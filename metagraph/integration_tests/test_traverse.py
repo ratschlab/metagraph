@@ -1,15 +1,30 @@
+import copy
+import hashlib
 import json
 import os
 import random
 import shlex
 import socket
 import subprocess
+import sys
+import tempfile
 import time
 import unittest
 
 import requests
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH
+
+# The graphlet library (api/python, metagraph.traverse) reads what the writer produces
+# (DESIGN-traverse-graphlet.md §9, T37-T40). The test venv installs api/python editable;
+# the library is stdlib-only, so the source tree serves as well -- these tests never skip.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+try:
+    import metagraph.traverse as graphlet_lib
+except ImportError:
+    sys.path.insert(0, os.path.join(REPO, 'api', 'python'))
+    import metagraph.traverse as graphlet_lib
+from metagraph.traverse.export import normalize_result  # noqa: E402
 
 """
 End-to-end tests for the label-consistent traversal interface
@@ -81,6 +96,31 @@ class TestTraverseBase(TestingBase):
             f'-o {cls.anno_base} {cls.fasta}',
             'index-header-coords')
         assert os.path.exists(cls.anno_base + '.seqs'), 'CoordToHeader sidecar was not created'
+        # the index bundle's manifest (DESIGN-traverse-graphlet.md §3.1): its digest is the
+        # index identity a graphlet carries, so retrievals can be joined and compared
+        cls.manifest = cls.tempdir.name + '/index.manifest.json'
+        cls.index_fp = cls._write_manifest(cls.tempdir.name, cls.manifest)
+
+    @staticmethod
+    def _write_manifest(directory, path):
+        """Every file of the bundle (graph, annotation and their sidecars) with its size
+        and sha256, as scripts/traversal/build_mini_refseq.sh writes it; -> index_fp, the
+        sha256 over the lines "path\tsize\tsha256\n" in byte order of path."""
+        files = []
+        for name in sorted(os.listdir(directory)):
+            full = os.path.join(directory, name)
+            if os.path.isfile(full) and name.startswith(('graph', 'annotation')):
+                with open(full, 'rb') as f:
+                    data = f.read()
+                files.append({'path': name, 'size': len(data),
+                              'sha256': hashlib.sha256(data).hexdigest()})
+        canonical = ''.join('%s\t%d\t%s\n' % (f['path'], f['size'], f['sha256'])
+                            for f in files)
+        fp = hashlib.sha256(canonical.encode()).hexdigest()
+        with open(path, 'w') as f:
+            json.dump({'format': 'metagraph-index-manifest', 'version': 1, 'index_fp': fp,
+                       'files': files}, f, indent=1)
+        return fp
 
     @classmethod
     def _traverse(cls, request, resolve=False):
@@ -533,8 +573,8 @@ class TestTraverseCLI(TestTraverseBase):
             recorded[flank] = {names[i] for i in alive}
         self.assertEqual({self.right1: {'acc1', 'acc3'}, self.right2: {'acc2'}}, recorded)
 
-        # the echo is resubmittable verbatim and gives the same result (`output.timing`
-        # is a request-level field the normalized strategy does not carry)
+        # the echo is resubmittable verbatim and gives the same result (it carries
+        # output.detail and output.timing; timing is turned off so results compare)
         request['strategy'] = dict(strategy)
         request['strategy'].pop('clamped')
         request['strategy']['output'] = dict(strategy['output'], timing=False)
@@ -815,6 +855,434 @@ class TestTraverseCLI(TestTraverseBase):
         self.assertEqual(2, cut['limit'])
         self.assertEqual(result['seed']['labels_supporting_total'], cut['observed'])
         self.assertEqual([], result['arms']['right']['limitations'])
+        # conservative outcome (DESIGN-traverse-graphlet.md §14, v5.2): the walks and the
+        # evidence of the carrier the cap left out are missing, and both axes say so
+        self.assertEqual(('partial', 'complete', 'lower_bound', 'inline'), self._outcome_axes(result))
+
+
+class TestTraverseGraphlet(TestTraverseBase):
+    """`output.detail: graphlet` through the CLI and the library (DESIGN-traverse-graphlet.md
+    §9 as amended): every body the writer produces parses, dumps back byte for byte, is
+    canonical and reproduces the detail: full result of the same request (T37); spellings,
+    orientation and continuations (T38); the §6.9 oracle and the index identity through
+    the library's comparisons (T39); the protocol (T40)."""
+
+    def _traverse_identified(self, request, manifest=None):
+        """The CLI with the index identity (--index-name, --index-manifest)."""
+        path = self.tempdir.name + '/graphlet_request.json'
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        res = subprocess.run([METAGRAPH, 'traverse', '--index-name', 'tiny',
+                              '--index-manifest', manifest or self.manifest,
+                              '-i', self.graph, '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out = json.loads(res.stdout.decode())
+        self.assertEqual(0, res.returncode, out.get('error'))
+        return out
+
+    def _retrieve(self, request):
+        """-> (detail full response, detail graphlet response) of one request."""
+        outs = []
+        for detail in ('full', 'graphlet'):
+            r = copy.deepcopy(request)
+            r.setdefault('strategy', {}).setdefault('output', {})['detail'] = detail
+            outs.append(self._traverse_identified(r))
+        return outs
+
+    def _graphlet(self, request, i=0):
+        """The library's Graphlet of seed |i| of a detail: graphlet retrieval."""
+        r = copy.deepcopy(request)
+        r.setdefault('strategy', {}).setdefault('output', {})['detail'] = 'graphlet'
+        out = self._traverse_identified(r)
+        return graphlet_lib.from_response(out['results'][i], out), out
+
+    def _assert_round_trip(self, full, out, case):
+        """T37 for every seed of one request; -> the number of graphlets checked."""
+        self.assertEqual(len(full['results']), len(out['results']), case)
+        self.assertEqual('graphlet', out['strategy']['output']['detail'])
+        checked = 0
+        for i, (rf, rg) in enumerate(zip(full['results'], out['results'])):
+            msg = '%s, seed %d' % (case, i)
+            if 'error' in rf:
+                # a failed derivation keeps its shape and carries no graphlet
+                self.assertNotIn('graphlet', rg, msg)
+                self.assertEqual(rf, rg, msg)
+                continue
+            checked += 1
+            text = rg['graphlet']
+            g = graphlet_lib.parse(text)
+            self.assertEqual(text, g.dump(), msg)
+            self.assertTrue(graphlet_lib.is_canonical(text), msg)
+            self.assertEqual(rg['graphlet_lines'], text.count('\n'), msg)
+            self.assertEqual('Z %d' % rg['graphlet_lines'], text.split('\n')[-2], msg)
+            self.assertEqual(len(text.encode('utf-8')), rg['graphlet_bytes'], msg)
+            gg = graphlet_lib.from_response(rg, out)
+            self.assertEqual(normalize_result(rf), normalize_result(gg.to_json()), msg)
+            # every '*' the writer emitted reproduces the walker's value, and the §4/§9
+            # invariants hold
+            self.assertEqual([], gg.check_rules(rf), msg)
+            for side, arm in rf['arms'].items():
+                a = g.arms[side]
+                summary = rg['arms'][side]['counts']
+                body = (a.counts.segments, a.counts.runs, a.counts.leaves, a.counts.splits,
+                        a.counts.merges, a.counts.bases)
+                self.assertEqual((len(arm['segments']), len(arm['runs']), len(arm['paths']),
+                                  len(arm['splits'])), body[:4], msg)
+                self.assertEqual((summary['segments'], summary['runs'], summary['leaves'],
+                                  summary['splits'], summary['merges'], summary['bases']),
+                                 body, msg)
+                ends = sum(1 for s in arm['segments'] for e in s['events']
+                           if e['type'] == 'label_end')
+                self.assertLessEqual(ends, len(arm['runs']), msg)
+                for r in a.runs:
+                    if r.silent:
+                        # a silent Lw end: the lineage went on under another name at to_bp
+                        self.assertTrue(any(o.prev_run == r.id and o.from_label == r.label
+                                            and o.from_bp == r.to_bp for o in a.runs), msg)
+        return checked
+
+    def test_t37_round_trip(self):
+        """T37: the body of every strategy reproduces the detail: full result."""
+        radius = BLOCK + 10
+        el = self.element
+        orphan = self.left2 + self.element + self.right2
+        both = {'direction': 'both', 'bounds': {'max_extension_bp': radius}}
+        switching = {'seeds': [{'sequence': self.left2[-40:] + el, 'labels': ['acc3']}],
+                     'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': radius},
+                                  'branching': {'max_label_branches': 1},
+                                  'labels': {'extra': ['acc2'], 'loss_budget': 1,
+                                             'change_cost': {'model': 'constant',
+                                                             'value': 0.5}}}}
+        cases = {
+            'tuned (merge), both arms': {'strategy': both},
+            'exhaustive (keep)': {'strategy': dict(both, exhaustive=True)},
+            'annotate exhaustive': {'strategy': dict(both, exhaustive=True,
+                                                     labels={'mode': 'annotate'})},
+            'annotate beam': {'strategy': dict(both, labels={'mode': 'annotate'},
+                                               frontier={'on_overflow': 'beam'},
+                                               bounds={'max_extension_bp': radius,
+                                                       'max_live_paths': 1})},
+            'quorum': {'strategy': dict(both, branching={'min_successor_labels': 2})},
+            'left only': {'strategy': dict(both, direction='left')},
+            'max_steps': {'strategy': dict(both, bounds={'max_extension_bp': radius,
+                                                         'max_steps': 50})},
+            # the cap trips on the left arm at depth 0 (two successors) and censors the
+            # right root before it ran a level: an arm with no growth bin (A B* V*)
+            'max_steps 1, annotate': {'strategy': dict(both, labels={'mode': 'annotate'},
+                                                       bounds={'max_extension_bp': radius,
+                                                               'max_steps': 1})},
+            'max_labels_per_node 1': {'strategy': dict(both, labels={
+                'mode': 'annotate', 'max_labels_per_node': 1})},
+            'sequences false': {'strategy': dict(both, output={'sequences': False})},
+            'radius below k': {'strategy': dict(both, bounds={'max_extension_bp': 10})},
+            'trace, column labels': {'strategy': dict(both, support='trace',
+                                                      branching={'on_reconverge': 'keep'},
+                                                      labels={'seed_label_kind': 'column'})},
+            'switch at a split': switching,
+        }
+        for case, request in cases.items():
+            request = copy.deepcopy(request)
+            request.setdefault('seeds', [{'sequence': el}])
+            full, out = self._retrieve(request)
+            self.assertEqual(1, self._assert_round_trip(full, out, case))
+        # a 3-seed batch: a derivation failure keeps its shape, a repeat says duplicate
+        full, out = self._retrieve({'seeds': [{'sequence': el}, {'sequence': orphan},
+                                              {'sequence': el}], 'strategy': both})
+        self.assertEqual(2, self._assert_round_trip(full, out, '3-seed batch'))
+        self.assertTrue(out['results'][2]['duplicate'])
+        self.assertEqual('failed', out['results'][1]['outcome']['walks'])
+
+    def test_t37_cli_fixtures_are_reproduced(self):
+        """T37 on the review's counterexamples (§9): the whole-document fixtures of
+        api/python/tests/data/traverse/documents are what this binary writes for their
+        requests, byte for byte, built from their tiny indexes with this CLI. Each also
+        still shows its situation (an ambiguous split with disjoint child sets after a
+        switch, a followed hairpin at a divergence, quorum-filtered splits, an A -> B -> A
+        re-entry, silent switch-source ends at a split, ends whose branch counts differ
+        only through a refused successor, two non-first-parent merges, two headers of one
+        name); the library tests read the same files (api/python/tests)."""
+        script = os.path.join(REPO, 'scripts', 'traversal', 'graphlet_fixtures.py')
+        # the binary RELATIVE to the working directory, as a developer types it (the
+        # script runs the CLI from each index directory, so it must resolve the path)
+        res = subprocess.run([sys.executable, script, '--from-cli',
+                              os.path.relpath(METAGRAPH, REPO), '--check'], cwd=REPO,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode() + res.stdout.decode())
+
+    def test_t38_spelling_reproduces_the_records(self):
+        """T38: natural(left) + seed + natural(right) is each record, read off the walks
+        that carry its label on both arms."""
+        g, _ = self._graphlet({'seeds': [{'sequence': self.element,
+                                          'labels': ['acc1', 'acc2', 'acc3']}],
+                               'strategy': {'exhaustive': True, 'direction': 'both',
+                                            'bounds': {'max_extension_bp': BLOCK + 10}}})
+        for name, record in self.records.items():
+            left = [w for w in g.walks('left') if name in [l.name for l in w.labels_full]]
+            right = [w for w in g.walks('right') if name in [l.name for l in w.labels_full]]
+            self.assertEqual((1, 1), (len(left), len(right)), name)
+            whole = (g.spell('left', left[0].path_id) + g.seed.sequence
+                     + g.spell('right', right[0].path_id))
+            self.assertEqual(record, whole, name)
+            self.assertEqual(whole, g.spell('left', left[0].path_id, with_seed=True)
+                             + g.spell('right', right[0].path_id))
+
+    def test_t38_continuations_on_both_arms(self):
+        """T38: the library's continuation equals the server's, on both arms, for
+        continuations contained in the flank (40 of 60 bp) and crossing into the seed
+        (k = 31 of 10 bp)."""
+        for radius, bp, crossing in ((60, 40, False), (10, 1000, True)):
+            request = {'seeds': [{'sequence': self.element}],
+                       'strategy': {'direction': 'both',
+                                    'bounds': {'max_extension_bp': radius},
+                                    'output': {'continuation_bp': bp}}}
+            full, out = self._retrieve(request)
+            g = graphlet_lib.from_response(out['results'][0], out)
+            for side in ('left', 'right'):
+                paths = full['results'][0]['arms'][side]['paths']
+                self.assertTrue(paths)
+                for p in paths:
+                    c = g.continuation(side, p['id'])
+                    self.assertEqual(p['continuation']['sequence'], c.sequence, (radius, side))
+                    self.assertEqual(crossing, len(c.sequence) > radius, (radius, side))
+
+    def test_t38_a_local_continuation_is_resubmittable(self):
+        """T38: a continuation derived by the library is a valid request, and the new
+        traversal extends the walk."""
+        g, _ = self._graphlet({'seeds': [{'sequence': self.element, 'labels': ['acc1']}],
+                               'strategy': {'direction': 'right',
+                                            'bounds': {'max_extension_bp': 60},
+                                            'output': {'continuation_bp': 40}}})
+        request = g.next_request('right', [0], bp=30)
+        self.assertEqual([{'sequence': self.right1[20:60], 'labels': ['acc1']}],
+                         request['seeds'])
+        out = self._traverse_identified(request)
+        result = out['results'][0]
+        self.assertNotIn('error', result)
+        self.assertEqual(('complete', 30), (result['arms']['right']['status'],
+                                            result['arms']['right']['complete_to_bp']))
+        nxt = graphlet_lib.from_response(result, out)
+        self.assertEqual(self.right1[60:90], nxt.spell('right', 0))
+
+    def test_t39_the_oracle_through_the_library(self):
+        """T39: the constrained exhaustive trie equals the annotate oracle under the
+        permitted labels (test_api_traverse_constrain_exhaustive_matches_the_structural_
+        oracle), and a tuned run is a prefix subset of the exhaustive one whose omission
+        carries the recorded reason (test_traverse_tuned_run_is_a_prefix_subset_...)."""
+        radius = BLOCK + 10
+        right = {'direction': 'right', 'bounds': {'max_extension_bp': radius}}
+
+        def get(strategy, labels=None):
+            seed = {'sequence': self.element}
+            if labels:
+                seed['labels'] = labels
+            return self._graphlet({'seeds': [seed], 'strategy': strategy})[0]
+
+        annotate = get(dict(right, labels={'mode': 'annotate'}))
+        self.assertEqual((self.index_fp, 'tiny'), (annotate.index_fp, annotate.index_ns))
+        constrain = get(dict(right, exhaustive=True), ['acc1', 'acc3'])
+        c = constrain.compare(annotate, mode='claims', labels=['acc1', 'acc3'])
+        self.assertEqual((True, True, [], [], []),
+                         (c.comparable, c.equal, c.only_in_a, c.only_in_b, c.differ))
+        self.assertEqual(radius, c.depth_used)
+        # over all labels, acc2's walk is the annotate side's only
+        c = constrain.compare(annotate, mode='claims')
+        self.assertFalse(c.equal)
+        self.assertEqual([{'name': 'acc2', 'ref': 'h:0:1'}], [x['label'] for x in c.only_in_b])
+        exhaustive = get(dict(right, exhaustive=True), ['acc1', 'acc2', 'acc3'])
+        for mode in ('claims', 'walks', 'labels'):
+            c = exhaustive.compare(annotate, mode=mode)
+            self.assertTrue(c.equal, (mode, c.only_in_a, c.only_in_b, c.differ))
+        tuned = get(dict(right, branching={'min_successor_labels': 2, 'on_reconverge': 'keep'}),
+                    ['acc1', 'acc2', 'acc3'])
+        c = tuned.compare(exhaustive, mode='prefix_subset')
+        self.assertTrue(c.equal)
+        self.assertEqual([('acc2', self.right2, 0, 'minority')],
+                         [(x['name'], x['walk'], x['at_bp'], x['reason']) for x in c.only_in_b])
+        self.assertFalse(exhaustive.compare(tuned, mode='prefix_subset').equal)
+        # the same on the left arm (walks are read outward there too)
+        left = dict(right, direction='left')
+        c = get(dict(left, branching={'min_successor_labels': 2, 'on_reconverge': 'keep'}),
+                ['acc1', 'acc2', 'acc3']).compare(
+                    get(dict(left, exhaustive=True), ['acc1', 'acc2', 'acc3']),
+                    mode='prefix_subset')
+        self.assertTrue(c.equal)
+        self.assertEqual([('acc3', self.left2, 0, 'minority')],
+                         [(x['name'], x['walk'], x['at_bp'], x['reason']) for x in c.only_in_b])
+        # a claim reaching the comparison depth is open on both sides: a shallower
+        # retrieval of the same trie compares equal
+        short = get(dict(right, exhaustive=True, bounds={'max_extension_bp': 60}),
+                    ['acc1', 'acc2', 'acc3'])
+        c = short.compare(exhaustive, mode='claims')
+        self.assertEqual((True, True, 60), (c.comparable, c.equal, c.depth_used))
+        # a side whose label evidence is a lower bound (cut lists) is never equal
+        cut = get(dict(right, labels={'mode': 'annotate', 'max_labels_per_node': 1}))
+        self.assertEqual('lower_bound', cut.outcome.label_evidence)
+        c = exhaustive.compare(cut, mode='claims')
+        self.assertEqual(('qualified', None), (c.comparable, c.equal))
+        # no common certified depth: nothing to compare, not equality
+        none = get(dict(right, exhaustive=True, bounds={'max_extension_bp': radius,
+                                                        'max_steps': 1}),
+                   ['acc1', 'acc2', 'acc3'])
+        self.assertEqual(0, none.arm('right').complete_to_bp)
+        for mode in ('walks', 'labels', 'claims'):
+            c = exhaustive.compare(none, mode=mode)
+            self.assertEqual(('unknown', None, 0), (c.comparable, c.equal, c.depth_used))
+
+    def test_t37_names_that_are_not_utf8(self):
+        """Label names come from FASTA headers, which need not be UTF-8. The server makes
+        them valid once (each ill-formed sequence -> U+FFFD), so detail: full, the summary
+        and the body carry the same bytes: graphlet_bytes holds after transport and the
+        front-coded names decode to the names of detail: full."""
+        rng = random.Random(4711)
+        block = {b: ''.join(rng.choice('ACGT') for _ in range(30)) for b in 'SABC'}
+        headers = [b'\xc0abc', b'\xc0abd', b'caf\xc3\xa9']
+        d = os.path.join(self.tempdir.name, 'latin1')
+        os.makedirs(d)
+        with open(os.path.join(d, 'x.fa'), 'wb') as f:
+            for h, tail in zip(headers, 'ABC'):
+                f.write(b'>' + h + b'\n' + (block['S'] + block[tail]).encode() + b'\n')
+        for cmd in (f'{METAGRAPH} build -p 1 --graph succinct -k 15 -o graph x.fa',
+                    f'{METAGRAPH} annotate -p 1 --anno-filename -i graph.dbg --anno-type column '
+                    f'--coordinates -o annotation x.fa',
+                    f'{METAGRAPH} transform_anno -p 1 --anno-type column_coord --coordinates '
+                    f'-o annotation annotation.column.annodbg',
+                    f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
+                    f'--index-header-coords -o annotation x.fa'):
+            res = subprocess.run(shlex.split(cmd), cwd=d, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            self.assertEqual(0, res.returncode, res.stderr.decode())
+        want = sorted(h.decode('utf-8', 'replace') for h in headers)
+        for mode in ('annotate', 'constrain'):
+            outs = []
+            for detail in ('full', 'graphlet'):
+                path = os.path.join(d, 'request.json')
+                with open(path, 'w') as f:
+                    json.dump({'seeds': [{'sequence': block['S']}],
+                               'strategy': {'direction': 'right',
+                                            'labels': {'mode': mode,
+                                                       'seed_label_kind': 'header'},
+                                            'bounds': {'max_extension_bp': 40},
+                                            'output': {'detail': detail}}}, f)
+                res = subprocess.run([METAGRAPH, 'traverse', '-i', os.path.join(d, 'graph.dbg'),
+                                      '-a', os.path.join(d, 'annotation.column_coord.annodbg'),
+                                      path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(0, res.returncode, res.stdout.decode('utf-8', 'replace'))
+                outs.append(json.loads(res.stdout.decode('utf-8')))
+            full, out = outs
+            self.assertEqual(want, sorted(l['name'] for l in full['results'][0]['label_dict']),
+                             mode)
+            self.assertEqual(1, self._assert_round_trip(full, out, 'not UTF-8, ' + mode))
+            g = graphlet_lib.from_response(out['results'][0], out)
+            self.assertEqual(want, sorted(l.name for l in g.labels), mode)
+
+    def test_t39_index_identity(self):
+        """§3.1 (freeze gate): two indexes over the same records with the same counts and
+        column names but swapped memberships share index_meta_fp and differ in index_fp,
+        so their retrievals never compare equal; without a manifest a join is
+        unverifiable."""
+        a, b = self.records['acc1'], self.records['acc2']        # equal lengths
+        fps, graphlets = [], []
+        for name, (first, second) in (('ab', (a, b)), ('ba', (b, a))):
+            d = os.path.join(self.tempdir.name, 'swapped_' + name)
+            os.makedirs(d)
+            for fname, rec in (('colA.fa', first), ('colB.fa', second)):
+                with open(os.path.join(d, fname), 'w') as f:
+                    f.write('>%s\n%s\n' % (fname[:4], rec))
+            for cmd in (f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k {K} '
+                        f'-o graph colA.fa colB.fa',
+                        f'{METAGRAPH} annotate -p 1 --anno-filename -i graph.dbg '
+                        f'--anno-type column --coordinates -o annotation colA.fa colB.fa',
+                        f'{METAGRAPH} transform_anno -p 1 --anno-type column_coord '
+                        f'--coordinates -o annotation annotation.column.annodbg'):
+                res = subprocess.run(shlex.split(cmd), cwd=d, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+                self.assertEqual(0, res.returncode, res.stderr.decode())
+            os.remove(os.path.join(d, 'annotation.column.annodbg'))
+            os.remove(os.path.join(d, 'annotation.column.annodbg.coords'))
+            manifest = os.path.join(d, 'manifest.json')
+            fps.append(self._write_manifest(d, manifest))
+            path = os.path.join(d, 'request.json')
+            with open(path, 'w') as f:
+                json.dump({'seeds': [{'sequence': self.element}],
+                           'strategy': {'direction': 'right',
+                                        'labels': {'seed_label_kind': 'column'},
+                                        'output': {'detail': 'graphlet'}}}, f)
+            out = []
+            for flags in ([], ['--index-manifest', manifest]):
+                res = subprocess.run([METAGRAPH, 'traverse'] + flags +
+                                     ['-i', os.path.join(d, 'graph.dbg'),
+                                      '-a', os.path.join(d, 'annotation.column_coord.annodbg'),
+                                      path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                resp = json.loads(res.stdout.decode())
+                self.assertEqual(0, res.returncode, resp.get('error'))
+                out.append(graphlet_lib.from_response(resp['results'][0], resp))
+            graphlets.append(out)
+        (ab_bare, ab), (ba_bare, ba) = graphlets
+        self.assertEqual(ab.index_meta_fp, ba.index_meta_fp)
+        self.assertNotEqual(fps[0], fps[1])
+        self.assertEqual((fps[0], fps[1]), (ab.index_fp, ba.index_fp))
+        c = ab.compare(ba)
+        self.assertEqual((False, None), (c.comparable, c.equal))
+        self.assertEqual(('unverifiable', None), (ab_bare.compare(ba_bare).comparable,
+                                                  ab_bare.compare(ba_bare).equal))
+        self.assertEqual((True, True), (ab.compare(ab).comparable, ab.compare(ab).equal))
+
+    def test_t40_protocol(self):
+        """T40: the summary keys, the echo, the capabilities, determinism and size."""
+        request = {'seeds': [{'sequence': self.element}],
+                   'strategy': {'direction': 'both',
+                                'bounds': {'max_extension_bp': BLOCK + 10}}}
+        full, out = self._retrieve(request)
+        self.assertEqual('graphlet', out['strategy']['output']['detail'])
+        self.assertTrue(out['strategy']['output']['timing'])
+        caps = out['capabilities']
+        self.assertEqual(1, caps['graphlet_format'])
+        self.assertEqual(['summary', 'tree', 'full', 'graphlet'], caps['detail_levels'])
+        self.assertEqual(('tiny', self.index_fp), (caps['index_ns'], caps['index_fp']))
+        r = out['results'][0]
+        self.assertEqual({'seed', 'label_mode', 'outcome', 'limitations', 'arms', 'annotation',
+                          'timing', 'graphlet', 'graphlet_bytes', 'graphlet_lines'}, set(r))
+        self.assertEqual({'seed_id', 'validated_seed_id', 'seed_id_mismatch', 'length_bp',
+                          'num_kmers', 'labels_from_seed', 'labels_supporting_total',
+                          'labels_dropped', 'labels_dropped_digest', 'num_labels',
+                          'num_seed_labels'}, set(r['seed']))
+        self.assertIn('serialize_ms', r['timing'])
+        for arm in r['arms'].values():
+            self.assertEqual({'segments', 'leaves', 'splits', 'merges', 'runs', 'bases', 'max_bp',
+                              'label_ends', 'leaves_by_reason'}, set(arm['counts']))
+            self.assertNotIn('segments', arm)
+        h = r['graphlet'].split('\n')[0].split(' ')
+        self.assertEqual(['tiny', self.index_fp, caps['index_meta_fp']], h[-3:])
+        # the echo is resubmittable verbatim (without the server's clamped report, as in
+        # test_traverse_annotate_mode_records_labels), and the body is deterministic
+        echo = {k: v for k, v in out['strategy'].items() if k != 'clamped'}
+        again = self._traverse_identified({'seeds': request['seeds'], 'strategy': echo})
+        self.assertEqual(r['graphlet'], again['results'][0]['graphlet'])
+        self.assertEqual(r['graphlet'], self._retrieve(request)[1]['results'][0]['graphlet'])
+        # the body is less than half of the compact full result
+        compact = json.dumps(full['results'][0], separators=(',', ':'))
+        self.assertLess(r['graphlet_bytes'] * 2, len(compact.encode()))
+
+    def test_t40_without_sequences(self):
+        """T40: sequences false -- G records without bases, split children with their
+        first base, continuations with their sequence, splits[].char reproduced."""
+        request = {'seeds': [{'sequence': self.element}],
+                   'strategy': {'direction': 'both', 'bounds': {'max_extension_bp': 60},
+                                'output': {'sequences': False, 'continuation_bp': 40}}}
+        full, out = self._retrieve(request)
+        self._assert_round_trip(full, out, 'sequences false')
+        lines = out['results'][0]['graphlet'].split('\n')
+        gs = [l.split(' ') for l in lines if l.startswith('G ')]
+        self.assertTrue(all(f[10] == '*' for f in gs))
+        self.assertTrue(all(f[9] != '*' for f in gs if f[1] != '*'))      # split children
+        cs = [l.split(' ') for l in lines if l.startswith('C ')]
+        self.assertTrue(cs and all(len(f) == 6 for f in cs))
+        g = graphlet_lib.from_response(out['results'][0], out)
+        mine = g.to_json()
+        for side, arm in full['results'][0]['arms'].items():
+            self.assertEqual([[b['char'] for b in s['branches']] for s in arm['splits']],
+                             [[b['char'] for b in s['branches']]
+                              for s in mine['arms'][side]['splits']])
 
 
 class TestTraverseAPI(TestTraverseBase):
@@ -842,16 +1310,51 @@ class TestTraverseAPI(TestTraverseBase):
         cls.server_process.kill()
         super().tearDownClass()
 
-    @staticmethod
-    def _start_server(graph, annotation, host, port):
+    @classmethod
+    def _start_server(cls, graph, annotation, host, port):
+        # with the index identity, which every graphlet and capabilities response carries
         command = (f'{METAGRAPH} server_query -i {graph} -a {annotation} '
-                   f'--port {port} --address {host} -p 2')
+                   f'--port {port} --address {host} -p 2 '
+                   f'--index-name tiny --index-manifest {cls.manifest}')
         return subprocess.Popen(shlex.split(command), shell=False,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def _post(self, route, payload):
         return requests.post(url=f'http://{self.host}:{self.port}/{route}',
                              data=json.dumps(payload))
+
+    def test_api_graphlet(self):
+        """T37/T40 over HTTP: the graphlet body of a gzip-compressed response reproduces
+        the detail: full result; the server's index identity is in capabilities, in the
+        response and in every body's H record."""
+        caps = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities').json()
+        self.assertEqual(('tiny', self.index_fp, 1),
+                         (caps['index_ns'], caps['index_fp'], caps['graphlet_format']))
+        self.assertIn('graphlet', caps['detail_levels'])
+        outs = {}
+        for detail in ('full', 'graphlet'):
+            ret = requests.post(url=f'http://{self.host}:{self.port}/traverse',
+                                data=json.dumps({
+                                    'seeds': [{'sequence': self.element}],
+                                    'strategy': {'direction': 'both',
+                                                 'bounds': {'max_extension_bp': BLOCK + 10},
+                                                 'output': {'detail': detail}}}),
+                                headers={'Accept-Encoding': 'gzip'})
+            self.assertEqual(200, ret.status_code, ret.text)
+            self.assertEqual('gzip', ret.headers.get('Content-Encoding'))
+            outs[detail] = ret.json()
+        out = outs['graphlet']
+        self.assertEqual(caps['index_meta_fp'], out['capabilities']['index_meta_fp'])
+        r = out['results'][0]
+        text = r['graphlet']
+        self.assertEqual(['tiny', self.index_fp, caps['index_meta_fp']],
+                         text.split('\n')[0].split(' ')[-3:])
+        g = graphlet_lib.from_response(r, out)
+        self.assertEqual(text, g.dump())
+        self.assertTrue(graphlet_lib.is_canonical(text))
+        self.assertEqual(normalize_result(outs['full']['results'][0]),
+                         normalize_result(g.to_json()))
+        self.assertEqual([], g.check_rules(outs['full']['results'][0]))
 
     def test_api_capabilities(self):
         ret = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities')
