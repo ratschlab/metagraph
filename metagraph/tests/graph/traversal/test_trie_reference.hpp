@@ -7,6 +7,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -506,9 +507,24 @@ inline SwitchTrie switch_trie(const StringIndex &ix, const std::set<std::string>
 // edge reuse still block), maximal per label. The reason at a record's end: dead_end
 // when the node has no successor at all, record_end when a successor carries the label
 // (its coordinates do not continue), label_lost otherwise.
+//
+// Several occurrences of the seed (in one record or in several records of the label)
+// may spell the SAME walk and stop there for different reasons: one is blocked where it
+// would re-enter the seed, another reaches its record's end. The walker keeps ONE
+// lineage per label with the live coordinates of every occurrence, and a blocked
+// successor whose coordinates continue sets the block reason, which outranks a trace
+// break — so the reason of a walk is derived from the AGGREGATE of its occurrences
+// with the walker's precedence: any structural block wins (the highest block rank:
+// rejoined_seed > edge_reuse_rc > edge_reuse), otherwise the occurrences agree. (It
+// used to be whichever occurrence came last, which made the reason depend on the
+// order of the records: review round 2, finding 3.)
 inline RefTrie trace_trie(const StringIndex &ix, const std::string &label,
                           const std::string &seed, Arm arm, uint64_t radius) {
-    RefTrie all;
+    struct Outcomes {
+        std::vector<EndReason> reasons;              // one per occurrence spelling the walk
+        std::vector<std::set<std::string>> labels;   // the same nodes for all of them
+    };
+    std::map<std::string, Outcomes> seen;
     WalkRule rule(ix, seed, arm);
     for (const StringIndex::Record &r : ix.records) {
         if (r.label != label)
@@ -551,8 +567,39 @@ inline RefTrie trace_trie(const StringIndex &ix, const std::string &label,
                 at.push_back(ix.labels_at(next->v));
                 u = next->v;
             }
-            all[walk] = RefLeaf{ reason, at };
+            Outcomes &o = seen[walk];
+            o.reasons.push_back(reason);
+            o.labels = std::move(at);
         }
+    }
+    // one reason per walk from the aggregate of its occurrences (see above)
+    RefTrie all;
+    for (auto &[walk, o] : seen) {
+        uint8_t rank = 0;
+        std::set<EndReason> plain;
+        for (EndReason r : o.reasons) {
+            if (block_rank(r)) {
+                rank = std::max(rank, block_rank(r));
+            } else {
+                plain.insert(r);
+            }
+        }
+        EndReason reason;
+        if (rank) {
+            reason = block_of_rank(rank);
+        } else if (plain.size() == 1) {
+            reason = *plain.begin();
+        } else {
+            // the same node at the same depth with the same edge history: a stop that
+            // is not a block is the radius or the record's end, and both depend on
+            // nothing but the node — the model would be wrong, not the walker
+            std::string what = "trace_trie: occurrences of the seed spelling the walk "
+                + (walk.empty() ? std::string("<empty>") : walk) + " end for different reasons:";
+            for (EndReason r : plain)
+                what += std::string(" ") + mtg::graph::traversal::to_string(r);
+            throw std::logic_error(what);
+        }
+        all[walk] = RefLeaf{ reason, std::move(o.labels) };
     }
     // maximal walks only: an occurrence whose record ends inside another occurrence's
     // walk makes no claim of its own (the label still continues on the other one)

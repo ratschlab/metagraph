@@ -38,10 +38,18 @@
  * path / segment structure. Walks are compared in WALKING order, outward from the seed
  * boundary, so that a prefix is a prefix on both arms.
  *
- * The second half is the tuned-run property: every leaf of a tuned run is a prefix of
- * an exhaustive leaf under each of its labels, and every (walk, label) of the
- * exhaustive trie that the tuned run does not reach has a recorded reason where the
- * tuned run left it. Nothing is dropped silently.
+ * The second half is the tuned-run property: every claim of a tuned run (every label
+ * end, leaf or not) is a prefix of an exhaustive walk under its label and a semantic
+ * end is one the exhaustive run makes too, and every (walk, label) of the exhaustive
+ * trie that the tuned run does not reach has a recorded reason — about THAT label and
+ * THAT successor — where the tuned run left it. Nothing is dropped silently, nothing
+ * is invented.
+ *
+ * The checkers of the second half collect every violation as a line of text: the core
+ * of each (tuned_subset_report, routes_subset_report) returns the report, the EXPECT
+ * wrapper (check_tuned_subset, check_routes_subset) asserts that it is empty, and a
+ * test can corrupt a result on purpose and assert that the report is NOT empty — the
+ * checkers are themselves under test (review round 2: three accepted corruptions).
  */
 namespace mtg {
 namespace test {
@@ -53,6 +61,9 @@ using namespace mtg::graph::traversal;
 // boundary) -> names of the labels claiming exactly it. The leaves of a run are the
 // claims whose walk is a leaf's.
 using Leaves = std::map<std::string, std::set<std::string>>;
+
+// the violations a checker found, one line each; empty iff the result passes
+using Problems = std::vector<std::string>;
 
 // a segment's or path's bases in walking order (the left arm spells them in natural
 // orientation, i.e. reversed)
@@ -71,6 +82,14 @@ inline std::set<std::string> name_set(const SeedResult &r, const std::vector<Lab
     for (LabelId l : ids)
         out.insert(r.label_dict.at(l).name);
     return out;
+}
+
+inline std::optional<LabelId> label_id(const SeedResult &r, const std::string &name) {
+    for (LabelId l = 0; l < r.label_dict.size(); ++l) {
+        if (r.label_dict[l].name == name)
+            return l;
+    }
+    return std::nullopt;
 }
 
 inline const Segment& root_of(const ArmResult &arm) {
@@ -108,10 +127,25 @@ inline bool is_censored(EndReason reason) {
     return reason == EndReason::BEAM_PRUNED || is_resource_stop(reason);
 }
 
+// a structural block: the walk rule itself refused the step
+inline bool is_block(EndReason reason) {
+    return reason == EndReason::EDGE_REUSE || reason == EndReason::EDGE_REUSE_RC
+        || reason == EndReason::REACHED_SEED;
+}
+
+inline std::string shown(const std::string &w) { return w.empty() ? "<empty>" : w; }
+
+inline std::string listed(const Problems &problems) {
+    std::string s;
+    for (const std::string &p : problems)
+        s += "\n  - " + p;
+    return s;
+}
+
 inline std::string describe(const Leaves &leaves) {
     std::ostringstream os;
     for (const auto &[w, ls] : leaves) {
-        os << "\n  " << (w.empty() ? "<empty>" : w) << " (" << w.size() << " bp) {";
+        os << "\n  " << shown(w) << " (" << w.size() << " bp) {";
         for (const auto &l : ls) os << ' ' << l;
         os << " }";
     }
@@ -334,17 +368,17 @@ inline void expect_equal(const Leaves &expected, const Leaves &actual, const std
     for (const auto &[w, ls] : expected) {
         auto it = actual.find(w);
         if (it == actual.end()) {
-            diff << "\n  only the structural oracle has " << (w.empty() ? "<empty>" : w)
+            diff << "\n  only the structural oracle has " << shown(w)
                  << " (" << w.size() << " bp) " << list(ls);
         } else if (it->second != ls) {
-            diff << "\n  labels differ on " << (w.empty() ? "<empty>" : w) << " ("
+            diff << "\n  labels differ on " << shown(w) << " ("
                  << w.size() << " bp): oracle " << list(ls) << ", walker "
                  << list(it->second);
         }
     }
     for (const auto &[w, ls] : actual) {
         if (!expected.count(w)) {
-            diff << "\n  only the constrained walker has " << (w.empty() ? "<empty>" : w)
+            diff << "\n  only the constrained walker has " << shown(w)
                  << " (" << w.size() << " bp) " << list(ls);
         }
     }
@@ -364,16 +398,67 @@ inline const PathResult* leaf_path(const ArmResult &arm, size_t segment) {
     return nullptr;
 }
 
-// a dropped continuation |ch| at depth |at| of |segment| is on record: a branch event
-// listing it (quorum, split limit, ambiguity) or a blocked-successor event
-inline bool branch_recorded(const ArmResult &arm, size_t segment, uint64_t at, char ch) {
+// the bases the trie continues with at depth |at| of |segment|: inside the segment its
+// own next base, at its end the first base of every child
+inline std::set<char> continuations(const ArmResult &arm, size_t segment, uint64_t at) {
+    const Segment &seg = arm.segments[segment];
+    const std::string seq = outward(arm, seg.sequence);
+    std::set<char> out;
+    if (at < seg.from_bp)
+        return out;
+    const uint64_t j = at - seg.from_bp;
+    if (j < seq.size()) {
+        out.insert(seq[j]);
+    } else if (j == seq.size()) {
+        for (size_t c : seg.children) {
+            const std::string cs = outward(arm, arm.segments[c].sequence);
+            if (!cs.empty())
+                out.insert(cs[0]);
+        }
+    }
+    return out;
+}
+
+// Discard evidence for label |name| not taking base |ch| at depth |at| of |segment| of
+// a constrain run |r| — evidence about THAT label and THAT successor:
+//  - a branch event there listing |ch| among the labelled admissible successors whose
+//    |dropped| names the label: it was ended there by the branch limit, a quorum, the
+//    split limit or the loss budget; or whose |ambiguous| names the label while the
+//    trie does not follow |ch| there: the label went on along another successor and
+//    |ch|, labelled and admissible, was refused by a quorum or the split limit (a
+//    labelled admissible successor is followed otherwise, and a label that lost every
+//    successor is in |dropped|);
+//  - a BLOCKED event there for |ch| naming the label among the labels that would have
+//    continued on it, with a structural reason (edge_reuse, edge_reuse_rc,
+//    rejoined_seed);
+//  - a HAIRPIN event there for |ch| naming the label: the step was skipped.
+// A branch event alone proves nothing: an ambiguity that was FOLLOWED on every
+// successor emits one too (|dropped| empty), and a result from which a subtree was
+// deleted still carries it (review round 2, finding 1).
+inline bool branch_recorded(const SeedResult &r, const ArmResult &arm, size_t segment,
+                            uint64_t at, char ch, const std::string &name) {
+    const std::optional<LabelId> id = label_id(r, name);
+    if (!id)
+        return false;
+    auto names = [&](const std::vector<LabelId> &ids) {
+        return std::find(ids.begin(), ids.end(), *id) != ids.end();
+    };
+    const bool followed = continuations(arm, segment, at).count(ch) > 0;
     for (const BranchEvent &be : arm.branch_events) {
-        if (be.segment == segment && be.at_bp == at
-                && std::find(be.chars.begin(), be.chars.end(), ch) != be.chars.end())
+        if (be.segment != segment || be.at_bp != at
+                || std::find(be.chars.begin(), be.chars.end(), ch) == be.chars.end())
+            continue;
+        if (names(be.dropped))
+            return true;
+        if (!followed && names(be.ambiguous))
             return true;
     }
     for (const Event &ev : arm.segments[segment].events) {
-        if (ev.type == EventType::BLOCKED && ev.at_bp == at && ev.ch == ch)
+        if (ev.at_bp != at || ev.ch != ch || !names(ev.labels))
+            continue;
+        if (ev.type == EventType::BLOCKED && is_block(ev.reason))
+            return true;
+        if (ev.type == EventType::HAIRPIN && !followed)
             return true;
     }
     return false;
@@ -392,6 +477,7 @@ inline const Event* label_end_at(const SeedResult &r, const Segment &seg,
 struct SubsetReport {
     size_t present = 0;   // (walk, label) claims of A the tuned run reaches in full
     size_t omitted = 0;   // ... it leaves early, each with a recorded reason
+    Problems problems;    // every violation found; empty iff the tuned run passes
 };
 
 // The claims of a constrain run: every (walk prefix, label) at which the run ends a
@@ -429,37 +515,38 @@ label_claims(const SeedResult &r, size_t a, uint64_t depth) {
 }
 
 // |tuned| must be a trie (merging off). Checks, against the exhaustive run |A|:
-//  1. every tuned leaf, under each of its labels, is a prefix of an exhaustive walk on
-//     which that label is alive at the leaf's depth (nothing is invented);
-//  2. for every claim (walk prefix, label) of A, following the prefix through the
-//     tuned trie either reaches its end with the label alive and ended there too
-//     (present), or stops earlier at a RECORDED reason: a label end by the branch
-//     limit, a quorum, the split limit, the loss budget, a cap or the beam, or a
-//     branch event naming the base not taken. A label ended with a SEMANTIC reason
-//     (label_lost, dead_end, ...) where A continues it, or a label that vanishes
-//     without any record, is a disagreement between the two runs and fails.
-inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tuned,
-                                       size_t a, const std::string &what) {
+//  1. nothing is invented: every CLAIM of the tuned run — every (walk prefix, label) at
+//     which it ends a label, leaf or not, and every label alive at the cut — is a
+//     prefix of an exhaustive walk on which that label is alive at that depth; and a
+//     claim ended for a SEMANTIC reason (not a cut) is one the exhaustive run makes
+//     too, i.e. it ends the label at exactly that position (the leaves alone would
+//     miss a label end inserted inside a segment: review round 2, finding 2);
+//  2. every omission has a reason: for every claim (walk prefix, label) of A, following
+//     the prefix through the tuned trie either reaches its end with the label alive
+//     and ended there too (present, for the same reason unless the tuned run ran into
+//     a cap exactly there), or stops earlier at a RECORDED reason: a label end by the
+//     branch limit, a quorum, the split limit, the loss budget, a cap or the beam, or
+//     discard evidence for the label and the base not taken (branch_recorded). A label
+//     ended with a SEMANTIC reason (label_lost, dead_end, ...) where A continues it,
+//     or a label that vanishes without any record, is a disagreement between the two
+//     runs and fails.
+// The report lists every violation; check_tuned_subset() asserts that it is empty.
+inline SubsetReport tuned_subset_report(const SeedResult &A, const SeedResult &tuned,
+                                        size_t a, const std::string &what) {
     const ArmResult &ta = tuned.arms[a];
     const ArmResult &aa = A.arms[a];
     SubsetReport rep;
-    EXPECT_TRUE(is_trie(ta)) << what << ": the tuned run is not a trie (merging on)";
+    Problems &problems = rep.problems;
+    if (!is_trie(ta))
+        problems.push_back(what + ": the tuned run is not a trie (merging on)");
     const uint64_t depth = aa.complete_to_bp;
-    auto name = [&](const SeedResult &r, LabelId l) { return r.label_dict.at(l).name; };
+    const auto a_claims = label_claims(A, a, depth);
+    const Leaves a_all = constrained_claims(A, a, depth);
+    auto bp = [](uint64_t n) { return std::to_string(n); };
 
-    // 1. prefix-subset
-    for (const PathResult &p : ta.paths) {
-        std::string w = walk_of(ta, p);
-        std::set<std::string> labels;
-        if (w.size() <= depth) {
-            for (const LabelEnd &e : p.end_labels) {
-                EXPECT_EQ(0u, e.route_bp) << what;
-                labels.insert(name(tuned, e.label));
-            }
-        } else {
-            labels = alive_at(tuned, ta, p, depth);
-            w.resize(depth);
-        }
+    // 1. nothing is invented
+    const auto t_claims = label_claims(tuned, a, depth);
+    for (const auto &[w, labels] : constrained_claims(tuned, a, depth)) {
         for (const std::string &l : labels) {
             bool found = false;
             for (const PathResult &ap : aa.paths) {
@@ -471,23 +558,41 @@ inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tu
                     break;
                 }
             }
-            EXPECT_TRUE(found) << what << ": tuned leaf " << w << " (" << w.size()
-                               << " bp) under " << l << " is not a prefix of an exhaustive "
-                                  "walk carrying that label to that depth";
+            if (!found) {
+                problems.push_back(what + ": tuned claim " + shown(w) + " (" + bp(w.size())
+                                   + " bp) under " + l + " is not a prefix of an exhaustive "
+                                     "walk carrying that label to that depth: INVENTED");
+                continue;
+            }
+            std::optional<EndReason> reason;
+            if (auto it = t_claims.find(w); it != t_claims.end()) {
+                if (auto jt = it->second.find(l); jt != it->second.end())
+                    reason = jt->second;
+            }
+            if (reason && !is_cut(*reason)) {
+                auto it = a_all.find(w);
+                if (it == a_all.end() || !it->second.count(l)) {
+                    problems.push_back(what + ": the tuned run ends " + l + " at " + bp(w.size())
+                                       + " on " + shown(w) + " with " + to_string(*reason)
+                                       + " while the exhaustive trie continues it: an INVENTED end");
+                }
+            }
         }
     }
 
     // 2. every omission has a reason
     const Segment &root = root_of(ta);
     const std::set<std::string> permitted = name_set(tuned, root.labels_start);
-    for (const auto &[w, labels] : label_claims(A, a, depth)) {
+    for (const auto &[w, labels] : a_claims) {
         for (const auto &[l, a_reason] : labels) {
             if (!permitted.count(l)) {
                 bool dropped = false;
                 for (const DroppedLabel &d : tuned.dropped_labels)
                     dropped |= d.name == l;
-                EXPECT_TRUE(dropped) << what << ": label " << l
-                                     << " is neither permitted nor reported dropped";
+                if (!dropped) {
+                    problems.push_back(what + ": label " + l
+                                       + " is neither permitted nor reported dropped");
+                }
                 rep.omitted++;
                 continue;
             }
@@ -503,19 +608,20 @@ inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tu
                         if (d == w.size()) {
                             // both runs end the label here: the reasons agree unless
                             // the tuned run ran into a cap exactly there
-                            if (!is_cut(end->reason) && a_reason) {
-                                EXPECT_EQ(to_string(*a_reason), to_string(end->reason))
-                                    << what << ": " << l << " ends at " << d << " on " << w
-                                    << " for different reasons";
+                            if (!is_cut(end->reason) && a_reason
+                                    && std::string(to_string(*a_reason)) != to_string(end->reason)) {
+                                problems.push_back(what + ": " + l + " ends at " + bp(d) + " on "
+                                                   + shown(w) + " for different reasons: exhaustive "
+                                                   + to_string(*a_reason) + ", tuned "
+                                                   + to_string(end->reason));
                             }
                             present = true;
-                        } else {
-                            EXPECT_TRUE(is_cut(end->reason))
-                                << what << ": the tuned run ends " << l << " at " << d
-                                << " on " << w << " with " << to_string(end->reason)
-                                << (end->text.empty() ? "" : " (" + end->text + ")")
-                                << " while the exhaustive trie continues it: the two "
-                                   "walkers DISAGREE";
+                        } else if (!is_cut(end->reason)) {
+                            problems.push_back(what + ": the tuned run ends " + l + " at " + bp(d)
+                                               + " on " + shown(w) + " with " + to_string(end->reason)
+                                               + (end->text.empty() ? "" : " (" + end->text + ")")
+                                               + " while the exhaustive trie continues it: the two "
+                                                 "walkers DISAGREE");
                         }
                         decided = true;
                         break;
@@ -523,11 +629,11 @@ inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tu
                     if (d == w.size()) {
                         // the exhaustive claim was itself cut at the boundary: nothing
                         // is claimed beyond it. Otherwise the tuned run outlives it.
-                        EXPECT_FALSE(a_reason.has_value())
-                            << what << ": label " << l << " outlives the exhaustive walk "
-                            << w << " (" << w.size() << " bp, ended there with "
-                            << to_string(a_reason.value_or(EndReason::DEAD_END))
-                            << ") in the tuned run";
+                        if (a_reason) {
+                            problems.push_back(what + ": label " + l + " outlives the exhaustive walk "
+                                               + shown(w) + " (" + bp(w.size()) + " bp, ended there with "
+                                               + to_string(*a_reason) + ") in the tuned run");
+                        }
                         present = true;
                         decided = true;
                         break;
@@ -535,10 +641,11 @@ inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tu
                     if (j < seq.size()) {
                         if (seq[j] == w[d])
                             continue;   // the tuned run follows w
-                        EXPECT_TRUE(branch_recorded(ta, seg->id, d, w[d]))
-                            << what << ": the tuned run leaves " << w << " at " << d
-                            << " (takes " << seq[j] << ", not " << w[d] << ") with " << l
-                            << " alive and no recorded reason";
+                        if (!branch_recorded(tuned, ta, seg->id, d, w[d], l)) {
+                            problems.push_back(what + ": the tuned run leaves " + shown(w) + " at "
+                                               + bp(d) + " (takes " + seq[j] + ", not " + w[d]
+                                               + ") with " + l + " alive and no recorded reason");
+                        }
                         decided = true;
                         break;
                     }
@@ -552,10 +659,10 @@ inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tu
                         // the label must enter the child it is said to follow: a label
                         // that vanishes at a split without an end was dropped silently
                         if (!name_set(tuned, next->labels_start).count(l)) {
-                            ADD_FAILURE() << what << ": label " << l << " is on " << w
-                                          << " at " << d << " and the tuned run takes "
-                                          << w[d] << ", but the label is not on that child "
-                                             "and nothing recorded its end: dropped SILENTLY";
+                            problems.push_back(what + ": label " + l + " is on " + shown(w) + " at "
+                                               + bp(d) + " and the tuned run takes " + w[d]
+                                               + ", but the label is not on that child and nothing "
+                                                 "recorded its end: dropped SILENTLY");
                             decided = true;
                         }
                         break;
@@ -563,15 +670,16 @@ inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tu
                     if (seg->children.empty()) {
                         const PathResult *p = leaf_path(ta, seg->id);
                         const bool ok = p && p->path_reason && is_cut(*p->path_reason);
-                        EXPECT_TRUE(ok) << what << ": tuned leaf " << w.substr(0, d) << " ("
-                                        << d << " bp) ends with " << l
-                                        << " alive and no recorded reason while the "
-                                           "exhaustive trie continues to " << w;
-                    } else {
-                        EXPECT_TRUE(branch_recorded(ta, seg->id, d, w[d]))
-                            << what << ": the tuned run drops " << w[d] << " at " << d
-                            << " on " << w << " with " << l
-                            << " alive and no recorded reason";
+                        if (!ok) {
+                            problems.push_back(what + ": tuned leaf " + shown(w.substr(0, d)) + " ("
+                                               + bp(d) + " bp) ends with " + l
+                                               + " alive and no recorded reason while the "
+                                                 "exhaustive trie continues to " + shown(w));
+                        }
+                    } else if (!branch_recorded(tuned, ta, seg->id, d, w[d], l)) {
+                        problems.push_back(what + ": the tuned run drops " + w[d] + " at " + bp(d)
+                                           + " on " + shown(w) + " with " + l
+                                           + " alive and no recorded reason");
                     }
                     decided = true;
                 }
@@ -587,9 +695,20 @@ inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tu
     return rep;
 }
 
+inline SubsetReport check_tuned_subset(const SeedResult &A, const SeedResult &tuned,
+                                       size_t a, const std::string &what) {
+    SubsetReport rep = tuned_subset_report(A, tuned, a, what);
+    EXPECT_TRUE(rep.problems.empty())
+        << what << ": the tuned run fails the prefix-subset property ("
+        << rep.problems.size() << " problem(s)):" << listed(rep.problems);
+    return rep;
+}
+
 // The flank of |label| ending at segment |leaf| in walking order, following at each
-// join the parent the label entered through (Segment::labels_via_parent).
-inline std::string label_route(const ArmResult &arm, size_t leaf, LabelId label) {
+// join the parent the label entered through (Segment::labels_via_parent). A label that
+// enters a join through no listed parent goes into |problems| when given, else fails.
+inline std::string label_route(const ArmResult &arm, size_t leaf, LabelId label,
+                               Problems *problems = nullptr) {
     std::string rev;   // leaf -> root
     size_t s = leaf;
     while (true) {
@@ -608,56 +727,155 @@ inline std::string label_route(const ArmResult &arm, size_t leaf, LabelId label)
                     found = true;
                 }
             }
-            EXPECT_TRUE(found) << "label " << label << " enters segment " << s
-                               << " through no parent";
+            if (!found) {
+                const std::string msg = "label " + std::to_string(label) + " enters segment "
+                    + std::to_string(s) + " through no parent";
+                if (problems) {
+                    problems->push_back(msg);
+                } else {
+                    ADD_FAILURE() << msg;
+                }
+            }
         }
         s = next;
     }
     return std::string(rev.rbegin(), rev.rend());
 }
 
+struct RouteReport {
+    size_t checked = 0;   // label ends checked: every leaf's labels and every interior end
+    Problems problems;    // every violation found; empty iff the merged run passes
+};
+
 // Merging on: a leaf's spelled walk is not evidence for a label merged in at a join
-// (LabelEnd::route_bp > 0) — the label's own route is. Every (route, label) of the
-// merged run must be a prefix of an exhaustive leaf under that label. Returns the
-// number of (leaf, label) pairs checked.
-inline size_t check_routes_subset(const SeedResult &A, const SeedResult &merged,
-                                  size_t a, const std::string &what) {
+// (LabelEnd::route_bp > 0) — the label's own route is. EVERY label end of the merged
+// run is checked on its own route: the leaves' labels and every LABEL_END inside a
+// segment (a leaf-only check would miss an end inserted inside a segment: review round
+// 2, finding 2). The route must be a prefix of an exhaustive CLAIM under that label (a
+// claim, not a leaf: the exhaustive run may end the label inside a walk other labels go
+// on with), and an end for a reason that does not depend on the edge history
+// (dead_end, label_lost, rejoined_seed, the radius, a trace break) must be where the
+// exhaustive run ends the label too, for the same reason. An edge-reuse end may come
+// earlier under merging (§6.10: a merge unites the edge histories of the routes it
+// joins), so for it the prefix condition is all that is required. A merge closes a
+// duplicate lineage without a label end, so every LABEL_END event is a real end.
+// The report lists every violation; check_routes_subset() asserts that it is empty.
+inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &merged,
+                                        size_t a, const std::string &what) {
     const ArmResult &ma = merged.arms[a];
     const uint64_t depth = A.arms[a].complete_to_bp;
-    const Leaves full = constrained_leaves(A, a, depth);
-    size_t checked = 0;
+    const Leaves full = constrained_claims(A, a, depth);
+    const auto a_claims = label_claims(A, a, depth);
+    RouteReport rep;
+    Problems &problems = rep.problems;
+    auto bp = [](uint64_t n) { return std::to_string(n); };
+    auto supported = [&](const std::string &route, const std::string &l) {
+        for (auto it = full.lower_bound(route);
+                it != full.end() && it->first.compare(0, route.size(), route) == 0; ++it) {
+            if (it->second.count(l))
+                return true;
+        }
+        return false;
+    };
+    // one label end: |route| the label's own route to it, |reason| how it ended there
+    auto check_end = [&](std::string route, const std::string &l,
+                         std::optional<EndReason> reason, const std::string &where) {
+        rep.checked++;
+        if (route.size() > depth) {
+            route.resize(depth);
+            reason.reset();
+        }
+        if (!supported(route, l)) {
+            problems.push_back(what + ": the route of " + l + " to " + where + " (" + shown(route)
+                               + ", " + bp(route.size()) + " bp) is not a prefix of an exhaustive "
+                                 "claim under that label: INVENTED");
+            return;
+        }
+        if (!reason || is_cut(*reason) || *reason == EndReason::EDGE_REUSE
+                || *reason == EndReason::EDGE_REUSE_RC)
+            return;
+        auto it = full.find(route);
+        if (it == full.end() || !it->second.count(l)) {
+            problems.push_back(what + ": the merged run ends " + l + " at " + where + " ("
+                               + shown(route) + ", " + bp(route.size()) + " bp) with "
+                               + to_string(*reason) + " while the exhaustive trie continues it: "
+                                 "an INVENTED end");
+            return;
+        }
+        if (auto jt = a_claims.find(route); jt != a_claims.end()) {
+            auto kt = jt->second.find(l);
+            if (kt != jt->second.end() && kt->second
+                    && std::string(to_string(*kt->second)) != to_string(*reason)) {
+                problems.push_back(what + ": " + l + " ends at " + where + " for different reasons: "
+                                   "exhaustive " + to_string(*kt->second) + ", merged "
+                                   + to_string(*reason));
+            }
+        }
+    };
+
+    // the leaves: a leaf label's route and the spelled walk share everything from
+    // route_bp on, and the leaf lists exactly the labels ended at its depth
     for (const PathResult &p : ma.paths) {
         const std::string spelled = walk_of(ma, p);
+        if (p.segments.empty()) {
+            problems.push_back(what + ": path " + bp(p.id) + " has no segments");
+            continue;
+        }
+        const Segment &last = ma.segments[p.segments.back()];
         for (const LabelEnd &e : p.end_labels) {
-            std::string route = label_route(ma, p.segments.back(), e.label);
             const std::string &l = merged.label_dict.at(e.label).name;
-            // the route and the spelled walk share everything from route_bp on
-            EXPECT_EQ(spelled.size(), route.size()) << what;
-            EXPECT_EQ(spelled.substr(std::min<size_t>(e.route_bp, spelled.size())),
-                      route.substr(std::min<size_t>(e.route_bp, route.size()))) << what;
-            if (e.route_bp == 0) {
-                EXPECT_EQ(spelled, route) << what;
-            } else {
-                EXPECT_NE(spelled, route) << what << ": " << l << " is reported merged in at "
-                                          << e.route_bp << " but its route is the spelled walk";
+            const std::string route = label_route(ma, p.segments.back(), e.label, &problems);
+            if (spelled.size() != route.size()) {
+                problems.push_back(what + ": leaf " + bp(p.id) + ": the route of " + l + " spells "
+                                   + bp(route.size()) + " bases, the walk " + bp(spelled.size()));
             }
-            if (route.size() > depth)
-                route.resize(depth);
-            bool found = false;
-            for (auto it = full.lower_bound(route);
-                    it != full.end() && it->first.compare(0, route.size(), route) == 0; ++it) {
-                if (it->second.count(l)) {
-                    found = true;
-                    break;
-                }
+            const size_t from = std::min<size_t>(e.route_bp, std::min(spelled.size(), route.size()));
+            if (spelled.substr(from) != route.substr(from)) {
+                problems.push_back(what + ": leaf " + bp(p.id) + ": the route of " + l
+                                   + " and the spelled walk differ after route_bp " + bp(e.route_bp));
             }
-            EXPECT_TRUE(found) << what << ": the route of " << l << " to leaf " << p.id
-                               << " (" << route << ") is not a prefix of an exhaustive leaf "
-                                  "under that label";
-            checked++;
+            if (e.route_bp == 0 && spelled != route) {
+                problems.push_back(what + ": leaf " + bp(p.id) + ": " + l + " has route_bp 0 but its "
+                                     "route is not the spelled walk");
+            } else if (e.route_bp > 0 && spelled == route) {
+                problems.push_back(what + ": " + l + " is reported merged in at " + bp(e.route_bp)
+                                   + " but its route is the spelled walk");
+            }
+            if (!label_end_at(merged, last, l, spelled.size())) {
+                problems.push_back(what + ": leaf " + bp(p.id) + " lists " + l
+                                   + " with no label end event at its depth");
+            }
         }
     }
-    return checked;
+    // every label end, leaf or interior, on the label's own route to it
+    for (const Segment &seg : ma.segments) {
+        const uint64_t end = seg.from_bp + seg.length_bp;
+        for (const Event &ev : seg.events) {
+            if (ev.type != EventType::LABEL_END)
+                continue;
+            const std::string &l = merged.label_dict.at(ev.label).name;
+            const std::string where = "segment " + bp(seg.id) + " at " + bp(ev.at_bp);
+            std::string route = label_route(ma, seg.id, ev.label, &problems);
+            if (route.size() != end || ev.at_bp > end || ev.at_bp < seg.from_bp) {
+                problems.push_back(what + ": the route of " + l + " to " + where + " spells "
+                                   + bp(route.size()) + " bases for a segment over ["
+                                   + bp(seg.from_bp) + ", " + bp(end) + ")");
+                continue;
+            }
+            route.resize(ev.at_bp);
+            check_end(route, l, ev.reason, where);
+        }
+    }
+    return rep;
+}
+
+inline size_t check_routes_subset(const SeedResult &A, const SeedResult &merged,
+                                  size_t a, const std::string &what) {
+    RouteReport rep = routes_subset_report(A, merged, a, what);
+    EXPECT_TRUE(rep.problems.empty())
+        << what << ": the merged run's label ends are not all supported by the exhaustive trie ("
+        << rep.problems.size() << " problem(s)):" << listed(rep.problems);
+    return rep.checked;
 }
 
 } // namespace trie
