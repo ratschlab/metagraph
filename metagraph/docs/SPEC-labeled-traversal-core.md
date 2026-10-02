@@ -747,21 +747,38 @@ tool for an agent exploring the graph *locally* before committing to labels, and
 - `branch_events[arm]`: the first `max_branch_events` in queue order **plus** the top `max_branch_events` by labels
   affected; each with position, successor characters, per-successor label counts and lookahead
   `{bp_until_end_or_window, reason}`, ambiguous labels, labels dropped by `branch`/`minority`/`loss_budget`, and
-  `refused: [{char, cause, labels}]` — one entry per successor the walker decided **not** to follow for labels
-  whose lineage would have continued on it, with the cause (`minority`, `below_min_labels`, `split_limit`,
-  `branch` for an ambiguous source over its allowance, `loss_budget` for a switch only above the budget) and
-  those labels. This is the explicit per-successor refusal evidence the tuned-run property (§6.9) is checked
-  against: `dropped` and `ambiguous` alone cannot tell a refused successor from one that was followed and
-  then lost from the output, and a missing branch says nothing about why it is missing. A step with a refusal
-  always emits a branch event; `branch_events_truncated` = total − shown.
+  `refused: [{char, cause, labels}]` — one entry per (successor, cause) the walker decided **not** to follow for
+  labels whose lineage would have continued on it, with those labels (the sources alive at the node,
+  ascending). The causes and when each is emitted:
+
+  | `cause` | Emitted | Knob that must be active |
+  |---|---|---|
+  | `branch` | for a source ambiguous at the node (its lineage on two or more successors) over its allowance: on every successor that carried its lineage when it was excluded; it ends there with `branch` | finite `max_label_branches` |
+  | `minority` | for every source on a successor whose label count (after the branch-limit exclusions) is below `min_successor_labels` or `min_successor_fraction · \|σ\|` | either quorum knob |
+  | `below_min_labels` | the same, for a count below `bounds.min_live_labels` | `min_live_labels > 1` |
+  | `split_limit` | for every source on every successor of a split the path may not make (it has made `max_splits_per_path` splits) | finite `max_splits_per_path` |
+  | `loss_budget` | for every source on every successor where its lineage could go on only by a switch above the budget into a target nobody entered — **whether or not the source continues on another successor or ends for another reason** (only its *label end* `loss_budget` depends on that). Not for a source excluded by the branch limit: the limit took it out of every successor's source set, so none of its switches was priced; its refusals are the `branch` ones | a finite change cost |
+
+  This is the explicit per-successor refusal evidence the tuned-run property (§6.9) is checked against:
+  `dropped` and `ambiguous` alone cannot tell a refused successor from one that was followed and then lost
+  from the output, and a missing branch says nothing about why it is missing. Because a refusal is a claim
+  about a pruning decision, a consumer checks it against the strategy the run was made with: the cause must
+  name an active knob whose condition holds at that node (the test checkers do, `refusal_problem`), and a
+  `hairpin` event is a reason for a missing successor only under `hairpins: skip` — one marked `followed`
+  records a child that is present. A step with a refusal always emits a branch event; `branch_events_truncated`
+  = total − shown. Refusals live in the events, so a run whose events were cut by `max_branch_events` has
+  incomplete refusal evidence: raise the cap when the evidence is what is wanted.
 - `needed_budget` histogram per arm (from `loss_budget` events); `cost_preview` for P under pairwise models
   (min/median/max of `cost(seed label → extra)`, units stated).
 - `counters`: steps, successor enumerations, annotation access (path used, keys mapped, rows reconstructed,
   direct cell reads, tuple rows, pair evaluations, rc_index_range calls), resource-cap hits; and the work of
   the structural and branching rules — `edge_reuse_probes` (uses scanned or (edge, segment) pairs probed by
   the per-path edge-reuse check, whichever was fewer), `reminimisation_rounds` (re-derivations after the
-  first at ambiguous nodes, §6.4; bounded by |σ| per node) and `max_reminimisation_rounds` (the largest at
-  one node) — so that a pathological locus is visible rather than silent.
+  first at ambiguous nodes, §6.4; bounded by |σ| per node), `max_reminimisation_rounds` (the largest at
+  one node) and `refusal_scans` (the work of recording the refusals: per round that excludes sources, the
+  successor state entries scanned once for all of them, plus one loss-budget test per (source, successor)
+  under a constant cost or per target under a table — linear in |σ| + Σ|σ_v| per round under `forbid` and
+  `constant`) — so that a pathological locus is visible rather than silent.
 - `timing` (excluded from determinism): elapsed per phase, cache hits, and the **physical fetch counters**
   `rows_fetched`, `tuple_rows_fetched`, `coords_mapped` — prefetching along unbranched runs changes them with
   `annotation.batch_kmers` while the walk, `rows_requested` and `keys_mapped` do not (§6.8), so they are not part

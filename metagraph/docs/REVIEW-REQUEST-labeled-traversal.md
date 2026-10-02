@@ -428,6 +428,65 @@ From round 3 (the commits after `373df0a2`):
     excluded from `frontier_remaining`; §6.11 `direct_bp` wording restored to route support;
     `completeness_scope: per_path | united_history` per arm.
 
+From round 4:
+
+26. **A followed hairpin excused a deleted child (test side).** `branch_recorded()` verified that a `hairpin`
+    event's step is self-reverse-complementary and stopped there, so a child the walker had *followed* (event text
+    `followed`, `hairpins: follow`) could be deleted and the event read as the reason it is missing. The checker
+    context (`SeedContext`) now carries the tuned run's `Strategy` and change cost, and a hairpin event is discard
+    evidence only when it is not a followed one, the strategy skips hairpins, and the geometry verifies.
+    `TunedCheckerRejectsADeletedFollowedHairpin`: your AAATT/AAATG case (CANONICAL, k = 3) is rejected; the same
+    fixture walked with `hairpins: skip` passes, and its genuine skipped event is refused as evidence under a
+    context whose strategy follows hairpins.
+
+27. **Recording branch refusals was Θ(N²).** Each excluded source scanned every successor's state. Now each
+    re-minimisation round marks the sources it excludes (`Scratch::marked`, cleared over those labels), scans
+    each successor's state once and collects the entries whose predecessor is marked. A new `(char, "branch")`
+    group is created in the order the per-source scan created it, so the output is byte-identical. I checked
+    that with a harness that prints every field of the result, refusals in order included, on 7,203 random runs
+    (k = 3–5, all regimes, every knob, forbid/constant/table costs, all five causes present): it matches HEAD
+    exactly. The constant-cost loss-budget test is now one per (source, successor) instead of one per target. The
+    work is a new counter, `counters.refusal_scans` (§7.2). `RefusalRecordingIsLinearInTheLabels` pins 2n scans
+    at n = 250 and n = 500 on your fixture (it was n(n + 1)). Your benchmark (`round4_refusal_perf.cpp`, best of
+    3, median of three such runs on one machine) — before `709d0f32` / at `9fc93893` / now: 1,000 labels
+    0.57 / 1.42 / 0.61 ms; 5,000: 4.0 / 26.3 / 3.7 ms; 10,000: 8.1 / 94.2 / 7.8 ms.
+
+28. **Loss-budget refusals disappeared when the source continued elsewhere.** They were recorded only inside
+    the label-end branch, which `has_cont` skips. The label end is unchanged (computed as before). After it, every
+    source whose end was not decided by the budget is tested per successor, and a refusal is recorded wherever
+    its lineage could go on only by a switch above the budget into a target nobody entered. Sources excluded by
+    the branch limit are left out: the limit took them out of every successor's source set, no switch of theirs
+    was priced, and their refusals are the `branch` ones. On the same 7,203 runs the only differences from HEAD
+    are 14,656 added branch events (only `loss_budget` refusals, nothing ambiguous or dropped) and 8,816 existing
+    events with added `loss_budget` labels or groups. Every other field is identical, and every earlier event
+    and refusal group keeps its place. `LossBudgetRefusalWhileTheSourceGoesOn`: your P/Q case — at budget 0 the
+    fork has the one refusal `{Q[0], loss_budget, {A}}` and nothing dropped; at budget 1, Q is walked through the
+    switch.
+
+29. **`gzip` sent when explicitly unacceptable.** `requested_encoding()` (shared by every route through
+    `process_request()`) parses RFC 9110 codings with `;q=`: default weight 1, 0 = unacceptable,
+    case-insensitive, `*` for codings not listed, several header lines merged, malformed weights ignored. It picks
+    the higher weight, gzip on a tie, and sends identity when neither coding is acceptable or identity is
+    weighted above both. `test_api_accept_encoding_honours_quality_values` covers your two headers,
+    `gzip;q=0.5, deflate;q=1` (deflate), `*;q=0` (identity), `GZIP` (gzip) and six more.
+
+30. **Refusals were trusted on their cause (trust boundary).** `refusal_problem()` checks each refusal
+    against the tuned run's strategy and cost. `branch` needs a finite `max_label_branches`, every label named
+    ambiguous there (in `ambiguous`, or its lineage on ≥ 2 successors) *and* ending there with `branch` (the
+    limit removes the source from every successor, so a "branch-refused" label that goes on is a contradiction;
+    this also rejects your forgery under a finite limit). `minority` / `below_min_labels` need the quorum knob
+    active and the successor's count below it. That count is `labels_per_successor` *less the labels refused
+    `branch` on that successor*, because `labels_per_successor` is taken before the branch-limit exclusions and
+    the quorum after them; under forbid it must equal the refusal's label count. `split_limit` needs a finite
+    `max_splits_per_path` reached by the splits above the node. `loss_budget` needs a finite change cost. Any
+    other string is rejected. `tuned_subset_report` lists every unsupported refusal (clause 0), not only those an
+    omission rests on. `TunedCheckerRejectsARefusalItsStrategyDoesNotMake`: your two forgeries plus the four
+    other causes forged onto the exhaustive run are rejected, and genuine refusals of each cause pass. One genuine
+    case is a quorum stop on a successor that also lost a branch-limited source; a literal "labels_per_successor
+    below the threshold" rule would reject it. `CheckersAcceptGenuineTunedRunsOnDenseGraphs` (dense k = 3
+    graphs, every mode, both hairpin policies, each knob, all knobs at once, a step cap) shows the stricter
+    checkers reject nothing genuine.
+
 Not changed, by decision (see §5.5 / §7): the trace seed cap ordering (presence → cap → trace validation),
 repeated edges under trace, the even-k palindromic-node rule, the constrain-mode merge default, `switch_on: any`
 without a reference, and `switch_on: loss` being per successor (§5.2.7 — the latter is the one I intend to
