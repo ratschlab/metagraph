@@ -762,6 +762,8 @@ is rejected instead (§5).
 | `inexact_counts` | arm | a live-label count in `frontier_remaining`, `cap_trigger` or a `growth` bin is flagged `exact: false` | `labels.max_labels_per_node` | how many counts are flagged |
 | `switch_sources` | arm | a `table` cost's source list was cut while a cut source had a finite switch into a target of that successor (`counters.switch_sources_cut > 0`), or a label ended `label_lost` with the qualifier `switch_sources` — whether or not the cut source ended: one that goes on along another successor leaves no end, yet the target it was the cheapest way into was entered at a higher loss or not at all | `labels.max_switch_sources` (accepts `"unlimited"`) | `counters.switch_sources_cut`, the successor derivations the cut may have changed (an over-approximation: the kept sources may still have been the cheapest); `label_ends` = the `switch_sources` label ends. Effect: losses may be overestimated and switch entries missed |
 | `scope` | arm | `completeness_scope: united_history` | `branching.on_reconverge` (`limit: "merge"`) | merges done (0: no history was united) |
+| `greedy_losses` | arm | an exclusion re-ran the derivation with priced switches under a finite branch limit | `branching.max_label_branches` | re-minimisation rounds after the first |
+| `trace_record_boundaries` | seed | `support: trace` with column labels | `labels.seed_label_kind` (`limit: "column"`) | column labels in the dictionary |
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, or a budget raised from zero (the walk ran under it) | the clamped field | the requested value (`limit` is the effective one) |
 | `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels` | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header; `over_seed_label_cap`: the carriers |
@@ -778,19 +780,17 @@ is rejected instead (§5).
   is complete there — and `dropped_labels` (named labels that do not support the seed). A seed whose permitted
   set could not be derived is a `failed` result with a `derivation` limitation (§6.1 step 4), not a limited one.
 - So an arm with `limitations: []` is exactly what its strategy defines to `bounds.max_extension_bp`: every
-  walk per path, every reason, every recorded list in full, every loss as the §6.3 recurrence gives it (but see
-  gap 3), and a result whose `outcome` axes are all `complete` / `inline` and whose seed-level `limitations` are
+  walk per path, every reason, every recorded list in full, every loss as the §6.3 recurrence gives it, and a result whose `outcome` axes are all `complete` / `inline` and whose seed-level `limitations` are
   `[]` covers everything it certifies.
-- **Known gaps that no entry states** (the rule's remaining exceptions; each is documented here instead):
-  1. `support: trace` with **column** labels follows consecutive column coordinates and does not detect a record
-     boundary whose global coordinates are consecutive (§13, I3 note 8): such a trace can run across two records
-     of one column without a `trace_break`. Header labels detect it. The response does not flag it.
-  2. Under `support: trace`, `dropped_labels[].runs` are k-mer **presence** runs, not trace runs (§13, I3 note 8).
-  3. Under a finite change cost with a finite `max_label_branches`, the branch-limit exclusion is greedy (§6.3,
-     §6.4): an excluded source's targets are re-minimised over the remaining sources, which need not be the
-     constrained optimum, so a loss can be higher than the best assignment within the limit (or a target
-     unentered). The exclusion itself is reported (`refused: branch`, the label's `branch` end); that the losses
-     after it are not optimal is not. `max_label_branches: "unlimited"` removes it.
+- **Formerly unstated gaps, now stated per response:** (1) `support: trace` with **column** labels follows consecutive
+  column coordinates and cannot detect a record boundary whose global coordinates are consecutive (header labels
+  detect it): stated as the seed-level limitation `trace_record_boundaries` (knob `labels.seed_label_kind`,
+  observed = the number of column labels). (2) Under `support: trace`, `dropped_labels[].runs` are k-mer presence
+  runs: every dropped label carries `runs_kind: "presence"`. (3) Under a finite change cost with a finite
+  `max_label_branches`, losses after a branch-limit exclusion are re-minimised greedily (§6.3, §6.4) and need not be
+  optimal: stated as the arm limitation `greedy_losses` (knob `branching.max_label_branches`, observed = the
+  re-minimisation rounds after the first) whenever an exclusion actually re-ran the derivation with priced switches,
+  and `outcome.label_evidence` is then `lower_bound`. No known gap remains unstated.
 - **Described in this spec but not implemented** (a request naming one is rejected; no response carries one):
   delivery bounds and the `delivery` block (§6.7, §13 deviation 8), a request-level time budget and `not_started`
   (§6.8), `beam_rank` and a `beam_pruned: [...]` list (§6.8), tip and bubble windows (§6.5), the `hll` cost model

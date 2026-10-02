@@ -3782,4 +3782,86 @@ TEST(Walker, UnimplementedWindowsAndShortContinuationsAreRefused) {
     EXPECT_EQ(0u, out["strategy"]["output"]["continuation_bp"].asUInt64());
 }
 
+
+// The two gaps that depend on the request and the data rather than on a cap are stated
+// too (spec §7.0): greedy re-minimisation under a finite cost and a finite branch limit,
+// and column-label traces that cannot see a record boundary.
+TEST(Walker, GreedyLossesAndColumnTracesAreStated) {
+    // greedy losses: the ReminimisationRounds fixture (A on both branches, B on P only)
+    // with a switch within budget makes the exclusion cascade through a second round
+    std::vector<std::string> b;
+    for (uint32_t seed = 4; ; ++seed) {
+        b = clean_blocks({ 30, 25, 30, 25, 30 }, seed);
+        if (b[1][0] != b[3][0])
+            break;
+    }
+    const std::string &X = b[0], &P = b[1], &Y = b[2], &Q = b[3], &Z = b[4];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { X + P + Y, X + Q + Z, X + P + Y }, { "A", "A", "B" }, DeBruijnGraph::BASIC);
+    auto traverse = [&](const std::string &strategy) {
+        Json::Value r;
+        Json::Value seed;
+        seed["sequence"] = X;
+        seed["labels"].append("A");
+        seed["labels"].append("B");
+        r["seeds"].append(seed);
+        r["strategy"] = parse_json(strategy);
+        return cli::process_traverse_request(r, *anno, "", cli::TraverseLimits())["results"][0];
+    };
+    Json::Value greedy = traverse(R"({"direction": "right",
+        "labels": {"change_cost": {"model": "constant", "value": 1}, "loss_budget": 1}})");
+    const Json::Value &lims = greedy["arms"]["right"]["limitations"];
+    const auto greedy_kinds = kinds_of(lims);
+    EXPECT_EQ(1, std::count(greedy_kinds.begin(), greedy_kinds.end(), "greedy_losses"))
+        << lims.toStyledString();
+    for (const auto &l : lims) {
+        if (l["kind"].asString() == "greedy_losses") {
+            EXPECT_EQ("branching.max_label_branches", l["knob"].asString());
+            EXPECT_GE(l["observed"].asUInt64(), 1u);
+        }
+    }
+    EXPECT_EQ("lower_bound", greedy["outcome"]["label_evidence"].asString());
+    // forbid prices no switch, so its zero losses are exact; an unlimited branch limit
+    // never excludes; either way nothing is stated
+    for (const char *strategy : { R"({"direction": "right"})",
+                                  R"({"direction": "right", "branching": {"max_label_branches": "unlimited"},
+                                      "labels": {"change_cost": {"model": "constant", "value": 1}, "loss_budget": 1}})" }) {
+        Json::Value r = traverse(strategy);
+        const auto kinds = kinds_of(r["arms"]["right"]["limitations"]);
+        EXPECT_EQ(0, std::count(kinds.begin(), kinds.end(), "greedy_losses")) << strategy;
+    }
+
+    // column traces: a coordinate index with one column F and a CoordToHeader
+    std::vector<std::string> c;
+    for (uint32_t seed = 29; ; ++seed) {
+        c = clean_blocks({ 40, 40 }, seed);
+        if (c[0].back() != c[1].back())
+            break;
+    }
+    const std::string acc = c[0] + c[1];
+    const uint64_t n = acc.size() - kK + 1;
+    auto coord = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { acc }, { "F" }, DeBruijnGraph::BASIC, true, { 0 });
+    std::vector<std::vector<std::string>> headers { { "acc" } };
+    std::vector<std::vector<uint64_t>> num_kmers { { n } };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    LabelOracle oracle(*coord, &cth);
+    for (const char *kind : { "column", "header" }) {
+        Seed seed;
+        seed.sequence = c[0];
+        Strategy st;
+        st.support = Support::TRACE;
+        st.merge_reconverge = false;
+        st.seed_label_kind = std::string(kind) == "column" ? LabelKind::COLUMN : LabelKind::HEADER;
+        SeedResult res = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        Json::Value j = cli::seed_result_to_json(res, st, "summary", false);
+        const auto kinds = kinds_of(j["limitations"]);
+        EXPECT_EQ(std::string(kind) == "column" ? 1 : 0,
+                  std::count(kinds.begin(), kinds.end(), "trace_record_boundaries")) << kind;
+        for (const auto &d : j["seed"]["dropped_labels"]) {
+            EXPECT_EQ("presence", d["runs_kind"].asString());
+        }
+    }
+}
+
 } // namespace

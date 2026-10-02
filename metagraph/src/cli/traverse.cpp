@@ -630,6 +630,15 @@ static bool ended_by(const ArmResult &arm, EndReason reason) {
 }
 
 // Every cap that limited this arm, each emitted only when it did (spec §7.0).
+// With a finite change cost and a finite branch limit, the sources left after a branch-limit
+// exclusion are re-minimised greedily (spec §6.4), so a reported loss can exceed the optimum.
+// pair_evaluations > 0 means switch costs were actually priced (forbid prices none, and its
+// losses are all zero); max_reminimisation_rounds > 0 means an exclusion re-ran derive().
+static bool greedy_losses(const ArmResult &arm, const Strategy &st) {
+    return arm.max_reminimisation_rounds > 0 && arm.pair_evaluations > 0
+        && st.max_label_branches != Strategy::kUnlimited;
+}
+
 static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st) {
     Json::Value out(Json::arrayValue);
     // The walk domain: the cap that set complete_to_bp, then any other cap that ended
@@ -734,6 +743,15 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st) {
         out.append(limitation("scope", "branching.on_reconverge", "merge", uint_json(merges),
                               "completeness holds for the united-history rule, not per path; use "
                               "\"keep\" for the per-path guarantee"));
+    }
+    if (greedy_losses(arm, st)) {
+        out.append(limitation("greedy_losses", "branching.max_label_branches",
+                              uint_json(st.max_label_branches), uint_json(arm.reminimisation_rounds),
+                              "after a branch-limit exclusion the switch losses were re-minimised "
+                              "greedily over the remaining sources (observed: re-minimisation rounds): a "
+                              "reported loss, and an entry decided by the loss budget, may differ from the "
+                              "optimum; set the knob to \"unlimited\" (or use the forbid cost) for exact "
+                              "losses"));
     }
     return out;
 }
@@ -1029,6 +1047,9 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
             runs.append(iv);
         }
         dj["runs"] = runs;
+        // the runs are k-mer PRESENCE runs on the seed, also under support: trace, where
+        // the label was dropped for lacking a coordinate-consecutive occurrence
+        dj["runs_kind"] = "presence";
         dropped.append(dj);
     }
     seed["dropped_labels"] = dropped;
@@ -1044,6 +1065,20 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
                                "carry are missing; raise the knob, or traverse the complement with an "
                                "explicit list"));
     }
+    if (st.support == Support::TRACE) {
+        size_t columns = 0;
+        for (const auto &l : r.label_dict) {
+            columns += l.kind == LabelKind::COLUMN;
+        }
+        if (columns) {
+            lims.append(limitation("trace_record_boundaries", "labels.seed_label_kind", "column",
+                                   uint_json(columns),
+                                   "a column label's trace follows consecutive coordinates of the whole "
+                                   "column, so it cannot detect the boundary between two records whose "
+                                   "coordinates happen to be adjacent; use header labels (seed_label_kind: "
+                                   "\"header\") where the index has a CoordToHeader"));
+        }
+    }
     j["limitations"] = lims;
     // §7.0: the guarantees are independent, so the outcome states each on its own axis
     // instead of folding them into one value that would read "partial" for a complete
@@ -1054,7 +1089,7 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
             continue;
         walks &= a.status == ArmResult::COMPLETE;
         diagnostics &= a.branch_events_complete_to_bp == std::numeric_limits<uint64_t>::max();
-        label_evidence &= !a.nodes_labels_truncated && !a.switch_sources_cut;
+        label_evidence &= !a.nodes_labels_truncated && !a.switch_sources_cut && !greedy_losses(a, st);
     }
     j["outcome"] = outcome_json(walks ? "complete" : "partial", diagnostics, label_evidence);
     j["label_mode"] = to_string(st.label_mode);
