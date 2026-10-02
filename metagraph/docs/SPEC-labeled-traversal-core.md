@@ -1004,6 +1004,8 @@ tail stays valid `/traverse` input.
 
 ### 7.5 The graphlet (MGT v1)
 
+**MGT v1 is frozen (2026-10-02).** This section is the wire contract; any change to a record, field or token is MGT v2.
+
 `output.detail: graphlet` returns, per seed, a small JSON summary with the **whole** result embedded as one
 line-based text, MGT v1 (`DESIGN-traverse-graphlet.md` §2, as implemented; where this section and the design
 differ, the differences are the decisions listed in §7.5.8). The text is lossless: the `detail: full` result of the
