@@ -62,6 +62,8 @@ Config::Config(int argc, char *argv[]) {
         identity = MERGE_ANNOTATIONS;
     } else if (!strcmp(argv[1], "query")) {
         identity = QUERY;
+    } else if (!strcmp(argv[1], "traverse")) {
+        identity = TRAVERSE;
     } else if (!strcmp(argv[1], "server_query")) {
         identity = SERVER_QUERY;
         num_top_labels = 10'000;
@@ -354,6 +356,20 @@ Config::Config(int argc, char *argv[]) {
             to_gfa = true;
         } else if (!strcmp(argv[i], "--compacted")) {
             output_compacted = true;
+        } else if (!strcmp(argv[i], "--resolve")) {
+            traverse_resolve = true;
+        } else if (!strcmp(argv[i], "--index-release")) {
+            index_release = get_value(i++);
+        } else if (!strcmp(argv[i], "--traverse-max-time-ms")) {
+            traverse_max_time_ms = atof(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-max-seeds")) {
+            traverse_max_seeds = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-max-seed-bp")) {
+            traverse_max_seed_bp = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-max-seed-labels")) {
+            traverse_max_seed_labels = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
+            resolve_max_query_bp = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
@@ -592,6 +608,11 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == QUERY && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
+
+    if (identity == TRAVERSE && (infbase.empty() || infbase_annotators.size() != 1)) {
+        std::cerr << "Error: traverse requires a graph (-i) and exactly one annotation (-a)" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (identity == SERVER_QUERY
             && (fnames.size() > 1
@@ -980,6 +1001,9 @@ if (advanced) {
 
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
+
+            fprintf(stderr, "\ttraverse\textend sequence seeds through the graph along consistent\n");
+            fprintf(stderr, "\t\t\tannotation labels (JSON request files)\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
@@ -1421,6 +1445,20 @@ if (advanced) {
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [1000]\n");
 }
         } break;
+        case TRAVERSE: {
+            fprintf(stderr, "Usage: %s traverse [options] -i <GRAPH> -a <ANNOTATION> REQUEST.json [[REQUEST2.json] ...]\n"
+                            "\tEach request is a JSON object as documented in\n"
+                            "\tdocs/SPEC-labeled-traversal-core.md (§5 for traverse, §4.1 for --resolve).\n"
+                            "\tOne JSON result is written to stdout per request.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for traverse:\n");
+            fprintf(stderr, "\t   --resolve \t\t\treport label support and seed candidates instead of traversing [off]\n");
+            fprintf(stderr, "\t   --index-release [STR]\trelease id echoed in results; requests may pin it []\n");
+            fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
+            fprintf(stderr, "\n");
+            return;
+        }
         case SERVER_QUERY: {
             fprintf(stderr, "Usage: %s server_query (-i <GRAPH> -a <ANNOTATION> | <GRAPHS.csv>) [options]\n\n"
                             "\tThe index must be passed with flags -i -a or with a file GRAPHS.csv listing one\n"
@@ -1442,6 +1480,12 @@ if (advanced) {
             fprintf(stderr, "\n\t   --num-top-labels [INT] \tmaximum number of top labels per query by default [10'000]\n");
             fprintf(stderr, "\t   --no-coord-mapping \t\tquery without mapping coords to sequence headers even if the .seqs index exists [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT] \tmemory in GB available for the server to load graphs for queries into RAM [0]\n");
+            fprintf(stderr, "\n\t   --index-release [STR] \trelease id echoed by /traverse and /resolve; requests may pin it []\n");
+            fprintf(stderr, "\t   --traverse-max-time-ms [FLOAT] \tcap on bounds.time_budget_ms per /traverse seed, 0 = unlimited [30000]\n");
+            fprintf(stderr, "\t   --traverse-max-seeds [INT] \t\tcap on seeds per /traverse request, 0 = unlimited [64]\n");
+            fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \t\tcap on the length of a /traverse seed, 0 = unlimited [100000]\n");
+            fprintf(stderr, "\t   --traverse-max-seed-labels [INT] \tcap on labels DERIVED from a seed, 0 = unlimited [10000]\n");
+            fprintf(stderr, "\t   --resolve-max-query-bp [INT] \t\tcap on the /resolve query length, 0 = unlimited [0]\n");
         } break;
     }
 

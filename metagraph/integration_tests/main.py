@@ -102,10 +102,10 @@ def run_tests_parallel(max_workers, test_files, filter_pattern="*", chunk_size =
     for test_file in test_files:
         module_name = os.path.basename(test_file)[:-3]
 
-        # Don't chunk test_api to avoid port collisions. Also skip the
-        # module entirely if the filter excludes all of it — otherwise the
+        # Don't chunk the server-based modules to avoid port collisions. Also skip
+        # the module entirely if the filter excludes all of it — otherwise the
         # worker runs an empty suite and unittest prints "NO TESTS RAN".
-        if module_name == 'test_api':
+        if module_name in ('test_api', 'test_traverse'):
             if load_tests_from_module(module_name, filter_pattern):
                 all_chunks.append(module_name)
             continue

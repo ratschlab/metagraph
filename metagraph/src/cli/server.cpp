@@ -16,6 +16,8 @@
 #include "load/load_annotated_graph.hpp"
 #include "query.hpp"
 #include "align.hpp"
+#include "traverse.hpp"
+#include "graph/traversal/label_oracle.hpp"
 #include "server_utils.hpp"
 #include "cli/load/load_annotation.hpp"
 
@@ -217,6 +219,54 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
                  server_startup.config.address, server_startup.config.port);
     logger->info("[Server] Maximum connections: {}", num_threads);
     return std::thread([&server_startup]() { server_startup.start(); });
+}
+
+/**
+ * Address exactly one physical (graph, annotation) pair for a traversal request.
+ * A traversal must stay inside one graph, so a name covering several shards is
+ * rejected unless the request disambiguates it with "graph_path".
+ */
+const graph::AnnotatedDBG&
+resolve_traverse_index(const Json::Value &json, const Config &config,
+                       const std::shared_future<std::unique_ptr<graph::AnnotatedDBG>> &anno_graph,
+                       const tsl::hopscotch_map<std::string,
+                                 std::vector<std::pair<std::string, std::string>>> &indexes,
+                       const VectorMap<std::pair<std::string, std::string>,
+                                       std::unique_ptr<graph::AnnotatedDBG>> &graphs_cache) {
+    if (config.fnames.empty()) {
+        if (json.isMember("graph") || json.isMember("graph_path")) {
+            throw InvalidRequest("Bad request: this server hosts a single graph; "
+                                 "remove the 'graph' / 'graph_path' field");
+        }
+        return *anno_graph.get();
+    }
+    if (!json.isMember("graph") || !json["graph"].isString())
+        throw InvalidRequest("Bad request: 'graph' (index name) is required in multi-graph mode");
+
+    const std::string name = json["graph"].asString();
+    auto it = indexes.find(name);
+    if (it == indexes.end())
+        throw InvalidRequest("Bad request: unknown graph '" + name + "'");
+
+    const auto &pairs = it->second;
+    if (pairs.size() == 1)
+        return *graphs_cache.at(pairs[0]);
+
+    if (json.isMember("graph_path") && json["graph_path"].isString()) {
+        const std::string wanted = json["graph_path"].asString();
+        for (const auto &pair : pairs) {
+            if (pair.first == wanted)
+                return *graphs_cache.at(pair);
+        }
+        throw InvalidRequest("Bad request: graph_path '" + wanted + "' is not part of index '"
+                             + name + "'");
+    }
+    std::string candidates;
+    for (const auto &pair : pairs) {
+        candidates += (candidates.empty() ? "" : ", ") + pair.first;
+    }
+    throw InvalidRequest("Bad request: index '" + name + "' spans several graphs (" + candidates
+                         + "); pass 'graph_path' to pick one");
 }
 
 std::vector<std::string> filter_graphs_from_list(
@@ -511,6 +561,62 @@ int run_server(Config *config) {
 
             throw std::invalid_argument("Bad request: alignment requests are not yet supported for "
                                         "servers with multiple graphs");
+        });
+    };
+
+    // Report where a query is supported and which labels carry which blocks, and
+    // optionally freeze seeds for /traverse. No graph traversal.
+    server.resource["^/resolve$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
+                                                shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, num_requests++, [&](const std::string &content) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError();
+
+            Json::Value json = parse_json_string(content);
+            const auto &index = resolve_traverse_index(json, *config, anno_graph,
+                                                       indexes, graphs_cache);
+            return process_resolve_request(json, index, config->index_release,
+                                           config->resolve_max_query_bp);
+        });
+    };
+
+    // Extend frozen seeds along consistent annotation labels.
+    server.resource["^/traverse$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
+                                                 shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, num_requests++, [&](const std::string &content) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError();
+
+            Json::Value json = parse_json_string(content);
+            const auto &index = resolve_traverse_index(json, *config, anno_graph,
+                                                       indexes, graphs_cache);
+            TraverseLimits limits;
+            limits.max_time_ms = config->traverse_max_time_ms;
+            limits.max_seeds = config->traverse_max_seeds;
+            limits.max_seed_bp = config->traverse_max_seed_bp;
+            limits.max_seed_labels = config->traverse_max_seed_labels;
+            return process_traverse_request(json, index, config->index_release, limits);
+        });
+    };
+
+    // What this deployment supports, so a client can pick a strategy before asking.
+    server.resource["^/traverse/capabilities$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
+                                                            shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
+                throw CurrentlyInitializingError();
+            if (config->fnames.size()) {
+                throw InvalidRequest("Bad request: in multi-graph mode the capabilities are "
+                                     "returned per request by POST /resolve and /traverse");
+            }
+            graph::traversal::LabelOracle oracle(*anno_graph.get());
+            Json::Value caps = capabilities_to_json(oracle, config->index_release);
+            caps["max_time_ms"] = config->traverse_max_time_ms;
+            caps["max_seeds"] = static_cast<Json::UInt64>(config->traverse_max_seeds);
+            caps["max_seed_bp"] = static_cast<Json::UInt64>(config->traverse_max_seed_bp);
+            caps["max_seed_labels"] = static_cast<Json::UInt64>(config->traverse_max_seed_labels);
+            caps["max_query_bp"] = static_cast<Json::UInt64>(config->resolve_max_query_bp);
+            return caps;
         });
     };
 

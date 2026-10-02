@@ -102,6 +102,21 @@ class Config {
     unsigned int num_columns_cached = 10;
     unsigned int max_hull_forks = 4;
     unsigned int row_diff_stage = 0;
+
+    // traversal (see docs/SPEC-labeled-traversal-core.md)
+    bool traverse_resolve = false;          // run resolve/select instead of traversal
+    std::string index_release;              // echoed in responses; requests may pin it
+    // Server-side caps for POST /traverse (0 = unlimited). They are deliberately
+    // non-zero by default: a request that names NO labels makes the server derive the
+    // permitted set, whose cost is set by the seed and the index rather than by
+    // anything the caller declared, so an unconfigured deployment must not be the
+    // unlimited one. The CLI, which is operator-run, applies no caps.
+    double traverse_max_time_ms = 30'000;
+    size_t traverse_max_seeds = 64;
+    uint64_t traverse_max_seed_bp = 100'000;
+    size_t traverse_max_seed_labels = 10'000;
+    uint64_t resolve_max_query_bp = 0;
+
     unsigned int max_path_length = 100;
     unsigned int smoothing_window = 1;  // no smoothing by default
     unsigned int num_kmers_in_seq = 0;  // assume all input reads have this length
@@ -192,6 +207,7 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        TRAVERSE,
     };
     IdentityType identity = NO_IDENTITY;
 
