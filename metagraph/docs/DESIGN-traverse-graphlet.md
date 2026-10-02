@@ -1,6 +1,6 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.2 (2026-10-02; v5.2 = the owner's conservative outcome rule in §14) — **stage 1 implemented** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
+**Status:** v5.2 (2026-10-02; v5.2 = the owner's conservative outcome rule in §14) — **stage 1 implemented; the implementation review (2026-10-02) recommends freezing MGT v1 now — no finding required a format change; spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
@@ -146,7 +146,7 @@ R <segment> <label> <from_bp> <to_bp> <end> <route_bp> <from_label:cost|*> <prev
                                        # (v2) <branches> <loss>: the lineage's TERMINAL values when the run ended or was
                                        # closed (LabelRun::branches/loss, §4). Valid at to_bp only: a claim cut at an
                                        # earlier depth reports them as unknown, never as the value at the cut.
-O <walks c|p|f> <branch_diagnostics c|x> <label_evidence c|l> <delivery i|s|p>
+O <walks c|p|f> <branch_diagnostics c|x> <label_evidence c|l|q> <delivery i|s|p>   # (v5.2) q = qualified
                                        # (v5) the per-seed guarantee dimensions (§14), one per document, before the arms
 Q <scope> <resource> <phase> <requested> <effective> <used> <remaining> <actions csv> <message>
                                        # (v5) resource_stop (§14), at most one per document, after O; message is the
@@ -154,7 +154,8 @@ Q <scope> <resource> <phase> <requested> <effective> <used> <remaining> <actions
 K <arm l|r|*> <kind> <knob> <limit VALUE> <observed VALUE> <complete_to_bp|*> <extra name=VALUE,...|.> <effect>
                                        # (v5) one stated limitation; arm * = seed-level (seed_labels, server_clamp,
                                        # derivation). (v5.1) VALUE is typed by a one-letter prefix: i:<integer>,
-                                       # f:<float, codec rule>, s:<string, percent-encoded incl. space and comma>, or
+                                       # f:<float, codec rule>, s:<string: every UTF-8 byte outside 0x21..0x7E, '%' and ','
+                                       # as uppercase %XX; '=' stays raw — as implemented and in the golden vectors>, or
                                        # u (unlimited) — e.g. the scope limitation's limit is s:merge; <extra> holds
                                        # further fields (server_limit, demand). (v5.1) <effect> is STORED as the
                                        # free-text last field (percent-encoded like names): the C++ builds it from
