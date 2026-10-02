@@ -1,3 +1,8 @@
+#include <cctype>
+#include <map>
+#include <optional>
+#include <sstream>
+
 #include <zlib.h>
 #include <json/json.h>
 #include <server_http.hpp>
@@ -61,18 +66,93 @@ std::string compress_string(const std::string &str,
     return outstring;
 }
 
-// The content encoding the client accepts, "gzip" preferred over "deflate", or "" when
-// it accepts neither (the response is then sent uncompressed).
-std::string requested_encoding(const std::shared_ptr<HttpServer::Request> &request) {
-    auto encoding_header = request->header.find("Accept-Encoding");
-    if (encoding_header == request->header.end())
+namespace {
+
+std::string trimmed(const std::string &s) {
+    const size_t from = s.find_first_not_of(" \t");
+    if (from == std::string::npos)
         return "";
-    const std::string &accept = encoding_header->second;
-    if (accept.find("gzip") != std::string::npos)
-        return "gzip";
-    if (accept.find("deflate") != std::string::npos)
-        return "deflate";
-    return "";
+    return s.substr(from, s.find_last_not_of(" \t") - from + 1);
+}
+
+std::string lowercase(std::string s) {
+    for (char &c : s) {
+        c = std::tolower(static_cast<unsigned char>(c));
+    }
+    return s;
+}
+
+// An RFC 9110 qvalue: "0" or "1", optionally with a point and up to three decimals,
+// at most 1
+std::optional<double> parse_qvalue(const std::string &s) {
+    if (s.empty() || s.size() > 5 || (s[0] != '0' && s[0] != '1'))
+        return std::nullopt;
+    if (s.size() > 1 && s[1] != '.')
+        return std::nullopt;
+    for (size_t i = 2; i < s.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(s[i])))
+            return std::nullopt;
+    }
+    const double q = std::stod(s);
+    if (q > 1)
+        return std::nullopt;
+    return q;
+}
+
+} // namespace
+
+// The content encoding to send, "" for none (RFC 9110 §12.5.3). Accept-Encoding is a
+// comma-separated list of case-insensitive codings, each with an optional weight ";q="
+// (1 when absent, 0 = not acceptable), `*` standing for every coding not listed by name;
+// several header lines form one list, and an element with a malformed weight is ignored.
+// A coding is acceptable at its own weight, else at the weight of `*`, else not at all.
+// gzip wins over deflate at equal weight, the higher weight otherwise; the response is
+// uncompressed when neither is acceptable or the client weights identity above both
+// (uncompressed is also the fallback after "identity;q=0": refusing to answer is not what
+// such a client asked for). A substring test sent gzip for "gzip;q=0, deflate;q=1" and
+// for "identity, gzip;q=0" (review round 4, finding 4).
+std::string requested_encoding(const std::shared_ptr<HttpServer::Request> &request) {
+    const auto [from, to] = request->header.equal_range("Accept-Encoding");
+    if (from == to)
+        return "";
+    std::map<std::string, double> weight;   // the first weight given for each coding
+    for (auto it = from; it != to; ++it) {
+        std::istringstream list(it->second);
+        std::string element;
+        while (std::getline(list, element, ',')) {
+            std::istringstream parts(element);
+            std::string coding, param;
+            std::getline(parts, coding, ';');
+            coding = lowercase(trimmed(coding));
+            if (coding.empty())
+                continue;
+            std::optional<double> q = 1.0;
+            while (q && std::getline(parts, param, ';')) {
+                param = trimmed(param);
+                if (param.size() >= 2 && std::tolower(static_cast<unsigned char>(param[0])) == 'q'
+                        && param[1] == '=') {
+                    q = parse_qvalue(trimmed(param.substr(2)));
+                }
+            }
+            if (q)
+                weight.emplace(coding == "x-gzip" ? "gzip" : coding, *q);
+        }
+    }
+    auto weight_of = [&](const std::string &coding) {
+        if (auto it = weight.find(coding); it != weight.end())
+            return it->second;
+        if (auto it = weight.find("*"); it != weight.end())
+            return it->second;
+        return 0.0;
+    };
+    const double gzip = weight_of("gzip");
+    const double deflate = weight_of("deflate");
+    const double best = std::max(gzip, deflate);
+    if (best <= 0)
+        return "";
+    if (auto it = weight.find("identity"); it != weight.end() && it->second > best)
+        return "";
+    return gzip >= deflate ? "gzip" : "deflate";
 }
 
 bool is_compression_requested(const std::shared_ptr<HttpServer::Request> &request) {

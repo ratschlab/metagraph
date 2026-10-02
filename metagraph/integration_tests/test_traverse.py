@@ -884,6 +884,33 @@ class TestTraverseAPI(TestTraverseBase):
         caps = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities').json()
         self.assertEqual(['gzip', 'deflate'], caps['content_encodings'])
 
+    def test_api_accept_encoding_honours_quality_values(self):
+        """HTTP transport (RFC 9110 §12.5.3): a coding with q=0 is not acceptable, `*` covers
+        the codings not listed, tokens are case-insensitive and the higher weight wins
+        (gzip on a tie). A substring test used to answer gzip to the first two headers
+        below (review round 4, finding 4). It is the shared process_request() path, so
+        the capabilities route stands for every route."""
+        url = f'http://{self.host}:{self.port}/traverse/capabilities'
+        plain = requests.get(url=url, headers={'Accept-Encoding': 'identity'})
+        self.assertEqual(200, plain.status_code, plain.text)
+        for accept, expected in [
+                ('gzip;q=0, deflate;q=1', 'deflate'),
+                ('identity, gzip;q=0', None),
+                ('gzip;q=0.5, deflate;q=1', 'deflate'),
+                ('*;q=0', None),
+                ('GZIP', 'gzip'),
+                ('deflate, gzip', 'gzip'),
+                ('gzip;q=0.1, deflate;q=1', 'deflate'),
+                ('*', 'gzip'),
+                ('*;q=0.5, deflate', 'deflate'),
+                ('identity;q=1, gzip;q=0.5', None),
+                ('gzip;q=abc, deflate;q=0.2', 'deflate'),
+        ]:
+            ret = requests.get(url=url, headers={'Accept-Encoding': accept})
+            self.assertEqual(200, ret.status_code, accept)
+            self.assertEqual(expected, ret.headers.get('Content-Encoding'), accept)
+            self.assertEqual(plain.json(), ret.json(), accept)
+
     def test_api_annotate_defaults_to_keep_and_merging_qualifies_the_walk_rule(self):
         """HTTP: without `exhaustive`, annotate mode defaults to `on_reconverge: keep` (it
         promises the per-path trie) while constrain mode keeps merging as its default; when

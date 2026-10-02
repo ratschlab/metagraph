@@ -9,8 +9,9 @@ namespace cli {
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
-// Runs |process| on the request body and writes its JSON result; compressed (gzip
-// preferred, else deflate) when the client's Accept-Encoding allows it. |compact|
+// Runs |process| on the request body and writes its JSON result; compressed with gzip or
+// deflate when the client's Accept-Encoding makes one acceptable (RFC 9110 weights; gzip
+// on a tie), uncompressed otherwise. |compact|
 // writes the JSON without indentation (the traversal routes, whose bodies are large).
 void process_request(std::shared_ptr<HttpServer::Response> &response,
                      const std::shared_ptr<HttpServer::Request> &request,
