@@ -1,0 +1,1298 @@
+#include "gtest/gtest.h"
+
+#include <algorithm>
+#include <iterator>
+#include <map>
+#include <random>
+#include <set>
+
+#include "tests/test_helpers.hpp"
+#include "tests/graph/all/test_dbg_helpers.hpp"
+#include "tests/annotation/test_annotated_dbg_helpers.hpp"
+#include "tests/graph/traversal/test_trie_oracle.hpp"
+
+#include "graph/traversal/walker.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+
+
+/*
+ * The exhaustive trie oracle (spec §6.9 / §6.10). First the smoke tests: the annotate
+ * label mode, the exhaustive preset, the BFS completeness boundary and the per-node
+ * label cap. Then the verification contract itself (suite TrieOracle, helpers in
+ * test_trie_oracle.hpp): leaves(A) == leaves(E) on a fixture with a bubble, a tandem
+ * repeat and a tip over basic / canonical / primary graphs and two annotation
+ * representations, the tuned-subset property with its every-omission-has-a-reason
+ * clause, the partial-level exclusion of the completeness guarantee, and the cut
+ * recorded lists that make the oracle unusable (and are reported as such).
+ */
+namespace {
+
+using namespace mtg;
+using namespace mtg::graph;
+using namespace mtg::graph::traversal;
+using namespace mtg::test;
+
+const size_t kK = 11;
+const size_t kLeft = static_cast<size_t>(Arm::LEFT);
+const size_t kRight = static_cast<size_t>(Arm::RIGHT);
+
+std::string rc(std::string s) { ::reverse_complement(s); return s; }
+
+std::string random_seq(size_t len, uint32_t seed) {
+    std::mt19937 gen(seed);
+    std::string s(len, 'A');
+    for (char &c : s) c = "ACGT"[gen() % 4];
+    return s;
+}
+
+// no repeated k-mer or (k-1)-mer in either orientation, no RC palindromes
+bool is_clean(const std::string &s) {
+    for (size_t len : { kK - 1, kK }) {
+        std::set<std::string> seen;
+        for (size_t i = 0; i + len <= s.size(); ++i) {
+            std::string km = s.substr(i, len);
+            if (seen.count(km) || seen.count(rc(km)))
+                return false;
+            seen.insert(km);
+        }
+    }
+    for (size_t len : { kK - 1, kK + 1 }) {
+        for (size_t i = 0; i + len <= s.size(); ++i) {
+            std::string x = s.substr(i, len);
+            if (rc(x) == x)
+                return false;
+        }
+    }
+    return true;
+}
+
+std::vector<std::string> clean_blocks(const std::vector<size_t> &lengths, uint32_t seed) {
+    size_t total = 0;
+    for (size_t l : lengths) total += l;
+    std::string master;
+    for (uint32_t s = seed; ; ++s) {
+        master = random_seq(total, s);
+        if (is_clean(master))
+            break;
+    }
+    std::vector<std::string> blocks;
+    size_t pos = 0;
+    for (size_t l : lengths) {
+        blocks.push_back(master.substr(pos, l));
+        pos += l;
+    }
+    return blocks;
+}
+
+// blocks {X, P, Q} with P[0] != Q[0]: X+P and X+Q fork right after the seed X
+std::vector<std::string> fork_blocks(uint32_t seed, std::vector<size_t> lengths = { 30, 40, 40 }) {
+    for (uint32_t s = seed; ; ++s) {
+        auto b = clean_blocks(lengths, s);
+        if (b[1][0] != b[2][0])
+            return b;
+    }
+}
+
+Strategy exhaustive(LabelMode mode) {
+    Strategy st;
+    st.exhaustive = true;
+    st.label_mode = mode;
+    st.max_label_branches = Strategy::kUnlimited;
+    st.max_splits_per_path = Strategy::kUnlimited;
+    st.merge_reconverge = false;
+    return st;
+}
+
+SeedResult run(const AnnotatedDBG &anno, const std::string &seq,
+               const std::vector<std::string> &labels, const Strategy &st) {
+    LabelOracle oracle(anno);
+    Seed seed;
+    seed.sequence = seq;
+    seed.labels = labels;
+    return traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+}
+
+std::vector<std::string> names(const SeedResult &r, const std::vector<LabelId> &ids) {
+    std::vector<std::string> out;
+    for (LabelId l : ids) out.push_back(r.label_dict[l].name);
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// leaf flank -> sorted names of the labels present on every node of that flank, read
+// from the RECORDED sets of an annotate run (no walker label machinery involved)
+std::map<std::string, std::vector<std::string>> structural_leaves(const SeedResult &r, size_t a) {
+    const ArmResult &arm = r.arms[a];
+    std::map<std::string, std::vector<std::string>> out;
+    for (const auto &path : arm.paths) {
+        std::vector<LabelId> alive = arm.segments[path.segments.front()].labels_start;
+        for (size_t s : path.segments) {
+            for (const auto &run : arm.segments[s].label_sets) {
+                EXPECT_FALSE(run.truncated());
+                std::vector<LabelId> still;
+                std::set_intersection(alive.begin(), alive.end(), run.labels.begin(),
+                                      run.labels.end(), std::back_inserter(still));
+                alive.swap(still);
+            }
+        }
+        out[spell_path(arm, path)] = names(r, alive);
+    }
+    return out;
+}
+
+} // namespace
+
+
+// Annotate mode follows every structural successor and records what is there: on a
+// fork carried by two labels, the structural trie has both branches, each branch's
+// recorded sets name exactly the label that carries it, and the constrained walk over
+// the same seed yields the same leaves with the same labels (the §6.9 contract in
+// miniature).
+TEST(Trie, AnnotateRecordsWhatConstrainFilters) {
+    auto b = fork_blocks(3);
+    const std::string &X = b[0], &P = b[1], &Q = b[2];
+    std::vector<DeBruijnGraph::Mode> modes { DeBruijnGraph::BASIC };
+#if ! _PROTEIN_GRAPH
+    modes.push_back(DeBruijnGraph::CANONICAL);
+    modes.push_back(DeBruijnGraph::PRIMARY);
+#endif
+    for (auto mode : modes) {
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, { X + P, X + Q }, { "A", "B" }, mode);
+
+        Strategy st = exhaustive(LabelMode::ANNOTATE);
+        st.direction = Strategy::RIGHT;
+        st.max_extension_bp = 100;
+        auto t = run(*anno, X, {}, st);
+        EXPECT_EQ(0u, t.num_seed_labels);
+        EXPECT_FALSE(t.labels_from_seed);
+        ASSERT_EQ(2u, t.label_dict.size());
+        const ArmResult &arm = t.arms[kRight];
+        EXPECT_EQ(ArmResult::COMPLETE, arm.status);
+        EXPECT_EQ(100u, arm.complete_to_bp);
+        EXPECT_EQ(0u, arm.nodes_labels_truncated);
+        EXPECT_EQ(2u, arm.max_labels_at_node);
+        // the root's entry node is the seed boundary, carried by both labels
+        ASSERT_FALSE(arm.segments.empty());
+        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), names(t, arm.segments[0].labels_start));
+        EXPECT_EQ(0u, arm.segments[0].length_bp);
+        EXPECT_TRUE(arm.segments[0].label_sets.empty());
+        ASSERT_EQ(1u, arm.splits.size());
+        const Split &split = arm.splits[0];
+        EXPECT_EQ(0u, split.at_bp);
+        EXPECT_FALSE(split.ambiguous);
+        EXPECT_EQ(2u, split.labels_before);
+        ASSERT_EQ(2u, split.branches.size());
+        std::set<char> chars;
+        for (const auto &br : split.branches) {
+            chars.insert(br.ch);
+            EXPECT_EQ(1u, br.labels_distinct);
+            EXPECT_EQ(1u, br.labels.size());
+            EXPECT_EQ(br.labels, arm.segments[br.segment].labels_start);
+        }
+        EXPECT_EQ((std::set<char>{ P[0], Q[0] }), chars);
+        // every leaf is a structural end with a path reason and no label ends
+        ASSERT_EQ(2u, arm.paths.size());
+        for (const auto &path : arm.paths) {
+            ASSERT_TRUE(path.path_reason.has_value());
+            EXPECT_EQ(EndReason::DEAD_END, *path.path_reason);
+            EXPECT_TRUE(path.end_labels.empty());
+            EXPECT_FALSE(path.continuation.has_value());
+            // one run per segment: the label set never changes along a branch
+            for (size_t s : path.segments) {
+                const Segment &seg = arm.segments[s];
+                if (!seg.length_bp) continue;
+                ASSERT_EQ(1u, seg.label_sets.size());
+                EXPECT_EQ(seg.from_bp, seg.label_sets[0].from_bp);
+                EXPECT_EQ(seg.from_bp + seg.length_bp, seg.label_sets[0].to_bp);
+                EXPECT_EQ(seg.label_sets[0].labels, seg.labels_start);
+                EXPECT_EQ(seg.label_sets[0].labels, seg.labels_end);
+            }
+        }
+        auto structural = structural_leaves(t, kRight);
+        ASSERT_EQ(2u, structural.size());
+        EXPECT_EQ((std::vector<std::string>{ "A" }), structural.at(P));
+        EXPECT_EQ((std::vector<std::string>{ "B" }), structural.at(Q));
+        // the per-label summary reads off the recorded sets
+        for (LabelId l = 0; l < 2; ++l) {
+            EXPECT_EQ(P.size(), t.label_summary[l][kRight].direct_bp);
+            EXPECT_EQ(P.size(), t.label_summary[l][kRight].reach_bp);
+            EXPECT_TRUE(t.label_summary[l][kRight].runs.empty());
+        }
+
+        // the constrained exhaustive walk agrees leaf by leaf
+        Strategy sc = exhaustive(LabelMode::CONSTRAIN);
+        sc.direction = Strategy::RIGHT;
+        sc.max_extension_bp = 100;
+        auto a = run(*anno, X, { "A", "B" }, sc);
+        const ArmResult &carm = a.arms[kRight];
+        EXPECT_EQ(ArmResult::COMPLETE, carm.status);
+        EXPECT_EQ(100u, carm.complete_to_bp);
+        std::map<std::string, std::vector<std::string>> constrained;
+        for (const auto &path : carm.paths) {
+            std::vector<LabelId> ids;
+            for (const auto &e : path.end_labels) ids.push_back(e.label);
+            constrained[spell_path(carm, path)] = names(a, ids);
+        }
+        EXPECT_EQ(structural, constrained) << "mode " << mode;
+        // and its trie view reports the same branches
+        ASSERT_EQ(1u, carm.splits.size());
+        EXPECT_EQ(2u, carm.splits[0].labels_before);
+        ASSERT_EQ(2u, carm.splits[0].branches.size());
+        for (const auto &br : carm.splits[0].branches) {
+            EXPECT_EQ(1u, br.labels_distinct);
+            EXPECT_EQ(br.labels, carm.segments[br.segment].labels_start);
+        }
+    }
+}
+
+// The preset refuses what would silently prune it, in both modes; annotate mode
+// refuses the label machinery and a seed label list.
+TEST(Trie, ExhaustiveRejectsConflictingKnobs) {
+    auto b = fork_blocks(4);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { b[0] + b[1] }, { "A" }, DeBruijnGraph::BASIC);
+    auto expect_reject = [&](const Strategy &st, const std::vector<std::string> &labels,
+                             const std::string &knob) {
+        try {
+            run(*anno, b[0], labels, st);
+            FAIL() << "accepted a strategy conflicting on " << knob;
+        } catch (const std::invalid_argument &e) {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find(knob)) << e.what();
+        }
+    };
+    for (LabelMode mode : { LabelMode::CONSTRAIN, LabelMode::ANNOTATE }) {
+        const std::vector<std::string> labels = mode == LabelMode::CONSTRAIN
+            ? std::vector<std::string>{ "A" } : std::vector<std::string>{};
+        // the preset itself is fine
+        EXPECT_NO_THROW(run(*anno, b[0], labels, exhaustive(mode)));
+
+        Strategy st = exhaustive(mode);
+        st.max_label_branches = 3;
+        expect_reject(st, labels, "max_label_branches");
+        st = exhaustive(mode);
+        st.merge_reconverge = true;
+        expect_reject(st, labels, "on_reconverge");
+        st = exhaustive(mode);
+        st.max_splits_per_path = 5;
+        expect_reject(st, labels, "max_splits_per_path");
+        st = exhaustive(mode);
+        st.min_successor_labels = 2;
+        expect_reject(st, labels, "min_successor_labels");
+        st = exhaustive(mode);
+        st.min_successor_fraction = 0.5;
+        expect_reject(st, labels, "min_successor_fraction");
+        st = exhaustive(mode);
+        st.min_live_labels = 2;
+        expect_reject(st, labels, "min_live_labels");
+        st = exhaustive(mode);
+        st.on_overflow = Strategy::BEAM;
+        expect_reject(st, labels, "on_overflow");
+    }
+    // annotate mode: no permitted set, so none of the label machinery
+    Strategy st = exhaustive(LabelMode::ANNOTATE);
+    st.extra = { "A" };
+    expect_reject(st, {}, "labels.extra");
+    st = exhaustive(LabelMode::ANNOTATE);
+    st.loss_budget = 1;
+    expect_reject(st, {}, "loss_budget");
+    st = exhaustive(LabelMode::ANNOTATE);
+    st.support = Support::TRACE;
+    expect_reject(st, {}, "support");
+    st = exhaustive(LabelMode::ANNOTATE);
+    expect_reject(st, { "A" }, "seeds[].labels");
+    {
+        LabelOracle oracle(*anno);
+        Seed seed;
+        seed.sequence = b[0];
+        EXPECT_THROW(traverse_seed(oracle, seed, exhaustive(LabelMode::ANNOTATE),
+                                   LabelChangeCost::constant(1)),
+                     std::invalid_argument);
+    }
+    // a pairwise (table) cost under the preset: derive() keeps only the cheapest
+    // max_switch_sources sources, and a target reachable only from a cut source is
+    // not entered — a walk pruned with no path-level reason. The default (64) is
+    // refused, "unlimited" is required; CONSTANT and FORBID never cut, so the knob
+    // does not bind there and is accepted
+    {
+        LabelOracle oracle(*anno);
+        Seed seed;
+        seed.sequence = b[0];
+        seed.labels = { "A" };
+        const auto table = LabelChangeCost::table({}, kInfiniteLoss);
+        Strategy st = exhaustive(LabelMode::CONSTRAIN);
+        EXPECT_EQ(64u, st.max_switch_sources);
+        try {
+            traverse_seed(oracle, seed, st, table);
+            FAIL() << "accepted a bounded max_switch_sources under exhaustive with a table cost";
+        } catch (const std::invalid_argument &e) {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find("max_switch_sources"))
+                << e.what();
+        }
+        st.max_switch_sources = Strategy::kUnlimited;
+        EXPECT_NO_THROW(traverse_seed(oracle, seed, st, table));
+        st.max_switch_sources = 64;
+        EXPECT_NO_THROW(traverse_seed(oracle, seed, st, LabelChangeCost::constant(1)));
+        EXPECT_NO_THROW(traverse_seed(oracle, seed, st, LabelChangeCost::forbid()));
+    }
+    // the plain (non-exhaustive) constrain default still accepts its own defaults
+    EXPECT_NO_THROW(run(*anno, b[0], { "A" }, Strategy()));
+}
+
+// A size cap trips between two heads of a level: the level is partial, complete_to_bp
+// is the last complete depth, the status is never "complete", and every walk up to
+// that depth is present.
+TEST(Trie, TrippedCapReportsTheCompleteDepth) {
+    auto b = fork_blocks(5);
+    const std::string &X = b[0], &P = b[1], &Q = b[2];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { X + P, X + Q }, { "A", "B" }, DeBruijnGraph::BASIC);
+    for (LabelMode mode : { LabelMode::ANNOTATE, LabelMode::CONSTRAIN }) {
+        const std::vector<std::string> labels = mode == LabelMode::CONSTRAIN
+            ? std::vector<std::string>{ "A", "B" } : std::vector<std::string>{};
+        // two walks of 40 bases; a budget of 15 steps ends at a partial level
+        Strategy st = exhaustive(mode);
+        st.direction = Strategy::RIGHT;
+        st.max_extension_bp = 100;
+        st.max_steps = 15;
+        auto r = run(*anno, X, labels, st);
+        const ArmResult &arm = r.arms[kRight];
+        EXPECT_EQ(ArmResult::TRUNCATED, arm.status);
+        ASSERT_TRUE(arm.cap_trigger.has_value());
+        EXPECT_EQ(EndReason::MAX_STEPS, arm.cap_trigger->reason);
+        EXPECT_LT(arm.complete_to_bp, 100u);
+        // 15 steps over two heads: 7 full levels (14 steps), the 8th level expands one
+        // head and trips on the other, so walks of length 7 are all present
+        EXPECT_EQ(7u, arm.complete_to_bp);
+        std::set<std::string> walks;
+        for (const auto &path : arm.paths) {
+            std::string flank = spell_path(arm, path);
+            EXPECT_GE(flank.size(), arm.complete_to_bp);
+            walks.insert(flank.substr(0, arm.complete_to_bp));
+            ASSERT_TRUE(path.path_reason.has_value());
+            EXPECT_EQ(EndReason::MAX_STEPS, *path.path_reason);
+            ASSERT_TRUE(path.continuation.has_value());
+        }
+        EXPECT_EQ((std::set<std::string>{ P.substr(0, 7), Q.substr(0, 7) }), walks);
+
+        // the other arm has nothing to do and is complete to the radius
+        auto both = run(*anno, X, labels, exhaustive(mode));
+        EXPECT_EQ(ArmResult::COMPLETE, both.arms[kLeft].status);
+        EXPECT_EQ(both.arms[kLeft].complete_to_bp, Strategy().max_extension_bp);
+
+        // a per-arm cap: output capped at 10 bases per arm, 5 complete levels
+        st = exhaustive(mode);
+        st.direction = Strategy::RIGHT;
+        st.max_output_bp = 10;
+        r = run(*anno, X, labels, st);
+        EXPECT_EQ(ArmResult::TRUNCATED, r.arms[kRight].status);
+        EXPECT_EQ(5u, r.arms[kRight].complete_to_bp);
+        EXPECT_EQ(EndReason::MAX_OUTPUT, r.arms[kRight].cap_trigger->reason);
+
+        // reaching the radius is complete
+        st = exhaustive(mode);
+        st.direction = Strategy::RIGHT;
+        st.max_extension_bp = 12;
+        r = run(*anno, X, labels, st);
+        EXPECT_EQ(ArmResult::COMPLETE, r.arms[kRight].status);
+        EXPECT_EQ(12u, r.arms[kRight].complete_to_bp);
+        for (const auto &path : r.arms[kRight].paths) {
+            EXPECT_EQ(12u, path.length_bp);
+            EXPECT_EQ(EndReason::MAX_EXTENSION, *path.path_reason);
+        }
+    }
+}
+
+// The per-node label cap never hides that it cut a list: the true count and the cut
+// are reported on the run, the branch and the arm.
+TEST(Trie, AnnotateReportsLabelListTruncation) {
+    auto b = fork_blocks(6);
+    const std::string &X = b[0], &P = b[1], &Q = b[2];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { X + P, X + Q, X + P }, { "A", "B", "C" }, DeBruijnGraph::BASIC);
+    Strategy st = exhaustive(LabelMode::ANNOTATE);
+    st.direction = Strategy::RIGHT;
+    st.max_labels_per_node = 1;
+    auto r = run(*anno, X, {}, st);
+    const ArmResult &arm = r.arms[kRight];
+    EXPECT_EQ(ArmResult::COMPLETE, arm.status);
+    EXPECT_EQ(3u, arm.max_labels_at_node);
+    EXPECT_GT(arm.nodes_labels_truncated, 0u);
+    // the boundary (3 labels) and the P branch (2 labels) are cut, the Q branch is not
+    EXPECT_EQ(1u, arm.segments[0].labels_start.size());
+    ASSERT_EQ(1u, arm.splits.size());
+    EXPECT_EQ(3u, arm.splits[0].labels_before);
+    for (const auto &br : arm.splits[0].branches) {
+        EXPECT_EQ(1u, br.labels.size());
+        EXPECT_EQ(br.ch == P[0] ? 2u : 1u, br.labels_distinct);
+        const Segment &seg = arm.segments[br.segment];
+        ASSERT_EQ(1u, seg.label_sets.size());
+        EXPECT_EQ(br.labels_distinct, seg.label_sets[0].labels_total);
+        EXPECT_EQ(br.ch == P[0], seg.label_sets[0].truncated());
+    }
+    // with a cap that fits, nothing is cut and the counts agree with the lists
+    st.max_labels_per_node = 3;
+    r = run(*anno, X, {}, st);
+    EXPECT_EQ(0u, r.arms[kRight].nodes_labels_truncated);
+    EXPECT_EQ(3u, r.arms[kRight].segments[0].labels_start.size());
+    for (const auto &seg : r.arms[kRight].segments) {
+        for (const auto &run : seg.label_sets) {
+            EXPECT_FALSE(run.truncated());
+            EXPECT_EQ(run.labels.size(), run.labels_total);
+        }
+    }
+}
+
+// The dictionary and the recorded sets do not depend on how far ahead rows are
+// prefetched, and the same request gives the same result twice.
+TEST(Trie, AnnotateIsDeterministicAndBatchInvariant) {
+    auto b = fork_blocks(7, { 30, 60, 60 });
+    const std::string &X = b[0], &P = b[1], &Q = b[2];
+    auto anno = build_anno_graph<DBGHashFast, annot::ColumnCompressed<>>(
+            kK, { X + P, X + Q, X + P.substr(0, 20) + Q.substr(20) }, { "A", "B", "C" },
+            DeBruijnGraph::BASIC);
+    auto reduce = [](const SeedResult &r) {
+        std::string s;
+        for (const auto &l : r.label_dict) s += l.name + ",";
+        for (const ArmResult &arm : r.arms) {
+            for (const auto &seg : arm.segments) {
+                s += "\n" + std::to_string(seg.id) + " " + seg.sequence;
+                for (const auto &run : seg.label_sets) {
+                    s += " [" + std::to_string(run.from_bp) + "," + std::to_string(run.to_bp) + ")";
+                    for (LabelId l : run.labels) s += std::to_string(l) + ";";
+                    s += "/" + std::to_string(run.labels_total);
+                }
+            }
+            s += "\n" + std::to_string(arm.complete_to_bp) + " " + std::to_string(arm.status);
+        }
+        return s;
+    };
+    std::string first;
+    for (size_t batch : { 1u, 2u, 7u, 64u }) {
+        Strategy st = exhaustive(LabelMode::ANNOTATE);
+        st.batch_kmers = batch;
+        auto r = run(*anno, X, {}, st);
+        EXPECT_EQ(3u, r.label_dict.size());
+        if (first.empty()) {
+            first = reduce(r);
+        } else {
+            EXPECT_EQ(first, reduce(r)) << "batch_kmers " << batch;
+        }
+    }
+}
+
+
+/*****************************************************************************
+ *                       The verification contract (§6.9)                    *
+ *****************************************************************************/
+
+namespace {
+
+std::vector<DeBruijnGraph::Mode> all_modes() {
+    return {
+        DeBruijnGraph::BASIC,
+#if ! _PROTEIN_GRAPH
+        DeBruijnGraph::CANONICAL,
+        DeBruijnGraph::PRIMARY,
+#endif
+    };
+}
+
+const uint32_t kFixtureSeed = 11;
+const uint64_t kRadius = 200;
+const std::set<std::string> kAllLabels { "A", "B", "C", "D", "S" };
+
+std::vector<std::string> as_list(const std::set<std::string> &s) {
+    return { s.begin(), s.end() };
+}
+
+std::string reversed(std::string s) { std::reverse(s.begin(), s.end()); return s; }
+
+Strategy exhaustive_at(LabelMode mode, uint64_t radius) {
+    Strategy st = exhaustive(mode);
+    st.max_extension_bp = radius;
+    return st;
+}
+
+/*
+ * The oracle fixture (brief: a bubble, a tandem repeat and a short tip), k = 11. The
+ * blocks come from one clean master (no k-mer or (k-1)-mer repeated in either
+ * orientation, no RC palindromes), so the only structure is the one built in:
+ *
+ *   left of the seed:   V · R · R · X            R is exactly k bases: a tandem repeat,
+ *                                                i.e. a cycle of length k through node R
+ *   right of the seed:  X · P · Y · Z            A, C      P | Q: a bubble closing in Y
+ *                       X · Q · Y · Z            B, C      (C follows BOTH branches)
+ *                       X · P · Y · Z[:m] · T    C, D      T: a 6 bp tip off Z at m
+ *                       X · P · Y[:10]           S         a label that stops early
+ *
+ * Every label but S also carries the left context V · R · R · X. With k-mer support a
+ * label carries a walk iff it holds every k-mer of it, so C (which holds Q·Y, Y·Z[:m]
+ * and Z[:m]·T) carries the walk Q·Y·Z[:m]·T that no record spells, and every label
+ * carries both the single and the double lap of the repeat.
+ */
+struct OracleFixture {
+    static constexpr size_t m = 20;
+    std::string V, R, X, P, Q, Y, Z, T;
+    std::vector<std::string> sequences, labels;
+
+    explicit OracleFixture(uint32_t seed) {
+        std::vector<std::string> b;
+        for (uint32_t s = seed; ; ++s) {
+            b = clean_blocks({ 25, kK, 30, 15, 15, 25, 40, 6 }, s);
+            // real forks at the bubble and the tip; and the repeat's cycle nodes
+            // (rotations of R, absent from the master) must not coincide with the
+            // context k-mers V[-1]·R[:k-1] and R[1:]·X[0], which they do exactly when
+            // V ends like R or X starts like R
+            if (b[3][0] != b[4][0] && b[7][0] != b[6][m]
+                    && b[0].back() != b[1].back() && b[2][0] != b[1][0])
+                break;
+        }
+        V = b[0]; R = b[1]; X = b[2]; P = b[3]; Q = b[4]; Y = b[5]; Z = b[6]; T = b[7];
+        const std::string left = V + R + R + X;
+        auto add = [&](const std::string &label, const std::string &seq) {
+            sequences.push_back(seq);
+            labels.push_back(label);
+        };
+        add("A", left + P + Y + Z);
+        add("B", left + Q + Y + Z);
+        add("C", left + P + Y + Z);
+        add("C", left + Q + Y + Z);
+        add("C", left + P + Y + Z.substr(0, m) + T);
+        add("D", left + P + Y + Z.substr(0, m) + T);
+        add("S", X + P + Y.substr(0, 10));
+    }
+
+    // the k-mers with more than one successor or predecessor: the bubble's open and
+    // close, the tip's fork and the repeat node
+    std::set<std::string> branching() const {
+        return { X.substr(X.size() - kK), Y.substr(0, kK), Z.substr(m - kK, kK), R };
+    }
+    // the structural walks, outward from the seed boundary
+    std::string pyz() const { return P + Y + Z; }
+    std::string pyt() const { return P + Y + Z.substr(0, m) + T; }
+    std::string qyz() const { return Q + Y + Z; }
+    std::string qyt() const { return Q + Y + Z.substr(0, m) + T; }
+    std::set<std::string> right_walks() const { return { pyz(), pyt(), qyz(), qyt() }; }
+    std::string one_lap() const { return reversed(V + R); }
+    std::string two_laps() const { return reversed(V + R + R); }
+    std::set<std::string> left_walks() const { return { one_lap(), two_laps() }; }
+};
+
+// the graph has exactly the branching the fixture builds in (both orientations fold
+// onto one k-mer in canonical and primary mode)
+bool topology_is(const AnnotatedDBG &anno, DeBruijnGraph::Mode mode,
+                 const std::set<std::string> &expected) {
+    const DeBruijnGraph &g = anno.get_graph();
+    auto norm = [&](std::string s) {
+        if (mode != DeBruijnGraph::BASIC)
+            s = std::min(s, rc(s));
+        return s;
+    };
+    std::set<std::string> found, want;
+    g.call_nodes([&](node_index n) {
+        if (g.outdegree(n) > 1 || g.indegree(n) > 1) {
+            std::string s = g.get_node_sequence(n);
+            if (s.find('$') == std::string::npos)
+                found.insert(norm(s));
+        }
+    });
+    for (const auto &s : expected) want.insert(norm(s));
+    EXPECT_EQ(want, found) << "unexpected graph structure in mode " << mode;
+    return want == found;
+}
+
+// the walks of exactly |n| bases that |arm| reached
+std::set<std::string> walks_at(const ArmResult &arm, uint64_t n) {
+    std::set<std::string> out;
+    for (const auto &p : arm.paths) {
+        std::string w = trie::walk_of(arm, p);
+        if (w.size() >= n)
+            out.insert(w.substr(0, n));
+    }
+    return out;
+}
+
+const Split* split_at(const ArmResult &arm, uint64_t at) {
+    for (const Split &s : arm.splits) {
+        if (s.at_bp == at)
+            return &s;
+    }
+    return nullptr;
+}
+
+size_t count_blocked(const ArmResult &arm, EndReason reason) {
+    size_t n = 0;
+    for (const auto &seg : arm.segments) {
+        for (const auto &ev : seg.events)
+            n += ev.type == EventType::BLOCKED && ev.reason == reason;
+    }
+    return n;
+}
+
+// runs of the label called |name| that ended with |reason| on arm |a|
+size_t count_ends_named(const SeedResult &r, size_t a, const std::string &name, EndReason reason) {
+    size_t n = 0;
+    for (const auto &run : r.arms[a].runs) {
+        n += run.ended && run.end_reason == reason && r.label_dict[run.label].name == name;
+    }
+    return n;
+}
+
+std::set<std::string> leaf_walks(const ArmResult &arm) {
+    std::set<std::string> out;
+    for (const auto &p : arm.paths) out.insert(trie::walk_of(arm, p));
+    return out;
+}
+
+} // namespace
+
+
+template <typename Pair>
+class TrieOracle : public ::testing::Test {};
+
+typedef ::testing::Types<
+    std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+    std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
+    std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+    std::pair<DBGHashFast, annot::RowFlatAnnotator>
+> TrieOracleTypes;
+TYPED_TEST_SUITE(TrieOracle, TrieOracleTypes);
+
+
+// Brief test 1. T = the structural trie with labels recorded; E = its walks filtered
+// by the recorded sets with test-side code; A = the label-constrained exhaustive walk.
+// leaves(A) == leaves(E) for several permitted sets, on both arms, in every graph mode.
+TYPED_TEST(TrieOracle, ConstrainedTrieEqualsTheFilteredStructuralTrie) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const OracleFixture f(kFixtureSeed);
+    for (auto mode : all_modes()) {
+        auto anno = build_anno_graph<Graph, Annotation>(kK, f.sequences, f.labels, mode);
+        ASSERT_TRUE(topology_is(*anno, mode, f.branching()));
+        const std::string where = "mode " + std::to_string(mode);
+
+        auto T = run(*anno, f.X, {}, exhaustive_at(LabelMode::ANNOTATE, kRadius));
+        ASSERT_EQ(5u, T.label_dict.size());
+        for (size_t a : { kLeft, kRight }) {
+            EXPECT_EQ(ArmResult::COMPLETE, T.arms[a].status) << where;
+            EXPECT_EQ(kRadius, T.arms[a].complete_to_bp);
+            EXPECT_EQ(0u, T.arms[a].nodes_labels_truncated);
+            EXPECT_EQ(5u, T.arms[a].max_labels_at_node);
+            EXPECT_TRUE(trie::is_trie(T.arms[a]));
+            for (const auto &p : T.arms[a].paths) {
+                ASSERT_TRUE(p.path_reason.has_value());
+                EXPECT_EQ(EndReason::DEAD_END, *p.path_reason) << where;
+                EXPECT_TRUE(p.end_labels.empty());
+            }
+        }
+        // the structural trie: bubble x tip on the right, one or two laps of the
+        // repeat on the left, the second lap's re-entry blocked by edge reuse
+        EXPECT_EQ(f.right_walks(), leaf_walks(T.arms[kRight])) << where;
+        EXPECT_EQ(f.left_walks(), leaf_walks(T.arms[kLeft])) << where;
+        EXPECT_EQ(1u, count_blocked(T.arms[kLeft], EndReason::EDGE_REUSE)) << where;
+        EXPECT_EQ(3u, T.arms[kRight].splits.size());
+        EXPECT_EQ(1u, T.arms[kLeft].splits.size());
+
+        // the trie view of the bubble: C follows both branches, so the branch counts
+        // (4 + 2) exceed labels_before (5) and the split is not "ambiguous" (no lineage)
+        const Split *bubble = split_at(T.arms[kRight], 0);
+        ASSERT_NE(nullptr, bubble);
+        EXPECT_FALSE(bubble->ambiguous);
+        EXPECT_EQ(5u, bubble->labels_before);
+        ASSERT_EQ(2u, bubble->branches.size());
+        std::map<char, size_t> counts;
+        for (const auto &br : bubble->branches) {
+            counts[br.ch] = br.labels_distinct;
+            EXPECT_EQ(br.labels_distinct, br.labels.size());
+        }
+        EXPECT_EQ(4u, counts[f.P[0]]);
+        EXPECT_EQ(2u, counts[f.Q[0]]);
+
+        // the contract
+        const std::vector<std::set<std::string>> permitted_sets {
+            kAllLabels, { "A", "D" }, { "S" }, { "C" }, { "B", "D" },
+        };
+        for (const auto &P : permitted_sets) {
+            std::string what = where + " P={";
+            for (const auto &l : P) what += " " + l;
+            what += " }";
+            auto A = run(*anno, f.X, as_list(P), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
+            EXPECT_EQ(P.size(), A.num_seed_labels);
+            for (size_t a : { kLeft, kRight }) {
+                EXPECT_EQ(ArmResult::COMPLETE, A.arms[a].status) << what;
+                auto v = trie::verify(T, A, a, P);
+                EXPECT_EQ(kRadius, v.depth);
+                EXPECT_FALSE(v.cut);
+                trie::expect_equal(v.expected, v.actual, what + " arm " + std::to_string(a));
+                EXPECT_FALSE(v.expected.empty()) << what;
+            }
+            if (P == kAllLabels) {
+                // the leaves, literally
+                trie::Leaves right {
+                    { f.pyz(), { "A", "C" } }, { f.pyt(), { "C", "D" } },
+                    { f.qyz(), { "B", "C" } }, { f.qyt(), { "C" } },
+                };
+                trie::Leaves left {
+                    { f.one_lap(), { "A", "B", "C", "D" } },
+                    { f.two_laps(), { "A", "B", "C", "D" } },
+                };
+                EXPECT_EQ(right, trie::constrained_leaves(A, kRight, kRadius)) << what;
+                EXPECT_EQ(left, trie::constrained_leaves(A, kLeft, kRadius)) << what;
+                // S stops inside Y, D at the tip: label ends on paths that go on
+                EXPECT_EQ(1u, count_ends_named(A, kRight, "S", EndReason::LABEL_LOST));
+                EXPECT_EQ(1u, count_ends_named(A, kLeft, "S", EndReason::LABEL_LOST));
+                // the CLAIMS, literally: the leaves plus S's own, which ends inside the
+                // P stretch that A, C and D continue (right) and at the boundary (left).
+                // This is what the contract compares, on both sides: the oracle E keeps
+                // S's claim although it is a prefix of the PYZ and PYT claims, and the
+                // walker's label end for S is at exactly that depth.
+                trie::Leaves right_claims = right, left_claims = left;
+                right_claims[f.P + f.Y.substr(0, 10)] = { "S" };
+                left_claims[""] = { "S" };
+                EXPECT_EQ(right_claims, trie::constrained_claims(A, kRight, kRadius)) << what;
+                EXPECT_EQ(left_claims, trie::constrained_claims(A, kLeft, kRadius)) << what;
+                EXPECT_EQ(right_claims, trie::verify(T, A, kRight, P).expected) << what;
+                EXPECT_EQ(left_claims, trie::verify(T, A, kLeft, P).expected) << what;
+                // the constrained bubble IS ambiguous (C), with the same branch counts
+                const Split *cb = split_at(A.arms[kRight], 0);
+                ASSERT_NE(nullptr, cb);
+                EXPECT_TRUE(cb->ambiguous);
+                EXPECT_EQ(5u, cb->labels_before);
+                std::map<char, size_t> cc;
+                for (const auto &br : cb->branches) cc[br.ch] = br.labels_distinct;
+                EXPECT_EQ(counts, cc);
+            } else if (P == std::set<std::string>{ "S" }) {
+                trie::Leaves right { { f.P + f.Y.substr(0, 10), { "S" } } };
+                trie::Leaves left { { "", { "S" } } };
+                EXPECT_EQ(right, trie::constrained_leaves(A, kRight, kRadius)) << what;
+                EXPECT_EQ(left, trie::constrained_leaves(A, kLeft, kRadius)) << what;
+            }
+        }
+    }
+}
+
+
+// Brief test 2. Tuned runs (branch limits, quorums, a split limit, a beam, caps) are
+// prefix-subsets of the exhaustive trie and record a reason for every omission; with
+// merging on, the per-label routes are.
+TYPED_TEST(TrieOracle, TunedRunsArePrefixSubsetsAndEveryOmissionHasAReason) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const OracleFixture f(kFixtureSeed);
+    for (auto mode : all_modes()) {
+        auto anno = build_anno_graph<Graph, Annotation>(kK, f.sequences, f.labels, mode);
+        ASSERT_TRUE(topology_is(*anno, mode, f.branching()));
+        const std::string where = "mode " + std::to_string(mode) + " ";
+        auto A = run(*anno, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
+        ASSERT_EQ(ArmResult::COMPLETE, A.arms[kRight].status);
+        ASSERT_EQ(ArmResult::COMPLETE, A.arms[kLeft].status);
+        // the claims of A: 7 (leaf, label) pairs on the right plus S stopping inside Y
+        // on the shared P stretch; 2 leaves x 4 labels on the left plus S at the boundary
+        const size_t claims_right = 8, claims_left = 9;
+
+        auto tuned = [](size_t branches) {
+            Strategy st;
+            st.max_extension_bp = kRadius;
+            st.max_label_branches = branches;
+            st.merge_reconverge = false;
+            return st;
+        };
+        struct Case {
+            const char *name;
+            Strategy st;
+            std::string omitted_walk;      // a walk of A the case must drop entirely
+            std::string omitted_label;     // ... or a label it must drop from every leaf
+        };
+        std::vector<Case> cases;
+        cases.push_back({ "max_label_branches 0", tuned(0), f.qyt(), "C" });
+        cases.push_back({ "max_label_branches 1", tuned(1), f.qyt(), "C" });
+        Strategy st = tuned(Strategy::kUnlimited);
+        st.min_successor_labels = 2;
+        cases.push_back({ "min_successor_labels 2", st, f.qyt(), "" });
+        st = tuned(Strategy::kUnlimited);
+        st.min_successor_fraction = 0.5;
+        cases.push_back({ "min_successor_fraction 0.5", st, f.qyz(), "B" });
+        st = tuned(Strategy::kUnlimited);
+        st.max_splits_per_path = 1;
+        cases.push_back({ "max_splits_per_path 1", st, f.pyt(), "" });
+        st = tuned(Strategy::kUnlimited);
+        st.on_overflow = Strategy::BEAM;
+        st.max_live_paths = 1;
+        cases.push_back({ "beam 1", st, f.qyt(), "" });
+        st = tuned(Strategy::kUnlimited);
+        st.max_live_paths = 1;
+        cases.push_back({ "max_live_paths 1", st, f.pyz(), "" });
+        st = tuned(Strategy::kUnlimited);
+        st.max_steps = 50;
+        cases.push_back({ "max_steps 50", st, f.pyz(), "" });
+        st = tuned(Strategy::kUnlimited);
+        st.max_output_bp = 130;
+        cases.push_back({ "max_output_bp 130", st, f.pyt(), "" });
+
+        for (const Case &c : cases) {
+            const std::string what = where + c.name;
+            auto t = run(*anno, f.X, as_list(kAllLabels), c.st);
+            trie::SubsetReport right = trie::check_tuned_subset(A, t, kRight, what);
+            trie::SubsetReport left = trie::check_tuned_subset(A, t, kLeft, what);
+            EXPECT_EQ(claims_right, right.present + right.omitted) << what;
+            EXPECT_EQ(claims_left, left.present + left.omitted) << what;
+            // the case is not vacuous: it does prune
+            EXPECT_GT(right.omitted, 0u) << what;
+            const trie::Leaves leaves = trie::constrained_leaves(t, kRight, kRadius);
+            EXPECT_EQ(0u, leaves.count(c.omitted_walk)) << what << ": " << c.omitted_walk;
+            if (!c.omitted_label.empty()) {
+                for (const auto &[w, ls] : leaves)
+                    EXPECT_EQ(0u, ls.count(c.omitted_label)) << what << ": " << w;
+            }
+        }
+
+        // merging on: the bubble's walks join in Y and the leaf through the first parent
+        // carries the other branch's label with route_bp > 0 — not evidence for the
+        // spelled bases before the join, which the route check honours
+        st = tuned(Strategy::kUnlimited);
+        st.merge_reconverge = true;
+        auto merged = run(*anno, f.X, as_list(kAllLabels), st);
+        EXPECT_FALSE(trie::is_trie(merged.arms[kRight])) << where << "no join?";
+        EXPECT_EQ(2u, merged.arms[kRight].paths.size());
+        size_t merged_in = 0;
+        for (const auto &p : merged.arms[kRight].paths) {
+            for (const auto &e : p.end_labels) merged_in += e.route_bp > 0;
+        }
+        // the Z leaf carries the other bubble branch's label through the second
+        // parent (and the T leaf carries D that way when the first parent is Q)
+        EXPECT_GE(merged_in, 1u) << where;
+        EXPECT_LE(merged_in, 2u) << where;
+        EXPECT_EQ(5u, trie::check_routes_subset(A, merged, kRight, where + "merge"));
+        EXPECT_EQ(8u, trie::check_routes_subset(A, merged, kLeft, where + "merge"));
+    }
+}
+
+
+// Brief test 3b. A size cap trips between two heads of one level: complete_to_bp is
+// the last complete depth, every walk up to it is present, and at complete_to_bp + 1
+// a walk IS missing — the partial level is excluded from the guarantee, in both modes.
+TEST(Trie, PartialLevelIsExcludedFromTheGuarantee) {
+    const OracleFixture f(kFixtureSeed);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    ASSERT_TRUE(topology_is(*anno, DeBruijnGraph::BASIC, f.branching()));
+    for (LabelMode mode : { LabelMode::ANNOTATE, LabelMode::CONSTRAIN }) {
+        const std::vector<std::string> labels = mode == LabelMode::CONSTRAIN
+            ? as_list(kAllLabels) : std::vector<std::string>{};
+        Strategy full = exhaustive_at(mode, kRadius);
+        full.direction = Strategy::RIGHT;
+        auto ref = run(*anno, f.X, labels, full);
+        const ArmResult &rarm = ref.arms[kRight];
+        ASSERT_EQ(ArmResult::COMPLETE, rarm.status);
+        ASSERT_EQ(4u, rarm.paths.size());
+
+        // right arm alone: two heads per level up to the tip fork at 60, four beyond
+        struct Case { const char *name; EndReason reason; uint64_t expect; Strategy st; };
+        std::vector<Case> cases;
+        Strategy st = full;
+        st.max_steps = 125;          // 120 to depth 60, 124 at 61, trips on the 2nd head of 62
+        cases.push_back({ "max_steps", EndReason::MAX_STEPS, 61, st });
+        st = full;
+        st.max_output_bp = 125;
+        cases.push_back({ "max_output_bp", EndReason::MAX_OUTPUT, 61, st });
+        st = full;
+        st.max_live_paths = 3;       // the 2nd tip fork would make 4 live heads
+        cases.push_back({ "max_live_paths", EndReason::MAX_LIVE_PATHS, 60, st });
+        st = full;
+        st.max_paths = 3;
+        cases.push_back({ "max_paths", EndReason::MAX_PATHS, 60, st });
+        st = full;
+        st.time_budget_ms = 0;       // stops after the first level
+        cases.push_back({ "time_budget_ms", EndReason::TIME_BUDGET, 1, st });
+
+        for (const Case &c : cases) {
+            const std::string what = std::string(to_string(mode)) + " " + c.name;
+            auto r = run(*anno, f.X, labels, c.st);
+            const ArmResult &arm = r.arms[kRight];
+            EXPECT_EQ(ArmResult::TRUNCATED, arm.status) << what;
+            ASSERT_TRUE(arm.cap_trigger.has_value()) << what;
+            EXPECT_EQ(c.reason, arm.cap_trigger->reason) << what;
+            EXPECT_LT(arm.complete_to_bp, kRadius) << what;
+            EXPECT_EQ(c.expect, arm.complete_to_bp) << what;
+            const uint64_t d = arm.complete_to_bp;
+            // every walk of every length up to d is present ...
+            for (uint64_t n = 0; n <= d; ++n) {
+                EXPECT_EQ(walks_at(rarm, n), walks_at(arm, n)) << what << " at " << n;
+            }
+            // ... and at d + 1 some walk is missing: a strict subset
+            const auto have = walks_at(arm, d + 1), want = walks_at(rarm, d + 1);
+            EXPECT_TRUE(std::includes(want.begin(), want.end(), have.begin(), have.end())) << what;
+            EXPECT_LT(have.size(), want.size()) << what;
+            // the cut walks are honestly ended with the cap, inside the region nothing is
+            for (const auto &p : arm.paths) {
+                ASSERT_TRUE(p.path_reason.has_value()) << what;
+                if (p.length_bp < d) {
+                    EXPECT_FALSE(is_resource_stop(*p.path_reason)) << what;
+                } else if (*p.path_reason != EndReason::DEAD_END) {
+                    EXPECT_EQ(c.reason, *p.path_reason) << what;
+                    EXPECT_TRUE(p.continuation.has_value()) << what;
+                }
+            }
+            if (mode == LabelMode::CONSTRAIN) {
+                // cut to the boundary, the capped run has the complete run's leaves
+                // with the same labels alive
+                EXPECT_EQ(trie::constrained_leaves(ref, kRight, d),
+                          trie::constrained_leaves(r, kRight, d)) << what;
+            }
+        }
+        // ... and the structural oracle cut by a cap still verifies the complete
+        // constrained run up to its boundary (the "usable on hard loci" clause)
+        if (mode == LabelMode::ANNOTATE) {
+            Strategy capped = full;
+            capped.max_output_bp = 125;
+            auto T = run(*anno, f.X, {}, capped);
+            EXPECT_EQ(61u, T.arms[kRight].complete_to_bp);
+            auto A = run(*anno, f.X, as_list(kAllLabels), [&] {
+                Strategy s = exhaustive_at(LabelMode::CONSTRAIN, kRadius);
+                s.direction = Strategy::RIGHT;
+                return s;
+            }());
+            auto v = trie::verify(T, A, kRight, kAllLabels);
+            EXPECT_EQ(61u, v.depth);
+            EXPECT_FALSE(v.cut);
+            trie::expect_equal(v.expected, v.actual, "structural oracle cut at 61");
+            // four walks of 61 bases (the tip fork at 60 has split them) plus S's own
+            // claim, which ends at |P| + 10 = 25 inside the P stretch
+            EXPECT_EQ(5u, v.expected.size());
+            for (const auto &[w, ls] : v.expected) {
+                if (ls == std::set<std::string>{ "S" }) {
+                    EXPECT_EQ(f.P + f.Y.substr(0, 10), w);
+                } else {
+                    EXPECT_EQ(61u, w.size()) << w;
+                }
+            }
+        }
+    }
+}
+
+
+// Brief test 4b. A cut recorded list is reported, and the report matters: an oracle
+// built from cut lists disagrees with a correct walker. Caps 1 and 2 cut C, which
+// reaches every leaf; cap 4 cuts only S, which reaches no leaf, so a comparison of
+// LEAVES would agree there by luck — the claim comparison does not (S's claim is
+// missing from E), and nodes_labels_truncated tells a reader why.
+TEST(Trie, CutRecordedListsAreReportedAndBreakTheOracle) {
+    const OracleFixture f(kFixtureSeed);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    auto A = run(*anno, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
+    for (size_t cap : { 1u, 2u, 4u }) {
+        Strategy st = exhaustive_at(LabelMode::ANNOTATE, kRadius);
+        st.max_labels_per_node = cap;
+        auto T = run(*anno, f.X, {}, st);
+        const ArmResult &arm = T.arms[kRight];
+        EXPECT_EQ(ArmResult::COMPLETE, arm.status);
+        EXPECT_EQ(5u, arm.max_labels_at_node);
+        EXPECT_GT(arm.nodes_labels_truncated, 0u) << "cap " << cap;
+        EXPECT_LE(arm.segments[0].labels_start.size(), cap);
+        const Split *bubble = split_at(arm, 0);
+        ASSERT_NE(nullptr, bubble);
+        EXPECT_EQ(5u, bubble->labels_before);
+        for (const auto &br : bubble->branches) {
+            EXPECT_LE(br.labels.size(), cap);
+            EXPECT_EQ(br.ch == f.P[0] ? 4u : 2u, br.labels_distinct);
+        }
+        auto v = trie::verify(T, A, kRight, kAllLabels);
+        EXPECT_TRUE(v.cut) << "cap " << cap;
+        // the kept labels are the first |cap| by column: {A}, {A, B}, {A, B, C, D}; every
+        // one of these caps makes the claim comparison fail ...
+        EXPECT_NE(v.expected, v.actual)
+            << "cap " << cap << ": oracle" << trie::describe(v.expected) << "\nwalker"
+            << trie::describe(v.actual);
+        // ... while the leaf view (the claims on leaf walks) agrees at cap 4 by luck
+        const auto walks = leaf_walks(T.arms[kRight]);
+        auto leaves_of = [&](const trie::Leaves &claims) {
+            trie::Leaves out;
+            for (const auto &[w, ls] : claims) {
+                if (walks.count(w))
+                    out.insert({ w, ls });
+            }
+            return out;
+        };
+        EXPECT_EQ(cap <= 2, leaves_of(v.expected) != leaves_of(v.actual)) << "cap " << cap;
+    }
+    // a cap that fits: nothing cut, the oracle holds
+    Strategy st = exhaustive_at(LabelMode::ANNOTATE, kRadius);
+    st.max_labels_per_node = 5;
+    auto T = run(*anno, f.X, {}, st);
+    EXPECT_EQ(0u, T.arms[kRight].nodes_labels_truncated);
+    auto v = trie::verify(T, A, kRight, kAllLabels);
+    EXPECT_FALSE(v.cut);
+    trie::expect_equal(v.expected, v.actual, "cap 5");
+}
+
+
+// The contract is label-granular, not leaf-granular. S's maximal label-consistent
+// walk ends inside the P stretch that A, C and D continue, so no LEAF lists S: a walker
+// that ended S two nodes early (or late) would pass a comparison of leaves. The claim
+// (P·Y[:10], S) is in E and in claims(A), and a shifted end is caught.
+TEST(Trie, OracleComparesPerLabelClaimsNotLeaves) {
+    const OracleFixture f(kFixtureSeed);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    auto T = run(*anno, f.X, {}, exhaustive_at(LabelMode::ANNOTATE, kRadius));
+    auto A = run(*anno, f.X, as_list(kAllLabels), exhaustive_at(LabelMode::CONSTRAIN, kRadius));
+    const std::string s_walk = f.P + f.Y.substr(0, 10);
+    auto v = trie::verify(T, A, kRight, kAllLabels);
+    ASSERT_FALSE(v.cut);
+    trie::expect_equal(v.expected, v.actual, "right");
+    // S's claim is a proper prefix of other labels' claims and is kept as its own
+    ASSERT_EQ(1u, v.expected.count(s_walk));
+    EXPECT_EQ((std::set<std::string>{ "S" }), v.expected.at(s_walk));
+    for (const auto &[w, ls] : v.expected) {
+        if (w != s_walk)
+            EXPECT_EQ(0u, ls.count("S")) << w;
+    }
+    // no leaf carries S: a leaf comparison alone says nothing about where S ends
+    for (const auto &[w, ls] : trie::constrained_leaves(A, kRight, kRadius)) {
+        EXPECT_EQ(0u, ls.count("S")) << w;
+    }
+
+    // a walker that ends S two nodes early: the same leaves, a different claim
+    SeedResult wrong = A;
+    size_t moved = 0;
+    for (Segment &seg : wrong.arms[kRight].segments) {
+        for (Event &ev : seg.events) {
+            if (ev.type == EventType::LABEL_END && wrong.label_dict[ev.label].name == "S") {
+                ASSERT_EQ(s_walk.size(), ev.at_bp);
+                ev.at_bp -= 2;
+                moved++;
+            }
+        }
+    }
+    ASSERT_EQ(1u, moved);
+    EXPECT_EQ(trie::constrained_leaves(A, kRight, kRadius),
+              trie::constrained_leaves(wrong, kRight, kRadius));
+    const trie::Leaves wrong_claims = trie::constrained_claims(wrong, kRight, kRadius);
+    EXPECT_NE(v.expected, wrong_claims);
+    EXPECT_EQ(1u, wrong_claims.count(s_walk.substr(0, s_walk.size() - 2)));
+    EXPECT_EQ(0u, wrong_claims.count(s_walk));
+}
+
+
+// Annotate mode: the labels of a successor that is NOT followed appear only on its
+// BLOCKED / HAIRPIN event, and the root's boundary list is in no run. Both carry the
+// true count, a cut of either is counted in nodes_labels_truncated, and the counter
+// is exactly the number of cut lists in the output.
+TEST(Trie, CutEventListsAndTheRootTotalAreReported) {
+    const OracleFixture f(kFixtureSeed);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    for (size_t cap : { 2u, 5u }) {
+        Strategy st = exhaustive_at(LabelMode::ANNOTATE, kRadius);
+        st.max_labels_per_node = cap;
+        auto r = run(*anno, f.X, {}, st);
+        for (size_t a : { kLeft, kRight }) {
+            const ArmResult &arm = r.arms[a];
+            const std::string what = "cap " + std::to_string(cap) + " arm " + std::to_string(a);
+            // the root: all five labels carry X
+            const Segment &root = trie::root_of(arm);
+            EXPECT_EQ(5u, root.labels_start_total) << what;
+            EXPECT_EQ(std::min<size_t>(5, cap), root.labels_start.size()) << what;
+            // every child segment's entry total agrees with its first run's (the
+            // root's first run is the node AFTER the boundary, which is in no run)
+            for (const Segment &seg : arm.segments) {
+                if (seg.parents.empty() || seg.label_sets.empty())
+                    continue;
+                EXPECT_EQ(seg.label_sets.front().labels_total, seg.labels_start_total) << what;
+                EXPECT_EQ(seg.label_sets.front().labels, seg.labels_start) << what;
+            }
+            // the counter is the number of cut lists: the root, every node entered
+            // (a run covers to_bp - from_bp of them), every not followed successor
+            size_t cut = root.labels_start_total > root.labels_start.size();
+            size_t blocked = 0;
+            for (const Segment &seg : arm.segments) {
+                for (const LabelSetRun &run : seg.label_sets) {
+                    if (run.truncated())
+                        cut += run.to_bp - run.from_bp;
+                }
+                for (const Event &ev : seg.events) {
+                    if (ev.type == EventType::BLOCKED || ev.type == EventType::HAIRPIN) {
+                        blocked++;
+                        EXPECT_EQ(std::min(ev.labels_total, cap), ev.labels.size()) << what;
+                        cut += ev.truncated();
+                    }
+                }
+            }
+            EXPECT_EQ(cut, arm.nodes_labels_truncated) << what;
+            EXPECT_EQ(cap < 5, arm.nodes_labels_truncated > 0) << what;
+            if (a == kLeft) {
+                // the second lap's re-entry is blocked (edge reuse); the labels present
+                // on that successor are the four carrying the repeat, not S
+                ASSERT_EQ(1u, blocked) << what;
+                for (const Segment &seg : arm.segments) {
+                    for (const Event &ev : seg.events) {
+                        if (ev.type != EventType::BLOCKED)
+                            continue;
+                        EXPECT_EQ(EndReason::EDGE_REUSE, ev.reason);
+                        EXPECT_EQ(4u, ev.labels_total) << what;
+                        EXPECT_EQ(std::min<size_t>(4, cap), ev.labels.size()) << what;
+                        EXPECT_EQ(cap < 4, ev.truncated()) << what;
+                        if (cap >= 4) {
+                            EXPECT_EQ((std::vector<std::string>{ "A", "B", "C", "D" }),
+                                      names(r, ev.labels));
+                        }
+                    }
+                }
+            } else {
+                EXPECT_EQ(0u, blocked) << what;
+            }
+        }
+    }
+}
+
+
+// Under `exhaustive` a derived permitted set is never cut: more carriers than
+// max_seed_labels is a per-seed refusal naming the knob, not a trie over a subset.
+// Without the preset the cap applies and is reported, as before.
+TEST(Trie, ExhaustiveRefusesACutDerivedSet) {
+    const OracleFixture f(kFixtureSeed);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    Strategy st = exhaustive_at(LabelMode::CONSTRAIN, kRadius);
+    st.max_seed_labels = 3;             // five labels carry X
+    try {
+        run(*anno, f.X, {}, st);
+        FAIL() << "a cut derived set was accepted under exhaustive";
+    } catch (const SeedDerivationError &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("max_seed_labels")) << e.what();
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("5 labels")) << e.what();
+    }
+    st.max_seed_labels = 5;
+    auto full = run(*anno, f.X, {}, st);
+    EXPECT_TRUE(full.labels_from_seed);
+    EXPECT_EQ(5u, full.num_seed_labels);
+    EXPECT_EQ(0u, full.labels_dropped);
+    EXPECT_EQ(ArmResult::COMPLETE, full.arms[kRight].status);
+    // the plain walk still truncates and reports it
+    Strategy plain;
+    plain.max_extension_bp = kRadius;
+    plain.max_seed_labels = 3;
+    auto capped = run(*anno, f.X, {}, plain);
+    EXPECT_EQ(3u, capped.num_seed_labels);
+    EXPECT_EQ(5u, capped.labels_supporting_total);
+    EXPECT_EQ(2u, capped.labels_dropped);
+}
+
+
+// Annotate mode: the live-label counts (frontier_remaining, cap_trigger, growth) are
+// taken over the CUT lists, so they are lower bounds whenever a counted head was cut,
+// and say so; with a cap that fits they are exact. Constrain mode never cuts.
+TEST(Trie, CutListsMakeLiveLabelCountsInexact) {
+    const OracleFixture f(kFixtureSeed);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, f.sequences, f.labels, DeBruijnGraph::BASIC);
+    for (size_t cap : { 2u, 5u }) {
+        Strategy st = exhaustive_at(LabelMode::ANNOTATE, kRadius);
+        st.direction = Strategy::RIGHT;
+        st.max_labels_per_node = cap;
+        // two heads per level inside the bubble: trips on the first head of level 25,
+        // where the P head still carries A, C, D and S (S ends at |P| + 10 = 25)
+        st.max_steps = 50;
+        auto r = run(*anno, f.X, {}, st);
+        const ArmResult &arm = r.arms[kRight];
+        const std::string what = "cap " + std::to_string(cap);
+        ASSERT_EQ(ArmResult::TRUNCATED, arm.status) << what;
+        ASSERT_TRUE(arm.cap_trigger.has_value()) << what;
+        EXPECT_EQ(25u, arm.complete_to_bp) << what;
+        const bool exact = cap >= 5;
+        EXPECT_EQ(exact, arm.cap_trigger->live_labels_exact) << what;
+        EXPECT_EQ(exact, arm.frontier_live_labels_exact) << what;
+        // the P side carries four labels, the Q side two: a cap of 2 cuts the P head
+        // at every level, so every bin with a P head is inexact
+        ASSERT_FALSE(arm.growth.empty());
+        for (const GrowthBin &b : arm.growth) {
+            if (b.max_live_paths)
+                EXPECT_EQ(exact, b.live_labels_exact) << what << " bin " << b.from_bp;
+        }
+        if (exact) {
+            EXPECT_EQ(5u, arm.growth.front().max_live_labels) << what;
+        } else {
+            EXPECT_LT(arm.growth.front().max_live_labels, 5u) << what;
+            EXPECT_LT(arm.cap_trigger->live_labels, 5u) << what;
+        }
+    }
+    Strategy sc = exhaustive_at(LabelMode::CONSTRAIN, kRadius);
+    sc.direction = Strategy::RIGHT;
+    sc.max_labels_per_node = 2;        // cuts the trie-view branches, never the state
+    sc.max_steps = 50;
+    auto r = run(*anno, f.X, as_list(kAllLabels), sc);
+    const ArmResult &arm = r.arms[kRight];
+    ASSERT_TRUE(arm.cap_trigger.has_value());
+    EXPECT_GT(arm.nodes_labels_truncated, 0u);
+    EXPECT_TRUE(arm.cap_trigger->live_labels_exact);
+    EXPECT_TRUE(arm.frontier_live_labels_exact);
+    for (const GrowthBin &b : arm.growth) EXPECT_TRUE(b.live_labels_exact);
+    EXPECT_EQ(5u, arm.growth.front().max_live_labels);
+}
+
+
+// The walk rule states what the walker enforces on THIS index: seed nodes of either
+// strand and the even-k hairpin rule in the stranded regimes, the hash identity of
+// edges when a (k+1)-mer does not pack into 64 bits.
+TEST(Trie, WalkRuleStatesWhatTheWalkerEnforces) {
+    auto b = fork_blocks(8);
+    auto has = [](const std::string &s, const char *needle) {
+        return s.find(needle) != std::string::npos;
+    };
+    Strategy st;
+    {
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, { b[0] + b[1] }, { "A" }, DeBruijnGraph::BASIC);
+        LabelOracle oracle(*anno);
+        const std::string s = walk_rule_statement(st, oracle);
+        EXPECT_TRUE(has(s, "no (k+1)-mer edge twice")) << s;
+        EXPECT_TRUE(has(s, "enters no seed node, and")) << s;
+        EXPECT_FALSE(has(s, "either strand")) << s;
+        EXPECT_FALSE(has(s, "canonical")) << s;
+        EXPECT_FALSE(has(s, "even k")) << s;
+        EXPECT_FALSE(has(s, "128-bit")) << s;
+        EXPECT_TRUE(has(s, "takes no hairpin step")) << s;
+        st.skip_hairpins = false;
+        EXPECT_TRUE(has(walk_rule_statement(st, oracle), "may take hairpin steps")) << s;
+        st.skip_hairpins = true;
+        st.label_mode = LabelMode::ANNOTATE;
+        EXPECT_TRUE(has(walk_rule_statement(st, oracle), "labels present at its nodes are recorded"));
+        st.label_mode = LabelMode::CONSTRAIN;
+    }
+#if ! _PROTEIN_GRAPH
+    for (auto mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        // odd k: both strands of the seed count, a self-RC k-mer node does not
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, { b[0] + b[1] }, { "A" }, mode);
+        LabelOracle oracle(*anno);
+        const std::string s = walk_rule_statement(st, oracle);
+        EXPECT_TRUE(has(s, "canonical (k+1)-mers")) << s;
+        EXPECT_TRUE(has(s, "of either strand")) << s;
+        EXPECT_FALSE(has(s, "even k")) << s;
+        // even k: a step into or out of a self-RC k-mer node is a hairpin too
+        auto even = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK - 1, { b[0] + b[1] }, { "A" }, mode);
+        LabelOracle even_oracle(*even);
+        EXPECT_TRUE(has(walk_rule_statement(st, even_oracle), "self-reverse-complementary k-mer node (even k)"));
+    }
+#endif
+    {
+        // (k+1) * 2 bits > 64: edges are identified by a hash, a collision blocks
+        const std::string seq = random_seq(80, 9);
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                32, { seq }, { "A" }, DeBruijnGraph::BASIC);
+        LabelOracle oracle(*anno);
+        EXPECT_TRUE(has(walk_rule_statement(st, oracle), "128-bit FNV-1a hash"));
+        auto packable = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                31, { seq }, { "A" }, DeBruijnGraph::BASIC);
+        LabelOracle packable_oracle(*packable);
+        EXPECT_FALSE(has(walk_rule_statement(st, packable_oracle), "128-bit"));
+    }
+}
