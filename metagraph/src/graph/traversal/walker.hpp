@@ -445,6 +445,18 @@ struct ArmResult {
     uint64_t successor_enumerations = 0;
     uint64_t output_bp = 0;
     uint64_t pair_evaluations = 0;
+    // Edge-use tests made by the per-path edge-reuse check: for every successor whose
+    // edge was taken before, the recorded uses of that edge or the path's own segments
+    // (itself and its ancestors), whichever are fewer. So a check costs at most the
+    // path's depth in segments, not the number of live paths that took the same edge.
+    uint64_t edge_reuse_probes = 0;
+    // Re-minimisations at ambiguous nodes (§6.3): once a source over its branch
+    // allowance is excluded, every successor's state is derived again, and that round
+    // can expose another source over the limit. The rounds AFTER the first are counted
+    // (0 at an ordinary node), as a total over the arm and as the largest at one node:
+    // a node needs at most |σ| of them, and a large maximum marks a pathological locus.
+    uint64_t reminimisation_rounds = 0;
+    size_t max_reminimisation_rounds = 0;
 };
 
 struct LabelArmSummary {

@@ -202,6 +202,20 @@ struct EdgeUse {
     size_t segment() const { return packed >> 1; }
     bool rc() const { return packed & 1; }
 };
+// the same use keyed the other way round, for probing "did THIS segment take the edge"
+struct EdgeSegKey {
+    uint64_t lo;
+    uint64_t hi;
+    size_t segment;
+    bool operator==(const EdgeSegKey &o) const {
+        return lo == o.lo && hi == o.hi && segment == o.segment;
+    }
+};
+struct EdgeSegKeyHash {
+    size_t operator()(const EdgeSegKey &k) const {
+        return EdgeKeyHash()(EdgeKey{ k.lo, k.hi }) ^ (k.segment * 0xC2B2AE3D27D4EB4FULL);
+    }
+};
 
 // structural lookahead: the successors of a node and, when it has exactly one,
 // the annotation key of that successor
@@ -225,7 +239,13 @@ struct ArmState {
     std::vector<Item> next;
     std::vector<std::string> walk_seq;      // per segment, in walking order
     std::vector<LeafInfo> leaves;           // per segment
+    // The per-path edge-reuse record, kept both ways: every use of an edge (scanned
+    // when the edge has few uses) and, per (edge, segment), the orientation bits
+    // 1 << rc of that segment's uses (probed per ancestor when it has many — in keep
+    // mode every live path through a shared region records the same edge, and
+    // scanning those uses once per path is quadratic in the number of paths).
     tsl::hopscotch_map<EdgeKey, SmallVector<EdgeUse>, EdgeKeyHash> used_edges;
+    tsl::hopscotch_map<EdgeSegKey, uint8_t, EdgeSegKeyHash> used_by_segment;
     tsl::hopscotch_map<node_index, std::pair<size_t, uint64_t>> first_arrival;
     tsl::hopscotch_map<node_index, Lookahead> lookahead;
     size_t finished_leaves = 0;
@@ -234,11 +254,13 @@ struct ArmState {
     // extension depth of the first head not expanded (or first pruned): the level it
     // belongs to is partial and does not count toward complete_to_bp
     uint64_t boundary = std::numeric_limits<uint64_t>::max();
-    // ancestor marks of |marked_segment| (ancestors never change after creation)
+    // ancestor marks of |marked_segment| (ancestors never change after creation), and
+    // the marked segments as a list: the proper ancestors, in no particular order
     std::vector<uint32_t> visit_mark;
     uint32_t visit_epoch = 0;
     size_t marked_segment = SIZE_MAX;
     std::vector<size_t> visit_stack;
+    std::vector<size_t> ancestors;
 };
 
 // Per-label scratch of process_item, sized |label_dict| once and cleared over the
@@ -1331,6 +1353,7 @@ void Walker::mark_ancestors(ArmState &arm, size_t seg) {
         arm.visit_mark.resize(segments.size(), 0);
     ++arm.visit_epoch;
     arm.visit_stack.assign(1, seg);
+    arm.ancestors.clear();
     while (!arm.visit_stack.empty()) {
         size_t s = arm.visit_stack.back();
         arm.visit_stack.pop_back();
@@ -1338,6 +1361,7 @@ void Walker::mark_ancestors(ArmState &arm, size_t seg) {
             if (arm.visit_mark[p] != arm.visit_epoch) {
                 arm.visit_mark[p] = arm.visit_epoch;
                 arm.visit_stack.push_back(p);
+                arm.ancestors.push_back(p);
             }
         }
     }
@@ -1881,35 +1905,47 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
                 uint64_t &stamped = arm.result.runs[run_id].route_bp;
                 stamped = stamped ? std::min(stamped, at) : at;
             };
+            // both states are sorted by label: one pass over the two, into a fresh
+            // vector (inserting each incoming entry in place would cost their product)
+            State out;
+            out.reserve(st.size() + other.state.size());
+            auto a = st.begin();
             for (Entry &e : other.state) {
-                Entry *cur = find_entry(st, e.label);
-                if (!cur) {
+                while (a != st.end() && a->label < e.label) {
+                    out.push_back(std::move(*a++));
+                }
+                if (a == st.end() || a->label != e.label) {
                     Entry copy = e;
                     copy.route_bp = depth;
                     stamp_route(copy.run, depth);
-                    st.insert(std::upper_bound(st.begin(), st.end(), copy,
-                                               [](const Entry &a, const Entry &b) {
-                                                   return a.label < b.label;
-                                               }), std::move(copy));
+                    out.push_back(std::move(copy));
                     continue;
                 }
+                Entry &cur = *a++;
                 bool better = std::make_pair(e.loss, e.branches)
-                            < std::make_pair(cur->loss, cur->branches);
-                Entry &closed = better ? *cur : e;
+                            < std::make_pair(cur.loss, cur.branches);
+                Entry &closed = better ? cur : e;
                 // closed by the merge: not a label end, the lineage continues
                 LabelRun &run = arm.result.runs[closed.run];
                 run.to_bp = depth;
                 run.ended = false;
                 if (trace_)
-                    unite_coords(&e.coords, cur->coords);
+                    unite_coords(&e.coords, cur.coords);
                 if (better) {
-                    *cur = e;
-                    cur->route_bp = depth;
-                    stamp_route(cur->run, depth);
-                } else if (trace_) {
-                    cur->coords = e.coords;
+                    Entry kept = e;
+                    kept.route_bp = depth;
+                    stamp_route(kept.run, depth);
+                    out.push_back(std::move(kept));
+                } else {
+                    if (trace_)
+                        cur.coords = e.coords;
+                    out.push_back(std::move(cur));
                 }
             }
+            while (a != st.end()) {
+                out.push_back(std::move(*a++));
+            }
+            st.swap(out);
         }
         // in annotate mode the join is purely structural (same node, same depth) and
         // the merged segment's entry labels are the node's own
@@ -2176,8 +2212,14 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut);
     }
     std::vector<LabelId> ambiguous_over, ambiguous_taken;
-    bool first_round = true;
-    while (true) {
+    // Every changing round excludes at least one source for good, so the fixpoint
+    // settles within |σ| + 1 rounds (the last one changes nothing). The bound is
+    // explicit so that nothing here can spin; it is never what ends the loop.
+    const size_t sigma_size = item.state.size();
+    size_t rounds = 0;
+    bool changed = true;
+    while (changed && rounds <= sigma_size) {
+        ++rounds;
         for (LabelId l : sc.touched) {
             sc.cont_count[l] = 0;
         }
@@ -2185,7 +2227,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             if (!c.admissible())
                 continue;
             derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut);
-            if (first_round)
+            if (rounds == 1)
                 c.initial_labels = c.state.size();
             if (c.hairpin)
                 continue;   // a followed hairpin never counts toward ambiguity (§6.5)
@@ -2199,8 +2241,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                 }
             }
         }
-        first_round = false;
-        bool changed = false;
+        changed = false;
         for (const Entry &src : item.state) {
             if (sc.excluded[src.label] || sc.cont_count[src.label] < 2)
                 continue;
@@ -2210,9 +2251,12 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                 changed = true;
             }
         }
-        if (!changed)
-            break;
     }
+    assert(!changed);
+    // the rounds after the first are re-minimisations
+    arm.result.reminimisation_rounds += rounds - 1;
+    arm.result.max_reminimisation_rounds = std::max(arm.result.max_reminimisation_rounds,
+                                                    rounds - 1);
     for (const Entry &src : item.state) {
         if (sc.excluded[src.label] || sc.cont_count[src.label] < 2)
             continue;
@@ -2228,7 +2272,6 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     }
 
     // ---- quorum, min_live_labels
-    const size_t sigma_size = item.state.size();
     std::vector<Cand*> followed;
     for (Cand &c : cands_) {
         if (!c.admissible() || c.state.empty())
@@ -2490,11 +2533,31 @@ void Walker::check_structure(ArmState &arm, const Item &item, Cand &c) {
     if (it == arm.used_edges.end())
         return;
     mark_ancestors(arm, item.segment);
+    // Was the edge taken by this segment or an ancestor, and in which orientation?
+    // Either scan the edge's uses or probe (edge, segment) for the path's own
+    // segments: the same uses, so the same answer, at the cost of whichever is fewer.
+    const SmallVector<EdgeUse> &uses = it->second;
     bool same = false, opposite = false;
-    for (const EdgeUse &u : it->second) {
-        if (!is_ancestor_or_self(arm, u.segment(), item.segment))
-            continue;
-        (u.rc() == c.rc ? same : opposite) = true;
+    if (uses.size() <= arm.ancestors.size() + 1) {
+        arm.result.edge_reuse_probes += uses.size();
+        for (const EdgeUse &u : uses) {
+            if (!is_ancestor_or_self(arm, u.segment(), item.segment))
+                continue;
+            (u.rc() == c.rc ? same : opposite) = true;
+        }
+    } else {
+        arm.result.edge_reuse_probes += arm.ancestors.size() + 1;
+        auto probe = [&](size_t segment) {
+            auto jt = arm.used_by_segment.find(EdgeSegKey{ c.key_lo, c.key_hi, segment });
+            if (jt == arm.used_by_segment.end())
+                return;
+            same |= (jt->second >> c.rc) & 1;
+            opposite |= (jt->second >> !c.rc) & 1;
+        };
+        probe(item.segment);
+        for (size_t a : arm.ancestors) {
+            probe(a);
+        }
     }
     if (opposite) {
         c.blocked = true;
@@ -2530,6 +2593,8 @@ void Walker::account_steps(ArmState &arm, uint64_t at, size_t nf) {
 
 void Walker::record_edge(ArmState &arm, size_t segment, const Cand &c) {
     arm.used_edges[EdgeKey{ c.key_lo, c.key_hi }].push_back(EdgeUse(segment, c.rc));
+    arm.used_by_segment[EdgeSegKey{ c.key_lo, c.key_hi, segment }]
+        |= static_cast<uint8_t>(1u << c.rc);
 }
 
 std::vector<LabelId> Walker::bounded(ArmState &arm, const std::vector<LabelId> &labels,

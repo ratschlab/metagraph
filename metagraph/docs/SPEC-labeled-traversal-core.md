@@ -700,7 +700,11 @@ so no new order is needed; what the bound needs is a **per-level completion boun
 - `needed_budget` histogram per arm (from `loss_budget` events); `cost_preview` for P under pairwise models
   (min/median/max of `cost(seed label → extra)`, units stated).
 - `counters`: steps, successor enumerations, annotation access (path used, keys mapped, rows reconstructed,
-  direct cell reads, tuple rows, pair evaluations, rc_index_range calls), resource-cap hits.
+  direct cell reads, tuple rows, pair evaluations, rc_index_range calls), resource-cap hits; and the work of
+  the structural and branching rules — `edge_reuse_probes` (uses scanned or (edge, segment) pairs probed by
+  the per-path edge-reuse check, whichever was fewer), `reminimisation_rounds` (re-derivations after the
+  first at ambiguous nodes, §6.4; bounded by |σ| per node) and `max_reminimisation_rounds` (the largest at
+  one node) — so that a pathological locus is visible rather than silent.
 - `timing` (excluded from determinism): elapsed per phase, cache hits.
 
 Consistency invariants (tested, T25): Σ_bins steps = counters.steps; Σ_bins label ends by reason = label_summary

@@ -776,6 +776,11 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     counters["successor_enumerations"] = uint_json(arm.successor_enumerations);
     counters["output_bp"] = uint_json(arm.output_bp);
     counters["pair_evaluations"] = uint_json(arm.pair_evaluations);
+    // the work of the per-path edge-reuse rule and of re-minimising ambiguous nodes
+    // (spec §6.4): a pathological locus shows up here, not as silence
+    counters["edge_reuse_probes"] = uint_json(arm.edge_reuse_probes);
+    counters["reminimisation_rounds"] = uint_json(arm.reminimisation_rounds);
+    counters["max_reminimisation_rounds"] = uint_json(arm.max_reminimisation_rounds);
     j["counters"] = counters;
     return j;
 }

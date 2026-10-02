@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <random>
 #include <set>
@@ -669,6 +670,67 @@ TYPED_TEST(WalkerTest, AmbiguousBranch) {
 }
 
 
+// The fixpoint over excluded sources at an ambiguous node (§6.3) derives every
+// successor's state again after an exclusion; the rounds after the first are counted
+// (ArmResult::reminimisation_rounds, and the largest at one node).
+TYPED_TEST(WalkerTest, ReminimisationRounds) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    std::vector<std::string> b;
+    for (uint32_t seed = 4; ; ++seed) {
+        b = clean_blocks({ 30, 25, 30, 25, 30 }, seed);
+        if (b[1][0] != b[3][0])
+            break;
+    }
+    const std::string &X = b[0], &P = b[1], &Y = b[2], &Q = b[3], &Z = b[4];
+    for (auto mode : all_modes()) {
+        // A on both branches, B on the P branch only
+        auto anno = build_anno_graph<Graph, Annotation>(kK, { X + P + Y, X + Q + Z, X + P + Y },
+                                                        { "A", "A", "B" }, mode);
+        // limit 0, no switching: A is excluded in the first round, B goes on along P
+        // alone, so one re-derivation settles the node
+        Strategy st = strategy(0);
+        auto res = run(*anno, X, { "A", "B" }, st);
+        const ArmResult &r0 = res.arms[kRight];
+        check_invariants(r0, st);
+        EXPECT_EQ(1u, r0.reminimisation_rounds);
+        EXPECT_EQ(1u, r0.max_reminimisation_rounds);
+        ASSERT_EQ(1u, r0.branch_events.size());
+        EXPECT_EQ((std::vector<LabelId>{ 0 }), r0.branch_events[0].ambiguous);
+        ASSERT_EQ(1u, r0.paths.size());
+        EXPECT_EQ(P.size() + Y.size(), r0.paths[0].length_bp);
+        // the seed starts the sequences: nothing to re-minimise on the left
+        EXPECT_EQ(0u, res.arms[kLeft].reminimisation_rounds);
+
+        // With a switch within budget the exclusion cascades: once A is excluded, B is
+        // the only source left for A's node on Q and switches into it, so B now goes
+        // on along both branches and is excluded in the second round. Two
+        // re-derivations, and every label ends at the node.
+        st.loss_budget = 1;
+        res = run(*anno, X, { "A", "B" }, st, LabelChangeCost::constant(1));
+        const ArmResult &r2 = res.arms[kRight];
+        check_invariants(r2, st);
+        EXPECT_EQ(2u, r2.reminimisation_rounds);
+        EXPECT_EQ(2u, r2.max_reminimisation_rounds);
+        ASSERT_EQ(1u, r2.branch_events.size());
+        EXPECT_EQ((std::vector<LabelId>{ 0, 1 }), r2.branch_events[0].ambiguous);
+        EXPECT_EQ((std::vector<LabelId>{ 0, 1 }), r2.branch_events[0].dropped);
+        EXPECT_EQ(2u, count_ends(r2, EndReason::BRANCH));
+        ASSERT_EQ(1u, r2.paths.size());
+        EXPECT_EQ(0u, r2.paths[0].length_bp);
+
+        // an ambiguity within the allowance excludes nothing: no re-derivation
+        st = strategy(1);
+        res = run(*anno, X, { "A", "B" }, st);
+        const ArmResult &r1 = res.arms[kRight];
+        check_invariants(r1, st);
+        EXPECT_EQ(0u, r1.reminimisation_rounds);
+        EXPECT_EQ(0u, r1.max_reminimisation_rounds);
+        EXPECT_EQ(2u, r1.paths.size());
+    }
+}
+
+
 // T10: diamond. A on X·P·Y·Q, B on X·P'·Y·Q'
 TYPED_TEST(WalkerTest, Diamond) {
     using Graph = typename TypeParam::first_type;
@@ -872,6 +934,125 @@ TYPED_TEST(WalkerTest, CycleJunction) {
         EXPECT_EQ(1u, blocked);
         EXPECT_EQ(0u, count_ends(r1, EndReason::BRANCH));
         EXPECT_EQ(0u, count_ends(r1, EndReason::EDGE_REUSE));
+    }
+}
+
+// 2^n labels through a cascade of n bubbles (A_i | B_i of equal length, then a shared
+// block S_i) and on through the |tail| blocks: label c takes B_i where bit i of c is
+// set, so every label has its own path and, with merging off, every one of the 2^n
+// paths walks the shared blocks as a head of its own.
+struct CascadeFixture {
+    size_t n;
+    std::vector<std::string> blocks;     // X, A_1, B_1, S_1, ..., A_n, B_n, S_n, tail...
+
+    CascadeFixture(size_t n, const std::vector<size_t> &tail_lengths, uint32_t seed,
+                   std::function<bool(const CascadeFixture&)> accept = nullptr) : n(n) {
+        std::vector<size_t> lengths { 30 };
+        for (size_t i = 0; i < n; ++i) {
+            lengths.insert(lengths.end(), { 20, 20, 15 });
+        }
+        lengths.insert(lengths.end(), tail_lengths.begin(), tail_lengths.end());
+        for (uint32_t s = seed; ; ++s) {
+            blocks = clean_blocks(lengths, s);
+            bool ok = true;
+            for (size_t i = 0; i < n; ++i) {
+                ok &= blocks[1 + 3 * i][0] != blocks[2 + 3 * i][0];
+            }
+            if (ok && (!accept || accept(*this)))
+                break;
+        }
+    }
+    const std::string& X() const { return blocks[0]; }
+    const std::string& tail(size_t j) const { return blocks[1 + 3 * n + j]; }
+    std::string bubbles(size_t c) const {
+        std::string s;
+        for (size_t i = 0; i < n; ++i) {
+            s += blocks[1 + 3 * i + ((c >> i) & 1)] + blocks[3 + 3 * i];
+        }
+        return s;
+    }
+    std::vector<std::string> labels() const {
+        std::vector<std::string> out;
+        for (size_t c = 0; c < (size_t(1) << n); ++c) out.push_back("L" + std::to_string(c));
+        return out;
+    }
+};
+
+// The per-path edge-reuse check costs a step at most the path's depth in segments,
+// not the number of live paths that took the same edge (ArmResult::edge_reuse_probes).
+// With merging off (keep mode, the exhaustive preset) the 2^5 paths of a cascade all
+// walk the shared tail and all record its edges: scanning those uses costs ~P/2 per
+// step there, probing the path's own segments at most n + 1.
+TYPED_TEST(WalkerTest, EdgeReuseProbes) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    {
+        const size_t n = 5;
+        CascadeFixture f(n, { 100 }, 11);
+        std::vector<std::string> seqs;
+        for (size_t c = 0; c < (size_t(1) << n); ++c) seqs.push_back(f.X() + f.bubbles(c) + f.tail(0));
+        for (auto mode : all_modes()) {
+            auto anno = build_anno_graph<Graph, Annotation>(kK, seqs, f.labels(), mode);
+            Strategy st = strategy(0, false);
+            st.direction = Strategy::RIGHT;
+            auto res = run(*anno, f.X(), f.labels(), st);
+            const ArmResult &right = res.arms[kRight];
+            check_invariants(right, st);
+            ASSERT_EQ(seqs.size(), right.paths.size());
+            for (const auto &path : right.paths) {
+                ASSERT_EQ(1u, path.end_labels.size());
+                EXPECT_EQ(seqs[path.end_labels[0].label].substr(f.X().size()),
+                          spell_path(right, path));
+            }
+            EXPECT_EQ(0u, count_events(right, EventType::BLOCKED));
+            // every path crosses the n splits, so a head has at most n + 1 segments
+            EXPECT_GT(right.edge_reuse_probes, 0u);
+            EXPECT_LE(right.edge_reuse_probes, (n + 1) * right.steps);
+        }
+    }
+    // The probe has to find a use by the path's own segments and ignore the sibling
+    // paths' uses of the same edge: 2^3 paths into the cycle L·J·C·J·E of T11a. Every
+    // path takes J→C once (eight uses, more than its segments) and is blocked at it
+    // the second time; J→E, taken by the siblings only, stays open.
+    {
+        const size_t n = 3;
+        CascadeFixture f(n, { 15, kK, 40, 30 }, 12,
+                         [](const CascadeFixture &x) { return x.tail(2)[0] != x.tail(3)[0]; });
+        const std::string &L = f.tail(0), &J = f.tail(1), &C = f.tail(2), &E = f.tail(3);
+        std::vector<std::string> seqs;
+        std::set<std::string> expected;
+        for (size_t c = 0; c < (size_t(1) << n); ++c) {
+            seqs.push_back(f.X() + f.bubbles(c) + L + J + C + J + E);
+            expected.insert(f.bubbles(c) + L + J + E);
+            expected.insert(f.bubbles(c) + L + J + C + J + E);
+        }
+        for (auto mode : all_modes()) {
+            auto anno = build_anno_graph<Graph, Annotation>(kK, seqs, f.labels(), mode);
+            Strategy st = strategy(1, false);
+            st.direction = Strategy::RIGHT;
+            auto res = run(*anno, f.X(), f.labels(), st);
+            const ArmResult &right = res.arms[kRight];
+            check_invariants(right, st);
+            std::set<std::string> flanks;
+            for (const auto &path : right.paths) {
+                flanks.insert(spell_path(right, path));
+                ASSERT_EQ(1u, path.end_labels.size());
+                EXPECT_EQ(1u, path.end_labels[0].branches);
+                EXPECT_EQ(1u, path.end_reasons[static_cast<size_t>(EndReason::DEAD_END)]);
+                check_spelled(*anno, right, path, f.X());
+            }
+            EXPECT_EQ(expected, flanks);
+            EXPECT_EQ(2 * seqs.size(), right.paths.size());
+            auto blocked = events_of(right, EventType::BLOCKED);
+            EXPECT_EQ(seqs.size(), blocked.size());
+            for (const Event *ev : blocked) {
+                EXPECT_EQ(EndReason::EDGE_REUSE, ev->reason);
+                EXPECT_EQ(C[0], ev->ch);
+                EXPECT_EQ(1u, ev->labels.size());
+            }
+            EXPECT_EQ(0u, count_ends(right, EndReason::EDGE_REUSE));
+            EXPECT_EQ(0u, count_ends(right, EndReason::EDGE_REUSE_RC));
+        }
     }
 }
 
