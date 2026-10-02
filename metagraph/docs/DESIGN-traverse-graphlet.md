@@ -1,6 +1,8 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** draft v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
+**Status:** v5.1 (2026-10-02) — **approved for implementation** by the fifth external review (no further architecture
+review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
+are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
 (v4) and §16 (v5) and marked where they are made. §14 is the resource and guarantee contract; §14.1 separates what
 is frozen with MGT v1 from what is enforced in stages. Not frozen: the fixtures of §2.7 and §14 are the freeze gate. Companion documents:
@@ -149,12 +151,14 @@ O <walks c|p|f> <branch_diagnostics c|x> <label_evidence c|l> <delivery i|s|p>
 Q <scope> <resource> <phase> <requested> <effective> <used> <remaining> <actions csv> <message>
                                        # (v5) resource_stop (§14), at most one per document, after O; message is the
                                        # free-text last field (percent-encoded like names)
-K <arm l|r|*> <kind> <knob> <limit> <observed> <complete_to_bp|*> <extra name=value,...|.>
+K <arm l|r|*> <kind> <knob> <limit VALUE> <observed VALUE> <complete_to_bp|*> <extra name=VALUE,...|.> <effect>
                                        # (v5) one stated limitation; arm * = seed-level (seed_labels, server_clamp,
-                                       # derivation). limit/observed are typed: an integer, a float (codec rule), or
-                                       # the literal `unlimited`; <extra> holds further fields (server_limit, demand).
-                                       # `effect` is NOT stored: it is reconstructed from the normative template of its
-                                       # kind (§14) and the stored fields, byte-identical in both languages
+                                       # derivation). (v5.1) VALUE is typed by a one-letter prefix: i:<integer>,
+                                       # f:<float, codec rule>, s:<string, percent-encoded incl. space and comma>, or
+                                       # u (unlimited) — e.g. the scope limitation's limit is s:merge; <extra> holds
+                                       # further fields (server_limit, demand). (v5.1) <effect> is STORED as the
+                                       # free-text last field (percent-encoded like names): the C++ builds it from
+                                       # values, and templates would have to substitute identically in two languages
 Z <line count of the document including this line>
 ```
 
@@ -226,7 +230,8 @@ Envelope unchanged (`release`, `capabilities`(+2 keys), `strategy`(+`output.deta
                                "label_ends":{reason:n},"leaves_by_reason":{path_reason|"semantic":n}}},
           "right"?: {…}},
  "annotation": {"access_path","keys_mapped","rows_requested","direct_reads"}, "timing"?: {…},
- "outcome": "complete|partial|failed|deferred",                      # (v4, §14)
+ "outcome": {"walks": "complete|partial|failed", "branch_diagnostics": "complete|cut",
+             "label_evidence": "complete|lower_bound", "delivery": "inline|spooled|paged"},   # (v5.1, §14)
  "resource_stop"?: {…},  "limitations": [ {…} ],                     # (v4, §14; per arm too: "evidence", "limitations")
  "graphlet": "<MGT text>", "graphlet_bytes": N, "graphlet_lines": N}
 ```
@@ -598,6 +603,8 @@ or not; the ledger **reconciles** reserved against used on the response, and **r
 cancellation, or on lease expiry when a response is lost (the attempt is then charged its full reservation, since
 its spending is unknown). The backend enforces the locus scope per request; the ledger enforces the rest.
 
+*(v5.1)* **Charging work and releasing capacity are separate operations.** Consumed work is charged when the response (or the lease expiry) settles the attempt; occupied capacity — the worker slot and the memory reservation — is released only once the backend has actually stopped: on its response, or after the lease, which is only a valid release point because the backend enforces the same deadline itself (the request's `time_budget_ms` plus the server's hard request timeout, so an attempt cannot outlive its lease). A cancellation the backend has not acknowledged releases nothing.
+
 **No silent semantic changes.** Enabling a beam, dropping labels, raising a cut, switching `on_reconverge` or the
 support kind changes the question or the evidence; none of them is ever applied as a resource measure. When the
 agent chooses one, the response says what it changed (`strategy` echo + `limitations`/`scope`).
@@ -652,3 +659,15 @@ the useful next action — the stages only move hard bounds from *stated* to *en
 | 6 | aggregate budgets by reported usage allow double spending | ledger with atomic reservations, reconciliation, lease expiry; `attempt_id`; usage on every response; work = charged units | §14 |
 | 7 | the parse rule implied a shallower graphlet could be made from a cut-off parse | local failure, original body/handle kept | §14 |
 | 8 | the freeze gate missed the above | fixtures added; §14.1 separates the frozen contract from staged enforcement | §14, §14.1 |
+
+# 17. Changes in v5.1 (after the fifth review: approved, three bounded items)
+
+| # | item | change | where |
+|---|---|---|---|
+| 1 | `K` values could not hold strings (the scope limitation's limit is `merge`); effect templates were promised but not supplied | typed values `i:`/`f:`/`s:`/`u`; `effect` stored as the free-text last field | §2.2 |
+| 2 | the JSON summary still showed the scalar outcome | the four dimensions | §3 |
+| 3 | cancellation / lease expiry could release capacity while the backend still runs | charging work and releasing capacity separated; capacity released only on the backend's response or after a lease the backend's own deadline guarantees | §14 |
+
+Implementation order (from the review): the C++ writer, the Python parser and the shared conformance fixtures first;
+then the staged enforcement of §14.1 (atomic commits and lazy paths, the bounded decode path, the ledger), with every
+not-yet-enforced guarantee marked soft in the responses.
