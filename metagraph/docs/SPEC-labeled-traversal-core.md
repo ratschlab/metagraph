@@ -299,23 +299,29 @@ to a header).
    64 k-mers (the batch is what makes a long seed fast), so an empty intersection stops the scan within one
    sub-batch rather than at the exact k-mer; `rows_requested` counts the rows actually CONSUMED, which is what the
    derivation read, not what the batch fetched.
-   The pass starts from the **cheapest row of the first batch**, not from k-mer 0: that one row is the only one no
-   intersection has narrowed yet, so starting at k-mer 0 would make the peak cost an accident of where the caller
-   cut the seed. The order does not change the result (an intersection is commutative and the set stays ascending
-   by `(column, seq_id)`), and a seed whose cheapest row still has more candidates than the derivation will
-   materialise is refused up front (a seed of exactly k bp has no intersection at all, so its "derived" set would
-   be a whole annotation row). The derivation also watches `bounds.time_budget_ms` itself — it runs before the walk,
-   i.e. before the only other place the clock is read.
+   The pass starts from the **cheapest row among the seed's first 64 k-mers**, not from k-mer 0: that one row is
+   the only one no intersection has narrowed yet, so starting at k-mer 0 would make the peak cost an accident of
+   where the caller cut the seed. The window is 64 k-mers **whatever `annotation.batch_kmers` is** (only the later
+   sub-batches follow the knob): the cheapest-row choice and the guard below decide whether a seed is accepted,
+   and acceptance must not depend on a fetch-size setting (§6.8). The order does not change the result (an
+   intersection is commutative and the set stays ascending by `(column, seq_id)`), and a seed whose cheapest row
+   in that window still has more annotation entries (columns plus k-mer coordinates — an upper bound on its
+   labels) than the derivation will materialise is refused up front (a seed of exactly k bp has no intersection
+   at all, so its "derived" set would be a whole annotation row). The derivation also watches
+   `bounds.time_budget_ms` itself — it runs before the walk, i.e. before the only other place the clock is read.
    `max_seed_labels` then truncates the ordered set; the truncation is reported as
    `{labels_from_seed, labels_supporting_total, labels_dropped, labels_dropped_digest}` (FNV-1a-64 over the cut
    names), and truncated labels are **not** in `dropped_labels`: they support the seed, they were only not taken.
    For an **explicit** list `labels_supporting_total` is `|labels after dropping|` and the other three are
    `false / 0 / ""`, so `labels_supporting_total > |seed.labels|` means "truncated" in both cases and
    `labels_supporting_total` never reads as "nothing supports this seed".
-   A derived list is **resubmittable verbatim** as an explicit one, and two cases that would break that promise are
-   refused instead of echoed: a `header` set whose names are not distinct (a FASTA header is unique per column, not
-   per index, and the set is deduplicated by `(column, seq_id)`, while the explicit path rejects duplicate names and
-   resolves a name to the first column holding it), and the too-wide first row above.
+   A derived list is **resubmittable verbatim** as an explicit one, and three cases that would break that promise
+   are refused instead of echoed: a `header` set whose names are not distinct (a FASTA header is unique per
+   column, not per index, and the set is deduplicated by `(column, seq_id)`, while the explicit path rejects
+   duplicate names), a `header` whose name does not **resolve back** to its own `(column, seq_id)` (the explicit
+   path resolves a name to the first column holding it, which may be a column that does not carry the seed), and
+   the too-wide first row above. Each refusal names the header and the two ways out (`seed_label_kind: column`
+   or an explicit list).
    The cap exists to bound the traversal state (§6.3 carries a label set per path position), not the discovery.
    Under `support: trace` the set is derived from k-mer **presence** and then held to step 3 unchanged, so a
    derived label without a coordinate-consecutive occurrence of the seed appears in `dropped_labels` with
@@ -516,7 +522,8 @@ separate from exploration status. A capped or pruned result is never evidence of
 ### 6.8 Exploration order, bounds, determinism
 
 - One priority queue per arm. Keys: `breadth_first` = `(extension_bp, path_id)`; `lowest_loss_first` =
-  `(min loss in σ, extension_bp, path_id)`; `most_supported_first` = `(−|σ|, min loss, extension_bp, path_id)`.
+  `(min loss in σ, extension_bp, path_id)`; `most_supported_first` = `(−|σ|, min loss, extension_bp, path_id)`,
+  where in `annotate` mode |σ| is the number of labels recorded at the head node (§6.11).
   Arms alternate by `extension_bp` so both advance fairly.
 - A popped path advances along its structurally unbranched run in chunks of up to `batch_kmers` nodes (labels
   batch-fetched, §8.3). **Cap and overflow decisions are made in queue-key order at single-step granularity:** a
@@ -620,11 +627,44 @@ so no new order is needed; what the bound needs is a **per-level completion boun
   self-reverse-complementary k-mer node is a hairpin too, and when a (k+1)-mer does not pack into 64 bits
   ((k+1) · bits per symbol > 64, e.g. k ≥ 32 on DNA) edges are identified by a 128-bit FNV-1a hash of the
   (k+1)-mer, so a collision blocks a step as a reuse — the finite set of walks is then slightly smaller than
-  "no (k+1)-mer twice".
+  "no (k+1)-mer twice". In a `basic` graph (one strand) no step is a hairpin and the statement says so. **Under
+  `on_reconverge: merge` the certificate is weaker and says so too:** a merge unites the edge histories of the
+  routes it joins (conservative), so a walk admissible on its own path can be blocked by an edge another route
+  used, and `complete_to_bp` then quantifies over the walks admissible under the *united* history — fewer than
+  the per-path set. The per-path claim holds only with `keep`, which the `exhaustive` preset forces and which is
+  the default in `annotate` mode (the mode that promises "the whole trie"); in `constrain` mode merging stays the
+  default and the response's `walk_rule` carries the qualification.
 - The depth at which the structural trie stops is itself a measurement: "the unconstrained trie explodes at 40 bp
   here" is a reportable property of the locus.
 
-## 7. `traverse` response
+### 6.11 Label-free exploration: `annotate` with a beam
+
+A complete trie is bounded by **breadth**: every walk up to `complete_to_bp` must be present, so in read data —
+where every sequencing error and every strain difference is a fork — the label-free trie dies within tens to a
+few hundred bases whatever the size cap (the walk count grows geometrically with depth; raising the cap buys depth
+logarithmically). What goes deep is giving up completeness: `labels.mode: annotate` **without** `exhaustive`, with
+`frontier.on_overflow: beam` and `bounds.max_live_paths: N` (N = 1 is a single guided walk). This is a legitimate
+tool for an agent exploring the graph *locally* before committing to labels, and the contract for it is:
+
+- **What the result is.** A beam path is a set of **candidate bases with per-node support**, not a sequence any
+  sample is claimed to contain. At every fork the beam kept some heads and dropped the rest, so the spelled walk
+  may switch, at any node, from one set of carriers to another. The response says so: `status: pruned`,
+  `cap_trigger.reason: beam_pruned`, `walk_rule` (which, without `exhaustive`, makes no completeness claim beyond
+  `complete_to_bp`, the depth before the first pruning), and `label_mode: annotate`.
+- **What the evidence is.** The labels present at every node are recorded (`segments[].label_sets`, true counts),
+  so the agent *sees* the support change along the path — the carrier set shrinking, a new set taking over —
+  without constraining by it. Per label, `label_summary.direct_bp` is how far that sample follows the spelled
+  walk contiguously from the seed boundary (exact when no list was cut); that, not the walk's length, is the
+  per-sample claim. A stretch supported by no label at all is recorded as an empty set.
+- **How the beam ranks.** `order: most_supported_first` keeps the heads with the most labels *recorded at the head
+  node* (in `constrain` mode: the most labels alive), ties broken by `extension_bp` and `path_id`, so the result is
+  deterministic and a width-1 beam follows the majority continuation at each fork — the most-supported local
+  path, not an arbitrary one. `breadth_first` keeps the earliest-created heads (no preference) and is the default
+  only because it is the completeness order; for exploration pass `most_supported_first` explicitly.
+- **How to use it.** Explore with a beam → read where the support changes → either constrain
+  (`labels.mode: constrain`, naming the carriers seen) or re-seed from a `continuation` → extend. The design
+  note's "probe cheaply, read the diagnostics, retune" loop; the beam is the cheap probe that reaches far, the
+  constrained walk is the one whose output is a claim.
 
 ### 7.1 Per seed (`detail: full`)
 
@@ -705,7 +745,10 @@ so no new order is needed; what the bound needs is a **per-level completion boun
   the per-path edge-reuse check, whichever was fewer), `reminimisation_rounds` (re-derivations after the
   first at ambiguous nodes, §6.4; bounded by |σ| per node) and `max_reminimisation_rounds` (the largest at
   one node) — so that a pathological locus is visible rather than silent.
-- `timing` (excluded from determinism): elapsed per phase, cache hits.
+- `timing` (excluded from determinism): elapsed per phase, cache hits, and the **physical fetch counters**
+  `rows_fetched`, `tuple_rows_fetched`, `coords_mapped` — prefetching along unbranched runs changes them with
+  `annotation.batch_kmers` while the walk, `rows_requested` and `keys_mapped` do not (§6.8), so they are not part
+  of the invariant `result`.
 
 Consistency invariants (tested, T25): Σ_bins steps = counters.steps; Σ_bins label ends by reason = label_summary
 ends by reason; splits of kind `ambiguous` = Σ_bins ambiguous branches taken; max live paths in any bin ≤

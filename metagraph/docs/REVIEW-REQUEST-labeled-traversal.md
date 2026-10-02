@@ -170,13 +170,13 @@ C1–C12 from round 1 still stand (restated briefly; C1 and C3 were qualified af
 | C11 | Strict JSON validation; nothing silently weakened (`annotation.access` must be `"auto"`). | `Strict` |
 | C12 | One physical shard per traversal; ambiguity is a routing 400, not a parse error. | `resolve_traverse_index` |
 | **C13** | **Annotate mode shares no label logic with constrain mode**: `process_item_annotate` never touches `derive`, `Entry`, `State`, the cost, the budget, quorums or branch limits; the only shared pieces are the level loop, `check_structure`, the caps, merging and the segment DAG. If any label decision leaks in, the oracle is circular. | `walker.cpp` |
-| **C14** | **`complete_to_bp` is sound**: for every n ≤ `complete_to_bp`, every walk of n bases from the seed boundary obeying the walk rule is in `segments`, and every path ending before it ended for its reported semantic reason. The partial level is marked, not rolled back, and excluded. Heads already at the radius when a seed-level cap trips are ended `max_extension_bp`, not censored. | `cap_check`, `trip`, `stop_frontier`, `finalize`; `TrieCasesCaps`, `TrippedCapReportsTheCompleteDepth` |
+| **C14** | **`complete_to_bp` is sound for the rule the response states**: for every n ≤ `complete_to_bp`, every walk of n bases from the seed boundary obeying `walk_rule` is in `segments`, and every path ending before it ended for its reported semantic reason. The per-path rule holds under `on_reconverge: keep` (forced by `exhaustive`, the default in annotate mode); under `merge` the edge histories of joined routes are united and `walk_rule` says so — the set quantified over is the smaller, united-history one (round-2 finding 4). The partial level is marked, not rolled back, and excluded. Heads already at the radius when a cap trips — in the frontier *or* in the next level — are ended `max_extension_bp`, not censored. | `cap_check`, `trip`, `stop_arm`, `stop_frontier`, `finalize`, `walk_rule_statement`; `TrieCasesCaps`, `MergedWalkRuleIsQualified`, `HeadsAtTheRadiusAreCompleteWhenACapTrips` |
 | **C15** | Under the `exhaustive` preset nothing prunes except the level boundary; the preset refuses conflicting knobs naming the required value, including `max_switch_sources` under a `table` cost, and a derived set cut by `max_seed_labels`. | `validate_strategy`, `ExhaustiveRejectsConflictingKnobs`, `ExhaustiveRefusesACutDerivedSet` |
-| **C16** | A derived permitted set is exactly the labels carrying every seed k-mer, in `(column, seq_id)` order, costs no extra annotation reads, is validated in O(sum of hits) not O(L²·M), honours the time budget, and yields results identical to naming those labels. | `validate_seed`; `check_derived` on every fixture; `ManyDerivedLabelsMatchTheExplicitList` |
+| **C16** | A derived permitted set is exactly the labels carrying every seed k-mer, in `(column, seq_id)` order, costs no extra annotation reads, is validated in O(sum of hits) not O(L²·M), honours the time budget, and yields results identical to naming those labels. Whether it is accepted does not depend on `batch_kmers` (the cheapest-row window is the first 64 k-mers regardless), and every derived header resolves back to its own `(column, seq_id)` or the set is refused. | `validate_seed`; `check_derived` on every fixture; `ManyDerivedLabelsMatchTheExplicitList`, `DerivationDoesNotDependOnBatchKmers`, `DerivedHeaderMustResolveBackToItsColumn` |
 | **C17** | Every recorded label list carries its true count (`labels_total` / `labels_distinct`), including blocked/hairpin events and the root; a cut anywhere increments `nodes_truncated`; live-label counts over cut lists are stamped inexact. | `bounded`, `distinct_labels`; `CutRecordedListsAreReportedAndBreakTheOracle`, `CutEventListsAndTheRootTotalAreReported` |
 | **C18** | The oracle E in `test_trie_oracle.hpp` reads only segment sequences, the recorded sets and the path/segment structure, and compares **claims** (label ends), so that a label ending inside a continuing walk is checked at its own end. | `expected_leaves`, `constrained_claims`, `OracleComparesPerLabelClaimsNotLeaves` |
 | **C19** | The records model implements the walk rule exactly, and "a label's maximal walks" (per-label DFS over its k-mers) equals "the maximal per-label prefixes of the structural walks" (what E computes from T). | `test_trie_reference.hpp` `WalkRule::steps`, `detail::dfs`, `label_trie` |
-| **C20** | `hits_from_tuples` is O(coordinates) per node (a slot map, not a scan of the hits built so far); `max_support` selection is O(R log R) per round with a single materialisation; `LabelQuery::fetch` keeps a call's whole working set resident across eviction. | `label_oracle.cpp`, `resolve.cpp`; `MaxSupportScalesWithManyLabels`, `EvictionKeepsTheCurrentBatchAnswerable` |
+| **C20** | `hits_from_tuples` is O(coordinates) per node (a slot map, not a scan of the hits built so far); `max_support` selection is O(R log R) per round — a Fenwick tree over the compressed run ends for insertion, "ends ≥ x" and "smallest end ≥ x" (round 2 found the sorted-vector version still Θ(R²) in element moves) — with a single materialisation; `LabelQuery::fetch` keeps a call's whole working set resident across eviction; the annotate summary is one pass over the segment DAG (union of the parents' surviving sets), not one per route. | `label_oracle.cpp`, `resolve.cpp` `Fenwick`, `walker.cpp` `summarize_annotate`; `MaxSupportScalesWithManyLabels`, `EvictionKeepsTheCurrentBatchAnswerable`, `AnnotateSummaryIsLinearOnAMergedDag` |
 | **C21** | The trace model's end reasons: at a record's end, `dead_end` when the node has no successor, `record_end` when a successor carries the label with non-continuing coordinates, `label_lost` otherwise; structural blocks still apply under trace. | `trace_trie` vs `TrieCasesTrace.*` |
 
 ---
@@ -382,6 +382,36 @@ From round 1 and its follow-up:
     bound → before; `walk_rule` understated the enforced rule (even-k hairpins, hashed edges) → stated;
     live-label counts over cut lists were stamped exact → inexact.
 
+From round 2 (all eleven findings; the commits after `61e82859`):
+
+12. **Checker false negatives (test side):** `branch_recorded()` accepted any branch event with the right
+    character → it now requires discard evidence naming the label (dropped/ambiguous at that split, a
+    structural `blocked` event for that label, or a hairpin); tuned and merged checks examined leaf labels only →
+    every label-end claim is validated, and merged routes are reconstructed for interior ends and compared with
+    exhaustive claims; the trace reference let the last occurrence choose the end reason → outcomes are
+    aggregated per spelled walk with the walker's block precedence. Each has a mutation test that corrupts a real
+    result and asserts the checker fails.
+13. **Completeness under merging** → the per-path certificate is restricted to `keep`; with `merge` the response's
+    `walk_rule` states the united-history rule; annotate mode defaults to `keep` in the JSON layer
+    (`MergedWalkRuleIsQualified`; spec §6.10).
+14. **`summarize_annotate` exponential over a merged DAG** → one pass in segment order with the union of the
+    parents' surviving sets (26 diamonds: 5.5 s → milliseconds; `AnnotateSummaryIsLinearOnAMergedDag`).
+15. **Derived header resolving to another column** → every derived name must resolve back to its own
+    `(column, seq_id)`, else the set is refused naming the header (`DerivedHeaderMustResolveBackToItsColumn`).
+16. **`batch_kmers` deciding acceptance** → the cheapest-row window is the first 64 k-mers whatever the fetch
+    batch; the guard's message says what it counts (`DerivationDoesNotDependOnBatchKmers`).
+17. **`max_support` Θ(R²)** → Fenwick tree over compressed run ends.
+18. **Heads at the radius censored with a cap reason** → `stop_arm` applies the radius check like `stop_frontier`
+    (`HeadsAtTheRadiusAreCompleteWhenACapTrips`).
+19. **`walk_rule` hairpin clause on basic graphs** → conditional on the regime.
+20. **Fetch counters in the invariant result** → `rows_fetched`, `tuple_rows_fetched`, `coords_mapped` moved to
+    `timing`; `result.annotation` keeps `access_path`, `keys_mapped`, `rows_requested`, `direct_reads`.
+
+Not changed, by decision (see §5.5 / §7): the trace seed cap ordering (presence → cap → trace validation),
+repeated edges under trace, the even-k palindromic-node rule, the constrain-mode merge default, `switch_on: any`
+without a reference, and `switch_on: loss` being per successor (§5.2.7 — the latter is the one I intend to
+change next, pending the owner's decision).
+
 ---
 
 ## 7. Known limitations — please do not spend time re-reporting these
@@ -411,7 +441,7 @@ cd metagraph/build_debug && cmake -DCMAKE_BUILD_TYPE=Debug   -DCMAKE_CXX_FLAGS=-
                          && make -j unit_tests
 # re-run cmake after ADDING a file: the source globs are not CONFIGURE_DEPENDS
 
-./unit_tests --gtest_filter='*Walker*:*LabelOracle*:*Resolve*:*Trie*:MiniRefSeq*'   # 195 tests, ~12 s / ~15 s
+./unit_tests --gtest_filter='*Walker*:*LabelOracle*:*Resolve*:*Trie*:MiniRefSeq*'   # 200+ tests, ~10 s / ~15 s
 ./unit_tests --gtest_filter='*TrieCases*'                                            # the 47 edge/non-edge cases
 TRIE_TIMINGS=1 ./unit_tests --gtest_filter='MiniRefSeq.TrieContract*'                # the real-index contract, phase timings
 
