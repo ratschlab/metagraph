@@ -451,6 +451,12 @@ void LabelQuery::fetch_uncached(const std::vector<node_index> &keys) {
     // The caller evicts before fetching when the cache would overflow, so the cache can
     // exceed max_cache_size_ only by the working set of a single call.
     for (size_t i = 0; i < keys.size(); ++i) {
+        // the estimate the byte bound compares: slot, vector, hits and coordinates
+        uint64_t bytes = 64 + result[i].size() * sizeof(Hit);
+        for (const Hit &h : result[i]) {
+            bytes += h.coords.size() * sizeof(Coord);
+        }
+        cache_bytes_ += bytes;
         cache_[keys[i]] = std::move(result[i]);
     }
 }
@@ -479,10 +485,10 @@ std::vector<LabelQuery::NodeHits> LabelQuery::fetch(const std::vector<node_index
     }
 
     if (!missing.empty()) {
-        if (cache_.size() + missing.size() > max_cache_size_) {
+        if (cache_.size() + missing.size() > max_cache_size_ || cache_bytes_ > max_cache_bytes_) {
             // a walk moves forward, so evict wholesale rather than tracking recency,
             // then refetch everything this call needs
-            cache_.clear();
+            clear_cache();
             missing = wanted;
         }
         fetch_uncached(missing);
@@ -510,8 +516,8 @@ void LabelQuery::warm(const std::vector<node_index> &keys) {
         return;
     std::sort(missing.begin(), missing.end());
     missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
-    if (cache_.size() + missing.size() > max_cache_size_)
-        cache_.clear();
+    if (cache_.size() + missing.size() > max_cache_size_ || cache_bytes_ > max_cache_bytes_)
+        clear_cache();
     if (missing.size() >= max_cache_size_)
         return;     // would not fit even into an empty cache: nothing to warm
     fetch_uncached(missing);
@@ -526,8 +532,8 @@ const LabelQuery::NodeHits& LabelQuery::fetch(node_index key) {
         oracle_.counters().cache_hits++;
         return it->second;
     }
-    if (cache_.size() >= max_cache_size_)
-        cache_.clear();
+    if (cache_.size() >= max_cache_size_ || cache_bytes_ > max_cache_bytes_)
+        clear_cache();
     fetch_uncached({ key });
     return cache_.at(key);
 }
@@ -641,6 +647,7 @@ void LabelRecorder::fetch_uncached(const std::vector<node_index> &keys) {
     for (size_t i = 0; i < keys.size(); ++i) {
         // a row costs at least one slot even when nothing is on it
         cached_keys_ += std::max<size_t>(1, result[i].kept.size());
+        cache_bytes_ += 64 + result[i].kept.size() * sizeof(Key);
         cache_[keys[i]] = std::move(result[i]);
     }
 }
@@ -668,9 +675,11 @@ LabelRecorder::fetch(const std::vector<node_index> &keys) {
         // the cache is bounded in rows AND in kept keys (its memory), since a row holds
         // up to |cap_| of them; either bound exceeded evicts wholesale, and the whole
         // working set is then refetched so that the lookups below cannot throw
-        if (cache_.size() + missing.size() > max_cache_size_ || cached_keys_ > max_cache_keys_) {
+        if (cache_.size() + missing.size() > max_cache_size_ || cached_keys_ > max_cache_keys_
+                || cache_bytes_ > max_cache_bytes_) {
             cache_.clear();
             cached_keys_ = 0;
+            cache_bytes_ = 0;
             missing = wanted;
         }
         fetch_uncached(missing);
@@ -704,9 +713,11 @@ void LabelRecorder::warm(const std::vector<node_index> &keys) {
         return;
     std::sort(missing.begin(), missing.end());
     missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
-    if (cache_.size() + missing.size() > max_cache_size_ || cached_keys_ > max_cache_keys_) {
+    if (cache_.size() + missing.size() > max_cache_size_ || cached_keys_ > max_cache_keys_
+            || cache_bytes_ > max_cache_bytes_) {
         cache_.clear();
         cached_keys_ = 0;
+        cache_bytes_ = 0;
     }
     if (missing.size() >= max_cache_size_)
         return;

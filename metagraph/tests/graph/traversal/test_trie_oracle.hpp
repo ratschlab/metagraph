@@ -94,6 +94,12 @@ inline std::string walk_of(const ArmResult &arm, const PathResult &path) {
     return outward(arm, spell_path(arm, path));
 }
 
+// whether |segment| is on |path|'s chain (the walker keeps only the leaf)
+inline bool path_has(const ArmResult &arm, const PathResult &path, size_t segment) {
+    const std::vector<size_t> chain = path_segments(arm, path);
+    return std::find(chain.begin(), chain.end(), segment) != chain.end();
+}
+
 inline std::set<std::string> name_set(const SeedResult &r, const std::vector<LabelId> &ids) {
     std::set<std::string> out;
     for (LabelId l : ids)
@@ -216,7 +222,7 @@ recorded_labels(const SeedResult &T, const ArmResult &arm, const PathResult &pat
     std::vector<bool> filled(path.length_bp + 1, false);
     at[0] = name_set(T, root_of(arm).labels_start);
     filled[0] = true;
-    for (size_t s : path.segments) {
+    for (size_t s : path_segments(arm, path)) {
         const Segment &seg = arm.segments[s];
         for (const LabelSetRun &run : seg.label_sets) {
             if (run.truncated())
@@ -298,7 +304,7 @@ inline Oracle expected_leaves(const SeedResult &T, size_t a,
 // ended inside it before |depth|, or its labels at the last node when |depth| is it.
 inline std::set<std::string> alive_at(const SeedResult &r, const ArmResult &arm,
                                       const PathResult &path, uint64_t depth) {
-    for (size_t s : path.segments) {
+    for (size_t s : path_segments(arm, path)) {
         const Segment &seg = arm.segments[s];
         const uint64_t end = seg.from_bp + seg.length_bp;
         if (depth > end)
@@ -444,7 +450,7 @@ inline void expect_equal(const Leaves &expected, const Leaves &actual, const std
 
 inline const PathResult* leaf_path(const ArmResult &arm, size_t segment) {
     for (const PathResult &p : arm.paths) {
-        if (!p.segments.empty() && p.segments.back() == segment)
+        if (p.leaf == segment)
             return &p;
     }
     return nullptr;
@@ -717,9 +723,7 @@ struct SubsetReport {
 inline void check_leaf_records(const SeedResult &r, const ArmResult &arm,
                                const std::string &what, Problems *problems) {
     for (const PathResult &p : arm.paths) {
-        if (p.segments.empty())
-            continue;
-        const Segment &last = arm.segments[p.segments.back()];
+        const Segment &last = arm.segments[p.leaf];
         const uint64_t depth = last.from_bp + last.length_bp;
         std::set<std::string> ended, listed;
         std::array<uint32_t, kNumEndReasons> by_reason {};
@@ -757,7 +761,7 @@ label_claims(const SeedResult &r, size_t a, uint64_t depth) {
     for (const PathResult &p : arm.paths) {
         const std::string w = walk_of(arm, p);
         std::set<std::string> ended;
-        for (size_t s : p.segments) {
+        for (size_t s : path_segments(arm, p)) {
             for (const Event &ev : arm.segments[s].events) {
                 if (ev.type != EventType::LABEL_END)
                     continue;
@@ -1208,14 +1212,10 @@ inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &m
     // route_bp on, and the leaf lists exactly the labels ended at its depth
     for (const PathResult &p : ma.paths) {
         const std::string spelled = walk_of(ma, p);
-        if (p.segments.empty()) {
-            problems.push_back(what + ": path " + bp(p.id) + " has no segments");
-            continue;
-        }
-        const Segment &last = ma.segments[p.segments.back()];
+        const Segment &last = ma.segments[p.leaf];
         for (const LabelEnd &e : p.end_labels) {
             const std::string &l = merged.label_dict.at(e.label).name;
-            const std::string route = label_route(ma, p.segments.back(), e.label, &problems);
+            const std::string route = label_route(ma, p.leaf, e.label, &problems);
             if (spelled.size() != route.size()) {
                 problems.push_back(what + ": leaf " + bp(p.id) + ": the route of " + l + " spells "
                                    + bp(route.size()) + " bases, the walk " + bp(spelled.size()));

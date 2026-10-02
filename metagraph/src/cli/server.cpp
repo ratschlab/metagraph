@@ -656,6 +656,17 @@ int run_server(Config *config) {
             caps["max_seed_bp"] = static_cast<Json::UInt64>(config->traverse_max_seed_bp);
             caps["max_seed_labels"] = static_cast<Json::UInt64>(config->traverse_max_seed_labels);
             caps["max_query_bp"] = static_cast<Json::UInt64>(config->resolve_max_query_bp);
+            // the request budgets of DESIGN-traverse-graphlet.md §14 (bounds.max_memory_mb,
+            // bounds.max_work_units) and W, the interval in charged work units at which the
+            // walker checks them and the deadline at the latest; stated here, not in every
+            // response, where the per-request capabilities stay as they were
+            Json::Value budgets(Json::arrayValue);
+            budgets.append("max_memory_mb");
+            budgets.append("max_work_units");
+            caps["budgets"] = budgets;
+            caps["work_check_interval"]
+                = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
+            caps["memory_bound"] = "soft";
             // transport: the traversal routes write compact JSON and honour
             // Accept-Encoding (gzip preferred, deflate accepted)
             Json::Value encodings(Json::arrayValue);

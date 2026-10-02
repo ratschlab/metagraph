@@ -132,8 +132,9 @@ std::map<std::string, std::vector<std::string>> structural_leaves(const SeedResu
     const ArmResult &arm = r.arms[a];
     std::map<std::string, std::vector<std::string>> out;
     for (const auto &path : arm.paths) {
-        std::vector<LabelId> alive = arm.segments[path.segments.front()].labels_start;
-        for (size_t s : path.segments) {
+        const std::vector<size_t> chain = path_segments(arm, path);
+        std::vector<LabelId> alive = arm.segments[chain.front()].labels_start;
+        for (size_t s : chain) {
             for (const auto &run : arm.segments[s].label_sets) {
                 EXPECT_FALSE(run.truncated());
                 std::vector<LabelId> still;
@@ -206,7 +207,7 @@ TEST(Trie, AnnotateRecordsWhatConstrainFilters) {
             EXPECT_TRUE(path.end_labels.empty());
             EXPECT_FALSE(path.continuation.has_value());
             // one run per segment: the label set never changes along a branch
-            for (size_t s : path.segments) {
+            for (size_t s : path_segments(arm, path)) {
                 const Segment &seg = arm.segments[s];
                 if (!seg.length_bp) continue;
                 ASSERT_EQ(1u, seg.label_sets.size());
@@ -954,7 +955,7 @@ TEST(Trie, TunedCheckerRejectsASilentlyDeletedBranch) {
     auto &children = arm.segments[root].children;
     children.erase(std::remove(children.begin(), children.end(), removed), children.end());
     arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
-        return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+        return trie::path_has(arm, p, removed);
     }), arm.paths.end());
     ASSERT_EQ(2u, arm.paths.size());
     // the bubble's event is untouched: C ambiguous, nothing dropped, Q's base listed
@@ -1010,7 +1011,7 @@ TEST(Trie, TunedCheckerRejectsADeletedBranchUnderASharedLabel) {
     const char removed_ch = arm.segments[removed].sequence[0];
     arm.segments[root].children.pop_back();
     arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
-        return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+        return trie::path_has(arm, p, removed);
     }), arm.paths.end());
     ASSERT_EQ(1u, arm.branch_events.size());
     EXPECT_EQ((std::set<std::string>{ "C" }), trie::name_set(tuned, arm.branch_events[0].ambiguous));
@@ -1056,7 +1057,7 @@ TEST(Trie, TunedCheckerRejectsAForgedStructuralBlock) {
         arm.segments[root].events.push_back(ev);
         arm.segments[root].children.pop_back();
         arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
-            return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+            return trie::path_has(arm, p, removed);
         }), arm.paths.end());
         const std::string name = tuned.label_dict.at(ev.labels[0]).name;
         EXPECT_FALSE(trie::branch_recorded(tuned, arm, ctx, "", root, 0, ev.ch, name)) << to_string(forged);
@@ -1244,7 +1245,7 @@ TEST(Trie, MergedCheckerAcceptsAUnitedHistoryTermination) {
         const std::string w = trie::walk_of(forged.arms[kRight], p);
         if (w != f.pyz() && w != f.qyz())
             continue;
-        Segment &last = forged.arms[kRight].segments[p.segments.back()];
+        Segment &last = forged.arms[kRight].segments[p.leaf];
         for (Event &ev : last.events) {
             if (ev.type == EventType::LABEL_END && ev.at_bp == p.length_bp) {
                 ev.reason = EndReason::REACHED_SEED;
@@ -1378,7 +1379,7 @@ TEST(Trie, TunedCheckerRejectsADeletedFollowedHairpin) {
     auto &children = arm.segments[parent].children;
     children.erase(std::remove(children.begin(), children.end(), removed), children.end());
     arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
-        return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+        return trie::path_has(arm, p, removed);
     }), arm.paths.end());
     // the split is at the parent's end: the walk to it is the parent's route
     const uint64_t at = arm.segments[parent].from_bp + arm.segments[parent].length_bp;
@@ -1442,7 +1443,7 @@ TEST(Trie, TunedCheckerRejectsARefusalItsStrategyDoesNotMake) {
     const char ch = arm.segments[removed].sequence[0];
     arm.segments[root].children.pop_back();
     arm.paths.erase(std::remove_if(arm.paths.begin(), arm.paths.end(), [&](const PathResult &p) {
-        return std::find(p.segments.begin(), p.segments.end(), removed) != p.segments.end();
+        return trie::path_has(arm, p, removed);
     }), arm.paths.end());
     ASSERT_EQ(1u, arm.branch_events.size());
     ASSERT_EQ(1u, trie::tuned_subset_report(A, tuned, kRight, "no refusal", ctx).problems.size());
@@ -2243,7 +2244,7 @@ void expect_runs_anchored(const SeedResult &r, const std::string &what, AnchorTa
             for (const LabelEnd &e : p.end_labels) {
                 ASSERT_LT(e.run, arm.runs.size()) << where;
                 const LabelRun &run = arm.runs[e.run];
-                EXPECT_EQ(p.segments.back(), run.segment) << where << " path " << p.id;
+                EXPECT_EQ(p.leaf, run.segment) << where << " path " << p.id;
                 EXPECT_EQ(p.length_bp, run.to_bp) << where << " path " << p.id;
                 EXPECT_EQ(e.branches, run.branches) << where << " path " << p.id;
                 EXPECT_EQ(e.loss, run.loss) << where << " path " << p.id;

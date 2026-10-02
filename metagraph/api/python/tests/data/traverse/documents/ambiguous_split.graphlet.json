@@ -49,7 +49,7 @@
       "edge_reuse_probes": 1,
       "max_reminimisation_rounds": 0,
       "output_bp": 87,
-      "pair_evaluations": 0,
+      "pair_evaluations": 88,
       "refusal_scans": 0,
       "reminimisation_rounds": 0,
       "steps": 87,
@@ -104,7 +104,7 @@
       "edge_reuse_probes": 0,
       "max_reminimisation_rounds": 0,
       "output_bp": 120,
-      "pair_evaluations": 226,
+      "pair_evaluations": 138,
       "refusal_scans": 0,
       "reminimisation_rounds": 0,
       "steps": 120,
@@ -153,8 +153,8 @@
      "status": "complete"
     }
    },
-   "graphlet": "H mgt 1 15 canonical $ACGT c k m 64 1000 0 walk fixtures * 252b2c7a8f5566cb\nS ca8b328e05ee1944 30 16 1 AAGTAGTGTTCTGGTTATTATTTCATGGGA\nL c 0 * 0 a.fa\nL c 1 * 0 b.fa\nL c 2 * 0 c.fa\nL c 3 * 0 d.fa\nO c c c i\nK l scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nK r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA l c 100 u 0 0 1 1 0 steps=87,successor_enumerations=88,output_bp=87,pair_evaluations=0,edge_reuse_probes=1,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 3 2 2 1 0 87\nB 0 2 1 2 1 75 1 0 1 0 0 0 1 .\nB 50 2 1 2 1 12 0 0 0 0 0 0 0 D:2\nG * 0 25 * * * * 0 * ATTATGGTAATCATCTAATTAGATG\nE 25 h A 1 0 f\nG 0 25 31 0 * * * * * ACCTGAAATATCCAGTACGCATATTAAGCTT\nE 26 b T V 1 0\nT * .\nG 0 25 31 0 * * * * * CCGATCAAGTAAAACCATTGACCCGTGCTCT\nT * .\nR 1 0 0 56 D 0 * * 0 0 0\nR 2 0 0 56 D 0 * * 0 0 0\nA r c 100 u 0 0 1 1 0 steps=120,successor_enumerations=121,output_bp=120,pair_evaluations=226,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 1 * 3 4 2 1 0 120\nB 0 1 1 1 1 50 0 0 0 0 0 0 0 L:1\nB 50 2 2 2 1 70 0 1 1 0 0 0 0 D:2,L:1\nV 60 0 GT 1,1 1 . .\nG * 0 60 * * * * 1 * GGTTATGCCGCCTTAAATGACAGAGGCCGCGGGTCCAGGGAGAAAAAATACCTAGGAGAA\nE 30 s 0 1 1\nG 0 60 30 2 * * * * * GGCAGTGGGATCGCGGTTCAACGTACAGAT\nE 60 s 1 2 1\nT * 2:2:1:0\nG 0 60 30 3 * * * * * TGCTGTGCACGTAGAGAATGCCATTATTCT\nE 60 s 1 3 1\nT * 3:2:1:0\nR 0 0 0 30 Lw 0 * * * 0 0\nR 0 1 30 60 Lw 0 0:1 0 * 0 1\nR 1 2 60 90 D 0 1:1 1 0 1 2\nR 2 3 60 90 D 0 1:1 1 0 1 2\nZ 38\n",
-   "graphlet_bytes": 1714,
+   "graphlet": "H mgt 1 15 canonical $ACGT c k m 64 1000 0 walk fixtures * 252b2c7a8f5566cb\nS ca8b328e05ee1944 30 16 1 AAGTAGTGTTCTGGTTATTATTTCATGGGA\nL c 0 * 0 a.fa\nL c 1 * 0 b.fa\nL c 2 * 0 c.fa\nL c 3 * 0 d.fa\nO c c c i\nK l scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nK r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA l c 100 u 0 0 1 1 0 steps=87,successor_enumerations=88,output_bp=87,pair_evaluations=88,edge_reuse_probes=1,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 3 2 2 1 0 87\nB 0 2 1 2 1 75 1 0 1 0 0 0 1 .\nB 50 2 1 2 1 12 0 0 0 0 0 0 0 D:2\nG * 0 25 * * * * 0 * ATTATGGTAATCATCTAATTAGATG\nE 25 h A 1 0 f\nG 0 25 31 0 * * * * * ACCTGAAATATCCAGTACGCATATTAAGCTT\nE 26 b T V 1 0\nT * .\nG 0 25 31 0 * * * * * CCGATCAAGTAAAACCATTGACCCGTGCTCT\nT * .\nR 1 0 0 56 D 0 * * 0 0 0\nR 2 0 0 56 D 0 * * 0 0 0\nA r c 100 u 0 0 1 1 0 steps=120,successor_enumerations=121,output_bp=120,pair_evaluations=138,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 1 * 3 4 2 1 0 120\nB 0 1 1 1 1 50 0 0 0 0 0 0 0 L:1\nB 50 2 2 2 1 70 0 1 1 0 0 0 0 D:2,L:1\nV 60 0 GT 1,1 1 . .\nG * 0 60 * * * * 1 * GGTTATGCCGCCTTAAATGACAGAGGCCGCGGGTCCAGGGAGAAAAAATACCTAGGAGAA\nE 30 s 0 1 1\nG 0 60 30 2 * * * * * GGCAGTGGGATCGCGGTTCAACGTACAGAT\nE 60 s 1 2 1\nT * 2:2:1:0\nG 0 60 30 3 * * * * * TGCTGTGCACGTAGAGAATGCCATTATTCT\nE 60 s 1 3 1\nT * 3:2:1:0\nR 0 0 0 30 Lw 0 * * * 0 0\nR 0 1 30 60 Lw 0 0:1 0 * 0 1\nR 1 2 60 90 D 0 1:1 1 0 1 2\nR 2 3 60 90 D 0 1:1 1 0 1 2\nZ 38\n",
+   "graphlet_bytes": 1715,
    "graphlet_lines": 38,
    "label_mode": "constrain",
    "limitations": [],

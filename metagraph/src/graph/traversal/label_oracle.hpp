@@ -1,6 +1,7 @@
 #ifndef __TRAVERSAL_LABEL_ORACLE_HPP__
 #define __TRAVERSAL_LABEL_ORACLE_HPP__
 
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -170,7 +171,14 @@ class LabelQuery {
     // overflow.
     void warm(const std::vector<node_index> &keys);
 
-    void clear_cache() { cache_.clear(); }
+    void clear_cache() { cache_.clear(); cache_bytes_ = 0; }
+
+    // A bound on the cache's bytes (an estimate: entries, hits and coordinates), on top
+    // of the row bound, evicting wholesale like it. Unbounded unless set: a request with
+    // a memory budget gives the cache a fixed allotment of that budget, which it must
+    // then stay within (exceeded at most by the working set of one call).
+    void set_max_cache_bytes(uint64_t bytes) { max_cache_bytes_ = bytes; }
+    uint64_t cache_bytes() const { return cache_bytes_; }
 
   private:
     enum class Path { DIRECT, ROWS, TUPLES };
@@ -180,6 +188,8 @@ class LabelQuery {
     bool with_coords_;
     Path path_;
     size_t max_cache_size_;
+    uint64_t max_cache_bytes_ = std::numeric_limits<uint64_t>::max();
+    uint64_t cache_bytes_ = 0;
 
     // column -> label id for COLUMN labels
     tsl::hopscotch_map<Column, LabelId> column_labels_;
@@ -245,6 +255,10 @@ class LabelRecorder {
     // Fetch the misses into the row cache without naming anything (lookahead).
     void warm(const std::vector<node_index> &keys);
 
+    // as LabelQuery::set_max_cache_bytes
+    void set_max_cache_bytes(uint64_t bytes) { max_cache_bytes_ = bytes; }
+    uint64_t cache_bytes() const { return cache_bytes_; }
+
   private:
     // (column, seq_id); seq_id is 0 for COLUMN labels
     using Key = std::pair<Column, uint64_t>;
@@ -259,6 +273,8 @@ class LabelRecorder {
     size_t max_cache_size_;
     size_t max_cache_keys_;
     size_t cached_keys_ = 0;           // sum over cached rows of max(1, |kept|)
+    uint64_t max_cache_bytes_ = std::numeric_limits<uint64_t>::max();
+    uint64_t cache_bytes_ = 0;
     std::vector<LabelRef> dict_;
     tsl::hopscotch_map<Column, LabelId> column_ids_;
     tsl::hopscotch_map<Column, tsl::hopscotch_map<uint64_t, LabelId>> header_ids_;

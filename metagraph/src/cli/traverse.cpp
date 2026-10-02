@@ -144,9 +144,11 @@ Json::Value limit_json(size_t x) {
 
 // The arm counters by name, in the walker's order: one list for the JSON `counters` and
 // the graphlet's A record, so that a counter added here reaches both (an MGT reader
-// keeps a name it does not know).
-std::vector<std::pair<const char*, uint64_t>> arm_counters(const ArmResult &arm) {
-    return {
+// keeps a name it does not know). work_units (the work budget's meter) is listed when
+// the request set a budget, so that a response without one is unchanged.
+std::vector<std::pair<const char*, uint64_t>> arm_counters(const ArmResult &arm,
+                                                           const Strategy &st) {
+    std::vector<std::pair<const char*, uint64_t>> counters {
         { "steps", arm.steps },
         { "successor_enumerations", arm.successor_enumerations },
         { "output_bp", arm.output_bp },
@@ -162,6 +164,9 @@ std::vector<std::pair<const char*, uint64_t>> arm_counters(const ArmResult &arm)
         // limitation's observed)
         { "switch_sources_cut", arm.switch_sources_cut },
     };
+    if (st.max_memory_bytes || st.max_work_units)
+        counters.emplace_back("work_units", arm.work_units);
+    return counters;
 }
 
 // the cost model as the walker sees it, for validating a strategy before any seed
@@ -351,6 +356,11 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
             st.max_paths = b.uint("max_paths", 10'000, 1);
             st.max_output_bp = b.uint("max_output_bp", 2'000'000, 1);
             st.time_budget_ms = b.number("time_budget_ms", 30'000);
+            // the request's budgets (DESIGN-traverse-graphlet.md §14); omitted = none
+            if (b.has("max_memory_mb"))
+                st.max_memory_bytes = b.uint("max_memory_mb", 0, 1, 1'048'576) << 20;
+            if (b.has("max_work_units"))
+                st.max_work_units = b.uint("max_work_units", 0, 1);
         }
         if (t.has("frontier")) {
             Strict f(t.raw("frontier"), "strategy.frontier");
@@ -567,6 +577,12 @@ Json::Value strategy_to_json(const Strategy &st, const CostSpec &cost, const std
     bo["max_paths"] = uint_json(st.max_paths);
     bo["max_output_bp"] = uint_json(st.max_output_bp);
     bo["time_budget_ms"] = st.time_budget_ms;
+    // echoed only when given: an omitted budget is no budget, and the echo of a request
+    // without one stays what it always was (still resubmittable either way)
+    if (st.max_memory_bytes)
+        bo["max_memory_mb"] = uint_json(st.max_memory_bytes >> 20);
+    if (st.max_work_units)
+        bo["max_work_units"] = uint_json(st.max_work_units);
     j["bounds"] = std::move(bo);
     Json::Value f;
     f["order"] = st.order == Strategy::BREADTH_FIRST ? "breadth_first"
@@ -653,9 +669,17 @@ static Json::Value limitation(const char *kind, const std::string &knob, Json::V
 }
 
 // The request field a resource stop answers to (§6.7) and its value; a beam's width is
-// bounds.max_live_paths.
-static std::pair<std::string, Json::Value> cap_knob(EndReason reason, const Strategy &st) {
+// bounds.max_live_paths; a head a budget did not admit answers to the budget that refused
+// it (|stop|; a memory refusal without a budget is a test hook's, stated as unlimited).
+static std::pair<std::string, Json::Value> cap_knob(EndReason reason, const Strategy &st,
+                                                    const ResourceStop *stop) {
     switch (reason) {
+        case EndReason::RESOURCE_LIMIT:
+            if (stop && stop->resource == ResourceStop::WORK)
+                return { "bounds.max_work_units", uint_json(st.max_work_units) };
+            return { "bounds.max_memory_mb", st.max_memory_bytes
+                                                 ? uint_json(st.max_memory_bytes >> 20)
+                                                 : Json::Value("unlimited") };
         case EndReason::MAX_STEPS: return { "bounds.max_steps", uint_json(st.max_steps) };
         case EndReason::MAX_LIVE_PATHS:
         case EndReason::BEAM_PRUNED: return { "bounds.max_live_paths", uint_json(st.max_live_paths) };
@@ -683,7 +707,8 @@ static bool greedy_losses(const ArmResult &arm, const Strategy &st) {
         && st.max_label_branches != Strategy::kUnlimited;
 }
 
-static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st) {
+static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
+                                   const ResourceStop *stop) {
     Json::Value out(Json::arrayValue);
     // The walk domain: the cap that set complete_to_bp, then any other cap that ended
     // walks after it — a beam prunes a level and a step cap trips later, and raising
@@ -704,11 +729,14 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st) {
                                  "missing: ";
             effect += r == EndReason::BEAM_PRUNED
                 ? "the beam kept the best-supported max_live_paths heads of a level and pruned the rest"
+                : r == EndReason::RESOURCE_LIMIT
+                ? "the request's budget did not admit the next head, and the exploration stopped "
+                  "there (resource_limit; see resource_stop)"
                 : std::string("the exploration stopped at this cap (") + to_string(r) + ")";
             if (!trigger)
                 effect += " after the cap that set complete_to_bp, so raising only that knob stops here";
             effect += "; raise the knob";
-            auto [knob, limit] = cap_knob(r, st);
+            auto [knob, limit] = cap_knob(r, st, stop);
             // at the trigger what the cap compared, which exceeded the limit; for a later
             // cap (no trigger of its own) the walks it ended
             const double demand = arm.cap_trigger->demand;
@@ -851,7 +879,8 @@ static Json::Value outcome_of(const Json::Value &result, bool failed) {
 // The per-arm fields every detail level carries: the certificate (status, complete_to_bp
 // and what it quantifies over), the frontier, the label-list cuts, the evidence boundary,
 // the stated limitations and the cap trigger.
-static void arm_certificate_json(Json::Value *j, const ArmResult &arm, const Strategy &st) {
+static void arm_certificate_json(Json::Value *j, const ArmResult &arm, const Strategy &st,
+                                 const ResourceStop *stop) {
     (*j)["status"] = arm.status == ArmResult::COMPLETE ? "complete"
                    : arm.status == ArmResult::TRUNCATED ? "truncated" : "pruned";
     Json::Value fr;
@@ -884,7 +913,7 @@ static void arm_certificate_json(Json::Value *j, const ArmResult &arm, const Str
                                                    : uint_json(arm.branch_events_complete_to_bp);
     (*j)["evidence"] = std::move(evidence);
     // every cap that limited this arm, with the knob to turn; empty when none did
-    (*j)["limitations"] = arm_limitations(arm, st);
+    (*j)["limitations"] = arm_limitations(arm, st, stop);
     if (arm.cap_trigger) {
         Json::Value c;
         c["reason"] = to_string(arm.cap_trigger->reason);
@@ -897,17 +926,18 @@ static void arm_certificate_json(Json::Value *j, const ArmResult &arm, const Str
     }
 }
 
-static Json::Value counters_json(const ArmResult &arm) {
+static Json::Value counters_json(const ArmResult &arm, const Strategy &st) {
     Json::Value counters(Json::objectValue);
-    for (const auto &[name, value] : arm_counters(arm)) {
+    for (const auto &[name, value] : arm_counters(arm, st)) {
         counters[name] = uint_json(value);
     }
     return counters;
 }
 
-static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const std::string &detail) {
+static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const std::string &detail,
+                               const ResourceStop *stop) {
     Json::Value j;
-    arm_certificate_json(&j, arm, st);
+    arm_certificate_json(&j, arm, st, stop);
     if (detail != "summary") {
         Json::Value segs(Json::arrayValue);
         for (const auto &s : arm.segments) {
@@ -982,12 +1012,17 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
         j["splits"] = std::move(splits);
     }
     Json::Value paths(Json::arrayValue);
+    // a path's chain is produced here from parent pointers (the walker keeps only the
+    // leaf), through one buffer reused across paths
+    std::vector<size_t> chain;
     for (const auto &p : arm.paths) {
         Json::Value pj;
         pj["id"] = uint_json(p.id);
         if (detail != "summary") {
+            chain.clear();
+            walk_path_leaf_first(arm, p, [&](size_t s) { chain.push_back(s); return true; });
             Json::Value segs(Json::arrayValue);
-            for (size_t s : p.segments) segs.append(uint_json(s));
+            for (auto it = chain.rbegin(); it != chain.rend(); ++it) segs.append(uint_json(*it));
             pj["segments"] = std::move(segs);
         }
         pj["length_bp"] = uint_json(p.length_bp);
@@ -1098,17 +1133,18 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     Json::Value nb(Json::arrayValue);
     for (double x : arm.needed_budgets) nb.append(x);
     j["needed_budgets"] = std::move(nb);
-    j["counters"] = counters_json(arm);
+    j["counters"] = counters_json(arm, st);
     return j;
 }
 
 // The arm of the `detail: graphlet` summary (DESIGN-traverse-graphlet.md §3): the
 // certificate, the counters and the counts that validate the body, nothing per segment,
 // leaf or label (those are in the MGT text).
-static Json::Value arm_summary_json(const ArmResult &arm, const Strategy &st) {
+static Json::Value arm_summary_json(const ArmResult &arm, const Strategy &st,
+                                    const ResourceStop *stop) {
     Json::Value j;
-    arm_certificate_json(&j, arm, st);
-    j["counters"] = counters_json(arm);
+    arm_certificate_json(&j, arm, st, stop);
+    j["counters"] = counters_json(arm, st);
     j["branch_events_total"] = uint_json(arm.branch_events_total);
     Json::Value counts;
     size_t merges = 0;
@@ -1151,8 +1187,128 @@ static Json::Value arm_summary_json(const ArmResult &arm, const Strategy &st) {
     return j;
 }
 
+// A resource stop is stated (`resource_stop`) when a budget of §14 ended the walk, and for
+// a time stop only when the request set such a budget: a time stop has its walk_domain
+// limitation either way, and a response without a budget keeps its form.
+static const ResourceStop* stated_stop(const SeedResult &r, const Strategy &st) {
+    if (!r.resource_stop)
+        return nullptr;
+    if (r.resource_stop->resource == ResourceStop::TIME && !st.max_memory_bytes
+            && !st.max_work_units)
+        return nullptr;
+    return &*r.resource_stop;
+}
+
+// `resource_stop` (DESIGN-traverse-graphlet.md §14, the MGT Q record): the amounts in the
+// unit of the knob that controls them — whole MiB for memory (used rounded up, remaining
+// down), work units, milliseconds — the next actions, and what the stop means. A property
+// of the walk, so the same in every detail: the graphlet's Q record must rebuild the
+// detail: full rendering of the same walk. |failed|: the budget did not hold the seed
+// itself (no walk, no leaves to continue from), whose actions are the levers on the seed.
+static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
+                                      const SeedBudgetError *failed = nullptr) {
+    constexpr double kMiB = 1 << 20;
+    Json::Value j;
+    j["scope"] = "locus";
+    Json::Value actions(Json::arrayValue);
+    std::string knob, unit;
+    switch (q.resource) {
+        case ResourceStop::MEMORY: {
+            j["resource"] = "memory";
+            knob = "bounds.max_memory_mb";
+            const Json::Value limit = q.limit > 0
+                ? uint_json(static_cast<uint64_t>(q.limit) >> 20) : Json::Value("unlimited");
+            j["requested"] = limit;
+            j["effective"] = limit;
+            j["used"] = uint_json(static_cast<uint64_t>(std::ceil(q.used / kMiB)));
+            j["remaining"] = q.limit > 0
+                ? uint_json(q.limit > q.used ? static_cast<uint64_t>((q.limit - q.used) / kMiB) : 0)
+                : Json::Value("unlimited");
+            // the output is charged in the requested detail: a graphlet (or no bases)
+            // delivers more walk within the same budget
+            actions.append("raise_memory_budget");
+            actions.append("use_graphlet");
+            if (st.sequences)
+                actions.append("drop_sequences");
+            // a depth-0 state costs per label at the roots: fewer labels fit. The lever is
+            // the knob that sets them — the derived set's cap, the named list, or (annotate
+            // mode, which permits no set) the cap on a node's recorded list
+            if (failed) {
+                actions.append(st.label_mode == LabelMode::ANNOTATE ? "lower_max_labels_per_node"
+                               : failed->labels_from_seed() ? "lower_max_seed_labels"
+                                                            : "name_fewer_labels");
+            }
+            break;
+        }
+        case ResourceStop::WORK:
+            j["resource"] = "work";
+            knob = "bounds.max_work_units";
+            j["requested"] = uint_json(static_cast<uint64_t>(q.limit));
+            j["effective"] = uint_json(static_cast<uint64_t>(q.limit));
+            j["used"] = uint_json(static_cast<uint64_t>(q.used));
+            j["remaining"] = uint_json(q.limit > q.used ? static_cast<uint64_t>(q.limit - q.used) : 0);
+            actions.append("raise_work_budget");
+            // the seed phase reads one annotation row per seed k-mer
+            if (failed)
+                actions.append("shorten_seed");
+            break;
+        case ResourceStop::TIME:
+            j["resource"] = "time";
+            knob = "bounds.time_budget_ms";
+            j["requested"] = q.limit;
+            j["effective"] = q.limit;
+            j["used"] = q.used;
+            j["remaining"] = q.limit > q.used ? q.limit - q.used : 0.0;
+            actions.append("raise_time_budget");
+            break;
+    }
+    if (!failed)
+        actions.append("continue_from_leaves");
+    j["phase"] = q.phase;
+    j["actions"] = std::move(actions);
+    if (failed) {
+        j["message"] = std::string(failed->what()) + " (the seed is failed: no valid traversal "
+                       "exists within the budget, not even one complete to 0 bp)";
+        return j;
+    }
+    std::string message = "the " + j["resource"].asString() + " budget (" + knob + ") stopped the "
+        "walk at " + std::to_string(q.at_bp) + " bp on the " + to_string(q.arm) + " arm: every walk "
+        "up to each arm's complete_to_bp is present and the heads not expanded end with "
+        + (q.resource == ResourceStop::TIME ? "time_budget" : "resource_limit");
+    if (q.resource == ResourceStop::MEMORY) {
+        message += "; memory is modelled (the walker's state and the output in the "
+                   "requested detail, charged per head; detail graphlet costs the least), "
+                   "annotation decoding is not charged yet (memory_bound_soft)";
+    } else if (q.resource == ResourceStop::WORK) {
+        // work is the walk's, the same in every detail (finding 5 of the stage-2 review:
+        // charging delivery would make the stop depend on the detail), so it says what
+        // bounds the output instead
+        message += "; work is checked at least every " + std::to_string(kWorkCheckInterval)
+                   + " units, so used can exceed the budget by that much; work bounds the walk, "
+                   "not its delivery: the size of the output (and the time to write it) is "
+                   "bounded by bounds.max_memory_mb";
+    }
+    message += "; a continuation from a leaf is a new traversal";
+    j["message"] = message;
+    return j;
+}
+
+// memory_bound_soft (§7.0): stated by every response under a memory budget until stage 3
+// charges annotation decoding — a failed seed's too
+static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &account) {
+    return limitation("memory_bound_soft", "bounds.max_memory_mb",
+                      uint_json(st.max_memory_bytes >> 20),
+                      uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
+                      "the memory budget is enforced on the walker's modelled state and on "
+                      "this response's output, admitted per head; the annotation rows a "
+                      "level decodes (and an annotate dictionary's growth) are held before "
+                      "they can be charged, so the peak can exceed the budget by them "
+                      "(observed: the excess seen, MiB, rounded up)");
+}
+
 Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const std::string &detail, bool timing) {
     const bool graphlet = detail == "graphlet";
+    const ResourceStop *stop = stated_stop(r, st);
     Json::Value j;
     Json::Value seed;
     seed["seed_id"] = r.seed_id;
@@ -1221,6 +1377,12 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
                                    "\"header\") where the index has a CoordToHeader"));
         }
     }
+    if (st.max_memory_bytes) {
+        // stage 2 of §14.1 enforces the budget on the modelled state and output; the
+        // decode of a level's annotation rows happens before it can be charged (stage 3),
+        // so the bound is soft until then, and every response under it says so
+        lims.append(memory_bound_soft(st, r.account));
+    }
     j["limitations"] = std::move(lims);
     j["label_mode"] = to_string(st.label_mode);
     if (!graphlet) {
@@ -1242,13 +1404,16 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
     for (Arm arm : { Arm::LEFT, Arm::RIGHT }) {
         const auto &a = r.arms[static_cast<size_t>(arm)];
         if (!a.requested) continue;
-        arms[to_string(arm)] = graphlet ? arm_summary_json(a, st) : arm_to_json(a, st, detail);
+        arms[to_string(arm)] = graphlet ? arm_summary_json(a, st, stop)
+                                        : arm_to_json(a, st, detail, stop);
     }
     j["arms"] = std::move(arms);
     // §7.0: the guarantees are independent, so the outcome states each on its own axis
     // instead of folding them into one value that would read "partial" for a complete
     // walk with cut diagnostics, or "complete" for walks whose label lists were cut
     j["outcome"] = outcome_of(j, false);
+    if (stop)
+        j["resource_stop"] = resource_stop_json(*stop, st);
     if (!graphlet) {
         // derived from the runs (constrain) or the recorded sets (annotate) by the
         // graphlet's reader, so not in its summary
@@ -2050,9 +2215,9 @@ IndexIdentity index_identity(const Config &config, const graph::AnnotatedDBG &an
 
 namespace {
 
-// End reasons as MGT codes (DESIGN-traverse-graphlet.md §2.1), in EndReason order. 'Y'
-// (resource_limit) is reserved for the budgets of §14, which no walk produces yet.
-const char kReasonCodes[] = "DLBRUVJTXSPNOMW";
+// End reasons as MGT codes (DESIGN-traverse-graphlet.md §2.1), in EndReason order; 'Y'
+// is resource_limit, a head the memory or work budget of §14 did not admit.
+const char kReasonCodes[] = "DLBRUVJTXSPNOMWY";
 static_assert(sizeof(kReasonCodes) == kNumEndReasons + 1, "one MGT code per EndReason");
 
 char reason_code(EndReason reason) { return kReasonCodes[static_cast<size_t>(reason)]; }
@@ -2163,6 +2328,7 @@ class GraphletWriter {
         dropped();
         dictionary();
         outcome();
+        resource_stop();
         limitations();
         for (Arm a : { Arm::LEFT, Arm::RIGHT }) {
             const ArmResult &arm = r_.arms[static_cast<size_t>(a)];
@@ -2386,6 +2552,40 @@ class GraphletWriter {
         end();
     }
 
+    // Q: the result's resource_stop, the JSON object itself (DESIGN §14), when there is one
+    void resource_stop() {
+        if (!json_.isMember("resource_stop"))
+            return;
+        const Json::Value &q = json_["resource_stop"];
+        out_ += "Q ";
+        token(q["scope"].asString(), "resource_stop scope");
+        sp(); token(q["resource"].asString(), "resource_stop resource");
+        sp(); token(q["phase"].asString(), "resource_stop phase");
+        for (const char *amount : { "requested", "effective", "used", "remaining" }) {
+            sp();
+            if (q[amount].isNull()) {
+                out_.push_back('*');
+            } else {
+                out_ += mgt::encode_kvalue(kvalue(q[amount], amount));
+            }
+        }
+        sp();
+        if (q["actions"].empty())
+            out_.push_back('.');
+        for (Json::ArrayIndex i = 0; i < q["actions"].size(); ++i) {
+            const std::string action = q["actions"][i].asString();
+            for (char c : action) {
+                if (!(std::islower(static_cast<unsigned char>(c)) || c == '_'))
+                    unrepresentable("resource_stop action '" + action + "'");
+            }
+            out_ += i ? "," : "";
+            out_ += action;
+        }
+        sp();
+        out_ += mgt::pct_escape(q["message"].asString());
+        end();
+    }
+
     // seed-level ones first, then each requested arm's, each list in its JSON order
     void limitations() {
         for (const Json::Value &l : json_["limitations"]) {
@@ -2416,27 +2616,20 @@ class GraphletWriter {
                     unrepresentable("a parent created after its child");
             }
         }
-        // paths: leaf ordinal in segment-id order, chain through parents[0] (finalize)
+        // paths: leaf ordinal in segment-id order (finalize). The chain through parents[0]
+        // holds by construction: a path stores only its leaf
         size_t last_leaf = 0;
         for (size_t i = 0; i < arm.paths.size(); ++i) {
             const PathResult &p = arm.paths[i];
-            if (p.id != i || p.segments.empty())
+            if (p.id != i)
                 unrepresentable("path ids are not ordinals");
-            const size_t leaf = p.segments.back();
+            const size_t leaf = p.leaf;
             if (leaf >= segs.size() || ix.path_of[leaf] >= 0 || (i && leaf <= last_leaf))
                 unrepresentable("paths are not one per leaf in segment order");
             last_leaf = leaf;
             ix.path_of[leaf] = i;
-            size_t cur = leaf;
-            for (size_t j = p.segments.size(); j-- > 0; ) {
-                if (p.segments[j] != cur)
-                    unrepresentable("a path is not its leaf's first-parent chain");
-                if (j)
-                    cur = segs[cur].parents.empty() ? SIZE_MAX : segs[cur].parents[0];
-            }
-            if (!segs[cur].parents.empty()
-                    || p.length_bp != segs[leaf].from_bp + segs[leaf].length_bp)
-                unrepresentable("a path does not start at the root or has another length");
+            if (p.length_bp != segs[leaf].from_bp + segs[leaf].length_bp)
+                unrepresentable("a path whose length is not its leaf's end");
         }
         // splits: the children with one parent, grouped by parent, in (at_bp, first child)
         std::pair<uint64_t, size_t> last_split { 0, 0 };
@@ -2533,7 +2726,7 @@ class GraphletWriter {
         sp(); num(arm.nodes_labels_truncated);
         sp();
         bool first = true;
-        for (const auto &[name, value] : arm_counters(arm)) {
+        for (const auto &[name, value] : arm_counters(arm, st_)) {
             out_ += first ? "" : ",";
             out_ += name;
             out_.push_back('=');
@@ -2910,9 +3103,9 @@ class GraphletWriter {
             // O(n) per leaf, never the whole chain (a comb-shaped trie has long ones)
             std::string rev;
             const uint64_t from_walk = std::min<uint64_t>(n, p.length_bp);
-            for (size_t i = p.segments.size(); i-- > 0 && rev.size() < from_walk; ) {
+            walk_path_leaf_first(arm, p, [&](size_t s) {
                 // walking order is the stored order on the right, reversed on the left
-                const std::string &w = arm.segments[p.segments[i]].sequence;
+                const std::string &w = arm.segments[s].sequence;
                 auto take = [&](auto begin, auto end) {
                     for (auto it = begin; it != end && rev.size() < from_walk; ++it) {
                         rev.push_back(*it);
@@ -2923,7 +3116,8 @@ class GraphletWriter {
                 } else {
                     take(w.begin(), w.end());
                 }
-            }
+                return rev.size() < from_walk;
+            });
             const uint64_t from_seed = n - from_walk;
             std::string seq = seed_.sequence;
 #if ! _DNA_CASE_SENSITIVE_GRAPH
@@ -3023,6 +3217,70 @@ std::string graphlet_text(const SeedResult &result, const Seed &seed, const Stra
 
 // ---------------------------------------------------------------- processing
 
+/**
+ * What one object costs this response to deliver in |detail| (bytes; upper bounds,
+ * checked against the serialisers by Graphlet.DeliveryCostsBoundTheOutput), for the
+ * memory budget (DESIGN-traverse-graphlet.md §14: "delivery is accounted per expansion").
+ *  - graphlet: the MGT body is held three times at once (the writer's text, its copy in
+ *    the JSON value, the response text), plus the writer's per-arm index (per segment,
+ *    run and label end);
+ *  - summary / tree / full: a JSON tree and its text. jsoncpp keeps an object member as
+ *    a map node with its key (~128 B) and an array element as a map node (~96 B); the
+ *    text costs up to ~64 B per member and ~40 B per element (indented).
+ * The fixed part holds the envelope, the seed's fixed records and the server's deflate
+ * state (256 KiB). A path chain costs only where JSON spells it (tree, full).
+ */
+DeliveryCosts delivery_costs(const std::string &detail, bool sequences) {
+    DeliveryCosts d;
+    constexpr uint64_t kMember = 192, kElement = 136;
+    if (detail == "graphlet") {
+        constexpr uint64_t kCopies = 3;
+        d.fixed = (1 << 18) + 32 * 1024 + kCopies * 2048;
+        d.label = kCopies * 40;
+        d.label_name = kCopies;
+        // per record its fixed fields at their widest (20-digit counts, 24-character
+        // floats are not reached by ids below 10^10), its lists per element
+        d.segment = kCopies * 48 + 40;
+        d.segment_label = kCopies * 11;
+        d.base = sequences ? kCopies : 0;
+        d.continuation_base = kCopies;
+        d.run = kCopies * 150 + 4;
+        d.event = kCopies * 60 + 96;
+        d.event_label = kCopies * 11;
+        d.leaf = kCopies * 60;
+        d.leaf_label = kCopies * 70;
+        d.split_branch = kCopies;
+        d.branch_event = kCopies * 60;
+        d.branch_event_entry = kCopies * 24;
+        d.presence_run = kCopies * 48;
+        d.bin = kCopies * 400;
+        return d;
+    }
+    const bool segments = detail != "summary";
+    d.fixed = (1 << 18) + 64 * 1024;
+    d.label = 6 * kMember + kElement;
+    d.label_name = 4;
+    d.segment = segments ? 12 * kMember + 2 * kElement : 0;
+    d.segment_label = segments ? kElement : 0;
+    d.base = segments && detail == "full" && sequences ? 2 : 0;
+    d.continuation_base = 2;
+    // a run: its object (tree, full) and its id in label_summary's runs (every detail)
+    d.run = (segments ? 12 * kMember : 0) + 2 * kElement;
+    // an event: its object, its label or segment ids; a loss-budget end's needed_budgets
+    d.event = (segments ? 9 * kMember : 0) + 2 * kElement;
+    d.event_label = segments ? kElement : 0;
+    d.leaf = 16 * kMember + kElement;
+    d.leaf_label = (segments ? 6 * kMember : 0) + 2 * kElement;
+    d.chain_entry = segments ? kElement : 0;
+    d.split = segments ? 8 * kMember + kElement : 0;
+    d.split_branch = segments ? 6 * kMember + 2 * kElement : 0;
+    d.branch_event = 9 * kMember + kElement;
+    d.branch_event_entry = 4 * kElement;
+    d.presence_run = segments ? 6 * kMember + kElement : 0;
+    d.bin = 32 * kMember + kElement;
+    return d;
+}
+
 static LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::string> &dict) {
     switch (spec.model) {
         case CostSpec::FORBID:
@@ -3069,6 +3327,10 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
             for (const ArmResult &a : r.arms) {
                 affected |= a.requested && ended_by(a, EndReason::TIME_BUDGET);
             }
+            // a time stop states what the request asked for beside what bound it
+            if (rj->isMember("resource_stop")
+                    && (*rj)["resource_stop"]["resource"].asString() == "time")
+                (*rj)["resource_stop"]["requested"] = c["requested"];
         }
         if (!affected)
             continue;
@@ -3182,6 +3444,60 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
     return rj;
 }
 
+// A seed a request budget does not hold (SeedBudgetError, DESIGN-traverse-graphlet.md §14):
+// no valid traversal exists within the budget — not even one complete to 0 bp — so the seed
+// is failed, in the shape of a failed derivation (no arms, an error, outcome.walks: failed)
+// that every client already handles. The structured reason is in the limitations and the
+// resource_stop (DESIGN §14: "failed: no valid traversal exists (structured reason in
+// limitations / resource_stop)"): a seed-level walk_domain naming the budget's knob, and
+// the resource_stop with what the budget held and needed and the levers on the seed.
+// DECISION (the conservative rule of DESIGN §14 v5.2: a stated limitation is never
+// omitted, and no axis is non-complete without the limitation that explains it): the
+// walk_domain is stated although it is otherwise an arm's — the walk domain was cut to
+// nothing by a cap, which is exactly what a walk_domain states, and a reader that only
+// reads limitations must still find the knob (a work-budget failure has no other entry).
+// It is the same kind, knob and typed values as an arm's resource_limit walk_domain, so
+// no record, field or token is new. The other seeds of the request are traversed;
+// nothing per label is delivered.
+static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudgetError &e,
+                                              const Strategy &st) {
+    const ResourceStop &q = e.stop();
+    Json::Value rj;
+    Json::Value sj;
+    sj["seed_id"] = seed.seed_id;
+    sj["length_bp"] = uint_json(seed.sequence.size());
+    sj["labels_from_seed"] = e.labels_from_seed();
+    rj["seed"] = std::move(sj);
+    rj["error"] = e.what();
+    Json::Value lims(Json::arrayValue);
+    if (q.resource == ResourceStop::MEMORY) {
+        constexpr double kMiB = 1 << 20;
+        lims.append(limitation("walk_domain", "bounds.max_memory_mb",
+                               uint_json(st.max_memory_bytes >> 20),
+                               uint_json(static_cast<uint64_t>(std::ceil(q.demand / kMiB))),
+                               "the memory budget does not hold the seed's depth-0 state (its "
+                               "label dictionary and both arms' roots, with what ending and "
+                               "delivering them costs in the requested detail), so no traversal "
+                               "was made (observed: the MiB it needs, rounded up); raise the knob, "
+                               "use detail graphlet, or start from fewer labels (fewer permitted; "
+                               "in annotate mode a lower labels.max_labels_per_node)"));
+    } else {
+        lims.append(limitation("walk_domain", "bounds.max_work_units", uint_json(st.max_work_units),
+                               uint_json(static_cast<uint64_t>(q.used)),
+                               "the work budget ran out while the seed was read (validated "
+                               "against its labels, or its permitted set derived: one annotation "
+                               "row per seed k-mer), so no traversal was made (observed: the work "
+                               "units spent); raise the knob or shorten the seed"));
+    }
+    // every response under a memory budget states it (§7.0)
+    if (st.max_memory_bytes)
+        lims.append(memory_bound_soft(st, e.account()));
+    rj["limitations"] = std::move(lims);
+    rj["outcome"] = outcome_of(rj, true);
+    rj["resource_stop"] = resource_stop_json(q, st, &e);
+    return rj;
+}
+
 Json::Value process_traverse_request(const Json::Value &json,
                                      const graph::AnnotatedDBG &anno_graph,
                                      const std::string &release,
@@ -3233,6 +3549,9 @@ Json::Value process_traverse_request(const Json::Value &json,
               uint_json(limits.max_seed_labels));
         req.strategy.max_seed_labels = limits.max_seed_labels;
     }
+
+    // what the requested output costs per object, for the memory budget (§14)
+    req.strategy.delivery = delivery_costs(req.detail, req.strategy.sequences);
 
     LabelOracle oracle(anno_graph);
     // checked here, where k is known: a continuation shorter than k is not a valid seed,
@@ -3329,6 +3648,11 @@ Json::Value process_traverse_request(const Json::Value &json,
             // discarding a 100-seed batch because seed 57 spans a recombination point.
             results.append(failed_seed_to_json(seed, e, req.strategy, clamped));
             per_seed(oracle.counters());   // do not bill this seed's reads to the next
+        } catch (const SeedBudgetError &e) {
+            // a request budget does not hold this seed (§14): failed per seed, like a
+            // derivation, since the budget is per seed and the other seeds may fit
+            results.append(budget_failed_seed_to_json(seed, e, req.strategy));
+            per_seed(oracle.counters());
         } catch (const std::invalid_argument &e) {
             throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)
                                  + "': " + e.what());

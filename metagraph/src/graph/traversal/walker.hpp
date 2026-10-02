@@ -2,6 +2,7 @@
 #define __TRAVERSAL_WALKER_HPP__
 
 #include <array>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -143,6 +144,42 @@ class LabelChangeCost {
 enum class LabelMode { CONSTRAIN, ANNOTATE };
 const char* to_string(LabelMode mode);
 
+/**
+ * What the response will cost to deliver, per object, in the requested output detail
+ * (bytes; upper bounds of what the serialiser holds at once: the text or the JSON tree
+ * with its text). The memory budget charges every committed head with the delivery of
+ * what it creates (DESIGN-traverse-graphlet.md §14, "delivery is accounted per
+ * expansion"), so that a committed prefix stays deliverable within the budget. All zero
+ * (the default) charges nothing for the output: a C++ caller that keeps the SeedResult
+ * pays only for it. The CLI fills it in from output.detail and output.sequences.
+ */
+struct DeliveryCosts {
+    uint64_t fixed = 0;              // per seed: the envelope and fixed records
+    uint64_t label = 0;              // per dictionary label, plus label_name per name byte
+    uint64_t label_name = 0;
+    uint64_t segment = 0;
+    uint64_t segment_label = 0;      // per label listed by a segment or a split branch
+    uint64_t base = 0;               // per base of a segment
+    uint64_t continuation_base = 0;  // per base of a continuation
+    uint64_t run = 0;
+    uint64_t event = 0;
+    uint64_t event_label = 0;
+    uint64_t leaf = 0;               // per path (T / C records, the path object)
+    uint64_t leaf_label = 0;         // per end label and continuation label
+    uint64_t chain_entry = 0;        // per segment of a path's chain (JSON paths[].segments)
+    uint64_t split = 0;
+    uint64_t split_branch = 0;
+    uint64_t branch_event = 0;
+    uint64_t branch_event_entry = 0; // per successor, ambiguous / dropped label, refusal label
+    uint64_t presence_run = 0;       // annotate mode: per recorded LabelSetRun
+    uint64_t bin = 0;
+};
+
+// The interval, in charged work units, at which the walker checks its work budget and
+// its deadline at the latest (DESIGN-traverse-graphlet.md §14: "checked at least every W
+// work units"); stated by the server as work_check_interval.
+constexpr uint64_t kWorkCheckInterval = 65536;
+
 struct Strategy {
     enum Direction { BOTH, LEFT, RIGHT };
     enum Order { BREADTH_FIRST, LOWEST_LOSS_FIRST, MOST_SUPPORTED_FIRST };
@@ -212,6 +249,27 @@ struct Strategy {
     size_t max_paths = 10'000;
     uint64_t max_output_bp = 2'000'000;
     double time_budget_ms = 30'000;
+    // The request's budgets (DESIGN-traverse-graphlet.md §14), 0 = none, both PER SEED (the
+    // design's locus scope): each seed of a request is walked under budgets of its own, so
+    // that its result does not depend on the other seeds of the request (§6.8). A request
+    // of n seeds can therefore hold up to n times the memory budget — each seed's output is
+    // kept until the response is written — and the server bounds n (review of stage 2,
+    // finding 7: a request-level ledger would make a seed's stop depend on its position).
+    // Memory: the modelled bytes one seed's walk and output retain at once — the walker's
+    // state, the label caches (a fixed allotment under a budget) and the output in the
+    // requested detail (|delivery|) — charged per head at admission, the depth-0 state
+    // included (SeedBudgetError), never measured, so that a stop is reproducible. It is the
+    // one bound on the size of the output, and so on the time to serialise it: detail full
+    // spells every leaf's chain, quadratic on a comb-shaped trie. Work: charged work units,
+    // a weighted sum of the walk's counters (successor enumerations, annotation keys and
+    // entries, pair evaluations, refusal scans, edge-reuse probes, derivation scans, steps)
+    // and of the seed phase's reads, checked at least every kWorkCheckInterval units. Work
+    // is the walk's alone, the same in every output detail (finding 5: charging delivery as
+    // work would make a work stop depend on the detail). Either budget stops the whole
+    // seed, with resource_limit.
+    uint64_t max_memory_bytes = 0;
+    uint64_t max_work_units = 0;
+    DeliveryCosts delivery;
 
     // frontier
     Order order = BREADTH_FIRST;
@@ -393,9 +451,17 @@ struct Continuation {
     uint32_t branches_used = 0;
 };
 
+/**
+ * One leaf of the segment DAG. The path is its leaf's first-parent chain, which is NOT
+ * stored: on a comb-shaped trie (one terminating branch per split) the chains sum to
+ * Θ(segments²), so materialising one per leaf made finalisation quadratic in the result
+ * (DESIGN-traverse-graphlet.md §14, "delivery is accounted per expansion"). The chain is
+ * derived on demand from parent pointers — by the serialisers while they write it, and
+ * by path_segments() for C++ callers.
+ */
 struct PathResult {
     size_t id = 0;
-    std::vector<size_t> segments;    // root -> leaf (first parent at joins)
+    size_t leaf = 0;                 // the leaf segment (root -> leaf: path_segments())
     uint64_t length_bp = 0;
     std::array<uint32_t, kNumEndReasons> end_reasons {};
     std::optional<EndReason> path_reason;   // MAX_EXTENSION / resource / beam
@@ -578,6 +644,11 @@ struct ArmResult {
     // covers what a `switch_sources` label end cannot: a cut source that goes on along
     // another successor (or stays) does not end, so no end records the cut.
     uint64_t switch_sources_cut = 0;
+    // The charged work units of this arm (Strategy::max_work_units): the weighted sum of
+    // the work its heads consumed (successors enumerated 4, annotation keys requested 8,
+    // entries returned 1, pair evaluations, refusal scans, edge-reuse probes, derivation
+    // scans and steps 1 each). Independent of batch_kmers, like the counters it weighs.
+    uint64_t work_units = 0;
 };
 
 struct LabelArmSummary {
@@ -598,6 +669,44 @@ struct DroppedLabel {
     std::string name;
     std::string reason;
     std::vector<std::pair<uint64_t, uint64_t>> runs;   // k-mer runs on the seed
+};
+
+/**
+ * Why the walk of a seed stopped at a budget (DESIGN-traverse-graphlet.md §14; JSON
+ * `resource_stop`, MGT `Q`): which resource, in which phase, and the amounts in the
+ * resource's raw unit — bytes (memory), work units (work) or milliseconds (time). The
+ * first stop of the seed; the stop applies to the whole locus (both arms).
+ */
+struct ResourceStop {
+    enum Resource { MEMORY, WORK, TIME };
+    Resource resource = MEMORY;
+    // traversal | finalisation | serialisation | annotation_decode. Stage 2 stops only
+    // in traversal: finalisation and serialisation are reserved at admission
+    const char *phase = "traversal";
+    Arm arm = Arm::RIGHT;            // the arm whose head was not admitted
+    uint64_t at_bp = 0;              // that head's depth
+    double limit = 0;                // 0: none (a hook refused the head)
+    double used = 0;                 // accounted when the head was refused
+    double demand = 0;               // what admitting it needed (used, for work and time)
+};
+
+// The request's accounts at the end of the seed (memory in modelled bytes)
+struct ResourceAccount {
+    uint64_t memory_limit = 0;
+    uint64_t memory_peak = 0;        // the largest accounted total
+    uint64_t memory_final = 0;       // accounted when the walk ended (live reservations 0)
+    // The excess over the budget (0 without one) of what was held but could not be
+    // charged before it was allocated — a level's decoded annotation rows (stage 3 charges
+    // them inside the decoder), a cache beyond its allotment and an annotate dictionary's
+    // growth — on top of the admitted account, which never exceeds the budget itself: the
+    // memory_bound_soft limitation's observed
+    uint64_t soft_overshoot = 0;
+    uint64_t work_limit = 0;
+    // the seed phase (its validation, or the derivation of its permitted set: 8 per seed
+    // k-mer read, 1 per annotation entry and coordinate) and both arms' work_units
+    uint64_t work_seed = 0;
+    uint64_t work_used = 0;
+    uint64_t work_check_interval = kWorkCheckInterval;
 };
 
 struct SeedResult {
@@ -629,6 +738,43 @@ struct SeedResult {
     LabelOracle::Counters annotation_counters;
     double elapsed_seconds = 0;
     const char *access_path = "";
+    std::optional<ResourceStop> resource_stop;
+    ResourceAccount account;
+};
+
+/**
+ * A request budget (DESIGN-traverse-graphlet.md §14) does not hold the seed itself: the work
+ * budget ran out while the seed was validated or its permitted set derived, or the memory
+ * budget does not hold the depth-0 state — the label dictionary and both arms' roots, each
+ * root reserved with what ending and delivering its labels costs in the requested detail
+ * (an unadmitted depth-0 state was delivered whole, ~4 KB per label and arm in detail full:
+ * review of stage 2, finding 3). No valid traversal exists within the budget, not even one
+ * complete to 0 bp, so unlike a stop between two heads there is no partial result: the
+ * caller reports the seed as failed (outcome.walks: failed) with its resource stop and
+ * traverses the other seeds. Raised before anything per label is delivered.
+ */
+class SeedBudgetError : public std::runtime_error {
+  public:
+    SeedBudgetError(const std::string &what, const ResourceStop &stop,
+                    const ResourceAccount &account, bool labels_from_seed, size_t labels)
+          : std::runtime_error(what), stop_(stop), account_(account),
+            labels_from_seed_(labels_from_seed), labels_(labels) {}
+
+    // resource MEMORY or WORK, at_bp 0. |used|: memory — what the account held before the
+    // depth-0 state (the seed and the fixed allotments); work — the seed phase's units.
+    // |demand|: memory — what the depth-0 state needs in all; work — as used
+    const ResourceStop& stop() const { return stop_; }
+    const ResourceAccount& account() const { return account_; }
+    // whether the permitted set was derived from the seed, and its size when the budget
+    // refused it (0 when the work budget ran out before the set was known)
+    bool labels_from_seed() const { return labels_from_seed_; }
+    size_t labels() const { return labels_; }
+
+  private:
+    ResourceStop stop_;
+    ResourceAccount account_;
+    bool labels_from_seed_;
+    size_t labels_;
 };
 
 /**
@@ -655,11 +801,50 @@ void validate_strategy(const Strategy &strategy, const LabelChangeCost &cost);
 std::string walk_rule_statement(const Strategy &strategy, const LabelOracle &oracle);
 
 /**
+ * What the walker is about to commit for one head (DESIGN-traverse-graphlet.md §14,
+ * "atomic commit per head"): every head is planned without touching the result, then
+ * ADMITTED against the request's budgets, then committed (which cannot fail). A head
+ * that is not admitted is censored like a head beyond a cap, with resource_limit.
+ * |ordinal| counts the admissions of the seed so far, over both arms, in processing
+ * order, so that a test can deny exactly the n-th one.
+ */
+struct Admission {
+    Arm arm = Arm::RIGHT;
+    uint64_t ordinal = 0;
+    uint64_t at_bp = 0;              // the head's extension depth
+    size_t segment = 0;              // the head's segment
+    size_t followed = 0;             // successors the plan follows (0: the head ends)
+    // the memory ledger (modelled bytes): the accounted total before the head, the
+    // reservation it held (released by committing it), what committing it adds (its
+    // objects and its children's reservations), and the budget (0: none)
+    uint64_t total = 0;
+    uint64_t reserve = 0;
+    uint64_t cost = 0;
+    uint64_t limit = 0;
+};
+
+/**
+ * Test and instrumentation hooks of traverse_seed(). |deny| is asked at every admission
+ * after the budgets admitted the head: returning true censors the head with
+ * resource_limit as if an allocation had been refused — the injection point for the
+ * allocation-denial fixtures of §14 (a denial around a switch, a split and a merge must
+ * leave runs, events, splits and paths consistent).
+ */
+struct WalkerHooks {
+    std::function<bool(const Admission&)> deny;
+    // after every level of an arm (its merges and beam done): the arm, the level's depth
+    // and the accounted memory total — what a budget must admit to complete that level
+    std::function<void(Arm, uint64_t, uint64_t)> level;
+};
+
+/**
  * Validate the seed and extend it in both directions under |strategy|.
  * Throws std::invalid_argument for invalid seeds / labels / strategies,
  * SeedDerivationError (a subclass of it) when an empty |seed.labels| yields no usable
- * permitted set, and std::runtime_error (naming the node) when the primary graph of a
- * PRIMARY index is inconsistent (CanonicalDBG found both strands of a k-mer).
+ * permitted set, SeedBudgetError when a request budget does not hold the seed itself
+ * (its validation, or its depth-0 state), and std::runtime_error (naming the node) when
+ * the primary graph of a PRIMARY index is inconsistent (CanonicalDBG found both strands
+ * of a k-mer).
  * |cost| is defined over request indices (seed labels in the given order, then
  * strategy.extra, see LabelChangeCost); SeedResult::label_dict lists the kept seed
  * labels in the given order, then strategy.extra.
@@ -670,10 +855,25 @@ SeedResult traverse_seed(LabelOracle &oracle,
                          const Seed &seed,
                          const Strategy &strategy,
                          const LabelChangeCost &cost,
-                         const std::string &release_id = "");
+                         const std::string &release_id = "",
+                         const WalkerHooks *hooks = nullptr);
 
 // Reconstruct the flank of |path| in natural orientation from the segments.
 std::string spell_path(const ArmResult &arm, const PathResult &path);
+
+// The segments of |path|, root -> leaf, through first parents at joins: the chain that
+// PathResult no longer stores. O(path depth in segments) per call.
+std::vector<size_t> path_segments(const ArmResult &arm, const PathResult &path);
+
+// Visit the segments of |path| leaf -> root (first parents) without allocating; |f|
+// returns false to stop early (a continuation needs only the last n bases).
+template <class F>
+void walk_path_leaf_first(const ArmResult &arm, const PathResult &path, F f) {
+    for (size_t s = path.leaf; ; s = arm.segments[s].parents[0]) {
+        if (!f(s) || arm.segments[s].parents.empty())
+            return;
+    }
+}
 
 } // namespace traversal
 } // namespace graph

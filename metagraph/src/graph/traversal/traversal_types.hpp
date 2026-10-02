@@ -80,8 +80,13 @@ enum class EndReason : uint8_t {
     MAX_OUTPUT,
     TIME_BUDGET,
     BEAM_PRUNED,
+    // a head the request's memory or work budget did not admit (bounds.max_memory_mb,
+    // bounds.max_work_units; DESIGN-traverse-graphlet.md §14): censored like a head
+    // beyond a cap. Appended last so that no existing value (and no array index keyed
+    // by one) moves.
+    RESOURCE_LIMIT,
 };
-static constexpr size_t kNumEndReasons = static_cast<size_t>(EndReason::BEAM_PRUNED) + 1;
+static constexpr size_t kNumEndReasons = static_cast<size_t>(EndReason::RESOURCE_LIMIT) + 1;
 const char* to_string(EndReason reason);
 // true if the reason means the requested domain was not explored completely
 bool is_resource_stop(EndReason reason);

@@ -7,7 +7,7 @@ L c 3 * 0 d.fa
 O c c c i
 K l scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
 K r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
-A l c 100 u 0 0 1 1 0 steps=87,successor_enumerations=88,output_bp=87,pair_evaluations=0,edge_reuse_probes=1,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 3 2 2 1 0 87
+A l c 100 u 0 0 1 1 0 steps=87,successor_enumerations=88,output_bp=87,pair_evaluations=88,edge_reuse_probes=1,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 3 2 2 1 0 87
 B 0 2 1 2 1 75 1 0 1 0 0 0 1 .
 B 50 2 1 2 1 12 0 0 0 0 0 0 0 D:2
 G * 0 25 * * * * 0 * ATTATGGTAATCATCTAATTAGATG
@@ -19,7 +19,7 @@ G 0 25 31 0 * * * * * CCGATCAAGTAAAACCATTGACCCGTGCTCT
 T * .
 R 1 0 0 56 D 0 * * 0 0 0
 R 2 0 0 56 D 0 * * 0 0 0
-A r c 100 u 0 0 1 1 0 steps=120,successor_enumerations=121,output_bp=120,pair_evaluations=226,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 1 * 3 4 2 1 0 120
+A r c 100 u 0 0 1 1 0 steps=120,successor_enumerations=121,output_bp=120,pair_evaluations=138,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 1 * 3 4 2 1 0 120
 B 0 1 1 1 1 50 0 0 0 0 0 0 0 L:1
 B 50 2 2 2 1 70 0 1 1 0 0 0 0 D:2,L:1
 V 60 0 GT 1,1 1 . .

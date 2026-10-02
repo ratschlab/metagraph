@@ -120,6 +120,20 @@ namespace {
 constexpr char kSentinel = boss::BOSS::kSentinel;
 // the structural lookahead cache is cleared when it grows beyond this many nodes
 constexpr size_t kMaxLookahead = 1'000'000;
+// Under a §14 budget the level's annotation keys are fetched in chunks of at most this
+// many, with a budget / deadline check between chunks: one fetch call is the walker's
+// largest uninterruptible unit of work. Without a budget the level is one call, as it
+// always was (the cache, and with it the direct_reads counter, depends on the batching).
+constexpr size_t kFetchChunk = 8192;
+
+// A budget or the deadline ran out while a head was being PLANNED or a level fetched
+// (DESIGN-traverse-graphlet.md §14). Thrown only before anything of the head or level is
+// committed, so the caller censors from that head on, exactly as at a cap. Never escapes
+// the walker.
+struct BudgetTrip {
+    ResourceStop::Resource resource;
+    double demand;                  // work units, or elapsed ms
+};
 
 // deterministic tie-break key of a switch source (§6.3)
 using SourceKey = std::tuple<double, uint32_t, Column, uint64_t>;
@@ -156,6 +170,14 @@ struct Item {
     // annotate mode: the labels present at |node| (capped) and their true count
     std::vector<LabelId> present;
     size_t present_total = 0;
+    // The memory reserved for this head (§14, modelled bytes): |reserve| holds the head
+    // itself and what ending it costs (its label ends, leaf, continuation, path chain and
+    // their delivery), |merge_reserve| what a reconvergence merge at the end of its level
+    // costs (released or consumed by merge_level). Whatever ends the head — its own step,
+    // a cap, the radius, a beam or a budget — fits in what it holds, so a prefix that
+    // was admitted can always be finished and delivered.
+    uint64_t reserve = 0;
+    uint64_t merge_reserve = 0;
 };
 
 struct Succ {
@@ -295,6 +317,14 @@ struct ArmState {
     size_t marked_segment = SIZE_MAX;
     std::vector<size_t> visit_stack;
     std::vector<size_t> ancestors;
+    // per segment, the length of its first-parent chain (root: 1): what a path ending
+    // there costs to spell out in JSON paths[].segments, charged per expansion (§14)
+    std::vector<uint32_t> chain_len;
+    // growth bins already charged to the memory account (bins are created lazily)
+    size_t bins_charged = 0;
+    // work units not visible as a counter (annotation keys and entries, derivation
+    // scans, trace coordinates); ArmResult::work_units adds the weighted counters
+    uint64_t work_extra = 0;
 };
 
 // Per-label scratch of process_item, sized |label_dict| once and cleared over the
@@ -341,6 +371,93 @@ struct ScratchGuard {
     Scratch &scratch;
     ~ScratchGuard() { scratch.reset(); }
 };
+
+// What one source (an entry of the head's state) does at a committed step: its lineage
+// continues on a followed successor, ends silently (it continues only under other names,
+// the switch events are written on commit), or ends with a label_end event.
+struct SourcePlan {
+    enum Kind : uint8_t { CONTINUES, SILENT_END, LABEL_END };
+    Kind kind = CONTINUES;
+    EndReason reason = EndReason::DEAD_END;
+    const char *text = "";
+    double needed = 0;
+};
+
+// The plan of one head (DESIGN-traverse-graphlet.md §14, "atomic commit per head"): every
+// decision of the step, computed without touching the result, so that the head can be
+// refused (censored with resource_limit) after planning and before anything of it is
+// written. Reused across heads (member of the walker) to keep its buffers.
+struct HeadPlan {
+    std::vector<Cand*> followed;
+    std::vector<LabelId> ambiguous_over, ambiguous_taken, dropped;
+    // the explicit per-successor refusals of the step (BranchEvent::refused), one per
+    // (successor, cause); the labels are made distinct and ascending when the event is
+    // emitted
+    std::vector<BranchEvent::Refusal> refused;
+    std::vector<SourcePlan> sources;     // parallel to the head's state
+    // The re-minimisation rounds the step needed (the rounds after the first). Kept here
+    // and counted when the step is committed (or a cap stops it, as before stage 2), not
+    // while planning: max_reminimisation_rounds > 0 is what states greedy_losses, and a
+    // head that is not admitted decided nothing greedily (review of stage 2, finding 1).
+    size_t reminimisations = 0;
+    // what committing the plan costs (§14, modelled bytes): the objects it adds for good,
+    // and per followed successor the new head's reservations
+    uint64_t committed = 0;
+    std::vector<uint64_t> child_reserve, child_merge_reserve;
+    // the growth bins the children's level writes into, charged with the first head of a
+    // level that creates children (the arm's bins charged up to this count on commit), so
+    // that no level starts beyond the budget by its bins
+    size_t bins_needed = 0;
+    // what the commit will create, checked against it in debug builds
+    size_t new_segments = 0, new_runs = 0, new_events = 0;
+
+    void clear() {
+        followed.clear();
+        ambiguous_over.clear();
+        ambiguous_taken.clear();
+        dropped.clear();
+        refused.clear();
+        sources.clear();
+        reminimisations = 0;
+        committed = 0;
+        child_reserve.clear();
+        child_merge_reserve.clear();
+        bins_needed = 0;
+        new_segments = new_runs = new_events = 0;
+    }
+    uint64_t reserved() const {
+        uint64_t total = 0;
+        for (size_t j = 0; j < child_reserve.size(); ++j) {
+            total += child_reserve[j] + child_merge_reserve[j];
+        }
+        return total;
+    }
+};
+
+/**
+ * The memory model of §14: bytes per object, retained plus delivered, each a fixed upper
+ * bound so that admission is deterministic (never a measurement). A vector grows by
+ * doubling, so an element is charged twice its size; an event once more for the stable
+ * sort in finalisation (bounded by any one segment's events).
+ */
+struct CostModel {
+    uint64_t segment = 0, seg_label = 0, base = 0, step = 0, run = 0, event = 0,
+             event_label = 0, needed = 0, leaf = 0, leaf_label = 0, chain_entry = 0,
+             cont_base = 0, split = 0, split_branch = 0, bevent = 0, bevent_entry = 0,
+             refusal = 0, presence_run = 0, bin = 0, item = 0, entry = 0, coord = 0,
+             present = 0, label = 0, label_name = 0;
+};
+
+// the labels of refusal (ch, cause) of |plan|, created when first needed; a step has a
+// few of them at most (successors x causes). The reference is used before the next call.
+std::vector<LabelId>& refusals_of(HeadPlan &plan, char ch, const char *cause) {
+    for (BranchEvent::Refusal &r : plan.refused) {
+        if (r.ch == ch && std::string_view(r.cause) == cause)
+            return r.labels;
+    }
+    plan.refused.push_back({ ch, cause, {} });
+    return plan.refused.back().labels;
+}
 
 uint8_t block_rank(EndReason reason) {
     switch (reason) {
@@ -403,9 +520,10 @@ class Walker {
            const Seed &seed,
            const Strategy &strategy,
            const LabelChangeCost &cost,
-           const std::string &release_id)
+           const std::string &release_id,
+           const WalkerHooks *hooks)
           : oracle_(oracle), graph_(oracle.graph()), seed_(seed), strategy_(strategy),
-            cost_(cost), release_id_(release_id), k_(oracle.get_k()),
+            cost_(cost), release_id_(release_id), hooks_(hooks), k_(oracle.get_k()),
             regime_(oracle.regime()), canonical_(oracle.canonical()),
             nfc_(oracle.node_first_cache()),
             trace_(strategy.support == Support::TRACE),
@@ -458,6 +576,23 @@ class Walker {
     // sets cap_demand_ when a cap trips
     std::optional<EndReason> cap_check(const ArmState &arm, size_t nf,
                                        size_t remaining_in_level);
+    // ADMIT (§14): whether the planned head may be committed; false censors it with
+    // resource_limit (sets cap_demand_)
+    bool admit(const ArmState &arm, const Item &item, size_t followed);
+    // the per-source decisions of a step that passed the caps (PLAN-B): which lineages
+    // continue, end silently or end with a reason, and the refusals; mutates nothing
+    // but scratch and the spent-work counters
+    void plan_outcomes(ArmState &arm, const Item &item);
+    // COMMIT of a constrained step whose plan was admitted; cannot fail
+    void commit_item(ArmState &arm, Item &item, const std::vector<Succ> &succs);
+    // the plan's re-minimisation rounds into the arm's counters (commit, or a cap)
+    void count_reminimisations(ArmState &arm) {
+        arm.result.reminimisation_rounds += plan_.reminimisations;
+        arm.result.max_reminimisation_rounds = std::max(arm.result.max_reminimisation_rounds,
+                                                        plan_.reminimisations);
+    }
+    // COST of the planned step (HeadPlan::committed, the children's reservations)
+    void plan_cost(const ArmState &arm, const Item &item);
     void account_steps(ArmState &arm, uint64_t at, size_t nf);
     void record_edge(ArmState &arm, size_t segment, const Cand &c);
     void prefetch(ArmState &arm, const std::vector<Item> &items,
@@ -482,13 +617,17 @@ class Walker {
     // segment's runs
     void record_present(ArmState &arm, size_t segment, uint64_t at,
                         const LabelRecorder::NodeLabels &nl);
+    // after a resource stop: keep only the dictionary labels the result records
+    void compact_dictionary();
     void summarize_annotate();
 
     // ---- label state
     // |*truncated|, |*cut|: whether max_switch_sources cut the source list and the key
     // of the last source kept; |*cut_reaches|: whether a cut source had a finite pair
-    // cost into one of |targets| (other than its own label)
-    void derive(const State &sigma, const std::vector<Target> &targets,
+    // cost into one of |targets| (other than its own label). The pairs priced are
+    // charged to |arm|, the arm whose head is being processed: the counters (and the
+    // greedy_losses limitation read off them) are per arm.
+    void derive(ArmState &arm, const State &sigma, const std::vector<Target> &targets,
                 const std::vector<uint8_t> &excluded, State *out,
                 bool *truncated, SourceKey *cut, bool *cut_reaches);
     // a finite cost(from -> t) for some target t != from
@@ -497,10 +636,31 @@ class Walker {
         const LabelRef &ref = result_.label_dict[e.label];
         return { e.loss, e.branches, ref.column, ref.seq_id };
     }
-    // |taken|: runs already continued by an earlier child of the same split; a
-    // run taken twice is cloned so that every run belongs to exactly one path
+    // |split|: the state is one child's of a split, whose runs already continued by an
+    // earlier child (taken_run()) are cloned so that every run belongs to exactly one path
     void commit_entries(ArmState &arm, const Item &item, size_t target_segment,
-                        State &state, uint64_t at, std::vector<uint32_t> *taken);
+                        State &state, uint64_t at, bool split);
+    // The runs continued by the children of one split so far, as stamps indexed by run id:
+    // O(1) per entry. A scan of the runs taken so far made a split O(|σ|²), once in its
+    // plan and once in its commit — on a 2,876-label locus most of the walk's time, with
+    // no budget set (review of stage 2, finding 4). begin_split() starts a split;
+    // taken_run() marks |run| and tells whether an earlier child of the split took it.
+    void begin_split(const ArmState &arm) {
+        if (run_stamp_.size() < arm.result.runs.size())
+            run_stamp_.resize(arm.result.runs.size(), 0);
+        if (++run_epoch_ == 0) {
+            std::fill(run_stamp_.begin(), run_stamp_.end(), 0);
+            run_epoch_ = 1;
+        }
+    }
+    bool taken_run(uint32_t run) {
+        // a split continues runs that existed when it began (switch-ins get new runs)
+        assert(run < run_stamp_.size());
+        if (run_stamp_[run] == run_epoch_)
+            return true;
+        run_stamp_[run] = run_epoch_;
+        return false;
+    }
 
     // ---- ends
     // |segment|: where the run ends (LabelRun::segment), the head's own segment
@@ -513,6 +673,11 @@ class Walker {
 
     // ---- bookkeeping
     GrowthBin& bin(ArmState &arm, uint64_t bp);
+    // every event of a segment is written here (counted for the plan's debug check)
+    void push_event(ArmState &arm, size_t segment, Event &&ev) {
+        arm.result.segments[segment].events.push_back(std::move(ev));
+        events_written_++;
+    }
     size_t new_segment(ArmState &arm, std::vector<size_t> parents, uint64_t from_bp,
                        std::vector<LabelId> labels_start, size_t labels_start_total);
     uint32_t new_run(ArmState &arm, LabelId label, uint64_t from_bp, bool by_switch,
@@ -529,12 +694,66 @@ class Walker {
     void finalize(ArmState &arm);
     void summarize();
 
+    // ---- budgets (DESIGN-traverse-graphlet.md §14)
+    void init_budgets();
+    uint64_t accounted() const { return base_ + committed_ + reserved_; }
+    void note_peak() { peak_ = std::max(peak_, accounted()); }
+    // a head's own memory, its stop and its merge reservations (see Item::reserve)
+    uint64_t item_bytes(const State &state, size_t present) const;
+    uint64_t stop_bytes(size_t state, size_t present, uint64_t ext, uint32_t chain) const;
+    uint64_t merge_bytes(size_t labels) const;
+    uint64_t stop_bytes(const ArmState &arm, const Item &item) const {
+        return stop_bytes(item.state.size(), item.present.size(), item.ext_bp,
+                          arm.chain_len[item.segment]);
+    }
+    // the first stop arrival() would report for a head entering |node| at |ext| (a probe)
+    bool would_revisit(const ArmState &arm, node_index node, uint64_t ext, bool revisiting) const;
+    // the plan's reservations for a new head (constrain: |state|, annotate: |present|)
+    void plan_child(const State &state, size_t present, uint64_t ext, uint32_t chain);
+    // book a committed plan: release |held| (the head's reservations), add the rest
+    void settle(ArmState &arm, uint64_t held);
+    // end a head (cap, radius, beam, budget): commit its stop, release its reservations
+    void release_head(const ArmState &arm, Item &item);
+    // the growth bins the level at |depth| can touch (its own depth and the next)
+    size_t bins_needed(uint64_t depth) const;
+    // the plan's share of the bins of its children's level (HeadPlan::bins_needed)
+    void plan_bins(const ArmState &arm, uint64_t child_depth);
+    // charge the bins a level can touch before it runs (only the roots' level is not
+    // charged by an admission)
+    void charge_bins(ArmState &arm, uint64_t depth);
+    void charge_dictionary();
+    // charged work units of an arm (ArmResult::work_units) / of the seed: its seed phase
+    // and both arms
+    uint64_t work_of(const ArmState &arm) const;
+    uint64_t work_used() const { return seed_work_ + work_of(arms_[0]) + work_of(arms_[1]); }
+    // The seed phase's work (§14, "rows decoded" count for the locus): the rows read to
+    // validate the seed or derive its permitted set, charged as the walk charges its
+    // reads, so that a work budget bounds the seed phase too (review of stage 2, finding
+    // 6). Over the budget it fails the seed: nothing has been walked yet.
+    void charge_seed(uint64_t units);
+    std::vector<LabelQuery::NodeHits> fetch_seed_hits(LabelQuery &query,
+                                                      const std::vector<node_index> &keys);
+    // a budget does not hold the seed itself: throws SeedBudgetError
+    [[noreturn]] void fail_seed(ResourceStop::Resource resource, double used, double demand,
+                                const std::string &what);
+    // the budget and deadline check (§14: at least every kWorkCheckInterval units);
+    // |force| checks now, otherwise only when the interval has passed. Throws BudgetTrip.
+    void checkpoint(bool force);
+    // what the trip costs the result: the resource stop (the first of the seed) and the
+    // cap's demand in the knob's unit; returns the end reason of the censored heads
+    EndReason note_stop(const ArmState &arm, const Item *head, ResourceStop::Resource resource,
+                        double demand);
+    std::vector<LabelQuery::NodeHits> fetch_hits(ArmState &arm, const std::vector<node_index> &keys);
+    std::vector<LabelRecorder::NodeLabels> fetch_present(ArmState &arm,
+                                                         const std::vector<node_index> &keys);
+
     LabelOracle &oracle_;
     const DeBruijnGraph &graph_;
     const Seed &seed_;
     const Strategy &strategy_;
     LabelChangeCost cost_;          // remapped to dictionary ids by validate_seed()
     const std::string &release_id_;
+    const WalkerHooks *hooks_;
     const size_t k_;
     const Regime regime_;
     const CanonicalDBG *canonical_;
@@ -558,19 +777,40 @@ class Walker {
 
     std::array<ArmState, 2> arms_;
     uint64_t steps_total_ = 0;
-    uint64_t pair_evaluations_ = 0;
     bool seed_stopped_ = false;
     // what the last cap to trip compared against its limit (CapTrigger::demand)
     double cap_demand_ = 0;
 
+    // admissions so far (Admission::ordinal), both arms
+    uint64_t admissions_ = 0;
+
+    // ---- budgets (§14). The memory account: base (seed, dictionary, fixed output and,
+    // under a budget, the caches' allotments), committed objects, and the reservations
+    // of the live heads; its total never exceeds the budget after an admission
+    CostModel m_;
+    bool budgeted_ = false;          // a §14 budget is set
+    uint64_t mem_limit_ = 0;
+    uint64_t base_ = 0, committed_ = 0, reserved_ = 0, peak_ = 0, overshoot_ = 0;
+    uint64_t fixed_base_ = 0;        // base_ without the dictionary (no label charged)
+    uint64_t seed_work_ = 0;         // the seed phase's charged work units
+    uint64_t cache_allotment_ = 0;
+    size_t dict_charged_ = 0;        // dictionary labels charged (annotate grows it)
+    size_t max_lookahead_ = kMaxLookahead;
+    uint64_t next_check_ = kWorkCheckInterval;
+    uint64_t depth_ = 0;             // the level being processed
+    size_t events_written_ = 0;      // events pushed, for the plan's debug check
+
     // scratch reused across steps
     Scratch scratch_;
+    HeadPlan plan_;
     std::vector<Cand> cands_;
     std::vector<const Entry*> sw_;
     std::string step_;
     std::string rc_scratch_;
     std::vector<uint32_t> label_stamp_;
     uint32_t label_epoch_ = 0;
+    std::vector<uint32_t> run_stamp_;    // begin_split() / taken_run()
+    uint32_t run_epoch_ = 0;
 };
 
 
@@ -695,7 +935,7 @@ void Walker::validate_seed() {
             seed_refs.push_back(oracle_.resolve_label(name));
         }
         LabelQuery validation(oracle_, seed_refs, trace_);
-        hits = validation.fetch(keys);
+        hits = fetch_seed_hits(validation, keys);
     }
 
     // request index (seed labels, then extra) -> dictionary id, UINT32_MAX if dropped
@@ -929,6 +1169,19 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                     - distinct.begin());
         };
 
+        // the entries of a k-mer's row: its columns, plus its coordinates where they are
+        // read (each costs a map_coord); also the row's work units beyond its key's 8
+        auto cost_of = [&](size_t i) {
+            const size_t r = row_of(i);
+            if (!with_coords)
+                return plain[r].size();
+            size_t n = 0;
+            for (const auto &entry : tuples[r]) {
+                n += 1 + entry.second.size();
+            }
+            return n;
+        };
+
         // In which order the sub-batch is consumed. The k-mer that SEEDS the intersection
         // sets the peak work and the peak memory of the whole derivation, and k-mer 0 is
         // merely where the caller cut the seed: a seed starting in a conserved or
@@ -943,16 +1196,6 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             order.push_back(i);
         }
         if (done.empty()) {
-            auto cost_of = [&](size_t i) {
-                const size_t r = row_of(i);
-                if (!with_coords)
-                    return plain[r].size();
-                size_t n = 0;    // columns plus coordinates: every one costs a map_coord
-                for (const auto &entry : tuples[r]) {
-                    n += 1 + entry.second.size();
-                }
-                return n;
-            };
             std::vector<size_t> cost(order.size());
             for (size_t j = 0; j < order.size(); ++j) {
                 cost[j] = cost_of(order[j]);
@@ -1089,6 +1332,9 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 }
                 compacted_at = live.size();
             }
+            // the row's work, as the walk charges a fetched row (8 per key, 1 per entry);
+            // a work budget the derivation exhausts fails the seed here, between two rows
+            charge_seed(8 + cost_of(i));
             if (out_of_time()) {
                 throw SeedDerivationError(SeedDerivationError::TIME_BUDGET,
                         "The time budget (bounds.time_budget_ms) ran out while deriving the "
@@ -1211,6 +1457,88 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     return false;
 }
 
+void Walker::charge_seed(uint64_t units) {
+    seed_work_ += units;
+    // The walk's rule (checkpoint()): checked once every kWorkCheckInterval units. A seed
+    // phase within one interval is charged, and the first head's check then stops the
+    // walk with a valid result complete to 0 bp; a longer one (a long seed, a wide one) is
+    // cut within the interval, where no result exists yet, and the seed fails.
+    if (seed_work_ < next_check_)
+        return;
+    next_check_ = seed_work_ + kWorkCheckInterval;
+    if (strategy_.max_work_units && seed_work_ > strategy_.max_work_units) {
+        fail_seed(ResourceStop::WORK, static_cast<double>(seed_work_),
+                  static_cast<double>(seed_work_),
+                  "the work budget (bounds.max_work_units = "
+                  + std::to_string(strategy_.max_work_units) + ") ran out while the seed was "
+                  + (seed_.labels.empty() ? "read to derive its permitted set"
+                                          : "validated against its labels")
+                  + ", after " + std::to_string(seed_work_) + " work units: no traversal "
+                    "was made");
+    }
+}
+
+std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
+                                                          const std::vector<node_index> &keys) {
+    std::vector<LabelQuery::NodeHits> hits;
+    auto charge = [&](size_t from) {
+        uint64_t units = 0;
+        for (size_t i = from; i < hits.size(); ++i) {
+            units += (keys[i] != npos ? 8 : 0) + hits[i].size();
+            for (const LabelQuery::Hit &h : hits[i]) {
+                units += h.coords.size();
+            }
+        }
+        charge_seed(units);
+    };
+    if (!strategy_.max_work_units) {
+        // one call, as always: the fetch's counters (direct_reads) depend on the batching
+        hits = query.fetch(keys);
+        charge(0);
+        return hits;
+    }
+    // Under a work budget in chunks, with the check between them: a key costs at most 8
+    // units plus one per label of the query (and the coordinates of its hits), so a chunk
+    // stays within about one check interval and a long seed cannot spend the budget many
+    // times over in one call
+    const size_t chunk = std::max<size_t>(1, kWorkCheckInterval / (8 + query.labels().size()));
+    hits.reserve(keys.size());
+    for (size_t begin = 0; begin < keys.size(); begin += chunk) {
+        const size_t end = std::min(keys.size(), begin + chunk);
+        for (auto &h : query.fetch(std::vector<node_index>(keys.begin() + begin,
+                                                           keys.begin() + end))) {
+            hits.push_back(std::move(h));
+        }
+        charge(begin);
+    }
+    return hits;
+}
+
+void Walker::fail_seed(ResourceStop::Resource resource, double used, double demand,
+                       const std::string &what) {
+    ResourceStop q;
+    q.resource = resource;
+    // no arm's head was refused: the seed itself; RIGHT is the arm a one-armed request
+    // walks by default, never read for a failed seed
+    q.arm = Arm::RIGHT;
+    q.at_bp = 0;
+    q.limit = resource == ResourceStop::MEMORY ? static_cast<double>(strategy_.max_memory_bytes)
+                                               : static_cast<double>(strategy_.max_work_units);
+    q.used = used;
+    q.demand = demand;
+    ResourceAccount account;
+    account.memory_limit = strategy_.max_memory_bytes;
+    account.memory_peak = peak_;
+    account.memory_final = accounted();
+    account.soft_overshoot = overshoot_;
+    account.work_limit = strategy_.max_work_units;
+    account.work_seed = seed_work_;
+    account.work_used = work_used();
+    const size_t labels = annotate_ ? (recorder_ ? recorder_->labels().size() : 0)
+                                    : result_.label_dict.size();
+    throw SeedBudgetError(what, q, account, !annotate_ && seed_.labels.empty(), labels);
+}
+
 void Walker::init_edge_coding() {
     code_.fill(255);
     size_t n = 0;
@@ -1248,6 +1576,7 @@ void Walker::init_arm(ArmState &arm) {
         // the boundary k-mer's own labels: the root's entry node, from which
         // continuous presence (label_summary.direct_bp) is measured
         auto nl = recorder_->fetch({ oracle_.key_of(root.node, root.kmer) });
+        arm.work_extra += 8 + nl[0].total;
         root.present = bounded(arm, nl[0].labels, nl[0].total);
         root.present_total = nl[0].total;
     }
@@ -1257,6 +1586,14 @@ void Walker::init_arm(ArmState &arm) {
         e.run = new_run(arm, e.label, 0, false, 0, 0, UINT32_MAX);
     }
     arm.first_arrival.emplace(root.node, std::make_pair(root.segment, uint64_t(0)));
+    // the root segment, its runs and its first arrival, and the root head's
+    // reservation; admitted with the rest of the depth-0 state in run() (a budget too
+    // small for them fails the seed)
+    committed_ += m_.segment + labels_at(root).size() * m_.seg_label
+                + root.state.size() * m_.run + m_.step;
+    root.reserve = item_bytes(root.state, root.present.size()) + stop_bytes(arm, root);
+    reserved_ += root.reserve;
+    note_peak();
     arm.frontier.push_back(std::move(root));
 }
 
@@ -1414,6 +1751,7 @@ size_t Walker::new_segment(ArmState &arm, std::vector<size_t> parents, uint64_t 
     seg.from_bp = from_bp;
     seg.labels_start = std::move(labels_start);
     seg.labels_start_total = labels_start_total;
+    arm.chain_len.push_back(seg.parents.empty() ? 1 : arm.chain_len[seg.parents[0]] + 1);
     arm.result.segments.push_back(std::move(seg));
     arm.walk_seq.emplace_back();
     arm.leaves.emplace_back();
@@ -1547,7 +1885,7 @@ void Walker::end_label(ArmState &arm, const Item &item, const Entry &e, EndReaso
     ev.structural_successors = structural;
     ev.needed_budget = needed;
     ev.text = text;
-    arm.result.segments[item.segment].events.push_back(std::move(ev));
+    push_event(arm, item.segment, std::move(ev));
     if (reason == EndReason::LOSS_BUDGET)
         arm.result.needed_budgets.push_back(needed);
 }
@@ -1572,6 +1910,7 @@ void Walker::finish_path(ArmState &arm, Item &item, std::optional<EndReason> pat
 }
 
 void Walker::censor_item(ArmState &arm, Item &item, EndReason reason) {
+    release_head(arm, item);
     for (const Entry &e : item.state) {
         end_label(arm, item, e, reason, 0, "");
     }
@@ -1699,7 +2038,7 @@ bool Walker::reaches_a_target(LabelId from, const std::vector<Target> &targets) 
     return false;
 }
 
-void Walker::derive(const State &sigma, const std::vector<Target> &targets,
+void Walker::derive(ArmState &arm, const State &sigma, const std::vector<Target> &targets,
                     const std::vector<uint8_t> &excluded, State *out,
                     bool *truncated, SourceKey *cut, bool *cut_reaches) {
     out->clear();
@@ -1707,6 +2046,9 @@ void Walker::derive(const State &sigma, const std::vector<Target> &targets,
     *cut_reaches = false;
     const double budget = strategy_.loss_budget;
     const bool loss_only = strategy_.switch_on_loss_only;
+    // the derivation's own scan of the sources and targets (its pair evaluations are
+    // counted below), charged as work (§14)
+    arm.work_extra += sigma.size() + targets.size();
 
     auto in_targets = [&](LabelId l) {
         auto it = std::lower_bound(targets.begin(), targets.end(), l,
@@ -1770,7 +2112,7 @@ void Walker::derive(const State &sigma, const std::vector<Target> &targets,
                 best = s;
                 best_loss = s->loss + cost_.cost(s->label, t.label);
             }
-            pair_evaluations_ += 1;
+            arm.result.pair_evaluations += 1;
         } else if (cost_.model() == LabelChangeCost::TABLE) {
             for (const Entry *s : sw) {
                 if (s->label == t.label)
@@ -1782,7 +2124,10 @@ void Walker::derive(const State &sigma, const std::vector<Target> &targets,
                     best_loss = v;
                 }
             }
-            pair_evaluations_ += sw.size();
+            arm.result.pair_evaluations += sw.size();
+            // one target prices every kept source: the budget is checked within a
+            // derivation, not only between heads
+            checkpoint(false);
         }
 
         Entry e;
@@ -1812,7 +2157,7 @@ void Walker::derive(const State &sigma, const std::vector<Target> &targets,
 }
 
 void Walker::commit_entries(ArmState &arm, const Item &item, size_t target_segment,
-                            State &state, uint64_t at, std::vector<uint32_t> *taken) {
+                            State &state, uint64_t at, bool split) {
     for (Entry &e : state) {
         if (e.switched) {
             const Entry *src = find_entry(item.state, e.from);
@@ -1824,19 +2169,297 @@ void Walker::commit_entries(ArmState &arm, const Item &item, size_t target_segme
             ev.label = e.from;
             ev.to = e.label;
             ev.cost = e.switch_cost;
-            arm.result.segments[target_segment].events.push_back(std::move(ev));
-        } else if (taken) {
-            if (std::find(taken->begin(), taken->end(), e.run) != taken->end()) {
-                LabelRun src = arm.result.runs[e.run];
-                e.run = new_run(arm, src.label, src.from_bp, src.entered_by_switch,
-                                src.from_label, src.switch_cost, src.prev_run);
-            } else {
-                taken->push_back(e.run);
-            }
+            push_event(arm, target_segment, std::move(ev));
+        } else if (split && taken_run(e.run)) {
+            LabelRun src = arm.result.runs[e.run];
+            e.run = new_run(arm, src.label, src.from_bp, src.entered_by_switch,
+                            src.from_label, src.switch_cost, src.prev_run);
         }
         e.switched = false;
         e.pred = e.label;
     }
+}
+
+
+/********************************* budgets **********************************/
+
+void Walker::init_budgets() {
+    const DeliveryCosts &d = strategy_.delivery;
+    // a segment with its walk buffer and leaf record, its visit mark and chain length
+    m_.segment = 2 * (sizeof(Segment) + sizeof(std::string) + sizeof(LeafInfo))
+               + 2 * 2 * sizeof(uint32_t) + d.segment;
+    m_.seg_label = 2 * sizeof(LabelId) + d.segment_label;
+    m_.base = 2 + d.base;
+    // a step's edge use (used_edges and used_by_segment) and the first arrival at its
+    // node, charged whether or not they are new: an upper bound with no probing
+    m_.step = 304;
+    // a run with its summary root and index (summarize)
+    m_.run = 2 * sizeof(LabelRun) + 3 * sizeof(uint32_t) + d.run;
+    m_.event = 3 * sizeof(Event) + d.event;
+    m_.event_label = 2 * sizeof(LabelId) + d.event_label;
+    m_.needed = 2 * sizeof(double);
+    m_.leaf = 2 * sizeof(PathResult) + d.leaf;
+    // an end label, and the label's ids in labels_end and the continuation
+    m_.leaf_label = 2 * sizeof(LabelEnd) + 4 * sizeof(LabelId) + d.leaf_label;
+    m_.chain_entry = d.chain_entry;
+    m_.cont_base = 1 + d.continuation_base;
+    m_.split = 2 * sizeof(Split) + d.split;
+    m_.split_branch = 2 * sizeof(SplitBranch) + 2 * 2 * sizeof(size_t) + d.split_branch;
+    m_.bevent = 2 * sizeof(BranchEvent) + d.branch_event;
+    m_.bevent_entry = 2 * (sizeof(char) + sizeof(size_t)) + d.branch_event_entry;
+    m_.refusal = 2 * sizeof(BranchEvent::Refusal) + d.branch_event_entry;
+    m_.presence_run = 2 * sizeof(LabelSetRun) + d.presence_run;
+    m_.bin = 2 * sizeof(GrowthBin) + d.bin;
+    // a live head: the Item (twice: frontier and next), its k-mer when it does not fit
+    // the small-string buffer, its label state with trace coordinates or its present list
+    m_.item = 2 * sizeof(Item) + (k_ > 22 ? k_ + 1 : 0);
+    m_.entry = 2 * sizeof(Entry);
+    m_.coord = 2 * sizeof(Coord);
+    m_.present = 2 * sizeof(LabelId);
+    // a dictionary label: its LabelRef, the per-label scratch and stamps, its summary on
+    // both arms and the query's maps; its name once more per byte
+    m_.label = 2 * sizeof(LabelRef) + 2 * 2 * sizeof(LabelArmSummary) + 96 + d.label;
+    m_.label_name = 2 + d.label_name;
+
+    mem_limit_ = strategy_.max_memory_bytes;
+    budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
+    // the seed (sequence, nodes, seed node set of both strands), the fixed records of
+    // the output and the statement of a stop (resource_stop, Q, K, walk_domain)
+    base_ = d.fixed + 4096 + seed_upper_.size() * (2 + d.base)
+          + nodes_.size() * (sizeof(node_index) + 64);
+    if (mem_limit_) {
+        // Fixed allotments of the budget for the caches, which then evict within them:
+        // charging what a cache happens to hold would make admission depend on
+        // annotation.batch_kmers (the lookahead warms the caches) and on eviction timing.
+        cache_allotment_ = std::min<uint64_t>(mem_limit_ / 4, uint64_t(64) << 20);
+        const uint64_t lookahead = std::min<uint64_t>(mem_limit_ / 16, uint64_t(64) << 20);
+        max_lookahead_ = std::max<size_t>(1, lookahead / 128);
+        base_ += cache_allotment_ + lookahead;
+        if (query_)
+            query_->set_max_cache_bytes(cache_allotment_);
+        if (recorder_)
+            recorder_->set_max_cache_bytes(cache_allotment_);
+    }
+    fixed_base_ = base_;
+    charge_dictionary();
+    note_peak();
+}
+
+void Walker::charge_dictionary() {
+    // annotate mode names labels as the walk meets them: charged after the fetch that
+    // named them (the overshoot this allows is stated as memory_bound_soft); the seed's
+    // dictionary (constrain) and the roots' labels (annotate) are admitted at depth 0
+    const std::vector<LabelRef> &dict = annotate_ ? recorder_->labels() : result_.label_dict;
+    for (; dict_charged_ < dict.size(); ++dict_charged_) {
+        base_ += m_.label + dict[dict_charged_].name.size() * m_.label_name;
+    }
+    note_peak();
+}
+
+uint64_t Walker::item_bytes(const State &state, size_t present) const {
+    uint64_t bytes = m_.item + state.size() * m_.entry + present * m_.present;
+    if (trace_) {
+        for (const Entry &e : state) {
+            bytes += e.coords.size() * m_.coord;
+        }
+    }
+    return bytes;
+}
+
+// What ending a head at |ext| costs, whatever ends it: a label end and an end label per
+// lineage, its labels at the leaf, the leaf with its path chain spelled out (JSON) and a
+// continuation of at most min(continuation_bp, |seed| + ext) bases.
+uint64_t Walker::stop_bytes(size_t state, size_t present, uint64_t ext, uint32_t chain) const {
+    const size_t labels = annotate_ ? present : state;
+    const uint64_t continuation = strategy_.continuation_bp
+        ? std::min<uint64_t>(strategy_.continuation_bp, seed_upper_.size() + ext) : 0;
+    return labels * (m_.seg_label + m_.leaf_label) + state * m_.event + m_.leaf
+         + chain * m_.chain_entry + continuation * m_.cont_base;
+}
+
+// A head's share of a merge at the end of its level: the merged segment (counted once
+// per head, so g heads hold g segments for the one created), its labels_start, the
+// partition and the parents' end sets (each at most the head's labels), the ids, and
+// one label on the reconverge event — or a same_distance revisit event under keep.
+uint64_t Walker::merge_bytes(size_t labels) const {
+    return m_.segment + (3 * labels + 2) * m_.seg_label + 32 + m_.event + m_.event_label;
+}
+
+bool Walker::would_revisit(const ArmState &arm, node_index node, uint64_t ext,
+                           bool revisiting) const {
+    // arrival() without its side effects
+    auto it = arm.first_arrival.find(node);
+    return it != arm.first_arrival.end() && it->second.second != ext && !revisiting;
+}
+
+void Walker::plan_child(const State &state, size_t present, uint64_t ext, uint32_t chain) {
+    plan_.child_reserve.push_back(item_bytes(state, present)
+                                  + stop_bytes(state.size(), present, ext, chain));
+    plan_.child_merge_reserve.push_back(merge_bytes(annotate_ ? present : state.size()));
+}
+
+void Walker::settle(ArmState &arm, uint64_t held) {
+    committed_ += plan_.committed;
+    reserved_ += plan_.reserved();
+    assert(reserved_ >= held);
+    reserved_ -= held;
+    arm.bins_charged = std::max(arm.bins_charged, plan_.bins_needed);
+    note_peak();
+}
+
+// The bins of the level at |child_depth| (its own depth and the next, see charge_bins),
+// as far as no earlier head charged them: the first head of a level that creates a child
+// pays for them in its admission. Charged at the next level's start instead, they could
+// put the account over the budget without any admission refusing them, and the stop that
+// follows would deliver a result beyond the budget (review of stage 2, finding 3).
+void Walker::plan_bins(const ArmState &arm, uint64_t child_depth) {
+    const size_t needed = bins_needed(child_depth);
+    if (needed > arm.bins_charged) {
+        plan_.committed += (needed - arm.bins_charged) * m_.bin;
+        plan_.bins_needed = needed;
+    }
+}
+
+void Walker::release_head(const ArmState &arm, Item &item) {
+    const uint64_t stop = stop_bytes(arm, item);
+    // the head was admitted with this much reserved for ending it (a merged head with
+    // the sum of its parents', which bounds it)
+    assert(stop <= item.reserve);
+    committed_ += stop;
+    assert(reserved_ >= item.reserve + item.merge_reserve);
+    reserved_ -= item.reserve + item.merge_reserve;
+    item.reserve = item.merge_reserve = 0;
+}
+
+size_t Walker::bins_needed(uint64_t depth) const {
+    // a level writes into the bins of its own depth and of the next (label ends of its
+    // children when they are censored, reconvergences at depth + 1)
+    const uint64_t width = std::max<uint64_t>(1, strategy_.profile_bin_bp);
+    return (depth + 1) / width + 1;
+}
+
+void Walker::charge_bins(ArmState &arm, uint64_t depth) {
+    // the roots' level (run()); a later level's bins were charged by the admission of
+    // the heads that created it (plan_bins), so this charges nothing there
+    const size_t needed = bins_needed(depth);
+    if (arm.bins_charged < needed) {
+        committed_ += (needed - arm.bins_charged) * m_.bin;
+        arm.bins_charged = needed;
+        note_peak();
+    }
+}
+
+uint64_t Walker::work_of(const ArmState &arm) const {
+    const ArmResult &r = arm.result;
+    return 4 * r.successor_enumerations + r.pair_evaluations + r.edge_reuse_probes
+         + r.refusal_scans + r.steps + arm.work_extra;
+}
+
+void Walker::checkpoint(bool force) {
+    const uint64_t used = work_used();
+    if (!force && used < next_check_)
+        return;
+    next_check_ = used + kWorkCheckInterval;
+    if (strategy_.max_work_units && used > strategy_.max_work_units)
+        throw BudgetTrip { ResourceStop::WORK, static_cast<double>(used) };
+    // The deadline is checked here too, so that one wide level cannot overrun it by
+    // more than the interval. Never at depth 0: a zero budget means "no extension", and
+    // the boundary check in run() is what ends such a walk after its first level.
+    if (depth_ > 0 && time_exceeded())
+        throw BudgetTrip { ResourceStop::TIME, timer_.elapsed() * 1000.0 };
+}
+
+EndReason Walker::note_stop(const ArmState &arm, const Item *head,
+                            ResourceStop::Resource resource, double demand) {
+    if (!result_.resource_stop) {
+        ResourceStop q;
+        q.resource = resource;
+        q.arm = arm.arm;
+        q.at_bp = head ? head->ext_bp : depth_;
+        q.demand = demand;
+        switch (resource) {
+            case ResourceStop::MEMORY:
+                q.limit = static_cast<double>(mem_limit_);
+                q.used = static_cast<double>(accounted());
+                break;
+            case ResourceStop::WORK:
+                q.limit = static_cast<double>(strategy_.max_work_units);
+                q.used = demand;
+                break;
+            case ResourceStop::TIME:
+                q.limit = strategy_.time_budget_ms;
+                q.used = demand;
+                break;
+        }
+        result_.resource_stop = q;
+    }
+    // the cap trigger's demand, in the unit of the knob a reader would raise
+    // (bounds.max_memory_mb counts whole MiB)
+    switch (resource) {
+        case ResourceStop::MEMORY:
+            cap_demand_ = std::ceil(demand / static_cast<double>(uint64_t(1) << 20));
+            return EndReason::RESOURCE_LIMIT;
+        case ResourceStop::WORK:
+            cap_demand_ = demand;
+            return EndReason::RESOURCE_LIMIT;
+        case ResourceStop::TIME:
+            cap_demand_ = demand;
+            return EndReason::TIME_BUDGET;
+    }
+    return EndReason::RESOURCE_LIMIT;
+}
+
+std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
+                                                     const std::vector<node_index> &keys) {
+    std::vector<LabelQuery::NodeHits> hits;
+    auto charge = [&](size_t from) {
+        for (size_t i = from; i < hits.size(); ++i) {
+            arm.work_extra += (keys[i] != npos ? 8 : 0) + hits[i].size();
+        }
+    };
+    if (!budgeted_) {
+        hits = query_->fetch(keys);
+        charge(0);
+        return hits;
+    }
+    hits.reserve(keys.size());
+    for (size_t begin = 0; begin < keys.size(); begin += kFetchChunk) {
+        const size_t end = std::min(keys.size(), begin + kFetchChunk);
+        for (auto &h : query_->fetch(std::vector<node_index>(keys.begin() + begin,
+                                                             keys.begin() + end))) {
+            hits.push_back(std::move(h));
+        }
+        charge(begin);
+        checkpoint(true);
+    }
+    return hits;
+}
+
+std::vector<LabelRecorder::NodeLabels> Walker::fetch_present(ArmState &arm,
+                                                             const std::vector<node_index> &keys) {
+    std::vector<LabelRecorder::NodeLabels> present;
+    auto charge = [&](size_t from) {
+        // a recorded row costs its whole width (the true count), not the capped list
+        for (size_t i = from; i < present.size(); ++i) {
+            arm.work_extra += (keys[i] != npos ? 8 : 0) + present[i].total;
+        }
+    };
+    if (!budgeted_) {
+        present = recorder_->fetch(keys);
+        charge(0);
+        return present;
+    }
+    present.reserve(keys.size());
+    for (size_t begin = 0; begin < keys.size(); begin += kFetchChunk) {
+        const size_t end = std::min(keys.size(), begin + kFetchChunk);
+        for (auto &nl : recorder_->fetch(std::vector<node_index>(keys.begin() + begin,
+                                                                 keys.begin() + end))) {
+            present.push_back(std::move(nl));
+        }
+        charge(begin);
+        checkpoint(true);
+    }
+    return present;
 }
 
 
@@ -1954,7 +2577,7 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             query_->warm(warm_keys);
         }
     }
-    if (arm.lookahead.size() > kMaxLookahead) {
+    if (arm.lookahead.size() > max_lookahead_) {
         for (const auto &kv : arm.lookahead) {
             if (kv.second.succs.size() == 1)
                 oracle_.counters().keys_mapped++;
@@ -1981,14 +2604,26 @@ void Walker::arrival(ArmState &arm, Item &item) {
         ev.labels = { static_cast<LabelId>(it->second.first) };
         ev.length_bp = item.ext_bp > it->second.second ? item.ext_bp - it->second.second
                                                         : it->second.second - item.ext_bp;
-        arm.result.segments[item.segment].events.push_back(std::move(ev));
+        push_event(arm, item.segment, std::move(ev));
     }
     // same distance: resolved in merge_level
 }
 
 void Walker::merge_level(ArmState &arm, uint64_t depth) {
-    if (arm.next.size() < 2)
+    // Every new head holds a merge reservation (§14): consumed below by a merge it takes
+    // part in, released otherwise. Nothing here is admitted: the level's heads already
+    // were, with this cost included, so a merge cannot fail.
+    auto release_merge = [&](Item &item) {
+        assert(reserved_ >= item.merge_reserve);
+        reserved_ -= item.merge_reserve;
+        item.merge_reserve = 0;
+    };
+    if (arm.next.size() < 2) {
+        for (Item &item : arm.next) {
+            release_merge(item);
+        }
         return;
+    }
     // group by node, keeping the order of first occurrence
     tsl::hopscotch_map<node_index, size_t> group_of;
     std::vector<std::vector<size_t>> groups;
@@ -2005,6 +2640,7 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
     merged.reserve(arm.next.size());
     for (const auto &g : groups) {
         if (g.size() == 1) {
+            release_merge(arm.next[g[0]]);
             merged.push_back(std::move(arm.next[g[0]]));
             continue;
         }
@@ -2019,11 +2655,26 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
                     ev.type = EventType::REVISIT;
                     ev.labels = { static_cast<LabelId>(arm.next[g[0]].segment) };
                     ev.text = "same_distance";
-                    arm.result.segments[item.segment].events.push_back(std::move(ev));
+                    push_event(arm, item.segment, std::move(ev));
+                    committed_ += m_.event + m_.event_label;
                 }
+                release_merge(item);
                 merged.push_back(std::move(item));
             }
             continue;
+        }
+        // what the merge costs, out of the reservations of the heads it joins (the
+        // merged segment, its entry set and partition, the parents' end sets, the ids
+        // and the reconverge event); they bound it, as the merged state is at most the
+        // union of theirs
+        uint64_t merge_cost = m_.segment + m_.event
+                            + g.size() * (m_.event_label + 2 * m_.seg_label + 32);
+        uint64_t held_merge = 0, held = 0;
+        for (size_t j : g) {
+            const Item &item = arm.next[j];
+            merge_cost += (annotate_ ? item.present.size() : item.state.size()) * m_.seg_label;
+            held_merge += item.merge_reserve;
+            held += item.reserve;
         }
         // union of states keeping the min (loss, branches) entry per label; an entry
         // taken from a later parent is routed from here on (route_bp); under trace
@@ -2121,17 +2772,27 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
         for (size_t p : parents) {
             ev.labels.push_back(static_cast<LabelId>(p));
         }
-        mseg.events.push_back(std::move(ev));
+        push_event(arm, m, std::move(ev));
         bin(arm, depth).reconvergences++;
         arm.first_arrival[primary.node] = { m, depth };
 
         primary.segment = m;
+        // the merged entry set and its partition (constrain), or the node's own labels
+        merge_cost += (annotate_ ? primary.present.size() : 2 * st.size()) * m_.seg_label;
+        assert(merge_cost <= held_merge);
+        committed_ += merge_cost;
+        assert(reserved_ >= held_merge);
+        reserved_ -= held_merge;
+        // the merged head holds its parents' reservations: they bound its own and its end
+        primary.reserve = held;
+        primary.merge_reserve = 0;
         primary.state = std::move(st);
         primary.path_id = path_id;
         primary.splits = splits;
         merged.push_back(std::move(primary));
     }
     arm.next.swap(merged);
+    note_peak();
 }
 
 void Walker::beam(ArmState &arm, uint64_t depth) {
@@ -2258,7 +2919,10 @@ void Walker::stop_frontier(ArmState &arm, EndReason reason) {
 
 void Walker::trip(ArmState &arm, EndReason reason, std::vector<Item> &items, size_t index) {
     stop_arm(arm, reason, &items, index);
-    if (reason == EndReason::MAX_STEPS) {
+    // max_steps, the request's budgets and its deadline bound the whole seed (§6.8 scope
+    // table, DESIGN-traverse-graphlet.md §14 "locus" scope): the other arm stops too
+    if (reason == EndReason::MAX_STEPS || reason == EndReason::RESOURCE_LIMIT
+            || reason == EndReason::TIME_BUDGET) {
         seed_stopped_ = true;
         for (ArmState &other : arms_) {
             if (&other != &arm)
@@ -2268,34 +2932,80 @@ void Walker::trip(ArmState &arm, EndReason reason, std::vector<Item> &items, siz
 }
 
 void Walker::run_level(ArmState &arm, uint64_t depth) {
+    depth_ = depth;
     std::vector<Item> items;
     items.swap(arm.frontier);
     sort_items(items);
     record_live(arm, depth, items);
 
-    // structural successors of every item, then one batched label fetch
+    // structural successors of every item, then one batched label fetch (in chunks with
+    // a check between them under a §14 budget). A budget or the deadline that runs out
+    // here stops the level before its first head: nothing of it is committed yet.
     std::vector<std::vector<Succ>> succs(items.size());
-    std::vector<node_index> keys;
-    for (size_t i = 0; i < items.size(); ++i) {
-        if (items[i].ext_bp >= strategy_.max_extension_bp)
-            continue;
-        bool cached = false;
-        node_index key = npos;
-        succs[i] = successors(arm, items[i].node, items[i].kmer, &cached, &key);
-        if (cached && succs[i].size() == 1) {
-            keys.push_back(key);
-            continue;
-        }
-        for (const Succ &s : succs[i]) {
-            keys.push_back(key_of_succ(arm.arm, items[i].kmer, s));
-        }
-    }
     std::vector<LabelQuery::NodeHits> hits;
     std::vector<LabelRecorder::NodeLabels> present;
-    if (annotate_) {
-        present = recorder_->fetch(keys);
-    } else {
-        hits = query_->fetch(keys);
+    try {
+        charge_bins(arm, depth);
+        std::vector<node_index> keys;
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (items[i].ext_bp >= strategy_.max_extension_bp)
+                continue;
+            bool cached = false;
+            node_index key = npos;
+            succs[i] = successors(arm, items[i].node, items[i].kmer, &cached, &key);
+            if (cached && succs[i].size() == 1) {
+                keys.push_back(key);
+                continue;
+            }
+            for (const Succ &s : succs[i]) {
+                keys.push_back(key_of_succ(arm.arm, items[i].kmer, s));
+            }
+        }
+        // The decoded rows of the level are scratch the model does not charge (stage 3
+        // of §14.1 charges them inside the decoder), and an annotate dictionary grows
+        // with what the fetch names: both are measured here, after the fact, as the
+        // memory bound's soft overshoot.
+        uint64_t scratch = 0, dictionary = 0;
+        if (annotate_) {
+            present = fetch_present(arm, keys);
+            const uint64_t named_before = base_;
+            charge_dictionary();
+            dictionary = base_ - named_before;
+            for (const auto &nl : present) {
+                scratch += sizeof(nl) + nl.labels.size() * sizeof(LabelId);
+            }
+        } else {
+            hits = fetch_hits(arm, keys);
+            for (const auto &h : hits) {
+                scratch += sizeof(h) + h.size() * sizeof(LabelQuery::Hit);
+                for (const auto &hit : h) {
+                    scratch += hit.coords.size() * sizeof(Coord);
+                }
+            }
+        }
+        if (mem_limit_) {
+            // Only what is held beyond the admitted account is soft: the scratch rows, a
+            // cache beyond its allotment and the dictionary this fetch grew. The admitted
+            // account itself never exceeds the budget (the depth-0 state and every level's
+            // bins are admitted), so memory_bound_soft never reports the modelled state's
+            // own excess as the decoder's (review of stage 2, finding 3).
+            const uint64_t cache = annotate_ ? recorder_->cache_bytes() : query_->cache_bytes();
+            const uint64_t soft = scratch + dictionary
+                                + (cache > cache_allotment_ ? cache - cache_allotment_ : 0);
+            const uint64_t held = accounted() - dictionary + soft;
+            overshoot_ = std::max(overshoot_, held > mem_limit_ ? std::min(soft, held - mem_limit_) : 0);
+        }
+        // A level's heads share its depth. At the radius the level only ends them (their
+        // reservations hold that), so nothing can be refused there: stopping it would
+        // report an arm whose every walk is present as truncated.
+        if (depth < strategy_.max_extension_bp) {
+            if (mem_limit_ && accounted() > mem_limit_)
+                throw BudgetTrip { ResourceStop::MEMORY, static_cast<double>(accounted()) };
+            checkpoint(true);
+        }
+    } catch (const BudgetTrip &t) {
+        trip(arm, note_stop(arm, &items[0], t.resource, t.demand), items, 0);
+        return;
     }
     prefetch(arm, items, succs);
 
@@ -2307,9 +3017,16 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
             continue;
         }
         const size_t remaining = items.size() - i - 1;
-        auto cap = annotate_
-            ? process_item_annotate(arm, item, succs[i], present.data() + offset, remaining)
-            : process_item(arm, item, succs[i], hits.data() + offset, remaining);
+        std::optional<EndReason> cap;
+        try {
+            cap = annotate_
+                ? process_item_annotate(arm, item, succs[i], present.data() + offset, remaining)
+                : process_item(arm, item, succs[i], hits.data() + offset, remaining);
+        } catch (const BudgetTrip &t) {
+            // thrown while the head was planned: censored like a head beyond a cap
+            trip(arm, note_stop(arm, &item, t.resource, t.demand), items, i);
+            return;
+        }
         offset += succs[i].size();
         if (cap) {
             trip(arm, *cap, items, i);
@@ -2319,22 +3036,38 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     merge_level(arm, depth + 1);
     beam(arm, depth + 1);
     arm.frontier.swap(arm.next);
+    if (hooks_ && hooks_->level)
+        hooks_->level(arm.arm, depth, accounted());
 }
 
 std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                                               const std::vector<Succ> &succs,
                                               const LabelQuery::NodeHits *hits,
                                               size_t remaining_in_level) {
-    const uint64_t at = item.ext_bp;
     const Arm side = arm.arm;
     Scratch &sc = scratch_;
     ScratchGuard guard { sc };      // clears the touched labels on every exit
+    // PLAN (successors, derived states, label ends, switches, splits) -> ADMIT -> COMMIT
+    // (DESIGN-traverse-graphlet.md §14): nothing of the head reaches the result before it
+    // is admitted, so that a head refused by a budget leaves no half-written step behind
+    HeadPlan &plan = plan_;
+    plan.clear();
+    // the budgets and the deadline, before anything of the head is planned
+    checkpoint(true);
 
     if (succs.empty()) {
+        // a dead end: every lineage ends here, and the path with them — what the head's
+        // reservation holds for its end
+        plan.committed = stop_bytes(arm, item);
+        plan.new_events = item.state.size();
+        if (!admit(arm, item, 0))
+            return EndReason::RESOURCE_LIMIT;
+        const uint64_t held = item.reserve + item.merge_reserve;
         for (const Entry &e : item.state) {
             end_label(arm, item, e, EndReason::DEAD_END, 0, "");
         }
         finish_path(arm, item, std::nullopt);
+        settle(arm, held);
         return std::nullopt;
     }
 
@@ -2356,6 +3089,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             if (trace_) {
                 const Entry *e = find_entry(item.state, h.label);
                 if (e) {
+                    arm.work_extra += h.coords.size();
                     for (Coord x : h.coords) {
                         bool ok = side == Arm::RIGHT
                             ? (x > 0 && std::binary_search(e->coords.begin(), e->coords.end(), x - 1))
@@ -2385,26 +3119,12 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     // ---- label recurrence and per-lineage branching (fixpoint over excluded sources)
     for (Cand &c : cands_) {
         if (!c.admissible()) {
-            derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut,
+            derive(arm, item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut,
                    &c.cut_reaches);
         }
     }
-    std::vector<LabelId> ambiguous_over, ambiguous_taken;
-    // The explicit per-successor refusals of this step (BranchEvent::refused), one per
-    // (successor, cause) with the sources whose lineage it cut; the labels are made
-    // distinct and ascending when the event is emitted. Empty on an ordinary step, so
-    // nothing is allocated there.
-    std::vector<BranchEvent::Refusal> refused;
-    // the labels of refusal (ch, cause), created when first needed; a step has a few
-    // of them at most (successors x causes). The reference is used before the next call.
-    auto refusals = [&](char ch, const char *cause) -> std::vector<LabelId>& {
-        for (BranchEvent::Refusal &r : refused) {
-            if (r.ch == ch && std::string_view(r.cause) == cause)
-                return r.labels;
-        }
-        refused.push_back({ ch, cause, {} });
-        return refused.back().labels;
-    };
+    std::vector<LabelId> &ambiguous_over = plan.ambiguous_over;
+    std::vector<LabelId> &ambiguous_taken = plan.ambiguous_taken;
     // successors with an entry of a source excluded in this round: (the smallest such
     // source, successor index)
     std::vector<std::pair<LabelId, size_t>> excluded_on;
@@ -2422,8 +3142,9 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         for (Cand &c : cands_) {
             if (!c.admissible())
                 continue;
-            derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut,
+            derive(arm, item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut,
                    &c.cut_reaches);
+            checkpoint(false);
             if (rounds == 1)
                 c.initial_labels = c.state.size();
             if (c.hairpin)
@@ -2479,7 +3200,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         std::sort(excluded_on.begin(), excluded_on.end());
         for (const auto &[first, i] : excluded_on) {
             const Cand &c = cands_[i];
-            std::vector<LabelId> &labels = refusals(c.succ->ch, "branch");
+            std::vector<LabelId> &labels = refusals_of(plan, c.succ->ch, "branch");
             labels.insert(labels.end(), c.excluded_preds.begin(), c.excluded_preds.end());
         }
         for (size_t j = excluded_from; j < ambiguous_over.size(); ++j) {
@@ -2487,10 +3208,9 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         }
     }
     assert(!changed);
-    // the rounds after the first are re-minimisations
-    arm.result.reminimisation_rounds += rounds - 1;
-    arm.result.max_reminimisation_rounds = std::max(arm.result.max_reminimisation_rounds,
-                                                    rounds - 1);
+    // the rounds after the first are re-minimisations; counted by the commit (or the cap
+    // below), never by a head the budget refuses
+    plan.reminimisations = rounds - 1;
     for (const Entry &src : item.state) {
         if (sc.excluded[src.label] || sc.cont_count[src.label] < 2)
             continue;
@@ -2506,7 +3226,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     }
 
     // ---- quorum, min_live_labels
-    std::vector<Cand*> followed;
+    std::vector<Cand*> &followed = plan.followed;
     for (Cand &c : cands_) {
         if (!c.admissible() || c.state.empty())
             continue;
@@ -2534,42 +3254,129 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     }
     const size_t nf = followed.size();
 
-    // ---- caps, decided before anything is committed
-    if (auto cap = cap_check(arm, nf, remaining_in_level))
+    // ---- caps, decided before anything is committed. A capped head still counts its
+    // re-minimisation rounds, as it always did: a result without a budget is unchanged
+    // by stage 2 (only a head the budget refuses leaves them uncounted)
+    if (auto cap = cap_check(arm, nf, remaining_in_level)) {
+        count_reminimisations(arm);
         return cap;
-
-    // ---- a cut switch-source list that may have changed what this step commits: a loss,
-    // an entry of a followed successor, or the labels on a blocked / hairpin event. Once
-    // per successor, for the derivation that stands (the last round's); stated as the
-    // arm's switch_sources limitation (§7.0)
-    for (const Cand &c : cands_) {
-        arm.result.switch_sources_cut += c.truncated && c.cut_reaches;
     }
 
-    // ---- commit: events for inadmissible label-carrying successors and followed hairpins
+    // ---- PLAN-B: what every lineage does at this step, and the refusals
+    plan_outcomes(arm, item);
+    plan_cost(arm, item);
+
+    // ---- ADMIT
+    if (!admit(arm, item, nf))
+        return EndReason::RESOURCE_LIMIT;
+
+    // ---- COMMIT (cannot fail)
+    const uint64_t held = item.reserve + item.merge_reserve;
+#ifndef NDEBUG
+    const size_t segments_before = arm.result.segments.size();
+    const size_t runs_before = arm.result.runs.size();
+    const size_t events_before = events_written_;
+#endif
+    commit_item(arm, item, succs);
+    // the plan foresaw exactly what the commit wrote: the account below is its cost
+    assert(arm.result.segments.size() == segments_before + plan.new_segments);
+    assert(arm.result.runs.size() == runs_before + plan.new_runs);
+    assert(events_written_ == events_before + plan.new_events);
+    settle(arm, held);
+    return std::nullopt;
+}
+
+// COST (§14) of an admitted-to-be constrained step: the objects the commit writes for
+// good and the new heads' reservations, from the plan alone (it reads, never writes).
+void Walker::plan_cost(const ArmState &arm, const Item &item) {
+    HeadPlan &plan = plan_;
+    const uint64_t at = item.ext_bp;
+    const size_t nf = plan.followed.size();
+    uint64_t &cost = plan.committed;
+    // blocked / hairpin events
     for (const Cand &c : cands_) {
-        if (c.state.empty())
+        if (c.state.empty() || (c.admissible() && !(c.hairpin && c.followed)))
             continue;
-        if (c.admissible() && !(c.hairpin && c.followed))
+        cost += m_.event + c.state.size() * m_.event_label;
+        plan.new_events++;
+    }
+    // the label ends; a head that ends here pays them out of its stop reservation
+    for (const SourcePlan &sp : plan.sources) {
+        if (sp.kind != SourcePlan::LABEL_END)
             continue;
-        Event ev;
-        ev.at_bp = at;
-        ev.ch = c.succ->ch;
-        ev.labels = labels_of(c.state);
-        ev.labels_total = ev.labels.size();   // the live state is never cut
-        if (c.skipped) {
-            ev.type = EventType::HAIRPIN;
-        } else if (c.blocked) {
-            ev.type = EventType::BLOCKED;
-            ev.reason = c.block_reason;
-            bin(arm, at).blocked_repeat++;
-        } else {
-            ev.type = EventType::HAIRPIN;
-            ev.text = "followed";
+        cost += (nf ? m_.event : 0) + (sp.reason == EndReason::LOSS_BUDGET ? m_.needed : 0);
+        plan.new_events++;
+    }
+    // the branch event, when it is kept
+    if ((!plan.ambiguous_taken.empty() || !plan.refused.empty())
+            && arm.result.branch_events.size() < strategy_.max_branch_events) {
+        size_t entries = plan.ambiguous_taken.size() + plan.ambiguous_over.size()
+                       + plan.dropped.size();
+        for (const Cand &c : cands_) {
+            entries += c.admissible() && c.initial_labels;
         }
-        arm.result.segments[item.segment].events.push_back(std::move(ev));
+        cost += m_.bevent + entries * m_.bevent_entry;
+        for (const BranchEvent::Refusal &r : plan.refused) {
+            cost += m_.refusal + r.labels.size() * m_.bevent_entry;
+        }
     }
+    if (!nf) {
+        cost += stop_bytes(arm, item);
+        return;
+    }
+    cost += nf * (m_.step + m_.base);
+    plan_bins(arm, at + 1);
+    if (nf == 1) {
+        const Cand &c = *plan.followed[0];
+        for (const Entry &e : c.state) {
+            if (e.switched) {
+                cost += m_.run + m_.event;
+                plan.new_runs++;
+                plan.new_events++;
+            }
+        }
+        if (would_revisit(arm, c.succ->node, at + 1, item.revisiting)) {
+            cost += m_.event + m_.event_label;
+            plan.new_events++;
+        }
+        plan_child(c.state, 0, at + 1, arm.chain_len[item.segment]);
+        return;
+    }
+    // a split: the split record, the parent's end set, and per child its segment, its
+    // branch (labels cut to the cap), its switch-ins and the runs cloned for it
+    cost += m_.split + item.state.size() * m_.seg_label;
+    begin_split(arm);
+    for (const Cand *c : plan.followed) {
+        const size_t n = c->state.size();
+        cost += m_.split_branch + std::min(n, strategy_.max_labels_per_node) * m_.seg_label
+              + m_.segment + n * m_.seg_label;
+        plan.new_segments++;
+        for (const Entry &e : c->state) {
+            if (e.switched) {
+                cost += m_.run + m_.event;
+                plan.new_runs++;
+                plan.new_events++;
+            } else if (taken_run(e.run)) {
+                cost += m_.run;     // commit_entries clones a run continued twice
+                plan.new_runs++;
+            }
+        }
+        if (would_revisit(arm, c->succ->node, at + 1, false)) {
+            cost += m_.event + m_.event_label;
+            plan.new_events++;
+        }
+        plan_child(c->state, 0, at + 1, arm.chain_len[item.segment] + 1);
+    }
+}
 
+// PLAN-B (§14): the per-source decisions of a step that passed the caps — which lineage
+// continues, which ends silently (it goes on only under other names) and which ends with
+// what reason, and every refusal of the step — in the order the commit replays them, so
+// that refusal groups, `dropped` and the label ends keep today's order. Mutates scratch
+// and the spent-work counter refusal_scans only.
+void Walker::plan_outcomes(ArmState &arm, const Item &item) {
+    Scratch &sc = scratch_;
+    HeadPlan &plan = plan_;
     // What a switch from |src| into the admissible successor |c| would cost (§6.3), for
     // the loss-budget ends and refusals (finite costs only): |present| a target within
     // the budget (kept through a cheaper predecessor, as |src| has no entry there),
@@ -2632,7 +3439,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     for (const Cand &c : cands_) {
         // a quorum or split-limit stop refuses the successor to every source on it
         std::vector<LabelId> *quorum_refused = c.quorum_fail && !c.state.empty()
-            ? &refusals(c.succ->ch, c.quorum_text) : nullptr;
+            ? &refusals_of(plan, c.succ->ch, c.quorum_text) : nullptr;
         for (const Entry &e : c.state) {
             if (c.followed) {
                 sc.has_cont[e.pred] = 1;
@@ -2651,15 +3458,16 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             }
         }
     }
-    std::vector<LabelId> dropped;
-    for (const Entry &src : item.state) {
+    std::vector<LabelId> &dropped = plan.dropped;
+    plan.sources.assign(item.state.size(), SourcePlan());
+    for (size_t i = 0; i < item.state.size(); ++i) {
+        const Entry &src = item.state[i];
+        SourcePlan &sp = plan.sources[i];
         LabelId l = src.label;
         if (sc.has_cont[l]) {
-            if (!sc.stays[l]) {
-                // the lineage continues only under other names (switch events on commit,
-                // on the children when this step splits): a run end without an event
-                end_run(arm, src, at, EndReason::LABEL_LOST, item.segment);
-            }
+            // the lineage continues only under other names (switch events on commit,
+            // on the children when this step splits): a run end without an event
+            sp.kind = sc.stays[l] ? SourcePlan::CONTINUES : SourcePlan::SILENT_END;
             continue;
         }
         EndReason reason;
@@ -2707,7 +3515,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                 needed = best_absent;
                 dropped.push_back(l);
                 for (char ch : over_budget_on) {
-                    refusals(ch, "loss_budget").push_back(l);
+                    refusals_of(plan, ch, "loss_budget").push_back(l);
                 }
             } else {
                 reason = EndReason::LABEL_LOST;
@@ -2718,7 +3526,10 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                 }
             }
         }
-        end_label(arm, item, src, reason, succs.size(), text, needed);
+        sp.kind = SourcePlan::LABEL_END;
+        sp.reason = reason;
+        sp.text = text;
+        sp.needed = needed;
     }
 
     // ---- loss-budget refusals of the sources whose end was not decided by the budget
@@ -2742,17 +3553,71 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                 if (sc.excluded[l] || sc.budget_checked[l] || sc.marked[l])
                     continue;
                 if (budget_look(src, c).over)
-                    refusals(c.succ->ch, "loss_budget").push_back(l);
+                    refusals_of(plan, c.succ->ch, "loss_budget").push_back(l);
             }
             for (const Entry &e : c.state) {
                 sc.marked[e.pred] = 0;
             }
         }
     }
+}
+
+// COMMIT (§14) of an admitted constrained step: writes the decisions of PLAN-A/B into the
+// result in the order the walker always wrote them (blocked / hairpin events, the label
+// ends in state order, the branch event, then the step or the split). Cannot fail.
+void Walker::commit_item(ArmState &arm, Item &item, const std::vector<Succ> &succs) {
+    const uint64_t at = item.ext_bp;
+    HeadPlan &plan = plan_;
+    const size_t nf = plan.followed.size();
+
+    // ---- a cut switch-source list that may have changed what this step commits: a loss,
+    // an entry of a followed successor, or the labels on a blocked / hairpin event. Once
+    // per successor, for the derivation that stands (the last round's); stated as the
+    // arm's switch_sources limitation (§7.0)
+    for (const Cand &c : cands_) {
+        arm.result.switch_sources_cut += c.truncated && c.cut_reaches;
+    }
+    // ---- the re-minimisations this committed step was decided by (greedy_losses)
+    count_reminimisations(arm);
+
+    // ---- commit: events for inadmissible label-carrying successors and followed hairpins
+    for (const Cand &c : cands_) {
+        if (c.state.empty())
+            continue;
+        if (c.admissible() && !(c.hairpin && c.followed))
+            continue;
+        Event ev;
+        ev.at_bp = at;
+        ev.ch = c.succ->ch;
+        ev.labels = labels_of(c.state);
+        ev.labels_total = ev.labels.size();   // the live state is never cut
+        if (c.skipped) {
+            ev.type = EventType::HAIRPIN;
+        } else if (c.blocked) {
+            ev.type = EventType::BLOCKED;
+            ev.reason = c.block_reason;
+            bin(arm, at).blocked_repeat++;
+        } else {
+            ev.type = EventType::HAIRPIN;
+            ev.text = "followed";
+        }
+        push_event(arm, item.segment, std::move(ev));
+    }
+
+    // ---- the label ends decided by the plan, in state order
+    for (size_t i = 0; i < item.state.size(); ++i) {
+        const Entry &src = item.state[i];
+        const SourcePlan &sp = plan.sources[i];
+        if (sp.kind == SourcePlan::SILENT_END) {
+            end_run(arm, src, at, EndReason::LABEL_LOST, item.segment);
+        } else if (sp.kind == SourcePlan::LABEL_END) {
+            end_label(arm, item, src, sp.reason, succs.size(), sp.text, sp.needed);
+        }
+    }
 
     // ---- branch event: an ambiguity taken or any refusal (a quorum or split-limit
     // stop, an excluded source and a successor refused by the budget each recorded one)
-    if (!ambiguous_taken.empty() || !refused.empty()) {
+    if (!plan.ambiguous_taken.empty() || !plan.refused.empty()) {
         assert(at >= arm.last_branch_event_bp);
         arm.last_branch_event_bp = at;
         arm.result.branch_events_total++;
@@ -2770,31 +3635,32 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                 be.chars.push_back(c.succ->ch);
                 be.labels_per_successor.push_back(c.initial_labels);
             }
-            be.ambiguous = ambiguous_taken;
-            be.ambiguous.insert(be.ambiguous.end(), ambiguous_over.begin(), ambiguous_over.end());
+            be.ambiguous = plan.ambiguous_taken;
+            be.ambiguous.insert(be.ambiguous.end(), plan.ambiguous_over.begin(),
+                                plan.ambiguous_over.end());
             std::sort(be.ambiguous.begin(), be.ambiguous.end());
-            be.dropped = dropped;
+            be.dropped = plan.dropped;
             be.labels_affected = be.ambiguous.size() + be.dropped.size();
-            for (BranchEvent::Refusal &r : refused) {
+            for (BranchEvent::Refusal &r : plan.refused) {
                 std::sort(r.labels.begin(), r.labels.end());
                 r.labels.erase(std::unique(r.labels.begin(), r.labels.end()), r.labels.end());
             }
-            be.refused = std::move(refused);
+            be.refused = std::move(plan.refused);
             arm.result.branch_events.push_back(std::move(be));
         }
     }
 
     if (!nf) {
         finish_path(arm, item, std::nullopt);
-        return std::nullopt;
+        return;
     }
 
     // ---- steps
     account_steps(arm, at, nf);
 
     if (nf == 1) {
-        Cand &c = *followed[0];
-        commit_entries(arm, item, item.segment, c.state, at, nullptr);
+        Cand &c = *plan.followed[0];
+        commit_entries(arm, item, item.segment, c.state, at, false);
         arm.walk_seq[item.segment].push_back(c.succ->ch);
         arm.result.segments[item.segment].length_bp++;
         record_edge(arm, item.segment, c);
@@ -2802,13 +3668,15 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         std::swap(item.kmer, c.kmer);       // keep the buffers for the next step
         item.ext_bp = at + 1;
         std::swap(item.state, c.state);
+        item.reserve = plan.child_reserve[0];
+        item.merge_reserve = plan.child_merge_reserve[0];
         arrival(arm, item);
         arm.next.push_back(std::move(item));
-        return std::nullopt;
+        return;
     }
 
     // ---- split
-    Split split { at, item.segment, {}, !ambiguous_taken.empty(), item.state.size(), {} };
+    Split split { at, item.segment, {}, !plan.ambiguous_taken.empty(), item.state.size(), {} };
     {
         GrowthBin &b = bin(arm, at);
         b.splits++;
@@ -2819,9 +3687,9 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         }
     }
     arm.result.segments[item.segment].labels_end = labels_of(item.state);
-    std::vector<uint32_t> taken;
+    begin_split(arm);
     for (size_t j = 0; j < nf; ++j) {
-        Cand &c = *followed[j];
+        Cand &c = *plan.followed[j];
         std::vector<LabelId> child_labels = labels_of(c.state);
         size_t child = new_segment(arm, { item.segment }, at, child_labels, child_labels.size());
         arm.result.segments[item.segment].children.push_back(child);
@@ -2833,7 +3701,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         br.labels_distinct = child_labels.size();
         br.labels = bounded(arm, child_labels, child_labels.size());
         split.branches.push_back(std::move(br));
-        commit_entries(arm, item, child, c.state, at, &taken);
+        commit_entries(arm, item, child, c.state, at, true);
         arm.walk_seq[child].push_back(c.succ->ch);
         arm.result.segments[child].length_bp = 1;
         record_edge(arm, child, c);
@@ -2845,11 +3713,12 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         ni.state = std::move(c.state);
         ni.splits = item.splits + 1;
         ni.path_id = arm.next_path_id++;
+        ni.reserve = plan.child_reserve[j];
+        ni.merge_reserve = plan.child_merge_reserve[j];
         arrival(arm, ni);
         arm.next.push_back(std::move(ni));
     }
     arm.result.splits.push_back(std::move(split));
-    return std::nullopt;
 }
 
 void Walker::check_structure(ArmState &arm, const Item &item, Cand &c) {
@@ -2880,6 +3749,7 @@ void Walker::check_structure(ArmState &arm, const Item &item, Cand &c) {
     bool same = false, opposite = false;
     if (uses.size() <= arm.ancestors.size() + 1) {
         arm.result.edge_reuse_probes += uses.size();
+        checkpoint(false);
         for (const EdgeUse &u : uses) {
             if (!is_ancestor_or_self(arm, u.segment(), item.segment))
                 continue;
@@ -2887,6 +3757,7 @@ void Walker::check_structure(ArmState &arm, const Item &item, Cand &c) {
         }
     } else {
         arm.result.edge_reuse_probes += arm.ancestors.size() + 1;
+        checkpoint(false);
         auto probe = [&](size_t segment) {
             auto jt = arm.used_by_segment.find(EdgeSegKey{ c.key_lo, c.key_hi, segment });
             if (jt == arm.used_by_segment.end())
@@ -2926,6 +3797,22 @@ std::optional<EndReason> Walker::cap_check(const ArmState &arm, size_t nf,
     if (strategy_.on_overflow == Strategy::STOP && live_after > strategy_.max_live_paths)
         return over(live_after, EndReason::MAX_LIVE_PATHS);
     return std::nullopt;
+}
+
+bool Walker::admit(const ArmState &arm, const Item &item, size_t followed) {
+    const uint64_t held = item.reserve + item.merge_reserve;
+    const uint64_t cost = plan_.committed + plan_.reserved();
+    const uint64_t total = accounted();
+    const Admission a { arm.arm, admissions_++, item.ext_bp, item.segment, followed,
+                        total, held, cost, mem_limit_ };
+    // the account after the commit: the head's reservations become its objects and its
+    // children's reservations
+    const uint64_t need = total - held + cost;
+    if ((mem_limit_ && need > mem_limit_) || (hooks_ && hooks_->deny && hooks_->deny(a))) {
+        note_stop(arm, &item, ResourceStop::MEMORY, static_cast<double>(need));
+        return false;
+    }
+    return true;
 }
 
 void Walker::account_steps(ArmState &arm, uint64_t at, size_t nf) {
@@ -2975,13 +3862,21 @@ std::optional<EndReason> Walker::process_item_annotate(ArmState &arm, Item &item
                                                        size_t remaining_in_level) {
     const uint64_t at = item.ext_bp;
     const Arm side = arm.arm;
+    HeadPlan &plan = plan_;
+    plan.clear();
+    checkpoint(true);
     if (succs.empty()) {
+        plan.committed = stop_bytes(arm, item);
+        if (!admit(arm, item, 0))
+            return EndReason::RESOURCE_LIMIT;
+        const uint64_t held = item.reserve + item.merge_reserve;
         finish_path(arm, item, EndReason::DEAD_END);
+        settle(arm, held);
         return std::nullopt;
     }
 
     cands_.resize(succs.size());
-    std::vector<Cand*> followed;
+    std::vector<Cand*> &followed = plan.followed;
     uint8_t blocked = 0;
     for (size_t i = 0; i < succs.size(); ++i) {
         Cand &c = cands_[i];
@@ -3000,6 +3895,52 @@ std::optional<EndReason> Walker::process_item_annotate(ArmState &arm, Item &item
     const size_t nf = followed.size();
     if (auto cap = cap_check(arm, nf, remaining_in_level))
         return cap;
+
+    // ---- COST: every decision of this mode is structural and made above (PLAN); what
+    // the commit below writes is priced from it, so the head is admitted before the
+    // first write (§14)
+    static const State kNoState;
+    uint64_t &cost = plan.committed;
+    for (const Cand &c : cands_) {
+        if (c.followed && !c.hairpin)
+            continue;
+        cost += m_.event + c.present.labels.size() * m_.event_label;
+        plan.new_events++;
+    }
+    if (nf)
+        plan_bins(arm, at + 1);
+    if (!nf) {
+        cost += stop_bytes(arm, item);
+    } else if (nf == 1) {
+        const Cand &c = *followed[0];
+        const auto &sets = arm.result.segments[item.segment].label_sets;
+        // record_present() extends the segment's last run when the node's set equals it
+        const bool extends = !sets.empty() && sets.back().to_bp == at
+            && sets.back().labels_total == c.present.total && sets.back().labels == c.present.labels;
+        cost += m_.step + m_.base
+              + (extends ? 0 : m_.presence_run + c.present.labels.size() * m_.seg_label);
+        if (would_revisit(arm, c.succ->node, at + 1, item.revisiting)) {
+            cost += m_.event + m_.event_label;
+            plan.new_events++;
+        }
+        plan_child(kNoState, c.present.labels.size(), at + 1, arm.chain_len[item.segment]);
+    } else {
+        cost += m_.split + item.present.size() * m_.seg_label;
+        for (const Cand *c : followed) {
+            const size_t n = c->present.labels.size();
+            cost += m_.step + m_.base + m_.split_branch + m_.segment + m_.presence_run
+                  + 3 * n * m_.seg_label;
+            plan.new_segments++;
+            if (would_revisit(arm, c->succ->node, at + 1, false)) {
+                cost += m_.event + m_.event_label;
+                plan.new_events++;
+            }
+            plan_child(kNoState, n, at + 1, arm.chain_len[item.segment] + 1);
+        }
+    }
+    if (!admit(arm, item, nf))
+        return EndReason::RESOURCE_LIMIT;
+    const uint64_t held = item.reserve + item.merge_reserve;
 
     // ---- commit: every successor not followed, and every followed hairpin, is reported
     // with the labels present there — the only way a reader can tell what a blocked
@@ -3026,13 +3967,14 @@ std::optional<EndReason> Walker::process_item_annotate(ArmState &arm, Item &item
             ev.type = EventType::HAIRPIN;
             ev.text = "followed";
         }
-        arm.result.segments[item.segment].events.push_back(std::move(ev));
+        push_event(arm, item.segment, std::move(ev));
     }
 
     if (!nf) {
         // a structural end: the path's reason (no label lineage ends in this mode);
         // a successor that was only a skipped hairpin is a dead end with its event
         finish_path(arm, item, blocked ? block_reason_of_rank(blocked) : EndReason::DEAD_END);
+        settle(arm, held);
         return std::nullopt;
     }
 
@@ -3049,8 +3991,11 @@ std::optional<EndReason> Walker::process_item_annotate(ArmState &arm, Item &item
         item.ext_bp = at + 1;
         item.present = std::move(c.present.labels);
         item.present_total = c.present.total;
+        item.reserve = plan.child_reserve[0];
+        item.merge_reserve = plan.child_merge_reserve[0];
         arrival(arm, item);
         arm.next.push_back(std::move(item));
+        settle(arm, held);
         return std::nullopt;
     }
 
@@ -3087,10 +4032,13 @@ std::optional<EndReason> Walker::process_item_annotate(ArmState &arm, Item &item
         ni.path_id = arm.next_path_id++;
         ni.present = std::move(c.present.labels);
         ni.present_total = c.present.total;
+        ni.reserve = plan.child_reserve[j];
+        ni.merge_reserve = plan.child_merge_reserve[j];
         arrival(arm, ni);
         arm.next.push_back(std::move(ni));
     }
     arm.result.splits.push_back(std::move(split));
+    settle(arm, held);
     return std::nullopt;
 }
 
@@ -3107,35 +4055,34 @@ void Walker::finalize(ArmState &arm) {
     // merge_level unites the edge histories of the routes it joins, so under merging
     // the walks present are those admissible under the united history (§6.10)
     res.completeness_scope = strategy_.merge_reconverge ? "united_history" : "per_path";
+    // The walk's own buffers are MOVED into the result: nothing reads them after this,
+    // and a copy would double the retained bases and leaf data at the very end of the
+    // request, when the reservation for them is already spent.
     for (size_t s = 0; s < res.segments.size(); ++s) {
         Segment &seg = res.segments[s];
         if (strategy_.sequences) {
-            seg.sequence = arm.walk_seq[s];
+            seg.sequence = std::move(arm.walk_seq[s]);
             if (arm.arm == Arm::LEFT)
                 std::reverse(seg.sequence.begin(), seg.sequence.end());
         }
         std::stable_sort(seg.events.begin(), seg.events.end(),
                          [](const Event &a, const Event &b) { return a.at_bp < b.at_bp; });
     }
+    // One PathResult per leaf, in segment order. The chain is NOT materialised (it is
+    // the leaf's first-parent chain, derived when serialised): per leaf this is O(1)
+    // plus its own end labels, so a comb-shaped trie finalises in linear time.
     for (size_t s = 0; s < res.segments.size(); ++s) {
-        const LeafInfo &leaf = arm.leaves[s];
+        LeafInfo &leaf = arm.leaves[s];
         if (!leaf.is_leaf)
             continue;
         PathResult path;
         path.id = res.paths.size();
-        size_t cur = s;
-        while (true) {
-            path.segments.push_back(cur);
-            if (res.segments[cur].parents.empty())
-                break;
-            cur = res.segments[cur].parents[0];
-        }
-        std::reverse(path.segments.begin(), path.segments.end());
+        path.leaf = s;
         path.length_bp = res.segments[s].from_bp + res.segments[s].length_bp;
         path.end_reasons = leaf.end_reasons;
         path.path_reason = leaf.path_reason;
-        path.end_labels = leaf.end_labels;
-        path.continuation = leaf.continuation;
+        path.end_labels = std::move(leaf.end_labels);
+        path.continuation = std::move(leaf.continuation);
         res.paths.push_back(std::move(path));
     }
 }
@@ -3181,6 +4128,79 @@ void Walker::summarize() {
             }
         }
     }
+}
+
+// Annotate mode names a label when a level's fetch first returns it, before any head of
+// the level is admitted. A walk that a budget, a refused admission or the deadline stopped
+// after the fetch can then hold labels only the heads it never committed would have
+// recorded: in label_dict, its L records and label_summary, but in no segment, split or
+// event — a label "met" that appears nowhere in the result (review of stage 2, finding 2).
+// Such a result keeps only the labels it records, in their first-seen order, so that the
+// kept ids keep their relative order and every sorted list stays sorted. (The labels a
+// stop orphans are those first named at or after the first head it censored, i.e. the
+// last ids, so the kept ids do not change at all.) A walk that is not stopped records
+// every label it named — each fetched successor is followed or stated by an event — so
+// this is the identity there. Applied to stops by a request budget or a refused admission
+// only: a cap, and a time stop without a budget, keep their dictionary as it was before
+// stage 2 (they can hold such a label too; changing them would change results that set
+// no budget, which stage 2 leaves byte-identical).
+void Walker::compact_dictionary() {
+    const size_t n = result_.label_dict.size();
+    constexpr LabelId kUnused = std::numeric_limits<LabelId>::max();
+    std::vector<LabelId> to(n, kUnused);
+    // every list of label ids an annotate result holds (it has no runs, label ends or
+    // lineage partitions; REVISIT and RECONVERGE events list segments, not labels)
+    auto each_list = [&](auto f) {
+        for (ArmState &arm : arms_) {
+            ArmResult &r = arm.result;
+            assert(r.runs.empty());
+            for (Segment &seg : r.segments) {
+                f(seg.labels_start);
+                f(seg.labels_end);
+                for (LabelSetRun &run : seg.label_sets) {
+                    f(run.labels);
+                }
+                for (Event &ev : seg.events) {
+                    if (ev.type == EventType::BLOCKED || ev.type == EventType::HAIRPIN)
+                        f(ev.labels);
+                }
+            }
+            for (Split &split : r.splits) {
+                for (SplitBranch &branch : split.branches) {
+                    f(branch.labels);
+                }
+            }
+            for (PathResult &p : r.paths) {
+                assert(p.end_labels.empty());
+                if (p.continuation)
+                    f(p.continuation->labels);
+            }
+        }
+    };
+    each_list([&](const std::vector<LabelId> &labels) {
+        for (LabelId l : labels) {
+            to[l] = 0;
+        }
+    });
+    LabelId kept = 0;
+    for (LabelId l = 0; l < n; ++l) {
+        if (to[l] != kUnused)
+            to[l] = kept++;
+    }
+    if (kept == n)
+        return;
+    each_list([&](std::vector<LabelId> &labels) {
+        for (LabelId &l : labels) {
+            l = to[l];
+        }
+    });
+    std::vector<LabelRef> dict;
+    dict.reserve(kept);
+    for (LabelId l = 0; l < n; ++l) {
+        if (to[l] != kUnused)
+            dict.push_back(std::move(result_.label_dict[l]));
+    }
+    result_.label_dict = std::move(dict);
 }
 
 void Walker::summarize_annotate() {
@@ -3268,11 +4288,35 @@ SeedResult Walker::run() {
     }
     scratch_.init(result_.label_dict.size());
     label_stamp_.assign(result_.label_dict.size(), 0);
+    init_budgets();
 
     arms_[static_cast<size_t>(Arm::LEFT)].arm = Arm::LEFT;
     arms_[static_cast<size_t>(Arm::RIGHT)].arm = Arm::RIGHT;
     for (ArmState &arm : arms_) {
         init_arm(arm);
+        // the bins a stop before the first level can write into
+        if (arm.result.requested)
+            charge_bins(arm, 0);
+    }
+    if (annotate_)
+        charge_dictionary();
+    // ---- ADMIT the depth-0 state (§14) like any head: the dictionary and both roots,
+    // each reserved with what ending and delivering it costs. A result complete to 0 bp
+    // is the shallowest there is, so a budget that does not hold this holds no valid
+    // result at all, and the seed fails before anything per label is delivered. Without
+    // this the depth-0 result was delivered whatever it cost — ~4 KB per label and arm in
+    // detail full, 44 MiB for 2,876 derived labels under a 1 MiB budget, reported as the
+    // soft overshoot (review of stage 2, finding 3).
+    if (mem_limit_ && accounted() > mem_limit_) {
+        const size_t labels = annotate_ ? recorder_->labels().size() : result_.label_dict.size();
+        fail_seed(ResourceStop::MEMORY, static_cast<double>(fixed_base_),
+                  static_cast<double>(accounted()),
+                  "the memory budget (bounds.max_memory_mb = "
+                  + std::to_string(mem_limit_ >> 20) + ") does not hold the seed's depth-0 "
+                  "state: the seed and " + std::to_string(labels) + " label(s), with both "
+                  "arms' roots and what ending and delivering them costs in the requested "
+                  "detail, need " + std::to_string((accounted() + (uint64_t(1) << 20) - 1) >> 20)
+                  + " MiB: no traversal was made");
     }
 
     uint64_t depth = 0;
@@ -3284,6 +4328,14 @@ SeedResult Walker::run() {
         if (!any)
             break;
         if (depth > 0 && time_exceeded()) {
+            depth_ = depth;
+            for (const ArmState &arm : arms_) {
+                if (!arm.frontier.empty()) {
+                    note_stop(arm, &arm.frontier.front(), ResourceStop::TIME,
+                              timer_.elapsed() * 1000.0);
+                    break;
+                }
+            }
             cap_demand_ = timer_.elapsed() * 1000.0;
             for (ArmState &arm : arms_) {
                 stop_frontier(arm, EndReason::TIME_BUDGET);
@@ -3305,9 +4357,23 @@ SeedResult Walker::run() {
     }
     for (ArmState &arm : arms_) {
         finalize(arm);
-        arm.result.pair_evaluations = 0;
+        arm.result.work_units = work_of(arm);
     }
-    arms_[static_cast<size_t>(Arm::RIGHT)].result.pair_evaluations = pair_evaluations_;
+    // a stop by a request budget or a refused admission; a time stop without a budget (and
+    // a cap) keeps its dictionary as before stage 2, so that such a result is unchanged
+    if (annotate_ && result_.resource_stop
+            && (budgeted_ || result_.resource_stop->resource != ResourceStop::TIME))
+        compact_dictionary();
+    // every head ended within what it held: nothing is reserved any more
+    assert(reserved_ == 0);
+    ResourceAccount &account = result_.account;
+    account.memory_limit = mem_limit_;
+    account.memory_peak = peak_;
+    account.memory_final = accounted();
+    account.soft_overshoot = overshoot_;
+    account.work_limit = strategy_.max_work_units;
+    account.work_seed = seed_work_;
+    account.work_used = work_used();
     if (annotate_) {
         summarize_annotate();
     } else {
@@ -3468,24 +4534,39 @@ SeedResult traverse_seed(LabelOracle &oracle,
                          const Seed &seed,
                          const Strategy &strategy,
                          const LabelChangeCost &cost,
-                         const std::string &release_id) {
+                         const std::string &release_id,
+                         const WalkerHooks *hooks) {
     validate_strategy(strategy, cost);
-    Walker walker(oracle, seed, strategy, cost, release_id);
+    Walker walker(oracle, seed, strategy, cost, release_id, hooks);
     return walker.run();
 }
 
 std::string spell_path(const ArmResult &arm, const PathResult &path) {
+    // walked leaf -> root through first parents: natural orientation is root -> leaf on
+    // the right arm (so the pieces are reversed at the end) and leaf -> root on the left
+    // (whose segment sequences are stored natural, i.e. reversed walking order)
+    std::vector<const std::string*> pieces;
+    walk_path_leaf_first(arm, path, [&](size_t s) {
+        pieces.push_back(&arm.segments[s].sequence);
+        return true;
+    });
+    if (arm.arm == Arm::RIGHT)
+        std::reverse(pieces.begin(), pieces.end());
     std::string out;
-    if (arm.arm == Arm::RIGHT) {
-        for (size_t s : path.segments) {
-            out += arm.segments[s].sequence;
-        }
-    } else {
-        for (auto it = path.segments.rbegin(); it != path.segments.rend(); ++it) {
-            out += arm.segments[*it].sequence;
-        }
+    for (const std::string *p : pieces) {
+        out += *p;
     }
     return out;
+}
+
+std::vector<size_t> path_segments(const ArmResult &arm, const PathResult &path) {
+    std::vector<size_t> chain;
+    walk_path_leaf_first(arm, path, [&](size_t s) {
+        chain.push_back(s);
+        return true;
+    });
+    std::reverse(chain.begin(), chain.end());
+    return chain;
 }
 
 } // namespace traversal

@@ -304,7 +304,7 @@ std::string serialize(const SeedResult &r) {
         }
         for (const PathResult &p : a.paths) {
             os << "\n P" << p.id << ' ' << p.length_bp << ' ';
-            for (size_t s : p.segments) os << s << ',';
+            for (size_t s : path_segments(a, p)) os << s << ',';
             os << ' ';
             for (uint32_t x : p.end_reasons) os << x << ',';
             os << ' ' << (p.path_reason ? to_string(*p.path_reason) : "-") << ' ';
@@ -844,7 +844,7 @@ TYPED_TEST(WalkerTest, Diamond) {
         for (const auto &path : rm.paths) {
             ASSERT_EQ(1u, path.end_labels.size());
             LabelId l = path.end_labels[0].label;
-            std::string route = route_of(rm, path.segments.back(), l);
+            std::string route = route_of(rm, path.leaf, l);
             EXPECT_EQ(l == 0 ? P + Y + Q : P2 + Y + Q2, route);
             EXPECT_TRUE(supports_sequence(l == 0 ? seqA : seqB, X + route, canonical));
         }
@@ -876,7 +876,7 @@ TYPED_TEST(WalkerTest, Diamond) {
                 EXPECT_EQ(names.size(), again.num_seed_labels);
                 // every end label supports its own route
                 for (const auto &e : path.end_labels) {
-                    std::string route = route_of(arm, path.segments.back(), e.label);
+                    std::string route = route_of(arm, path.leaf, e.label);
                     EXPECT_TRUE(supports_sequence(e.label == 0 ? seqA : seqB, X + route, canonical))
                         << mode << " extra " << extra << " label " << e.label;
                 }
@@ -3136,7 +3136,7 @@ TEST(Walker, LabelFreeBeamFollowsTheMostSupportedBranch) {
     EXPECT_EQ(1u, arm.complete_to_bp);
     // the per-node support is on record: 3 labels along P, 2 along P1
     auto labels_at_depth = [&](uint64_t d) -> size_t {
-        for (size_t s : kept->segments) {
+        for (size_t s : path_segments(arm, *kept)) {
             for (const LabelSetRun &run : arm.segments[s].label_sets) {
                 if (run.from_bp < d && d <= run.to_bp) {
                     EXPECT_FALSE(run.truncated());
@@ -3865,5 +3865,79 @@ TEST(Walker, GreedyLossesAndColumnTracesAreStated) {
         }
     }
 }
+
+// Every counter belongs to the arm whose head was processed (review: Walker::run used to
+// assign ALL pair evaluations to the right arm, so a left-arm greedy re-minimisation read
+// pair_evaluations 0, its greedy_losses was not stated and its label_evidence read
+// complete). The ReminimisationRounds fixture (two rounds under a constant cost and
+// loss_budget 1) on the right, its reverse complement walked to the left, and both at
+// once with a plain block on the right: each re-minimising arm states greedy_losses and
+// lower_bound, and each arm's counters equal its own single-arm run's.
+TEST(Walker, CountersAreAttributedToTheirArm) {
+    std::vector<std::string> b;
+    for (uint32_t seed = 4; ; ++seed) {
+        b = clean_blocks({ 30, 25, 30, 25, 30, 30 }, seed);
+        if (b[1][0] != b[3][0])
+            break;
+    }
+    const std::string &X = b[0], &P = b[1], &Y = b[2], &Q = b[3], &Z = b[4], &R = b[5];
+    struct Case {
+        const char *name;
+        std::vector<std::string> records;
+        std::string seed;
+        const char *direction;
+        bool left_greedy, right_greedy;
+    };
+    const std::vector<Case> cases {
+        { "right", { X + P + Y, X + Q + Z, X + P + Y }, X, "right", false, true },
+        // the mirror: walking left from rc(X) meets rc(P) / rc(Q), whose last bases differ
+        { "left", { rc(Y) + rc(P) + rc(X), rc(Z) + rc(Q) + rc(X), rc(Y) + rc(P) + rc(X) },
+          rc(X), "left", true, false },
+        // only the left arm re-minimises; the right arm prices its own switches along R
+        { "both", { rc(Y) + rc(P) + rc(X) + R, rc(Z) + rc(Q) + rc(X) + R,
+                    rc(Y) + rc(P) + rc(X) + R }, rc(X), "both", true, false },
+    };
+    for (const Case &c : cases) {
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, c.records, { "A", "A", "B" }, DeBruijnGraph::BASIC);
+        auto traverse = [&](const std::string &direction) {
+            Json::Value r;
+            Json::Value seed;
+            seed["sequence"] = c.seed;
+            seed["labels"].append("A");
+            seed["labels"].append("B");
+            r["seeds"].append(seed);
+            r["strategy"] = parse_json(R"({"labels": {"change_cost": {"model": "constant",
+                "value": 1}, "loss_budget": 1}})");
+            r["strategy"]["direction"] = direction;
+            return cli::process_traverse_request(r, *anno, "", cli::TraverseLimits())["results"][0];
+        };
+        const Json::Value res = traverse(c.direction);
+        for (const char *side : { "left", "right" }) {
+            if (!res["arms"].isMember(side))
+                continue;
+            const Json::Value &arm = res["arms"][side];
+            const bool expected = std::string(side) == "left" ? c.left_greedy : c.right_greedy;
+            const auto kinds = kinds_of(arm["limitations"]);
+            EXPECT_EQ(expected ? 1 : 0, std::count(kinds.begin(), kinds.end(), "greedy_losses"))
+                << c.name << ' ' << side << arm["limitations"].toStyledString();
+            if (expected) {
+                EXPECT_EQ(2u, arm["counters"]["max_reminimisation_rounds"].asUInt64())
+                    << c.name << ' ' << side;
+                EXPECT_GT(arm["counters"]["pair_evaluations"].asUInt64(), 0u) << c.name << ' ' << side;
+            }
+            // the arm's counters are its own: the same as when it is walked alone
+            const Json::Value alone = traverse(side);
+            EXPECT_EQ(alone["arms"][side]["counters"], arm["counters"]) << c.name << ' ' << side;
+        }
+        EXPECT_EQ("lower_bound", res["outcome"]["label_evidence"].asString()) << c.name;
+        if (std::string(c.direction) == "both") {
+            // the right arm priced switches of its own along R (and only those)
+            EXPECT_GT(res["arms"]["right"]["counters"]["pair_evaluations"].asUInt64(), 0u);
+            EXPECT_EQ(0u, res["arms"]["right"]["counters"]["max_reminimisation_rounds"].asUInt64());
+        }
+    }
+}
+
 
 } // namespace

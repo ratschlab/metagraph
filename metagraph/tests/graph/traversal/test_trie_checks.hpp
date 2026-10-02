@@ -150,7 +150,7 @@ inline trie::SwitchTrie switch_leaves(const SeedResult &r, size_t a) {
         trie::SwitchLeaf leaf;
         for (const LabelEnd &e : p.end_labels)
             leaf.state[r.label_dict.at(e.label).name] = e.loss;
-        for (size_t s : p.segments) {
+        for (size_t s : path_segments(arm, p)) {
             for (const Event &ev : arm.segments[s].events) {
                 if (ev.type == EventType::SWITCH)
                     leaf.switches.emplace_back(ev.at_bp, r.label_dict.at(ev.to).name);

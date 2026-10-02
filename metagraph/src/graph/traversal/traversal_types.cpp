@@ -51,6 +51,7 @@ const char* to_string(EndReason reason) {
         case EndReason::MAX_OUTPUT: return "max_output_bp";
         case EndReason::TIME_BUDGET: return "time_budget";
         case EndReason::BEAM_PRUNED: return "beam_pruned";
+        case EndReason::RESOURCE_LIMIT: return "resource_limit";
     }
     return "unknown";
 }
@@ -63,6 +64,7 @@ bool is_resource_stop(EndReason reason) {
         case EndReason::MAX_OUTPUT:
         case EndReason::TIME_BUDGET:
         case EndReason::BEAM_PRUNED:
+        case EndReason::RESOURCE_LIMIT:
             return true;
         default:
             return false;
