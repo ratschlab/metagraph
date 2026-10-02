@@ -407,6 +407,27 @@ From round 2 (all eleven findings; the commits after `61e82859`):
 20. **Fetch counters in the invariant result** → `rows_fetched`, `tuple_rows_fetched`, `coords_mapped` moved to
     `timing`; `result.annotation` keeps `access_path`, `keys_mapped`, `rows_requested`, `direct_reads`.
 
+From round 3 (the commits after `373df0a2`):
+
+21. **Checker inferred discards from missing children; forged `blocked` accepted** → `BranchEvent::refused`
+    (explicit per-successor `{char, cause, labels}` for branch limit, quorum, split limit, loss budget, emitted by
+    the walker and serialized); `branch_recorded()` accepts only a Refusal naming label and char, or a
+    `blocked`/`hairpin` event whose fact is re-derived from seed + walk (the (k+1)-mer already used, the seed
+    k-mer entered, the self-RC step); `TunedCheckerRejectsADeletedBranchUnderASharedLabel`,
+    `TunedCheckerRejectsAForgedStructuralBlock`.
+22. **Merged checker rejected united-history ends** → route support and termination verified separately; at or
+    after a join any structural block is a legitimate end (`rejoined_seed` additionally cross-checked against the
+    keep run's own blocked event at that node); `MergedCheckerAcceptsAUnitedHistoryTermination`,
+    `MergedCheckerAcceptsGenuineDenseMerges`. Leaf `end_labels`/`end_reasons` are cross-checked against the
+    label-end events (the "redundant representation" boundary you noted).
+23. **Derived header vs `resolve_label()`** → round-trip through the explicit resolver, kind + column + seq_id
+    (`DerivedHeaderMustNotBeAColumnName`).
+24. **Beam ranked by the capped list** → `present_total`; spec: the beam keeps the most supported heads whatever
+    `frontier.order` is (`LabelFreeBeamRanksByTheTrueCount`).
+25. Censored reference ends are unknown ends (`CensoredReferenceBoundaryIsUnknown`); radius-complete heads
+    excluded from `frontier_remaining`; §6.11 `direct_bp` wording restored to route support;
+    `completeness_scope: per_path | united_history` per arm.
+
 Not changed, by decision (see §5.5 / §7): the trace seed cap ordering (presence → cap → trace validation),
 repeated edges under trace, the even-k palindromic-node rule, the constrain-mode merge default, `switch_on: any`
 without a reference, and `switch_on: loss` being per successor (§5.2.7 — the latter is the one I intend to

@@ -633,7 +633,11 @@ so no new order is needed; what the bound needs is a **per-level completion boun
   used, and `complete_to_bp` then quantifies over the walks admissible under the *united* history — fewer than
   the per-path set. The per-path claim holds only with `keep`, which the `exhaustive` preset forces and which is
   the default in `annotate` mode (the mode that promises "the whole trie"); in `constrain` mode merging stays the
-  default and the response's `walk_rule` carries the qualification.
+  default and the response's `walk_rule` carries the qualification. Every arm states the scope structurally as
+  well, `completeness_scope: per_path | united_history` (§7.4), so that a consumer verifying a merged result
+  against the exhaustive trie knows which ends it may compare: route support is per-label and scope-free, but
+  a structural block (`edge_reuse`, `edge_reuse_rc`, `rejoined_seed` by block precedence) on a route that
+  passed a merge is decided on the united history and need not be where the per-path trie ends the label.
 - The depth at which the structural trie stops is itself a measurement: "the unconstrained trie explodes at 40 bp
   here" is a reportable property of the locus.
 
@@ -653,14 +657,21 @@ tool for an agent exploring the graph *locally* before committing to labels, and
   `complete_to_bp`, the depth before the first pruning), and `label_mode: annotate`.
 - **What the evidence is.** The labels present at every node are recorded (`segments[].label_sets`, true counts),
   so the agent *sees* the support change along the path — the carrier set shrinking, a new set taking over —
-  without constraining by it. Per label, `label_summary.direct_bp` is how far that sample follows the spelled
-  walk contiguously from the seed boundary (exact when no list was cut); that, not the walk's length, is the
-  per-sample claim. A stretch supported by no label at all is recorded as an empty set.
-- **How the beam ranks.** `order: most_supported_first` keeps the heads with the most labels *recorded at the head
-  node* (in `constrain` mode: the most labels alive), ties broken by `extension_bp` and `path_id`, so the result is
-  deterministic and a width-1 beam follows the majority continuation at each fork — the most-supported local
-  path, not an arbitrary one. `breadth_first` keeps the earliest-created heads (no preference) and is the default
-  only because it is the completeness order; for exploration pass `most_supported_first` explicitly.
+  without constraining by it. Per label, `label_summary.direct_bp` is the longest stretch from the seed boundary
+  on which the label is recorded at every node of **some recorded route** — existential over every route the
+  result holds, the stubs the beam pruned included (a one-base stub left at a fork gives its carriers
+  `direct_bp ≥ 1`), exact when no list was cut. It is label-consistent route support (§7.1), **not** support
+  along the spelled walk: how far a sample follows *this* walk is read off the walk's own `label_sets`. A
+  stretch supported by no label at all is recorded as an empty set.
+- **How the beam ranks.** When the frontier overflows, the beam keeps the heads with the most labels *recorded
+  at the head node* — the **true count**, `labels_total`, not the list cut at `labels.max_labels_per_node`
+  (in `constrain` mode: the most labels alive) — ties broken by `extension_bp` and `path_id`, so the result is
+  deterministic and a width-1 beam follows the majority continuation at each fork, the most-supported local
+  path rather than an arbitrary one. **The beam ranks by support whatever `frontier.order` says:** `order`
+  only sets the sequence in which the heads of one level are expanded (and so where a size cap trips within
+  a level), it never decides which heads a beam retains; there is no earliest-created beam. `breadth_first`
+  stays the default only because it is the completeness order; for exploration pass `most_supported_first`
+  so that the expansion order matches the beam's.
 - **How to use it.** Explore with a beam → read where the support changes → either constrain
   (`labels.mode: constrain`, naming the carriers seen) or re-seed from a `continuation` → extend. The design
   note's "probe cheaply, read the diagnostics, retune" loop; the beam is the cheap probe that reaches far, the
@@ -735,8 +746,14 @@ tool for an agent exploring the graph *locally* before committing to labels, and
   reason, steps.
 - `branch_events[arm]`: the first `max_branch_events` in queue order **plus** the top `max_branch_events` by labels
   affected; each with position, successor characters, per-successor label counts and lookahead
-  `{bp_until_end_or_window, reason}`, ambiguous labels, labels dropped by `branch`/`minority`/`loss_budget`;
-  `branch_events_truncated` = total − shown.
+  `{bp_until_end_or_window, reason}`, ambiguous labels, labels dropped by `branch`/`minority`/`loss_budget`, and
+  `refused: [{char, cause, labels}]` — one entry per successor the walker decided **not** to follow for labels
+  whose lineage would have continued on it, with the cause (`minority`, `below_min_labels`, `split_limit`,
+  `branch` for an ambiguous source over its allowance, `loss_budget` for a switch only above the budget) and
+  those labels. This is the explicit per-successor refusal evidence the tuned-run property (§6.9) is checked
+  against: `dropped` and `ambiguous` alone cannot tell a refused successor from one that was followed and
+  then lost from the output, and a missing branch says nothing about why it is missing. A step with a refusal
+  always emits a branch event; `branch_events_truncated` = total − shown.
 - `needed_budget` histogram per arm (from `loss_budget` events); `cost_preview` for P under pairwise models
   (min/median/max of `cost(seed label → extra)`, units stated).
 - `counters`: steps, successor enumerations, annotation access (path used, keys mapped, rows reconstructed,
@@ -764,7 +781,11 @@ including `label_modes`), and `walk_rule` (§6.10).
 
 Per arm, in both modes:
 
-- `complete_to_bp` (§6.10) next to `status`, `frontier_remaining` and `cap_trigger`.
+- `complete_to_bp` (§6.10) next to `status`, `frontier_remaining` and `cap_trigger`, with
+  `completeness_scope: per_path | united_history` naming what it quantifies over (`per_path` under
+  `on_reconverge: keep`, `united_history` under `merge`) so that a checker can pick the termination scope it
+  verifies against instead of parsing `walk_rule`. `frontier_remaining` and `cap_trigger` count the heads a cap
+  cut, not heads that had already reached the radius (those end as `max_extension_bp`).
 - `labels_per_node: {cap, max_seen, nodes_truncated}` — `cap` is `labels.max_labels_per_node`, `max_seen` the
   largest true label count met at a node, `nodes_truncated` how many recorded lists lost labels to the cap: the
   root's boundary list, every node entered, every successor not taken (listed on its `blocked` / `hairpin`
