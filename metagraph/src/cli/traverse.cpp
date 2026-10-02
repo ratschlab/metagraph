@@ -591,6 +591,9 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     // the completeness guarantee (§6.10): every admissible walk of at most this many
     // bases is present; equals bounds.max_extension_bp exactly when status is complete
     j["complete_to_bp"] = uint_json(arm.complete_to_bp);
+    // what it quantifies over: the per-path edge history (on_reconverge keep) or the
+    // united history of merged routes (merge), see §6.10
+    j["completeness_scope"] = arm.completeness_scope;
     // per-node label lists cut by labels.max_labels_per_node: non-zero means the
     // recorded sets are incomplete and must not be read as "these labels and no other"
     Json::Value lpn;
@@ -766,6 +769,16 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
         bj["labels_per_successor"] = lps;
         bj["ambiguous"] = labels_json(b.ambiguous);
         bj["dropped"] = labels_json(b.dropped);
+        // per successor not followed for labels present on it: why, and for which
+        Json::Value refused(Json::arrayValue);
+        for (const auto &r : b.refused) {
+            Json::Value rj;
+            rj["char"] = std::string(1, r.ch);
+            rj["cause"] = r.cause;
+            rj["labels"] = labels_json(r.labels);
+            refused.append(rj);
+        }
+        bj["refused"] = refused;
         bes.append(bj);
     }
     j["branch_events"] = bes;

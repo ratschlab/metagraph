@@ -2736,6 +2736,61 @@ TEST(WalkerCoord, DerivedHeaderMustResolveBackToItsColumn) {
 }
 
 
+// Round 3, finding 3: a derived header that is ALSO the name of an annotation column.
+// Column "ACC" holds an unrelated record (header "decoy"); column B's record carries
+// the seed under the header "ACC". find_header("ACC") gives B's record, so the old
+// round-trip check passed — but an explicit label list resolves "ACC" to the COLUMN
+// first, a label that does not carry the seed. The derivation now round-trips through
+// the resolver the explicit path uses and refuses; the column kind still derives B,
+// and B explicitly still works.
+TEST(WalkerCoord, DerivedHeaderMustNotBeAColumnName) {
+    auto b = clean_blocks({ 40, 40, 30 }, 941);
+    const std::string &D = b[0], &M = b[1], &T = b[2];
+    const std::string in_acc = D, in_b = M + T;   // the seed M is only in column B's record
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        kK, { in_acc, in_b }, { "ACC", "B" }, DeBruijnGraph::BASIC, true, { 0, 0 });
+    const auto &enc = anno->get_annotator().get_label_encoder();
+    std::vector<std::vector<std::string>> headers(2);
+    std::vector<std::vector<uint64_t>> num_kmers(2);
+    headers[enc.encode("ACC")] = { "decoy" };
+    num_kmers[enc.encode("ACC")] = { in_acc.size() - kK + 1 };
+    headers[enc.encode("B")] = { "ACC" };
+    num_kmers[enc.encode("B")] = { in_b.size() - kK + 1 };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    LabelOracle oracle(*anno, &cth);
+    // what the explicit path makes of the name: the column, and the header is B's
+    EXPECT_EQ(LabelKind::COLUMN, oracle.resolve_label("ACC").kind);
+    ASSERT_TRUE(oracle.find_header("ACC").has_value());
+    EXPECT_EQ(static_cast<uint64_t>(enc.encode("B")),
+              static_cast<uint64_t>(oracle.find_header("ACC")->column));
+
+    Seed seed;
+    seed.sequence = M;
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    try {
+        traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        FAIL() << "a derived header that an explicit list resolves to a column was accepted";
+    } catch (const SeedDerivationError &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("'ACC'")) << e.what();
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("name of an annotation column")) << e.what();
+    }
+    // the column kind derives B, and B explicitly still works
+    st.seed_label_kind = LabelKind::COLUMN;
+    auto by_column = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    ASSERT_EQ(1u, by_column.label_dict.size());
+    EXPECT_EQ("B", by_column.label_dict[0].name);
+    EXPECT_EQ(LabelKind::COLUMN, by_column.label_dict[0].kind);
+    EXPECT_EQ(T.size(), by_column.arms[kRight].paths[0].length_bp);
+    seed.labels = { "B" };
+    auto explicitly = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    EXPECT_EQ(T.size(), explicitly.arms[kRight].paths[0].length_bp);
+    // and the name the old check would have echoed does not carry the seed explicitly
+    seed.labels = { "ACC" };
+    EXPECT_THROW(traverse_seed(oracle, seed, st, LabelChangeCost::forbid()), std::invalid_argument);
+}
+
+
 // Whether a seed's labels can be derived must not depend on annotation.batch_kmers. A
 // header record A^66000·tail: the k-mer A^11 alone carries ~66k coordinates, over the
 // guard for max_seed_labels = 1; the cheapest-row choice and the guard look at a window
@@ -2803,6 +2858,14 @@ TEST(Walker, HeadsAtTheRadiusAreCompleteWhenACapTrips) {
     ASSERT_EQ(2u, ends.size());
     EXPECT_STREQ("max_extension_bp", to_string(ends.at(2)));
     EXPECT_STREQ("max_steps", to_string(ends.at(1)));
+    // the head at the radius is complete, not remaining: one path and its one label
+    // were cut, and that is what the frontier and the cap trigger report
+    EXPECT_EQ(1u, arm.frontier_live_paths);
+    EXPECT_EQ(1u, arm.frontier_live_labels);
+    ASSERT_TRUE(arm.cap_trigger.has_value());
+    EXPECT_EQ(1u, arm.cap_trigger->live_paths);
+    EXPECT_EQ(1u, arm.cap_trigger->live_labels);
+    EXPECT_EQ(1u, arm.cap_trigger->at_bp);
 }
 
 
@@ -2894,6 +2957,8 @@ TEST(Walker, MergedWalkRuleIsQualified) {
         auto r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
         const ArmResult &arm = r.arms[kRight];
         EXPECT_EQ(ArmResult::COMPLETE, arm.status) << merge;
+        // the scope of the certificate is a field, not only prose
+        EXPECT_STREQ(merge ? "united_history" : "per_path", arm.completeness_scope);
         const std::string rule = walk_rule_statement(st, oracle);
         if (!merge) {
             EXPECT_TRUE(spells_prefix(arm, 0, P + R + Q + E)) << "keep lost A's own walk";
@@ -2977,6 +3042,55 @@ TEST(Walker, LabelFreeBeamFollowsTheMostSupportedBranch) {
     EXPECT_EQ(P.size() + P1.size(), direct["B"]);
     EXPECT_EQ(P.size() + 1, direct["C"]);
     EXPECT_EQ(1u, direct["D"]);
+}
+
+
+// Round 3, finding 4: the beam ranked heads by the RECORDED label list, which
+// labels.max_labels_per_node cuts — with a cap of 1 a branch carried by one label and
+// one carried by three tied, and the tie went to the head created first. The minority
+// branch here is the one enumerated first (its first base sorts lower); the TRUE count
+// ranks the three-label branch above it, under a cap of 1 as under none, and under
+// either frontier order, since the beam keeps the most supported heads whatever order
+// expands a level (§6.11).
+TEST(Walker, LabelFreeBeamRanksByTheTrueCount) {
+    auto b = clean_blocks({ 30, 40, 40 }, 664);
+    for (uint32_t s = 665; b[1][0] >= b[2][0]; ++s)
+        b = clean_blocks({ 30, 40, 40 }, s);
+    const std::string &X = b[0], &minor = b[1], &major = b[2];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        kK, { X + minor, X + major, X + major, X + major }, { "A", "B", "C", "D" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    for (auto order : { Strategy::BREADTH_FIRST, Strategy::MOST_SUPPORTED_FIRST }) {
+        for (size_t cap : { size_t(1), size_t(64) }) {
+            const std::string what = "order " + std::to_string(order) + " cap " + std::to_string(cap);
+            Seed seed;
+            seed.sequence = X;
+            Strategy st;
+            st.label_mode = LabelMode::ANNOTATE;
+            st.direction = Strategy::RIGHT;
+            st.merge_reconverge = false;
+            st.on_overflow = Strategy::BEAM;
+            st.max_live_paths = 1;
+            st.order = order;
+            st.max_extension_bp = 100;
+            st.max_labels_per_node = cap;
+            auto r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+            const ArmResult &arm = r.arms[kRight];
+            EXPECT_EQ(ArmResult::PRUNED, arm.status) << what;
+            // the cut is reported; it must not have decided the ranking
+            EXPECT_EQ(cap == 1, arm.nodes_labels_truncated > 0) << what;
+            const PathResult *kept = nullptr;
+            for (const PathResult &p : arm.paths) {
+                ASSERT_TRUE(p.path_reason.has_value()) << what;
+                if (*p.path_reason == EndReason::BEAM_PRUNED)
+                    continue;
+                EXPECT_EQ(nullptr, kept) << what << ": two walks survived a beam of width 1";
+                kept = &p;
+            }
+            ASSERT_NE(nullptr, kept) << what;
+            EXPECT_EQ(major, spell_path(arm, *kept)) << what << ": the beam kept the minority branch";
+        }
+    }
 }
 
 } // namespace

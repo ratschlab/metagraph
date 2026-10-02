@@ -387,6 +387,22 @@ struct BranchEvent {
     std::vector<LabelId> ambiguous;
     std::vector<LabelId> dropped;
     size_t labels_affected;
+    // A successor the walker decided NOT to follow for labels whose lineage would have
+    // continued on it: the successor's base (walking direction), why, and those labels
+    // (sources alive at the node, ascending). |cause| is "minority", "below_min_labels"
+    // or "split_limit" (the quorum and split-limit texts of the BRANCH ends), "branch"
+    // (an ambiguous source over its allowance, whose entries on every successor are
+    // removed) or "loss_budget" (the only switch into the successor costs more than the
+    // budget). This is the walker's explicit per-successor refusal evidence: |dropped|
+    // and |ambiguous| alone cannot tell a successor that was refused from one that was
+    // followed and then deleted from the output (review round 3, finding 1), and a
+    // missing child says nothing about why it is missing.
+    struct Refusal {
+        char ch;
+        const char *cause;
+        std::vector<LabelId> labels;
+    };
+    std::vector<Refusal> refused;
 };
 
 struct CapTrigger {
@@ -422,6 +438,13 @@ struct ArmResult {
      * them. It equals Strategy::max_extension_bp exactly when status == COMPLETE.
      */
     uint64_t complete_to_bp = 0;
+    // What "every admissible walk" quantifies over (§6.10): "per_path" under
+    // on_reconverge keep (the walk rule's own per-path edge history), "united_history"
+    // under merge, where a merge unites the edge histories of the routes it joins and
+    // the set of walks present is the smaller one admissible under that union. Stated
+    // as a field, not only in walk_rule's prose, so that a checker can pick the
+    // termination scope it verifies against (review round 3).
+    const char *completeness_scope = "per_path";
     // Per-node label lists cut by Strategy::max_labels_per_node: how many recorded
     // positions (annotate mode: the root's boundary node, every node entered and every
     // not followed successor listed on a BLOCKED / HAIRPIN event; both modes:

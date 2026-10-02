@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iterator>
 #include <stdexcept>
+#include <string_view>
 #include <tuple>
 
 #include <tsl/hopscotch_map.h>
@@ -66,6 +67,11 @@ namespace {
  *   Event::text; a label whose only continuation is a skipped hairpin ends with
  *   DEAD_END, text "hairpin"; a label cut from the switch sources by
  *   max_switch_sources ends with LABEL_LOST, text "switch_sources".
+ * - Every successor the walker refuses to a label whose lineage would have continued
+ *   on it (quorum, split limit, branch limit, loss budget) is stated on the step's
+ *   BranchEvent as a Refusal (§7.2): the tuned-run checker takes only that, or a
+ *   structural block it can verify itself, as evidence for an omission — a missing
+ *   child says nothing about why it is missing.
  * - Hairpins (§6.5): with skip_hairpins the self-RC step is inadmissible and gets a
  *   HAIRPIN event; without it the step is followed, flagged with a HAIRPIN event
  *   (text "followed") on the parent segment and never counts toward ambiguity
@@ -473,11 +479,12 @@ class Walker {
     void mark_ancestors(ArmState &arm, size_t seg);
     bool is_ancestor_or_self(const ArmState &arm, size_t anc, size_t seg) const;
     void record_live(ArmState &arm, uint64_t bp, const std::vector<Item> &items);
-    // distinct labels on the heads a[from_a..] and b; |*exact| is cleared when a head
-    // carries a list cut by max_labels_per_node (annotate mode), so the count is a
-    // lower bound
+    // distinct labels on the heads a[from_a..] and b below extension depth |below_bp|;
+    // |*exact| is cleared when a head carries a list cut by max_labels_per_node
+    // (annotate mode), so the count is a lower bound
     size_t distinct_labels(const std::vector<Item> &a, const std::vector<Item> &b,
-                           size_t from_a, bool *exact);
+                           size_t from_a, bool *exact,
+                           uint64_t below_bp = std::numeric_limits<uint64_t>::max());
     void finalize(ArmState &arm);
     void summarize();
 
@@ -1067,20 +1074,26 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         "seed_label_kind to \"column\" or name the labels explicitly.");
             }
         }
-        // ... and a header that also occurs in a column NOT carrying the seed is just as
-        // unusable: an explicit list resolves a name to the FIRST column holding it,
-        // which need not be the derived one. Every derived name must resolve back to its
-        // own (column, seq_id).
+        // ... and a header that an explicit list would resolve to something else is just
+        // as unusable. Every derived name must round-trip through the resolver the
+        // explicit path uses, resolve_label(): it tries column names FIRST, so a header
+        // spelled like a column resolves to that column (whatever find_header() would say:
+        // review round 3, finding 3), and a header held by several columns resolves to
+        // the first of them, which need not be the derived one.
         for (const Key &key : live) {
             const std::string &name = name_of(key);
-            const std::optional<LabelRef> back = oracle_.find_header(name);
-            if (!back || back->column != key.first || back->seq_id != key.second) {
+            const LabelRef back = oracle_.resolve_label(name);   // the header exists: no throw
+            if (back.kind != LabelKind::HEADER || back.column != key.first
+                    || back.seq_id != key.second) {
+                const std::string resolves_to = back.kind == LabelKind::COLUMN
+                    ? "is also the name of an annotation column"
+                    : "also occurs in another annotation column ("
+                          + oracle_.column_name(back.column) + ")";
                 throw SeedDerivationError(
                         "The labels derived from the seed are not resubmittable: the sequence "
-                        "header '" + name + "' also occurs in another annotation column"
-                        + (back ? " (" + oracle_.column_name(back->column) + ")" : std::string())
-                        + ", which an explicit label list would resolve it to. Set "
-                          "seed_label_kind to \"column\" or name the labels explicitly.");
+                        "header '" + name + "' " + resolves_to + ", which an explicit label list "
+                        "would resolve it to. Set seed_label_kind to \"column\" or name the "
+                        "labels explicitly.");
             }
         }
     }
@@ -1398,7 +1411,7 @@ bool Walker::is_ancestor_or_self(const ArmState &arm, size_t anc, size_t seg) co
 }
 
 size_t Walker::distinct_labels(const std::vector<Item> &a, const std::vector<Item> &b,
-                               size_t from_a, bool *exact) {
+                               size_t from_a, bool *exact, uint64_t below_bp) {
     ++label_epoch_;
     size_t n = 0;
     *exact = true;
@@ -1412,6 +1425,8 @@ size_t Walker::distinct_labels(const std::vector<Item> &a, const std::vector<Ite
         }
     };
     auto count = [&](const Item &item) {
+        if (item.ext_bp >= below_bp)
+            return;
         if (annotate_) {
             // a cut list hides labels: the count over it is a lower bound
             if (item.present_total > item.present.size())
@@ -1749,9 +1764,11 @@ void Walker::sort_items(std::vector<Item> &items) const {
         case Strategy::MOST_SUPPORTED_FIRST: {
             // support = the labels alive on the head (constrain) or recorded at its node
             // (annotate), so that a label-free beam follows the majority continuation at a
-            // fork instead of whichever head was created first (spec §6.11)
+            // fork instead of whichever head was created first (spec §6.11). The TRUE
+            // count, not the recorded list: that list is cut at max_labels_per_node, and
+            // ranking by it would tie a 65-label branch with a 10,000-label one
             auto support = [this](const Item &item) {
-                return annotate_ ? item.present.size() : item.state.size();
+                return annotate_ ? item.present_total : item.state.size();
             };
             std::sort(items.begin(), items.end(), [&](const Item &a, const Item &b) {
                 return std::make_tuple(support(b), min_loss(a.state), a.path_id)
@@ -2023,11 +2040,14 @@ void Walker::beam(ArmState &arm, uint64_t depth) {
     for (size_t i = 0; i < order.size(); ++i) {
         order[i] = i;
     }
-    // most supported first: the labels alive on the head (constrain) or recorded at its
-    // node (annotate) — a label-free beam then follows the majority continuation at a
-    // fork rather than whichever head was created first (spec §6.11)
+    // most supported first, whatever Strategy::order (which only sets the expansion
+    // order within a level): the labels alive on the head (constrain) or recorded at
+    // its node (annotate, the true count — the recorded list is cut at
+    // max_labels_per_node and must not decide the beam) — a label-free beam then
+    // follows the majority continuation at a fork rather than whichever head was
+    // created first (spec §6.11)
     auto support = [this](const Item &item) {
-        return annotate_ ? item.present.size() : item.state.size();
+        return annotate_ ? item.present_total : item.state.size();
     };
     std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
         const Item &x = arm.next[a], &y = arm.next[b];
@@ -2062,12 +2082,26 @@ void Walker::beam(ArmState &arm, uint64_t depth) {
 // End every live path of |arm| with |reason|: the items of the current level from
 // |from| on (if given) and the items already produced for the next level.
 void Walker::stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items, size_t from) {
-    size_t live = arm.next.size() + (items ? items->size() - from : 0);
-    if (!live)
+    const size_t heads = arm.next.size() + (items ? items->size() - from : 0);
+    if (!heads)
         return;
+    // A head that has already reached the radius is complete, not out of budget (the
+    // same rule stop_frontier applies to the frontier): it ends as max_extension_bp
+    // below and is no remaining head, so neither frontier_remaining nor the cap
+    // trigger counts it or its labels.
+    const uint64_t radius = strategy_.max_extension_bp;
     bool exact = true;
-    size_t labels = items ? distinct_labels(*items, arm.next, from, &exact)
-                          : distinct_labels(arm.next, {}, 0, &exact);
+    size_t labels = items ? distinct_labels(*items, arm.next, from, &exact, radius)
+                          : distinct_labels(arm.next, {}, 0, &exact, radius);
+    size_t live = 0;
+    for (const Item &item : arm.next) {
+        live += item.ext_bp < radius;
+    }
+    if (items) {
+        for (size_t j = from; j < items->size(); ++j) {
+            live += (*items)[j].ext_bp < radius;
+        }
+    }
     const Item &first = items && from < items->size() ? (*items)[from] : arm.next.front();
     if (!arm.result.cap_trigger) {
         arm.result.cap_trigger = CapTrigger{ reason, first.ext_bp, first.segment,
@@ -2082,11 +2116,8 @@ void Walker::stop_arm(ArmState &arm, EndReason reason, std::vector<Item> *items,
     arm.result.frontier_live_labels = labels;
     arm.result.frontier_live_labels_exact = exact;
     arm.result.status = ArmResult::TRUNCATED;
-    // a head that has already reached the radius is complete, not out of budget (the
-    // same rule stop_frontier applies to the frontier)
     auto censor = [&](Item &item) {
-        censor_item(arm, item, item.ext_bp >= strategy_.max_extension_bp
-                                   ? EndReason::MAX_EXTENSION : reason);
+        censor_item(arm, item, item.ext_bp >= radius ? EndReason::MAX_EXTENSION : reason);
     };
     if (items) {
         for (size_t j = from; j < items->size(); ++j) {
@@ -2251,6 +2282,20 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             derive(item.state, c.targets, sc.excluded, &c.state, &c.truncated, &c.cut);
     }
     std::vector<LabelId> ambiguous_over, ambiguous_taken;
+    // The explicit per-successor refusals of this step (BranchEvent::refused), one per
+    // (successor, cause) with the sources whose lineage it cut; the labels are made
+    // distinct and ascending when the event is emitted. Empty on an ordinary step, so
+    // nothing is allocated there.
+    std::vector<BranchEvent::Refusal> refused;
+    auto refuse = [&](char ch, const char *cause, LabelId source) {
+        for (BranchEvent::Refusal &r : refused) {
+            if (r.ch == ch && std::string_view(r.cause) == cause) {
+                r.labels.push_back(source);
+                return;
+            }
+        }
+        refused.push_back({ ch, cause, { source } });
+    };
     // Every changing round excludes at least one source for good, so the fixpoint
     // settles within |σ| + 1 rounds (the last one changes nothing). The bound is
     // explicit so that nothing here can spin; it is never what ends the loop.
@@ -2287,6 +2332,16 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             if (src.branches + 1 > strategy_.max_label_branches) {
                 sc.excluded[src.label] = 1;
                 ambiguous_over.push_back(src.label);
+                // the next derivation removes its entries from every successor: record
+                // which successors refused it while those entries are still visible
+                for (const Cand &c : cands_) {
+                    if (!c.admissible())
+                        continue;
+                    if (std::any_of(c.state.begin(), c.state.end(),
+                                    [&](const Entry &e) { return e.pred == src.label; })) {
+                        refuse(c.succ->ch, "branch", src.label);
+                    }
+                }
                 changed = true;
             }
         }
@@ -2379,6 +2434,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             } else if (c.quorum_fail) {
                 sc.in_quorum_fail[e.pred] = 1;
                 sc.qtext[e.pred] = c.quorum_text;
+                refuse(c.succ->ch, c.quorum_text, e.pred);
             } else if (c.blocked) {
                 sc.blocked[e.pred] = std::max(sc.blocked[e.pred], block_rank(c.block_reason));
             } else if (c.skipped) {
@@ -2421,12 +2477,14 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             // Only the sources derive() actually considered count (max_switch_sources).
             double best_absent = kInfiniteLoss;
             bool present_target = false, cut_finite = false;
+            std::string over_budget_on;     // successors refused to l by the budget alone
             if (cost_.finite()) {
                 const SourceKey key = source_key(src);
                 for (const Cand &c : cands_) {
                     if (!c.admissible())
                         continue;
                     const bool eligible = !c.truncated || !(c.cut < key);
+                    bool over = false;
                     for (const Target &t : c.targets) {
                         if (t.label == l)
                             continue;
@@ -2439,14 +2497,20 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                             present_target = true;     // kept through a cheaper predecessor
                         } else if (!find_entry(c.state, t.label)) {
                             best_absent = std::min(best_absent, v);
+                            over = true;
                         }
                     }
+                    if (over)
+                        over_budget_on.push_back(c.succ->ch);
                 }
             }
             if (best_absent != kInfiniteLoss) {
                 reason = EndReason::LOSS_BUDGET;
                 needed = best_absent;
                 dropped.push_back(l);
+                for (char ch : over_budget_on) {
+                    refuse(ch, "loss_budget", l);
+                }
             } else {
                 reason = EndReason::LABEL_LOST;
                 if (present_target) {
@@ -2459,10 +2523,9 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         end_label(arm, item, src, reason, succs.size(), text, needed);
     }
 
-    // ---- branch event
-    bool any_quorum_fail = std::any_of(cands_.begin(), cands_.end(),
-                                       [](const Cand &c) { return c.quorum_fail; });
-    if (!ambiguous_over.empty() || !ambiguous_taken.empty() || any_quorum_fail) {
+    // ---- branch event: an ambiguity taken or any refusal (a quorum or split-limit
+    // stop, an excluded source and a loss-budget stop each recorded one)
+    if (!ambiguous_taken.empty() || !refused.empty()) {
         arm.result.branch_events_total++;
         if (arm.result.branch_events.size() < strategy_.max_branch_events) {
             BranchEvent be;
@@ -2479,6 +2542,11 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             std::sort(be.ambiguous.begin(), be.ambiguous.end());
             be.dropped = dropped;
             be.labels_affected = be.ambiguous.size() + be.dropped.size();
+            for (BranchEvent::Refusal &r : refused) {
+                std::sort(r.labels.begin(), r.labels.end());
+                r.labels.erase(std::unique(r.labels.begin(), r.labels.end()), r.labels.end());
+            }
+            be.refused = std::move(refused);
             arm.result.branch_events.push_back(std::move(be));
         }
     }
@@ -2799,6 +2867,9 @@ void Walker::finalize(ArmState &arm) {
     res.complete_to_bp = std::min(arm.boundary, strategy_.max_extension_bp);
     assert((res.status == ArmResult::COMPLETE) == (res.complete_to_bp == strategy_.max_extension_bp)
            || !res.requested);
+    // merge_level unites the edge histories of the routes it joins, so under merging
+    // the walks present are those admissible under the united history (§6.10)
+    res.completeness_scope = strategy_.merge_reconverge ? "united_history" : "per_path";
     for (size_t s = 0; s < res.segments.size(); ++s) {
         Segment &seg = res.segments[s];
         if (strategy_.sequences) {
