@@ -730,13 +730,17 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
                                  "missing: ";
             effect += r == EndReason::BEAM_PRUNED
                 ? "the beam kept the best-supported max_live_paths heads of a level and pruned the rest"
+                : r == EndReason::RESOURCE_LIMIT && stop && stop->injected
+                ? "an injected allocation refusal (a test hook, not the budget) did not admit the "
+                  "next head, and the exploration stopped there (resource_limit; see resource_stop)"
                 : r == EndReason::RESOURCE_LIMIT
                 ? "the request's budget did not admit the next head, and the exploration stopped "
                   "there (resource_limit; see resource_stop)"
                 : std::string("the exploration stopped at this cap (") + to_string(r) + ")";
             if (!trigger)
                 effect += " after the cap that set complete_to_bp, so raising only that knob stops here";
-            effect += "; raise the knob";
+            effect += r == EndReason::RESOURCE_LIMIT && stop && stop->injected
+                ? "; no request knob caused it" : "; raise the knob";
             auto [knob, limit] = cap_knob(r, st, stop);
             // at the trigger what the cap compared, which exceeded the limit; for a later
             // cap (no trigger of its own) the walks it ended
@@ -1040,8 +1044,9 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
             for (const auto &e : p.end_labels) {
                 Json::Value ej;
                 ej["label"] = e.label; ej["loss"] = e.loss; ej["branches"] = e.branches; ej["run"] = e.run;
-                // non-zero: merged in from another route at a reconvergence, so this
-                // label does NOT support the spelled bases after route_bp
+                // non-zero: merged in from another route at a reconvergence (the latest
+                // such merge), so this label does NOT support the spelled bases BEFORE
+                // route_bp; its displayed support at the leaf starts there
                 ej["route_bp"] = uint_json(e.route_bp);
                 els.append(std::move(ej));
             }
@@ -1066,7 +1071,9 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
             rj["from_bp"] = uint_json(r.from_bp);
             rj["to_bp"] = uint_json(r.to_bp);
             rj["entered_by"] = r.entered_by_switch ? "switch" : "seed";
-            rj["route_bp"] = uint_json(r.route_bp);   // see LabelEnd::route_bp
+            // the run's EARLIEST non-first-parent merge stamp (LabelRun::route_bp), not where
+            // its displayed support begins: that is derived (evidence_from, spec §7.1)
+            rj["route_bp"] = uint_json(r.route_bp);
             if (r.entered_by_switch) { rj["from"] = r.from_label; rj["cost"] = r.switch_cost; }
             if (r.ended) rj["end_reason"] = to_string(r.end_reason);
             // where the run ended or was closed (a label end is there at to_bp; a
@@ -1207,7 +1214,8 @@ static const ResourceStop* stated_stop(const SeedResult &r, const Strategy &st) 
 // detail: full rendering of the same walk. |failed|: the budget did not hold the seed
 // itself (no walk, no leaves to continue from), whose actions are the levers on the seed.
 static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
-                                      const SeedBudgetError *failed = nullptr) {
+                                      const SeedBudgetError *failed = nullptr,
+                                      const ResourceAccount *account = nullptr) {
     constexpr double kMiB = 1 << 20;
     Json::Value j;
     j["scope"] = "locus";
@@ -1226,11 +1234,14 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                 ? uint_json(q.limit > q.used ? static_cast<uint64_t>((q.limit - q.used) / kMiB) : 0)
                 : Json::Value("unlimited");
             // the output is charged in the requested detail: a graphlet (or no bases)
-            // delivers more walk within the same budget
-            actions.append("raise_memory_budget");
-            actions.append("use_graphlet");
-            if (st.sequences)
-                actions.append("drop_sequences");
+            // delivers more walk within the same budget. No lever helps against a refusal
+            // a test hook injected (C++ callers only): only continuing from the leaves
+            if (!q.injected) {
+                actions.append("raise_memory_budget");
+                actions.append("use_graphlet");
+                if (st.sequences)
+                    actions.append("drop_sequences");
+            }
             // a depth-0 state costs per label at the roots: fewer labels fit. The lever is
             // the knob that sets them — the derived set's cap, the named list, or (annotate
             // mode, which permits no set) the cap on a node's recorded list
@@ -1272,22 +1283,45 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                        "exists within the budget, not even one complete to 0 bp)";
         return j;
     }
-    std::string message = "the " + j["resource"].asString() + " budget (" + knob + ") stopped the "
-        "walk at " + std::to_string(q.at_bp) + " bp on the " + to_string(q.arm) + " arm: every walk "
-        "up to each arm's complete_to_bp is present and the heads not expanded end with "
+    // A refusal injected by a test hook (WalkerHooks::deny, C++ callers only) is reported as
+    // a memory stop so that it stays representable in Q and K, but no budget refused the
+    // head (without one the limit reads "unlimited"), so the message must not say a budget did
+    const std::string cause = q.injected
+        ? "an injected allocation refusal (a test hook, not " + knob + ": the budget, if any, "
+          "would have admitted the head)"
+        : "the " + j["resource"].asString() + " budget (" + knob + ")";
+    std::string message = cause + " stopped the walk at " + std::to_string(q.at_bp) + " bp on the "
+        + to_string(q.arm) + " arm: every walk up to each arm's complete_to_bp is present and the "
+          "heads not expanded end with "
         + (q.resource == ResourceStop::TIME ? "time_budget" : "resource_limit");
-    if (q.resource == ResourceStop::MEMORY) {
+    if (q.resource == ResourceStop::MEMORY && !q.injected) {
         message += "; memory is modelled (the walker's state and the output in the "
                    "requested detail, charged per head; detail graphlet costs the least), "
                    "annotation decoding is not charged yet (memory_bound_soft)";
     } else if (q.resource == ResourceStop::WORK) {
-        // work is the walk's, the same in every detail (finding 5 of the stage-2 review:
-        // charging delivery would make the stop depend on the detail), so it says what
-        // bounds the output instead
-        message += "; work is checked at least every " + std::to_string(kWorkCheckInterval)
-                   + " units, so used can exceed the budget by that much; work bounds the walk, "
-                   "not its delivery: the size of the output (and the time to write it) is "
-                   "bounded by bounds.max_memory_mb";
+        // How far used can exceed the budget, stated with the number that bounds it rather
+        // than as a fixed maximum (GPT review of stage 2, finding 2) or a kind of charge
+        // that another kind could break (the review of the stage-2 fixes, F4, F5, F7: two
+        // roots' rows, a row's coordinates and a label-state scan each exceeded "the
+        // widest row"): every comparison follows one that passed, so the overrun is at
+        // most what was charged since, and the walker records the most it charged between
+        // two comparisons. Work is the walk's, the same in every detail (finding 5 of the
+        // first stage-2 review: charging delivery would make the stop depend on the
+        // detail), so it also says what bounds the output.
+        message += "; the walk compares work with the budget after every charge, so used "
+                   "exceeds it by at most what was charged since the previous comparison";
+        if (account && account->largest_charge) {
+            message += " (the most this seed charged between two comparisons: "
+                     + std::to_string(account->largest_charge) + " units)";
+        }
+        message += ", one indivisible charge: a fetch call's annotation rows, decoded whole "
+                   "with their coordinates (8 units per key, 1 per entry and coordinate; near "
+                   "the budget a call reads one key), a node's label-state scan, or the roots' "
+                   "rows of the arms (with the end of the seed phase, which is cut every "
+                 + std::to_string(kWorkCheckInterval) + " units), charged as one so that the "
+                   "result complete to 0 bp is delivered, as wide as the index makes them; work "
+                   "bounds the walk, not its delivery: the size of the "
+                   "output (and the time to write it) is bounded by bounds.max_memory_mb";
     }
     message += "; a continuation from a leaf is a new traversal";
     j["message"] = message;
@@ -1301,10 +1335,11 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                       uint_json(st.max_memory_bytes >> 20),
                       uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
                       "the memory budget is enforced on the walker's modelled state and on "
-                      "this response's output, admitted per head; the annotation rows a "
-                      "level decodes (and an annotate dictionary's growth) are held before "
-                      "they can be charged, so the peak can exceed the budget by them "
-                      "(observed: the excess seen, MiB, rounded up)");
+                      "this response's output, admitted per head; the annotation rows the "
+                      "seed phase and each level decode (with an annotate dictionary's "
+                      "growth and a cache beyond its allotment) are held before they can be "
+                      "charged, so the peak can exceed the budget by them (observed: the "
+                      "excess seen, MiB, rounded up)");
 }
 
 Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const std::string &detail, bool timing) {
@@ -1414,7 +1449,7 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
     // walk with cut diagnostics, or "complete" for walks whose label lists were cut
     j["outcome"] = outcome_of(j, false);
     if (stop)
-        j["resource_stop"] = resource_stop_json(*stop, st);
+        j["resource_stop"] = resource_stop_json(*stop, st, nullptr, &r.account);
     if (!graphlet) {
         // derived from the runs (constrain) or the recorded sets (annotate) by the
         // graphlet's reader, so not in its summary
@@ -3184,67 +3219,211 @@ std::string graphlet_text(const SeedResult &result, const Seed &seed, const Stra
 
 // ---------------------------------------------------------------- processing
 
+// The length jsoncpp's writer gives |s| inside a JSON string, quotes excluded (its
+// escaping with emitUTF8 off, which every writer here uses): '"' '\\' and \b \f \n \r \t
+// take two bytes, any other control character six (\u00XX), a code point above U+007F six
+// (twelve as a surrogate pair), and a malformed sequence the six of U+FFFD for the bytes
+// the writer consumes with it. GraphletCodec.JsonEscapedSizeIsTheWriters checks it against
+// the writer itself.
+uint64_t json_escaped_size(std::string_view s) {
+    uint64_t n = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c == '"' || c == '\\' || c == '\b' || c == '\f' || c == '\n' || c == '\r' || c == '\t') {
+            n += 2;
+        } else if (c < 0x20) {
+            n += 6;
+        } else if (c < 0x80) {
+            n += 1;
+        } else if (c >= 0xF8) {
+            n += 6;     // no lead byte: one replacement character
+        } else {
+            // a lead byte claims up to three more bytes, as jsoncpp's utf8ToCodepoint does
+            // (without checking that they are continuation bytes); a sequence cut by the
+            // end of the string is one replacement character for its lead byte
+            const size_t width = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+            if (s.size() - i < width) {
+                n += 6;
+                continue;
+            }
+            n += width == 4 ? 12 : 6;
+            i += width - 1;
+        }
+    }
+    return n;
+}
+
 /**
- * What one object costs this response to deliver in |detail| (bytes; upper bounds,
- * checked against the serialisers by Graphlet.DeliveryCostsBoundTheOutput), for the
- * memory budget (DESIGN-traverse-graphlet.md §14: "delivery is accounted per expansion").
- *  - graphlet: the MGT body is held three times at once (the writer's text, its copy in
- *    the JSON value, the response text), plus the writer's per-arm index (per segment,
- *    run and label end);
- *  - summary / tree / full: a JSON tree and its text. jsoncpp keeps an object member as
- *    a map node with its key (~128 B) and an array element as a map node (~96 B); the
- *    text costs up to ~64 B per member and ~40 B per element (indented).
- * The fixed part holds the envelope, the seed's fixed records and the server's deflate
- * state (256 KiB). A path chain costs only where JSON spells it (tree, full).
+ * What one object costs this response to deliver in |detail| (bytes, upper bounds checked
+ * against the serialisers by Graphlet.DeliveryCostsBoundTheOutput, adversarial names
+ * included), for the memory budget (DESIGN-traverse-graphlet.md §14: "delivery is accounted
+ * per expansion"). Every bound is a worst case, not an average (the owner's answer to the
+ * stage-2 review: delivery margins come from demonstrated upper bounds, escaping included).
+ *
+ * JSON (summary / tree / full, and the summary of a graphlet). jsoncpp's tree costs per
+ * value at most: an object member a std::map node (rb-tree links and colour, the CZString key,
+ * the Value: 96 B with malloc's 16-byte quantum and 8-byte header) plus its key's copy (48 B:
+ * every key here is at most 25 characters); an array element a node (96 B); an object or
+ * array value its map (64 B); a string value its length prefix, NUL and rounding (48 B for
+ * the short ones, 32 B plus its bytes for a long one). Its text at most: in the CLI's
+ * indented form (two spaces a level, at most ten levels deep in a traversal response) a
+ * member writes a line break, its indent, the quoted key, " : ", its value (24 B for a number
+ * at 17 significant digits or 20 digits, 30 B for the longest fixed string) and a comma: 80 B;
+ * an element 48 B; an object's or array's closing line 24 B; the server's compact form is
+ * shorter. Json::writeString holds the text three times at the peak: its stream's buffer,
+ * which grows by doubling (less than twice the text), and the copy it returns, while the tree
+ * is still alive. So a member costs 144 + 3 * 80, an element 96 + 3 * 48, a container
+ * 64 + 3 * 24; a base 1 + 3; a name its escaped length three times plus its bytes and 32
+ * (DeliveryCosts::name), per place it is written. Compressing the text later holds the text
+ * and the deflate output (no larger than the text plus 0.03%) beside zlib's 256 KiB state,
+ * less than the writeString peak plus that state, which the fixed part carries.
+ *
+ * The graphlet: the MGT writer's text grows by doubling (less than twice the body p) and is
+ * copied into the JSON value, 3p at once; then the JSON value is held while writeString holds
+ * the escaped body E three times, p + 3E. E is p for every record field (printable ASCII, no
+ * quote) plus one byte for the line break that ends a record, so a record of b bytes costs
+ * 4b + 3, a name p + 3E with p its percent-escaped length; plus the writer's per-arm index
+ * (per segment, run and label end). Record fields are bounded at their widest: ids, counts
+ * and positions below 10^10 (10 digits; a budget of at most 1 TiB charges more than 110 B
+ * per object, so no count reaches 10^10), floats at 24 characters.
+ *
+ * The fixed part holds zlib's deflate state (256 KiB), the envelope (the seed object, its
+ * outcome, annotation, timing and resource_stop, both arms' certificates, counters and
+ * empty lists; a graphlet's arm summaries and its H S O Q A Z records) and every limitation
+ * a result can state: at most 5 at the seed level (seed_labels, trace_record_boundaries,
+ * memory_bound_soft, two server_clamp) and 8 per arm (a stopping cap and a beam's
+ * walk_domain, branch_events, label_lists, switch_sources, inexact_counts, scope,
+ * greedy_losses), each with an effect of at most 640 bytes. A path chain costs only where
+ * JSON spells it (tree, full).
  */
 DeliveryCosts delivery_costs(const std::string &detail, bool sequences) {
     DeliveryCosts d;
-    constexpr uint64_t kMember = 192, kElement = 136;
+    constexpr uint64_t kTextCopies = 3;
+    constexpr uint64_t kMember = 96 + 48 + kTextCopies * 80;     // 384
+    constexpr uint64_t kElement = 96 + kTextCopies * 48;         // 240
+    constexpr uint64_t kMap = 64 + kTextCopies * 24;             // 136
+    constexpr uint64_t kShort = 48;                              // a short string's buffer
+    constexpr uint64_t kLongString = 32;                         // a long string's, beyond its bytes
+    constexpr uint64_t kLimitations = 5 + 2 * 8;
+    constexpr uint64_t kEffect = 640;
+    // a limitation: its element and object, at most 8 members (kind, knob, limit, observed,
+    // complete_to_bp, effect, one extra), 3 short strings and the effect (escaped: its two
+    // quotes around "unlimited" add two bytes)
+    constexpr uint64_t kLimitationJson = kElement + kMap + 8 * kMember + 3 * kShort
+                                       + kEffect + kLongString + kTextCopies * (kEffect + 4);
+    // the envelope: the seed object (11 members, 3 lists), the result's own members (11, 7
+    // maps), outcome (4), annotation (4), timing (9), resource_stop (9 members, its actions,
+    // a message of at most 1 KiB), and per arm its member, its certificate (21 members, 5
+    // maps), lists and counters (21 members, 9 maps)
+    constexpr uint64_t kMessage = 1024;
+    constexpr uint64_t kEnvelopeJson = (11 + 11 + 4 + 4 + 9 + 9 + 2 * 43) * kMember
+                                     + (3 + 7 + 3 + 2 * 14) * kMap + 8 * kElement + 24 * kShort
+                                     + kMessage + kLongString + kTextCopies * (kMessage + 8);
+    constexpr uint64_t kDeflate = 1 << 18;
+    // the name of a dictionary label, a dropped label or the seed: how often the detail
+    // writes it, and what each written copy costs
+    auto json_name = [](std::string_view name, uint64_t copies) {
+        return copies * (name.size() + kLongString + kTextCopies * (json_escaped_size(name) + 2));
+    };
     if (detail == "graphlet") {
-        constexpr uint64_t kCopies = 3;
-        d.fixed = (1 << 18) + 32 * 1024 + kCopies * 2048;
-        d.label = kCopies * 40;
-        d.label_name = kCopies;
-        // per record its fixed fields at their widest (20-digit counts, 24-character
-        // floats are not reached by ids below 10^10), its lists per element
-        d.segment = kCopies * 48 + 40;
+        constexpr uint64_t kCopies = 4;    // p + 3E per record byte (E = p, see above)
+        constexpr uint64_t kLine = 3;      // the escaped line break of a record, three times
+        auto record = [](uint64_t widest) { return kCopies * widest + kLine; };
+        // the JSON summary: the envelope with per arm a summary (85 members, 9 maps) in
+        // place of its lists, every limitation in JSON, and in the body H S O Q A Z and a K
+        // record per limitation (at most 240 B of fields with its effect)
+        constexpr uint64_t kEnvelope = (11 + 11 + 4 + 4 + 9 + 9 + 2 * 85) * kMember
+                                     + (3 + 7 + 3 + 2 * 9) * kMap + 8 * kElement + 24 * kShort
+                                     + kMessage + kLongString + kTextCopies * (kMessage + 8);
+        constexpr uint64_t kRecords = 4 * 1024 + kMessage + 2 * 1024
+                                    + kLimitations * (240 + kEffect);
+        d.fixed = kDeflate + kEnvelope + kLimitations * kLimitationJson
+                + kCopies * kRecords + 16 * kLine;
+        // L <c|h> <column> <seq_id> <prefix_len> <suffix>: 38 B without the name
+        d.label = record(40);
+        // G: parents (the first), from_bp, length_bp, the set codes and entry_total, split,
+        // first_base, the bases' marker: 64 B; plus the writer's index per segment
+        d.segment = record(64) + 40;
         d.segment_label = kCopies * 11;
+        d.merge_parent = kCopies * 13;     // ",<id>" and "|" with its list
         d.base = sequences ? kCopies : 0;
         d.continuation_base = kCopies;
-        d.run = kCopies * 150 + 4;
-        d.event = kCopies * 60 + 96;
+        // R: seven ids and positions, the end code, from:cost, branches, loss, needed: 172 B;
+        // its entry in the writer's index of anchored runs
+        d.run = record(172) + 8;
+        // E: at most 64 B of fields; a label end's node in the writer's index instead
+        d.event = record(64) + 96;
         d.event_label = kCopies * 11;
-        d.leaf = kCopies * 60;
-        d.leaf_label = kCopies * 70;
-        d.split_branch = kCopies;
-        d.branch_event = kCopies * 60;
-        d.branch_event_entry = kCopies * 24;
-        d.presence_run = kCopies * 48;
-        d.bin = kCopies * 400;
+        d.leaf = record(32) + record(56);  // T, and C without its labels and bases
+        d.leaf_label = kCopies * 70;       // label:loss:branches:route_bp, a label in C
+        d.split_branch = kCopies;          // its first base
+        d.branch_event = record(60);
+        d.branch_event_entry = kCopies * 12;
+        d.refusal = kCopies * 24;
+        d.presence_run = record(48);
+        d.bin = record(14 * 11 + kNumEndReasons * 13 + 2);
+        d.dropped = record(24);            // X <reason> without its runs and name
+        d.dropped_run = kCopies * 22;
+        d.name = [](std::string_view name, DeliveryCosts::Name use) -> uint64_t {
+            if (use == DeliveryCosts::Name::SEED_ID) {
+                // the JSON summary's seed.seed_id: the body holds no seed_id
+                return name.size() + kLongString + kTextCopies * (json_escaped_size(name) + 2);
+            }
+            // one L or X record each: the percent-escaped name p, then p + 3E
+            const std::string escaped = mgt::pct_escape(name);
+            return escaped.size() + kTextCopies * json_escaped_size(escaped);
+        };
         return d;
     }
     const bool segments = detail != "summary";
-    d.fixed = (1 << 18) + 64 * 1024;
-    d.label = 6 * kMember + kElement;
-    d.label_name = 4;
-    d.segment = segments ? 12 * kMember + 2 * kElement : 0;
+    d.fixed = kDeflate + kEnvelopeJson + kLimitations * kLimitationJson;
+    // label_dict: element, object, 4 members, its kind; label_summary: element, object,
+    // "label" and per arm a member with an object of 4 members and the runs list; a seed
+    // label's element in seed.labels
+    d.label = (kElement + kMap + 4 * kMember + kShort) + (kElement + 5 * kMap + 11 * kMember)
+            + kElement;
+    // element, object and 12 members (id, parents, labels_via_parent, from_bp, length_bp,
+    // sequence, labels, labels_total, labels_truncated, labels_at_end, events, label_sets),
+    // 6 lists, its first parent's id, the sequence's buffer
+    d.segment = segments ? 2 * kElement + 7 * kMap + 12 * kMember + kLongString : 0;
     d.segment_label = segments ? kElement : 0;
-    d.base = segments && detail == "full" && sequences ? 2 : 0;
-    d.continuation_base = 2;
-    // a run: its object (tree, full) and its id in label_summary's runs (every detail)
-    d.run = (segments ? 12 * kMember : 0) + 2 * kElement;
-    // an event: its object, its label or segment ids; a loss-budget end's needed_budgets
-    d.event = (segments ? 9 * kMember : 0) + 2 * kElement;
+    d.merge_parent = segments ? 2 * kElement + kMap : 0;
+    d.base = segments && detail == "full" && sequences ? 1 + kTextCopies : 0;
+    d.continuation_base = 1 + kTextCopies;
+    // a run: element, object, 11 members, entered_by and end_reason (tree, full), and its id
+    // in label_summary's runs (every detail)
+    d.run = (segments ? kElement + kMap + 11 * kMember + 2 * kShort : 0) + kElement;
+    // an event: element, object, its list, 7 members, 3 short strings (tree, full); a
+    // loss-budget end's needed_budgets element (every detail)
+    d.event = (segments ? kElement + 2 * kMap + 7 * kMember + 3 * kShort : 0) + kElement;
     d.event_label = segments ? kElement : 0;
-    d.leaf = 16 * kMember + kElement;
-    d.leaf_label = (segments ? 6 * kMember : 0) + 2 * kElement;
+    // a path: element, object, 12 members (with its continuation's), 6 lists and maps,
+    // path_reason and the continuation's buffer
+    d.leaf = kElement + 6 * kMap + 12 * kMember + kShort + kLongString;
+    // an end label: element, object, 5 members (tree, full); its reason in the path's
+    // end_reasons (every detail) and, charged alike, a continuation label's element
+    d.leaf_label = (segments ? kElement + kMap + 5 * kMember : kElement) + kMember;
     d.chain_entry = segments ? kElement : 0;
-    d.split = segments ? 8 * kMember + kElement : 0;
-    d.split_branch = segments ? 6 * kMember + 2 * kElement : 0;
-    d.branch_event = 9 * kMember + kElement;
-    d.branch_event_entry = 4 * kElement;
-    d.presence_run = segments ? 6 * kMember + kElement : 0;
-    d.bin = 32 * kMember + kElement;
+    // element, object, children, branches, 7 members, kind
+    d.split = segments ? kElement + 3 * kMap + 7 * kMember + kShort : 0;
+    // element, object, labels, 5 members, char; its id in children
+    d.split_branch = segments ? 2 * kElement + 2 * kMap + 5 * kMember + kShort : 0;
+    // element, object, 4 lists, 7 members, successors' buffer (every detail)
+    d.branch_event = kElement + 5 * kMap + 7 * kMember + kShort;
+    // an element, and its successor's character (1 + 3)
+    d.branch_event_entry = kElement + 1 + kTextCopies;
+    // element, object, labels, 3 members, char and cause
+    d.refusal = kElement + 2 * kMap + 3 * kMember + 2 * kShort;
+    d.presence_run = segments ? kElement + 2 * kMap + 5 * kMember : 0;
+    // element, object, label_ends, 14 members and one per end reason (every detail)
+    d.bin = kElement + 2 * kMap + (14 + kNumEndReasons) * kMember;
+    // element, object, runs, 4 members, reason and runs_kind; per run its pair
+    d.dropped = kElement + 2 * kMap + 4 * kMember + 2 * kShort;
+    d.dropped_run = 3 * kElement + kMap;
+    d.name = [json_name](std::string_view name, DeliveryCosts::Name use) -> uint64_t {
+        // a seed label's name is in label_dict and seed.labels, every other once
+        return json_name(name, use == DeliveryCosts::Name::SEED_LABEL ? 2 : 1);
+    };
     return d;
 }
 
@@ -3311,6 +3490,24 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
     // the outcome is read off the final limitations (server_clamp itself is in no class;
     // what a clamp caused is stated by the walk_domain or seed_labels it led to)
     (*rj)["outcome"] = outcome_of(*rj, false);
+}
+
+// memory_bound_soft's observed excess (bytes) for a seed failed or refused without an
+// admitted result. Such a result is not admitted, and it echoes the request's seed_id,
+// which only the request's size bounds: a seed_id that the depth-0 admission refused still
+// came back whole (review of the stage-2 fixes, F1: 100,000 emoji, a 1.2 MB result under 1 MiB
+// with soft excess 0). It is priced as a delivered result prices it — the fixed part, an
+// upper bound of this shorter result, and the seed_id in every copy the serialisers hold —
+// and what exceeds the budget is stated with what the walk observed. Index-supplied names
+// in its messages are cut under a budget (Walker::echoed), so they add no more than a
+// bounded prefix.
+static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t observed) {
+    if (!st.max_memory_bytes)
+        return observed;
+    const DeliveryCosts &d = st.delivery;
+    const uint64_t held = d.fixed + seed.seed_id.size()
+                        + (d.name ? d.name(seed.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
+    return std::max(observed, held > st.max_memory_bytes ? held - st.max_memory_bytes : 0);
 }
 
 // The result of a seed whose permitted set could not be DERIVED (§6.1 step 4): no arms,
@@ -3410,6 +3607,15 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
                 "as one occurrence: raise the knob");
         server_limit("labels.max_seed_labels", &s);
         lims.append(std::move(s));
+    }
+    if (st.max_memory_bytes) {
+        // every response under a memory budget states it (§7.0), a failed derivation's
+        // too: it decoded whole annotation rows that no admission charged, and observed is
+        // what it was seen to hold beyond the budget (GPT review of stage 2, finding 8)
+        ResourceAccount account;
+        account.memory_limit = st.max_memory_bytes;
+        account.soft_overshoot = failed_soft(st, seed, e.soft_overshoot());
+        lims.append(memory_bound_soft(st, account));
     }
     rj["limitations"] = std::move(lims);
     // no walk was made, so nothing was cut on the other axes — except the carriers a cap
@@ -3558,9 +3764,13 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
                                "row per seed k-mer), so no traversal was made (observed: the work "
                                "units spent); raise the knob or shorten the seed"));
     }
-    // every response under a memory budget states it (§7.0)
-    if (st.max_memory_bytes)
-        lims.append(memory_bound_soft(st, e.account()));
+    // every response under a memory budget states it (§7.0), with what this result's echo
+    // of the request holds beyond the budget (failed_soft)
+    if (st.max_memory_bytes) {
+        ResourceAccount account = e.account();
+        account.soft_overshoot = failed_soft(st, seed, account.soft_overshoot);
+        lims.append(memory_bound_soft(st, account));
+    }
     rj["limitations"] = std::move(lims);
     rj["outcome"] = outcome_of(rj, true);
     rj["resource_stop"] = resource_stop_json(q, st, &e);
@@ -3690,8 +3900,11 @@ Json::Value process_traverse_request(const Json::Value &json,
             Json::Value refused = unrepresentable_seed_to_json(seed, r, req.strategy);
             if (!refused.isNull()) {
                 if (req.strategy.max_memory_bytes) {
-                    // every response under a memory budget states it (§7.0)
-                    refused["limitations"].append(memory_bound_soft(req.strategy, r.account));
+                    // every response under a memory budget states it (§7.0), with what
+                    // this result's echo of the request holds beyond it (failed_soft)
+                    ResourceAccount account = r.account;
+                    account.soft_overshoot = failed_soft(req.strategy, seed, account.soft_overshoot);
+                    refused["limitations"].append(memory_bound_soft(req.strategy, account));
                     refused["outcome"] = outcome_of(refused, true);
                 }
                 results.append(std::move(refused));

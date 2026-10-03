@@ -37,36 +37,36 @@
    "annotation": {
     "access_path": "direct",
     "direct_reads": 244,
-    "keys_mapped": 75,
-    "rows_requested": 75
+    "keys_mapped": 74,
+    "rows_requested": 74
    },
    "arms": {
     "right": {
      "branch_events_total": 1,
      "cap_trigger": {
-      "at_bp": 42,
+      "at_bp": 41,
       "exact": true,
       "live_labels": 4,
       "live_paths": 1,
       "reason": "resource_limit",
       "segment": 3
      },
-     "complete_to_bp": 42,
+     "complete_to_bp": 41,
      "completeness_scope": "united_history",
      "counters": {
       "edge_reuse_probes": 0,
       "max_reminimisation_rounds": 0,
-      "output_bp": 58,
+      "output_bp": 57,
       "pair_evaluations": 0,
       "refusal_scans": 0,
       "reminimisation_rounds": 0,
-      "steps": 58,
-      "successor_enumerations": 58,
+      "steps": 57,
+      "successor_enumerations": 57,
       "switch_sources_cut": 0,
-      "work_units": 1327
+      "work_units": 1310
      },
      "counts": {
-      "bases": 58,
+      "bases": 57,
       "label_ends": {
        "resource_limit": 4
       },
@@ -74,7 +74,7 @@
       "leaves_by_reason": {
        "resource_limit": 1
       },
-      "max_bp": 42,
+      "max_bp": 41,
       "merges": 1,
       "runs": 5,
       "segments": 4,
@@ -96,12 +96,12 @@
      },
      "limitations": [
       {
-       "complete_to_bp": 42,
+       "complete_to_bp": 41,
        "effect": "every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop); raise the knob",
        "kind": "walk_domain",
        "knob": "bounds.max_work_units",
        "limit": 1500,
-       "observed": 1519
+       "observed": 1502
       },
       {
        "effect": "completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee",
@@ -114,8 +114,8 @@
      "status": "truncated"
     }
    },
-   "graphlet": "H mgt 1 15 basic $ACGT c k m 64 40 0 walk fixtures * fbfd396e439f0d22\nS 1c38c1d2a2cf1283 30 16 4 ATGAGCGTGCCTCTAACGTTCATACCAAAT\nL c 0 * 0 a.fa\nL c 1 * 0 b.fa\nL c 2 * 0 c.fa\nL c 3 * 0 both.fa\nO p c c i\nQ locus work traversal i:1500 i:1500 i:1519 i:0 raise_work_budget,continue_from_leaves the work budget (bounds.max_work_units) stopped the walk at 42 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; work is checked at least every 65536 units, so used can exceed the budget by that much; work bounds the walk, not its delivery: the size of the output (and the time to write it) is bounded by bounds.max_memory_mb; a continuation from a leaf is a new traversal\nK r walk_domain bounds.max_work_units i:1500 i:1519 42 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop); raise the knob\nK r scope branching.on_reconverge s:merge i:1 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA r t 42 u 1 4 1 3 0 steps=58,successor_enumerations=58,output_bp=58,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=1327 Y,42,3,1,4,1,1519 1 * 4 5 1 1 1 58\nB 0 2 4 5 1 58 0 1 1 1 0 0 0 Y:4\nV 20 0 AT 3,2 3 . .\nG * 0 20 * * * * 1 * TTTCCTATTTAGCCTCTGTC\nG 0 20 16 !1 * * * * * ATTACGTTTGACAATG\nG 0 20 16 1,3 * * * * * TTTACGTTTGACAATG\nG 1,2 36 6 * * * 0,2-3|1 * * ACCCAG\nT Y 1:0:0:36,3:0:1:0\nC 15 0 0 !1\nR 3 0 0 42 Y 0 * * 0 0 0\nR 3 1 0 42 Y 36 * * 0 0 0\nR 3 2 0 42 Y 0 * * 0 0 0\nR 3 3 0 42 Y 0 * * 0 1 0\nR 2 3 0 36 m 0 * * * 1 0\nZ 25\n",
-   "graphlet_bytes": 1786,
+   "graphlet": "H mgt 1 15 basic $ACGT c k m 64 40 0 walk fixtures * fbfd396e439f0d22\nS 1c38c1d2a2cf1283 30 16 4 ATGAGCGTGCCTCTAACGTTCATACCAAAT\nL c 0 * 0 a.fa\nL c 1 * 0 b.fa\nL c 2 * 0 c.fa\nL c 3 * 0 both.fa\nO p c c i\nQ locus work traversal i:1500 i:1500 i:1502 i:0 raise_work_budget,continue_from_leaves the work budget (bounds.max_work_units) stopped the walk at 41 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; the walk compares work with the budget after every charge, so used exceeds it by at most what was charged since the previous comparison (the most this seed charged between two comparisons: 192 units), one indivisible charge: a fetch call's annotation rows, decoded whole with their coordinates (8 units per key, 1 per entry and coordinate; near the budget a call reads one key), a node's label-state scan, or the roots' rows of the arms (with the end of the seed phase, which is cut every 65536 units), charged as one so that the result complete to 0 bp is delivered, as wide as the index makes them; work bounds the walk, not its delivery: the size of the output (and the time to write it) is bounded by bounds.max_memory_mb; a continuation from a leaf is a new traversal\nK r walk_domain bounds.max_work_units i:1500 i:1502 41 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's budget did not admit the next head, and the exploration stopped there (resource_limit; see resource_stop); raise the knob\nK r scope branching.on_reconverge s:merge i:1 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA r t 41 u 1 4 1 3 0 steps=57,successor_enumerations=57,output_bp=57,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=1310 Y,41,3,1,4,1,1502 1 * 4 5 1 1 1 57\nB 0 2 4 5 1 57 0 1 1 1 0 0 0 Y:4\nV 20 0 AT 3,2 3 . .\nG * 0 20 * * * * 1 * TTTCCTATTTAGCCTCTGTC\nG 0 20 16 !1 * * * * * ATTACGTTTGACAATG\nG 0 20 16 1,3 * * * * * TTTACGTTTGACAATG\nG 1,2 36 5 * * * 0,2-3|1 * * ACCCA\nT Y 1:0:0:36,3:0:1:0\nC 15 0 0 !1\nR 3 0 0 41 Y 0 * * 0 0 0\nR 3 1 0 41 Y 36 * * 0 0 0\nR 3 2 0 41 Y 0 * * 0 0 0\nR 3 3 0 41 Y 0 * * 0 1 0\nR 2 3 0 36 m 0 * * * 1 0\nZ 25\n",
+   "graphlet_bytes": 2298,
    "graphlet_lines": 25,
    "label_mode": "constrain",
    "limitations": [],
@@ -131,13 +131,13 @@
      "continue_from_leaves"
     ],
     "effective": 1500,
-    "message": "the work budget (bounds.max_work_units) stopped the walk at 42 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; work is checked at least every 65536 units, so used can exceed the budget by that much; work bounds the walk, not its delivery: the size of the output (and the time to write it) is bounded by bounds.max_memory_mb; a continuation from a leaf is a new traversal",
+    "message": "the work budget (bounds.max_work_units) stopped the walk at 41 bp on the right arm: every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; the walk compares work with the budget after every charge, so used exceeds it by at most what was charged since the previous comparison (the most this seed charged between two comparisons: 192 units), one indivisible charge: a fetch call's annotation rows, decoded whole with their coordinates (8 units per key, 1 per entry and coordinate; near the budget a call reads one key), a node's label-state scan, or the roots' rows of the arms (with the end of the seed phase, which is cut every 65536 units), charged as one so that the result complete to 0 bp is delivered, as wide as the index makes them; work bounds the walk, not its delivery: the size of the output (and the time to write it) is bounded by bounds.max_memory_mb; a continuation from a leaf is a new traversal",
     "phase": "traversal",
     "remaining": 0,
     "requested": 1500,
     "resource": "work",
     "scope": "locus",
-    "used": 1519
+    "used": 1502
    },
    "seed": {
     "labels_dropped": 0,

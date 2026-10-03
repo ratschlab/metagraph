@@ -658,14 +658,28 @@ int run_server(Config *config) {
             caps["max_query_bp"] = static_cast<Json::UInt64>(config->resolve_max_query_bp);
             // the request budgets of DESIGN-traverse-graphlet.md §14 (bounds.max_memory_mb,
             // bounds.max_work_units) and W, the interval in charged work units at which the
-            // walker checks them and the deadline at the latest; stated here, not in every
-            // response, where the per-request capabilities stay as they were
+            // walker reads the clock at the latest; stated here, not in every response, where
+            // the per-request capabilities stay as they were. How far a work stop can exceed
+            // its budget is stated with what bounds it, not as a fixed maximum: a fetch
+            // call's rows are decoded and charged whole (GPT review of stage 2, finding 2),
+            // and each stop states the most its seed charged between two comparisons (the
+            // review of the stage-2 fixes, F7: no fixed kind of charge bounds them all)
             Json::Value budgets(Json::arrayValue);
             budgets.append("max_memory_mb");
             budgets.append("max_work_units");
             caps["budgets"] = budgets;
             caps["work_check_interval"]
                 = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
+            caps["work_bound"] = "the walk compares bounds.max_work_units after every charge, so a "
+                "work stop exceeds it by at most what was charged since the previous comparison, "
+                "one indivisible charge, and the stop's message states the most its seed charged "
+                "between two comparisons: a fetch call's annotation rows, decoded whole with "
+                "their coordinates (8 units per key, 1 per entry and coordinate; calls are sized "
+                "from the budget left, down to one key), a node's label-state scan, or the roots' "
+                "rows of the arms (with the end of the seed phase, which is cut every "
+                "work_check_interval units), charged as one so that the result complete to 0 bp "
+                "is delivered, as wide as the index makes them; the deadline is read before "
+                "every head and at least every work_check_interval units";
             caps["memory_bound"] = "soft";
             // transport: the traversal routes write compact JSON and honour
             // Accept-Encoding (gzip preferred, deflate accepted)

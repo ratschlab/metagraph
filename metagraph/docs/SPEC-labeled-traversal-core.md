@@ -246,6 +246,33 @@ to a header).
   serialise it, is bounded by `bounds.max_memory_mb` alone, which charges each expansion's delivery in the
   requested detail (`detail: full` spells every leaf's chain: on a comb-shaped trie the output is quadratic
   in the walk, and only the memory budget bounds it).
+  **Delivery is charged at demonstrated upper bounds, not averages**: every object at the worst case of what the
+  serialisers hold of it at once — the JSON tree (jsoncpp's nodes, key copies, maps and string buffers) with
+  three copies of its text (`Json::writeString` holds its stream's buffer, grown by doubling, and the copy it
+  returns), or a graphlet's body four times (the writer's text, grown by doubling, and its JSON copy; then that
+  copy with the escaped body three times), each field at its widest — plus zlib's deflate state, the envelope
+  and the largest number of limitations a result can state (5 at the seed level, 8 per arm). Names (label
+  names, dropped labels' names, the `seed_id`) are the one input whose delivered size is no fixed multiple of
+  its length: JSON writes a control character as six bytes and a non-ASCII character as six or twelve, MGT a
+  `%` as three, and a graphlet's body is escaped once more inside its JSON string; so each name is charged at
+  its escaped length in every place the detail writes it (a seed label twice in `full`: `label_dict` and
+  `seed.labels`). `Graphlet.DeliveryCostsBoundTheOutput` checks the bounds against the serialisers' output,
+  adversarial names included, and the widths they assume (keys, nesting, numbers, effects). The request's own
+  echo (`strategy`, with `labels.extra` and a cost table) is outside the per-seed budgets: its size is the
+  request's.
+  **A failed or refused seed's result is not admitted** (no walk exists to admit): it echoes the request's
+  `seed_id`, priced as a delivered result prices it (the fixed part and the `seed_id` in every copy the
+  serialisers hold), and whatever exceeds the budget is stated as `memory_bound_soft`'s observed excess (§7.0),
+  never left unstated (a `seed_id` the depth-0 admission refused still comes back whole). A name the INDEX
+  supplies that a failure echoes — the header of an `ambiguous_header` derivation, in `error` and as
+  `observed`, and a column it collides with — is, under `bounds.max_memory_mb`, echoed whole only up to 256
+  bytes; a longer one as its first 256 bytes (never inside a UTF-8 sequence), `...`, and `(<n> bytes; column
+  <c>, sequence <s>)`, so that nothing the request does not bound can make a failed result larger than the
+  budget. Without a budget it is echoed whole, as before.
+  **A memory bound is not a wall-clock bound**, and the walk's deadline does not cover delivery: serialising
+  and compressing an admitted result take time the deadline does not check (a hard overall deadline would need
+  enforcement during delivery, a staged item, §6.8); what bounds the delivery's time is the size the memory
+  budget admits.
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
   and the regime is basic).
 - **`seeds[].labels` is optional.** Omitting it is the default and realizes the design note's
@@ -593,21 +620,47 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   is not admitted is censored exactly like a head beyond a cap (`resource_limit`), and its level does not count
   toward `complete_to_bp`; every admitted prefix can be finished and delivered within what it reserved. The
   model is deterministic (fixed bytes per object, never a measurement), so a memory stop is reproducible and
-  independent of `annotation.batch_kmers`. Work units are a weighted sum of what the walk consumed — successor
-  enumerations (4), annotation keys requested (8) and entries returned (1), pair evaluations, refusal scans,
-  edge-reuse probes, derivation scans and steps (1 each) — and the work budget and the deadline are checked
-  before every head and at least every `W` = 65 536 units (within a derivation and between chunks of a level's
-  annotation fetch), so neither is overrun by more than `W`. The seed phase is charged too (8 per seed k-mer
-  read, 1 per annotation entry and coordinate, as the walk charges a fetched row; `account.work_seed` beside
-  each arm's `work_units`), checked at the same interval: a seed phase within one interval is followed by a
-  stop at the first head (a valid result complete to 0 bp), a longer one is cut within about the interval
-  and fails the seed. The depth-0 state is admitted like a head: a memory budget that does not hold it fails
-  the seed. Every counter belongs to the arm whose head did the work. The deadline is never checked at depth 0
-  (`time_budget_ms: 0` still means one level, then the boundary check). **Not implemented** (see `DESIGN-traverse-graphlet.md`
-  §14): the per-seed delivery bounds `max_output_bytes` / `max_events` (§6.7), and a request-level time budget
+  independent of `annotation.batch_kmers`. Work units are a weighted sum of what the walk did — successor
+  enumerations (4), the annotation rows its fetches return (8 per key, 1 per entry and, under `trace`, 1 per
+  coordinate: a recorded row its whole width), pair evaluations, refusal scans, edge-reuse probes, derivation
+  scans and steps (1 each). A row is charged **when a fetch returns it** (the design's "rows decoded"), whether
+  or not a head then consumes it: a level cut mid-way decoded its later rows all the same, and charging only
+  consumed rows hid that decoding from the budget and from `used`. A row the lookahead decoded ahead is charged
+  when a level's fetch returns it from the cache; a row the lookahead decoded that no fetch asks for (at most
+  `batch_kmers` per head of a level) is not charged; a row evicted and fetched again is charged again.
+  **The work bound is stated with its number, not as a fixed maximum**: the walk compares the work budget after
+  every charge (each fetch call, a derivation's scan, each priced target, each edge-reuse probe, each
+  enumeration); the previous comparison passed, so a stop exceeds the budget by at most what was charged since,
+  and every work stop's message states the most its seed charged between two comparisons
+  (`ResourceAccount::largest_charge`), whatever the charge was: a fetch call's rows, decoded whole with their
+  coordinates (stage 3 of `DESIGN-traverse-graphlet.md` §14.1 makes the decoder interruptible), a node's
+  label-state scan (|σ| + |A(v)|), or the seed phase with the roots' rows (both arms' roots belong to the
+  result complete to 0 bp, so they are charged before the first comparison). It can exceed `W` on a wide index
+  (70,000 records on one k-mer: one row of 70,008 units; with `direction: both`, both roots: 140,016): only the
+  seed phase is cut at `W`, while the roots' rows are one charge as wide as the index makes them. Under a
+  request budget a level's annotation is fetched in calls of at most 8,192 keys, sized so that a call holds about
+  `W` units at the widest row fetched so far and, under a work budget, no more than the budget has left (down to
+  one key near the budget), growing from one key at the start of each level so that rows wider than any fetched
+  before are met by a small call; without a request budget the level is one call, as before (its counters depend
+  on the batching). The deadline is read before every head, between those calls and at least every `W` = 65 536
+  units otherwise; without a request budget a level's fetch is one uninterruptible call, which the deadline can
+  run past. The seed phase is charged too (8 per seed k-mer read, 1 per annotation entry and coordinate, as the
+  walk charges a fetched row; `account.work_seed` beside each arm's `work_units`), compared once every `W`
+  units: a seed phase that ran past the budget by less than an interval is let finish, so that the stop at the
+  first head delivers a valid result complete to 0 bp (the roots' rows charged after it are the one further
+  charge stated above); a longer one is cut within the interval (plus one fetch
+  call) and fails the seed. The depth-0 state is admitted like a head: a memory budget that does not hold it
+  fails the seed (what its dictionary held is stated, §7.0 `memory_bound_soft`). Every counter
+  belongs to the arm whose head did the work. The deadline is never checked at depth 0 (`time_budget_ms: 0`
+  still means one level, then the boundary check), and **a level at the radius is never stopped**: its heads
+  only end (`max_extension_bp`), within what they reserved, so neither a budget nor the deadline trips there,
+  and a deadline that passes when every remaining head has reached the radius censors nothing and states no
+  stop (no `resource_stop`, no `Q`: the walk is complete). **Not implemented** (see `DESIGN-traverse-graphlet.md`
+  §14): the per-seed delivery bounds `max_output_bytes` / `max_events` (§6.7), a request-level time budget
   (`request_time_budget_ms`) that would mark the seeds it leaves unstarted as `not_started` — every seed of a
   request is traversed, each under its own `time_budget_ms`, and the server bounds a request by
-  `--traverse-max-seeds` (§10.3).
+  `--traverse-max-seeds` (§10.3) — and a hard overall deadline, which would have to be enforced while the
+  response is serialised and compressed (the walk's deadline stops at the walk; §5, request budgets).
 - **Overflow** (`on_overflow`): `stop` ends the arm's live paths with that reason; `beam` keeps, at the end of each
   level, the `max_live_paths` heads with the most support (`(−|σ|, min loss, path_id)`; in `annotate` mode |σ| is
   the true count recorded at the head node, §6.11), whatever `frontier.order` is, and ends the others with
@@ -826,8 +879,8 @@ is rejected instead (§5).
 | `trace_record_boundaries` | seed | `support: trace` with column labels | `labels.seed_label_kind` (`limit: "column"`) | column labels in the dictionary |
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, or a budget raised from zero (the walk ran under it) | the clamped field | the requested value (`limit` is the effective one) |
-| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: the budget is enforced on the modelled state and output, but the annotation rows a level decodes (and an annotate dictionary's growth) are held before they can be charged — stage 3 of `DESIGN-traverse-graphlet.md` §14.1 charges them inside the decoder. In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account (the decoded rows, a cache beyond its allotment, the dictionary a fetch grew), MiB rounded up (0: none); the admitted account itself, the depth-0 state included, never exceeds the budget. Also on a seed a budget failed |
-| `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode) | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header; `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
+| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment) are held before they can be charged — stage 3 of `DESIGN-traverse-graphlet.md` §14.1 charges them inside the decoder. In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account (the decoded rows, a cache beyond its allotment, the dictionary a fetch grew), MiB rounded up (0: none), observed wherever it is held — after every call of a level's fetch, the roots' rows, the lookahead's warming, the seed phase's rows (each fetch call of the label validation before the first of its charges, which can fail the seed) — and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
+| `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode) | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
 
 ```json
 "outcome": {"walks": "complete", "branch_diagnostics": "cut", "label_evidence": "complete", "delivery": "inline"},
@@ -848,7 +901,14 @@ is rejected instead (§5).
   `shorten_seed` for a work budget the seed phase spent). The MGT `Q` record carries
   it (§7.5.2). It is a property of the walk, the same in every detail; a memory stop itself depends on the
   requested detail (the output is charged), so the same request can stop at another depth in another detail.
-  `phase` is always `traversal` in this stage: finalisation and serialisation are reserved at admission.
+  `phase` is always `traversal` in this stage: finalisation and serialisation are reserved at admission. A work
+  stop's message states how far `used` can exceed the budget, with its number: at most what was charged since
+  the previous comparison, and the most its seed charged between two comparisons (one indivisible charge: a
+  fetch call's rows with their coordinates, a label-state scan, or the seed phase with the roots' rows, let
+  finish within `W`; §6.8). A refusal injected by the test hook
+  (`WalkerHooks::deny`, C++ callers only) is reported as a memory stop — with `limit` `"unlimited"` when no
+  budget is set, so that it stays representable in `K` and `Q` — whose message and `walk_domain` effect say that
+  the refusal was injected and that no budget caused it, and whose only action is `continue_from_leaves`.
 - **Not limitations:** semantic stops (`dead_end`, `label_lost`, `max_extension_bp`, …) — the requested domain
   is complete there — and `dropped_labels` (named labels that do not support the seed). A seed whose permitted
   set could not be derived is a `failed` result with a `derivation` limitation (§6.1 step 4), not a limited one.
@@ -920,7 +980,9 @@ is rejected instead (§5).
 - **A seed whose permitted set could not be DERIVED** (§6.1 step 4) takes the place of this object with
   `{"seed": {"seed_id", "length_bp", "labels_from_seed": true}, "outcome": {"walks": "failed", …}, "error":
   "<reason>", "limitations": [{"kind": "derivation", …}]}` and no `arms`: the request still succeeds and the other
-  seeds are traversed. `outcome.walks` (or the presence of `error`) is how a client tells the two apart.
+  seeds are traversed. `outcome.walks` (or the presence of `error`) is how a client tells the two apart. Under
+  `bounds.max_memory_mb` the limitations also state `memory_bound_soft` (§7.0), whatever the cause: the
+  derivation decoded rows no admission charged, and `observed` is what they held beyond the budget.
 - `segment.labels` = names live at the segment's **first** step; `labels_at_end` at its last (both lists in full:
   a `label_lists: delta` encoding with `labels_removed` is not implemented). Label sets change only through
   events, sorted by `at_bp`.
@@ -933,14 +995,37 @@ is rejected instead (§5).
   against the source record establishes a contiguous occurrence). `reach_bp` = end of the label's lineage
   including switches, plus `reentries` and all runs.
   Three distinct claims must not be conflated: **label-consistent route support** (`direct_bp`), **support for a
-  particular displayed path** (that run's `route_bp == 0`, or only its `[route_bp, to_bp)` part), and **a
-  contiguous source occurrence** (trace or source validation). So "N of M labels share this exact displayed flank
-  to x bp" counts runs with `entered_by: seed`, `from_bp: 0` **and `route_bp: 0`** — the first two alone establish
-  support along *some* route, not along the one shown.
+  particular displayed path**, and **a contiguous source occurrence** (trace or source validation). A run's
+  `route_bp` (MGT `R`) is the **earliest** merge at which its lineage entered through a non-first parent, anywhere
+  on the lineage's own route; a leaf label's `route_bp` (`end_labels[]`, MGT `T`) is the **latest** such merge
+  the entry came through. Neither is the start of displayed support: after a lineage entered through non-first
+  parents at two merges d1 < d2, the run keeps d1 while the displayed path spells another route's bases up to d2
+  (reproduced on SRA: a run with `route_bp` 61 whose displayed support starts at 113). Displayed support of a
+  run is `[evidence_from, to_bp)`, with `evidence_from` derived per run and displayed path from the merge
+  partitions — the latest merge on the displayed first-parent chain that the lineage entered through a
+  non-first parent, at least the run's `from_bp` (`DESIGN-traverse-graphlet.md` §5.1, `Claim.evidence_from` in
+  the library); at a leaf the merge part equals the leaf label's `route_bp`. `route_bp == 0` on a run means no
+  such merge on its route, so the whole run is displayed support. One exception to the definition, on the
+  conservative side: at a merge of three or more parents the walker stamps an entry that beat an earlier
+  parent before a later parent beats it, so the run that merge then closes (code `m`, `to_bp == route_bp`)
+  carries the merge although it is not on the run's route; its displayed support is still `[evidence_from,
+  to_bp)` (on the offline real data: 6 of 73,575 runs, all whole-run support). A reader counting `route_bp: 0`
+  runs then undercounts, never overstates; stamping only the entries that survive the whole merge would change
+  `R` in unbudgeted output. So "N of M labels share this exact displayed flank to x bp" counts runs with
+  `entered_by: seed`, `from_bp: 0` **and `route_bp: 0`** — the first two alone establish support along *some*
+  route, not along the one shown.
 - **Continuation.** Every leaf ended by `max_extension_bp`, a resource reason or `beam_pruned` carries
   `continuation: {sequence, labels, loss_used, branches_used}`: the last `max(k, bp since the last switch)` bases
   up to `continuation_bp`, natural orientation, with the labels covering that whole tail. It is valid `/traverse`
-  input (a fresh seed: edge-reuse and branch state reset; the agent may reduce `loss_budget` by `loss_used`):
+  input — a fresh seed: edge-reuse and branch state reset, and every label restarts at loss 0. `loss_used` is the
+  SMALLEST terminal loss of the labels: for no route of the continuation to exceed its original budget, reduce
+  `loss_budget` by the LARGEST terminal loss of the continued labels (their `T` records), as the library's
+  `next_request()` does; one request carries one loss budget and no per-label starting loss, so this is
+  conservative for the labels that ended at a lower loss. The continuation's labels become the seed labels:
+  `labels.extra` must not repeat them, and keeps only the other permitted labels that a seed label reaches in
+  one switch within the reduced budget (the server's rule). A label alive at the leaf that does not cover the
+  whole tail (it switched in within the last bases) is not among the continuation's labels, so the continuation
+  does not seed it and may lack its lineage; the library states each such label. A continuation's
   `continuation_bp` is either 0 or at least k (1 … k − 1 is rejected, §5). With `continuation_bp: 0` the sequence
   is `""` and `labels` / `loss_used` / `branches_used` describe the leaf's head node.
 - `detail: summary` returns `seed`, `outcome`, `limitations`, `label_summary`, per-leaf `{length_bp, n_labels,
@@ -1206,7 +1291,9 @@ R <segment> <label> <from_bp> <to_bp> <end> <route_bp> <from_label:cost|*> <prev
     a label_end event on <segment> at to_bp) | Lw (ended label_lost silently: a switch source that went on
     under other names) | m (closed by the merge at to_bp, ended = false). from_label:cost * = entered by seed;
     structural_successors * for Lw and m; needed_budget only for code B. branches, loss = the lineage's
-    values when the run ended or was closed (§7.1)
+    values when the run ended or was closed (§7.1). route_bp = the run's earliest non-first-parent merge
+    stamp (§7.1), not where its displayed support begins (that is derived: evidence_from); a run closed by
+    a merge of three or more parents can carry that merge itself (to_bp == route_bp, §7.1)
 Z <line count of the document, this line included>
 ```
 
@@ -1349,6 +1436,18 @@ underlying `DBGSuccinct`, the matrix cross-casts, the `CoordToHeader` pointer, t
 Per-step costs to expect: `basic` DBGSuccinct right step O(σ) rank/select, left step 2 bwd with the cache;
 `primary` first-visit step adds O(k) (`rc_index_range`, counted).
 
+The reverse header index (header → `(column, seq_id)`, for resolving a header label by name) belongs to the
+`CoordToHeader` itself: built on its first lookup, shared by every request on the loaded index, and freed with
+it. It is never a process-wide cache keyed by the object's address: an object made later at a freed address
+could be answered from another's index, which no partial fingerprint of the headers can rule out.
+
+Under a memory budget the label caches get a fixed allotment of it (§5) and **evict wholesale** when they exceed
+it, as without one (a walk moves forward, so recency is not worth tracking). A row evicted and needed again is
+decoded again and charged again when the fetch returns it, like every row (work counts the rows the walk's
+fetches return, §6.8), so the refetching is bounded by the work budget and the deadline, and the memory it
+holds beyond the allotment is observed as `memory_bound_soft`. After a budget stop or a refused admission an annotate dictionary is compacted
+to the labels the result records (§6.9); a cap, and a time stop without a budget, keep it as it was.
+
 ## 9. Label-change cost models
 
 | Model | `cost(ℓ → ℓ')` for ℓ ≠ ℓ' |
@@ -1411,8 +1510,10 @@ the server.
   `schema_version`, `release`, `graphlet_format` (1: the MGT version `detail: graphlet` writes, §7.5),
   `detail_levels` (`["summary", "tree", "full", "graphlet"]`); `GET /traverse/capabilities` adds the request
   budgets it accepts (`budgets: ["max_memory_mb", "max_work_units"]`), `work_check_interval` (`W` of §6.8, in
-  work units) and `memory_bound: "soft"` (until stage 3 charges annotation decoding; not in the per-request
-  capabilities, which stay as they were); and the **index identity**
+  work units), `work_bound` (the sentence of §6.8 saying how far a work stop can exceed its budget: what was
+  charged since the previous comparison, one indivisible charge such as a fetch call's rows decoded whole, with
+  each stop's message stating the most its seed charged between two comparisons) and `memory_bound: "soft"` (until stage 3 charges
+  annotation decoding; not in the per-request capabilities, which stay as they were); and the **index identity**
   (`DESIGN-traverse-graphlet.md` §3.1), also in every graphlet's `H` record:
   - `index_ns`: `--index-name NAME` (`[A-Za-z0-9._-]+`), a name for humans and routing, not identity; `null`
     when unset.
@@ -1527,6 +1628,8 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T39 | orientation (design T38) | `spell(left) + seed + spell(right)` is each record (acc1/acc2/acc3); the library's continuations equal the server's on both arms, contained (40 of 60 bp) and crossing into the seed (k of 10 bp); a continuation the library derives (`next_request`) is accepted and extends the walk | — |
 | T40 | the oracle and the identity through the library (design T39) | `constrain.compare(annotate, mode='claims')` equal under the permitted labels and `only_in_b` = acc2 over all; exhaustive vs annotate equal in `claims`, `walks`, `labels`; tuned vs exhaustive `prefix_subset` with acc2's omission at 0 for `minority`; §3.1: two indexes over swapped memberships share `index_meta_fp`, differ in `index_fp` and never compare equal, without a manifest `unverifiable` | — |
 | T41 | the graphlet protocol (design T40) | summary key sets; `output.detail/timing` echoed and resubmittable; `graphlet_format`, `detail_levels` and the index identity in capabilities and `H`; `sequences: false` (no bases, first bases on split children, continuation sequences, `splits[].char` reproduced); two runs byte-equal; body < ½ of the compact full JSON | — |
+| T42 | the request budgets' bounds (stage 2, the re-review) | `Graphlet.DeliveryCostsBoundTheOutput`: per detail, the model is at least the demonstrated peak of the serialisers (the JSON tree from this platform's jsoncpp types with `writeString`'s three texts, the compressor's, the graphlet writer's), for every budget case and for names of control characters, `%`, quotes, tabs and DEL and 2-, 3- and 4-byte UTF-8 (seed, extra, recorded and dropped labels, the seed_id); the walker charges at least the model; the output keeps to the widths the model assumes; with a fixed four bytes per name byte the case fails. `GraphletCodec.JsonEscapedSizeIsTheWriters`. `Stage2ReviewRecheck.*`: a work stop within one row of the budget (annotate root row, a constrain level of 3,000-label rows; the message states the most charged between two comparisons), an interrupted fetch stating what it held, failed derivations (no carrier, the time budget) stating `memory_bound_soft`, a walk complete to its radius under `time_budget_ms: 0` stating no stop, an injected refusal saying so, escaped names within the budget (180,000 control characters, 200,000 `%`). `LabelOracleHeaderIndex.IsBoundToItsCoordToHeader`: the reviewer's `[A,X,Y,Z]` → `[A,Y,X,Z]` at one address resolves by the live headers, and the index is built once per `CoordToHeader`. Integration `test_stage2_*`: the reviewer's CLI cases (25,000 headers under a work budget of 1; 100,000 headers under 1 MiB; 180,000 control characters and `%` headers under 1–2 MiB) | — |
+| T43 | the review of the stage-2 fixes (round 3) | `Stage2ReviewRound3.*`: a failed seed's echo — an `ambiguous_header` of 180,000 control characters echoed as a bounded prefix with its length and place under a budget (whole without one), a `seed_id` of 100,000 emoji whose failed result's excess is stated as `memory_bound_soft`; the label validation observing a row of 200,000 coordinates before the charge that fails the seed; every fetched row charged (a level's second head refused after the fetch: work ≥ rows_requested × (8 + n) at width n); work stops within their stated largest charge (both arms' roots, a row's trace coordinates, a budget sweep over 1,000-label constrain rows and label-state scans); a failed depth-0 admission stating the dictionary it held (six 200 KB names, both modes). Integration `test_stage2_*` (the same through the CLI, including a budget sweep on an index of uniform row width). Python `test_traverse_review3.TestRound3*`: compare() equal at a radius equal to a merge position (constrain 36, annotate 36 and 62) with true differences kept; malformed continuation overrides, arms and resolve labels as bounded errors; a 30-label continuation's receipt within the default ceiling, the per-label loss list cut first; a label alive at the leaf but not seeded stated in `notes` and `left_out` | — |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 

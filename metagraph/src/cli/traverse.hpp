@@ -133,6 +133,9 @@ Json::Value capabilities_to_json(const graph::traversal::LabelOracle &oracle,
 // bounds): the output part of the memory budget's model (DESIGN-traverse-graphlet.md §14),
 // which process_traverse_request sets as Strategy::delivery
 graph::traversal::DeliveryCosts delivery_costs(const std::string &detail, bool sequences);
+// the length the JSON writers here give |s| inside a JSON string, quotes excluded: what
+// delivery_costs prices a name's text by
+uint64_t json_escaped_size(std::string_view s);
 
 // What the H record states besides the result: the index and the seed's position.
 struct GraphletContext {

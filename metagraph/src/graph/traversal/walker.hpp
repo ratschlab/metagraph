@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "traversal_types.hpp"
@@ -73,12 +74,20 @@ class SeedDerivationError : public std::invalid_argument {
     // trace check runs after the cap): non-zero means raising that knob may succeed
     size_t labels_cut() const { return labels_cut_; }
 
+    // Under a memory budget, the soft excess the seed phase was seen to hold before it
+    // failed (ResourceAccount::soft_overshoot, bytes): the derivation decodes whole rows
+    // that no admission charges, so a failed seed states memory_bound_soft like every
+    // other result under a budget (GPT review of stage 2, finding 8). Set by the walker.
+    uint64_t soft_overshoot() const { return soft_overshoot_; }
+    void set_soft_overshoot(uint64_t bytes) { soft_overshoot_ = bytes; }
+
   private:
     Cause cause_;
     double limit_;
     double observed_;
     std::string subject_;
     size_t labels_cut_;
+    uint64_t soft_overshoot_ = 0;
 };
 const char* to_string(SeedDerivationError::Cause cause);
 
@@ -153,19 +162,22 @@ const char* to_string(LabelMode mode);
 
 /**
  * What the response will cost to deliver, per object, in the requested output detail
- * (bytes; upper bounds of what the serialiser holds at once: the text or the JSON tree
- * with its text). The memory budget charges every committed head with the delivery of
- * what it creates (DESIGN-traverse-graphlet.md §14, "delivery is accounted per
- * expansion"), so that a committed prefix stays deliverable within the budget. All zero
- * (the default) charges nothing for the output: a C++ caller that keeps the SeedResult
- * pays only for it. The CLI fills it in from output.detail and output.sequences.
+ * (bytes; upper bounds of what the serialisers hold at once: the text or the JSON tree
+ * with its text, in every copy alive together). The memory budget charges every committed
+ * head with the delivery of what it creates (DESIGN-traverse-graphlet.md §14, "delivery is
+ * accounted per expansion"), so that a committed prefix stays deliverable within the
+ * budget. All zero (the default) charges nothing for the output: a C++ caller that keeps
+ * the SeedResult pays only for it. The CLI fills it in from output.detail and
+ * output.sequences (cli::delivery_costs, where each bound is derived).
  */
 struct DeliveryCosts {
-    uint64_t fixed = 0;              // per seed: the envelope and fixed records
-    uint64_t label = 0;              // per dictionary label, plus label_name per name byte
-    uint64_t label_name = 0;
-    uint64_t segment = 0;
+    uint64_t fixed = 0;              // per seed: the envelope, fixed records, limitations
+    uint64_t label = 0;              // per dictionary label (its record or objects), name apart
+    uint64_t segment = 0;            // with its first parent's id
     uint64_t segment_label = 0;      // per label listed by a segment or a split branch
+    // per parent of a merged segment: its id (beyond the first) and its labels_via_parent
+    // list (the labels in it are segment_labels)
+    uint64_t merge_parent = 0;
     uint64_t base = 0;               // per base of a segment
     uint64_t continuation_base = 0;  // per base of a continuation
     uint64_t run = 0;
@@ -178,13 +190,30 @@ struct DeliveryCosts {
     uint64_t split_branch = 0;
     uint64_t branch_event = 0;
     uint64_t branch_event_entry = 0; // per successor, ambiguous / dropped label, refusal label
+    uint64_t refusal = 0;            // per refusal of a branch event, its labels apart
     uint64_t presence_run = 0;       // annotate mode: per recorded LabelSetRun
     uint64_t bin = 0;
+    uint64_t dropped = 0;            // per dropped seed label (its record or object), name apart
+    uint64_t dropped_run = 0;        // per k-mer presence run of a dropped seed label
+    /**
+     * What delivering one name costs, in every copy the serialisers hold at once: label
+     * names, dropped labels' names and the request's seed_id are the one input whose
+     * delivered size is no fixed multiple of its length — JSON writes a control character
+     * as six bytes, MGT a '%' as three, and a graphlet's MGT text is escaped once more
+     * inside its JSON string — so the layer that does the escaping prices each one
+     * exactly (GPT review of stage 2, finding 1: a fixed four bytes per name byte let a
+     * name of control characters deliver more than the whole budget). Empty: nothing.
+     */
+    enum class Name { SEED_LABEL, LABEL, DROPPED_LABEL, SEED_ID };
+    std::function<uint64_t(std::string_view name, Name use)> name;
 };
 
-// The interval, in charged work units, at which the walker checks its work budget and
-// its deadline at the latest (DESIGN-traverse-graphlet.md §14: "checked at least every W
-// work units"); stated by the server as work_check_interval.
+// The interval, in charged work units, at which the walker reads the clock for its
+// deadline at the latest (DESIGN-traverse-graphlet.md §14: "checked at least every W work
+// units"), and within which a seed phase that ran past the work budget is let finish (so
+// that the result complete to 0 bp is delivered); stated by the server as
+// work_check_interval. The work budget itself is compared after every charge of the walk
+// (ResourceAccount::largest_charge).
 constexpr uint64_t kWorkCheckInterval = 65536;
 
 struct Strategy {
@@ -268,9 +297,13 @@ struct Strategy {
     // included (SeedBudgetError), never measured, so that a stop is reproducible. It is the
     // one bound on the size of the output, and so on the time to serialise it: detail full
     // spells every leaf's chain, quadratic on a comb-shaped trie. Work: charged work units,
-    // a weighted sum of the walk's counters (successor enumerations, annotation keys and
-    // entries, pair evaluations, refusal scans, edge-reuse probes, derivation scans, steps)
-    // and of the seed phase's reads, checked at least every kWorkCheckInterval units. Work
+    // a weighted sum of the walk's counters (successor enumerations, the annotation rows its
+    // fetches return with their entries and coordinates, pair evaluations, refusal scans,
+    // edge-reuse probes, derivation scans, steps) and of the seed phase's reads, compared
+    // after every charge of the walk (the seed phase: once every kWorkCheckInterval units),
+    // so a stop exceeds it by what was charged since the previous comparison — one fetch
+    // call's rows, a node's label-state scan, the seed phase with the roots' rows — and the
+    // largest such charge is stated (ResourceAccount::largest_charge). Work
     // is the walk's alone, the same in every output detail (finding 5: charging delivery as
     // work would make a work stop depend on the detail). Either budget stops the whole
     // seed, with resource_limit.
@@ -412,11 +445,18 @@ struct LabelRun {
     uint64_t from_bp = 0;
     uint64_t to_bp = 0;              // half-open; set when the run ends
     // Non-zero when this run's lineage was merged in from another parent at a
-    // reconvergence (§6.5) at that extension. A merge joins paths AT A NODE, so the
-    // bases from route_bp onward are shared by every route into it, while the earlier
-    // [from_bp, route_bp) prefix was travelled on a different route than the one the
-    // reported path spells. So of a displayed path, only [route_bp, to_bp) is evidence
-    // that this label carries those bases; the prefix is not.
+    // reconvergence (§6.5): the EARLIEST such merge on its route (runs are shared across
+    // sibling paths, so the first stamp wins). A merge joins paths AT A NODE, so the bases
+    // before it were travelled on a different route than the one the reported path
+    // spells. It is not where displayed support begins: after two such merges d1 < d2 the
+    // run keeps d1 while the displayed path spells another route up to d2 (spec §7.1), so
+    // displayed support is derived from the merge partitions (evidence_from, design §5.1);
+    // only route_bp == 0 says the whole run is displayed support. One exception, also
+    // stated in §7.1: at a merge of three or more parents an entry that beat an earlier
+    // parent is stamped before a later parent beats it, so the run it closes there (to_bp ==
+    // route_bp, `m`) carries that merge, which is not on its route; such a run's displayed
+    // support is still [evidence_from, to_bp). Changing the stamp would change R in
+    // unbudgeted output, so it stays, stated.
     uint64_t route_bp = 0;
     bool entered_by_switch = false;
     LabelId from_label = 0;
@@ -695,6 +735,9 @@ struct ResourceStop {
     double limit = 0;                // 0: none (a hook refused the head)
     double used = 0;                 // accounted when the head was refused
     double demand = 0;               // what admitting it needed (used, for work and time)
+    // a memory refusal injected by WalkerHooks::deny (a test hook) while the budget, if
+    // any, would have admitted the head: the statement must not blame a budget for it
+    bool injected = false;
 };
 
 // The request's accounts at the end of the seed (memory in modelled bytes)
@@ -714,6 +757,14 @@ struct ResourceAccount {
     uint64_t work_seed = 0;
     uint64_t work_used = 0;
     uint64_t work_check_interval = kWorkCheckInterval;
+    // The most work charged between two comparisons with the work budget (units; 0: no
+    // comparison was made, i.e. no work budget). Every comparison follows one that passed,
+    // so a work stop exceeds the budget by at most its last such stretch, and so by at most
+    // this: the bound a stop states with its number (review of the stage-2 fixes, F7), whatever
+    // the charge was — a fetch call's annotation rows decoded whole with their coordinates,
+    // a node's label-state scan, or the seed phase with the roots' rows, which are charged
+    // before the first comparison so that the result complete to 0 bp can be delivered
+    uint64_t largest_charge = 0;
 };
 
 struct SeedResult {

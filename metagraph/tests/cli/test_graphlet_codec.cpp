@@ -2344,34 +2344,203 @@ TEST(Graphlet, CombTrieStaysLinear) {
 
 namespace {
 
-void count_json(const Json::Value &v, uint64_t *members, uint64_t *elements, uint64_t *strings) {
+// malloc's footprint of |n| requested bytes, at most: a 16-byte quantum and an 8-byte
+// header, 32 bytes at least (glibc; macOS's tiny zone rounds to 16 without a header)
+uint64_t heap_bytes(uint64_t n) {
+    return std::max<uint64_t>(32, (n + 8 + 15) / 16 * 16);
+}
+
+// What jsoncpp allocates for the tree |v|, from this platform's types: per object or array
+// its map, per member a node (rb-tree links and colour, the pair of CZString and Value) and
+// its key's copy, per element a node, per string its length-prefixed buffer
+uint64_t json_tree_bytes(const Json::Value &v) {
+    static const uint64_t node
+        = heap_bytes(sizeof(Json::Value::ObjectValues::value_type) + 4 * sizeof(void*));
+    static const uint64_t map = heap_bytes(sizeof(Json::Value::ObjectValues));
+    uint64_t bytes = 0;
+    if (v.isObject()) {
+        bytes += map;
+        for (const std::string &name : v.getMemberNames()) {
+            bytes += node + heap_bytes(name.size() + 1) + json_tree_bytes(v[name]);
+        }
+    } else if (v.isArray()) {
+        bytes += map;
+        for (const Json::Value &x : v) {
+            bytes += node + json_tree_bytes(x);
+        }
+    } else if (v.isString()) {
+        bytes += heap_bytes(sizeof(unsigned) + v.asString().size() + 1);
+    }
+    return bytes;
+}
+
+// The peak of delivering one seed's JSON |j| as the response holds it (a graphlet's with
+// its body): the tree with Json::writeString's text three times (its stream's buffer,
+// grown by doubling to less than twice the text, and the copy it returns); later the text,
+// the deflate output (at most 0.03% and a few bytes larger) and zlib's 256 KiB state; or a
+// phase before either (|before|: the graphlet writer's text and its JSON copy). The text is
+// the larger of the server's compact form and the CLI's indented one, nested in a response.
+uint64_t delivery_peak(const Json::Value &j, uint64_t before = 0) {
+    Json::StreamWriterBuilder compact, indented;
+    compact["indentation"] = "";
+    indented["indentation"] = "  ";
+    const std::string c = Json::writeString(compact, j), i = Json::writeString(indented, j);
+    // a result is two levels deep in a response (the root object, the results array)
+    const uint64_t lines = std::count(i.begin(), i.end(), '\n') + 1;
+    const uint64_t text = std::max<uint64_t>(c.size(), i.size() + 4 * lines);
+    return std::max({ json_tree_bytes(j) + 3 * text,
+                      2 * text + text / 4096 + 64 + (uint64_t(1) << 18), before });
+}
+
+// The assumptions delivery_costs() derives its bounds from, checked on what the
+// serialisers wrote: keys of at most 25 characters, at most ten levels in a response (the
+// result itself is at level 2), numbers of at most 24 characters and fixed strings of at most
+// 28; names, sequences, effects (640) and messages (1 KiB) are priced by their length
+void check_widths(const Json::Value &v, size_t level, const std::string &key,
+                  const std::string &what) {
+    static const std::set<std::string> kPriced {
+        "name", "label", "seed_id", "sequence", "graphlet", "labels", "error"
+    };
+    EXPECT_LE(level, 10u) << what << " " << key;
     if (v.isObject()) {
         for (const std::string &name : v.getMemberNames()) {
-            (*members)++;
-            *strings += name.size();
-            count_json(v[name], members, elements, strings);
+            EXPECT_LE(name.size(), 25u) << what << " key " << name;
+            check_widths(v[name], level + 1, name, what);
         }
     } else if (v.isArray()) {
         for (const Json::Value &x : v) {
-            (*elements)++;
-            count_json(x, members, elements, strings);
+            check_widths(x, level + 1, key, what);
         }
     } else if (v.isString()) {
-        *strings += v.asString().size();
+        const size_t n = v.asString().size();
+        if (key == "effect") {
+            EXPECT_LE(n, 640u) << what;
+        } else if (key == "message") {
+            EXPECT_LE(n, 1024u) << what;
+        } else if (!kPriced.count(key)) {
+            EXPECT_LE(n, 28u) << what << " " << key << ": " << v.asString();
+        }
+    } else if (!v.isNull()) {
+        Json::StreamWriterBuilder compact;
+        compact["indentation"] = "";
+        EXPECT_LE(Json::writeString(compact, v).size(), 24u) << what << " " << key;
     }
 }
+
+// The cases of names whose delivered size is far from their length (GPT review of stage 2,
+// finding 1): control characters (six bytes each in JSON), '%' (three in MGT), quotes and
+// backslashes, tabs and DEL, and two-, three- and four-byte UTF-8 (six or twelve bytes per
+// character in JSON) — as seed labels (written twice by detail full), extra and recorded
+// labels, a dropped label and the seed_id
+std::vector<BudgetCase> adversarial_name_cases() {
+    // long enough that the names, not the fixed part, dominate what is delivered
+    const size_t n = 24'000;
+    auto repeat = [](const std::string &unit, size_t bytes) {
+        std::string s;
+        while (s.size() + unit.size() <= bytes) s += unit;
+        return s;
+    };
+    const std::vector<std::string> names {
+        std::string(n, '\x01'),
+        std::string(n, '%'),
+        repeat("\"\\", n),
+        repeat("\t\x7f\x1f", n),
+        repeat("\xc3\xa9", n),
+        repeat("\xe2\x82\xac", n),
+        repeat("\xf0\x9f\x98\x80%\x02", n),
+    };
+    std::vector<std::string> seqs, labels;
+    for (uint32_t i = 0; i < names.size(); ++i) {
+        seqs.push_back("AAA" + random_seq(14, 7700 + i));
+        labels.push_back(names[i]);
+    }
+    std::shared_ptr<graph::AnnotatedDBG> anno
+        = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(3, seqs, labels,
+                                                                         DeBruijnGraph::BASIC);
+    std::vector<BudgetCase> cases;
+    // every label carries AAA; the last one's record is cut so that it does not carry the
+    // seed AAAx and is dropped
+    for (size_t first = 0; first + 1 < names.size(); ++first) {
+        Seed seed = seed_of(seqs[first].substr(0, 6), { names[first], names[names.size() - 1] });
+        seed.seed_id = std::string(64, '\x03') + names[first].substr(0, 40);
+        LabelChangeCost constant;
+        Strategy st = strategy_of(R"({"bounds": {"max_extension_bp": 8},
+            "labels": {"loss_budget": 1, "change_cost": {"model": "constant", "value": 1}}})",
+            &constant);
+        st.extra = { names[(first + 1) % (names.size() - 1)] };
+        cases.push_back({ "names " + std::to_string(first), anno, seed, st, constant });
+    }
+    cases.push_back({ "names annotate", anno, seed_of("AAA"),
+                      strategy_of(R"({"labels": {"mode": "annotate"}, "bounds": {"max_extension_bp": 5}})") });
+    return cases;
+}
+
+} // namespace
+
+TEST(GraphletCodec, JsonEscapedSizeIsTheWriters) {
+    Json::StreamWriterBuilder compact;
+    compact["indentation"] = "";
+    auto written = [&](const std::string &s) {
+        return Json::writeString(compact, Json::Value(s)).size() - 2;
+    };
+    std::vector<std::string> cases;
+    for (int c = 1; c < 128; ++c) {
+        cases.push_back(std::string(3, static_cast<char>(c)));
+    }
+    cases.push_back("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80plain");
+    std::mt19937 rng(17);
+    for (size_t i = 0; i < 200; ++i) {
+        std::string s;
+        for (size_t j = 0; j < 40; ++j) {
+            switch (rng() % 5) {
+                case 0: s.push_back(static_cast<char>(rng() % 0x80)); break;
+                case 1: s += "\xc3\xa9"; break;
+                case 2: s += "\xe2\x82\xac"; break;
+                case 3: s += "\xf0\x9f\x98\x80"; break;
+                default: s.push_back(static_cast<char>(1 + rng() % 0x1f)); break;
+            }
+        }
+        cases.push_back(s);
+    }
+    for (const std::string &s : cases) {
+        if (s.find('\0') != std::string::npos)
+            continue;
+        EXPECT_EQ(written(s), json_escaped_size(s)) << s;
+    }
+    // bytes that are not UTF-8 (refused per seed before any output; priced at least as
+    // the writer would write them)
+    for (const std::string &s : { std::string("\xff\xfe"), std::string("\x80"), std::string("a\xc3"),
+                                  std::string("\xe2\x82"), std::string("\xf8\x88\x80\x80\x80") }) {
+        EXPECT_GE(json_escaped_size(s), written(s)) << s;
+    }
+}
+
+namespace {
 
 // what the delivery model charges for |r| in |detail| (DeliveryCosts per object), from
 // the result's own objects: a lower bound of the walker's charge, which prices lists at
 // their bounds
 uint64_t modelled_delivery(const SeedResult &r, const DeliveryCosts &d) {
     uint64_t m = d.fixed;
-    for (const LabelRef &l : r.label_dict) m += d.label + l.name.size() * d.label_name;
+    auto name = [&](const std::string &n, DeliveryCosts::Name use) {
+        return d.name ? d.name(n, use) : 0;
+    };
+    m += name(r.seed_id, DeliveryCosts::Name::SEED_ID);
+    for (size_t i = 0; i < r.label_dict.size(); ++i) {
+        m += d.label + name(r.label_dict[i].name, i < r.num_seed_labels
+                                                   ? DeliveryCosts::Name::SEED_LABEL
+                                                   : DeliveryCosts::Name::LABEL);
+    }
+    for (const DroppedLabel &dl : r.dropped_labels) {
+        m += d.dropped + dl.runs.size() * d.dropped_run + name(dl.name, DeliveryCosts::Name::DROPPED_LABEL);
+    }
     for (const ArmResult &arm : r.arms) {
         for (const Segment &s : arm.segments) {
             m += d.segment + s.length_bp * d.base;
-            size_t labels = s.labels_start.size() + s.labels_end.size() + s.parents.size();
-            for (const auto &via : s.labels_via_parent) labels += via.size() + 1;
+            size_t labels = s.labels_start.size() + s.labels_end.size();
+            if (s.parents.size() > 1)
+                m += s.parents.size() * d.merge_parent;
+            for (const auto &via : s.labels_via_parent) labels += via.size();
             for (const LabelSetRun &run : s.label_sets) {
                 labels += run.labels.size();
                 m += d.presence_run;
@@ -2394,7 +2563,7 @@ uint64_t modelled_delivery(const SeedResult &r, const DeliveryCosts &d) {
         }
         for (const BranchEvent &be : arm.branch_events) {
             m += d.branch_event + (be.chars.size() + be.ambiguous.size() + be.dropped.size()) * d.branch_event_entry;
-            for (const auto &rf : be.refused) m += (1 + rf.labels.size()) * d.branch_event_entry;
+            for (const auto &rf : be.refused) m += d.refusal + rf.labels.size() * d.branch_event_entry;
         }
         m += arm.growth.size() * d.bin;
     }
@@ -2404,38 +2573,66 @@ uint64_t modelled_delivery(const SeedResult &r, const DeliveryCosts &d) {
 } // namespace
 
 // The delivery model bounds what the serialisers hold (§14: every committed prefix stays
-// deliverable within what was reserved for it): per detail, the MGT body three times
-// (text, its JSON copy, the response), or the JSON tree (jsoncpp's map nodes, keys and
-// strings) with its indented text — and stays within a small factor of it, or the
-// budget would refuse far too early.
+// deliverable within what was reserved for it), as a demonstrated upper bound and not an
+// average (the owner's answer to the stage-2 review): per detail, the peak of the JSON tree
+// with writeString's three texts, the compressor's, or the graphlet writer's (its text and
+// the JSON copy), computed from the real serialisers' output and this platform's jsoncpp
+// types — with names whose delivered size is far from their length (GPT review of stage 2,
+// finding 1). The walker charges at least the model (memory_final), the serialised output
+// keeps to the widths the model assumes, and the model stays within a small factor of the
+// output, or the budget would refuse far too early.
 TEST(Graphlet, DeliveryCostsBoundTheOutput) {
-    size_t checked = 0;
-    for (const BudgetCase &c : budget_cases()) {
+    size_t checked = 0, names = 0;
+    std::vector<BudgetCase> cases = budget_cases();
+    for (BudgetCase &c : adversarial_name_cases()) {
+        cases.push_back(std::move(c));
+    }
+    for (const BudgetCase &c : cases) {
         LabelOracle oracle(*c.anno);
-        const SeedResult r = run_case(c, c.st);
         for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
-            const DeliveryCosts d = delivery_costs(detail, c.st.sequences);
-            const uint64_t model = modelled_delivery(r, d);
-            uint64_t actual = 0;
-            const Json::Value j = seed_result_to_json(r, c.st, detail, false);
-            if (std::string(detail) == "graphlet") {
-                actual = 3 * graphlet_text(r, c.seed, c.st, context_of(oracle), j).size();
-            } else {
-                uint64_t members = 0, elements = 0, strings = 0;
-                count_json(j, &members, &elements, &strings);
-                actual = 128 * members + 96 * elements + 2 * strings + j.toStyledString().size();
-            }
             const std::string what = c.name + " " + detail;
+            Strategy st = c.st;
+            st.delivery = delivery_costs(detail, st.sequences);
+            const SeedResult r = run_case(c, st);
+            const DeliveryCosts &d = st.delivery;
+            const uint64_t model = modelled_delivery(r, d);
+            Json::Value j = seed_result_to_json(r, st, detail, false);
+            uint64_t before = 0;
+            if (std::string(detail) == "graphlet") {
+                const std::string text = graphlet_text(r, c.seed, st, context_of(oracle), j);
+                // the writer's text (less than twice the body by doubling) and its JSON
+                // copy, with the writer's index (per segment, run and label end) and the
+                // JSON summary
+                uint64_t index = 0;
+                for (const ArmResult &arm : r.arms) {
+                    index += 40 * arm.segments.size() + 8 * arm.runs.size();
+                    for (const Segment &s : arm.segments) {
+                        for (const Event &ev : s.events) index += 96 * (ev.type == EventType::LABEL_END);
+                    }
+                }
+                before = 3 * text.size() + index + json_tree_bytes(j);
+                j["graphlet"] = text;
+            }
+            check_widths(j, 2, "", what);
+            size_t limitations = j["limitations"].size();
+            for (const std::string &side : j["arms"].getMemberNames()) {
+                EXPECT_LE(j["arms"][side]["limitations"].size(), 8u) << what;
+                limitations += j["arms"][side]["limitations"].size();
+            }
+            EXPECT_LE(limitations, 5u + 2 * 8) << what;
+            const uint64_t actual = delivery_peak(j, before);
             EXPECT_LE(actual, model) << what;
-            // An MGT body writes derivable fields as '*' and sets as deltas, which a bound
-            // fixed per object cannot know before the walk, so its model is looser (and
-            // matters less: the walker's own state is several times the body)
+            EXPECT_LE(model, r.account.memory_final) << what << ": the walker charges less than the model";
+            // a bound fixed per object cannot know before the walk which fields will be
+            // short, '*' or delta-coded (MGT), so the model is looser than any one output
             const uint64_t factor = std::string(detail) == "graphlet" ? 10 : 6;
-            EXPECT_LE(model - d.fixed, factor * actual) << what << ": the model is not useful";
+            EXPECT_LE(model, factor * actual) << what << ": the model is not useful";
             checked++;
+            names += c.name.rfind("names", 0) == 0;
         }
     }
     EXPECT_GT(checked, 40u);
+    EXPECT_GE(names, 28u);
 }
 
 // The deadline is checked between the heads of a level too (§14: at least every W work
@@ -2984,8 +3181,10 @@ TEST(Stage2Review, FailedAnnotateSeedNamesItsLever) {
     const Json::Value *wd = limitation_of(f["limitations"], "walk_domain");
     ASSERT_TRUE(wd);
     EXPECT_EQ("bounds.max_memory_mb", (*wd)["knob"].asString());
-    // the lever works: the default cap records 64 labels per node, which fit
-    const Json::Value ok = request(64);
+    // the lever works: a cap of 4 labels per node fits (the default 64 does not since the
+    // delivery model prices every object at its demonstrated upper bound: a recorded label
+    // costs some 8 KiB in detail full, its root reservations as much again)
+    const Json::Value ok = request(4);
     EXPECT_TRUE(ok.isMember("arms")) << ok.toStyledString();
     EXPECT_NE("failed", ok["outcome"]["walks"].asString());
 }
@@ -3141,5 +3340,583 @@ TEST(Stage2Review, SeedPhaseIsChargedAsWork) {
         ASSERT_TRUE(wd) << what;
         EXPECT_EQ("bounds.max_work_units", (*wd)["knob"].asString()) << what;
         EXPECT_FALSE(states(res["limitations"], "memory_bound_soft")) << what;
+    }
+}
+
+
+/*
+ * The external re-review of stage 2 (GPT, of 4d332729 and the fixes, confirmed on
+ * 278a53dd): one regression per finding of the C++ side, each failing before its fix.
+ */
+namespace {
+
+// |n| sequences |record|, one column "F", headers L0 ... (or |first| then L0 ...): the
+// reviewer's indexes in-process (build -k 3 --mode basic, coordinates, a CoordToHeader)
+struct HeaderIndexCase {
+    std::shared_ptr<graph::AnnotatedDBG> anno;
+    std::unique_ptr<annot::CoordToHeader> cth;
+};
+
+HeaderIndexCase header_index(size_t k, const std::vector<std::pair<std::string, std::string>> &records) {
+    std::vector<std::string> seqs, labels, headers;
+    std::vector<uint64_t> offsets, num_kmers;
+    uint64_t offset = 0;
+    for (const auto &[name, seq] : records) {
+        seqs.push_back(seq);
+        labels.push_back("F");
+        headers.push_back(name);
+        offsets.push_back(offset);
+        num_kmers.push_back(seq.size() - k + 1);
+        offset += seq.size() - k + 1;
+    }
+    HeaderIndexCase c;
+    c.anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            k, seqs, labels, DeBruijnGraph::BASIC, true, offsets);
+    std::vector<std::vector<std::string>> h { headers };
+    std::vector<std::vector<uint64_t>> n { num_kmers };
+    c.cth = std::make_unique<annot::CoordToHeader>(std::move(h), std::move(n));
+    return c;
+}
+
+} // namespace
+
+// Finding 2: the work budget exceeded its advertised maximum overrun. The level's rows were
+// charged and checked in fixed batches of keys, whatever their width, and the root's row
+// before any check: 25,000 headers on AAACAAAGAAAT under a budget of 1 used 125,044 units.
+// Now the walk compares the budget after every charge — a fetch call's rows are charged
+// when it returns them, and near the budget a call reads one key — so a stop overruns by
+// what was charged since the previous comparison at most: here one row, as wide as the
+// index makes it, stated with its number (ResourceAccount::largest_charge) rather than
+// promised to be below W.
+TEST(Stage2ReviewRecheck, WorkStopsWithinOneRowOfTheBudget) {
+    const size_t n = 3000;
+    std::vector<std::pair<std::string, std::string>> records;
+    for (size_t i = 0; i < n; ++i) {
+        records.emplace_back("L" + std::to_string(i), "AAACAAAGAAAT");
+    }
+    const HeaderIndexCase idx = header_index(3, records);
+    LabelOracle oracle(*idx.anno, idx.cth.get());
+
+    // annotate: the root's row (n labels) is charged before the first level reads anything
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.label_mode = LabelMode::ANNOTATE;
+    st.seed_label_kind = LabelKind::HEADER;
+    st.max_labels_per_node = 1;
+    st.max_label_branches = Strategy::kUnlimited;
+    st.max_splits_per_path = Strategy::kUnlimited;
+    st.min_live_labels = 0;
+    st.max_extension_bp = 10;
+    st.max_work_units = 1;
+    const SeedResult a = traverse_seed(oracle, seed_of("AAA"), st, LabelChangeCost::forbid());
+    ASSERT_TRUE(a.resource_stop);
+    EXPECT_EQ(ResourceStop::WORK, a.resource_stop->resource);
+    EXPECT_EQ(0u, a.arms[1].complete_to_bp);
+    // the root's row, the one charge before the first comparison (annotate reads no row
+    // in its seed phase)
+    EXPECT_EQ(8u + n, a.account.largest_charge);
+    EXPECT_LE(a.resource_stop->used - 1, static_cast<double>(a.account.largest_charge));
+    EXPECT_LE(a.resource_stop->used, 1.0 + kWorkCheckInterval);
+
+    // constrain, a derived set of n labels: a budget that admits the seed phase and the
+    // first enumeration stops at the first row the head consumes, not after the level's
+    st = Strategy();
+    st.direction = Strategy::RIGHT;
+    st.max_seed_labels = n;
+    st.max_extension_bp = 10;
+    const Seed seed = seed_of("AAA");
+    const SeedResult free = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    ASSERT_FALSE(free.resource_stop);
+    ASSERT_EQ(n, free.label_dict.size());
+    st.max_work_units = free.account.work_seed + 4 + 1;
+    const SeedResult c = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    ASSERT_TRUE(c.resource_stop);
+    EXPECT_EQ(ResourceStop::WORK, c.resource_stop->resource);
+    EXPECT_EQ(0u, c.arms[1].complete_to_bp);
+    const double over = c.resource_stop->used - static_cast<double>(st.max_work_units);
+    EXPECT_GT(over, 0.0);
+    EXPECT_LE(over, static_cast<double>(8 + n)) << "more than one row past the budget";
+    EXPECT_LE(over, static_cast<double>(c.account.largest_charge));
+    // the stop states the bound, with the most the seed charged between two comparisons
+    const Json::Value j = seed_result_to_json(c, st, "full", false);
+    const std::string message = j["resource_stop"]["message"].asString();
+    EXPECT_NE(std::string::npos, message.find("after every charge")) << message;
+    EXPECT_NE(std::string::npos, message.find("between two comparisons: "
+                                              + std::to_string(c.account.largest_charge) + " units"))
+        << message;
+    check_serialised(c, seed, st, oracle, "work stop at a row");
+}
+
+// Finding 3: an interrupted fetch hid its memory excess. The level's fetch was checked
+// against the work budget between its chunks, and a stop there skipped the observation of
+// what the fetch held: 100,000 headers on the next node, max_memory_mb 1, max_work_units 100
+// reported memory_bound_soft observed 0 while the cache alone held 1.6 MB beyond its
+// allotment. Now what a fetch holds is observed before any check after it can throw.
+TEST(Stage2ReviewRecheck, InterruptedFetchStatesWhatItHeld) {
+    const size_t n = 20'000;
+    std::vector<std::pair<std::string, std::string>> records { { "root", "AAAC" } };
+    for (size_t i = 0; i < n; ++i) {
+        records.emplace_back("L" + std::to_string(i), "AAC");
+    }
+    const HeaderIndexCase idx = header_index(3, records);
+    LabelOracle oracle(*idx.anno, idx.cth.get());
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.label_mode = LabelMode::ANNOTATE;
+    st.seed_label_kind = LabelKind::HEADER;
+    st.max_labels_per_node = 100'000;
+    st.max_label_branches = Strategy::kUnlimited;
+    st.max_splits_per_path = Strategy::kUnlimited;
+    st.min_live_labels = 0;
+    st.max_extension_bp = 10;
+    st.max_memory_bytes = uint64_t(1) << 20;
+    st.max_work_units = 100;
+    st.delivery = delivery_costs("full", true);
+    const SeedResult r = traverse_seed(oracle, seed_of("AAA"), st, LabelChangeCost::forbid());
+    ASSERT_TRUE(r.resource_stop);
+    EXPECT_EQ(0u, r.arms[1].complete_to_bp);
+    // the cache's kept keys alone (n rows' worth beyond a 256 KiB allotment) are held
+    EXPECT_GT(r.account.soft_overshoot, n * 16 - (uint64_t(1) << 18));
+    const Json::Value j = seed_result_to_json(r, st, "full", false);
+    const Json::Value *soft = limitation_of(j["limitations"], "memory_bound_soft");
+    ASSERT_TRUE(soft);
+    EXPECT_GE((*soft)["observed"].asUInt64(), 1u);
+
+    // a stop by work alone, at the first head after the fetch, states the excess too
+    st.max_memory_bytes = uint64_t(1) << 30;
+    st.max_work_units = 30;
+    const SeedResult w = traverse_seed(oracle, seed_of("AAA"), st, LabelChangeCost::forbid());
+    ASSERT_TRUE(w.resource_stop);
+    EXPECT_EQ(ResourceStop::WORK, w.resource_stop->resource);
+}
+
+// Finding 8: a seed failed in its derivation (no carrier, the time budget) omitted
+// memory_bound_soft under max_memory_mb, which budget failures and UTF-8 refusals state
+TEST(Stage2ReviewRecheck, FailedDerivationsStateTheSoftBound) {
+    const std::string X = random_seq(30, 8101), Y = random_seq(30, 8102), Z = random_seq(30, 8103);
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            11, { X + Y, Y + Z }, { "A", "B" }, DeBruijnGraph::BASIC);
+    for (const char *bounds : { R"("max_extension_bp": 5, "max_memory_mb": 1)",
+                                R"("max_extension_bp": 5, "max_memory_mb": 1, "time_budget_ms": 0.000000001)",
+                                R"("max_extension_bp": 5)" }) {
+        Json::Value r;
+        r["seeds"][0]["sequence"] = X + Y + Z;
+        r["strategy"] = parse_json(std::string(R"({"bounds": {)") + bounds
+                                   + R"(}, "output": {"detail": "graphlet", "timing": false}})");
+        const Json::Value res = process_traverse_request(r, *anno, "")["results"][0];
+        ASSERT_EQ("failed", res["outcome"]["walks"].asString()) << bounds;
+        const Json::Value *d = limitation_of(res["limitations"], "derivation");
+        ASSERT_TRUE(d) << bounds;
+        const bool budget = std::string(bounds).find("max_memory_mb") != std::string::npos;
+        const bool time = std::string(bounds).find("time_budget_ms") != std::string::npos;
+        EXPECT_EQ(time ? "time_budget" : "no_carrier", (*d)["cause"].asString()) << bounds;
+        const Json::Value *soft = limitation_of(res["limitations"], "memory_bound_soft");
+        EXPECT_EQ(budget, soft != nullptr) << bounds;
+        if (soft) {
+            EXPECT_EQ(1u, (*soft)["limit"].asUInt64()) << bounds;
+            EXPECT_TRUE((*soft)["observed"].isUInt64()) << bounds;
+        }
+        // memory_bound_soft is in no outcome class
+        EXPECT_EQ("complete", res["outcome"]["label_evidence"].asString()) << bounds;
+    }
+}
+
+// N1: a traversal complete to its radius reported a time stop. With time_budget_ms 0 the
+// deadline has passed at every depth after 0; when every remaining head has reached the
+// radius, nothing is censored (the heads end as max_extension_bp), so no stop is stated
+TEST(Stage2ReviewRecheck, CompleteWalkIsNoTimeStop) {
+    const std::string seq = random_seq(60, 8201);
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            15, { seq }, { "F" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    const Seed seed = seed_of(seq.substr(0, 40), { "F" });
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.merge_reconverge = false;
+    st.max_extension_bp = 1;
+    st.time_budget_ms = 0;
+    st.max_work_units = 1'000'000;
+    st.delivery = delivery_costs("graphlet", true);
+    const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    EXPECT_FALSE(r.resource_stop);
+    EXPECT_EQ(ArmResult::COMPLETE, r.arms[1].status);
+    EXPECT_EQ(1u, r.arms[1].complete_to_bp);
+    const Json::Value j = seed_result_to_json(r, st, "graphlet", false);
+    EXPECT_FALSE(j.isMember("resource_stop"));
+    EXPECT_EQ("complete", j["outcome"]["walks"].asString());
+    const std::string text = check_serialised(r, seed, st, oracle, "radius 1, time 0");
+    EXPECT_EQ(std::string::npos, text.find("\nQ "));
+    // below the radius the deadline does censor a head, and says so
+    st.max_extension_bp = 5;
+    const SeedResult cut = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    ASSERT_TRUE(cut.resource_stop);
+    EXPECT_EQ(ResourceStop::TIME, cut.resource_stop->resource);
+    EXPECT_EQ(1u, cut.arms[1].complete_to_bp);
+    EXPECT_EQ(ArmResult::TRUNCATED, cut.arms[1].status);
+}
+
+// Part A: a refusal injected by the denial hook stays a memory stop (limit "unlimited"
+// without a budget, so that it is representable in Q and K), but no budget refused the
+// head, and the statement says so
+TEST(Stage2ReviewRecheck, InjectedRefusalIsNotABudget) {
+    const std::string seq = random_seq(60, 8301);
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            15, { seq }, { "F" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    const Seed seed = seed_of(seq.substr(0, 20), { "F" });
+    WalkerHooks hooks;
+    hooks.deny = [](const Admission &a) { return a.at_bp == 2; };
+    for (uint64_t budget : { uint64_t(0), uint64_t(64) << 20 }) {
+        Strategy st;
+        st.direction = Strategy::RIGHT;
+        st.max_extension_bp = 10;
+        st.max_memory_bytes = budget;
+        const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", &hooks);
+        ASSERT_TRUE(r.resource_stop);
+        EXPECT_TRUE(r.resource_stop->injected);
+        const Json::Value j = seed_result_to_json(r, st, "full", false);
+        const Json::Value &q = j["resource_stop"];
+        EXPECT_EQ("memory", q["resource"].asString());
+        EXPECT_EQ(budget ? Json::Value(Json::UInt64(64)) : Json::Value("unlimited"), q["effective"]);
+        const std::string message = q["message"].asString();
+        EXPECT_NE(std::string::npos, message.find("injected")) << message;
+        EXPECT_EQ(std::string::npos, message.find("the memory budget (")) << message;
+        // no budget lever helps against it
+        ASSERT_EQ(1u, q["actions"].size());
+        EXPECT_EQ("continue_from_leaves", q["actions"][0].asString());
+        const Json::Value *wd = limitation_of(j["arms"]["right"]["limitations"], "walk_domain");
+        ASSERT_TRUE(wd);
+        EXPECT_NE(std::string::npos, (*wd)["effect"].asString().find("injected"));
+        check_serialised(r, seed, st, oracle, "injected refusal");
+    }
+    // a refusal by the budget itself still names the budget
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.max_extension_bp = 10;
+    st.max_memory_bytes = uint64_t(1) << 20;
+    st.delivery = delivery_costs("full", true);
+    const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    if (r.resource_stop) {
+        EXPECT_FALSE(r.resource_stop->injected);
+        const std::string message = seed_result_to_json(r, st, "full", false)["resource_stop"]["message"].asString();
+        EXPECT_NE(std::string::npos, message.find("the memory budget (")) << message;
+    }
+}
+
+// Finding 1, as the reviewer ran it (detail full, a header of 180,000 control characters,
+// a 4-base record, max_memory_mb 2; detail graphlet, a header of 200,000 '%' in annotate
+// mode): the delivered result exceeded what the budget had reserved for it, since a name
+// byte was charged at four bytes but JSON writes a control character as six. Now names are
+// charged as escaped: the seed either fails at depth 0 (nothing per label delivered) or its
+// delivery peak stays within the budget.
+TEST(Stage2ReviewRecheck, EscapedNamesStayWithinTheBudget) {
+    for (const auto &[name, mode, detail, mb] : {
+             std::make_tuple(std::string(180'000, '\x01'), "constrain", "full", 2),
+             std::make_tuple(std::string(200'000, '%'), "annotate", "graphlet", 2),
+             std::make_tuple(std::string(70'000, '%'), "annotate", "graphlet", 1),
+             std::make_tuple(std::string(60'000, '\x01'), "constrain", "full", 2) }) {
+        auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                3, { "AAAC" }, { name }, DeBruijnGraph::BASIC);
+        Json::Value r;
+        r["seeds"][0]["sequence"] = "AAA";
+        r["strategy"] = parse_json(std::string(R"({"direction": "right", "labels": {"mode": ")") + mode
+                + R"(", "seed_label_kind": "column", "max_labels_per_node": 1}, "bounds":
+                {"max_extension_bp": 1}, "output": {"detail": ")" + detail + R"(", "timing": false}})");
+        r["strategy"]["bounds"]["max_memory_mb"] = mb;
+        const Json::Value res = process_traverse_request(r, *anno, "")["results"][0];
+        const std::string what = std::string(mode) + " " + detail + " " + std::to_string(name.size());
+        const uint64_t budget = uint64_t(mb) << 20;
+        EXPECT_LE(compact(res).size(), budget) << what;
+        if (res["outcome"]["walks"].asString() == "failed") {
+            EXPECT_EQ(std::string::npos, compact(res).find(name.substr(0, 100))) << what;
+            EXPECT_EQ("memory", res["resource_stop"]["resource"].asString()) << what;
+            continue;
+        }
+        EXPECT_LE(delivery_peak(res), budget) << what;
+    }
+}
+
+
+/*
+ * The adversarial review of the fixes to the re-review (round 3): what the fixes left open.
+ * One regression per finding, each failing before its fix.
+ */
+namespace {
+
+// two columns "a" and "b" holding one record each, both under the header |name|: a derived
+// header label that cannot be resubmitted (ambiguous_header)
+HeaderIndexCase same_header_in_two_columns(const std::string &name, const std::string &seq) {
+    HeaderIndexCase c;
+    c.anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { seq, seq }, { "a", "b" }, DeBruijnGraph::BASIC, true, { 0, 0 });
+    std::vector<std::vector<std::string>> h { { name }, { name } };
+    std::vector<std::vector<uint64_t>> n { { seq.size() - 2 }, { seq.size() - 2 } };
+    c.cth = std::make_unique<annot::CoordToHeader>(std::move(h), std::move(n));
+    return c;
+}
+
+// the work bound a stop states: used exceeds the budget by at most the most the seed charged
+// between two comparisons, and the message gives that number
+void expect_stated_work_bound(const SeedResult &r, const Strategy &st, const std::string &what) {
+    ASSERT_TRUE(r.resource_stop) << what;
+    ASSERT_EQ(ResourceStop::WORK, r.resource_stop->resource) << what;
+    const double over = r.resource_stop->used - static_cast<double>(st.max_work_units);
+    EXPECT_GT(over, 0.0) << what;
+    EXPECT_LE(over, static_cast<double>(r.account.largest_charge)) << what;
+    const std::string message = seed_result_to_json(r, st, "full", false)["resource_stop"]["message"].asString();
+    EXPECT_NE(std::string::npos, message.find("between two comparisons: "
+                                              + std::to_string(r.account.largest_charge) + " units"))
+        << what << ": " << message;
+}
+
+} // namespace
+
+// F1: a failed seed's result echoed an index-supplied header (ambiguous_header: in the error
+// and as observed) and the request's seed_id, neither charged: one failed result of 2.16 MB
+// under 1 MiB with memory_bound_soft observed 0. Now, under a memory budget, a long index
+// name is echoed as a bounded prefix with its length and where it is, and what the echoed
+// seed_id holds beyond the budget is stated as memory_bound_soft's observed excess.
+TEST(Stage2ReviewRound3, FailedResultsEchoWithinWhatTheyState) {
+    // an index-supplied header (the CLI's view of the same case: integration
+    // test_stage2_failed_results_echo_within_what_they_state)
+    const std::string name(180'000, '\x01');
+    const HeaderIndexCase idx = same_header_in_two_columns(name, "AAAC");
+    LabelOracle oracle(*idx.anno, idx.cth.get());
+    for (uint64_t budget : { uint64_t(1) << 20, uint64_t(0) }) {
+        Strategy st;
+        st.direction = Strategy::RIGHT;
+        st.seed_label_kind = LabelKind::HEADER;
+        st.max_extension_bp = 1;
+        st.max_memory_bytes = budget;
+        try {
+            traverse_seed(oracle, seed_of("AAA"), st, LabelChangeCost::forbid());
+            FAIL() << "the derived header is ambiguous";
+        } catch (const SeedDerivationError &e) {
+            EXPECT_EQ(SeedDerivationError::AMBIGUOUS_HEADER, e.cause());
+            if (!budget) {
+                // without a budget the header is echoed whole, as before
+                EXPECT_EQ(name, e.subject());
+                continue;
+            }
+            EXPECT_LE(e.subject().size(), 512u);
+            EXPECT_NE(std::string::npos, e.subject().find("180000 bytes; column "));
+            EXPECT_LE(std::string(e.what()).size(), 1024u);
+            EXPECT_EQ(std::string::npos, std::string(e.what()).find(name.substr(0, 1000)));
+        }
+    }
+
+    // the request's seed_id: a seed failed at depth 0 because of it still echoes it, and
+    // the excess is stated
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { "AAACGTTGCA" }, { "r1" }, DeBruijnGraph::BASIC);
+    std::string seed_id;
+    for (size_t i = 0; i < 100'000; ++i) {
+        seed_id += "\xF0\x9F\x98\x80";     // U+1F600: twelve bytes in JSON (a surrogate pair)
+    }
+    Json::Value r;
+    r["seeds"][0]["sequence"] = "AAACGT";
+    r["seeds"][0]["seed_id"] = seed_id;
+    r["strategy"] = parse_json(R"({"direction": "both", "labels": {"mode": "constrain",
+        "seed_label_kind": "column"}, "bounds": {"max_extension_bp": 4, "max_memory_mb": 1},
+        "output": {"detail": "graphlet", "timing": false}})");
+    const Json::Value res = process_traverse_request(r, *anno, "")["results"][0];
+    ASSERT_EQ("failed", res["outcome"]["walks"].asString());
+    const Json::Value *soft = limitation_of(res["limitations"], "memory_bound_soft");
+    ASSERT_TRUE(soft);
+    const uint64_t budget = uint64_t(1) << 20;
+    ASSERT_GT(compact(res).size(), budget);
+    EXPECT_GE((*soft)["observed"].asUInt64() << 20, compact(res).size() - budget)
+        << "the failed result exceeds the budget by more than memory_bound_soft states";
+}
+
+// F2: the explicit-label validation charged each row (which can fail the seed) before it
+// observed what the fetched rows held: a row of 400,000 coordinates under 1 MiB and a work
+// budget of 100 reported memory_bound_soft observed 0. Now a fetch call's rows and the
+// query's cache are observed before the first charge.
+TEST(Stage2ReviewRound3, ValidationStatesWhatItHeldBeforeItFails) {
+    std::string seq = "CGAT";
+    for (size_t i = 0; i < 200'000; ++i) {
+        seq += "GAT";
+    }
+    const HeaderIndexCase idx = header_index(3, { { "r1", seq } });
+    LabelOracle oracle(*idx.anno, idx.cth.get());
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.support = Support::TRACE;
+    st.merge_reconverge = false;
+    st.max_extension_bp = 5;
+    st.max_memory_bytes = uint64_t(1) << 20;
+    st.max_work_units = 100;
+    st.delivery = delivery_costs("summary", true);
+    try {
+        traverse_seed(oracle, seed_of("GATG", { "r1" }), st, LabelChangeCost::forbid());
+        FAIL() << "the first row alone is past the work budget";
+    } catch (const SeedBudgetError &e) {
+        EXPECT_EQ(ResourceStop::WORK, e.stop().resource);
+        // GAT's row holds 200,000 coordinates (1.6 MB) under a 1 MiB budget
+        EXPECT_GT(e.account().soft_overshoot, 200'000u * sizeof(uint64_t) - (uint64_t(1) << 20));
+    }
+}
+
+// F3: the fix to finding 2 charged a row only when a head consumed it, so the rows a cut
+// level had fetched were decoded but never charged, and `used` understated the decoding.
+// Every row a fetch returns is charged again: with every row n labels wide, the work charged
+// is at least rows_requested x (8 + n) when the level's second head is refused after the
+// fetch returned its row.
+TEST(Stage2ReviewRound3, EveryFetchedRowIsCharged) {
+    const size_t n = 1000;
+    const std::string S = random_seq(40, 9101);
+    std::string X = random_seq(30, 9102), Y = random_seq(30, 9103);
+    X[0] = 'A';
+    Y[0] = 'C';
+    std::vector<std::string> seqs, labels;
+    for (size_t c = 0; c < n; ++c) {
+        for (const std::string *tail : { &X, &Y }) {
+            seqs.push_back(S + *tail);
+            labels.push_back("c" + std::to_string(c));
+        }
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            15, seqs, labels, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.label_mode = LabelMode::ANNOTATE;
+    st.seed_label_kind = LabelKind::COLUMN;
+    st.max_labels_per_node = 1;
+    st.max_label_branches = Strategy::kUnlimited;
+    st.max_splits_per_path = Strategy::kUnlimited;
+    st.min_live_labels = 0;
+    st.merge_reconverge = false;
+    st.max_extension_bp = 30;
+    st.max_work_units = 1'000'000'000;
+    // the seed's last k-mer is S[5, 20); the head at depth 20 is S's last k-mer, which
+    // splits into X and Y: the level at depth 21 has two heads, the second one refused
+    const uint64_t D = 21;
+    size_t at_d = 0;
+    WalkerHooks hooks;
+    hooks.deny = [&](const Admission &a) { return a.at_bp == D && at_d++ == 1; };
+    const SeedResult r = traverse_seed(oracle, seed_of(S.substr(0, 20)), st,
+                                       LabelChangeCost::forbid(), "", &hooks);
+    ASSERT_TRUE(r.resource_stop);
+    EXPECT_TRUE(r.resource_stop->injected);
+    EXPECT_EQ(D, r.resource_stop->at_bp);
+    EXPECT_EQ(2u, at_d);
+    const uint64_t rows = r.annotation_counters.rows_requested;
+    ASSERT_GT(rows, D);
+    EXPECT_GE(r.arms[1].work_units, rows * (8 + n))
+        << "a row the fetch returned was not charged";
+}
+
+// F4, F5, F7: "one indivisible charge, the widest row" was broken by the two roots' rows of
+// direction both (charged before the first comparison: 50,016 under a budget of 1, stated
+// 25,008), by a row's trace coordinates (charged as one sum after the row: stated 9, overrun
+// 99,924) and could be by a label-state scan (which carried no number). Now the coordinates
+// are part of their row's charge, and every stop states the most its seed charged between
+// two comparisons, which bounds its overrun whatever the charge was.
+TEST(Stage2ReviewRound3, WorkStopsStateTheirLargestCharge) {
+    {
+        // F4: both arms' roots, as one charge with the (empty) annotate seed phase
+        const size_t n = 3000;
+        std::vector<std::pair<std::string, std::string>> records;
+        for (size_t i = 0; i < n; ++i) {
+            records.emplace_back("L" + std::to_string(i), "AAACAAAGAAAT");
+        }
+        const HeaderIndexCase idx = header_index(3, records);
+        LabelOracle oracle(*idx.anno, idx.cth.get());
+        Strategy st;
+        st.label_mode = LabelMode::ANNOTATE;
+        st.seed_label_kind = LabelKind::HEADER;
+        st.max_labels_per_node = 1;
+        st.max_label_branches = Strategy::kUnlimited;
+        st.max_splits_per_path = Strategy::kUnlimited;
+        st.min_live_labels = 0;
+        st.max_extension_bp = 10;
+        st.max_work_units = 1;
+        for (const char *seed : { "AAA", "AAAC", "AAACAAAG" }) {
+            const SeedResult r = traverse_seed(oracle, seed_of(seed), st, LabelChangeCost::forbid());
+            expect_stated_work_bound(r, st, std::string("both roots of ") + seed);
+            EXPECT_EQ(2 * (8u + n), r.account.largest_charge) << seed;
+        }
+    }
+    {
+        // F5: a row with one label and 20,000 coordinates under support: trace
+        std::string seq = "CGAT";
+        for (size_t i = 0; i < 20'000; ++i) {
+            seq += "GAT";
+        }
+        const HeaderIndexCase idx = header_index(3, { { "r1", seq } });
+        LabelOracle oracle(*idx.anno, idx.cth.get());
+        Strategy st;
+        st.direction = Strategy::RIGHT;
+        st.support = Support::TRACE;
+        st.merge_reconverge = false;
+        st.seed_label_kind = LabelKind::HEADER;
+        st.max_extension_bp = 5;
+        st.max_work_units = 100;
+        const SeedResult r = traverse_seed(oracle, seed_of("CGA"), st, LabelChangeCost::forbid());
+        expect_stated_work_bound(r, st, "trace coordinates");
+        EXPECT_GE(r.account.largest_charge, 20'000u);
+    }
+    {
+        // F7: a sweep of budgets over a constrain walk of 1,000 derived labels (rows of
+        // 1,000 entries, label-state scans of 2,000): whatever charge a stop comes after,
+        // its overrun is within the stated number
+        const size_t n = 1000;
+        std::vector<std::pair<std::string, std::string>> records;
+        for (size_t i = 0; i < n; ++i) {
+            records.emplace_back("L" + std::to_string(i), "AAACAAAGAAAT");
+        }
+        const HeaderIndexCase idx = header_index(3, records);
+        LabelOracle oracle(*idx.anno, idx.cth.get());
+        Strategy st;
+        st.max_seed_labels = n;
+        st.max_extension_bp = 10;
+        st.max_label_branches = Strategy::kUnlimited;
+        const Seed seed = seed_of("AAACA");
+        const SeedResult free = traverse_seed(oracle, seed, st, LabelChangeCost::constant(1));
+        ASSERT_FALSE(free.resource_stop);
+        size_t stops = 0;
+        const uint64_t walk = free.account.work_used - free.account.work_seed;
+        for (uint64_t extra = 0; extra < walk; extra += walk / 12 + 1) {
+            st.max_work_units = free.account.work_seed + extra + 1;
+            const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::constant(1));
+            if (!r.resource_stop)
+                continue;
+            ++stops;
+            expect_stated_work_bound(r, st, "budget " + std::to_string(st.max_work_units));
+        }
+        EXPECT_GT(stops, 3u);
+    }
+}
+
+// F6: the depth-0 state built its label dictionary (names in each LabelRef and again in the
+// query) before its admission; a seed the admission failed reported memory_bound_soft 0 with
+// twelve names of 1 MB held under 1 MiB. Now what the dictionary holds is observed first.
+TEST(Stage2ReviewRound3, FailedAdmissionStatesTheDictionaryItHeld) {
+    std::vector<std::pair<std::string, std::string>> records;
+    for (size_t i = 0; i < 6; ++i) {
+        records.emplace_back("N" + std::to_string(i) + std::string(200'000, 'x'), "AAAC");
+    }
+    const HeaderIndexCase idx = header_index(3, records);
+    LabelOracle oracle(*idx.anno, idx.cth.get());
+    for (LabelMode mode : { LabelMode::CONSTRAIN, LabelMode::ANNOTATE }) {
+        Strategy st;
+        st.direction = Strategy::RIGHT;
+        st.label_mode = mode;
+        st.seed_label_kind = LabelKind::HEADER;
+        st.max_labels_per_node = 100;
+        st.max_extension_bp = 1;
+        st.max_memory_bytes = uint64_t(1) << 20;
+        st.delivery = delivery_costs("graphlet", true);
+        try {
+            traverse_seed(oracle, seed_of("AAA"), st, LabelChangeCost::forbid());
+            FAIL() << to_string(mode) << ": six names of 200 KB fit 1 MiB";
+        } catch (const SeedBudgetError &e) {
+            EXPECT_EQ(ResourceStop::MEMORY, e.stop().resource) << to_string(mode);
+            // the names alone, held twice (the LabelRef and the query's or recorder's copy)
+            EXPECT_GE(e.account().soft_overshoot, 2 * 6 * 200'000u - (uint64_t(1) << 20))
+                << to_string(mode);
+        }
     }
 }

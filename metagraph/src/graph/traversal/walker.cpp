@@ -121,10 +121,12 @@ namespace {
 constexpr char kSentinel = boss::BOSS::kSentinel;
 // the structural lookahead cache is cleared when it grows beyond this many nodes
 constexpr size_t kMaxLookahead = 1'000'000;
-// Under a §14 budget the level's annotation keys are fetched in chunks of at most this
-// many, with a budget / deadline check between chunks: one fetch call is the walker's
-// largest uninterruptible unit of work. Without a budget the level is one call, as it
-// always was (the cache, and with it the direct_reads counter, depends on the batching).
+// Under a §14 budget the level's annotation keys are fetched in calls of at most this
+// many (fewer when rows are wide or the work budget is near, fetch_chunk()): one fetch
+// call is the walker's largest uninterruptible unit of decoding, so its rows are charged
+// as work when it returns them and what it holds is observed before the comparison after
+// it. Without a budget the level is one call, as it always was (the cache, and with it
+// the direct_reads counter, depends on the batching).
 constexpr size_t kFetchChunk = 8192;
 
 // A budget or the deadline ran out while a head was being PLANNED or a level fetched
@@ -446,7 +448,7 @@ struct CostModel {
              event_label = 0, needed = 0, leaf = 0, leaf_label = 0, chain_entry = 0,
              cont_base = 0, split = 0, split_branch = 0, bevent = 0, bevent_entry = 0,
              refusal = 0, presence_run = 0, bin = 0, item = 0, entry = 0, coord = 0,
-             present = 0, label = 0, label_name = 0;
+             present = 0, label = 0, label_name = 0, merge_parent = 0;
 };
 
 // the labels of refusal (ch, cause) of |plan|, created when first needed; a step has a
@@ -544,6 +546,8 @@ class Walker {
     bool derive_seed_labels(const std::vector<node_index> &keys,
                             std::vector<LabelRef> *refs,
                             std::vector<LabelQuery::NodeHits> *hits);
+    // an index-supplied name as a failure message echoes it; |where| identifies it
+    std::string echoed(const std::string &name, const std::string &where) const;
     void init_edge_coding();
     void init_arm(ArmState &arm);
 
@@ -737,16 +741,36 @@ class Walker {
     // a budget does not hold the seed itself: throws SeedBudgetError
     [[noreturn]] void fail_seed(ResourceStop::Resource resource, double used, double demand,
                                 const std::string &what);
-    // the budget and deadline check (§14: at least every kWorkCheckInterval units);
-    // |force| checks now, otherwise only when the interval has passed. Throws BudgetTrip.
+    // the work budget's comparison (after every charge: what was charged since the last
+    // comparison is the largest_charge_ candidate) and the deadline's (|force|: now,
+    // otherwise once the interval has passed, §14). Throws BudgetTrip.
     void checkpoint(bool force);
     // what the trip costs the result: the resource stop (the first of the seed) and the
     // cap's demand in the knob's unit; returns the end reason of the censored heads
     EndReason note_stop(const ArmState &arm, const Item *head, ResourceStop::Resource resource,
-                        double demand);
+                        double demand, bool injected = false);
+    // a level's annotation rows (in calls under a budget, observing what each holds),
+    // charged as work to |arm| when a call returns them
     std::vector<LabelQuery::NodeHits> fetch_hits(ArmState &arm, const std::vector<node_index> &keys);
     std::vector<LabelRecorder::NodeLabels> fetch_present(ArmState &arm,
                                                          const std::vector<node_index> &keys);
+    // the keys of the next fetch call; |grown| is the call's growth from one key per level
+    // under a work budget
+    size_t fetch_chunk(size_t grown) const;
+    // the memory bound's soft part (memory_bound_soft, ResourceAccount::soft_overshoot):
+    // what is held beyond the admitted account — decoded rows (|scratch|), a cache beyond its
+    // allotment, dictionary labels named but not charged yet — observed wherever it is held
+    // and before any check after it can throw (GPT review of stage 2, finding 3)
+    void observe_soft(uint64_t scratch, uint64_t dictionary = 0);
+    // the same for the seed phase, which runs before the account exists
+    void observe_seed_scratch(uint64_t scratch);
+    // what a dictionary label costs the account: its LabelRef and summaries, its name
+    // retained twice, and its delivery in the requested detail
+    uint64_t label_bytes(LabelId id, const LabelRef &label) const;
+    uint64_t dictionary_bytes(size_t *named) const;
+    // what the dictionary built so far holds (its labels and names in every copy, the
+    // query's or recorder's cache), its delivery apart: held before the depth-0 admission
+    uint64_t dictionary_held() const;
 
     LabelOracle &oracle_;
     const DeBruijnGraph &graph_;
@@ -798,6 +822,13 @@ class Walker {
     size_t dict_charged_ = 0;        // dictionary labels charged (annotate grows it)
     size_t max_lookahead_ = kMaxLookahead;
     uint64_t next_check_ = kWorkCheckInterval;
+    // the widest annotation row fetched so far (entries, and coordinates under trace):
+    // sizes the fetch calls
+    uint64_t widest_row_ = 0;
+    // work used at the last comparison with the work budget, and the most charged between
+    // two comparisons (ResourceAccount::largest_charge)
+    uint64_t compared_at_ = 0;
+    uint64_t largest_charge_ = 0;
     uint64_t depth_ = 0;             // the level being processed
     size_t events_written_ = 0;      // events pushed, for the plan's debug check
 
@@ -1073,6 +1104,23 @@ void Walker::validate_seed() {
     }
 }
 
+std::string Walker::echoed(const std::string &name, const std::string &where) const {
+    // Under a memory budget a name the INDEX supplies (a header, a column name) is echoed
+    // by a failure as a bounded prefix with its length and where it is: a failed seed's
+    // result is not admitted, and nothing in the request bounds such a name, so echoing it
+    // whole let one failed result exceed the budget (review of the stage-2 fixes, F1: a header
+    // of 180,000 control characters, written twice, was 2.16 MB under 1 MiB). Without a
+    // budget, or when short, it is echoed whole, as before.
+    constexpr size_t kEchoBytes = 256;
+    if (!strategy_.max_memory_bytes || name.size() <= kEchoBytes)
+        return name;
+    size_t cut = kEchoBytes;
+    while (cut > 0 && (static_cast<unsigned char>(name[cut]) & 0xC0) == 0x80) {
+        --cut;     // never inside a UTF-8 sequence
+    }
+    return name.substr(0, cut) + "... (" + std::to_string(name.size()) + " bytes; " + where + ")";
+}
+
 bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                                 std::vector<LabelRef> *refs,
                                 std::vector<LabelQuery::NodeHits> *hits) {
@@ -1163,6 +1211,29 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             tuples = oracle_.get_row_tuples(distinct);
         } else {
             plain = oracle_.get_rows(distinct);
+        }
+        if (strategy_.max_memory_bytes) {
+            // The sub-batch's decoded rows and the running intersection are held before
+            // any account exists, the largest scratch of a derived seed: observed as the
+            // soft excess, which a seed failed here states too (finding 8)
+            uint64_t scratch = (live.capacity() + next.capacity()) * sizeof(Key)
+                             + cur.capacity() * sizeof(cur[0]) + flat.capacity() * sizeof(flat[0]);
+            for (const auto &row : plain) {
+                scratch += sizeof(row) + row.size() * sizeof(row[0]);
+            }
+            for (const auto &row : tuples) {
+                scratch += sizeof(row) + row.size() * sizeof(row[0]);
+                for (const auto &entry : row) {
+                    scratch += entry.second.size() * sizeof(entry.second[0]);
+                }
+            }
+            for (const auto &at : coords_at) {
+                scratch += sizeof(at) + at.size() * sizeof(at[0]);
+                for (const auto &entry : at) {
+                    scratch += entry.second.size() * sizeof(Coord);
+                }
+            }
+            observe_seed_scratch(scratch);
         }
         auto row_of = [&](size_t i) {
             return static_cast<size_t>(
@@ -1360,21 +1431,28 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         // names and a name resolves to the FIRST column holding it — and every name-keyed
         // output (label_dict, label_summary, end_labels, the seed id) would be ambiguous.
         // Refuse it rather than echo a list the caller cannot use.
-        std::vector<const std::string*> names;
+        // where a header is, for a failure that cannot echo it whole (echoed())
+        auto where = [](const Key &key) {
+            return "column " + std::to_string(key.first) + ", sequence " + std::to_string(key.second);
+        };
+        std::vector<const Key*> names;
         names.reserve(live.size());
         for (const Key &key : live) {
-            names.push_back(&name_of(key));
+            names.push_back(&key);
         }
-        std::sort(names.begin(), names.end(),
-                  [](const std::string *a, const std::string *b) { return *a < *b; });
+        // stable: of the keys sharing a name, the one an echo locates is deterministic
+        std::stable_sort(names.begin(), names.end(), [&](const Key *a, const Key *b) {
+            return name_of(*a) < name_of(*b);
+        });
         for (size_t i = 1; i < names.size(); ++i) {
-            if (*names[i - 1] == *names[i]) {
+            if (name_of(*names[i - 1]) == name_of(*names[i])) {
+                const std::string name = echoed(name_of(*names[i]), where(*names[i]));
                 throw SeedDerivationError(SeedDerivationError::AMBIGUOUS_HEADER,
                         "The labels derived from the seed are ambiguous: the sequence header '"
-                        + *names[i] + "' occurs in more than one annotation column, so the "
+                        + name + "' occurs in more than one annotation column, so the "
                         "derived list cannot be resubmitted as explicit labels. Set "
                         "seed_label_kind to \"column\" or name the labels explicitly.",
-                        0, 0, *names[i]);
+                        0, 0, name);
             }
         }
         // ... and a header that an explicit list would resolve to something else is just
@@ -1391,13 +1469,15 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 const std::string resolves_to = back.kind == LabelKind::COLUMN
                     ? "is also the name of an annotation column"
                     : "also occurs in another annotation column ("
-                          + oracle_.column_name(back.column) + ")";
+                          + echoed(oracle_.column_name(back.column),
+                                   "column " + std::to_string(back.column)) + ")";
+                const std::string shown = echoed(name, where(key));
                 throw SeedDerivationError(SeedDerivationError::AMBIGUOUS_HEADER,
                         "The labels derived from the seed are not resubmittable: the sequence "
-                        "header '" + name + "' " + resolves_to + ", which an explicit label list "
+                        "header '" + shown + "' " + resolves_to + ", which an explicit label list "
                         "would resolve it to. Set seed_label_kind to \"column\" or name the "
                         "labels explicitly.",
-                        0, 0, name);
+                        0, 0, shown);
             }
         }
     }
@@ -1467,6 +1547,11 @@ void Walker::charge_seed(uint64_t units) {
     if (seed_work_ < next_check_)
         return;
     next_check_ = seed_work_ + kWorkCheckInterval;
+    if (strategy_.max_work_units) {
+        // a comparison: what was charged since the last one is stated (largest_charge)
+        largest_charge_ = std::max(largest_charge_, seed_work_ - compared_at_);
+        compared_at_ = seed_work_;
+    }
     if (strategy_.max_work_units && seed_work_ > strategy_.max_work_units) {
         fail_seed(ResourceStop::WORK, static_cast<double>(seed_work_),
                   static_cast<double>(seed_work_),
@@ -1482,15 +1567,28 @@ void Walker::charge_seed(uint64_t units) {
 std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
                                                           const std::vector<node_index> &keys) {
     std::vector<LabelQuery::NodeHits> hits;
+    uint64_t scratch = 0;
+    // a row is charged when it is read, key by key (8 units, 1 per hit and coordinate), so
+    // that a check never waits for a whole chunk of wide rows (charge_seed)
     auto charge = [&](size_t from) {
-        uint64_t units = 0;
+        // What the call holds is observed BEFORE the first charge: a charge can fail the
+        // seed, and the failure must state what the fetched rows and the query's cache
+        // held (review of the stage-2 fixes, F2: observed 0 while the first row alone held
+        // 3.2 MB of coordinates under 1 MiB) — the rule of finding 3, observe then check
         for (size_t i = from; i < hits.size(); ++i) {
-            units += (keys[i] != npos ? 8 : 0) + hits[i].size();
+            scratch += sizeof(hits[i]) + hits[i].size() * sizeof(LabelQuery::Hit);
+            for (const LabelQuery::Hit &h : hits[i]) {
+                scratch += h.coords.size() * sizeof(Coord);
+            }
+        }
+        observe_seed_scratch(scratch + query.cache_bytes());
+        for (size_t i = from; i < hits.size(); ++i) {
+            uint64_t units = (keys[i] != npos ? 8 : 0) + hits[i].size();
             for (const LabelQuery::Hit &h : hits[i]) {
                 units += h.coords.size();
             }
+            charge_seed(units);
         }
-        charge_seed(units);
     };
     if (!strategy_.max_work_units) {
         // one call, as always: the fetch's counters (direct_reads) depend on the batching
@@ -1535,6 +1633,7 @@ void Walker::fail_seed(ResourceStop::Resource resource, double used, double dema
     account.work_limit = strategy_.max_work_units;
     account.work_seed = seed_work_;
     account.work_used = work_used();
+    account.largest_charge = largest_charge_;
     const size_t labels = annotate_ ? (recorder_ ? recorder_->labels().size() : 0)
                                     : result_.label_dict.size();
     throw SeedBudgetError(what, q, account, !annotate_ && seed_.labels.empty(), labels);
@@ -1575,9 +1674,19 @@ void Walker::init_arm(ArmState &arm) {
     }
     if (annotate_) {
         // the boundary k-mer's own labels: the root's entry node, from which
-        // continuous presence (label_summary.direct_bp) is measured
-        auto nl = recorder_->fetch({ oracle_.key_of(root.node, root.kmer) });
-        arm.work_extra += 8 + nl[0].total;
+        // continuous presence (label_summary.direct_bp) is measured. Its row is charged
+        // here and compared with the budget before the first level reads anything
+        // (run_level): both roots belong to the depth-0 result, so a stop between them
+        // would deliver none, and the stretch they make with the seed phase is stated as
+        // a charge of its own (largest_charge). What the row holds beyond the account is
+        // observed now: the root's labels are admitted with the depth-0 state, its row and
+        // the cache are not
+        const node_index key = oracle_.key_of(root.node, root.kmer);
+        auto nl = recorder_->fetch({ key });
+        widest_row_ = std::max<uint64_t>(widest_row_, nl[0].total);
+        arm.work_extra += (key != npos ? 8 : 0) + nl[0].total;
+        charge_dictionary();
+        observe_soft(sizeof(nl[0]) + nl[0].labels.size() * sizeof(LabelId));
         root.present = bounded(arm, nl[0].labels, nl[0].total);
         root.present_total = nl[0].total;
     }
@@ -2057,8 +2166,9 @@ void Walker::derive(ArmState &arm, const State &sigma, const std::vector<Target>
     const double budget = strategy_.loss_budget;
     const bool loss_only = strategy_.switch_on_loss_only;
     // the derivation's own scan of the sources and targets (its pair evaluations are
-    // counted below), charged as work (§14)
+    // counted below), charged as work (§14) and compared with the budget before it runs
     arm.work_extra += sigma.size() + targets.size();
+    checkpoint(false);
 
     auto in_targets = [&](LabelId l) {
         auto it = std::lower_bound(targets.begin(), targets.end(), l,
@@ -2123,6 +2233,7 @@ void Walker::derive(ArmState &arm, const State &sigma, const std::vector<Target>
                 best_loss = s->loss + cost_.cost(s->label, t.label);
             }
             arm.result.pair_evaluations += 1;
+            checkpoint(false);
         } else if (cost_.model() == LabelChangeCost::TABLE) {
             for (const Entry *s : sw) {
                 if (s->label == t.label)
@@ -2223,7 +2334,9 @@ void Walker::init_budgets() {
     m_.split_branch = 2 * sizeof(SplitBranch) + 2 * 2 * sizeof(size_t) + d.split_branch;
     m_.bevent = 2 * sizeof(BranchEvent) + d.branch_event;
     m_.bevent_entry = 2 * (sizeof(char) + sizeof(size_t)) + d.branch_event_entry;
-    m_.refusal = 2 * sizeof(BranchEvent::Refusal) + d.branch_event_entry;
+    m_.refusal = 2 * sizeof(BranchEvent::Refusal) + d.refusal;
+    // a merged segment's parent: its id in parents and its labels_via_parent list
+    m_.merge_parent = 2 * (sizeof(size_t) + sizeof(std::vector<LabelId>)) + d.merge_parent;
     m_.presence_run = 2 * sizeof(LabelSetRun) + d.presence_run;
     m_.bin = 2 * sizeof(GrowthBin) + d.bin;
     // a live head: the Item (twice: frontier and next), its k-mer when it does not fit
@@ -2233,9 +2346,10 @@ void Walker::init_budgets() {
     m_.coord = 2 * sizeof(Coord);
     m_.present = 2 * sizeof(LabelId);
     // a dictionary label: its LabelRef, the per-label scratch and stamps, its summary on
-    // both arms and the query's maps; its name once more per byte
+    // both arms and the query's maps; its name twice per byte (the LabelRef and the
+    // query's or recorder's copy), its delivery priced by name (label_bytes)
     m_.label = 2 * sizeof(LabelRef) + 2 * 2 * sizeof(LabelArmSummary) + 96 + d.label;
-    m_.label_name = 2 + d.label_name;
+    m_.label_name = 2;
 
     mem_limit_ = strategy_.max_memory_bytes;
     budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
@@ -2243,6 +2357,15 @@ void Walker::init_budgets() {
     // the output and the statement of a stop (resource_stop, Q, K, walk_domain)
     base_ = d.fixed + 4096 + seed_upper_.size() * (2 + d.base)
           + nodes_.size() * (sizeof(node_index) + 64);
+    // what the output repeats from the request and the index besides the dictionary: the
+    // seed_id and the dropped seed labels with their names and presence runs, each name
+    // priced as delivered (escaped) in the requested detail (finding 1)
+    base_ += seed_.seed_id.size() + (d.name ? d.name(seed_.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
+    for (const DroppedLabel &dl : result_.dropped_labels) {
+        base_ += 2 * sizeof(DroppedLabel) + dl.name.size() + dl.reason.size()
+               + dl.runs.size() * (2 * sizeof(dl.runs[0]) + d.dropped_run) + d.dropped
+               + (d.name ? d.name(dl.name, DeliveryCosts::Name::DROPPED_LABEL) : 0);
+    }
     if (mem_limit_) {
         // Fixed allotments of the budget for the caches, which then evict within them:
         // charging what a cache happens to hold would make admission depend on
@@ -2261,13 +2384,22 @@ void Walker::init_budgets() {
     note_peak();
 }
 
+uint64_t Walker::label_bytes(LabelId id, const LabelRef &label) const {
+    // a seed label's name is written twice by detail full (label_dict and seed.labels),
+    // an extra or recorded label's once: the serialiser layer knows, and prices the escaping
+    const DeliveryCosts &d = strategy_.delivery;
+    const auto use = !annotate_ && id < result_.num_seed_labels ? DeliveryCosts::Name::SEED_LABEL
+                                                                : DeliveryCosts::Name::LABEL;
+    return m_.label + label.name.size() * m_.label_name + (d.name ? d.name(label.name, use) : 0);
+}
+
 void Walker::charge_dictionary() {
     // annotate mode names labels as the walk meets them: charged after the fetch that
     // named them (the overshoot this allows is stated as memory_bound_soft); the seed's
     // dictionary (constrain) and the roots' labels (annotate) are admitted at depth 0
     const std::vector<LabelRef> &dict = annotate_ ? recorder_->labels() : result_.label_dict;
     for (; dict_charged_ < dict.size(); ++dict_charged_) {
-        base_ += m_.label + dict[dict_charged_].name.size() * m_.label_name;
+        base_ += label_bytes(dict_charged_, dict[dict_charged_]);
     }
     note_peak();
 }
@@ -2295,10 +2427,12 @@ uint64_t Walker::stop_bytes(size_t state, size_t present, uint64_t ext, uint32_t
 
 // A head's share of a merge at the end of its level: the merged segment (counted once
 // per head, so g heads hold g segments for the one created), its labels_start, the
-// partition and the parents' end sets (each at most the head's labels), the ids, and
-// one label on the reconverge event — or a same_distance revisit event under keep.
+// partition and the parents' end sets (each at most the head's labels), its parent entry
+// (id and partition list), and one label on the reconverge event — or a same_distance
+// revisit event under keep.
 uint64_t Walker::merge_bytes(size_t labels) const {
-    return m_.segment + (3 * labels + 2) * m_.seg_label + 32 + m_.event + m_.event_label;
+    return m_.segment + 3 * labels * m_.seg_label + m_.merge_parent + 32 + m_.event
+         + m_.event_label;
 }
 
 bool Walker::would_revisit(const ArmState &arm, node_index node, uint64_t ext,
@@ -2373,23 +2507,38 @@ uint64_t Walker::work_of(const ArmState &arm) const {
 
 void Walker::checkpoint(bool force) {
     const uint64_t used = work_used();
+    // The work budget is compared on every call, and every charge of the walk reaches a
+    // checkpoint before the next one (a fetch call's rows, a derivation's scan, each target
+    // it prices, each edge-reuse probe, each successor enumeration): a comparison costs
+    // nothing, and comparing only once every interval let a level of wide annotation rows
+    // run far past the budget (GPT review of stage 2, finding 2: 125,044 units used under a
+    // budget of 1). The previous comparison passed, so a stop overruns the budget by what
+    // was charged since, at most: the largest such stretch is recorded and stated with its
+    // number (review of the stage-2 fixes, F7), rather than a bound that one kind of
+    // charge could break.
+    if (strategy_.max_work_units) {
+        largest_charge_ = std::max(largest_charge_, used - compared_at_);
+        compared_at_ = used;
+        if (used > strategy_.max_work_units)
+            throw BudgetTrip { ResourceStop::WORK, static_cast<double>(used) };
+    }
     if (!force && used < next_check_)
         return;
     next_check_ = used + kWorkCheckInterval;
-    if (strategy_.max_work_units && used > strategy_.max_work_units)
-        throw BudgetTrip { ResourceStop::WORK, static_cast<double>(used) };
-    // The deadline is checked here too, so that one wide level cannot overrun it by
-    // more than the interval. Never at depth 0: a zero budget means "no extension", and
-    // the boundary check in run() is what ends such a walk after its first level.
+    // The deadline needs the clock, so it is read before every head and at least every
+    // interval, so that one wide level cannot overrun it by more than that. Never at depth
+    // 0: a zero budget means "no extension", and the boundary check in run() is what ends
+    // such a walk after its first level.
     if (depth_ > 0 && time_exceeded())
         throw BudgetTrip { ResourceStop::TIME, timer_.elapsed() * 1000.0 };
 }
 
 EndReason Walker::note_stop(const ArmState &arm, const Item *head,
-                            ResourceStop::Resource resource, double demand) {
+                            ResourceStop::Resource resource, double demand, bool injected) {
     if (!result_.resource_stop) {
         ResourceStop q;
         q.resource = resource;
+        q.injected = injected;
         q.arm = arm.arm;
         q.at_bp = head ? head->ext_bp : depth_;
         q.demand = demand;
@@ -2425,55 +2574,166 @@ EndReason Walker::note_stop(const ArmState &arm, const Item *head,
     return EndReason::RESOURCE_LIMIT;
 }
 
+// The bytes the dictionary labels named since |*named| will cost when charge_dictionary()
+// charges them (annotate mode names labels inside a fetch): held, and not charged yet.
+uint64_t Walker::dictionary_bytes(size_t *named) const {
+    uint64_t bytes = 0;
+    if (!annotate_)
+        return 0;
+    const std::vector<LabelRef> &dict = recorder_->labels();
+    for (; *named < dict.size(); ++*named) {
+        bytes += label_bytes(*named, dict[*named]);
+    }
+    return bytes;
+}
+
+uint64_t Walker::dictionary_held() const {
+    const std::vector<LabelRef> &dict = annotate_ ? recorder_->labels() : result_.label_dict;
+    uint64_t bytes = annotate_ ? recorder_->cache_bytes() : query_->cache_bytes();
+    for (const LabelRef &label : dict) {
+        bytes += m_.label - strategy_.delivery.label + label.name.size() * m_.label_name;
+    }
+    return bytes;
+}
+
+void Walker::observe_soft(uint64_t scratch, uint64_t dictionary) {
+    if (!mem_limit_)
+        return;
+    // Only what is held beyond the admitted account is soft: the scratch rows, a cache
+    // beyond its allotment and the dictionary labels a fetch named that are not charged
+    // yet. The admitted account itself never exceeds the budget (the depth-0 state and
+    // every level's bins are admitted), so memory_bound_soft never reports the modelled
+    // state's own excess as the decoder's (review of stage 2, finding 3).
+    uint64_t cache = 0;
+    if (query_) {
+        cache = query_->cache_bytes();
+    } else if (recorder_) {
+        cache = recorder_->cache_bytes();
+    }
+    const uint64_t soft = scratch + dictionary
+                        + (cache > cache_allotment_ ? cache - cache_allotment_ : 0);
+    const uint64_t held = accounted() + soft;
+    if (held > mem_limit_)
+        overshoot_ = std::max(overshoot_, std::min(soft, held - mem_limit_));
+}
+
+void Walker::observe_seed_scratch(uint64_t scratch) {
+    if (!mem_limit_)
+        return;
+    // The seed phase runs before the account exists: what it holds is the seed (charged
+    // with the depth-0 state, see init_budgets) and the rows it decodes (soft)
+    const uint64_t seed = seed_upper_.size() * 2 + nodes_.size() * (sizeof(node_index) + 64);
+    const uint64_t held = seed + scratch;
+    if (held > mem_limit_)
+        overshoot_ = std::max(overshoot_, std::min(scratch, held - mem_limit_));
+}
+
+size_t Walker::fetch_chunk(size_t grown) const {
+    // A call's rows are decoded together and charged together, before the comparison that
+    // follows the call, so the call is the work a stop can run past the budget by. Sized so
+    // that, at the widest row fetched so far, a call holds about one check interval (the
+    // deadline is read between calls), and under a work budget no more than the budget has
+    // left, so that near the budget a call reads one key; and there grown from one key per
+    // level (|grown|), so that rows far wider than any fetched before are met by a small
+    // call rather than by a whole chunk of them (review of the stage-2 fixes, F3)
+    uint64_t chunk = std::clamp<uint64_t>(kWorkCheckInterval / (8 + widest_row_), 1, kFetchChunk);
+    if (strategy_.max_work_units) {
+        const uint64_t used = work_used();
+        const uint64_t left = strategy_.max_work_units > used ? strategy_.max_work_units - used : 0;
+        chunk = std::min<uint64_t>({ chunk, std::max<uint64_t>(1, left / (8 + widest_row_)),
+                                     static_cast<uint64_t>(grown) });
+    }
+    return static_cast<size_t>(chunk);
+}
+
+// The work of a fetched row (DESIGN-traverse-graphlet.md §14, "rows decoded" and
+// "coordinates mapped"): 8 per key, 1 per entry and 1 per coordinate. A row is charged
+// when a fetch returns it — decoded then or by the lookahead ahead of it — whether or not a
+// head consumes it: a level cut mid-way decoded its later rows all the same, and charging
+// only consumed rows hid that decoding from the budget and from `used` (review of the
+// stage-2 fixes, F3: 880,000 of 900,000 decoded entries uncharged)
+static uint64_t row_units(node_index key, const LabelQuery::NodeHits &h) {
+    uint64_t units = (key != npos ? 8 : 0) + h.size();
+    for (const LabelQuery::Hit &hit : h) {
+        units += hit.coords.size();
+    }
+    return units;
+}
+
 std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
                                                      const std::vector<node_index> &keys) {
-    std::vector<LabelQuery::NodeHits> hits;
-    auto charge = [&](size_t from) {
-        for (size_t i = from; i < hits.size(); ++i) {
-            arm.work_extra += (keys[i] != npos ? 8 : 0) + hits[i].size();
-        }
-    };
     if (!budgeted_) {
-        hits = query_->fetch(keys);
-        charge(0);
+        // one call, as always: the fetch's counters (direct_reads) depend on the batching
+        std::vector<LabelQuery::NodeHits> hits = query_->fetch(keys);
+        for (size_t i = 0; i < hits.size(); ++i) {
+            arm.work_extra += row_units(keys[i], hits[i]);
+        }
         return hits;
     }
+    // Under a §14 budget in calls (fetch_chunk()), each charged and compared when it
+    // returns; the memory a call leaves held beyond the account is observed BEFORE the
+    // comparison after it can throw, or a stop inside the fetch would hide it (GPT review
+    // of stage 2, finding 3)
+    std::vector<LabelQuery::NodeHits> hits;
     hits.reserve(keys.size());
-    for (size_t begin = 0; begin < keys.size(); begin += kFetchChunk) {
-        const size_t end = std::min(keys.size(), begin + kFetchChunk);
+    uint64_t scratch = 0;
+    size_t grown = 1;
+    for (size_t begin = 0; begin < keys.size(); ) {
+        const size_t end = std::min(keys.size(), begin + fetch_chunk(grown));
         for (auto &h : query_->fetch(std::vector<node_index>(keys.begin() + begin,
                                                              keys.begin() + end))) {
+            const size_t i = hits.size();
+            scratch += sizeof(h) + h.size() * sizeof(LabelQuery::Hit);
+            const uint64_t units = row_units(keys[i], h);
+            for (const auto &hit : h) {
+                scratch += hit.coords.size() * sizeof(Coord);
+            }
+            widest_row_ = std::max<uint64_t>(widest_row_, units - (keys[i] != npos ? 8 : 0));
+            arm.work_extra += units;
             hits.push_back(std::move(h));
         }
-        charge(begin);
+        observe_soft(scratch);
         checkpoint(true);
+        grown = std::min(2 * grown, kFetchChunk);
+        begin = end;
     }
     return hits;
 }
 
 std::vector<LabelRecorder::NodeLabels> Walker::fetch_present(ArmState &arm,
                                                              const std::vector<node_index> &keys) {
-    std::vector<LabelRecorder::NodeLabels> present;
-    auto charge = [&](size_t from) {
-        // a recorded row costs its whole width (the true count), not the capped list
-        for (size_t i = from; i < present.size(); ++i) {
-            arm.work_extra += (keys[i] != npos ? 8 : 0) + present[i].total;
-        }
+    // as fetch_hits; a recorded row costs its whole width (the true count), not the capped
+    // list, and the dictionary also grows with what each call names
+    auto units = [](node_index key, const LabelRecorder::NodeLabels &nl) {
+        return (key != npos ? 8 : 0) + static_cast<uint64_t>(nl.total);
     };
     if (!budgeted_) {
-        present = recorder_->fetch(keys);
-        charge(0);
+        std::vector<LabelRecorder::NodeLabels> present = recorder_->fetch(keys);
+        for (size_t i = 0; i < present.size(); ++i) {
+            arm.work_extra += units(keys[i], present[i]);
+        }
         return present;
     }
+    std::vector<LabelRecorder::NodeLabels> present;
     present.reserve(keys.size());
-    for (size_t begin = 0; begin < keys.size(); begin += kFetchChunk) {
-        const size_t end = std::min(keys.size(), begin + kFetchChunk);
+    uint64_t scratch = 0, dictionary = 0;
+    size_t named = dict_charged_;
+    size_t grown = 1;
+    for (size_t begin = 0; begin < keys.size(); ) {
+        const size_t end = std::min(keys.size(), begin + fetch_chunk(grown));
         for (auto &nl : recorder_->fetch(std::vector<node_index>(keys.begin() + begin,
                                                                  keys.begin() + end))) {
+            const size_t i = present.size();
+            scratch += sizeof(nl) + nl.labels.size() * sizeof(LabelId);
+            widest_row_ = std::max<uint64_t>(widest_row_, nl.total);
+            arm.work_extra += units(keys[i], nl);
             present.push_back(std::move(nl));
         }
-        charge(begin);
+        dictionary += dictionary_bytes(&named);
+        observe_soft(scratch, dictionary);
         checkpoint(true);
+        grown = std::min(2 * grown, kFetchChunk);
+        begin = end;
     }
     return present;
 }
@@ -2684,7 +2944,7 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
         // and the reconverge event); they bound it, as the merged state is at most the
         // union of theirs
         uint64_t merge_cost = m_.segment + m_.event
-                            + g.size() * (m_.event_label + 2 * m_.seg_label + 32);
+                            + g.size() * (m_.event_label + m_.merge_parent + 32);
         uint64_t held_merge = 0, held = 0;
         for (size_t j : g) {
             const Item &item = arm.next[j];
@@ -2958,17 +3218,27 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     // a check between them under a §14 budget). A budget or the deadline that runs out
     // here stops the level before its first head: nothing of it is committed yet.
     std::vector<std::vector<Succ>> succs(items.size());
+    std::vector<node_index> keys;
     std::vector<LabelQuery::NodeHits> hits;
     std::vector<LabelRecorder::NodeLabels> present;
+    // A level's heads share its depth. At the radius the level only ends them (their
+    // reservations hold that), so nothing can be refused there: stopping it would
+    // report an arm whose every walk is present as truncated.
+    const bool expands = depth < strategy_.max_extension_bp;
     try {
+        // what the walk charged since the last head (the roots' rows at depth 0, a seed
+        // phase let finish past the budget) is checked before this level reads anything
+        if (expands)
+            checkpoint(true);
         charge_bins(arm, depth);
-        std::vector<node_index> keys;
         for (size_t i = 0; i < items.size(); ++i) {
             if (items[i].ext_bp >= strategy_.max_extension_bp)
                 continue;
             bool cached = false;
             node_index key = npos;
             succs[i] = successors(arm, items[i].node, items[i].kmer, &cached, &key);
+            // an enumeration is charged when consumed
+            checkpoint(false);
             if (cached && succs[i].size() == 1) {
                 keys.push_back(key);
                 continue;
@@ -2977,44 +3247,14 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
                 keys.push_back(key_of_succ(arm.arm, items[i].kmer, s));
             }
         }
-        // The decoded rows of the level are scratch the model does not charge (stage 3
-        // of §14.1 charges them inside the decoder), and an annotate dictionary grows
-        // with what the fetch names: both are measured here, after the fact, as the
-        // memory bound's soft overshoot.
-        uint64_t scratch = 0, dictionary = 0;
         if (annotate_) {
             present = fetch_present(arm, keys);
-            const uint64_t named_before = base_;
+            // the labels the fetch named (observed as soft until here, see fetch_present)
             charge_dictionary();
-            dictionary = base_ - named_before;
-            for (const auto &nl : present) {
-                scratch += sizeof(nl) + nl.labels.size() * sizeof(LabelId);
-            }
         } else {
             hits = fetch_hits(arm, keys);
-            for (const auto &h : hits) {
-                scratch += sizeof(h) + h.size() * sizeof(LabelQuery::Hit);
-                for (const auto &hit : h) {
-                    scratch += hit.coords.size() * sizeof(Coord);
-                }
-            }
         }
-        if (mem_limit_) {
-            // Only what is held beyond the admitted account is soft: the scratch rows, a
-            // cache beyond its allotment and the dictionary this fetch grew. The admitted
-            // account itself never exceeds the budget (the depth-0 state and every level's
-            // bins are admitted), so memory_bound_soft never reports the modelled state's
-            // own excess as the decoder's (review of stage 2, finding 3).
-            const uint64_t cache = annotate_ ? recorder_->cache_bytes() : query_->cache_bytes();
-            const uint64_t soft = scratch + dictionary
-                                + (cache > cache_allotment_ ? cache - cache_allotment_ : 0);
-            const uint64_t held = accounted() - dictionary + soft;
-            overshoot_ = std::max(overshoot_, held > mem_limit_ ? std::min(soft, held - mem_limit_) : 0);
-        }
-        // A level's heads share its depth. At the radius the level only ends them (their
-        // reservations hold that), so nothing can be refused there: stopping it would
-        // report an arm whose every walk is present as truncated.
-        if (depth < strategy_.max_extension_bp) {
+        if (expands) {
             if (mem_limit_ && accounted() > mem_limit_)
                 throw BudgetTrip { ResourceStop::MEMORY, static_cast<double>(accounted()) };
             checkpoint(true);
@@ -3024,6 +3264,21 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
         return;
     }
     prefetch(arm, items, succs);
+    if (mem_limit_) {
+        // the lookahead warmed the caches, possibly beyond their allotments, while the
+        // level's rows are still held: observed before a head's check can throw
+        uint64_t scratch = 0;
+        for (const auto &nl : present) {
+            scratch += sizeof(nl) + nl.labels.size() * sizeof(LabelId);
+        }
+        for (const auto &h : hits) {
+            scratch += sizeof(h) + h.size() * sizeof(LabelQuery::Hit);
+            for (const auto &hit : h) {
+                scratch += hit.coords.size() * sizeof(Coord);
+            }
+        }
+        observe_soft(scratch);
+    }
 
     size_t offset = 0;
     for (size_t i = 0; i < items.size(); ++i) {
@@ -3068,7 +3323,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     // is admitted, so that a head refused by a budget leaves no half-written step behind
     HeadPlan &plan = plan_;
     plan.clear();
-    // the budgets and the deadline, before anything of the head is planned
+    // the budgets and the deadline, before anything of the head is planned (its
+    // successors' rows were charged when the level's fetch returned them)
     checkpoint(true);
 
     if (succs.empty()) {
@@ -3105,7 +3361,10 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             if (trace_) {
                 const Entry *e = find_entry(item.state, h.label);
                 if (e) {
-                    arm.work_extra += h.coords.size();
+                    // the coordinates were charged with their row when the fetch returned
+                    // it (one indivisible charge with the row, compared after the fetch
+                    // call: review of the stage-2 fixes, F5 — charged here as one sum after the
+                    // whole row, they ran past the stated bound unchecked)
                     for (Coord x : h.coords) {
                         bool ok = side == Arm::RIGHT
                             ? (x > 0 && std::binary_search(e->coords.begin(), e->coords.end(), x - 1))
@@ -3201,6 +3460,7 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             if (!c.admissible())
                 continue;
             arm.result.refusal_scans += c.state.size();
+            checkpoint(false);
             for (const Entry &e : c.state) {
                 if (sc.marked[e.pred])
                     c.excluded_preds.push_back(e.pred);
@@ -3412,6 +3672,7 @@ void Walker::plan_outcomes(ArmState &arm, const Item &item) {
         const bool eligible = !c.truncated || !(c.cut < source_key(src));
         if (cost_.model() == LabelChangeCost::CONSTANT) {
             arm.result.refusal_scans++;
+            checkpoint(false);
             assert(c.state.size() <= c.targets.size());
             auto it = std::lower_bound(c.targets.begin(), c.targets.end(), l,
                                        [](const Target &t, LabelId x) { return t.label < x; });
@@ -3433,6 +3694,7 @@ void Walker::plan_outcomes(ArmState &arm, const Item &item) {
             return b;
         }
         arm.result.refusal_scans += c.targets.size();
+        checkpoint(false);
         for (const Target &t : c.targets) {
             if (t.label == l)
                 continue;
@@ -3824,8 +4086,9 @@ bool Walker::admit(const ArmState &arm, const Item &item, size_t followed) {
     // the account after the commit: the head's reservations become its objects and its
     // children's reservations
     const uint64_t need = total - held + cost;
-    if ((mem_limit_ && need > mem_limit_) || (hooks_ && hooks_->deny && hooks_->deny(a))) {
-        note_stop(arm, &item, ResourceStop::MEMORY, static_cast<double>(need));
+    const bool over = mem_limit_ && need > mem_limit_;
+    if (over || (hooks_ && hooks_->deny && hooks_->deny(a))) {
+        note_stop(arm, &item, ResourceStop::MEMORY, static_cast<double>(need), !over);
         return false;
     }
     return true;
@@ -4293,7 +4556,16 @@ SeedResult Walker::run() {
                 + " is shorter than k = " + std::to_string(k_) + ": a continuation must be "
                   "valid traverse input; use 0 (no continuation sequence) or at least k");
     }
-    validate_seed();
+    // the seed phase observes what it holds against the memory budget (observe_seed_scratch)
+    mem_limit_ = strategy_.max_memory_bytes;
+    try {
+        validate_seed();
+    } catch (SeedDerivationError &e) {
+        // a seed failed in its derivation states memory_bound_soft like any other result
+        // under a memory budget, with what the derivation was seen to hold (finding 8)
+        e.set_soft_overshoot(overshoot_);
+        throw;
+    }
     init_edge_coding();
     if (annotate_) {
         const LabelKind kind = strategy_.seed_label_kind.value_or(
@@ -4316,6 +4588,12 @@ SeedResult Walker::run() {
     }
     if (annotate_)
         charge_dictionary();
+    // What the depth-0 state holds whatever its admission decides — the dictionary's labels
+    // with their names in every copy, the query's or recorder's cache — is observed before
+    // the admission can fail the seed: a seed the budget does not hold still built it, and
+    // its failure states that excess (review of the stage-2 fixes, F6: twelve names of 1 MB
+    // under 1 MiB reported memory_bound_soft 0). Within the budget it is no excess.
+    observe_seed_scratch(dictionary_held());
     // ---- ADMIT the depth-0 state (§14) like any head: the dictionary and both roots,
     // each reserved with what ending and delivering it costs. A result complete to 0 bp
     // is the shallowest there is, so a budget that does not hold this holds no valid
@@ -4345,10 +4623,17 @@ SeedResult Walker::run() {
             break;
         if (depth > 0 && time_exceeded()) {
             depth_ = depth;
+            // Only a head below the radius is censored by the deadline: stop_frontier ends
+            // the others as max_extension_bp, so when every remaining head has reached the
+            // radius the walk is complete and nothing was stopped. Stating a time stop then
+            // (resource_stop, Q) told the reader to raise a budget that cut nothing (GPT
+            // review of stage 2, N1).
             for (const ArmState &arm : arms_) {
-                if (!arm.frontier.empty()) {
-                    note_stop(arm, &arm.frontier.front(), ResourceStop::TIME,
-                              timer_.elapsed() * 1000.0);
+                auto head = std::find_if(arm.frontier.begin(), arm.frontier.end(), [&](const Item &item) {
+                    return item.ext_bp < strategy_.max_extension_bp;
+                });
+                if (head != arm.frontier.end()) {
+                    note_stop(arm, &*head, ResourceStop::TIME, timer_.elapsed() * 1000.0);
                     break;
                 }
             }
@@ -4390,6 +4675,7 @@ SeedResult Walker::run() {
     account.work_limit = strategy_.max_work_units;
     account.work_seed = seed_work_;
     account.work_used = work_used();
+    account.largest_charge = largest_charge_;
     if (annotate_) {
         summarize_annotate();
     } else {

@@ -1230,6 +1230,255 @@ class TestTraverseGraphlet(TestTraverseBase):
         self.assertEqual(alt[:5], g.spell('right', 0))
         self.assertNotEqual(seq[35:40], alt[:5])
 
+    def _resource_case(self, name, records, labels, bounds, detail, seed=None,
+                       direction='right', files=None, k=3, **strategy):
+        """The external re-review's resource probes (GPT, stage 2): an index of |records|
+        (k = 3 unless given, header labels via --index-header-coords; |files|: {file name:
+        records} instead, one column each) and one request on |seed| (default {sequence:
+        AAA}) along |direction|; -> (the result, the response's bytes). A second call with
+        the same |name| reuses the index."""
+        d = os.path.join(self.tempdir.name, 'resource_' + name)
+        files = files or {'input.fa': records}
+        if not os.path.exists(d):
+            os.makedirs(d)
+            for file, recs in files.items():
+                with open(os.path.join(d, file), 'wb') as f:
+                    for header, seq in recs:
+                        f.write(b'>' + header + b'\n' + seq.encode() + b'\n')
+            inputs = ' '.join(sorted(files))
+            for cmd in (f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k {k} -o graph {inputs}',
+                        f'{METAGRAPH} annotate -p 1 --anno-filename -i graph.dbg --anno-type column '
+                        f'--coordinates -o annotation {inputs}',
+                        f'{METAGRAPH} transform_anno -p 1 --anno-type column_coord --coordinates '
+                        f'-o annotation annotation.column.annodbg',
+                        f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
+                        f'--index-header-coords -o annotation {inputs}'):
+                res = subprocess.run(shlex.split(cmd), cwd=d, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+                self.assertEqual(0, res.returncode, res.stderr.decode())
+        path = os.path.join(d, 'request.json')
+        with open(path, 'w') as f:
+            json.dump({'seeds': [seed or {'sequence': 'AAA'}],
+                       'strategy': dict({'direction': direction, 'labels': labels,
+                                         'bounds': bounds,
+                                         'output': {'detail': detail, 'timing': False}},
+                                        **strategy)}, f)
+        res = subprocess.run([METAGRAPH, 'traverse', '--json', '-i', os.path.join(d, 'graph.dbg'),
+                              '-a', os.path.join(d, 'annotation.column_coord.annodbg'), path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        return json.loads(res.stdout.decode('utf-8'))['results'][0], len(res.stdout)
+
+    @staticmethod
+    def _largest_charge(stop):
+        """The number a work stop states: the most its seed charged between two comparisons
+        with the budget, which bounds how far used exceeds the budget."""
+        return int(stop['message'].split('between two comparisons: ')[1].split(' units')[0])
+
+    def test_stage2_work_stop_states_its_overrun(self):
+        """GPT re-review, finding 2: 25,000 headers on AAACAAAGAAAT, annotate, a work budget of
+        1 used 125,044 units against an advertised overrun of at most W = 65,536: the root's
+        row and the level's rows were charged before a check. The walk now compares the
+        budget after every charge: the stop exceeds it by the one row that tripped it, and the
+        message states the most the seed charged between two comparisons (here that row).
+        Round 3 (F4): with direction both, the two roots' rows are charged before the first
+        comparison (a stop between them would deliver no result complete to 0 bp): the
+        stated number is then both rows, which the overrun stays within."""
+        records = [(b'L%d' % i, 'AAACAAAGAAAT') for i in range(25000)]
+        labels = {'mode': 'annotate', 'seed_label_kind': 'header', 'max_labels_per_node': 1}
+        result, _ = self._resource_case(
+            'work', records, labels, {'max_extension_bp': 10, 'max_work_units': 1}, 'full')
+        stop = result['resource_stop']
+        self.assertEqual('work', stop['resource'])
+        self.assertLessEqual(stop['used'] - 1, 65536)
+        self.assertEqual(0, result['arms']['right']['complete_to_bp'])
+        self.assertIn('after every charge', stop['message'])
+        self.assertEqual(8 + 25000, self._largest_charge(stop))
+        self.assertLessEqual(stop['used'] - 1, self._largest_charge(stop))
+        for seed in ('AAA', 'AAAC', 'AAACAAAG'):
+            result, _ = self._resource_case(
+                'work', records, labels, {'max_extension_bp': 10, 'max_work_units': 1}, 'summary',
+                seed={'sequence': seed}, direction='both')
+            stop = result['resource_stop']
+            self.assertEqual('work', stop['resource'], seed)
+            self.assertEqual(2 * (8 + 25000), self._largest_charge(stop), seed)
+            self.assertLessEqual(stop['used'] - 1, self._largest_charge(stop), seed)
+
+    def test_stage2_work_stops_state_their_largest_charge(self):
+        """Round 3, F5 and F7: under support trace a row's coordinates were charged as one
+        sum after the row, outside the stated bound (stated 9, overrun 99,924), and a
+        label-state scan carried no number. The coordinates are now charged with their row
+        when the fetch returns it, and every work stop states the most its seed charged
+        between two comparisons, whatever the charge: a sweep of budgets keeps every overrun
+        within the stated number."""
+        result, _ = self._resource_case(
+            'trace', [(b'r1', 'CGAT' + 'GAT' * 100000)], {'mode': 'constrain',
+                                                          'seed_label_kind': 'header'},
+            {'max_extension_bp': 5, 'max_work_units': 100}, 'summary',
+            seed={'sequence': 'CGA'}, support='trace', branching={'on_reconverge': 'keep'})
+        stop = result['resource_stop']
+        self.assertEqual('work', stop['resource'])
+        self.assertGreaterEqual(self._largest_charge(stop), 100000)
+        self.assertLessEqual(stop['used'] - 100, self._largest_charge(stop))
+        records = [(b'L%d' % i, 'AAACAAAGAAAT') for i in range(1000)]
+        stops = 0
+        for budget in range(1, 40000, 1999):
+            result, _ = self._resource_case(
+                'sweep', records, {'mode': 'constrain', 'seed_label_kind': 'header',
+                                   'max_seed_labels': 1000,
+                                   'change_cost': {'model': 'constant', 'value': 1}},
+                {'max_extension_bp': 10, 'max_work_units': budget}, 'summary',
+                seed={'sequence': 'AAACA'}, branching={'max_label_branches': 'unlimited'})
+            stop = result.get('resource_stop')
+            if not stop:
+                continue
+            stops += 1
+            self.assertEqual('work', stop['resource'], budget)
+            self.assertLessEqual(stop['used'] - budget, self._largest_charge(stop), budget)
+        self.assertGreater(stops, 3)
+
+    def test_stage2_every_fetched_row_is_charged(self):
+        """Round 3, F3: the fix to finding 2 charged a row only when a head consumed it, so
+        rows a level's fetch decoded but no head consumed went uncharged (880,000 of 900,000
+        entries), and `used` understated the decoding. Rows are charged again when the fetch
+        returns them: on an index whose every row is n labels wide (n files each holding both
+        branches of a split), every work stop has used >= rows_requested x (8 + n)."""
+        n = 300
+        rng = random.Random(9101)
+        S, X, Y = (''.join(rng.choice('ACGT') for _ in range(m)) for m in (40, 20, 20))
+        X, Y = 'A' + X[1:], 'C' + Y[1:]          # S's last k-mer splits into X and Y
+        files = {('f%03d.fa' % i): [(b'x', S + X), (b'y', S + Y)] for i in range(n)}
+        free, _ = self._resource_case(
+            'uniform', None, {'mode': 'annotate', 'seed_label_kind': 'column',
+                              'max_labels_per_node': 1},
+            {'max_extension_bp': 30, 'max_work_units': 10 ** 9}, 'summary',
+            seed={'sequence': S[:20]}, files=files, k=15, branching={'on_reconverge': 'keep'})
+        self.assertNotIn('resource_stop', free)
+        total = free['arms']['right']['counters']['work_units']
+        stops = 0
+        for budget in range(1, total, (8 + n) // 3):
+            result, _ = self._resource_case(
+                'uniform', None, {'mode': 'annotate', 'seed_label_kind': 'column',
+                                  'max_labels_per_node': 1},
+                {'max_extension_bp': 30, 'max_work_units': budget}, 'summary',
+                seed={'sequence': S[:20]}, files=files, k=15,
+                branching={'on_reconverge': 'keep'})
+            stop = result.get('resource_stop')
+            if not stop:
+                continue
+            stops += 1
+            rows = result['annotation']['rows_requested']
+            self.assertGreaterEqual(stop['used'], rows * (8 + n),
+                                    'budget %d: a fetched row was not charged' % budget)
+        self.assertGreater(stops, 10)
+
+    def test_stage2_interrupted_fetch_states_its_memory(self):
+        """GPT re-review, finding 3: 100,000 headers on the next node, max_memory_mb 1,
+        max_work_units 100 stopped inside the level's fetch and reported memory_bound_soft
+        observed 0 while the annotation cache alone held ~1.6 MB beyond its allotment. What a
+        fetch holds is now observed before any check after it can stop the walk."""
+        records = [(b'root', 'AAAC')] + [(b'L%d' % i, 'AAC') for i in range(100000)]
+        result, _ = self._resource_case(
+            'soft', records, {'mode': 'annotate', 'seed_label_kind': 'header',
+                              'max_labels_per_node': 100000},
+            {'max_extension_bp': 10, 'max_work_units': 100, 'max_memory_mb': 1}, 'full')
+        self.assertIn('resource_stop', result)
+        (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
+        self.assertGreaterEqual(soft['observed'], 2)
+
+    def test_stage2_failed_results_echo_within_what_they_state(self):
+        """Round 3, F1: a failed seed's result echoed an index-supplied header in full (an
+        ambiguous_header: in the error and as observed) and the request's seed_id, neither
+        charged: 2.16 MB under 1 MiB with memory_bound_soft observed 0. Under a memory budget
+        a long index name is now echoed as a bounded prefix with its length and place, and
+        what the echoed seed_id holds beyond the budget is stated as memory_bound_soft."""
+        name = b'\x01' * 180000
+        budget = 1 << 20
+        for detail in ('summary', 'full', 'graphlet'):
+            result, size = self._resource_case(
+                'ambiguous', None, {'mode': 'constrain', 'seed_label_kind': 'header'},
+                {'max_extension_bp': 1, 'max_memory_mb': 1}, detail,
+                files={'a.fa': [(name, 'AAAC')], 'b.fa': [(name, 'AAAC')]})
+            self.assertEqual('failed', result['outcome']['walks'], detail)
+            (d,) = [l for l in result['limitations'] if l['kind'] == 'derivation']
+            self.assertEqual('ambiguous_header', d['cause'], detail)
+            self.assertIn('180000 bytes; column ', d['observed'], detail)
+            compact = json.dumps(result, ensure_ascii=True, separators=(',', ':')).encode()
+            self.assertLessEqual(len(compact), budget, detail)
+            self.assertLessEqual(size, budget, detail)
+        for unit, n in (('\U0001F600', 100000), ('\x01', 200000)):
+            result, _ = self._resource_case(
+                'seed_id', [(b'r1', 'AAACGTTGCA')], {'mode': 'constrain',
+                                                     'seed_label_kind': 'header'},
+                {'max_extension_bp': 4, 'max_memory_mb': 1}, 'graphlet',
+                seed={'sequence': 'AAACGT', 'seed_id': unit * n}, direction='both')
+            self.assertEqual('failed', result['outcome']['walks'])
+            (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
+            compact = json.dumps(result, ensure_ascii=True, separators=(',', ':')).encode()
+            self.assertGreater(len(compact), budget)
+            self.assertGreaterEqual(soft['observed'] << 20, len(compact) - budget,
+                                    'the failed result exceeds the budget by more than stated')
+
+    def test_stage2_validation_and_admission_state_what_they_held(self):
+        """Round 3, F2: the explicit-label validation charged a row (which failed the seed)
+        before observing what the fetch held: a row of 400,000 coordinates under 1 MiB and a
+        work budget of 100 reported memory_bound_soft 0. F6: a seed whose depth-0 admission
+        failed reported 0 although its dictionary held megabytes of names. Both now observe
+        what is held before the check that can fail the seed."""
+        result, _ = self._resource_case(
+            'validation', [(b'r1', 'CGAT' + 'GAT' * 400000)], {'mode': 'constrain'},
+            {'max_extension_bp': 5, 'max_memory_mb': 1, 'max_work_units': 100}, 'summary',
+            seed={'sequence': 'GATG', 'labels': ['r1']}, support='trace',
+            branching={'on_reconverge': 'keep'})
+        self.assertEqual('failed', result['outcome']['walks'])
+        self.assertEqual('work', result['resource_stop']['resource'])
+        (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
+        self.assertGreaterEqual(soft['observed'], 2)     # 3.2 MB of coordinates under 1 MiB
+        records = [(b'N%d' % i + b'x' * 400000, 'AAAC') for i in range(6)]
+        for mode in ('constrain', 'annotate'):
+            result, _ = self._resource_case(
+                'dictionary', records, {'mode': mode, 'seed_label_kind': 'header',
+                                        'max_labels_per_node': 100},
+                {'max_extension_bp': 1, 'max_memory_mb': 1}, 'summary')
+            self.assertEqual('failed', result['outcome']['walks'], mode)
+            self.assertEqual('memory', result['resource_stop']['resource'], mode)
+            (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
+            # 2.4 MB of names, held twice (each label and the query's or recorder's copy)
+            self.assertGreaterEqual(soft['observed'], 3, mode)
+
+    def test_stage2_escaped_names_stay_within_the_budget(self):
+        """GPT re-review, finding 1: a header of 180,000 control characters (detail full,
+        max_memory_mb 2) gave a memory stop whose compact per-seed JSON alone was 2,163,840
+        bytes, and '%' headers delivered more than the model reserved in a graphlet: a name
+        byte was charged at a fixed four (three) bytes, but JSON writes a control character
+        as six and MGT a '%' as three, escaped once more inside the JSON string. Names are
+        now charged as delivered: each seed either fails at depth 0 (no name delivered) or
+        stays within its budget."""
+        for name, header, labels, mb, detail in (
+                ('control', b'\x01' * 180000, {'mode': 'constrain', 'seed_label_kind': 'header',
+                                               'max_labels_per_node': 1}, 2, 'full'),
+                ('percent', b'%' * 200000, {'mode': 'annotate', 'seed_label_kind': 'header',
+                                            'max_labels_per_node': 1}, 2, 'graphlet'),
+                ('percent1', b'%' * 70000, {'mode': 'annotate', 'seed_label_kind': 'header',
+                                            'max_labels_per_node': 1}, 1, 'graphlet')):
+            result, size = self._resource_case(
+                name, [(header, 'AAAC')], labels, {'max_extension_bp': 1, 'max_memory_mb': mb},
+                detail)
+            budget = mb << 20
+            compact = json.dumps(result, ensure_ascii=True, separators=(',', ':')).encode()
+            self.assertLessEqual(len(compact), budget, name)
+            self.assertLessEqual(size, budget, name)
+            if result['outcome']['walks'] == 'failed':
+                self.assertEqual('memory', result['resource_stop']['resource'], name)
+                self.assertNotIn(header[:64].decode(), json.dumps(result), name)
+                continue
+            if 'graphlet' in result:
+                # the body p, its JSON escaping E: the writer's text and JSON copy, then
+                # the copy with writeString's three texts (spec §5, request budgets)
+                body = result['graphlet'].encode()
+                escaped = len(json.dumps(result['graphlet'], ensure_ascii=True)) - 2
+                self.assertLessEqual(len(body) + 3 * escaped, budget, name)
+
     def test_t39_index_identity(self):
         """§3.1 (freeze gate): two indexes over the same records with the same counts and
         column names but swapped memberships share index_meta_fp and differ in index_fp,
@@ -1424,6 +1673,14 @@ class TestTraverseAPI(TestTraverseBase):
         # set: a deployment that configures nothing must not be the unlimited one.
         for cap in ('max_time_ms', 'max_seeds', 'max_seed_bp', 'max_seed_labels'):
             self.assertGreater(caps[cap], 0, cap)
+        # the request budgets, and how far a work stop can exceed one: stated with what
+        # bounds it (a fetch call's rows are decoded whole; each stop states the most its
+        # seed charged between two comparisons), not as the fixed interval W (GPT re-review)
+        self.assertEqual(['max_memory_mb', 'max_work_units'], caps['budgets'])
+        self.assertEqual(65536, caps['work_check_interval'])
+        self.assertIn('indivisible charge', caps['work_bound'])
+        self.assertIn('between two comparisons', caps['work_bound'])
+        self.assertEqual('soft', caps['memory_bound'])
 
     def test_api_enforces_server_caps(self):
         caps = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities').json()
