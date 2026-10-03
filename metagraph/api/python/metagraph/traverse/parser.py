@@ -25,7 +25,7 @@ from ._codec import (
     RESOURCE_CODES, decode_kvalue, decode_pairs, decode_ranges, decode_setexpr,
     encode_kvalue, encode_pairs, encode_ranges, encode_setexpr, end_token, fmt_bool,
     fmt_int, fmt_num, front_decode_parts, front_encode, parse_bool, parse_end_token,
-    parse_int, parse_num, pct_escape, pct_unescape,
+    parse_int, parse_num, pct_escape, pct_unescape, tok as _tok,
 )
 from .model import (
     Arm, BranchEvent, CapTrigger, Counts, Dropped, Event, Frontier, Graphlet, GrowthBin,
@@ -34,7 +34,7 @@ from .model import (
 )
 
 __all__ = ['parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
-           'GraphletFormatError', 'FORMAT_VERSION']
+           'GraphletFormatError', 'FORMAT_VERSION', 'utf8_bytes']
 
 FORMAT_VERSION = 1
 
@@ -55,6 +55,19 @@ _NS_RE = re.compile(r'[A-Za-z0-9._-]+\Z')
 _NAME_RE = re.compile(r'[A-Za-z0-9_.\[\]-]+\Z')   # counter / extra names
 
 
+# which fields a record wrote as '*' (check_rules): one shared frozenset per combination
+# -- a new frozenset per run or segment cost 216 B each (frozenset() is no singleton),
+# 3.4 MB of a 13.9 MB model on 15,922 runs (B2)
+_NO_STARS = frozenset()
+_STRUCT_STAR = frozenset(['structural_successors'])
+_STAR_SETS = {}
+
+
+def _star_set(names):
+    key = frozenset(names)
+    return _STAR_SETS.setdefault(key, key)
+
+
 def _inv(d):
     return {v: k for k, v in d.items()}
 
@@ -63,7 +76,7 @@ def _code(table, tok, what):
     try:
         return table[tok]
     except KeyError:
-        raise CodecError('%s %r' % (what, tok)) from None
+        raise CodecError('%s %s' % (what, _tok(tok))) from None
 
 
 def _opt(tok, conv):
@@ -76,7 +89,7 @@ def _star(v, conv):
 
 def _reason_code(tok):
     if len(tok) != 1 or tok not in REASON:
-        raise CodecError('end-reason code %r' % tok)
+        raise CodecError('end-reason code %s' % _tok(tok))
     return tok
 
 
@@ -88,7 +101,7 @@ def _csv_ints(tok):
 
 def _fixed(tok, what):
     if not _TOKEN_RE.match(tok):
-        raise CodecError('%s %r is not printable ASCII without spaces' % (what, tok))
+        raise CodecError('%s %s is not printable ASCII without spaces' % (what, _tok(tok)))
     return tok
 
 
@@ -96,12 +109,13 @@ def _fixed(tok, what):
 
 class _ArmRaw:
     """An arm's records as read, before the derived fields are resolved."""
-    __slots__ = ('arm', 'seg_raw', 'runs')
+    __slots__ = ('arm', 'seg_raw', 'runs', 'run_lines')
 
     def __init__(self, arm):
         self.arm = arm
         self.seg_raw = []      # per segment: dict of raw tokens + line numbers
         self.runs = []
+        self.run_lines = []    # the line of each R record (the checks after the read)
 
 
 class _Reader:
@@ -131,8 +145,8 @@ class _Reader:
         else:
             parts = line.split(' ')
         if parts[0] != tag:
-            raise GraphletFormatError(self.i, 'expected a %s record, found %r'
-                                      % (tag, line[:40]))
+            raise GraphletFormatError(self.i, 'expected a %s record, found %s'
+                                      % (tag, _tok(line)))
         if n is not None and (len(parts) != n if not isinstance(n, tuple)
                               else len(parts) not in n):
             raise GraphletFormatError(self.i, '%s record with %d fields' % (tag, len(parts)))
@@ -156,14 +170,14 @@ class _Reader:
         if h[1] != 'mgt':
             raise self.err('not an MGT document')
         if h[2] != str(FORMAT_VERSION):
-            raise self.err('unsupported MGT version %r (this reader: %d)'
-                           % (h[2], FORMAT_VERSION))
+            raise self.err('unsupported MGT version %s (this reader: %d)'
+                           % (_tok(h[2]), FORMAT_VERSION))
         if h[4] not in _REGIMES:
-            raise self.err('regime %r' % h[4])
+            raise self.err('regime %s' % _tok(h[4]))
         if h[12] != 'walk':
-            raise self.err('orientation %r (MGT v1 stores walking order: "walk")' % h[12])
+            raise self.err('orientation %s (MGT v1 stores walking order: "walk")' % _tok(h[12]))
         if h[13] != '*' and not _NS_RE.match(h[13]):
-            raise self.err('index_ns %r' % h[13])
+            raise self.err('index_ns %s' % _tok(h[13]))
         g = Graphlet(
             format=FORMAT_VERSION, k=parse_int(h[3]), regime=h[4],
             alphabet=_fixed(h[5], 'alphabet'), mode=_code(_MODE, h[6], 'mode'),
@@ -209,7 +223,7 @@ class _Reader:
             else:
                 seq_id = None
             if f[4] == '' or not re.match(r'(?:0|[1-9][0-9]*)\Z', f[4]):
-                raise self.err('L prefix_len %r' % f[4])
+                raise self.err('L prefix_len %s' % _tok(f[4]))
             name = front_decode_parts(prev, f[4], f[5])
             g.labels.append(Label(len(g.labels), kind, column, seq_id, name))
             prev = name
@@ -226,7 +240,7 @@ class _Reader:
             q = self.take('Q', 10, maxsplit=9)
             for k in range(1, 9):
                 if not _TOKEN_RE.match(q[k]):
-                    raise self.err('Q field %d %r' % (k, q[k]))
+                    raise self.err('Q field %d %s' % (k, _tok(q[k])))
             g.resource_stop = ResourceStop(
                 q[1], q[2], q[3], *(_opt(t, decode_kvalue) for t in q[4:8]),
                 [] if q[8] == '.' else q[8].split(','), pct_unescape(q[9]))
@@ -253,7 +267,7 @@ class _Reader:
         f = self.take('K', 9, maxsplit=8)
         arm = {'l': 'left', 'r': 'right', '*': None}.get(f[1], False)
         if arm is False:
-            raise self.err('K arm %r' % f[1])
+            raise self.err('K arm %s' % _tok(f[1]))
         for k in (2, 3):
             _fixed(f[k], 'K field')
         extra = []
@@ -261,7 +275,7 @@ class _Reader:
             for item in f[7].split(','):
                 name, eq, val = item.partition('=')
                 if not eq or not _NAME_RE.match(name):
-                    raise self.err('K extra item %r' % item)
+                    raise self.err('K extra item %s' % _tok(item))
                 extra.append((name, decode_kvalue(val)))
         return Limitation(arm, f[2], f[3], decode_kvalue(f[4]), decode_kvalue(f[5]),
                           _opt(f[6], parse_int), extra, pct_unescape(f[8]))
@@ -272,19 +286,19 @@ class _Reader:
         a = self.take('A', 20)
         side = {'l': 'left', 'r': 'right'}.get(a[1])
         if side is None:
-            raise self.err('A arm %r' % a[1])
+            raise self.err('A arm %s' % _tok(a[1]))
         counters = {}
         if a[10] != '.':
             for item in a[10].split(','):
                 name, eq, val = item.partition('=')
                 if not eq or not _NAME_RE.match(name) or name in counters:
-                    raise self.err('A counter %r' % item)
+                    raise self.err('A counter %s' % _tok(item))
                 counters[name] = parse_int(val)
         cap_trigger = None
         if a[11] != '*':
             c = a[11].split(',')
             if len(c) != 7:
-                raise self.err('A cap_trigger %r' % a[11])
+                raise self.err('A cap_trigger %s' % _tok(a[11]))
             cap_trigger = CapTrigger(_reason_code(c[0]), parse_int(c[1]), parse_int(c[2]),
                                      parse_int(c[3]), parse_int(c[4]), parse_bool(c[5]),
                                      parse_num(c[6]))
@@ -305,6 +319,7 @@ class _Reader:
         while self.peek_tag() == 'G':
             raw.seg_raw.append(self._segment_records(g, len(raw.seg_raw)))
         while self.peek_tag() == 'R':
+            raw.run_lines.append(self.i + 1)
             raw.runs.append(self._run_record(g, len(raw.runs), len(raw.seg_raw)))
         _resolve_arm(self, g, raw)
         c = arm.counts
@@ -326,7 +341,7 @@ class _Reader:
             for item in b[14].split(','):
                 code, colon, n = item.partition(':')
                 if not colon or code in ends:
-                    raise self.err('B label_ends item %r' % item)
+                    raise self.err('B label_ends item %s' % _tok(item))
                 ends[_reason_code(code)] = parse_int(n)
         v = [parse_int(t) for t in b[1:5]]
         return GrowthBin(v[0], v[1], v[2], v[3], parse_bool(b[5]),
@@ -338,10 +353,10 @@ class _Reader:
         if f[7] != '.':
             for item in f[7].split(';'):
                 if len(item) < 3 or item[1] != ':':
-                    raise self.err('V refusal %r' % item)
+                    raise self.err('V refusal %s' % _tok(item))
                 cause, colon, ranges = item[2:].partition(':')
                 if not colon or not cause:
-                    raise self.err('V refusal %r' % item)
+                    raise self.err('V refusal %s' % _tok(item))
                 refused.append(Refusal(item[0], cause, self._ids(decode_ranges(ranges, n_labels),
                                                                  n_labels)))
         chars = '' if f[3] == '.' else f[3]
@@ -387,11 +402,11 @@ class _Reader:
         line = self.lines[self.i]
         f = line.split(' ')
         if len(f) < 3:
-            raise GraphletFormatError(self.i + 1, 'E record %r' % line[:40])
+            raise GraphletFormatError(self.i + 1, 'E record %s' % _tok(line))
         t = f[2]
         n = {'s': 6, 'b': 7, 'h': 7, 'v': 5, 't': 5, 'u': 5}.get(t)
         if n is None:
-            raise GraphletFormatError(self.i + 1, 'event type %r' % t)
+            raise GraphletFormatError(self.i + 1, 'event type %s' % _tok(t))
         f = self.take('E', n)
         at = parse_int(f[1])
         if t == 's':
@@ -399,13 +414,13 @@ class _Reader:
                          to_label=self._label_id(f[4], n_labels), cost=parse_num(f[5]))
         if t == 'b':
             if len(f[3]) != 1:
-                raise self.err('blocked char %r' % f[3])
+                raise self.err('blocked char %s' % _tok(f[3]))
             return Event(at, 'blocked', char=f[3], reason=_reason_code(f[4]),
                          total=parse_int(f[5]),
                          labels=self._ids(decode_ranges(f[6], n_labels), n_labels))
         if t == 'h':
             if len(f[3]) != 1 or f[6] not in ('f', 's'):
-                raise self.err('hairpin event %r' % line)
+                raise self.err('hairpin event %s' % _tok(line))
             return Event(at, 'hairpin', char=f[3], total=parse_int(f[4]),
                          labels=self._ids(decode_ranges(f[5], n_labels), n_labels),
                          followed=f[6] == 'f')
@@ -434,7 +449,7 @@ class _Reader:
         if f[7] != '*':
             fl, colon, c = f[7].partition(':')
             if not colon:
-                raise self.err('R from_label:cost %r' % f[7])
+                raise self.err('R from_label:cost %s' % _tok(f[7]))
             from_label = self._label_id(fl, len(g.labels))
             cost = parse_num(c)
         prev = _opt(f[8], parse_int)
@@ -446,7 +461,7 @@ class _Reader:
             structural = None
         else:
             structural = parse_int(f[9])
-        stars = frozenset(['structural_successors']) if f[9] == '*' else frozenset()
+        stars = _STRUCT_STAR if f[9] == '*' else _NO_STARS
         return Run(id=run_id, segment=seg, label=self._label_id(f[2], len(g.labels)),
                    from_bp=parse_int(f[3]), to_bp=parse_int(f[4]), end=f[5],
                    reason=None if merged else REASON[code], qualifier=qual, silent=silent,
@@ -465,7 +480,8 @@ def _resolve_arm(rd, g, raw):
     anchored = [[] for _ in range(n)]
     for r in arm.runs:
         if r.to_bp < r.from_bp:
-            raise GraphletFormatError(0, 'run %d ends before it starts' % r.id)
+            raise GraphletFormatError(raw.run_lines[r.id], '%s arm: run %d ends before it '
+                                      'starts' % (arm.side, r.id))
         anchored[r.segment].append(r.id)
     arm.cache['runs_by_segment'] = anchored
     segs = arm.segments
@@ -476,7 +492,7 @@ def _resolve_arm(rd, g, raw):
         try:
             parents = () if f[1] == '*' else tuple(parse_int(t) for t in f[1].split(','))
             if any(p >= sid for p in parents) or len(set(parents)) != len(parents):
-                raise CodecError('parents %r must be distinct earlier segments' % f[1])
+                raise CodecError('parents %s must be distinct earlier segments' % _tok(f[1]))
             if not parents and sid != 0:
                 raise CodecError('only segment 0 is a root')
             if sid == 0 and parents:
@@ -493,7 +509,7 @@ def _resolve_arm(rd, g, raw):
             if partition is None:
                 parts = f[7].split('|')
                 if len(parents) <= 1 or len(parts) != len(parents):
-                    raise CodecError('partition %r for %d parent(s)' % (f[7], len(parents)))
+                    raise CodecError('partition %s for %d parent(s)' % (_tok(f[7]), len(parents)))
                 partition = [rd._ids(decode_ranges(p, len(g.labels)), len(g.labels))
                              for p in parts]
             seg = Segment(id=sid, parents=parents, from_bp=from_bp, length_bp=length,
@@ -504,7 +520,7 @@ def _resolve_arm(rd, g, raw):
                               ('end', f[6]), ('partition', f[7])):
                 if tok == '*':
                     stars.add(name)
-            seg.stars = frozenset(stars)
+            seg.stars = _star_set(stars)
             if f[4] == '*':
                 rule = derive.rule_entry(g.mode, g.seed.num_seed_labels, seg)
                 if rule is None:
@@ -529,8 +545,8 @@ def _resolve_arm(rd, g, raw):
                                  'value per retrieval)')
             if f[9] != '*':
                 if has or len(f[9]) != 1 or length == 0:
-                    raise CodecError('first_base %r is written only when the bases are '
-                                     'absent' % f[9])
+                    raise CodecError('first_base %s is written only when the bases are '
+                                     'absent' % _tok(f[9]))
                 seg.first_base = f[9]
             elif not has and len(parents) == 1:
                 # a split child: its base is splits[].branches[].char
@@ -618,9 +634,10 @@ def _resolve_arm(rd, g, raw):
                                       'a segment ends in a split or a merge, not both')
     for r in arm.runs:
         if r.to_bp > segs[r.segment].end_bp or r.to_bp < segs[r.segment].from_bp:
-            raise GraphletFormatError(0, 'run %d ends at %d outside its anchor %d [%d, %d]'
-                                      % (r.id, r.to_bp, r.segment, segs[r.segment].from_bp,
-                                         segs[r.segment].end_bp))
+            raise GraphletFormatError(raw.run_lines[r.id], '%s arm: run %d ends at %d '
+                                      'outside its anchor %d [%d, %d]'
+                                      % (arm.side, r.id, r.to_bp, r.segment,
+                                         segs[r.segment].from_bp, segs[r.segment].end_bp))
     if g.mode == 'constrain':
         for leaf in derive.leaves(arm):
             seen = set()
@@ -633,7 +650,8 @@ def _resolve_arm(rd, g, raw):
                 raise GraphletFormatError(raw.seg_raw[leaf]['line'],
                                           'T extras for a label not alive at the leaf')
     elif arm.runs:
-        raise GraphletFormatError(0, 'R records in annotate mode')
+        raise GraphletFormatError(raw.run_lines[0], '%s arm: R records in annotate mode'
+                                  % arm.side)
 
 
 def _check_arm_invariants(g, arm, line):
@@ -696,7 +714,7 @@ def _parse_extras(tok, n_labels):
     for item in tok.split(','):
         f = item.split(':')
         if len(f) != 4:
-            raise CodecError('T extra %r' % item)
+            raise CodecError('T extra %s' % _tok(item))
         label = parse_int(f[0])
         if label >= n_labels or label in out:
             raise CodecError('T extra label %d' % label)
@@ -716,6 +734,22 @@ def _attach_j(g, j):
     g.derived_from = j.get('derived_from')
 
 
+def utf8_bytes(text):
+    """|text| (a str body) as UTF-8 bytes. A str can hold what no UTF-8 document can: a
+    lone surrogate (JSON's '\\udc80' decodes to one) -> GraphletFormatError naming its
+    line, never a bare UnicodeEncodeError (a ValueError the tool layer would report as
+    the agent's bad argument). The one byte count of a body: parse, from_response, the
+    store and traverse_fetch use it."""
+    if text.isascii():
+        return text.encode('ascii')
+    try:
+        return text.encode('utf-8')
+    except UnicodeEncodeError as e:
+        raise GraphletFormatError(text.count('\n', 0, e.start) + 1,
+                                  'not UTF-8: a lone surrogate (%s)'
+                                  % ascii(text[e.start:e.end])) from None
+
+
 def parse(text):
     """-> Graphlet (BODY ONLY unless the text carries a J line: no seed_id, annotation
     counters or replay strategy; to_json(), next_request() and summary() raise
@@ -725,6 +759,8 @@ def parse(text):
             text = bytes(text).decode('utf-8')
         except UnicodeDecodeError as e:
             raise GraphletFormatError(0, 'not UTF-8: %s' % e) from None
+    else:
+        utf8_bytes(text)
     if not text.endswith('\n'):
         raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
     # LF is the only record separator: names may hold VT, FF, NEL, LS, PS raw, so
@@ -948,10 +984,11 @@ def from_response(result, response):
     if body is None:
         raise ValueError('this result carries no graphlet%s' % (
             ': ' + result['error'] if 'error' in result else ''))
-    if 'graphlet_bytes' in result and len(body.encode('utf-8')) != result['graphlet_bytes']:
-        raise GraphletFormatError(0, 'the body has %d bytes, graphlet_bytes says %d '
-                                  '(truncated in transport)'
-                                  % (len(body.encode('utf-8')), result['graphlet_bytes']))
+    if 'graphlet_bytes' in result:
+        n = len(utf8_bytes(body))
+        if n != result['graphlet_bytes']:
+            raise GraphletFormatError(0, 'the body has %d bytes, graphlet_bytes says %d '
+                                      '(truncated in transport)' % (n, result['graphlet_bytes']))
     g = parse(body)
     if 'graphlet_lines' in result and body.count('\n') != result['graphlet_lines']:
         raise GraphletFormatError(0, 'graphlet_lines says %d, the body has %d'

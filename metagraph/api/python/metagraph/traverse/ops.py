@@ -14,9 +14,14 @@ Evidence semantics (§5, §5.1):
   * route support = the run's own [from_bp, to_bp), whatever route it took;
   * a claim cut at D: the run-start guard first (no claim for a run starting at or
     after D), then [evidence_from, to_bp) ∩ [0, D), route_only when that is empty,
-    zero-length runs are boundary claims; terminal loss/branches are unknown at a cut.
+    zero-length runs are boundary claims; terminal loss/branches are unknown at a cut;
+  * annotate mode has no runs: a claim is a maximal end of a label's routes under the
+    §5.1 union rule of direct_bp (through any parent of a merge), its displayed support
+    starting at the last merge its route enters through a non-first parent -- route and
+    displayed evidence kept apart exactly as for a run.
 """
 
+import collections
 import copy
 import hashlib
 import json
@@ -26,15 +31,19 @@ import sys
 from . import derive
 from ._codec import REASON, RESOURCE_CODES, UNLIMITED
 from .model import (
-    AmbiguousLabel, ARM_SIDES, BadSelector, Change, Claim, Comparison, Continuation,
-    IncompleteRecording, Label, LabelWalk, Path, SupportRun, UnknownLabel, Walk,
+    AmbiguousLabel, ARM_SIDES, BadSelector, Branch, Change, Claim, Comparison,
+    Continuation, IncompleteRecording, Label, LabelWalk, Path, SplitPoint, SupportRun,
+    UnknownLabel, UnverifiableLabelName, Walk,
 )
 
 __all__ = [
     'label', 'labels_matching', 'path_id', 'leaf_segment', 'spell', 'walks', 'claims',
+    'rank_walks', 'walks_at',
     'label_walks', 'routes', 'support_profile', 'support_changes', 'label_summary',
-    'continuation', 'next_request', 'subgraph', 'GraphletView', 'view_from_saved',
-    'compare', 'index_identity', 'memory_bytes', 'summary', 'evidence_block',
+    'splits', 'continuation', 'next_request', 'resubmittable_names', 'subgraph',
+    'GraphletView', 'view_from_saved',
+    'compare', 'index_identity', 'memory_bytes', 'cache_bytes', 'cache_signature',
+    'summary', 'evidence_block',
     'END_CLASS', 'alive_at', 'limitation_dict', 'resource_stop_dict', 'informational',
 ]
 
@@ -194,25 +203,32 @@ def _alive_profile(g, arm, leaf_seg):
     the chronological order of the G.end rule."""
     out = []
     for sid in derive.chain(arm, leaf_seg):
-        s = arm.segments[sid]
-        if s.length_bp == 0:
-            continue
-        ops = _segment_ops(arm, s)
-        cur = set(s.entry)
-        pos = s.from_bp
-        i = 0
-        while pos < s.end_bp:
-            while i < len(ops) and ops[i][0] <= pos:
-                if ops[i][1] == 0:
-                    cur.discard(ops[i][2])
-                else:
-                    cur.add(ops[i][2])
-                i += 1
-            nxt = ops[i][0] if i < len(ops) else s.end_bp
-            nxt = min(max(nxt, pos + 1), s.end_bp)
-            out.append((pos, nxt, frozenset(cur)))
-            pos = nxt
+        out.extend(_alive_pieces(arm, arm.segments[sid]))
     return _merge_runs(out)
+
+
+def _alive_pieces(arm, s):
+    """Constrain: the alive sets inside one segment as [(from, to, frozenset)] (not
+    merged; nothing for a zero-length segment)."""
+    out = []
+    if s.length_bp == 0:
+        return out
+    ops = _segment_ops(arm, s)
+    cur = set(s.entry)
+    pos = s.from_bp
+    i = 0
+    while pos < s.end_bp:
+        while i < len(ops) and ops[i][0] <= pos:
+            if ops[i][1] == 0:
+                cur.discard(ops[i][2])
+            else:
+                cur.add(ops[i][2])
+            i += 1
+        nxt = ops[i][0] if i < len(ops) else s.end_bp
+        nxt = min(max(nxt, pos + 1), s.end_bp)
+        out.append((pos, nxt, frozenset(cur)))
+        pos = nxt
+    return out
 
 
 def _presence_profile(arm, leaf_seg):
@@ -270,8 +286,9 @@ def _first_paths(arm):
     return got
 
 
-def _run_claim(g, arm, run, cut):
-    """The claim of one run end, or None when the run-start guard drops it at |cut|."""
+def _run_claim(g, arm, run, cut, exact=True):
+    """The claim of one run end, or None when the run-start guard drops it at |cut|.
+    |exact|: the arm's label evidence is exact (arm_exact)."""
     route_from, ev_from = derive.evidence(arm, run)
     seg = arm.segments[run.segment]
     zero = run.from_bp == run.to_bp
@@ -313,7 +330,7 @@ def _run_claim(g, arm, run, cut):
         evidence_from=evidence_from, kind=kind, reason=reason, qualifier=qualifier,
         end_class=end_class, entered_by=run.entered_by,
         from_label=None if run.from_label is None else g.labels[run.from_label],
-        cost=run.cost, loss=loss, branches=branches, support=g.support, exact=True,
+        cost=run.cost, loss=loss, branches=branches, support=g.support, exact=exact,
         run=run.id)
 
 
@@ -326,6 +343,7 @@ def _displayed_presence(arm):
     if got is None:
         segs = arm.segments
         got = [None] * len(segs)
+        sets = {}                            # equal sets shared (a comb repeats a few)
         for s in segs:
             alive = set(s.entry) if not s.parents else set(got[s.parents[0]][0])
             drops = []
@@ -335,107 +353,215 @@ def _displayed_presence(arm):
                 still = alive.intersection(pr.labels)
                 drops.extend((l, pr.from_bp) for l in sorted(alive - still))
                 alive = still
-            got[s.id] = (frozenset(alive), drops)
+            fs = frozenset(alive)
+            got[s.id] = (sets.setdefault(fs, fs), drops or ())
         arm.cache['displayed_presence'] = got
     return got
 
 
-def _annotate_stretches(g, arm):
-    """Annotate mode: per walk and per label recorded at the seed boundary, the stretch
-    from 0 on which the label is recorded at every node (the §6.9 oracle E, filtered
-    from the recorded sets alone). -> [(label, anchor, j, path_id, leaf)], maximal per
-    label. A stretch ends inside its anchor (shared by every walk through it), at a
-    leaf's end, or at the first base of a child -- where it is not maximal when another
-    first-parent child of the anchor carries the label on."""
-    got = arm.cache.get('annotate_stretches')
+def _annotate_evidence(arm, l, anchor):
+    """Annotate mode, the §5.1 merge walk for an end of label |l| anchored at |anchor|:
+    the start of the merge nearest the anchor on its first-parent chain p through whose
+    FIRST parent no route of |l| arrives -- the witness route of routes() enters it
+    through another parent, so the displayed bases of p before it are not the label's
+    (route_bp); 0 when a route of the label follows p from the seed boundary. The
+    annotate reading of derive.evidence(): 'the lineage's label is in partition[0]'
+    becomes 'a route of |l| reaches the end of parents[0]' (the union rule of direct_bp;
+    annotate partitions are empty). Relative to p even when no walk displays p (the
+    claim's path_id is then None), as in constrain mode. Cached only where p has a
+    merge (elsewhere it is 0 at once)."""
+    above = derive.merge_above(arm)
+    m = above[anchor]
+    if m is None:
+        return 0
+    cache = arm.cache.setdefault('annotate_evidence', {})
+    got = cache.get((l, anchor))
     if got is not None:
         return got
+    alive_end, _ = _annotate_route_ends(arm)
     segs = arm.segments
-    pres = _displayed_presence(arm)
-    first = _first_paths(arm)
-    pol = derive.path_of_leaf(arm)
-    out = []
-    for s in segs:
-        alive_end, drops = pres[s.id]
-        pid = first[s.id]
-        if pid is None:
-            continue                     # on no displayed walk (a non-first merge parent)
-        for l, j in drops:
-            anchor = s.id
-            if j == s.from_bp and s.parents:
-                # absent from the child's first base: the stretch ends with the parent,
-                # maximal only if no other walk through the parent carries l on
-                anchor = s.parents[0]
-                if any(_carries(arm, c, l) for c in segs[anchor].children
-                       if c != s.id and segs[c].parents[0] == anchor):
-                    continue
-            out.append((l, anchor, j, pid, derive.paths(arm)[pid].leaf))
-        if s.leaf is not None:
-            for l in sorted(alive_end):
-                out.append((l, s.id, s.end_bp, pol[s.id], s.id))
-    # one claim per (label, anchor, position): walks sharing a prefix share the stretch
-    seen = set()
-    uniq = []
-    for x in out:
-        if (x[0], x[1], x[2]) not in seen:
-            seen.add((x[0], x[1], x[2]))
-            uniq.append(x)
-    got = sorted(uniq, key=lambda x: (x[3], x[0], x[2]))
-    arm.cache['annotate_stretches'] = got
+    got = 0
+    while m is not None:
+        seg = segs[m]
+        if l not in alive_end[seg.parents[0]]:
+            got = seg.from_bp
+            break
+        m = above[seg.parents[0]]
+    cache[(l, anchor)] = got
     return got
 
 
-def _carries(arm, c, l):
-    """Whether a walk through child |c| has |l| recorded at c's first base (through
-    zero-length segments, which record nothing, to their first-parent children)."""
-    seg = arm.segments[c]
-    if seg.presence:
-        return l in seg.presence[0].labels
-    return any(_carries(arm, cc, l) for cc in seg.children
-               if arm.segments[cc].parents[0] == c)
+def _annotate_ends(arm):
+    """Annotate mode: [(label, anchor, j, route_bp)], one per maximal end of a label's
+    label-consistent routes under the §5.1 union rule (the rule of direct_bp), with the
+    merge-derived start of its displayed support; ordered by (first displayed walk
+    through the anchor, label, j). Built per call from the cached ends (a list per
+    end would cost as much as the ends again)."""
+    _, ends = _annotate_route_ends(arm)
+    first = _first_paths(arm)
+    none = len(first)
+    got = [(l, s, j, _annotate_evidence(arm, l, s)) for l, es in ends.items() for s, j in es]
+    got.sort(key=lambda x: (none if first[x[1]] is None else first[x[1]], x[0], x[2], x[1]))
+    return got
 
 
-def _annotate_claim(g, arm, l, anchor, j, pid, leaf, cut):
-    """One oracle stretch [0, j) as a claim; None when the run-start guard drops it
-    (a stretch with bases makes no claim at a cut of 0)."""
+def _annotate_claim(g, arm, l, anchor, j, ev, cut, exact):
+    """One route end [0, j) of label |l| as a claim: route support [0, j), displayed
+    support [ev, j) on the anchor's first-parent chain (route_bp = ev, as for a run in
+    constrain mode); None when the run-start guard drops it (a route with bases makes no
+    claim at a cut of 0). At a cut D < j: a stretch when displayed support survives the
+    cut, route_only when none does."""
     if cut is not None and j > 0 and cut <= 0:
         return None
-    seg = arm.segments[leaf]
-    length = seg.end_bp
-    if j < length:
+    seg = arm.segments[anchor]
+    code = seg.leaf.path_reason if seg.leaf is not None and j == seg.end_bp else None
+    if code is None:
         reason, end_class, kind = 'label_lost', 'lost', 'end'
     else:
-        code = seg.leaf.path_reason
         reason, end_class = REASON[code], END_CLASS[code]
         kind = 'alive' if code == 'X' or code in RESOURCE_CODES else 'end'
     to_bp = j
-    ev = 0
+    evidence_from = ev
     if j == 0:
-        kind, ev = 'boundary', None
+        kind, evidence_from = 'boundary', None
     if cut is not None and j > cut:
-        to_bp, kind, end_class, reason = cut, 'stretch', 'open', None
-    return Claim(label=g.labels[l], arm=arm.side, path_id=pid, segment=anchor, from_bp=0,
-                 to_bp=to_bp, route_bp=0, evidence_from=ev, kind=kind, reason=reason,
-                 qualifier=None, end_class=end_class, entered_by='seed', from_label=None,
-                 cost=None, loss=None, branches=None, support=g.support,
-                 exact=arm.labels_per_node.nodes_truncated == 0, run=None)
+        to_bp, end_class, reason = cut, 'open', None
+        if ev < cut:
+            kind = 'stretch'
+        else:
+            kind, evidence_from = 'route_only', None
+    return Claim(label=g.labels[l], arm=arm.side, path_id=_first_paths(arm)[anchor],
+                 segment=anchor, from_bp=0, to_bp=to_bp, route_bp=ev,
+                 evidence_from=evidence_from, kind=kind, reason=reason, qualifier=None,
+                 end_class=end_class, entered_by='seed', from_label=None, cost=None,
+                 loss=None, branches=None, support=g.support,
+                 exact=exact, run=None)
+
+
+def _annotate_route_ends(arm):
+    """Annotate mode, the §5.1 union rule of label_summary's direct_bp: -> (alive_end,
+    ends). alive_end[seg] = the labels recorded on every node of SOME route from the
+    seed boundary to the segment's end (the union over the parents' sets, then every P
+    run of the segment); ends = {label: [(seg, j)]}, the maximal ends of its routes: a
+    drop inside a segment (anywhere in the root), or the end of a segment where it is
+    alive and no child records it at its first node (a zero-length child, which records
+    nothing, carries every label on to its own end). A drop at a child's first base is
+    not an end of its own: the route ends with the parent, unless another child carries
+    the label on. The longest end of a label is its direct_bp."""
+    got = arm.cache.get('annotate_route_ends')
+    if got is not None:
+        return got
+    segs = arm.segments
+    alive_end = [None] * len(segs)
+    ends = {}
+    sets = {}                                # equal sets shared (a comb repeats a few)
+    for s in segs:
+        if s.parents:
+            alive = set()
+            for p in s.parents:
+                alive.update(alive_end[p])
+        else:
+            alive = set(s.entry)
+        for pr in s.presence:
+            if not alive:
+                break
+            still = alive.intersection(pr.labels)
+            if pr.from_bp > s.from_bp or not s.parents:
+                for l in alive - still:
+                    ends.setdefault(l, []).append((s.id, pr.from_bp))
+            alive = still
+        fs = frozenset(alive)
+        alive_end[s.id] = sets.setdefault(fs, fs)
+    for s in segs:
+        alive = alive_end[s.id]
+        if not alive:
+            continue
+        carried = set()
+        for c in s.children:
+            if not segs[c].presence:
+                carried = alive
+                break
+            carried.update(alive.intersection(segs[c].presence[0].labels))
+        for l in sorted(alive - carried):
+            ends.setdefault(l, []).append((s.id, s.end_bp))
+    got = (alive_end, ends)
+    arm.cache['annotate_route_ends'] = got
+    return got
+
+
+def _annotate_routes(arm, l):
+    """Annotate mode: one witness route per maximal end of label |l| -> [(route = the
+    segments root -> anchor, anchor, j)]. Back from the anchor, every merge is passed
+    through its FIRST parent (in parents order) whose set holds the label, so a route
+    that can follow the displayed chain does. Displayed routes come first (by their
+    first walk), then route-only ones by length."""
+    alive_end, ends = _annotate_route_ends(arm)
+    segs = arm.segments
+    first = _first_paths(arm)
+    out = []
+    for s, j in ends.get(l, ()):
+        route = [s]
+        while segs[route[-1]].parents:
+            ps = segs[route[-1]].parents
+            route.append(next((p for p in ps if l in alive_end[p]), ps[0]))
+        route.reverse()
+        out.append((route, s, j))
+    npaths = len(derive.paths(arm))
+
+    def key(x):
+        route, s, j = x
+        shown = first[s] is not None and route == derive.chain(arm, s)
+        return (first[s] if shown else npaths, j, s)
+    out.sort(key=key)
+    return out
+
+
+def _route_bases(arm, route, hi):
+    """Bases [0, hi) along |route| (segment ids root -> anchor, any parents), natural
+    orientation; None without bases."""
+    parts = []
+    for x in route:
+        w = arm.segments[x].walk
+        if w is None:
+            return None
+        parts.append(w)
+    b = ''.join(parts)[:hi]
+    return b if arm.side == 'right' else b[::-1]
+
+
+def _displayed_leaves_below(arm, seg):
+    """The leaves whose displayed (first-parent) chain passes through |seg|."""
+    segs = arm.segments
+    out, stack = [], [seg]
+    while stack:
+        x = stack.pop()
+        if segs[x].leaf is not None:
+            out.append(x)
+        stack.extend(c for c in segs[x].children if segs[c].parents[0] == x)
+    return sorted(out)
 
 
 def claims(g, arm=None, labels=None, at_most_bp=None, strict=True):
     """The §6.9 unit: one claim per RUN END (claims, not leaves). In annotate mode the
     claims are the oracle's: per label recorded at the seed boundary its maximal
-    label-consistent walks; strict=True raises IncompleteRecording when a recorded
-    list was cut (the oracle would be a lower bound)."""
+    label-consistent routes -- the §5.1 union rule of direct_bp, through ANY parent of a
+    merge -- each with route support [0, to_bp) and displayed support [evidence_from,
+    to_bp) on the first-parent chain of its anchor, kept apart exactly as for a run in
+    constrain mode (route_bp > 0: the route joins that chain through a non-first merge
+    parent; at a cut with no displayed support left it is route_only). strict=True
+    raises IncompleteRecording when a recorded list was cut (the oracle would be a lower
+    bound)."""
     sides = [g.arm(arm).side] if arm is not None else [s for s in ARM_SIDES if s in g.arms]
     wanted = _label_ids(g, labels)
     out = []
     for side in sides:
         a = g.arms[side]
+        exact = arm_exact(g, side)
         if g.mode == 'constrain':
             for run in a.runs:
                 if wanted is not None and run.label not in wanted:
                     continue
-                c = _run_claim(g, a, run, at_most_bp)
+                c = _run_claim(g, a, run, at_most_bp, exact)
                 if c is not None:
                     out.append(c)
         else:
@@ -444,10 +570,10 @@ def claims(g, arm=None, labels=None, at_most_bp=None, strict=True):
                     'the %s arm has %d recorded label lists cut at labels.max_labels_per_node:'
                     ' claims filtered from them are lower bounds (pass strict=False to accept,'
                     ' or raise the knob)' % (side, a.labels_per_node.nodes_truncated))
-            for l, anchor, j, pid, leaf in _annotate_stretches(g, a):
+            for l, anchor, j, ev in _annotate_ends(a):
                 if wanted is not None and l not in wanted:
                     continue
-                c = _annotate_claim(g, a, l, anchor, j, pid, leaf, at_most_bp)
+                c = _annotate_claim(g, a, l, anchor, j, ev, at_most_bp, exact)
                 if c is not None:
                     out.append(c)
     return out
@@ -472,23 +598,41 @@ def walks(g, arm, *, top=None, by='support', labels=None, route_consistent=True,
     path order. Ranking uses the per-leaf records only; chains, spellings and claims
     are produced for the walks returned."""
     a = g.arm(arm)
-    wanted = _label_ids(g, labels)
+    ranked = _ranked_walks(g, a, by, _label_ids(g, labels), route_consistent, min_bp)
+    if top is not None:
+        ranked = ranked[:top]
+    return _walk_objects(g, a, ranked, with_claims=True)
+
+
+_WALK_KEYS = {
+    'support': lambda x: (-len(x[1]), -len(x[2]), -x[0].length_bp, x[0].id),
+    'length': lambda x: (-x[0].length_bp, x[0].id),
+    'loss': lambda x: (x[3], -len(x[2]), -x[0].length_bp, x[0].id),
+    'id': lambda x: x[0].id,
+}
+
+
+def _walk_keys_of(g, a, p):
+    """(full, alive_ids, consistent, min_loss) of one walk, from its per-leaf records."""
+    if g.mode == 'constrain':
+        ends = derive.end_labels(a, p.leaf)
+        alive_ids = [e.label for e in ends]
+        consistent = {e.label for e in ends if e.route_bp == 0}
+        min_loss = min((e.loss for e in ends), default=math.inf)
+        return None, alive_ids, consistent, min_loss
+    full = _labels_full(g, a, p)
+    return full, list(a.segments[p.leaf].end), {l.id for l in full}, 0.0
+
+
+def _ranked_walks(g, a, by, wanted, route_consistent, min_bp):
+    """[(path, labels_full, alive ids, min loss)] in walks() order; nothing is spelled."""
+    if by not in _WALK_KEYS:
+        raise ValueError("by is 'support', 'length', 'loss' or 'id'")
     ranked = []
     for p in derive.paths(a):
         if p.length_bp < min_bp:
             continue
-        seg = a.segments[p.leaf]
-        if g.mode == 'constrain':
-            ends = derive.end_labels(a, p.leaf)
-            alive_ids = [e.label for e in ends]
-            consistent = {e.label for e in ends if e.route_bp == 0}
-            min_loss = min((e.loss for e in ends), default=math.inf)
-            full = None
-        else:
-            alive_ids = list(seg.end)
-            full = _labels_full(g, a, p)
-            consistent = {l.id for l in full}
-            min_loss = 0.0
+        full, alive_ids, consistent, min_loss = _walk_keys_of(g, a, p)
         if wanted is not None:
             pool = consistent if route_consistent else set(alive_ids)
             if not wanted & pool:
@@ -496,19 +640,35 @@ def walks(g, arm, *, top=None, by='support', labels=None, route_consistent=True,
         if full is None:
             full = _labels_full(g, a, p)
         ranked.append((p, full, alive_ids, min_loss))
-    keys = {
-        'support': lambda x: (-len(x[1]), -len(x[2]), -x[0].length_bp, x[0].id),
-        'length': lambda x: (-x[0].length_bp, x[0].id),
-        'loss': lambda x: (x[3], -len(x[2]), -x[0].length_bp, x[0].id),
-        'id': lambda x: x[0].id,
-    }
-    if by not in keys:
-        raise ValueError("by is 'support', 'length', 'loss' or 'id'")
-    ranked.sort(key=keys[by])
-    if top is not None:
-        ranked = ranked[:top]
+    ranked.sort(key=_WALK_KEYS[by])
+    return ranked
+
+
+def rank_walks(g, arm, *, by='support', labels=None, route_consistent=True, min_bp=0):
+    """The path ids walks() returns, in its order, from the per-leaf records only: no
+    chain, spelling or claim is built (a pager ranks the whole arm, then materializes
+    one page with walks_at())."""
+    a = g.arm(arm)
+    return [x[0].id for x in _ranked_walks(g, a, by, _label_ids(g, labels),
+                                           route_consistent, min_bp)]
+
+
+def walks_at(g, arm, path_ids, with_claims=False):
+    """The Walk objects of |path_ids|, in that order (claims only with with_claims)."""
+    a = g.arm(arm)
+    ps = derive.paths(a)
+    rows = []
+    for pid in path_ids:
+        p = ps[path_id(a, pid)]
+        full, alive_ids, _, min_loss = _walk_keys_of(g, a, p)
+        rows.append((p, full if full is not None else _labels_full(g, a, p), alive_ids,
+                     min_loss))
+    return _walk_objects(g, a, rows, with_claims)
+
+
+def _walk_objects(g, a, ranked, with_claims):
     by_leaf = {}
-    if ranked:
+    if ranked and with_claims:
         leaves_ = {x[0].leaf for x in ranked}
         for c in claims(g, a, strict=False):
             s = a.segments[c.segment]
@@ -544,15 +704,19 @@ def routes(g, sel, arm, spell=False):
     """Per run of the label (constrain): the segments root -> anchor of the LABEL'S OWN
     route, chosen at every merge through the G partition holding the lineage's
     incoming label (not the displayed first-parent chain). spell=True adds the route's
-    bases (natural orientation, from the seed boundary to the run's end)."""
+    bases (natural orientation, from the seed boundary to the run's end).
+
+    Annotate mode (no runs, empty partitions): one witness route per maximal end of the
+    label's label-consistent routes under the §5.1 union rule (the rule of direct_bp,
+    so the direct_bp route is always among them), passing every merge through its first
+    parent, in parents order, that records the label -- the displayed chain where it
+    can. A route through a non-first merge parent is shown by no walk."""
     a = g.arm(arm)
     lab = label(g, sel)
     out = []
     if g.mode != 'constrain':
-        for l, anchor, j, pid, leaf in _annotate_stretches(g, a):
-            if l == lab.id:
-                r = derive.chain(a, anchor)
-                out.append((r, _chain_bases(a, anchor, 0, j)) if spell else r)
+        for route, anchor, j in _annotate_routes(a, lab.id):
+            out.append((route, _route_bases(a, route, j)) if spell else route)
         return out
     segs = a.segments
     for run in a.runs:
@@ -588,23 +752,32 @@ def label_walks(g, sel, arm=None):
     """Per run of the label: (from, to, evidence_from, sequence = the label's own route
     bases [from_bp, to_bp), end = the end reason as the label_end event states it
     ('switched' for a silent Lw end, 'merged' for a run closed by a merge),
-    leaves_below, merged_into)."""
+    leaves_below, merged_into).
+
+    Annotate mode: per witness route of routes() (from the seed boundary, run None):
+    leaves_below the leaves whose displayed walk passes through the route's anchor (the
+    walks that show where the stretch ends, as a run's leaves_below in constrain mode; []
+    when the anchor is on no displayed walk), evidence_from the claim's: where the
+    route's bases become those of the anchor's first-parent chain (0 when the route is
+    that chain, the start of the last merge it enters through a non-first parent
+    otherwise -- §5.1, as for a run in constrain mode)."""
     lab = label(g, sel)
     sides = [g.arm(arm).side] if arm is not None else [s for s in ARM_SIDES if s in g.arms]
     out = []
     for side in sides:
         a = g.arms[side]
         if g.mode != 'constrain':
-            for l, anchor, j, pid, leaf in _annotate_stretches(g, a):
-                if l != lab.id:
-                    continue
-                try:
-                    seq = _chain_bases(a, anchor, 0, j)
-                except ValueError:
-                    seq = None
-                c = _annotate_claim(g, a, l, anchor, j, pid, leaf, None)
-                out.append(LabelWalk(None, lab, side, 0, j, 0, seq, c.reason,
-                                     [leaf], None))
+            for route, anchor, j in _annotate_routes(a, lab.id):
+                seg = a.segments[anchor]
+                if seg.leaf is not None and j == seg.end_bp:
+                    code = seg.leaf.path_reason
+                    end = REASON[code] if code else None
+                else:
+                    end = 'label_lost'
+                out.append(LabelWalk(None, lab, side, 0, j,
+                                     _annotate_evidence(a, lab.id, anchor),
+                                     _route_bases(a, route, j), end,
+                                     _displayed_leaves_below(a, anchor), None))
             continue
         rts = routes(g, lab, a, spell=True)
         k = 0
@@ -716,7 +889,10 @@ def _change_reasons(g, a, chain, on_chain, rbs, at, added, removed):
                                    for x in (segs[c].walk[:1] if segs[c].walk
                                              else segs[c].first_base or '')
                                    if l in segs[c].entry})
-                    if l in parent.end:
+                    if l in parent.end and took:
+                        # a split only when another branch took the label: on the
+                        # parent's last node and on no child's first node it is
+                        # absent (annotate) or ended, not split
                         why = {'why': 'split', 'took': took}
                     break
         if why is None:
@@ -738,6 +914,33 @@ def _change_reasons(g, a, chain, on_chain, rbs, at, added, removed):
             why = {'why': 'present' if g.mode != 'constrain' else 'entered'}
         reasons.append(dict(why, label=g.labels[l].as_dict(), change='added'))
     return reasons
+
+
+def splits(g, arm, min_labels_before=0):
+    """The split records of an arm, in the walker's order (at_bp, then first child), as
+    SplitPoint(arm, at_bp, segment, kind, labels_before, branches): oriented like the
+    other accessors -- at_bp is the outward distance from the seed boundary (walking
+    order on both arms, as a claim's interval), labels are Label objects ({name, ref}),
+    and each Branch carries its first base, the labels at its first node (the recorded
+    list, cut at labels.max_labels_per_node, with the true count) and the first walk
+    whose displayed chain takes it. A branch's label count is not a share of
+    labels_before: a label may follow several branches (kind 'ambiguous')."""
+    a = g.arm(arm)
+    first = _first_paths(a)
+    out = []
+    for sp in derive.splits(a, g.mode):
+        if sp.labels_before < min_labels_before:
+            continue
+        branches = []
+        for c in sp.children:
+            child = a.segments[c]
+            branches.append(Branch(c, derive.first_base(child),
+                                   [g.labels[l] for l in child.entry[:g.cap]],
+                                   child.entry_total, first[c]))
+        out.append(SplitPoint(a.side, sp.at_bp, sp.segment,
+                              'ambiguous' if sp.ambiguous else 'divergence',
+                              sp.labels_before, branches))
+    return out
 
 
 def label_summary(g):
@@ -773,8 +976,59 @@ def continuation(g, arm, leaf):
         coord = (g.seed.length_bp + L - c.n, g.seed.length_bp + L)
     else:
         coord = (-L, -L + c.n)
-    return Continuation(seq, _labels(g, c.labels), c.loss_used, c.branches_used, coord,
-                        a.side, path_id(a, leaf))
+    labels = _labels(g, c.labels)
+    return Continuation(seq, labels, c.loss_used, c.branches_used, coord, a.side,
+                        path_id(a, leaf), _unverifiable_names(g, labels))
+
+
+# what a server before the refusal of names that are not UTF-8 wrote for the bytes it could
+# not carry: such a name may stand for another one in the index
+_REPLACEMENT = '\ufffd'
+
+
+def _unverifiable_names(g, labels):
+    """Why the names of |labels| cannot be resubmitted as an explicit label list (None:
+    they can). /traverse resolves a NAME to a label, so a request that names labels
+    holds only when each name is exactly one label's: not shared by two labels of the
+    retrieval, and not a name the library cannot know to be the index's own -- one with
+    U+FFFD, which servers that replaced the bytes of names that are not UTF-8 wrote, so
+    that the index may hold another label of exactly that name (a server now refuses
+    such a seed instead). The library has only the retrieval to go by."""
+    if not labels:
+        return None
+    counts = g.cache.get('name_counts')
+    if counts is None:
+        counts = g.cache['name_counts'] = collections.Counter(l.name for l in g.labels)
+    why = []
+    for l in labels:
+        if counts[l.name] > 1:
+            why.append('%s: %d labels of this retrieval are named %s (%s)' % (
+                l.ref, counts[l.name], _shown(l.name),
+                ', '.join(x.ref for x in g.labels if x.name == l.name)))
+        elif _REPLACEMENT in l.name:
+            why.append('%s: its name %s holds U+FFFD, which servers wrote in place of '
+                       'bytes that are not UTF-8: the index may hold another label of '
+                       'exactly this name' % (l.ref, _shown(l.name)))
+    if not why:
+        return None
+    return ('the request would name labels by names that may resolve to other labels '
+            '(/traverse resolves names): %s; not built -- name the labels explicitly in a '
+            'request of your own once verified (e.g. with /resolve)' % '; '.join(why[:3])
+            + (' and %d more' % (len(why) - 3) if len(why) > 3 else ''))
+
+
+def _shown(name, limit=32):
+    return repr(name if len(name) <= limit else name[:limit] + '...')
+
+
+def resubmittable_names(g, labels):
+    """The names of |labels| (selectors) as a request would carry them; raises
+    UnverifiableLabelName when one may resolve to another label (see continuation)."""
+    labs = labels_matching(g, labels) or []
+    why = _unverifiable_names(g, labs)
+    if why:
+        raise UnverifiableLabelName(why)
+    return [l.name for l in labs]
 
 
 def _deep_merge(dst, src):
@@ -803,10 +1057,10 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
         if not c.sequence:
             raise ValueError('walk %d has no continuation sequence (output.continuation_bp '
                              'was 0): nothing to resubmit' % c.leaf)
-        s = c.as_seed()
         if g.mode != 'constrain':
-            s.pop('labels', None)    # annotate mode has no permitted set
-        seeds.append(s)
+            seeds.append({'sequence': c.sequence})   # annotate mode has no permitted set
+        else:
+            seeds.append(c.as_seed())    # raises UnverifiableLabelName, never resolves
     strategy = copy.deepcopy(g.envelope.get('strategy') or {})
     strategy.pop('clamped', None)
     strategy['direction'] = a.side
@@ -1077,10 +1331,9 @@ def compare(a, b, *, arm=None, labels=None, mode='claims'):
             notes.append('%s arm of a: histories were united at merges' % s)
     if a.support != b.support:
         notes.append('support kinds differ (%s vs %s)' % (a.support, b.support))
-    sel = None
-    if labels is not None:
-        sel = {label(a, x).ref for x in ([labels] if isinstance(labels, (str, dict))
-                                          else labels)}
+    if mode not in ('claims', 'walks', 'labels', 'prefix_subset'):
+        raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
+    sel = _compare_selectors(a, b, labels)
     only_a, only_b, differ = [], [], []
     names = {l.ref: l.name for l in b.labels}
     names.update({l.ref: l.name for l in a.labels})
@@ -1088,14 +1341,31 @@ def compare(a, b, *, arm=None, labels=None, mode='claims'):
     def lab(ref):
         return {'name': names.get(ref), 'ref': ref}
 
-    if mode == 'claims':
+    # claims, walks and prefix_subset are keyed by displayed bases (a claim's prefix, a
+    # walk's spelling): a side retrieved with output.sequences false has none. Keying it
+    # by anything else would report every claim of the identical trie as one-sided, or
+    # match claims of different walks, so the comparison is not made: 'unknown'
+    no_bases = [tag for tag, g in (('a', a), ('b', b))
+                if any(not _has_bases(g, s) for s in sides)]
+    memo = {}
+    evaluated = True
+    if mode in ('claims', 'walks', 'prefix_subset') and no_bases:
+        comparable = _weaker(comparable, 'unknown')
+        evaluated = False
+        reason = ('%s carries no bases (output.sequences false): mode %s matches %s by '
+                  'their displayed bases, so it cannot compare them; retrieve both with '
+                  'output.sequences true, or compare mode labels'
+                  % (' and '.join(no_bases) + (' each' if len(no_bases) > 1 else ''), mode,
+                     'claims' if mode == 'claims' else 'walks'))
+    elif mode == 'claims':
         ka, kb = _claim_keys(a, sides, depth, sel), _claim_keys(b, sides, depth, sel)
         only_a = [_key_json(k, v, lab) for k, v in sorted(ka.items()) if k not in kb]
         only_b = [_key_json(k, v, lab) for k, v in sorted(kb.items()) if k not in ka]
         differ = [{'key': _key_json(k, None, lab), 'a': ka[k], 'b': kb[k]}
                   for k in sorted(ka) if k in kb and ka[k] != kb[k]]
     elif mode == 'walks':
-        wa, wb = _walk_keys(a, sides, depth, sel), _walk_keys(b, sides, depth, sel)
+        wa = _walk_keys(a, sides, depth, sel, memo)
+        wb = _walk_keys(b, sides, depth, sel, memo)
         only_a = [{'arm': k[0], 'walk': k[1], 'labels': [lab(r) for r in sorted(v)]}
                   for k, v in sorted(wa.items()) if k not in wb]
         only_b = [{'arm': k[0], 'walk': k[1], 'labels': [lab(r) for r in sorted(v)]}
@@ -1109,22 +1379,58 @@ def compare(a, b, *, arm=None, labels=None, mode='claims'):
         only_b = [dict(lab(k[1]), arm=k[0]) for k in sorted(lb) if k not in la]
         differ = [dict(lab(k[1]), arm=k[0], a=la[k], b=lb[k])
                   for k in sorted(la) if k in lb and la[k] != lb[k]]
-    elif mode == 'prefix_subset':
-        only_a, only_b = _prefix_subset(a, b, sides, depth, sel)
+    else:
+        only_a, only_b = _prefix_subset(a, b, sides, depth, sel, memo)
         for row in only_a + only_b:
             row['name'] = names.get(row['ref'])
-    else:
-        raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
     if mode == 'prefix_subset':
         holds = not only_a
     else:
         holds = not (only_a or only_b or differ)
     equal = holds if comparable is True else None
-    if comparable is not True and holds:
+    if comparable is not True and holds and evaluated:
         notes.append('no difference found, but equality is not claimed (%s)' % comparable)
     return Comparison(comparable, reason, depth, equal, only_a, only_b, notes, differ,
                       mode=mode, support=(a.support, b.support), scopes=scopes,
                       strategies=strategies)
+
+
+def _compare_selectors(a, b, labels):
+    """The LabelRefs a comparison is restricted to (None: every label). Comparisons are
+    keyed by LabelRef, and a label only one side recorded (a cut list, a lower-bound
+    retrieval) is exactly what they must show: a selector resolves against |a|, then
+    |b|; {'ref': ...} is the key itself. {'id': ...} (and a bare int) are ids of |a|."""
+    if labels is None:
+        return None
+    if isinstance(labels, (str, dict, int, Label)):
+        labels = [labels]
+    out = set()
+    known = None
+    for x in labels:
+        if isinstance(x, dict) and len(x) == 1 and 'ref' in x and isinstance(x['ref'], str):
+            if known is None:
+                known = {l.ref for l in a.labels} | {l.ref for l in b.labels}
+            if x['ref'] not in known:
+                raise UnknownLabel('no label in either graphlet has ref %r' % x['ref'])
+            out.add(x['ref'])
+            continue
+        if isinstance(x, bool) or isinstance(x, int) or (
+                isinstance(x, dict) and len(x) == 1 and 'id' in x):
+            out.add(label(a, x).ref)
+            continue
+        try:
+            out.add(label(a, x).ref)
+        except UnknownLabel:
+            try:
+                out.add(label(b, x).ref)
+            except UnknownLabel:
+                raise UnknownLabel('no label in either graphlet matches %r' % (x,)) from None
+    return out
+
+
+def _has_bases(g, side):
+    segs = g.arms[side].segments
+    return not segs or segs[0].walk is not None
 
 
 def _key_json(k, v, lab):
@@ -1161,57 +1467,194 @@ def _claim_keys(g, sides, depth, sel):
     return out
 
 
-def _cut_labels(g, a, p, m):
-    """Labels with displayed support on the whole [0, m) of walk p."""
-    if m == 0:
-        return {g.labels[l].ref for l in a.segments[p.segments[0]].entry}
-    prof = support_profile(g, a, p.id)
-    have = None
-    for run in prof:
-        if run.from_bp >= m:
-            break
-        ids = {l.id for l in run.labels}
-        have = ids if have is None else have & ids
-    return {g.labels[l].ref for l in (have or ())}
+def _segment_support(g, arm, s):
+    """The displayed support inside one segment as [(from, to, frozenset of ids)]:
+    the alive sets (constrain) or the recorded P sets (annotate)."""
+    if g.mode == 'constrain':
+        return _alive_pieces(arm, s)
+    return [(p.from_bp, p.to_bp, frozenset(p.labels)) for p in s.presence]
 
 
-def _walk_keys(g, sides, depth, sel):
+def _cut_info(g, arm, anchor, m):
+    """One cut [0, m) of the first-parent chain root -> |anchor| (the segment holding
+    base m - 1; None for m = 0) -> (the walking-order prefix, None without bases; the
+    labels with displayed support on all of [0, m); {label: j} the longest [0, j),
+    j <= m, each label supports from the boundary on). Only the segments up to the
+    anchor are read, each only up to m."""
+    segs = arm.segments
+    entry = segs[0].entry if segs else ()
+    have = {l: 0 for l in entry}
+    if anchor is None:
+        return ('' if not segs or segs[0].walk is not None else None, frozenset(entry), have)
+    parts = []
+    inter = None
+    for sid in derive.chain(arm, anchor):
+        s = segs[sid]
+        if s.walk is None:
+            parts = None
+        elif parts is not None:
+            parts.append(s.walk if s.end_bp <= m else s.walk[:m - s.from_bp])
+        for f, t, labs in _segment_support(g, arm, s):
+            if f >= m:
+                break
+            inter = labs if inter is None else inter & labs
+            for l in inter:
+                have[l] = min(t, m)
+    return (None if parts is None else ''.join(parts), inter or frozenset(), have)
+
+
+def _cuts(g, side, depth, memo):
+    """[(path, m, cut info)] for every walk of the arm, m = min(length, depth). Walks
+    sharing the segment that holds base m - 1 share one cut: the work is the distinct
+    anchors' chains up to the depth, not every walk's whole chain (B1). Memoized per
+    comparison in |memo|."""
+    key = (id(g), side, depth)
+    got = memo.get(key)
+    if got is not None:
+        return got
+    a = g.arms[side]
+    segs = a.segments
+    # the segment on each first-parent chain that holds base depth - 1 (parents first)
+    anc = [None] * len(segs)
+    if depth > 0:
+        for s in segs:
+            if s.from_bp <= depth - 1 < s.end_bp:
+                anc[s.id] = s.id
+            elif s.from_bp >= depth and s.parents:
+                anc[s.id] = anc[s.parents[0]]
+    infos = {}
+    out = []
+    for p in derive.paths(a):
+        m = min(p.length_bp, depth)
+        if m == 0:
+            k = None
+        elif m == depth:
+            k = anc[p.leaf]
+        else:
+            k = p.leaf
+            while segs[k].from_bp >= m:      # zero-length segments at the leaf's end
+                k = segs[k].parents[0]
+        info = infos.get((k, m))
+        if info is None:
+            info = infos[(k, m)] = _cut_info(g, a, k, m)
+        out.append((p, m, info))
+    memo[key] = out
+    return out
+
+
+def _walk_keys(g, sides, depth, sel, memo=None):
+    memo = {} if memo is None else memo
     out = {}
     for side in sides:
-        a = g.arms[side]
-        for p in derive.paths(a):
-            m = min(p.length_bp, depth)
-            try:
-                seq = _chain_bases(a, p.leaf, 0, m)
-            except ValueError:
-                seq = 'path:%d' % p.id
-            refs = _cut_labels(g, a, p, m)
+        seen = set()
+        for p, m, info in _cuts(g, side, depth, memo):
+            if id(info) in seen:
+                # walks sharing a cut share its key and its labels: one update per cut,
+                # not one per walk (a shallow cut of a wide arm is shared by thousands
+                # of walks, each with every seed label)
+                continue
+            seen.add(id(info))
+            prefix, ids, _ = info
+            seq = _natural(side, _cut_prefix(prefix))
+            refs = {g.labels[l].ref for l in ids}
             if sel is not None:
                 refs &= sel
+                if not refs:
+                    # restricted to labels, the comparison is over the walks UNDER them:
+                    # a walk none of them supports is in neither side's set (as for the
+                    # claims of a label filter), not a walk with no labels
+                    continue
             out.setdefault((side, seq), set()).update(refs)
     return out
 
 
 def _label_keys(g, sides, depth, sel):
-    rows = derive.label_summary(g)
+    """(side, ref) -> {direct_bp, reach_bp} of every label the arm holds within [0, depth),
+    each summary DERIVED from the records clipped to the depth (_clipped_summary), not a
+    completed summary clamped to it: a label first recorded beyond the depth is in
+    neither retrieval's [0, depth), and clamping its reach_bp would report it in the
+    deeper one only."""
     out = {}
-    for lab, per in zip(g.labels, rows):
-        if sel is not None and lab.ref not in sel:
-            continue
-        for side in sides:
-            v = per.get(side)
-            if v is None or (v['reach_bp'] == 0 and v['direct_bp'] == 0 and not v['runs']
-                             and not _label_seen(g, side, lab.id)):
+    for side in sides:
+        for lid, v in _clipped_summary(g, g.arms[side], depth).items():
+            ref = g.labels[lid].ref
+            if sel is not None and ref not in sel:
                 continue
-            out[(side, lab.ref)] = {'direct_bp': min(v['direct_bp'], depth),
-                                    'reach_bp': min(v['reach_bp'], depth)}
+            out[(side, ref)] = v
     return out
 
 
-def _label_seen(g, side, lid):
-    """Recorded at the seed boundary of the arm (a label with no stretch of its own)."""
-    a = g.arms[side]
-    return bool(a.segments) and lid in a.segments[0].entry
+def _run_exists_at(run, depth):
+    """The run-start guard of a claim at a cut: a run starting at or after the cut does
+    not exist yet; a zero-length run (a boundary claim) exists at its position."""
+    if run.from_bp == run.to_bp:
+        return run.from_bp <= depth
+    return run.from_bp < depth
+
+
+def _clipped_summary(g, arm, depth):
+    """label id -> {direct_bp, reach_bp} of one arm's label_summary (§5.1, both modes)
+    computed over [0, depth) only, for the labels the arm holds there. Constrain: the
+    runs that exist at the cut, each cut to it (direct_bp: the seed runs from 0; reach_bp:
+    credited to the lineage root). Annotate: the P runs starting before the cut, each cut
+    to it, and the union pass of direct_bp stopped at the cut; a label recorded at the
+    seed boundary only has both 0. At a depth beyond the arm it is label_summary itself
+    (for the labels it holds)."""
+    out = {}
+    if g.mode == 'constrain':
+        root = [0] * len(arm.runs)
+        for r in arm.runs:
+            root[r.id] = root[r.prev_run] if (r.from_label is not None
+                                              and r.prev_run is not None) else r.label
+        for r in arm.runs:
+            if not _run_exists_at(r, depth):
+                continue
+            to = min(r.to_bp, depth)
+            own = out.setdefault(r.label, {'direct_bp': 0, 'reach_bp': 0})
+            if r.from_label is None and r.from_bp == 0:
+                own['direct_bp'] = max(own['direct_bp'], to)
+            lin = out.setdefault(root[r.id], {'direct_bp': 0, 'reach_bp': 0})
+            lin['reach_bp'] = max(lin['reach_bp'], to)
+        return out
+    segs = arm.segments
+    if segs:
+        for l in segs[0].entry:
+            out.setdefault(l, {'direct_bp': 0, 'reach_bp': 0})
+    alive_end = [None] * len(segs)
+    for s in segs:
+        for p in s.presence:
+            if p.from_bp >= depth:
+                break
+            to = min(p.to_bp, depth)
+            for l in p.labels:
+                v = out.setdefault(l, {'direct_bp': 0, 'reach_bp': 0})
+                if to > v['reach_bp']:
+                    v['reach_bp'] = to
+        if s.parents:
+            alive = set()
+            for p in s.parents:
+                alive.update(alive_end[p])
+        else:
+            alive = set(s.entry)
+        if s.from_bp < depth:
+            for p in s.presence:
+                if not alive or p.from_bp >= depth:
+                    break
+                still = alive.intersection(p.labels)
+                for l in alive - still:
+                    v = out[l]
+                    if p.from_bp > v['direct_bp']:
+                        v['direct_bp'] = p.from_bp
+                alive = still
+            end = min(s.end_bp, depth)
+            for l in alive:
+                v = out[l]
+                if end > v['direct_bp']:
+                    v['direct_bp'] = end
+        else:
+            alive = set()
+        alive_end[s.id] = alive
+    return out
 
 
 def _walk_prefix(arm, seg_id, hi):
@@ -1225,41 +1668,44 @@ def _natural(side, w):
     return w if side == 'right' else w[::-1]
 
 
-def _route_pairs(g, sides, depth):
+def _cut_prefix(prefix):
+    if prefix is None:
+        raise ValueError('this retrieval carries no bases (output.sequences: false)')
+    return prefix
+
+
+def _route_pairs(g, sides, depth, memo=None):
     """(side, walk prefix cut at depth in walking order, ref) of every walk under each
     label with displayed support over the whole cut walk."""
+    memo = {} if memo is None else memo
     out = set()
     for side in sides:
-        a = g.arms[side]
-        for p in derive.paths(a):
-            m = min(p.length_bp, depth)
-            seq = _walk_prefix(a, p.leaf, m)
-            for ref in _cut_labels(g, a, p, m):
-                out.add((side, seq, ref))
+        seen = set()
+        for p, m, info in _cuts(g, side, depth, memo):
+            if id(info) in seen:
+                continue                     # walks sharing the cut give the same pairs
+            seen.add(id(info))
+            seq = _cut_prefix(info[0])
+            for l in info[1]:
+                out.add((side, seq, g.labels[l].ref))
     return out
 
 
-def _supported_prefixes(g, sides, depth):
+def _supported_prefixes(g, sides, depth, memo=None):
     """(side, ref) -> the walking-order prefixes w[:j] of every walk w (cut at depth) on
     which the label has displayed support over all of [0, j), j maximal per walk: a
     label that ends inside a walk (at a node where the walk goes on with other labels)
     still supports the walk up to its end, which whole-walk pairs alone never see."""
+    memo = {} if memo is None else memo
     out = {}
     for side in sides:
-        a = g.arms[side]
-        for p in derive.paths(a):
-            m = min(p.length_bp, depth)
-            w = _walk_prefix(a, p.leaf, m)
-            have = {l: 0 for l in a.segments[p.segments[0]].entry} if p.segments else {}
-            cur = None
-            for r in support_profile(g, a, p.id):
-                if r.from_bp >= m:
-                    break
-                ids = {l.id for l in r.labels}
-                cur = ids if cur is None else cur & ids
-                for l in cur:
-                    have[l] = min(r.to_bp, m)
-            for l, j in have.items():
+        seen = set()
+        for p, m, info in _cuts(g, side, depth, memo):
+            if id(info) in seen:
+                continue
+            seen.add(id(info))
+            w = _cut_prefix(info[0])
+            for l, j in info[2].items():
                 out.setdefault((side, g.labels[l].ref), set()).add(w[:j])
     return out
 
@@ -1314,15 +1760,16 @@ def _divergence(arm, seq):
     return best
 
 
-def _prefix_subset(a, b, sides, depth, sel):
-    pa = _route_pairs(a, sides, depth)
-    pb = _route_pairs(b, sides, depth)
+def _prefix_subset(a, b, sides, depth, sel, memo=None):
+    memo = {} if memo is None else memo
+    pa = _route_pairs(a, sides, depth, memo)
+    pb = _route_pairs(b, sides, depth, memo)
     if sel is not None:
         pa = {x for x in pa if x[2] in sel}
         pb = {x for x in pb if x[2] in sel}
     # a's walk under a label must be a prefix of a walk of b on which b's label supports
     # at least that prefix -- not necessarily the whole walk (it may end inside it)
-    supported = _supported_prefixes(b, sides, depth)
+    supported = _supported_prefixes(b, sides, depth, memo)
     violations = []
     for side, seq, ref in sorted(pa):
         if not any(w.startswith(seq) for w in supported.get((side, ref), ())):
@@ -1376,43 +1823,166 @@ def _prefix_subset(a, b, sides, depth, sel):
 
 # ------------------------------------------------------------------ size, summary
 
-def memory_bytes(g):
-    """An estimate of the model's footprint (interned sets counted once)."""
-    seen = set()
-    total = sys.getsizeof(g)
+# the model's record types: a cache refers to them, it never copies them
+_MODEL_TYPES = None
 
-    def add(x):
-        nonlocal total
-        if id(x) in seen:
-            return
-        seen.add(id(x))
-        total += sys.getsizeof(x)
 
-    for lab in g.labels:
-        add(lab)
-        add(lab.name)
-    add(g.seed.sequence)
-    for a in g.arms.values():
-        for s in a.segments:
-            add(s)
-            for x in (s.entry, s.end, s.walk, s.parents, s.children, s.events, s.presence):
-                if x is not None:
-                    add(x)
-            for p in s.presence:
-                add(p)
-                add(p.labels)
-            for e in s.events:
-                add(e)
-            for p in s.partition:
-                add(p)
-            if s.leaf is not None:
-                add(s.leaf)
-                add(s.leaf.extras)
-        for r in a.runs:
-            add(r)
-        for b in a.branch_events:
-            add(b)
+def _model_types():
+    global _MODEL_TYPES
+    if _MODEL_TYPES is None:
+        from . import model as m
+        _MODEL_TYPES = frozenset((
+            m.Graphlet, m.Arm, m.Segment, m.Run, m.Label, m.SeedInfo, m.Dropped, m.Event,
+            m.PresenceRun, m.LeafContinuation, m.Leaf, m.GrowthBin, m.Refusal,
+            m.BranchEvent, m.CapTrigger, m.Frontier, m.LabelsPerNode, m.Counts,
+            m.Limitation, m.Outcome, m.ResourceStop))
+    return _MODEL_TYPES
+
+
+_SLOTS = {}
+
+
+def _slots_of(t):
+    got = _SLOTS.get(t)
+    if got is None:
+        names = []
+        for k in t.__mro__:
+            for n in getattr(k, '__slots__', ()):
+                if n not in ('__dict__', '__weakref__') and n not in names:
+                    names.append(n)
+        got = _SLOTS[t] = tuple(names)
+    return got
+
+
+_SHARED = None
+
+
+def _shared_ids():
+    """The ids of the program's own constants a model refers to without owning them: the
+    strings, tuples and frozensets of the package modules' globals (code tables such as
+    REASON, the parser's shared star sets) and of their functions' code constants ('right',
+    'constrain', 'label_lost', cache keys, ...). They exist whether or not a model does,
+    so charging them overstated a small model by a fifth (they are module-lifetime
+    objects: their ids stay valid)."""
+    global _SHARED
+    if _SHARED is None:
+        import types
+        from . import _codec, derive as d, export, model, parser
+        ids = set()
+        stack = []
+
+        def code(c):
+            for k in c.co_consts:
+                if isinstance(k, types.CodeType):
+                    code(k)
+                else:
+                    stack.append(k)
+        for m in (_codec, parser, model, d, export, sys.modules[__name__]):
+            for v in vars(m).values():
+                if isinstance(v, types.FunctionType):
+                    code(v.__code__)
+                elif isinstance(v, type) and v.__module__ == m.__name__:
+                    for x in vars(v).values():
+                        f = getattr(x, '__func__', x)
+                        if isinstance(f, types.FunctionType):
+                            code(f.__code__)
+                        elif isinstance(x, property) and x.fget is not None:
+                            code(x.fget.__code__)
+                elif not isinstance(v, types.ModuleType):
+                    stack.append(v)
+        while stack:
+            x = stack.pop()
+            t = type(x)
+            if t is str or t is tuple or t is frozenset or t is dict:
+                if id(x) in ids:
+                    continue
+                if t is not dict:            # a module's dict is mutable: entered only
+                    ids.add(id(x))
+                if t is dict:
+                    stack.extend(x.keys())
+                    stack.extend(x.values())
+                elif t is not str:
+                    stack.extend(x)
+        _SHARED = frozenset(ids)
+    return _SHARED
+
+
+def _deep_bytes(roots, stop=None):
+    """sys.getsizeof over everything reachable from |roots|, each object once: what the
+    objects hold in the heap. Not counted: None, booleans, small ints and strings of at
+    most one character (interpreter singletons), the program's own constants
+    (_shared_ids), and the objects of the types in |stop| (not entered either).
+    Iterative: a deep trie does not recurse."""
+    from array import array
+    getsizeof = sys.getsizeof
+    seen = set(_shared_ids())
+    total = 0
+    stack = list(roots)
+    while stack:
+        x = stack.pop()
+        if x is None:
+            continue
+        i = id(x)
+        if i in seen:
+            continue
+        seen.add(i)
+        t = type(x)
+        if t is bool:
+            continue
+        if t is int:
+            if not -5 <= x <= 256:
+                total += getsizeof(x)
+            continue
+        if t is str:
+            if len(x) > 1:
+                total += getsizeof(x)
+            continue
+        if stop is not None and t in stop:
+            continue
+        total += getsizeof(x)
+        if t is float or t is array or t is bytes:
+            continue
+        if t is list or t is tuple or t is set or t is frozenset:
+            stack.extend(x)
+        elif t is dict:
+            stack.extend(x.keys())
+            stack.extend(x.values())
+        elif hasattr(t, '__slots__'):
+            for name in _slots_of(t):
+                stack.append(getattr(x, name, None))
+        elif hasattr(x, '__dict__'):
+            stack.append(x.__dict__)
     return total
+
+
+def memory_bytes(g):
+    """The model's footprint in the heap: a deduplicating deep sizeof over the slotted
+    model -- every record, label set, string, int and float it holds -- plus the caches
+    the queries built (Graphlet.cache, Arm.cache), the envelope and the summary. What a
+    GraphletStore charges against max_ram_mb (the old shallow count saw 35-67 % of the
+    traced heap, B2)."""
+    return _deep_bytes([g])
+
+
+def cache_bytes(g):
+    """The derived caches alone (Graphlet.cache and every Arm.cache), the model's records
+    they refer to not counted: what the queries added since the model was measured. The
+    store re-measures this, not the whole model, after a query (cost ~ the caches)."""
+    roots = [g.cache] + [a.cache for a in g.arms.values()]
+    return _deep_bytes(roots, stop=_model_types())
+
+
+def cache_signature(g):
+    """A cheap fingerprint of the caches' sizes (the number of entries of each), which
+    changes whenever a query adds to them."""
+    sig = [len(g.cache)]
+    for a in g.arms.values():
+        sig.append(len(a.cache))
+        for v in a.cache.values():
+            sig.append(len(v) if isinstance(v, (dict, list, tuple)) else 1)
+    for v in g.cache.values():
+        sig.append(len(v) if isinstance(v, (dict, list, tuple)) else 1)
+    return tuple(sig)
 
 
 def _kv(v):
@@ -1455,14 +2025,32 @@ def resource_stop_dict(q):
             'message': q.message}
 
 
+def arm_exact(g, side):
+    """Whether the label evidence of one arm is exact: no label-class limitation (a
+    lower bound or an overstatement) stated for that arm or for the seed, and no recorded
+    list of the arm cut. Per ARM: a limitation of the other arm does not make this one
+    inexact. A graphlet whose outcome says label evidence is not complete while no K
+    record says where (a body whose K records were lost) is exact on no arm."""
+    if g.arms[side].labels_per_node.nodes_truncated:
+        return False
+    stated = False
+    for lim in g.limitations:
+        if lim.kind in LOWER_BOUND_KINDS or lim.kind in OVERSTATED_KINDS:
+            stated = True
+            if lim.arm is None or lim.arm == side:
+                return False
+    return stated or g.outcome is None or g.outcome.label_evidence == 'complete'
+
+
 def evidence_block(g, side=None, view=None):
     """The block every local answer carries (§6): what it is certified to and how. Beyond
     §6's {complete_to_bp, exact, support, reconverge, scope}: the four outcome dimensions
     and the kinds of the limitations that apply (seed level and per arm), so an answer
-    read on its own never looks more certain than the retrieval. exact holds only when
-    the label evidence is complete AND no recorded list was cut. |view|: a GraphletView
-    the answer was restricted to (its completeness is qualified 'for the selected
-    labels')."""
+    read on its own never looks more certain than the retrieval. exact is PER ARM
+    (arm_exact): it holds only when the label evidence of every arm the answer covers
+    (|side|, or every arm) is complete and none of their recorded lists was cut; the
+    outcome's label_evidence beside it is the seed's. |view|: a GraphletView the answer
+    was restricted to (its completeness is qualified 'for the selected labels')."""
     if side is None:
         sides = [s for s in ARM_SIDES if s in g.arms]
     else:
@@ -1476,11 +2064,9 @@ def evidence_block(g, side=None, view=None):
             got.append(lim.kind)
     if g.resource_stop is not None:
         kinds.setdefault('seed', []).append('resource_stop')
-    label_evidence = g.outcome.label_evidence if g.outcome is not None else 'complete'
     out = {
         'complete_to_bp': {s: g.arms[s].complete_to_bp for s in sides},
-        'exact': label_evidence == 'complete'
-        and all(g.arms[s].labels_per_node.nodes_truncated == 0 for s in sides),
+        'exact': all(arm_exact(g, s) for s in sides),
         'support': g.support, 'reconverge': g.reconverge,
         'scope': {s: g.arms[s].scope for s in sides},
         'outcome': g.outcome.as_dict() if g.outcome is not None else None,

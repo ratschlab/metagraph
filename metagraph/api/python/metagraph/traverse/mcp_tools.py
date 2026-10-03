@@ -14,11 +14,15 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
   * list tools page by `cursor` and return `next_cursor` and `total`; a cursor is
     opaque and bound to the entry handle, the tool and its normalized arguments (one
     presented with other arguments is rejected), and stays valid across a restart (its
-    secret lives in the spool). EVERY return is <= max_bytes (2048 by default;
-    graphlet_sequence has its own 16 KB ceiling, stated in its result): the cursor's
+    secret lives in the spool). EVERY return is <= max(max_bytes, MIN_MAX_BYTES) (2048
+    by default; graphlet_sequence and the request of traverse_continue(execute=False)
+    have the 16 KB sequence ceiling, stated in their result; a max_bytes below
+    MIN_MAX_BYTES = 64, the smallest error that fits, is a bad_argument): the cursor's
     room is measured, not guessed, and a result that cannot be made to fit is an
-    explicit result_too_large. A single row larger than max_bytes is returned alone with
-    row_truncated: true and the fields that were cut named -- never shortened silently;
+    explicit result_too_large whose hint names what this tool offers (raise max_bytes,
+    or export). An error keeps its code under the ceiling (its message is cut). A single
+    row larger than max_bytes is returned alone with row_truncated: true and the fields
+    that were cut named -- never shortened silently;
   * a filter never hides rows silently: what a filter removed is counted (`filtered`);
   * a derived handle (graphlet_subtrie) is a view: every local tool answers for the
     selected labels and says so (`evidence.view`, `qualified`), or refuses explicitly
@@ -33,12 +37,23 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
     the server initialises), an unreachable backend, I/O errors and malformed arguments
     come back as {error, message, ...}; only bugs raise;
   * an unknown handle answers "replay with traverse_fetch(replay=<handle>)" when the
-    store kept its request.
+    store kept its request;
+  * a replay or a continuation is derived from its entry only on the entry's index
+    (§3.1): the backend's capabilities are checked before the request is sent and the
+    returned graphlet before anything is stored -- a different release, namespace,
+    index_meta_fp or index_fp, or a manifest digest on one side only, is
+    release_mismatch / index_mismatch; with no digest on either side the result states
+    `identity: {verified: false, note}` instead of refusing;
+  * a request that would name labels by names the library cannot verify to resolve
+    back to them (two labels of the retrieval share one, or it holds U+FFFD) is not
+    built: unverifiable_label_name.
 """
 
 import base64
+import collections
 import hashlib
 import hmac
+import inspect
 import json
 import os
 
@@ -47,18 +62,30 @@ from ._codec import GraphletFormatError
 from .client import ServerInitializing, TraverseError
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, UnknownLabel,
+    UnverifiableLabelName,
 )
+from .parser import utf8_bytes
 from .store import StoreLimitExceeded, UnknownHandle
 
 __all__ = ['GraphletTools', 'ToolError', 'tool_names', 'DEFAULT_MAX_BYTES',
-           'SEQUENCE_MAX_BYTES']
+           'SEQUENCE_MAX_BYTES', 'MIN_MAX_BYTES']
 
 DEFAULT_MAX_BYTES = 2048
 SEQUENCE_MAX_BYTES = 16 * 1024
+# the smallest max_bytes a tool accepts: below it not even the shortest error fits
+# ({"error":"result_too_large","max_bytes":63,"message":""} is 57 bytes)
+MIN_MAX_BYTES = 64
+# ranked walk lists kept for paging (graphlet_walks): (handle, arm, arguments) -> ids
+_RANKED_CACHE = 16
 _LABELS_IN_ROW = 8
-_ROUTE_ONLY_HINT = ('rows where the label is carried only along its own route through a '
-                    'merge, not on the displayed bases, were left out: pass '
-                    'route_consistent=false to include them')
+_ROUTE_ONLY_HINT = ('walks whose selected label is alive at the end only along its own '
+                    'route through a merge (it joined the displayed walk through a '
+                    'non-first merge parent, so it does not spell the whole walk) were '
+                    'left out: pass route_consistent=false to include them')
+_MERGE_ENTERED_HINT = ('claims whose label joined the displayed walk through a non-first '
+                       'merge parent (route support from from_bp, displayed support only '
+                       'from evidence_from) were left out: pass route_consistent=false to '
+                       'include them')
 
 
 def _size(obj):
@@ -134,13 +161,72 @@ def _selectors(v):
 
 # ------------------------------------------------------------------ the wrapper
 
+def _too_large(n, limit, takes_max):
+    """The result_too_large that replaces an answer over the ceiling, itself held to it:
+    the longest of three forms that fits. The hint names what THIS tool offers."""
+    if takes_max:
+        hint = 'raise max_bytes, or export the complete answer to a file'
+    else:
+        hint = 'this tool takes no max_bytes: export the complete answer to a file'
+    for out in ({'error': 'result_too_large', 'bytes': n, 'max_bytes': limit,
+                 'message': 'the answer does not fit max_bytes even with its rows cut: '
+                            + hint},
+                {'error': 'result_too_large', 'bytes': n, 'max_bytes': limit,
+                 'message': hint},
+                {'error': 'result_too_large', 'max_bytes': limit, 'message': ''}):
+        if _size(out) <= limit:
+            return out
+    return out
+
+
+def _fit_error(out, limit):
+    """An error over the ceiling keeps its code: its message is cut (with '...'), then
+    its other fields dropped. None when not even the code fits."""
+    msg = str(out.get('message', ''))
+    for cand in (dict(out), {'error': out['error'], 'message': msg}):
+        cand['message'] = msg
+        if _size(cand) <= limit:
+            return cand
+        if _size(dict(cand, message='...')) > limit:
+            continue
+        lo, hi = 0, len(msg)
+        while lo < hi:                       # the longest prefix that fits with '...'
+            mid = (lo + hi + 1) // 2
+            if _size(dict(cand, message=msg[:mid] + '...')) <= limit:
+                lo = mid
+            else:
+                hi = mid - 1
+        return dict(cand, message=msg[:lo] + '...')
+    return None
+
+
 def _tool(fn):
     """Expected failures become {error, message, ...} results; bugs still raise. Every
     result is held to the tool's ceiling: one that cannot be made to fit is an explicit
-    result_too_large, never a silently shortened answer."""
+    result_too_large, never a silently shortened answer; an error keeps its code."""
     name = fn.__name__
+    sig = inspect.signature(fn)
+    takes_max = 'max_bytes' in sig.parameters
 
     def wrapped(self, *args, **kw):
+        try:
+            bound = sig.bind(self, *args, **kw)
+        except TypeError as e:
+            # an argument the tool does not take is the caller's error, not a bug
+            out = {'error': 'bad_argument', 'message': str(e)}
+            return _fit_error(out, self.max_bytes) or out
+        limit = bound.arguments.get('max_bytes')
+        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int)
+                                  or limit < MIN_MAX_BYTES):
+            return {'error': 'bad_argument', 'message': 'max_bytes: an int >= %d'
+                    % MIN_MAX_BYTES}
+        if limit is None:
+            if name == 'graphlet_sequence' or (
+                    name == 'traverse_continue' and bound.arguments.get('execute', True)
+                    is False):
+                limit = self.sequence_max_bytes
+            else:
+                limit = self.max_bytes
         try:
             out = fn(self, *args, **kw)
         except ToolError as e:
@@ -161,6 +247,11 @@ def _tool(fn):
             out = {'error': 'missing_envelope', 'message': str(e)}
         except IncompleteRecording as e:
             out = {'error': 'incomplete_recording', 'message': str(e)}
+        except UnverifiableLabelName as e:
+            # before ValueError, its base class: never resolved by a name it cannot verify
+            out = {'error': 'unverifiable_label_name', 'message': str(e),
+                   'hint': 'build the request yourself with names verified against the '
+                           'index (e.g. traverse_resolve)'}
         except StoreLimitExceeded as e:
             out = {'error': 'too_large', 'message': str(e)}
         except GraphletFormatError as e:
@@ -172,20 +263,43 @@ def _tool(fn):
             out = {'error': 'io_error', 'message': e.strerror or type(e).__name__}
         except (IndexError, ValueError) as e:
             out = {'error': 'bad_argument', 'message': str(e)}
-        limit = kw.get('max_bytes')
-        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-            limit = None
-        if limit is None:
-            limit = self.sequence_max_bytes if name == 'graphlet_sequence' else self.max_bytes
+        # the call may have grown the caches of the models it read: the store charges
+        # them now, so that max_ram_mb holds between calls
+        refresh = getattr(self.store, 'refresh', None)
+        if refresh is not None:
+            refresh()
         n = _size(out)
         if n > limit:
-            out = {'error': 'result_too_large', 'bytes': n, 'max_bytes': limit,
-                   'message': 'the answer does not fit max_bytes even with its rows cut: '
-                              'raise max_bytes, or export the complete answer to a file'}
+            fitted = None
+            if isinstance(out.get('error'), str) and out['error'] != 'result_too_large':
+                fitted = _fit_error(out, limit)
+            out = fitted or _too_large(n, limit, takes_max)
         return out
     wrapped.__name__ = fn.__name__
     wrapped.__doc__ = fn.__doc__
+    wrapped.__signature__ = sig
     return wrapped
+
+
+class _LazyRows:
+    """A list of rows built on first access (graphlet_walks): _page reads len() and the
+    rows of one page, so only those are materialized."""
+
+    def __init__(self, n, build):
+        self.n = n
+        self.build = build
+        self.got = {}
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, i):
+        if i < 0 or i >= self.n:
+            raise IndexError(i)
+        row = self.got.get(i)
+        if row is None:
+            row = self.got[i] = self.build(i)
+        return row
 
 
 class GraphletTools:
@@ -202,6 +316,10 @@ class GraphletTools:
         # lives in the spool unless one is configured
         self._key = secret if secret is not None else store.cursor_secret()
         self.export_dir = export_dir
+        # (handle, arm, rank, label, min_bp, route_consistent) -> (ranked path ids,
+        # filtered): a page of graphlet_walks ranks on cheap keys once and spells only
+        # its own rows (path ids, not model objects: a re-parsed graphlet stays valid)
+        self._ranked = collections.OrderedDict()
 
     # ================================================================ plumbing
 
@@ -368,13 +486,13 @@ class GraphletTools:
     # ================================================================ backend tools
 
     @_tool
-    def traverse_capabilities(self, index=None):
+    def traverse_capabilities(self, index=None, max_bytes=None):
         name, client = self._client(index)
         return {'index': name, 'capabilities': self._backend(client.capabilities)}
 
     @_tool
     def traverse_resolve(self, index=None, sequence=None, labels=None, discover=None,
-                         select=None, limit=10):
+                         select=None, limit=10, max_bytes=None):
         name, client = self._client(index)
         if not isinstance(sequence, str) or not sequence:
             raise ToolError('bad_argument', 'sequence is a non-empty string')
@@ -392,7 +510,8 @@ class GraphletTools:
             res['seeds'] = [{'seed_id': s['seed_id'], 'sequence_bp': len(s['sequence']),
                              'labels': len(s['labels'])}
                             for s in out['selection']['seeds'][:limit]]
-        while _size(res) > self.max_bytes and (res['labels'] or res.get('seeds')):
+        while _size(res) > (max_bytes or self.max_bytes) and (res['labels']
+                                                              or res.get('seeds')):
             # long names: fewer rows, and the cut stated (labels_total stays)
             res['labels_cut_to_fit'] = True
             if res.get('seeds'):
@@ -403,7 +522,7 @@ class GraphletTools:
 
     @_tool
     def traverse_fetch(self, index=None, seed=None, strategy=None, keep=True,
-                       max_graphlet_mb=8, replay=None):
+                       max_graphlet_mb=8, replay=None, max_bytes=None):
         """One retrieval -> its summary and (keep) a handle. replay=<handle> re-runs the
         stored request of an entry (also an expired one) against the same index."""
         _bool('keep', keep)
@@ -414,8 +533,9 @@ class GraphletTools:
             req, ident = self._replay_request(_handle(replay, 'replay'))
             if not req:
                 raise ToolError('not_replayable', 'entry %r holds no request (it was loaded '
-                                'from a body-only file): fetch the seed with '
-                                'traverse_fetch(seed=...)' % replay)
+                                'from a body-only file, or from one whose seed label names '
+                                'cannot be verified to resolve to its labels): fetch the '
+                                'seed with traverse_fetch(seed=...)' % replay)
             index = index or ident.get('source')
         else:
             if not isinstance(seed, dict) or not isinstance(seed.get('sequence'), str):
@@ -424,10 +544,11 @@ class GraphletTools:
                 raise ToolError('bad_request', 'strategy is an object')
             req = None
         name, client = self._client(index)
+        identity = None
         if req is None:
             req = client.build_request([seed], strategy or {}, detail='graphlet')
         else:
-            self._check_same_index(client, ident)
+            identity = self._check_same_index(client, ident)
         response = self._backend(client.traverse_raw, req)
         results = response.get('results') or []
         if not results:
@@ -436,10 +557,15 @@ class GraphletTools:
         if 'graphlet' not in result:
             return {'error': 'seed_failed', 'message': result.get('error'),
                     'outcome': result.get('outcome'), 'limitations': result.get('limitations')}
-        nbytes = result.get('graphlet_bytes', len(result['graphlet'].encode('utf-8')))
+        nbytes = result.get('graphlet_bytes')
+        if nbytes is None:
+            nbytes = len(utf8_bytes(result['graphlet']))
         spooled = nbytes > max_graphlet_mb * (1 << 20)
         from .parser import from_response
         g = from_response(result, response)       # the whole body validated
+        if identity is not None:
+            # what actually answered, not only what the capabilities said before
+            _same_index(ident, self._identity_of(g), 'the replay')
         if spooled:
             # max_graphlet_mb is a RAM threshold: the body goes to the spool complete, the
             # model built to validate it is not kept, and the outcome says what happened
@@ -452,8 +578,10 @@ class GraphletTools:
         out = {'index': name, 'delivery': g.outcome.delivery, 'graphlet_bytes': nbytes}
         if handle is not None:
             out['handle'] = handle
+        if identity is not None:
+            out['identity'] = identity
         out['evidence'] = ops.evidence_block(g)
-        out['summary'] = self._fit_summary(g, out)
+        out['summary'] = self._fit_summary(g, out, max_bytes=max_bytes)
         return out
 
     def _replay_request(self, handle):
@@ -467,23 +595,31 @@ class GraphletTools:
             raise
 
     def _check_same_index(self, client, ident):
-        """A replay runs against the same index: a different release or bundle digest
-        is an error, not a silent re-run."""
+        """A replay or a continuation runs against the same index as its entry: the
+        backend's capabilities must state the entry's identity (_same_index) before
+        anything is submitted. -> the identity statement for the result."""
         caps = self._backend(client.capabilities)
-        rel = caps.get('release') or None
-        if ident.get('release') and rel and ident['release'] != rel:
-            raise ToolError('release_mismatch', 'the entry was retrieved from release %r, the '
-                            'index serves %r: not re-run silently' % (ident['release'], rel))
-        fp = caps.get('index_fp')
-        if ident.get('fp') and fp and ident['fp'] != fp:
-            raise ToolError('index_mismatch', 'the entry was retrieved from another index '
-                            '(index_fp differs)')
+        return _same_index(ident, {'ns': caps.get('index_ns') or None,
+                                   'fp': caps.get('index_fp') or None,
+                                   'meta_fp': caps.get('index_meta_fp') or None,
+                                   'release': caps.get('release') or None},
+                           'the index')
+
+    @staticmethod
+    def _identity_of(g):
+        return {'ns': g.index_ns, 'fp': g.index_fp, 'meta_fp': g.index_meta_fp,
+                'release': (g.envelope or {}).get('release') or None}
 
     @_tool
-    def traverse_continue(self, handle, arm, walk, overrides=None, execute=True):
+    def traverse_continue(self, handle, arm, walk, overrides=None, execute=True,
+                          max_bytes=None):
         """A continuation is a new traversal: the library builds the request from the
-        walk's continuation, the backend runs it (execute=False: the request only). The
-        new entry keeps its parent walk."""
+        walk's continuation, the backend runs it (execute=False: the request only, under
+        the 16 KB sequence ceiling -- it carries the continuation's bases and label
+        names -- stated as ceiling_bytes; max_bytes raises it). The new entry keeps its
+        parent walk, and is stored only when the parent's index identity holds before the
+        request (capabilities) and in the result (_same_index); the result states it
+        (`identity`)."""
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         walk = _int('walk', walk)
@@ -496,19 +632,26 @@ class GraphletTools:
         parent = {'handle': handle, 'arm': a.side, 'walk': walk,
                   'overlap_bp': len(cont.sequence)}
         if not execute:
-            return {'request': req, 'parent': parent}
-        source = self.store.get(handle).index.get('source')
-        name, client = self._client(source)
+            return {'request': req, 'parent': parent,
+                    'ceiling_bytes': max_bytes or self.sequence_max_bytes}
+        ident = self.store.get(handle).index
+        name, client = self._client(ident.get('source'))
+        # a continuation is derived from its parent only on the parent's index: checked
+        # against the capabilities before submitting, and against what answered before
+        # the parent/child link is stored
+        identity = self._check_same_index(client, ident)
         response = self._backend(client.traverse_raw, req)
         result = (response.get('results') or [{}])[0]
         if 'graphlet' not in result:
             return {'error': 'seed_failed', 'message': result.get('error'), 'parent': parent}
         from .parser import from_response
         g2 = from_response(result, response)
+        _same_index(ident, self._identity_of(g2), 'the continuation')
         new = self.store.put_parsed(g2, result['graphlet'], req, source=name, parent=parent,
                                     derived_from=handle)
-        out = {'handle': new, 'parent': parent, 'evidence': ops.evidence_block(g2)}
-        out['summary'] = self._fit_summary(g2, out)
+        out = {'handle': new, 'parent': parent, 'identity': identity,
+               'evidence': ops.evidence_block(g2)}
+        out['summary'] = self._fit_summary(g2, out, max_bytes=max_bytes)
         return out
 
     # ================================================================ local tools
@@ -557,20 +700,12 @@ class GraphletTools:
         tail_bp = _int('tail_bp', tail_bp)
         _bool('route_consistent', route_consistent)
         labels = None if label is None else [_selector(label)]
-        ws = g.walks(a, by=rank, labels=labels, min_bp=min_bp,
-                     route_consistent=route_consistent)
         keep = None if view is None else set(view.path_ids.get(a.side, ()))
-        if keep is not None:
-            ws = [w for w in ws if w.path_id in keep]
-        filtered = 0
-        if labels is not None and route_consistent:
-            every = {w.path_id for w in g.walks(a, by='id', labels=labels, min_bp=min_bp,
-                                                route_consistent=False)}
-            if keep is not None:
-                every &= keep
-            filtered = len(every) - len(ws)
-        rows = []
-        for w in ws:
+        ids, filtered = self._ranked_ids(handle, g, a, rank, labels, min_bp,
+                                         route_consistent, keep)
+
+        def row_of(i):
+            w, = ops.walks_at(g, a, [ids[i]])
             row = {'walk': w.path_id, 'length_bp': w.length_bp,
                    'end': w.path_reason or ','.join(sorted(w.end_reasons)) or 'semantic',
                    'n_alive': w.n_alive, 'n_full': len(w.labels_full),
@@ -583,7 +718,8 @@ class GraphletTools:
                 if spell == 'tail':
                     s = s[-tail_bp:] if a.side == 'right' else s[:tail_bp]
                 row['sequence'] = s
-            rows.append(row)
+            return row
+        rows = _LazyRows(len(ids), row_of)
         args = dict(arm=a.side, rank=rank, min_bp=min_bp, label=label, spell=spell,
                     tail_bp=tail_bp, route_consistent=route_consistent, cursor=cursor)
         base = {'handle': handle, 'arm': a.side,
@@ -592,6 +728,31 @@ class GraphletTools:
             base['filtered'] = {'route_only': filtered}
             base['hint'] = _ROUTE_ONLY_HINT
         return self._page('graphlet_walks', handle, args, rows, base, max_bytes, n)
+
+    def _ranked_ids(self, handle, g, a, rank, labels, min_bp, route_consistent, keep):
+        """(the ranked path ids of graphlet_walks, how many the route_consistent filter
+        removed), cached per handle and arguments: paging an arm ranks it once (B3)."""
+        key = (handle, a.side, rank, json.dumps(labels, sort_keys=True, default=str),
+               min_bp, route_consistent)
+        got = self._ranked.get(key)
+        if got is not None:
+            self._ranked.move_to_end(key)
+            return got
+        ids = ops.rank_walks(g, a, by=rank, labels=labels, min_bp=min_bp,
+                             route_consistent=route_consistent)
+        if keep is not None:
+            ids = [i for i in ids if i in keep]
+        filtered = 0
+        if labels is not None and route_consistent:
+            every = set(ops.rank_walks(g, a, by='id', labels=labels, min_bp=min_bp,
+                                       route_consistent=False))
+            if keep is not None:
+                every &= keep
+            filtered = len(every) - len(ids)
+        got = self._ranked[key] = (ids, filtered)
+        while len(self._ranked) > _RANKED_CACHE:
+            self._ranked.popitem(last=False)
+        return got
 
     @staticmethod
     def _walk_rows(g, a, p, cut=_LABELS_IN_ROW):
@@ -686,20 +847,25 @@ class GraphletTools:
                                 % lab.ref)
             walks = g.label_walks(lab, sides[0] if len(sides) == 1 else None)
             # each run's OWN route (ops.routes yields one per run of the label, in run
-            # order on the arm), not the first run's
+            # order on the arm), not the first run's; annotate mode: one witness route
+            # per label walk, in label_walks order
             routes = {}
-            if g.mode == 'constrain':
-                for side in {lw.arm for lw in walks}:
+            for side in {lw.arm for lw in walks}:
+                if g.mode == 'constrain':
                     ids = [r.id for r in g.arms[side].runs if r.label == lab.id]
                     routes[side] = dict(zip(ids, ops.routes(g, lab, side)))
+                else:
+                    routes[side] = iter(ops.routes(g, lab, side))
             rows = []
             for lw in walks:
+                if g.mode == 'constrain':
+                    route = routes[lw.arm][lw.run] if lw.run is not None else None
+                else:
+                    route = next(routes[lw.arm])
                 rows.append({'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
                              'evidence_from': lw.evidence_from, 'end': lw.end,
                              'walks_below': len(lw.leaves_below),
-                             'merged_into': lw.merged_into,
-                             'route': routes[lw.arm][lw.run] if g.mode == 'constrain'
-                             and lw.run is not None else None})
+                             'merged_into': lw.merged_into, 'route': route})
             base = dict(lab.as_dict(), handle=handle,
                         evidence=ops.evidence_block(g, arm, view))
             args = dict(arm=arm, name=lab.ref, cursor=cursor)
@@ -766,13 +932,16 @@ class GraphletTools:
                 ids &= {l.id for l in g.labels_matching(sel)}
             sel = [{'id': i} for i in sorted(ids)]
         rows = []
-        route_only = 0
+        filtered = collections.Counter()
         for c in g.claims(a, labels=sel, strict=False):
             ev = c.evidence_from if c.evidence_from is not None else c.to_bp
             if c.to_bp - ev < min_bp:
                 continue
             if route_consistent and c.route_bp:
-                route_only += 1
+                # a merge-entered claim (displayed support from evidence_from) is counted
+                # as what it is: route_only is the kind of a claim with NO displayed
+                # support left at a cut, which this list (uncut) never holds
+                filtered['route_only' if c.kind == 'route_only' else 'merge_entered'] += 1
                 continue
             d = c.as_dict()
             d.pop('arm')
@@ -781,9 +950,9 @@ class GraphletTools:
                     labels=labels, cursor=cursor)
         base = {'handle': handle, 'arm': a.side,
                 'evidence': ops.evidence_block(g, a.side, view)}
-        if route_only:
-            base['filtered'] = {'route_only': route_only}
-            base['hint'] = _ROUTE_ONLY_HINT
+        if filtered:
+            base['filtered'] = dict(sorted(filtered.items()))
+            base['hint'] = _MERGE_ENTERED_HINT
         if g.mode == 'annotate' and a.labels_per_node.nodes_truncated:
             base['caveat'] = ('recorded label lists were cut: these claims are lower bounds '
                               '(label_lists limitation)')
@@ -1011,6 +1180,43 @@ class GraphletTools:
         g = self.store.graphlet(h)
         return {'handle': h, 'summary': self._fit_summary(g, {'handle': h})
                 if g.has_envelope else None}
+
+
+def _same_index(parent, other, what):
+    """The §3.1 identity check of a retrieval derived from (or replaying) an entry: the
+    release and the namespace, where both state one, must agree, a differing
+    index_meta_fp proves another index, and the manifest digest index_fp must be equal
+    on both -- one side without it cannot be verified to be the same index and is
+    refused like a different one (index_mismatch). Neither with it (no manifest
+    anywhere) is not refused: the result states the identity unverifiable. -> the
+    identity statement {verified, ...}."""
+    rel_a, rel_b = parent.get('release') or None, other.get('release') or None
+    if rel_a and rel_b and rel_a != rel_b:
+        raise ToolError('release_mismatch', 'the entry was retrieved from release %r, %s '
+                        'serves %r: not run silently' % (rel_a, what, rel_b))
+    ns_a, ns_b = parent.get('ns') or None, other.get('ns') or None
+    if ns_a and ns_b and ns_a != ns_b:
+        raise ToolError('index_mismatch', 'the entry was retrieved from index %r, %s is %r'
+                        % (ns_a, what, ns_b))
+    meta_a, meta_b = parent.get('meta_fp') or None, other.get('meta_fp') or None
+    if meta_a and meta_b and meta_a != meta_b:
+        raise ToolError('index_mismatch', 'the entry was retrieved from another index '
+                        '(index_meta_fp differs from that of %s)' % what)
+    fp_a, fp_b = parent.get('fp') or None, other.get('fp') or None
+    if fp_a and fp_b:
+        if fp_a != fp_b:
+            raise ToolError('index_mismatch', 'the entry was retrieved from another index '
+                            '(index_fp differs from that of %s)' % what)
+        return {'verified': True, 'index_fp': fp_a}
+    if fp_a or fp_b:
+        raise ToolError('index_mismatch', '%s states %s index manifest digest (index_fp) '
+                        'and the entry %s: that they are the same index cannot be verified, '
+                        'so nothing is derived from the entry across them'
+                        % (what, 'an' if fp_b else 'no', 'one' if fp_a else 'none'))
+    return {'verified': False,
+            'note': 'neither the entry nor %s states an index manifest digest (index_fp): '
+                    'that they are the same index cannot be verified (the server loaded no '
+                    'index manifest)' % what}
 
 
 def _row(x):

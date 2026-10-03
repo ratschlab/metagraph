@@ -19,8 +19,9 @@ __all__ = [
     'Segment', 'Run', 'GrowthBin', 'Refusal', 'BranchEvent', 'CapTrigger', 'Frontier',
     'LabelsPerNode', 'Counts', 'Limitation', 'Outcome', 'ResourceStop', 'Arm', 'Graphlet',
     'Walk', 'Claim', 'LabelWalk', 'SupportRun', 'Change', 'Continuation', 'Comparison',
-    'Split', 'Path', 'EndLabel', 'MissingEnvelope', 'AmbiguousLabel', 'UnknownLabel',
-    'BadSelector', 'IncompleteRecording', 'ARM_SIDES',
+    'Split', 'SplitPoint', 'Branch', 'Path', 'EndLabel', 'MissingEnvelope',
+    'AmbiguousLabel', 'UnknownLabel', 'BadSelector', 'IncompleteRecording',
+    'UnverifiableLabelName', 'ARM_SIDES',
 ]
 
 ARM_SIDES = ('left', 'right')
@@ -51,6 +52,15 @@ class BadSelector(TypeError, ValueError):
 class IncompleteRecording(RuntimeError):
     """claims(strict=True) on an annotate arm whose recorded lists were cut: the oracle
     filtered from them would be a lower bound, not the label-consistent walks."""
+
+
+class UnverifiableLabelName(ValueError):
+    """A request would name labels whose names the library cannot verify to resolve back
+    to exactly these labels: /traverse resolves a name to a label, and two labels of the
+    retrieval sharing it, or a name with U+FFFD (what a server before the refusal of
+    names that are not UTF-8 wrote for bytes it could not carry, so the index's own
+    name may be another), could constrain the new traversal to another label. Raised
+    instead of building the request (Continuation.as_seed, next_request)."""
 
 
 # ------------------------------------------------------------------------ records
@@ -511,6 +521,13 @@ class Graphlet:
         from . import export
         return export.to_gfa(self, with_seed)
 
+    def splits(self, arm, min_labels_before=0):
+        """The arm's splits (SplitPoint: at_bp outward, kind, labels_before, branches with
+        their first base, labels as {name, ref} and the first walk taking each), in the
+        walker's order."""
+        from . import ops
+        return ops.splits(self, arm, min_labels_before)
+
     def compare(self, other, *, arm=None, labels=None, mode='claims'):
         from . import ops
         return ops.compare(self, other, arm=arm, labels=labels, mode=mode)
@@ -557,6 +574,38 @@ class Split:
     children: List[int]
     ambiguous: bool
     labels_before: int
+
+
+@dataclass(slots=True)
+class Branch:
+    """One branch of a split: its first segment, the base it starts with (the base at
+    outward position at_bp of the split, the same character in either orientation:
+    the left arm is read reversed, not complemented), the labels at its first node (the
+    recorded list, cut at labels.max_labels_per_node) with their true count, and the
+    smallest walk (path id) whose displayed chain takes it (None: none does)."""
+    segment: int
+    char: Optional[str]
+    labels: List[Label]
+    labels_total: int
+    walk: Optional[int]
+
+
+@dataclass(slots=True)
+class SplitPoint:
+    """A split of an arm as Graphlet.splits() returns it: at_bp is the outward distance
+    from the seed boundary (walking order, like a claim's from_bp/to_bp on both arms),
+    kind 'ambiguous' (some lineage continued on more than one branch) or 'divergence',
+    labels_before the labels at the parent's last node (true count)."""
+    arm: str
+    at_bp: int
+    segment: int
+    kind: str
+    labels_before: int
+    branches: List[Branch]
+
+    @property
+    def ambiguous(self):
+        return self.kind == 'ambiguous'
 
 
 @dataclass(slots=True)
@@ -652,11 +701,17 @@ class Continuation:
     seed_coord: Tuple[int, int]
     arm: str = 'right'
     leaf: int = 0
+    # why the labels' names cannot be resubmitted (None: each is the name of exactly one
+    # label of the retrieval and holds no U+FFFD)
+    unverifiable: Optional[str] = None
 
     def as_seed(self):
-        """A /traverse seed: names are what the request resolves (an explicit list)."""
+        """A /traverse seed: names are what the request resolves (an explicit list).
+        Raises UnverifiableLabelName when a name may resolve to another label."""
         seed = {'sequence': self.sequence}
         if self.labels:
+            if self.unverifiable:
+                raise UnverifiableLabelName(self.unverifiable)
             seed['labels'] = [l.name for l in self.labels]
         return seed
 

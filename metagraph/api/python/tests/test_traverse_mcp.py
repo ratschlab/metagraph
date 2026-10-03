@@ -28,6 +28,13 @@ SEED = {n: seed_of(n) for n in ('fork', 'merge', 'switch_chain', 'annotate', 'sa
 # switch_chain's walk 1 continuation, answered by a stand-in document (the fake has no index)
 CONTINUATION = 'TTACTCGTAGCCGGGCGTGA'
 BY_SEED[(CONTINUATION, 'constrain')] = 'reentry'
+# ... which stands in for the parent's index: it carries the parent's index_meta_fp (a
+# continuation is checked to come from its parent's index, §3.1)
+STAND_IN = {CONTINUATION: 'switch_chain'}
+
+
+def meta_fp_of(name):
+    return T.doc_text(name).split('\n')[0].split(' ')[-1]
 
 
 class FakeClient(TraverseClient):
@@ -46,6 +53,13 @@ class FakeClient(TraverseClient):
                                                 'outcome': {'walks': 'failed'},
                                                 'limitations': []}]}
         resp = copy.deepcopy(T.doc_json(BY_SEED[(seq, mode)], 'graphlet'))
+        if seq in STAND_IN:
+            r = resp['results'][0]
+            own, parent = meta_fp_of(BY_SEED[(seq, mode)]), meta_fp_of(STAND_IN[seq])
+            r['graphlet'] = r['graphlet'].replace(' walk fixtures * %s\n' % own,
+                                                  ' walk fixtures * %s\n' % parent, 1)
+            r['graphlet_bytes'] = len(r['graphlet'].encode('utf-8'))
+            resp['capabilities']['index_meta_fp'] = parent
         if self.fp:
             r = resp['results'][0]
             r['graphlet'] = r['graphlet'].replace(' walk fixtures * ', ' walk fixtures %s '
@@ -598,7 +612,9 @@ class TestReviewFindings(ToolsCase):
         w = self.tools.graphlet_walks(h, 'right', label={'ref': 'c:1'}, route_consistent=False)
         self.assertEqual((1, None), (w['total'], w.get('filtered')))
         c = self.tools.graphlet_claims(h, 'right', max_bytes=8192)
-        self.assertEqual({'route_only': 2}, c['filtered'])
+        # merge-entered claims (displayed from 62), not route_only ones (GPT review,
+        # finding 11)
+        self.assertEqual({'merge_entered': 2}, c['filtered'])
         every = self.tools.graphlet_claims(h, 'right', route_consistent=False, max_bytes=8192)
         self.assertEqual(c['total'] + 2, every['total'])
 

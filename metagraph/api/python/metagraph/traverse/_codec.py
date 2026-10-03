@@ -44,6 +44,26 @@ class CodecError(ValueError):
     a GraphletFormatError naming the line."""
 
 
+# how much of a token an error message repeats: a corrupt or hostile body must not make
+# its own error message huge (a 5,000-digit token would turn the tool layer's
+# format_error into result_too_large and hide the error class)
+TOKEN_ECHO = 32
+
+
+def tok(x, n=TOKEN_ECHO):
+    """|x| as an error message shows it: the repr of its first |n| characters, and its
+    length when it was cut. An int beyond 64 bits is described, not printed (its decimal
+    text may exceed sys.get_int_max_str_digits() and raise while formatting)."""
+    if isinstance(x, str):
+        if len(x) <= n:
+            return repr(x)
+        return '%r... (%d characters)' % (x[:n], len(x))
+    if isinstance(x, int) and not isinstance(x, bool) and x.bit_length() > 64:
+        return 'an integer of %d bits' % x.bit_length()
+    s = repr(x)
+    return s if len(s) <= n else '%s... (%d characters)' % (s[:n], len(s))
+
+
 class _Unlimited:
     """The K value 'u'. A sentinel rather than the string 'unlimited', which is a legal
     string value of its own ('s:unlimited')."""
@@ -63,20 +83,26 @@ UNLIMITED = _Unlimited()
 # ------------------------------------------------------------------- integers, booleans
 
 _UINT_RE = re.compile(r'(?:0|[1-9][0-9]*)\Z')
+# every u64 has at most 20 digits: a longer digit string is out of range before int()
+# sees it (int() raises a bare ValueError beyond sys.get_int_max_str_digits(), which
+# escaped parse() as no CodecError)
+_U64_DIGITS = 20
 
 
 def fmt_int(n):
     if not isinstance(n, int) or isinstance(n, bool) or n < 0 or n > MAX_U64:
-        raise CodecError('not an unsigned 64-bit integer: %r' % (n,))
+        raise CodecError('not an unsigned 64-bit integer: %s' % tok(n))
     return str(n)
 
 
-def parse_int(tok):
-    if not _UINT_RE.match(tok):
-        raise CodecError('integer %r' % tok)
-    n = int(tok)
+def parse_int(t):
+    if not _UINT_RE.match(t):
+        raise CodecError('integer %s' % tok(t))
+    if len(t) > _U64_DIGITS:
+        raise CodecError('integer %s does not fit 64 bits' % tok(t))
+    n = int(t)
     if n > MAX_U64:
-        raise CodecError('integer %r does not fit 64 bits' % tok)
+        raise CodecError('integer %s does not fit 64 bits' % tok(t))
     return n
 
 
@@ -84,12 +110,12 @@ def fmt_bool(b):
     return '1' if b else '0'
 
 
-def parse_bool(tok):
-    if tok == '1':
+def parse_bool(t):
+    if t == '1':
         return True
-    if tok == '0':
+    if t == '0':
         return False
-    raise CodecError('boolean %r' % tok)
+    raise CodecError('boolean %s' % tok(t))
 
 
 # --------------------------------------------------------------------------- floats
@@ -101,7 +127,7 @@ def fmt_num(x):
     1e23 is '100000000000000000000000', not to_chars(fixed)'s exact binary value."""
     x = float(x)
     if math.isnan(x) or x < 0:   # -0 < 0 is false: -0 is in the domain, written 0
-        raise CodecError('outside the MGT float domain: %r' % x)
+        raise CodecError('outside the MGT float domain: %s' % tok(x))
     if x == math.inf:
         return 'inf'
     s = format(decimal.Decimal(repr(x)), 'f')
@@ -113,15 +139,15 @@ def fmt_num(x):
 _FLOAT_RE = re.compile(r'(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?\Z')
 
 
-def parse_num(tok):
-    if tok != 'inf' and not _FLOAT_RE.match(tok):
-        raise CodecError('float %r' % tok)
-    x = float(tok)
+def parse_num(t):
+    if t != 'inf' and not _FLOAT_RE.match(t):
+        raise CodecError('float %s' % tok(t))
+    x = float(t)
     # re-encoding is the canonical check: it rejects digits that are not the shortest
     # (the exact expansion of 1e23, '0.10000000000000001'), overflow to inf and
     # underflow to 0
-    if fmt_num(x) != tok:
-        raise CodecError('float %r is not the canonical text of %r' % (tok, x))
+    if fmt_num(x) != t:
+        raise CodecError('float %s is not the canonical text of %s' % (tok(t), tok(x)))
     return x
 
 
@@ -134,7 +160,7 @@ def encode_ranges(ids):
     start = prev = None
     for i in ids:
         if prev is not None and i <= prev:
-            raise CodecError('RANGES ids not strictly ascending: %r after %r' % (i, prev))
+            raise CodecError('RANGES ids not strictly ascending: %s after %s' % (tok(i), tok(prev)))
         if start is None:
             start = i
         elif i != prev + 1:
@@ -152,29 +178,31 @@ def encode_ranges(ids):
 _RANGES_ITEM_RE = re.compile(r'(0|[1-9][0-9]*)(?:-(0|[1-9][0-9]*))?\Z')
 
 
-def decode_ranges(tok, bound=None):
+def decode_ranges(t, bound=None):
     """-> ascending ids. |bound|: every id must be below it, checked BEFORE a run is
     expanded, so that a few bytes of a corrupt or hostile token ('0-3000000000') cannot
     allocate in proportion to the range (§14: a parse that cannot complete fails
     locally); the reader passes the number of L records."""
-    if tok == '.':
+    if t == '.':
         return []
     ids = []
     last_end = None
-    for item in tok.split(','):
+    for item in t.split(','):
         m = _RANGES_ITEM_RE.match(item)
         if not m:
-            raise CodecError('RANGES item %r' % item)
+            raise CodecError('RANGES item %s' % tok(item))
+        if max(len(m.group(1)), len(m.group(2) or '')) > _U64_DIGITS:
+            raise CodecError('RANGES id %s does not fit 64 bits' % tok(item))
         a = int(m.group(1))
         if m.group(2) is not None:
             b = int(m.group(2))
             if b <= a:
-                raise CodecError('RANGES run %r' % item)
+                raise CodecError('RANGES run %s' % tok(item))
         else:
             b = a
         if last_end is not None and a <= last_end + 1:
             # descending, overlapping, or adjacent items that collapse into one run
-            raise CodecError('RANGES %r is not ascending and collapsed' % tok)
+            raise CodecError('RANGES %s is not ascending and collapsed' % tok(t))
         if b > MAX_U64:
             raise CodecError('RANGES id does not fit 64 bits')
         if bound is not None and b >= bound:
@@ -203,24 +231,24 @@ def encode_setexpr(ids, base):
     return delta if len(delta) < len(explicit) else explicit
 
 
-def decode_setexpr(tok, base, bound=None):
+def decode_setexpr(t, base, bound=None):
     """-> sorted list of ids. A delta whose parts do not fit |base| is an error, never a
     different set: it means the reader derived another base than the writer. |bound| as
     in decode_ranges."""
-    if not tok.startswith('!'):
-        return decode_ranges(tok, bound)
+    if not t.startswith('!'):
+        return decode_ranges(t, bound)
     if base is None:
-        raise CodecError('a SETEXPR delta needs a base: %r' % tok)
-    body = tok[1:]
+        raise CodecError('a SETEXPR delta needs a base: %s' % tok(t))
+    body = t[1:]
     rem_tok, plus, add_tok = body.partition('+')
     # an empty part is omitted, never written '.': one spelling per delta
     if rem_tok == '.' or (plus and add_tok in ('', '.')):
-        raise CodecError('empty SETEXPR part in %r' % tok)
+        raise CodecError('empty SETEXPR part in %s' % tok(t))
     removed = decode_ranges(rem_tok, bound) if rem_tok else []
     added = decode_ranges(add_tok, bound) if plus else []
     b = set(base)
     if not b.issuperset(removed) or not b.isdisjoint(added):
-        raise CodecError('SETEXPR %r does not fit its base' % tok)
+        raise CodecError('SETEXPR %s does not fit its base' % tok(t))
     if removed:
         b.difference_update(removed)
     if added:
@@ -242,20 +270,20 @@ def pct_escape(s):
     return ''.join(_PCT.get(c, c) for c in s)
 
 
-def pct_unescape(tok):
-    if '\n' in tok or '\r' in tok:
+def pct_unescape(t):
+    if '\n' in t or '\r' in t:
         raise CodecError('raw LF/CR in a free-text field')
-    if '%' not in tok:
-        return tok
+    if '%' not in t:
+        return t
     out = []
     i = 0
-    n = len(tok)
+    n = len(t)
     while i < n:
-        c = tok[i]
+        c = t[i]
         if c == '%':
-            esc = tok[i:i + 3]
+            esc = t[i:i + 3]
             if esc not in _UNPCT:
-                raise CodecError('percent escape %r' % esc)
+                raise CodecError('percent escape %s' % tok(esc))
             out.append(_UNPCT[esc])
             i += 3
         else:
@@ -304,10 +332,10 @@ def front_decode_parts(prev, p_tok, suffix_tok):
 _FRONT_RE = re.compile(r'(0|[1-9][0-9]*) (.*)\Z', re.S)
 
 
-def front_decode(prev, tok):
-    m = _FRONT_RE.match(tok)
+def front_decode(prev, t):
+    m = _FRONT_RE.match(t)
     if not m:
-        raise CodecError('front-coded name %r' % tok)
+        raise CodecError('front-coded name %s' % tok(t))
     return front_decode_parts(prev, m.group(1), m.group(2))
 
 
@@ -323,7 +351,7 @@ def encode_kvalue(v):
     if v is UNLIMITED:
         return 'u'
     if isinstance(v, bool):
-        raise CodecError('a K value is not a boolean: %r' % (v,))
+        raise CodecError('a K value is not a boolean: %s' % tok(v))
     if isinstance(v, int):
         return 'i:' + fmt_int(v)
     if isinstance(v, float):
@@ -331,18 +359,18 @@ def encode_kvalue(v):
     if isinstance(v, str):
         return 's:' + ''.join(chr(b) if _s_raw(b) else '%%%02X' % b
                               for b in v.encode('utf-8'))
-    raise CodecError('not a K value: %r' % (v,))
+    raise CodecError('not a K value: %s' % tok(v))
 
 
 _HEX2_RE = re.compile(r'[0-9A-F]{2}\Z')
 
 
-def decode_kvalue(tok):
-    if tok == 'u':
+def decode_kvalue(t):
+    if t == 'u':
         return UNLIMITED
-    kind, colon, body = tok.partition(':')
+    kind, colon, body = t.partition(':')
     if not colon or kind not in ('i', 'f', 's'):
-        raise CodecError('K value %r' % tok)
+        raise CodecError('K value %s' % tok(t))
     if kind == 'i':
         return parse_int(body)
     if kind == 'f':
@@ -354,21 +382,21 @@ def decode_kvalue(tok):
         c = body[i]
         if c == '%':
             if not _HEX2_RE.match(body[i + 1:i + 3]):
-                raise CodecError('K string escape in %r' % tok)
+                raise CodecError('K string escape in %s' % tok(t))
             b = int(body[i + 1:i + 3], 16)
             if _s_raw(b):
-                raise CodecError('K string escapes a raw byte: %r' % tok)
+                raise CodecError('K string escapes a raw byte: %s' % tok(t))
             raw.append(b)
             i += 3
         else:
             if ord(c) > 0x7F or not _s_raw(ord(c)):
-                raise CodecError('K string holds a byte that must be escaped: %r' % tok)
+                raise CodecError('K string holds a byte that must be escaped: %s' % tok(t))
             raw.append(ord(c))
             i += 1
     try:
         return raw.decode('utf-8')
     except UnicodeDecodeError:
-        raise CodecError('K string is not UTF-8: %r' % tok) from None
+        raise CodecError('K string is not UTF-8: %s' % tok(t)) from None
 
 
 # ------------------------------------------------------------------ interval pairs
@@ -380,14 +408,14 @@ def encode_pairs(pairs):
     return ','.join('%s-%s' % (fmt_int(a), fmt_int(b)) for a, b in pairs)
 
 
-def decode_pairs(tok):
-    if tok == '.':
+def decode_pairs(t):
+    if t == '.':
         return []
     out = []
-    for item in tok.split(','):
+    for item in t.split(','):
         a, dash, b = item.partition('-')
         if not dash:
-            raise CodecError('interval %r' % item)
+            raise CodecError('interval %s' % tok(item))
         out.append((parse_int(a), parse_int(b)))
     return out
 
@@ -419,23 +447,23 @@ RESOURCE_CODES = frozenset('SPNOMWY')
 def end_token(code, qualifier=None):
     if qualifier is None:
         return code
-    tok = QUAL_CODE.get((code, qualifier))
-    if tok is None:
-        raise CodecError('no code for qualifier %r of %r' % (qualifier, code))
-    return tok
+    t = QUAL_CODE.get((code, qualifier))
+    if t is None:
+        raise CodecError('no code for qualifier %s of %s' % (tok(qualifier), tok(code)))
+    return t
 
 
-def parse_end_token(tok):
+def parse_end_token(t):
     """R <end>: -> (code, qualifier, silent, merged); code None for 'm'."""
-    if tok == 'm':
+    if t == 'm':
         return None, None, False, True
-    if tok == 'Lw':
+    if t == 'Lw':
         return 'L', None, True, False
-    if len(tok) == 1 and tok in REASON:
-        return tok, None, False, False
-    if tok in QUAL:
-        return tok[0], QUAL[tok], False, False
-    raise CodecError('end token %r' % tok)
+    if len(t) == 1 and t in REASON:
+        return t, None, False, False
+    if t in QUAL:
+        return t[0], QUAL[t], False, False
+    raise CodecError('end token %s' % tok(t))
 
 
 # -------------------------------------------------------------------- label sets

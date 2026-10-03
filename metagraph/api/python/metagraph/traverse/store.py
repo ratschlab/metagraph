@@ -17,7 +17,10 @@ A body is validated (parsed in full) before it is stored: a truncated MGT docume
 never stored or returned as a graphlet. RAM holds parsed graphlets under max_ram_mb /
 max_handles (least recently used first out) and drops one not used for ttl_ram_s; a
 graphlet larger than the whole RAM budget is never kept resident (it is parsed on
-demand), and a spooled one is not made resident when it is stored. The disk keeps an
+demand), and a spooled one is not made resident when it is stored. A resident model is
+charged its deep heap footprint (Graphlet.memory_bytes()), and again when the caches its
+queries build have grown (refresh(): on every access, and after every MCP tool call),
+so that max_ram_mb bounds the heap the resident models hold. The disk keeps an
 entry for ttl_disk_s after its last use, and a tombstone for ttl_tomb_s after its
 expiry. The clock is injectable.
 """
@@ -33,7 +36,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .parser import dump, from_response, j_object, parse
+from .parser import dump, from_response, j_object, parse, utf8_bytes
 
 __all__ = ['GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded']
 
@@ -141,6 +144,8 @@ class GraphletStore:
         self._entries = {}
         self._ram = collections.OrderedDict()     # handle -> (graphlet, bytes, last use)
         self._ram_bytes = 0
+        # handle -> (bytes without the caches, the caches' signature when measured)
+        self._meter = {}
         self._persisted = {}                       # handle -> accessed time on disk
         for name in os.listdir(os.path.join(spool_dir, 'entries')):
             if name.endswith('.json'):
@@ -183,7 +188,7 @@ class GraphletStore:
                 return h
 
     def _store_body(self, body):
-        data = body.encode('utf-8')
+        data = utf8_bytes(body)
         if self.max_body_bytes is not None and len(data) > self.max_body_bytes:
             raise StoreLimitExceeded('the graphlet body has %d bytes, over the store limit of '
                                      '%d: rejected (never truncated)'
@@ -288,6 +293,7 @@ class GraphletStore:
         if got is not None and now - got[2] <= self.ttl_ram_s:
             self._ram.move_to_end(handle)
             self._ram[handle] = (got[0], got[1], now)
+            self.refresh(handle)
             return got[0]
         if got is not None:
             self._drop_ram(handle)
@@ -314,20 +320,47 @@ class GraphletStore:
         return g
 
     def _remember(self, handle, g, now):
+        from . import ops
         size = g.memory_bytes()
         if handle in self._ram:
             self._drop_ram(handle)
         if size > self.max_ram_bytes:
             return      # never resident above the whole budget: parsed on demand
         self._ram[handle] = (g, size, now)
+        self._meter[handle] = (size - ops.cache_bytes(g), ops.cache_signature(g))
         self._ram_bytes += size
+        self.refresh()
+
+    def refresh(self, handle=None):
+        """Charge the resident models (or one) again where their caches grew since they
+        were measured -- a query builds derived caches (paths, evidence, label
+        summaries, ...) on the model it ran on -- then evict, least recently used first,
+        until the budget holds. Costs a signature per model, and the caches of the
+        models whose caches changed."""
+        from . import ops
+        for h in ([handle] if handle is not None else list(self._ram)):
+            got = self._ram.get(h)
+            if got is None:
+                continue
+            g, size, used = got
+            base, sig = self._meter.get(h, (size, None))
+            now_sig = ops.cache_signature(g)
+            if now_sig != sig:
+                new = base + ops.cache_bytes(g)
+                self._ram_bytes += new - size
+                self._ram[h] = (g, new, used)
+                self._meter[h] = (base, now_sig)
         while len(self._ram) > 1 and (len(self._ram) > self.max_handles
                                       or self._ram_bytes > self.max_ram_bytes):
             oldest = next(iter(self._ram))
             self._drop_ram(oldest)
+        if len(self._ram) == 1 and self._ram_bytes > self.max_ram_bytes:
+            # one model whose caches outgrew the whole budget: parsed again on demand
+            self._drop_ram(next(iter(self._ram)))
 
     def _drop_ram(self, handle):
         got = self._ram.pop(handle, None)
+        self._meter.pop(handle, None)
         if got is not None:
             self._ram_bytes -= got[1]
 
@@ -445,13 +478,21 @@ class GraphletStore:
     @staticmethod
     def request_of(g):
         """The replayable request of a graphlet with an envelope: its seed as validated
-        (sequence, the seed labels by name) and the normalized strategy."""
+        (sequence, the seed labels by name) and the normalized strategy. None when there
+        is none -- also when the seed labels' names cannot be verified to resolve back
+        to them (ops.resubmittable_names): a replay must not run under other labels."""
         if not g.has_envelope:
             return None
         seed = {'sequence': g.seed.sequence}
         meta = g.seed_summary.get('seed') or {}
         if g.mode == 'constrain' and not meta.get('labels_from_seed'):
-            seed['labels'] = [l.name for l in g.labels[:g.seed.num_seed_labels]]
+            from .model import UnverifiableLabelName
+            from .ops import resubmittable_names
+            try:
+                seed['labels'] = resubmittable_names(
+                    g, [{'id': l.id} for l in g.labels[:g.seed.num_seed_labels]])
+            except UnverifiableLabelName:
+                return None
         if meta.get('seed_id'):
             seed['seed_id'] = meta['seed_id']
         strategy = dict(g.envelope.get('strategy') or {})

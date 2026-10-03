@@ -18,7 +18,8 @@ __all__ = [
     'leaves', 'paths', 'path_of_leaf', 'chain', 'splits', 'split_branches',
     'label_end_events', 'reconverge_events', 'end_labels', 'labels_at_end',
     'label_summary', 'needed_budgets', 'continuation_sequence', 'walk_bases',
-    'natural_flank', 'evidence', 'lineage_label_at', 'run_leaves', 'check_rules',
+    'natural_flank', 'evidence', 'lineage_label_at', 'merge_above', 'run_leaves',
+    'check_rules',
 ]
 
 
@@ -381,7 +382,7 @@ def lineage_label_at(arm, run, depth):
     return r.label
 
 
-def _merge_above(arm):
+def merge_above(arm):
     """seg -> the nearest merge segment at or above it on its first-parent chain (None:
     none), so that the evidence scan visits the merges only."""
     got = arm.cache.get('merge_above')
@@ -413,7 +414,7 @@ def evidence(arm, run):
     segs = arm.segments
     t = run.to_bp
     route_from = 0
-    above = _merge_above(arm)
+    above = merge_above(arm)
     m = above[run.segment]
     while m is not None:
         seg = segs[m]
