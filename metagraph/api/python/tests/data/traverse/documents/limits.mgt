@@ -5,7 +5,7 @@ L c 1 * 3 B
 L c 2 * 3 C
 L c 3 * 3 D
 O p x q s
-Q locus work annotation_decode i:1000000 i:500000 i:500000 i:0 narrow_seed,constrain_labels decode stopped at 100%25 of the work budget; use a more selective seed
+Q locus work annotation_decode i:1000000 i:500000 i:500000 i:0 more_selective_seed,label_constrained_query decode stopped at 100%25 of the work budget; use a more selective seed
 K * trace_record_boundaries labels.seed_label_kind s:column i:4 * . a column label's trace follows consecutive coordinates of the whole column, so it cannot detect the boundary between two records whose coordinates happen to be adjacent; use header labels (seed_label_kind: "header") where the index has a CoordToHeader
 K r walk_domain bounds.max_steps i:11 i:12 7 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob
 K r branch_events output.max_branch_events i:1 i:2 6 . branch decisions and refusals at or beyond complete_to_bp are not reported; more were produced: raise the knob or set it to "unlimited"

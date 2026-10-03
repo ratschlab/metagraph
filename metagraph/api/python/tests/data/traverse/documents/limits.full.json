@@ -573,8 +573,8 @@
     "used": 500000,
     "remaining": 0,
     "actions": [
-     "narrow_seed",
-     "constrain_labels"
+     "more_selective_seed",
+     "label_constrained_query"
     ],
     "message": "decode stopped at 100% of the work budget; use a more selective seed"
    },

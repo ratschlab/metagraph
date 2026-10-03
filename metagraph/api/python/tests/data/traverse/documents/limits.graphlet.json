@@ -230,8 +230,8 @@
     "used": 500000,
     "remaining": 0,
     "actions": [
-     "narrow_seed",
-     "constrain_labels"
+     "more_selective_seed",
+     "label_constrained_query"
     ],
     "message": "decode stopped at 100% of the work budget; use a more selective seed"
    },
@@ -244,8 +244,8 @@
      "effect": "a column label's trace follows consecutive coordinates of the whole column, so it cannot detect the boundary between two records whose coordinates happen to be adjacent; use header labels (seed_label_kind: \"header\") where the index has a CoordToHeader"
     }
    ],
-   "graphlet": "H mgt 1 5 basic $ACGT c t m 64 10 0 walk * * 3f2a9c1b0d4e5f60\nS 5eedfa11ed5eed00 10 6 3 ATGGCATTCA\nL c 0 * 0 colA\nL c 1 * 3 B\nL c 2 * 3 C\nL c 3 * 3 D\nO p x q s\nQ locus work annotation_decode i:1000000 i:500000 i:500000 i:0 narrow_seed,constrain_labels decode stopped at 100%25 of the work budget; use a more selective seed\nK * trace_record_boundaries labels.seed_label_kind s:column i:4 * . a column label's trace follows consecutive coordinates of the whole column, so it cannot detect the boundary between two records whose coordinates happen to be adjacent; use header labels (seed_label_kind: \"header\") where the index has a CoordToHeader\nK r walk_domain bounds.max_steps i:11 i:12 7 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob\nK r branch_events output.max_branch_events i:1 i:2 6 . branch decisions and refusals at or beyond complete_to_bp are not reported; more were produced: raise the knob or set it to \"unlimited\"\nK r scope branching.on_reconverge s:merge i:1 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA r t 7 u 1 2 1 2 0 steps=11,successor_enumerations=10,output_bp=11,pair_evaluations=8,edge_reuse_probes=3,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=4,switch_sources_cut=0,future_units=7 S,7,3,1,2,1,12 2 6 4 3 1 1 1 11\nB 0 2 3 3 1 11 1 0 1 1 0 0 1 B:1,S:2\nV 5 1 A 1 . 1 T:loss_budget:1\nG * 0 3 * * * * 0 * *\nE 2 b T U 1 2\nG 0 3 4 !2 * * * * C *\nG 0 3 4 2 * * * * G *\nE 6 v 1 2\nG 1,2 7 0 * * * 0|2 * * *\nT S 2:0:0:7\nC 5 0 0 0 ACAAG\nR 3 0 0 7 S 0 * * 0 0 0\nR 1 1 0 5 B 0 * * 2 0 0 2\nR 3 2 0 7 S 7 * * 0 0 0\nZ 27\n",
-   "graphlet_bytes": 1710,
+   "graphlet": "H mgt 1 5 basic $ACGT c t m 64 10 0 walk * * 3f2a9c1b0d4e5f60\nS 5eedfa11ed5eed00 10 6 3 ATGGCATTCA\nL c 0 * 0 colA\nL c 1 * 3 B\nL c 2 * 3 C\nL c 3 * 3 D\nO p x q s\nQ locus work annotation_decode i:1000000 i:500000 i:500000 i:0 more_selective_seed,label_constrained_query decode stopped at 100%25 of the work budget; use a more selective seed\nK * trace_record_boundaries labels.seed_label_kind s:column i:4 * . a column label's trace follows consecutive coordinates of the whole column, so it cannot detect the boundary between two records whose coordinates happen to be adjacent; use header labels (seed_label_kind: \"header\") where the index has a CoordToHeader\nK r walk_domain bounds.max_steps i:11 i:12 7 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the exploration stopped at this cap (max_steps); raise the knob\nK r branch_events output.max_branch_events i:1 i:2 6 . branch decisions and refusals at or beyond complete_to_bp are not reported; more were produced: raise the knob or set it to \"unlimited\"\nK r scope branching.on_reconverge s:merge i:1 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA r t 7 u 1 2 1 2 0 steps=11,successor_enumerations=10,output_bp=11,pair_evaluations=8,edge_reuse_probes=3,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=4,switch_sources_cut=0,future_units=7 S,7,3,1,2,1,12 2 6 4 3 1 1 1 11\nB 0 2 3 3 1 11 1 0 1 1 0 0 1 B:1,S:2\nV 5 1 A 1 . 1 T:loss_budget:1\nG * 0 3 * * * * 0 * *\nE 2 b T U 1 2\nG 0 3 4 !2 * * * * C *\nG 0 3 4 2 * * * * G *\nE 6 v 1 2\nG 1,2 7 0 * * * 0|2 * * *\nT S 2:0:0:7\nC 5 0 0 0 ACAAG\nR 3 0 0 7 S 0 * * 0 0 0\nR 1 1 0 5 B 0 * * 2 0 0 2\nR 3 2 0 7 S 7 * * 0 0 0\nZ 27\n",
+   "graphlet_bytes": 1725,
    "graphlet_lines": 27
   }
  ]

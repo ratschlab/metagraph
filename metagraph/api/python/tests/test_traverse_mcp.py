@@ -629,10 +629,10 @@ class TestReviewFindings(ToolsCase):
                          (walk['knob'], walk['limit'], walk['observed'], walk['complete_to_bp']))
         self.assertIn('effect', walk)
         stop = [c for c in caveats if c['kind'] == 'resource_stop'][0]
-        self.assertEqual(['narrow_seed', 'constrain_labels'], stop['actions'])
+        self.assertEqual(['more_selective_seed', 'label_constrained_query'], stop['actions'])
         full = self.tools.graphlet_summary(h, detail='limitations', max_bytes=8192)
         self.assertEqual(len(self.store.graphlet(h).limitations), full['total'])
-        self.assertEqual(['narrow_seed', 'constrain_labels'], full['resource_stop']['actions'])
+        self.assertEqual(['more_selective_seed', 'label_constrained_query'], full['resource_stop']['actions'])
         fork = self.tools.graphlet_summary(self.handle('fork'))['summary']['caveats']
         self.assertEqual([True, True], [c.get('informational') for c in fork
                                         if c['kind'] == 'scope'])
