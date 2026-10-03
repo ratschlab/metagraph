@@ -904,8 +904,9 @@ is rejected instead (§5).
   `phase` is always `traversal` in this stage: finalisation and serialisation are reserved at admission. A work
   stop's message states how far `used` can exceed the budget, with its number: at most what was charged since
   the previous comparison, and the most its seed charged between two comparisons (one indivisible charge: a
-  fetch call's rows with their coordinates, a label-state scan, or the seed phase with the roots' rows, let
-  finish within `W`; §6.8). A refusal injected by the test hook
+  fetch call's rows with their coordinates, a label-state scan, or the roots' rows of the arms with the end of
+  the seed phase, charged as one so that the result complete to 0 bp is delivered; only the seed phase is cut at
+  `W`; §6.8). A refusal injected by the test hook
   (`WalkerHooks::deny`, C++ callers only) is reported as a memory stop — with `limit` `"unlimited"` when no
   budget is set, so that it stays representable in `K` and `Q` — whose message and `walk_domain` effect say that
   the refusal was injected and that no budget caused it, and whose only action is `continue_from_leaves`.
