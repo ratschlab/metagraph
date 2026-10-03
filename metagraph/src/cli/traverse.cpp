@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <numeric>
 #include <optional>
@@ -1646,6 +1647,17 @@ void append_uint(std::string &out, uint64_t x) {
 
 bool is_continuation(unsigned char c) { return (c & 0xC0) == 0x80; }
 
+
+int hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;   // lowercase hex is not canonical
+}
+
+const char kHexUpper[] = "0123456789ABCDEF";
+
+} // namespace
+
 // well-formed UTF-8 (no overlong forms, no surrogates, at most U+10FFFF)
 bool valid_utf8(std::string_view s) {
     size_t i = 0;
@@ -1673,16 +1685,6 @@ bool valid_utf8(std::string_view s) {
     }
     return true;
 }
-
-int hex_value(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;   // lowercase hex is not canonical
-}
-
-const char kHexUpper[] = "0123456789ABCDEF";
-
-} // namespace
 
 std::string encode_float(double x) {
     if (x == 0)
@@ -1755,11 +1757,14 @@ std::string encode_ranges(const std::vector<uint64_t> &ids) {
     std::string out;
     if (ids.empty())
         return ".";
+    constexpr uint64_t kMax = std::numeric_limits<uint64_t>::max();
     for (size_t i = 0; i < ids.size(); ) {
         if (i && ids[i] <= ids[i - 1])
             throw std::logic_error("RANGES: ids must be strictly ascending");
         size_t j = i;
-        while (j + 1 < ids.size() && ids[j + 1] == ids[j] + 1) j++;
+        // adjacency without overflow: nothing follows UINT64_MAX (MAX + 1 wraps to 0, which
+        // made {MAX, 0} one descending run "MAX-0")
+        while (j + 1 < ids.size() && ids[j] != kMax && ids[j + 1] == ids[j] + 1) j++;
         if (!out.empty())
             out.push_back(',');
         append_uint(out, ids[i]);
@@ -1793,8 +1798,11 @@ std::vector<uint64_t> decode_ranges(std::string_view token, std::optional<uint64
                        || b <= a) {
             fail("malformed RANGES", token);
         }
-        // ascending, and every maximal run collapsed: an item may not continue the last
-        if (!out.empty() && a <= out.back() + 1)
+        // ascending, and every maximal run collapsed: an item may not continue the last.
+        // Without overflow: nothing follows UINT64_MAX (out.back() + 1 wrapped to 0, so
+        // "18446744073709551615,1" was accepted as the descending {MAX, 1})
+        if (!out.empty() && (out.back() == std::numeric_limits<uint64_t>::max()
+                             || a <= out.back() + 1))
             fail("RANGES not ascending or not collapsed", token);
         if (bound && b >= *bound)
             fail("RANGES id beyond the id space", token);
@@ -1899,49 +1907,6 @@ std::string front_code(std::string_view previous, std::string_view name) {
     append_uint(out, p);
     out.push_back(' ');
     out += pct_escape(name.substr(p));
-    return out;
-}
-
-std::string to_valid_utf8(std::string_view s) {
-    if (valid_utf8(s))
-        return std::string(s);
-    std::string out;
-    out.reserve(s.size() + 8);
-    size_t i = 0;
-    while (i < s.size()) {
-        const unsigned char c = s[i];
-        if (c < 0x80) {
-            out.push_back(c);
-            ++i;
-            continue;
-        }
-        // the lead byte's sequence length and the range of its FIRST continuation byte,
-        // which is what excludes overlong forms, surrogates and code points > U+10FFFF
-        // (Unicode Table 3-7); C0, C1, F5..FF and a stray continuation lead nothing
-        size_t n = 0;
-        unsigned char lo = 0x80, hi = 0xBF;
-        if (c >= 0xC2 && c <= 0xDF) { n = 1; }
-        else if (c == 0xE0) { n = 2; lo = 0xA0; }
-        else if ((c >= 0xE1 && c <= 0xEC) || c == 0xEE || c == 0xEF) { n = 2; }
-        else if (c == 0xED) { n = 2; hi = 0x9F; }
-        else if (c == 0xF0) { n = 3; lo = 0x90; }
-        else if (c >= 0xF1 && c <= 0xF3) { n = 3; }
-        else if (c == 0xF4) { n = 3; hi = 0x8F; }
-        // the maximal subpart: the lead byte and the continuation bytes valid so far
-        size_t j = i + 1;
-        for (size_t m = 0; m < n && j < s.size(); ++m) {
-            const unsigned char d = s[j];
-            if (d < (m == 0 ? lo : 0x80) || d > (m == 0 ? hi : 0xBF))
-                break;
-            ++j;
-        }
-        if (n && j - i == n + 1) {
-            out.append(s.substr(i, n + 1));
-        } else {
-            out += "\xEF\xBF\xBD";   // U+FFFD for the whole ill-formed subpart
-        }
-        i = j;
-    }
     return out;
 }
 
@@ -2266,7 +2231,9 @@ void put_ranges(std::string &out, const std::vector<T> &ids) {
         if (i && ids[i] <= ids[i - 1])
             unrepresentable("a label or segment list is not strictly ascending");
         size_t j = i;
-        while (j + 1 < ids.size() && ids[j + 1] == ids[j] + 1) j++;
+        // adjacency without overflow (T's maximum + 1 wraps to 0)
+        while (j + 1 < ids.size() && ids[j] != std::numeric_limits<T>::max()
+                   && ids[j + 1] == static_cast<T>(ids[j] + 1)) j++;
         if (i)
             out.push_back(',');
         put_uint(out, ids[i]);
@@ -2433,9 +2400,9 @@ class GraphletWriter {
                 num(d.runs[i].second);
             }
             sp();
-            // process_traverse_request made every name valid UTF-8; a name that is not
-            // would be replaced inside the JSON string, so graphlet_bytes and the front
-            // coding (byte counts) would no longer describe the transported body
+            // process_traverse_request refuses a seed with a name that is not UTF-8; one
+            // here would be replaced inside the JSON string, so graphlet_bytes and the
+            // front coding (byte counts) would no longer describe the transported body
             if (!mgt::valid_utf8(d.name))
                 unrepresentable("a dropped label name that is not UTF-8");
             out_ += mgt::pct_escape(d.name);
@@ -3413,6 +3380,13 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
                      "of a dropped carrier would be missing): raise the knob to at least observed "
                      "or name the labels explicitly";
             break;
+        case SeedDerivationError::UNREPRESENTABLE_LABEL_NAME:
+            // stated by unrepresentable_seed_to_json, which knows where the name came from
+            knob = "seeds[].labels";
+            limit = Json::Value();
+            observed = uint_json(static_cast<uint64_t>(e.observed()));
+            effect = e.what();
+            break;
     }
     Json::Value rj;
     Json::Value sj;
@@ -3440,6 +3414,101 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
     rj["limitations"] = std::move(lims);
     // no walk was made, so nothing was cut on the other axes — except the carriers a cap
     // cut before the trace check (seed_labels), whose evidence is then missing
+    rj["outcome"] = outcome_of(rj, true);
+    return rj;
+}
+
+// A seed whose label dictionary (or dropped labels) would hold a name that is not valid
+// UTF-8 (spec §6.1 step 4, §7.0): refused per seed, in both label modes, in the shape of a
+// failed derivation -- no arms, `outcome.walks: failed`, an `error`, and a `derivation`
+// limitation with cause `unrepresentable_label_name`. Names come from FASTA headers and
+// file names, which need not be UTF-8; no output (JSON, MGT) carries such a name verbatim,
+// and a REPLACED name (U+FFFD, as earlier servers wrote it) can be another label's name
+// anywhere in the index: a continuation that resubmitted it went on under that other
+// label (GPT review, finding 1). So nothing of the seed is delivered, and neither the
+// error nor the effect echoes the name's bytes: they name the label by its column (and
+// sequence id). The knob is the one that avoids recording the label where one exists.
+// Returns a null value when every name is valid.
+static Json::Value unrepresentable_seed_to_json(const Seed &seed, const SeedResult &r,
+                                                const Strategy &st) {
+    size_t bad = 0;
+    std::optional<size_t> first_dict;       // index into label_dict
+    std::optional<size_t> first_dropped;    // index into dropped_labels
+    for (size_t i = 0; i < r.label_dict.size(); ++i) {
+        if (!mgt::valid_utf8(r.label_dict[i].name)) {
+            bad++;
+            if (!first_dict)
+                first_dict = i;
+        }
+    }
+    for (size_t i = 0; i < r.dropped_labels.size(); ++i) {
+        if (!mgt::valid_utf8(r.dropped_labels[i].name)) {
+            bad++;
+            if (!first_dropped)
+                first_dropped = i;
+        }
+    }
+    if (!bad)
+        return Json::Value();
+    std::string where;
+    std::string knob;
+    Json::Value limit;
+    std::string lever;
+    if (first_dict) {
+        const LabelRef &l = r.label_dict[*first_dict];
+        where = "column " + std::to_string(l.column);
+        if (l.kind == LabelKind::HEADER)
+            where += ", sequence " + std::to_string(l.seq_id);
+        if (st.label_mode == LabelMode::ANNOTATE) {
+            knob = "labels.mode";
+            limit = "annotate";
+            lever = "traverse in constrain mode with an explicit list of labels whose names "
+                    "are UTF-8 (resolve lists the labels on the seed)";
+        } else if (*first_dict >= r.num_seed_labels) {
+            knob = "labels.extra";
+            limit = uint_json(static_cast<uint64_t>(r.label_dict.size() - r.num_seed_labels));
+            lever = "leave that label out of labels.extra";
+        } else if (r.labels_from_seed && l.kind == LabelKind::HEADER) {
+            knob = "labels.seed_label_kind";
+            limit = "header";
+            lever = "set the knob to \"column\" (labels are then the annotation columns) or "
+                    "name the labels explicitly, leaving that one out";
+        } else {
+            knob = "seeds[].labels";
+            limit = uint_json(static_cast<uint64_t>(r.num_seed_labels));
+            lever = r.labels_from_seed
+                ? "name the labels explicitly, leaving that one out"
+                : "leave that label out of seeds[].labels";
+        }
+    } else {
+        where = "dropped seed label " + std::to_string(*first_dropped + 1) + " of "
+              + std::to_string(r.dropped_labels.size());
+        knob = "seeds[].labels";
+        limit = uint_json(static_cast<uint64_t>(r.num_seed_labels + r.dropped_labels.size()));
+        lever = "leave that label out of seeds[].labels";
+    }
+    const std::string count = std::to_string(bad) + " label name" + (bad > 1 ? "s" : "");
+    const std::string effect
+        = count + " of this seed (observed; the first: " + where + ") " + (bad > 1 ? "are" : "is")
+        + " not valid UTF-8: no output can carry such a name verbatim, and a replaced one could "
+          "name another label of the index, so the seed is refused and nothing of it is "
+          "delivered: " + lever + ", or rename the label in the index";
+    Json::Value rj;
+    Json::Value sj;
+    sj["seed_id"] = seed.seed_id;
+    sj["length_bp"] = uint_json(seed.sequence.size());
+    sj["labels_from_seed"] = r.labels_from_seed;
+    rj["seed"] = std::move(sj);
+    rj["error"] = "The seed's labels include " + count + " that " + (bad > 1 ? "are" : "is")
+                + " not valid UTF-8 (the first: " + where + "): refused, since no output "
+                  "carries such a name verbatim and a replaced name could resolve to another "
+                  "label";
+    Json::Value lims(Json::arrayValue);
+    Json::Value d = limitation("derivation", knob, std::move(limit),
+                               uint_json(static_cast<uint64_t>(bad)), effect);
+    d["cause"] = to_string(SeedDerivationError::UNREPRESENTABLE_LABEL_NAME);
+    lims.append(std::move(d));
+    rj["limitations"] = std::move(lims);
     rj["outcome"] = outcome_of(rj, true);
     return rj;
 }
@@ -3612,15 +3681,22 @@ Json::Value process_traverse_request(const Json::Value &json,
         try {
             SeedResult r = traverse_seed(oracle, seed, req.strategy, cost, release);
             r.annotation_counters = per_seed(r.annotation_counters);
-            // Names come from FASTA headers and file names, which need not be UTF-8. The
-            // JSON writer would replace an ill-formed sequence its own way (and differently
-            // for different bytes), so detail: full, the summary and the MGT body, whose
-            // graphlet_bytes and L prefix lengths count bytes, would disagree. Made valid
-            // once, here, every output carries the same bytes.
-            for (LabelRef &l : r.label_dict)
-                l.name = mgt::to_valid_utf8(l.name);
-            for (DroppedLabel &d : r.dropped_labels)
-                d.name = mgt::to_valid_utf8(d.name);
+            // Names come from FASTA headers and file names, which need not be UTF-8. No
+            // output carries such a name verbatim, and a replaced one (U+FFFD) can be the
+            // name of another label anywhere in the index -- resubmitted, it resolves to
+            // that label. The seed is refused instead (in both modes; checked after the
+            // walk, since an annotate dictionary is complete only then), like a failed
+            // derivation; the writers' own refusals stay as the backstop.
+            Json::Value refused = unrepresentable_seed_to_json(seed, r, req.strategy);
+            if (!refused.isNull()) {
+                if (req.strategy.max_memory_bytes) {
+                    // every response under a memory budget states it (§7.0)
+                    refused["limitations"].append(memory_bound_soft(req.strategy, r.account));
+                    refused["outcome"] = outcome_of(refused, true);
+                }
+                results.append(std::move(refused));
+                continue;
+            }
             Timer serialize;
             Json::Value rj = seed_result_to_json(r, req.strategy, req.detail, req.timing);
             state_server_clamps(&rj, r, clamped);

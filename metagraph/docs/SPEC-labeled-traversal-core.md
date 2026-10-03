@@ -367,7 +367,14 @@ to a header).
    that one label (and `/resolve` + `/select` remain the way to freeze a reproducible subset).
    **Per-seed failure.** Deriving can fail for reasons the caller cannot act on, because it named no labels at all:
    nothing carries the seed in full, the derived names are ambiguous, the first row is too wide, or the time budget
-   ran out mid-derivation. Those do not fail the request: the seed's entry in `results` is
+   ran out mid-derivation. One failure of the same shape is not a derivation's: a seed whose labels — the
+   `label_dict` of either mode (an `annotate` dictionary is complete only after the walk) or a `dropped_labels`
+   entry — include a name that is not valid UTF-8 (names come from FASTA headers and file names) is **refused**
+   with cause `unrepresentable_label_name`, whether or not its labels were named. No output carries such a name
+   verbatim, and a replaced one (U+FFFD, which earlier servers wrote) can be another label's valid name anywhere in
+   the index: resubmitted as a continuation's seed label it resolved to that label and walked other bases. The
+   refusal names the label by its column (and sequence id), never by its bytes. Those do not fail the request: the
+   seed's entry in `results` is
    `{"seed": {"seed_id", "length_bp", "labels_from_seed": true}, "outcome": {"walks": "failed", …}, "error":
    "<reason>", "limitations": [{"kind": "derivation", "cause", "knob", …}]}` — no `arms` — and the other seeds are
    traversed as usual. The `derivation` entry names the request field that would get past the cause (§7.0); a
@@ -820,7 +827,7 @@ is rejected instead (§5).
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, or a budget raised from zero (the walk ran under it) | the clamped field | the requested value (`limit` is the effective one) |
 | `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: the budget is enforced on the modelled state and output, but the annotation rows a level decodes (and an annotate dictionary's growth) are held before they can be charged — stage 3 of `DESIGN-traverse-graphlet.md` §14.1 charges them inside the decoder. In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account (the decoded rows, a cache beyond its allotment, the dictionary a fetch grew), MiB rounded up (0: none); the admitted account itself, the depth-0 state included, never exceeds the budget. Also on a seed a budget failed |
-| `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels` | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header; `over_seed_label_cap`: the carriers |
+| `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode) | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header; `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
 
 ```json
 "outcome": {"walks": "complete", "branch_diagnostics": "cut", "label_evidence": "complete", "delivery": "inline"},
@@ -1143,9 +1150,10 @@ L <c|h> <column> <seq_id|*> <prefix_len> <suffix>
     BYTES of the previous name's UTF-8, cut back to a code-point boundary, so the suffix is valid UTF-8; the
     first L's previous name is "". The space before the suffix is always written (an empty suffix leaves the
     line ending in a space). seq_id is * for a column label. Names come from FASTA headers and file names,
-    which need not be UTF-8: the server makes every label and dropped-label name valid UTF-8 once, before any
-    output (each maximal ill-formed subsequence → U+FFFD, = Python's decode('utf-8', 'replace')), so
-    detail: full, the summary and the body carry the same bytes and graphlet_bytes holds after transport
+    which need not be UTF-8: a seed whose label or dropped-label names include one that is not is refused
+    (§6.1 step 4, cause unrepresentable_label_name) and has no body, so every name the body carries is the
+    index's own, verbatim — a replaced name (U+FFFD, as servers before this rule wrote it) could be another
+    label's; the writer refuses a name that is not UTF-8 as a backstop
 O <walks c|p|f> <branch_diagnostics c|x> <label_evidence c|l|q> <delivery i|s|p>
     the per-seed outcome (§7.0); q = qualified (DESIGN v5.2)
 Q <scope> <resource> <phase> <requested VALUE|*> <effective VALUE|*> <used VALUE|*> <remaining VALUE|*>

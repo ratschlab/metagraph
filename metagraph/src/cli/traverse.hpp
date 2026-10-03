@@ -195,10 +195,10 @@ std::string pct_unescape(std::string_view token);
 // code-point boundary, suffix pct-escaped); decoding returns the full name
 std::string front_code(std::string_view previous, std::string_view name);
 std::string front_decode(std::string_view previous, std::string_view token);
-// strings in MGT (and in the JSON beside it) are UTF-8 (§2.1): every maximal ill-formed
-// subsequence replaced by one U+FFFD, the Unicode / WHATWG practice and Python's
-// bytes.decode('utf-8', 'replace'); valid input is returned unchanged
-std::string to_valid_utf8(std::string_view s);
+// strings in MGT (and in the JSON beside it) are UTF-8 (§2.1): well-formed UTF-8 (no
+// overlong forms, no surrogates, at most U+10FFFF). A label name that is not is never
+// replaced: the seed is refused (spec §6.1 step 4, cause unrepresentable_label_name)
+bool valid_utf8(std::string_view s);
 
 // a typed K value: i:<integer> | f:<float> | s:<percent-encoded string> | u (unlimited)
 struct KValue {

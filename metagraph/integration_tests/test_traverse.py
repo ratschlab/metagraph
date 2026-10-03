@@ -1129,10 +1129,12 @@ class TestTraverseGraphlet(TestTraverseBase):
             self.assertEqual(('unknown', None, 0), (c.comparable, c.equal, c.depth_used))
 
     def test_t37_names_that_are_not_utf8(self):
-        """Label names come from FASTA headers, which need not be UTF-8. The server makes
-        them valid once (each ill-formed sequence -> U+FFFD), so detail: full, the summary
-        and the body carry the same bytes: graphlet_bytes holds after transport and the
-        front-coded names decode to the names of detail: full."""
+        """Label names come from FASTA headers, which need not be UTF-8. No output carries
+        such a name verbatim, and a replaced one (U+FFFD, which servers wrote before) can be
+        another label's name -- a continuation that resubmitted it went on under that label
+        (GPT review, finding 1). So a seed whose labels include one is refused per seed in
+        both modes, as a failed derivation (cause unrepresentable_label_name) that names
+        the column, never the bytes; detail full and graphlet agree (T37)."""
         rng = random.Random(4711)
         block = {b: ''.join(rng.choice('ACGT') for _ in range(30)) for b in 'SABC'}
         headers = [b'\xc0abc', b'\xc0abd', b'caf\xc3\xa9']
@@ -1151,8 +1153,8 @@ class TestTraverseGraphlet(TestTraverseBase):
             res = subprocess.run(shlex.split(cmd), cwd=d, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
             self.assertEqual(0, res.returncode, res.stderr.decode())
-        want = sorted(h.decode('utf-8', 'replace') for h in headers)
-        for mode in ('annotate', 'constrain'):
+        for mode, knob in (('annotate', 'labels.mode'),
+                           ('constrain', 'labels.seed_label_kind')):
             outs = []
             for detail in ('full', 'graphlet'):
                 path = os.path.join(d, 'request.json')
@@ -1167,13 +1169,66 @@ class TestTraverseGraphlet(TestTraverseBase):
                                       '-a', os.path.join(d, 'annotation.column_coord.annodbg'),
                                       path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 self.assertEqual(0, res.returncode, res.stdout.decode('utf-8', 'replace'))
-                outs.append(json.loads(res.stdout.decode('utf-8')))
+                # strict: the response is UTF-8, with no replacement character anywhere
+                text = res.stdout.decode('utf-8')
+                self.assertNotIn('\ufffd', text)
+                outs.append(json.loads(text))
             full, out = outs
-            self.assertEqual(want, sorted(l['name'] for l in full['results'][0]['label_dict']),
-                             mode)
-            self.assertEqual(1, self._assert_round_trip(full, out, 'not UTF-8, ' + mode))
-            g = graphlet_lib.from_response(out['results'][0], out)
-            self.assertEqual(want, sorted(l.name for l in g.labels), mode)
+            self.assertEqual(0, self._assert_round_trip(full, out, 'not UTF-8, ' + mode))
+            result = out['results'][0]
+            self.assertEqual('failed', result['outcome']['walks'], mode)
+            (lim,) = result['limitations']
+            self.assertEqual(('derivation', 'unrepresentable_label_name', knob, 2),
+                             (lim['kind'], lim['cause'], lim['knob'], lim['observed']), mode)
+            self.assertIn('column 0, sequence ', lim['effect'])
+            self.assertNotIn('abc', json.dumps(result))
+            with self.assertRaises(ValueError):
+                graphlet_lib.from_response(result, out)
+
+    def test_t37_a_replaced_name_is_never_another_label(self):
+        """The review's probe (GPT, finding 1): column 'bad\\xff' and column 'bad\\ufffd' --
+        the second is the first's name as replaced. A derived seed carried by both is
+        refused (its dictionary holds the name that is not UTF-8); the valid name, named
+        explicitly, resolves to its own column and walks its own bases."""
+        rng = random.Random(54321)
+        seq = ''.join(rng.choice('ACGT') for _ in range(120))
+        alt = ('A' if seq[35] != 'A' else 'C') + 'TGCA' * 20
+        d = os.path.join(self.tempdir.name, 'replaced_name')
+        os.makedirs(d)
+        for name, content in (('one.fa', (b'bad\xff', seq)),
+                              ('two.fa', ('bad\ufffd'.encode(), seq[20:35] + alt))):
+            with open(os.path.join(d, name), 'wb') as f:
+                f.write(b'>' + content[0] + b'\n' + content[1].encode() + b'\n')
+        for cmd in (f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 15 -o graph '
+                    f'one.fa two.fa',
+                    f'{METAGRAPH} annotate -p 1 --anno-header -i graph.dbg --anno-type column '
+                    f'-o annotation one.fa two.fa'):
+            res = subprocess.run(shlex.split(cmd), cwd=d, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            self.assertEqual(0, res.returncode, res.stderr.decode())
+
+        def traverse(seed):
+            path = os.path.join(d, 'request.json')
+            with open(path, 'w') as f:
+                json.dump({'seeds': [seed], 'strategy': {
+                    'direction': 'right', 'bounds': {'max_extension_bp': 5},
+                    'output': {'detail': 'graphlet'}}}, f)
+            res = subprocess.run([METAGRAPH, 'traverse', '-i', os.path.join(d, 'graph.dbg'),
+                                  '-a', os.path.join(d, 'annotation.column.annodbg'), path],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(0, res.returncode, res.stdout.decode('utf-8', 'replace'))
+            return json.loads(res.stdout.decode('utf-8'))
+
+        out = traverse({'sequence': seq[:30]})
+        result = out['results'][0]
+        self.assertEqual('failed', result['outcome']['walks'])
+        self.assertEqual('unrepresentable_label_name', result['limitations'][0]['cause'])
+        # the replaced name is a label of its own: named, it walks ITS bases, not seq's
+        out = traverse({'sequence': seq[20:35], 'labels': ['bad\ufffd']})
+        g = graphlet_lib.from_response(out['results'][0], out)
+        self.assertEqual(['bad\ufffd'], [l.name for l in g.labels])
+        self.assertEqual(alt[:5], g.spell('right', 0))
+        self.assertNotEqual(seq[35:40], alt[:5])
 
     def test_t39_index_identity(self):
         """§3.1 (freeze gate): two indexes over the same records with the same counts and

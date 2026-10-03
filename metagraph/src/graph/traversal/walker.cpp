@@ -51,6 +51,7 @@ const char* to_string(SeedDerivationError::Cause cause) {
         case SeedDerivationError::TIME_BUDGET: return "time_budget";
         case SeedDerivationError::AMBIGUOUS_HEADER: return "ambiguous_header";
         case SeedDerivationError::OVER_SEED_LABEL_CAP: return "over_seed_label_cap";
+        case SeedDerivationError::UNREPRESENTABLE_LABEL_NAME: return "unrepresentable_label_name";
     }
     return "unknown";
 }

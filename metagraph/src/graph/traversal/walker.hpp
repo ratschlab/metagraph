@@ -51,6 +51,13 @@ class SeedDerivationError : public std::invalid_argument {
         // `exhaustive` refuses to cut the derived set: |limit| max_seed_labels,
         // |observed| the labels carrying the seed
         OVER_SEED_LABEL_CAP,
+        // the seed's label dictionary (or its dropped labels) would hold a name that is
+        // not valid UTF-8, which no output carries verbatim: never thrown by the walker;
+        // the request layer (cli/traverse.cpp) checks the result after the walk (an
+        // annotate dictionary is known only then) and reports the seed failed with this
+        // cause, in both modes and whether or not the labels were derived (spec §6.1
+        // step 4, §7.0)
+        UNREPRESENTABLE_LABEL_NAME,
     };
 
     SeedDerivationError(Cause cause, const std::string &what, double limit = 0,
