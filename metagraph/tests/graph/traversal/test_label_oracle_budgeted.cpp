@@ -1,0 +1,480 @@
+// The budget-aware reads of LabelQuery and LabelRecorder (stage 3 of
+// DESIGN-traverse-graphlet.md §14.1): the same answers as the unbudgeted reads, all or
+// nothing, every key admitted against its demand whether it is cached or not.
+#include "gtest/gtest.h"
+
+#include <random>
+
+#include "tests/annotation/test_annotated_dbg_helpers.hpp"
+
+#include "graph/traversal/label_oracle.hpp"
+#include "graph/traversal/walker.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "annotation/coord_to_header.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+
+#if USE_JEMALLOC
+extern "C" int mallctl(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+#endif
+
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::graph;
+using namespace mtg::graph::traversal;
+using annot::matrix::DecodeBudget;
+
+const size_t kK = 11;
+
+std::vector<std::string> sequences(size_t n, size_t len, uint32_t seed) {
+    std::mt19937 gen(seed);
+    std::vector<std::string> seqs;
+    for (size_t i = 0; i < n; ++i) {
+        std::string s(len, 'A');
+        for (char &c : s) {
+            c = "ACGT"[gen() % 4];
+        }
+        seqs.push_back(s);
+    }
+    return seqs;
+}
+
+// Labels sharing long stretches (rows of several labels, diffs that cancel), two records
+// in column F for the header labels
+struct Fixture {
+    std::unique_ptr<AnnotatedDBG> anno;
+    std::unique_ptr<annot::CoordToHeader> cth;
+    std::vector<std::string> seqs;
+    std::vector<std::string> labels;
+
+    explicit Fixture(bool coordinates) {
+        auto rnd = sequences(8, 90, 5);
+        const std::string shared = rnd[7];
+        for (size_t i = 0; i < 7; ++i) {
+            seqs.push_back(rnd[i].substr(0, 30) + shared.substr(i, 60) + rnd[i].substr(30));
+            labels.push_back(i < 2 ? "F" : "L" + std::to_string(i));
+        }
+        std::vector<uint64_t> starts;
+        uint64_t f = 0;
+        for (size_t i = 0; i < seqs.size(); ++i) {
+            if (labels[i] == "F") {
+                starts.push_back(f);
+                f += seqs[i].size() - kK + 1;
+            } else {
+                starts.push_back(0);
+            }
+        }
+        anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+                kK, seqs, labels, DeBruijnGraph::BASIC, coordinates,
+                coordinates ? starts : std::vector<uint64_t>{});
+        if (coordinates) {
+            const auto &encoder = anno->get_annotator().get_label_encoder();
+            std::vector<std::vector<std::string>> headers(encoder.size());
+            std::vector<std::vector<uint64_t>> num_kmers(encoder.size());
+            for (size_t i = 0; i < seqs.size(); ++i) {
+                const size_t c = encoder.encode(labels[i]);
+                headers[c].push_back(labels[i] == "F" ? "acc" + std::to_string(i) : labels[i] + "_h");
+                num_kmers[c].push_back(seqs[i].size() - kK + 1);
+            }
+            cth = std::make_unique<annot::CoordToHeader>(std::move(headers), std::move(num_kmers));
+        }
+    }
+
+    // keys of every k-mer of every sequence, in batches as a walk asks for them
+    std::vector<std::vector<node_index>> batches(const LabelOracle &oracle) const {
+        std::vector<node_index> all;
+        for (const auto &s : seqs) {
+            for (node_index k : oracle.keys_of_sequence(s)) all.push_back(k);
+        }
+        std::vector<std::vector<node_index>> out;
+        std::mt19937 gen(3);
+        for (size_t begin = 0; begin < all.size(); ) {
+            const size_t n = 1 + gen() % 40;
+            std::vector<node_index> b(all.begin() + begin, all.begin() + std::min(all.size(), begin + n));
+            if (b.size() > 2) {
+                b.push_back(b[1]);             // a duplicate
+                b.push_back(npos);             // a key that is not in the graph
+            }
+            out.push_back(std::move(b));
+            begin += n;
+        }
+        return out;
+    }
+};
+
+// the label sets a query is checked with: column labels (rows), column labels with
+// coordinates (tuples), header labels (tuples, coordinates mapped to records)
+std::vector<std::pair<std::vector<std::string>, bool>> label_sets(bool coordinates) {
+    std::vector<std::pair<std::vector<std::string>, bool>> sets {
+        { { "F", "L3", "L5" }, false },
+    };
+    if (coordinates) {
+        sets.push_back({ { "F", "L2", "L6" }, true });
+        sets.push_back({ { "acc0", "acc1", "L4_h" }, true });
+        sets.push_back({ { "acc1", "L2" }, false });
+    }
+    return sets;
+}
+
+std::vector<LabelRef> refs(const LabelOracle &oracle, const std::vector<std::string> &names) {
+    std::vector<LabelRef> out;
+    for (const auto &n : names) out.push_back(oracle.resolve_label(n));
+    return out;
+}
+
+// Q1, Q3: the budget-aware fetch and warm return the unbudgeted hits, and a key's costs are
+// the same whether a fetch decoded it or found it cached
+TEST(LabelOracleBudgetedQuery, SameHitsAsTheUnbudgetedFetch) {
+    for (bool coordinates : { false, true }) {
+        Fixture fx(coordinates);
+        for (const auto &[names, with_coords] : label_sets(coordinates)) {
+            LabelOracle oracle(*fx.anno, fx.cth.get());
+            ASSERT_TRUE(oracle.decode_charged());
+            LabelQuery plain(oracle, refs(oracle, names), with_coords);
+            LabelQuery budgeted(oracle, refs(oracle, names), with_coords);
+            budgeted.set_max_cache_bytes(1 << 20);
+            std::map<node_index, KeyCost> seen;
+            size_t from_cache = 0;
+            for (const auto &batch : fx.batches(oracle)) {
+                const auto expected = plain.fetch(batch);
+                std::vector<LabelQuery::NodeHits> hits;
+                std::vector<KeyCost> costs;
+                hits.reserve(batch.size());
+                costs.reserve(batch.size());
+                DecodeBudget budget;
+                size_t refused = 0;
+                ASSERT_TRUE(budgeted.fetch(batch.data(), batch.size(), budget, &hits, &costs, &refused));
+                ASSERT_EQ(expected, hits) << names[0];
+                uint64_t held = 0;
+                for (size_t i = 0; i < batch.size(); ++i) {
+                    held += LabelQuery::held_bytes(hits[i]);
+                    if (batch[i] == npos)
+                        continue;
+                    EXPECT_GE(costs[i].demand, LabelQuery::held_bytes(hits[i]));
+                    auto [it, inserted] = seen.emplace(batch[i], costs[i]);
+                    if (!inserted) {
+                        from_cache++;
+                        EXPECT_EQ(it->second.demand, costs[i].demand);
+                        EXPECT_EQ(it->second.dependency_units, costs[i].dependency_units);
+                    }
+                }
+                // what the call holds is what it returned
+                EXPECT_EQ(held, budget.held());
+                EXPECT_LE(budgeted.cache_bytes(), uint64_t(1) << 20);
+                // the lookahead's read answers like a fetch's
+                DecodeBudget warm_budget;
+                budgeted.warm(batch, warm_budget);
+                EXPECT_EQ(0u, warm_budget.held());
+            }
+            EXPECT_GT(from_cache, 10u);
+        }
+    }
+}
+
+// Q2, Q4: a key is admitted exactly when its demand fits what the call has left, cached or
+// not; a refusal returns nothing and leaves the cache and the counters as they were
+TEST(LabelOracleBudgetedQuery, AdmitsExactlyAndRefusesWhole) {
+    Fixture fx(true);
+    for (const auto &[names, with_coords] : label_sets(true)) {
+        LabelOracle oracle(*fx.anno, fx.cth.get());
+        LabelQuery probe(oracle, refs(oracle, names), with_coords);
+        std::vector<node_index> keys = oracle.keys_of_sequence(fx.seqs[2]);
+        keys.resize(12);
+        std::vector<LabelQuery::NodeHits> hits;
+        std::vector<KeyCost> costs;
+        hits.reserve(keys.size());
+        costs.reserve(keys.size());
+        DecodeBudget unlimited;
+        size_t refused = 0;
+        ASSERT_TRUE(probe.fetch(keys.data(), keys.size(), unlimited, &hits, &costs, &refused));
+        for (bool cached : { false, true }) {
+            // The smallest budget that admits keys 0 .. i: key k needs its demand beside what
+            // the keys before it returned. One byte less refuses at the first key that needs
+            // all of it.
+            uint64_t before = 0, need = 0;
+            size_t first = 0;
+            for (size_t i = 0; i < keys.size(); ++i) {
+                if (before + costs[i].demand > need) {
+                    need = before + costs[i].demand;
+                    first = i;
+                }
+                LabelQuery query(oracle, refs(oracle, names), with_coords);
+                if (cached) {
+                    std::vector<LabelQuery::NodeHits> h;
+                    std::vector<KeyCost> c;
+                    h.reserve(keys.size());
+                    c.reserve(keys.size());
+                    DecodeBudget b;
+                    ASSERT_TRUE(query.fetch(keys.data(), keys.size(), b, &h, &c, &refused));
+                }
+                for (uint64_t extra : { uint64_t(0), uint64_t(1) }) {
+                    const uint64_t cache_bytes = query.cache_bytes();
+                    const auto counters = oracle.counters();
+                    DecodeBudget budget(need - extra);
+                    budget.charge(0);
+                    std::vector<LabelQuery::NodeHits> h { LabelQuery::NodeHits{} };
+                    std::vector<KeyCost> c { KeyCost{} };
+                    h.reserve(1 + i + 1);
+                    c.reserve(1 + i + 1);
+                    const bool ok = query.fetch(keys.data(), i + 1, budget, &h, &c, &refused);
+                    const std::string what = names[0] + " key " + std::to_string(i)
+                                           + (cached ? " cached" : " decoded");
+                    if (!extra) {
+                        EXPECT_TRUE(ok) << what;
+                        if (ok)
+                            EXPECT_EQ(hits[i], h.back()) << what;
+                    } else {
+                        ASSERT_FALSE(ok) << what;
+                        EXPECT_EQ(first, refused) << what;
+                        EXPECT_EQ(1u, h.size()) << what;
+                        EXPECT_EQ(0u, budget.held()) << what;
+                        EXPECT_EQ(counters.rows_requested, oracle.counters().rows_requested);
+                        EXPECT_EQ(counters.cache_hits, oracle.counters().cache_hits);
+                        // the physical counters (timing) count the decoding a refused fetch
+                        // did: they never go back (review of stage 3, F5: the spec now says so)
+                        EXPECT_LE(counters.rows_fetched + counters.tuple_rows_fetched,
+                                  oracle.counters().rows_fetched + oracle.counters().tuple_rows_fetched);
+                        EXPECT_LE(counters.fetch_seconds, oracle.counters().fetch_seconds);
+                        // the refusal says which key and why: a demand that does not fit
+                        // what was left at its position, or a read that did not fit alone
+                        const FetchRefusal &why = query.refusal();
+                        EXPECT_EQ(first, why.position) << what;
+                        EXPECT_EQ(need - extra - why.held, why.left) << what;
+                        if (why.cause == FetchRefusal::DEMAND) {
+                            EXPECT_EQ(costs[first].demand, why.demand) << what;
+                            EXPECT_GT(why.demand, why.left) << what;
+                        } else {
+                            EXPECT_EQ(FetchRefusal::DECODE, why.cause) << what;
+                            EXPECT_GT(why.need, why.left) << what;
+                        }
+                        EXPECT_EQ(cache_bytes, query.cache_bytes()) << what;
+                        EXPECT_EQ(need - costs[first].demand, query.refused_held()) << what;
+                    }
+                }
+                before += LabelQuery::held_bytes(hits[i]);
+            }
+        }
+    }
+}
+
+// Q1, Q2 for the recorder: the same lists and dictionary as the unbudgeted reads, names
+// priced inside the call and given only when the whole call is admitted
+TEST(LabelOracleBudgetedRecorder, SameListsAndNames) {
+    Fixture fx(true);
+    for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
+        for (size_t cap : { size_t(1), size_t(3), size_t(64) }) {
+            LabelOracle oracle(*fx.anno, fx.cth.get());
+            LabelRecorder plain(oracle, kind, cap);
+            LabelRecorder budgeted(oracle, kind, cap);
+            budgeted.set_max_cache_bytes(1 << 20);
+            uint64_t priced = 0;
+            auto name_bytes = [&](std::string_view name) {
+                return 100 + name.size();
+            };
+            for (const auto &batch : fx.batches(oracle)) {
+                const auto expected = plain.fetch(batch);
+                std::vector<LabelRecorder::NodeLabels> lists;
+                std::vector<KeyCost> costs;
+                lists.reserve(batch.size());
+                costs.reserve(batch.size());
+                const size_t named = budgeted.labels().size();
+                // a refused call (a budget below the first key's demand) names nothing
+                {
+                    DecodeBudget none(1);
+                    std::vector<LabelRecorder::NodeLabels> l;
+                    std::vector<KeyCost> c;
+                    l.reserve(batch.size());
+                    c.reserve(batch.size());
+                    size_t refused = 0;
+                    if (batch[0] != npos) {
+                        EXPECT_FALSE(budgeted.fetch(batch.data(), batch.size(), none, &l, &c,
+                                                    &refused, name_bytes));
+                        EXPECT_TRUE(l.empty());
+                        EXPECT_EQ(named, budgeted.labels().size());
+                    }
+                }
+                DecodeBudget budget;
+                size_t refused = 0;
+                ASSERT_TRUE(budgeted.fetch(batch.data(), batch.size(), budget, &lists, &costs,
+                                           &refused, name_bytes));
+                ASSERT_EQ(expected.size(), lists.size());
+                for (size_t i = 0; i < lists.size(); ++i) {
+                    EXPECT_EQ(expected[i].labels, lists[i].labels);
+                    EXPECT_EQ(expected[i].total, lists[i].total);
+                }
+                ASSERT_EQ(plain.labels().size(), budgeted.labels().size());
+                uint64_t names = 0;
+                for (size_t id = named; id < budgeted.labels().size(); ++id) {
+                    EXPECT_EQ(plain.labels()[id].name, budgeted.labels()[id].name);
+                    names += 100 + budgeted.labels()[id].name.size();
+                }
+                EXPECT_EQ(names, budgeted.last_names_bytes());
+                // each new label is charged its provisional naming beside its name, which
+                // bounds what the call's pending labels held (review of stage 3, F1)
+                const uint64_t named_now = budgeted.labels().size() - named;
+                EXPECT_EQ(named_now * LabelRecorder::kNamingBytes, budgeted.last_naming_bytes());
+                EXPECT_LE(LabelRecorder::pending_bytes(named_now), budgeted.last_naming_bytes());
+                priced += names;
+                uint64_t held = names + budgeted.last_naming_bytes();
+                for (const auto &l : lists) {
+                    held += LabelRecorder::held_bytes(l);
+                }
+                EXPECT_EQ(held, budget.held());
+                EXPECT_LE(budgeted.cache_bytes(), uint64_t(1) << 20);
+                DecodeBudget warm_budget;
+                budgeted.warm(batch, warm_budget);
+                EXPECT_EQ(0u, warm_budget.held());
+            }
+            EXPECT_GT(priced, 0u);
+        }
+    }
+}
+
+// F2: the recorder says why a key was refused — its demand, or the dictionary labels it would
+// name first — so that a stop by labels is not reported as a row that does not fit
+TEST(LabelOracleBudgetedRecorder, RefusalNamesItsCause) {
+    Fixture fx(true);
+    for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
+        LabelOracle oracle(*fx.anno, fx.cth.get());
+        auto name_bytes = [](std::string_view name) { return 1000 + name.size(); };
+        // the key of the shared stretch carrying the most labels
+        node_index key = npos;
+        size_t most = 0;
+        for (node_index k : oracle.keys_of_sequence(fx.seqs[0])) {
+            LabelRecorder probe(oracle, kind, 64);
+            const auto lists = probe.fetch(std::vector<node_index>{ k });
+            if (lists[0].labels.size() > most) {
+                most = lists[0].labels.size();
+                key = k;
+            }
+        }
+        ASSERT_GE(most, 3u);
+        LabelRecorder probe(oracle, kind, 64);
+        std::vector<LabelRecorder::NodeLabels> l;
+        std::vector<KeyCost> c;
+        l.reserve(1);
+        c.reserve(1);
+        DecodeBudget unlimited;
+        size_t refused = 0;
+        ASSERT_TRUE(probe.fetch(&key, 1, unlimited, &l, &c, &refused, name_bytes));
+        const uint64_t names = probe.last_names_bytes() + probe.last_naming_bytes();
+        EXPECT_EQ(most * LabelRecorder::kNamingBytes, probe.last_naming_bytes());
+        for (uint64_t budget_bytes : { c[0].demand + names - 1, c[0].demand }) {
+            LabelRecorder recorder(oracle, kind, 64);
+            std::vector<LabelRecorder::NodeLabels> out;
+            std::vector<KeyCost> costs;
+            out.reserve(1);
+            costs.reserve(1);
+            DecodeBudget budget(budget_bytes);
+            ASSERT_FALSE(recorder.fetch(&key, 1, budget, &out, &costs, &refused, name_bytes));
+            const FetchRefusal &why = recorder.refusal();
+            EXPECT_EQ(FetchRefusal::NAMES, why.cause) << budget_bytes;
+            EXPECT_EQ(c[0].demand, why.demand);
+            EXPECT_EQ(most, why.labels);
+            EXPECT_EQ(names, why.names_bytes);
+            EXPECT_TRUE(recorder.labels().empty());
+        }
+        // one byte below the demand: the row itself
+        LabelRecorder recorder(oracle, kind, 64);
+        std::vector<LabelRecorder::NodeLabels> out;
+        std::vector<KeyCost> costs;
+        out.reserve(1);
+        costs.reserve(1);
+        DecodeBudget budget(c[0].demand - 1);
+        ASSERT_FALSE(recorder.fetch(&key, 1, budget, &out, &costs, &refused, name_bytes));
+        EXPECT_NE(FetchRefusal::NAMES, recorder.refusal().cause);
+    }
+}
+
+// F1: what naming labels provisionally holds is bounded by the per-label charge, for any
+// number of labels (the pending table and list, their growth transients included)
+TEST(LabelOracleBudgetedRecorder, NamingIsChargedPerLabel) {
+    for (uint64_t m = 1; m < 200000; m = m < 300 ? m + 1 : m * 17 / 16) {
+        EXPECT_LE(LabelRecorder::pending_bytes(m), m * LabelRecorder::kNamingBytes) << m;
+    }
+    EXPECT_EQ(LabelRecorder::kNamingBytes, LabelRecorder::pending_bytes(1));
+}
+
+// F1: jemalloc's peak of a budget-aware fetch that names many labels stays within what the
+// call charged (with names priced at the walker's model of a dictionary label without its
+// delivery), up to the dictionary map's first bucket array, a constant per recorder: the
+// pending labels were a map per label (~1.5 KB each) held uncharged
+TEST(LabelOracleBudgetedRecorder, NamingWithinTheAllocatorsPeak) {
+#if USE_JEMALLOC
+    for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
+        // 400 records sharing one stretch: its k-mers carry 400 labels (columns, or the
+        // headers of 400 columns)
+        const std::string shared = sequences(1, 40, 77)[0];
+        std::vector<std::string> seqs, labels;
+        for (size_t i = 0; i < 400; ++i) {
+            seqs.push_back(sequences(1, 10, 100 + i)[0] + shared + sequences(1, 10, 900 + i)[0]);
+            labels.push_back("C" + std::to_string(i));
+        }
+        auto anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+                kK, seqs, labels, DeBruijnGraph::BASIC, true, std::vector<uint64_t>(400, 0));
+        const auto &encoder = anno->get_annotator().get_label_encoder();
+        std::vector<std::vector<std::string>> headers(encoder.size());
+        std::vector<std::vector<uint64_t>> num_kmers(encoder.size());
+        for (size_t i = 0; i < seqs.size(); ++i) {
+            const size_t c = encoder.encode(labels[i]);
+            headers[c].push_back("h" + std::to_string(i));
+            num_kmers[c].push_back(seqs[i].size() - kK + 1);
+        }
+        annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+        LabelOracle oracle(*anno, &cth);
+        std::vector<node_index> keys = oracle.keys_of_sequence(shared);
+        keys.resize(8);
+        // a dictionary label as the walker's account models it, its delivery apart
+        auto name_bytes = [](std::string_view name) {
+            return 2 * sizeof(LabelRef) + 4 * sizeof(LabelArmSummary) + 96 + 2 * name.size();
+        };
+        LabelRecorder recorder(oracle, kind, 1000);
+        recorder.set_max_cache_bytes(0);
+        std::vector<LabelRecorder::NodeLabels> out;
+        std::vector<KeyCost> costs;
+        out.reserve(keys.size());
+        costs.reserve(keys.size());
+        DecodeBudget budget;
+        size_t refused = 0;
+        size_t sz = sizeof(uint64_t);
+        if (mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0))
+            GTEST_SKIP() << "jemalloc without thread.peak";
+        ASSERT_TRUE(recorder.fetch(keys.data(), keys.size(), budget, &out, &costs, &refused,
+                                   name_bytes));
+        uint64_t peak = 0;
+        mallctl("thread.peak.read", &peak, &sz, nullptr, 0);
+        if (budget.peak() > 4096 && !peak)
+            GTEST_SKIP() << "jemalloc is not the process allocator";
+        ASSERT_EQ(400u, recorder.labels().size());
+        // the dictionary map's first bucket array (tsl: 63 buckets), once per recorder
+        const uint64_t first_buckets = 2048;
+        EXPECT_LE(peak, budget.peak() + first_buckets) << to_string(kind);
+        std::cerr << to_string(kind) << ": jemalloc peak " << peak << ", charged peak "
+                  << budget.peak() << std::endl;
+    }
+#else
+    GTEST_SKIP() << "needs jemalloc";
+#endif
+}
+
+// Q5: which indexes have the budget-aware reads
+TEST(LabelOracleBudgeted, DecodeChargedTruthTable) {
+    auto seqs = sequences(3, 60, 9);
+    std::vector<std::string> labels { "A", "B", "C" };
+    auto column = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels, DeBruijnGraph::BASIC);
+    auto row_diff = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(kK, seqs, labels, DeBruijnGraph::BASIC);
+    auto row_diff_coord = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(kK, seqs, labels, DeBruijnGraph::BASIC, true);
+    auto row_disk = test::build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(kK, seqs, labels, DeBruijnGraph::BASIC);
+    auto row_flat = test::build_anno_graph<DBGSuccinct, annot::RowFlatAnnotator>(kK, seqs, labels, DeBruijnGraph::BASIC);
+    EXPECT_FALSE(LabelOracle(*column).decode_charged());
+    EXPECT_FALSE(LabelOracle(*column).row_diff());
+    EXPECT_TRUE(LabelOracle(*row_diff).decode_charged());
+    EXPECT_TRUE(LabelOracle(*row_diff_coord).decode_charged());
+    EXPECT_FALSE(LabelOracle(*row_disk).decode_charged());
+    EXPECT_TRUE(LabelOracle(*row_disk).row_diff());
+    EXPECT_FALSE(LabelOracle(*row_flat).decode_charged());
+}
+
+} // namespace

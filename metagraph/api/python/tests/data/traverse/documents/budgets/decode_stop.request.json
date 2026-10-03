@@ -1,0 +1,27 @@
+{
+ "seeds": [
+  {
+   "seed_id": "decode_stop",
+   "sequence": "CCGCGTACAGATCCGAGTGGGCCTGTATCA",
+   "labels": [
+    "acc_path"
+   ]
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "bounds": {
+   "max_extension_bp": 60,
+   "max_memory_mb": 1
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "dense",
+  "k": 15,
+  "doc": "the dense row-diff index (budget-aware annotation reads, stage 3) under bounds.max_memory_mb 1: the level that reads the row before the repeated k-mer cannot hold its row-diff dependency rows, so the walk stops there in phase annotation_decode (Q memory annotation_decode, its levers, a walk_domain on the budget, memory_bound_soft naming only what is still uncharged)"
+ }
+}

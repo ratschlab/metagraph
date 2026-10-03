@@ -1231,12 +1231,14 @@ class TestTraverseGraphlet(TestTraverseBase):
         self.assertNotEqual(seq[35:40], alt[:5])
 
     def _resource_case(self, name, records, labels, bounds, detail, seed=None,
-                       direction='right', files=None, k=3, **strategy):
+                       direction='right', files=None, k=3, anno='column_coord', output=None,
+                       **strategy):
         """The external re-review's resource probes (GPT, stage 2): an index of |records|
         (k = 3 unless given, header labels via --index-header-coords; |files|: {file name:
-        records} instead, one column each) and one request on |seed| (default {sequence:
-        AAA}) along |direction|; -> (the result, the response's bytes). A second call with
-        the same |name| reuses the index."""
+        records} instead, one column each; |anno| column_coord, or row_diff_brwt_coord,
+        whose reads are budget-aware) and one request on |seed| (default {sequence: AAA})
+        along |direction|; -> (the result, the response's bytes). A second call with the
+        same |name| reuses the index."""
         d = os.path.join(self.tempdir.name, 'resource_' + name)
         files = files or {'input.fa': records}
         if not os.path.exists(d):
@@ -1246,13 +1248,23 @@ class TestTraverseGraphlet(TestTraverseBase):
                     for header, seq in recs:
                         f.write(b'>' + header + b'\n' + seq.encode() + b'\n')
             inputs = ' '.join(sorted(files))
-            for cmd in (f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k {k} -o graph {inputs}',
-                        f'{METAGRAPH} annotate -p 1 --anno-filename -i graph.dbg --anno-type column '
-                        f'--coordinates -o annotation {inputs}',
-                        f'{METAGRAPH} transform_anno -p 1 --anno-type column_coord --coordinates '
-                        f'-o annotation annotation.column.annodbg',
-                        f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
-                        f'--index-header-coords -o annotation {inputs}'):
+            if anno == 'row_diff_brwt_coord':
+                rd = (f'{METAGRAPH} transform_anno -p 1 --anno-type row_diff --coordinates '
+                      f'-o annotation -i graph.dbg annotation.column.annodbg')
+                transform = (rd, rd + ' --row-diff-stage 1', rd + ' --row-diff-stage 2',
+                             f'{METAGRAPH} transform_anno -p 1 --anno-type row_diff_brwt_coord '
+                             f'--greedy -o annotation -i graph.dbg annotation.column.annodbg',
+                             f'{METAGRAPH} relax_brwt -p 1 -o annotation '
+                             f'annotation.row_diff_brwt_coord.annodbg')
+            else:
+                transform = (f'{METAGRAPH} transform_anno -p 1 --anno-type column_coord '
+                             f'--coordinates -o annotation annotation.column.annodbg',)
+            for cmd in ((f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k {k} -o graph {inputs}',
+                         f'{METAGRAPH} annotate -p 1 --anno-filename -i graph.dbg --anno-type column '
+                         f'--coordinates -o annotation {inputs}')
+                        + transform
+                        + (f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
+                           f'--index-header-coords -o annotation {inputs}',)):
                 res = subprocess.run(shlex.split(cmd), cwd=d, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)
                 self.assertEqual(0, res.returncode, res.stderr.decode())
@@ -1261,13 +1273,131 @@ class TestTraverseGraphlet(TestTraverseBase):
             json.dump({'seeds': [seed or {'sequence': 'AAA'}],
                        'strategy': dict({'direction': direction, 'labels': labels,
                                          'bounds': bounds,
-                                         'output': {'detail': detail, 'timing': False}},
+                                         'output': dict({'detail': detail, 'timing': False},
+                                                        **(output or {}))},
                                         **strategy)}, f)
         res = subprocess.run([METAGRAPH, 'traverse', '--json', '-i', os.path.join(d, 'graph.dbg'),
-                              '-a', os.path.join(d, 'annotation.column_coord.annodbg'), path],
+                              '-a', os.path.join(d, 'annotation.%s.annodbg' % anno), path],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(0, res.returncode, res.stderr.decode())
         return json.loads(res.stdout.decode('utf-8'))['results'][0], len(res.stdout)
+
+    # ---- stage 3 (DESIGN-traverse-graphlet.md §14.1): the budget-aware annotation reads
+
+    @staticmethod
+    def _dense_files():
+        """The §14 freeze-gate shape on a row-diff index: the path P (acc_path) and a
+        record that repeats the k-mer P[51, 66) 120,000 times between random spacers, so
+        the row before it on P carries one label while its row-diff dependency rows hold
+        120,000 coordinates."""
+        rng = random.Random(1111)
+
+        def seq(n):
+            return ''.join(rng.choice('ACGT') for _ in range(n))
+
+        P = seq(120)
+        rep = ''.join(P[51:66] + seq(10) for _ in range(120000))
+        return P, {'path.fa': [(b'acc_path', P)], 'rep.fa': [(b'acc_rep', rep)]}
+
+    def _dense_case(self, labels, bounds, detail, seed, **strategy):
+        P, files = self._dense_files()
+        return self._resource_case('dense', None, labels, bounds, detail,
+                                   seed={'sequence': seed(P), **strategy.pop('seed_extra', {})},
+                                   files=files, k=15, anno='row_diff_brwt_coord', **strategy)
+
+    def test_stage3_dense_row_stops_the_level_that_reads_it(self):
+        """§14 freeze gate: a row whose dependencies are dense but whose result is tiny. The
+        level that reads it cannot hold its row-diff dependency rows within 1 MiB, so the walk
+        stops there (partial, phase annotation_decode), in JSON and in the graphlet, with the
+        levers that read fewer rows and memory_bound_soft naming only what is uncharged."""
+        for detail in ('full', 'graphlet'):
+            result, size = self._dense_case(
+                {'mode': 'constrain'}, {'max_extension_bp': 60, 'max_memory_mb': 1}, detail,
+                lambda P: P[:30], seed_extra={'labels': ['acc_path']})
+            self.assertEqual('partial', result['outcome']['walks'], detail)
+            stop = result['resource_stop']
+            self.assertEqual(('memory', 'annotation_decode'), (stop['resource'], stop['phase']))
+            self.assertIn('more_selective_seed', stop['actions'])
+            self.assertNotIn('lower_max_seed_labels', stop['actions'])
+            self.assertIn('row-diff dependency rows', stop['message'])
+            self.assertLessEqual(stop['used'], stop['effective'])
+            arm = result['arms']['right']
+            self.assertEqual('truncated', arm['status'])
+            (walk,) = [l for l in arm['limitations'] if l['kind'] == 'walk_domain']
+            # what admitting the refused row needed, beside what the walk held: more than the
+            # budget (it was stated as the budget plus one)
+            self.assertGreater(walk['observed'], walk['limit'])
+            self.assertIn('row-diff dependency rows', walk['effect'])
+            (soft,) = [l for l in result['limitations'] if l['kind'] == 'memory_bound_soft']
+            self.assertIn('charged before they are held', soft['effect'])
+            self.assertLessEqual(size, 1 << 20)
+            if detail == 'graphlet':
+                self.assertIn('\nQ locus memory annotation_decode ', result['graphlet'])
+                g = graphlet_lib.parse(result['graphlet'])
+                self.assertEqual('annotation_decode', g.resource_stop.phase)
+        # without a budget the same walk passes the dense row (the default reads)
+        result, _ = self._dense_case({'mode': 'constrain'}, {'max_extension_bp': 60}, 'summary',
+                                     lambda P: P[:30], seed_extra={'labels': ['acc_path']})
+        self.assertEqual('complete', result['outcome']['walks'])
+        self.assertNotIn('resource_stop', result)
+
+    def test_stage3_decode_stop_does_not_depend_on_batch_kmers(self):
+        """Every row a fetch returns is admitted against what decoding it alone needs,
+        whether the lookahead decoded it or the fetch did: the stop is the same for every
+        annotation.batch_kmers."""
+        results = []
+        for batch in (1, 7, 64, 1000):
+            result, _ = self._dense_case(
+                {'mode': 'constrain'}, {'max_extension_bp': 60, 'max_memory_mb': 1}, 'graphlet',
+                lambda P: P[:30], seed_extra={'labels': ['acc_path']},
+                annotation={'batch_kmers': batch})
+            results.append(result)
+        self.assertEqual('annotation_decode', results[0]['resource_stop']['phase'])
+        for r in results[1:]:
+            self.assertEqual(results[0], r)
+
+    def test_stage3_seed_phase_reads_fail_the_seed(self):
+        """Read in the seed phase -- to validate the seed, to derive its labels, or as an
+        annotate root -- a row that does not fit fails the seed: outcome failed, a seed-level
+        walk_domain on the budget, the seed's levers (annotate mode: a label-constrained
+        query)."""
+        cases = (('validation', {'mode': 'constrain'}, lambda P: P[45:75], {'labels': ['acc_path']}),
+                 ('derivation', {'mode': 'constrain', 'seed_label_kind': 'header'},
+                  lambda P: P[45:75], {}),
+                 ('annotate root', {'mode': 'annotate', 'seed_label_kind': 'header'},
+                  lambda P: P[36:66], {}))
+        for what, labels, seed, extra in cases:
+            result, _ = self._dense_case(labels, {'max_extension_bp': 10, 'max_memory_mb': 1},
+                                         'summary', seed, seed_extra=extra)
+            self.assertEqual('failed', result['outcome']['walks'], what)
+            stop = result['resource_stop']
+            self.assertEqual(('memory', 'annotation_decode'), (stop['resource'], stop['phase']), what)
+            self.assertEqual(['raise_memory_budget', 'more_selective_seed']
+                             + (['label_constrained_query'] if labels['mode'] == 'annotate' else []),
+                             stop['actions'], what)
+            (walk,) = [l for l in result['limitations'] if l['kind'] == 'walk_domain']
+            self.assertGreater(walk['observed'], walk['limit'], what)
+            self.assertIn('row-diff dependency rows', walk['effect'], what)
+
+    def test_stage3_work_counts_dependency_rows(self):
+        """A row's work includes its row-diff dependency rows (8 units each and 1 per entry
+        and coordinate they store), whichever read decoded them: the walk past the dense row
+        is charged for the tens of thousands of coordinates its dependency rows hold (the
+        row-diff transform cancels the copies whose successor is the one the fork rule picked),
+        where stage 2 charged its 60 rows' own entries (about 10 units each)."""
+        result, _ = self._dense_case(
+            {'mode': 'constrain'}, {'max_extension_bp': 60, 'max_work_units': 100000000},
+            'summary', lambda P: P[:30], seed_extra={'labels': ['acc_path']})
+        self.assertEqual('complete', result['outcome']['walks'])
+        work = result['arms']['right']['counters']['work_units']
+        self.assertGreater(work, 20000)
+        # a work budget below it stops the walk (in phase traversal: work never refuses a read)
+        stopped, _ = self._dense_case(
+            {'mode': 'constrain'}, {'max_extension_bp': 60, 'max_work_units': work // 2},
+            'summary', lambda P: P[:30], seed_extra={'labels': ['acc_path']})
+        self.assertEqual(('work', 'traversal'), (stopped['resource_stop']['resource'],
+                                                 stopped['resource_stop']['phase']))
+        self.assertIn('per dependency row', stopped['resource_stop']['message'])
 
     @staticmethod
     def _largest_charge(stop):

@@ -174,6 +174,17 @@ INDEXES = {
         'files': {'comb.fa': [('backbone', ['B'])]
                   + [('tip%d' % i, [('B', i - 14, i), ('alt', 'B', i)]) for i in range(15, 245)]},
     },
+    # a row-diff annotation with coordinates (stage 3 of DESIGN-traverse-graphlet.md §14.1,
+    # the budget-aware reads): the path P (acc_path) and a record acc_rep that repeats the
+    # k-mer P[51, 66) 120,000 times between random spacers. The k-mer before it on P carries
+    # acc_path alone, but its row-diff successor carries 120,000 coordinates of acc_rep: a
+    # row whose dependencies are dense while its result is tiny (§14 freeze gate)
+    'dense': {
+        'k': 15, 'seed': 1111, 'anno': 'row_diff_brwt_coord',
+        'blocks': {'P': 120},
+        'files': {'path.fa': [('acc_path', ['P'])],
+                  'rep.fa': [('acc_rep', [('repeat', 'P', 51, 66, 120000, 10, 1112)])]},
+    },
 }
 
 
@@ -196,6 +207,14 @@ def assemble(parts, blocks):
     for p in parts:
         if isinstance(p, str):
             out.append(blocks[p])
+        elif p[0] == 'repeat':
+            # ('repeat', block, start, end, times, spacer, seed): the slice |times| times,
+            # each followed by |spacer| bases of a generator of its own
+            _, block, start, end, times, spacer, seed = p
+            rng = random.Random(seed)
+            for _ in range(times):
+                out.append(blocks[block][start:end])
+                out.append(''.join(rng.choice('ACGT') for _ in range(spacer)))
         elif p[0] == '=':
             out.append(p[1])
         elif p[0] == 'rc':
@@ -231,18 +250,37 @@ def build_index(name, metagraph, root):
             for header, parts in records:
                 f.write('>%s\n%s\n' % (header, assemble(parts, blocks)))
     k = str(spec['k'])
-    for cmd in ([metagraph, 'build', '-p', '1', '--mode', spec.get('mode', 'basic'),
-                 '--graph', 'succinct', '-k', k, '-o', 'graph'] + files,
-                [metagraph, 'annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg',
-                 '--anno-type', 'column', '--coordinates', '-o', 'annotation'] + files,
-                [metagraph, 'transform_anno', '-p', '1', '--anno-type', 'column_coord',
-                 '--coordinates', '-o', 'annotation', 'annotation.column.annodbg'],
-                [metagraph, 'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
-                 '--index-header-coords', '-o', 'annotation'] + files):
+    if spec.get('anno') == 'row_diff_brwt_coord':
+        # the row-diff pipeline (as integration_tests/base.py builds row_diff_brwt_coord):
+        # the coordinate columns diffed along the graph in three stages, then compressed
+        rd = [metagraph, 'transform_anno', '-p', '1', '--anno-type', 'row_diff', '--coordinates',
+              '-o', 'annotation', '-i', 'graph.dbg', 'annotation.column.annodbg']
+        transform = [rd, rd + ['--row-diff-stage', '1'], rd + ['--row-diff-stage', '2'],
+                     [metagraph, 'transform_anno', '-p', '1', '--anno-type', 'row_diff_brwt_coord',
+                      '--greedy', '-o', 'annotation', '-i', 'graph.dbg',
+                      'annotation.column.annodbg'],
+                     [metagraph, 'relax_brwt', '-p', '1', '-o', 'annotation',
+                      'annotation.row_diff_brwt_coord.annodbg']]
+    else:
+        transform = [[metagraph, 'transform_anno', '-p', '1', '--anno-type', 'column_coord',
+                      '--coordinates', '-o', 'annotation', 'annotation.column.annodbg']]
+    for cmd in ([[metagraph, 'build', '-p', '1', '--mode', spec.get('mode', 'basic'),
+                  '--graph', 'succinct', '-k', k, '-o', 'graph'] + files,
+                 [metagraph, 'annotate', '-p', '1', '--anno-filename', '-i', 'graph.dbg',
+                  '--anno-type', 'column', '--coordinates', '-o', 'annotation'] + files]
+                + transform
+                + [[metagraph, 'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename',
+                    '--index-header-coords', '-o', 'annotation'] + files]):
         p = subprocess.run(cmd, cwd=d, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if p.returncode:
             raise RuntimeError('%s failed:\n%s' % (' '.join(cmd), p.stderr.decode()[-2000:]))
-    return os.path.join(d, 'graph.dbg'), os.path.join(d, 'annotation.column_coord.annodbg')
+    return os.path.join(d, 'graph.dbg'), annotation_of(name, root)
+
+
+def annotation_of(index, root):
+    """The annotation file of a built fixture index."""
+    anno = INDEXES[index].get('anno', 'column_coord')
+    return os.path.join(root, index, 'annotation.%s.annodbg' % anno)
 
 
 # ===================================================================== CLI fixtures
@@ -501,6 +539,22 @@ BUDGET_FIXTURES = {
                                  'output': {'profile_bin_bp': 50, 'continuation_bp': 0,
                                             'max_branch_events': 'unlimited'}}},
     },
+    'decode_stop': {
+        'index': 'dense',
+        'doc': 'the dense row-diff index (budget-aware annotation reads, stage 3) under '
+               'bounds.max_memory_mb 1: the level that reads the row before the repeated '
+               'k-mer cannot hold its row-diff dependency rows, so the walk stops there in '
+               'phase annotation_decode (Q memory annotation_decode, its levers, a walk_domain '
+               'on the budget, memory_bound_soft naming only what is still uncharged)',
+        'shows': ['Q:memory', 'Q:annotation_decode', 'T:Y', 'K:walk_domain',
+                  'K:memory_bound_soft'],
+        'details': ('graphlet',),
+        'request': {'seeds': [{'seed_id': 'decode_stop', 'sequence': [('P', 0, 30)],
+                               'labels': ['acc_path']}],
+                    'strategy': {'direction': 'right',
+                                 'bounds': {'max_extension_bp': 60, 'max_memory_mb': 1},
+                                 'output': {'profile_bin_bp': 50}}},
+    },
     'memory_stop_full': {
         'index': 'comb',
         'doc': 'the memory_stop request in detail full: the JSON spells every leaf\'s chain '
@@ -551,6 +605,7 @@ def features(body):
             f.add('O:' + ''.join(x[1:5]))
         elif tag == 'Q':
             f.add('Q:' + x[2])
+            f.add('Q:' + x[3])
         elif tag == 'K':
             f.add('K:' + x[2])
         elif tag == 'X':
@@ -787,7 +842,7 @@ def build_cli(metagraph, root, name):
     graph = os.path.join(root, fx['index'], 'graph.dbg')
     if not os.path.exists(graph):
         build_index(fx['index'], metagraph, root)
-    annotation = os.path.join(root, fx['index'], 'annotation.column_coord.annodbg')
+    annotation = annotation_of(fx['index'], root)
     request = materialize(fx['request'], blocks_of(spec))
     outs = {}
     for detail in ('full', 'graphlet'):
@@ -810,7 +865,7 @@ def build_budget(metagraph, root, name):
     graph = os.path.join(root, fx['index'], 'graph.dbg')
     if not os.path.exists(graph):
         build_index(fx['index'], metagraph, root)
-    annotation = os.path.join(root, fx['index'], 'annotation.column_coord.annodbg')
+    annotation = annotation_of(fx['index'], root)
     request = materialize(fx['request'], blocks_of(spec))
     stored = dict(request, fixture_index={'cli': fx['index'], 'k': spec['k'], 'doc': fx['doc']})
     files = {name + '.request.json': dumps(stored)}
@@ -833,7 +888,7 @@ def build_compare(metagraph, root, name):
     graph = os.path.join(root, index, 'graph.dbg')
     if not os.path.exists(graph):
         build_index(index, metagraph, root)
-    annotation = os.path.join(root, index, 'annotation.column_coord.annodbg')
+    annotation = annotation_of(index, root)
     r = materialize(request, blocks_of(INDEXES[index]))
     r['strategy']['output']['detail'] = 'graphlet'
     return run_traverse(metagraph, graph, annotation, r)['results'][0]['graphlet']

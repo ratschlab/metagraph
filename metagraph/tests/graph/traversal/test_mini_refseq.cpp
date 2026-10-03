@@ -720,4 +720,70 @@ TEST_F(MiniRefSeq, TrieContractAgainstTheSourceRecords) {
     }
 }
 
+// Stage 3 of DESIGN-traverse-graphlet.md §14.1 on the real index (RowDiff<BRWT> with
+// coordinates, whose reads are budget-aware): budgets swept across their stops — memory
+// stops in both phases (traversal, annotation_decode), work stops — give the same result
+// whatever annotation.batch_kmers is, and every read is charged with its dependency rows
+TEST_F(MiniRefSeq, BudgetAwareReadsDoNotDependOnBatchKmers) {
+    ASSERT_TRUE(oracle_->decode_charged());
+    const std::string seed = query_.substr(0, 120);
+    size_t decode_stops = 0, compared = 0;
+    for (LabelMode mode : { LabelMode::CONSTRAIN, LabelMode::ANNOTATE }) {
+        std::vector<std::pair<uint64_t, uint64_t>> budgets;     // memory bytes, work units
+        for (uint64_t m = uint64_t(1) << 15; m <= (uint64_t(16) << 20); m = m * 3 / 2)
+            budgets.emplace_back(m, 0);
+        for (uint64_t w : { 2000, 20000, 200000, 2000000 })
+            budgets.emplace_back(0, w);
+        for (const auto &[memory, work] : budgets) {
+            std::string reference;
+            for (size_t batch : { 1, 3, 64, 1000 }) {
+                Strategy st;
+                st.label_mode = mode;
+                st.max_extension_bp = 150;
+                st.max_labels_per_node = mode == LabelMode::ANNOTATE ? 64 : st.max_labels_per_node;
+                st.max_memory_bytes = memory;
+                st.max_work_units = work;
+                st.batch_kmers = batch;
+                Seed s;
+                s.sequence = seed;
+                std::ostringstream os;
+                try {
+                    // an oracle per run, as per request: its counters accumulate
+                    LabelOracle oracle(*anno_graph_);
+                    const SeedResult r = traverse_seed(oracle, s, st, LabelChangeCost::forbid());
+                    EXPECT_TRUE(r.account.decode_charged);
+                    os << reduce(r) << "\nwork " << r.account.work_used << " soft "
+                       << r.account.soft_overshoot << " keys " << r.annotation_counters.keys_mapped
+                       << " requested " << r.annotation_counters.rows_requested;
+                    for (const ArmResult &arm : r.arms) {
+                        os << "\narm " << arm.complete_to_bp << " " << arm.work_units;
+                    }
+                    if (r.resource_stop) {
+                        const ResourceStop &q = *r.resource_stop;
+                        os << "\nstop " << q.resource << " " << q.phase << " " << q.at_bp
+                           << " " << q.used << " " << q.demand;
+                        EXPECT_TRUE(std::string(q.phase) == "traversal"
+                                    || (std::string(q.phase) == "annotation_decode"
+                                        && q.resource == ResourceStop::MEMORY));
+                        decode_stops += batch == 64 && std::string(q.phase) == "annotation_decode";
+                    }
+                } catch (const SeedBudgetError &e) {
+                    os << "failed " << e.what() << " " << e.stop().phase << " "
+                       << e.account().work_used << " " << e.account().soft_overshoot;
+                    decode_stops += batch == 64 && std::string(e.stop().phase) == "annotation_decode";
+                }
+                if (reference.empty()) {
+                    reference = os.str();
+                } else {
+                    EXPECT_EQ(reference, os.str()) << to_string(mode) << " memory " << memory
+                                                   << " work " << work << " batch_kmers " << batch;
+                }
+                compared++;
+            }
+        }
+    }
+    EXPECT_GT(compared, 80u);
+    EXPECT_GT(decode_stops, 0u);
+}
+
 } // namespace

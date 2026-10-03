@@ -727,17 +727,53 @@ struct DroppedLabel {
 struct ResourceStop {
     enum Resource { MEMORY, WORK, TIME };
     Resource resource = MEMORY;
-    // traversal | finalisation | serialisation | annotation_decode. Stage 2 stops only
-    // in traversal: finalisation and serialisation are reserved at admission
+    // traversal | finalisation | serialisation | annotation_decode. Finalisation and
+    // serialisation are reserved at admission, so they never stop; annotation_decode: a
+    // budget-aware annotation read (LabelOracle::decode_charged()) did not fit the memory
+    // the request had left (stage 3 of DESIGN-traverse-graphlet.md §14.1) — a level's read
+    // (the level is censored from its first head) or, failing the seed, the seed phase's
+    // or an annotate root's
     const char *phase = "traversal";
     Arm arm = Arm::RIGHT;            // the arm whose head was not admitted
     uint64_t at_bp = 0;              // that head's depth
     double limit = 0;                // 0: none (a hook refused the head)
     double used = 0;                 // accounted when the head was refused
     double demand = 0;               // what admitting it needed (used, for work and time)
-    // a memory refusal injected by WalkerHooks::deny (a test hook) while the budget, if
-    // any, would have admitted the head: the statement must not blame a budget for it
+    // a memory refusal injected by WalkerHooks::deny or deny_decode (test hooks) while the
+    // budget, if any, would have admitted the head or the read: the statement must not blame
+    // a budget for it
     bool injected = false;
+
+    // ---- what did not fit, for the statements of a memory stop (the message, the actions
+    // and the walk_domain they shape; nothing of it is a field of its own on the wire). A stop
+    // must name its true cause: a row that does not fit is not a dictionary or a level's lists
+    // that do not (review of stage 3, F2, F6, F7)
+    enum Cause {
+        HEAD,           // a head's admission (traversal), or the seed's depth-0 state
+        READ_ROW,       // annotation_decode: an annotation row with its row-diff dependency rows
+        LABEL_NAMES,    // traversal: the dictionary labels a level's rows would name first
+        LEVEL_LISTS,    // traversal: the level's own lists left nothing to read its rows with
+    };
+    Cause cause = HEAD;
+    // where the refused read was (READ_ROW, LABEL_NAMES): the seed phase (the derivation's
+    // window or the validation), an annotate root, or a level's fetch
+    enum Where { SEED, DERIVATION, ROOT, LEVEL };
+    Where where = LEVEL;
+    uint64_t left = 0;               // bytes the read had left at the refused row
+    // READ_ROW: the refused row's standalone demand (the bound every returned row is admitted
+    // against); 0 when its read alone was refused, which then needed more than |left|
+    uint64_t row_demand = 0;
+    uint64_t held = 0;               // what was held beside the read (bytes: the account, the
+                                     // level's lists and rows read before it, or the seed phase's)
+    // LABEL_NAMES: the new labels, and what naming them costs; READ_ROW at an annotate ROOT:
+    // the labels already in the dictionary (the other arm's root's), and what the depth-0 state
+    // built before the read holds beyond the fixed state (that root with its labels)
+    uint64_t labels = 0;
+    uint64_t label_bytes = 0;
+    uint64_t index = 0;              // SEED, DERIVATION: the seed k-mer of the refused row
+    // |demand| is the least the seed was seen to need (part of what it needs was not read
+    // because the budget was already exceeded): its statements say "at least"
+    bool lower_bound = false;
 };
 
 // The request's accounts at the end of the seed (memory in modelled bytes)
@@ -765,6 +801,14 @@ struct ResourceAccount {
     // a node's label-state scan, or the seed phase with the roots' rows, which are charged
     // before the first comparison so that the result complete to 0 bp can be delivered
     uint64_t largest_charge = 0;
+    // How the annotation was read under the request's budgets (stage 3 of
+    // DESIGN-traverse-graphlet.md §14.1): |decode_charged| — by the budget-aware decode path
+    // (every dependency row and coordinate tuple charged before it is held, a read that does
+    // not fit refused whole, each row's dependency rows charged as work); |row_diff_uncounted|
+    // — a row-diff annotation without that path, whose dependency rows are neither charged
+    // nor counted. Both false without a budget.
+    bool decode_charged = false;
+    bool row_diff_uncounted = false;
 };
 
 struct SeedResult {
@@ -888,8 +932,28 @@ struct Admission {
  * allocation-denial fixtures of §14 (a denial around a switch, a split and a merge must
  * leave runs, events, splits and paths consistent).
  */
+/**
+ * One charge of a budget-aware annotation read (stage 3 of DESIGN-traverse-graphlet.md §14.1;
+ * annot::matrix::DecodeBudget): where the read is — the seed phase (SEED: the derivation's
+ * rows or the validation's), an annotate root (ROOT), a level's fetch (LEVEL) or the
+ * lookahead (WARM) — the arm and depth, and |ordinal|, which counts the decode charges of the
+ * seed so far, so that a test can deny exactly the n-th one.
+ */
+struct DecodeCharge {
+    enum Where { SEED, ROOT, LEVEL, WARM };
+    Where where = LEVEL;
+    Arm arm = Arm::RIGHT;
+    uint64_t at_bp = 0;
+    uint64_t ordinal = 0;
+};
+
 struct WalkerHooks {
     std::function<bool(const Admission&)> deny;
+    // asked at every charge of a budget-aware annotation read (only on an index whose reads
+    // are budget-aware, and only under a request budget): returning true refuses that charge
+    // as if it had not fit — reported like a refusal of |deny|, as an injected memory stop, in
+    // phase annotation_decode (a lookahead read gives up silently, as on a real refusal)
+    std::function<bool(const DecodeCharge&)> deny_decode;
     // after every level of an arm (its merges and beam done): the arm, the level's depth
     // and the accounted memory total — what a budget must admit to complete that level
     std::function<void(Arm, uint64_t, uint64_t)> level;

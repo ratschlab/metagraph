@@ -21,6 +21,7 @@
 #include "graph/traversal/label_oracle.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
 
@@ -3307,7 +3308,7 @@ TEST(Stage2Review, SeedPhaseIsChargedAsWork) {
     EXPECT_GE(within.resource_stop->used, 180.0);
     check_serialised(within, shortseed, st, oracle, "seed phase within an interval");
 
-    // a long seed, explicit and derived: cut within about one interval
+    // a long seed, explicit and derived: cut within about two intervals
     for (bool derived : { false, true }) {
         const Seed longseed = seed_of(L.substr(0, 35'000), derived ? std::vector<std::string>()
                                                                    : std::vector<std::string> { "A" });
@@ -3318,8 +3319,11 @@ TEST(Stage2Review, SeedPhaseIsChargedAsWork) {
         } catch (const SeedBudgetError &e) {
             EXPECT_EQ(ResourceStop::WORK, e.stop().resource) << what;
             EXPECT_GT(e.stop().used, 50.0) << what;
-            // checked once the interval passed, within one more chunk or row of it
-            EXPECT_LE(e.stop().used, 2.0 * kWorkCheckInterval) << what;
+            // compared every interval and cut at the first comparison that finds it W past the
+            // budget (a seed phase less than W past it is let finish: review of stage 3, F9),
+            // within one more chunk or row of it
+            EXPECT_GE(e.stop().used - 50.0, static_cast<double>(kWorkCheckInterval)) << what;
+            EXPECT_LE(e.stop().used, 2.0 * kWorkCheckInterval + 50 + 64) << what;
             EXPECT_EQ(e.stop().used, static_cast<double>(e.account().work_seed)) << what;
             EXPECT_EQ(derived, e.labels_from_seed()) << what;
         }
@@ -3919,4 +3923,698 @@ TEST(Stage2ReviewRound3, FailedAdmissionStatesTheDictionaryItHeld) {
                 << to_string(mode);
         }
     }
+}
+
+
+/*************** stage 3: the budget-aware annotation reads (§14.1) ***************/
+
+namespace {
+
+// Row-diff budget cases: the dense random graphs of budget_cases() and the switch chain,
+// annotated by the row-diff pipeline (RowDiff<ColumnMajor>, whose reads are budget-aware),
+// under the same strategies; and a trace case on a coordinate row-diff annotation
+std::vector<BudgetCase> rowdiff_budget_cases() {
+    std::vector<BudgetCase> cases;
+    std::vector<DeBruijnGraph::Mode> modes { DeBruijnGraph::BASIC };
+#if ! _PROTEIN_GRAPH
+    modes.push_back(DeBruijnGraph::PRIMARY);
+#endif
+    for (auto mode : modes) {
+        std::vector<std::string> seqs, labels;
+        for (uint32_t i = 0; i < 6; ++i) {
+            seqs.push_back("AAA" + random_seq(14, 11 + i));
+            labels.push_back(std::string(1, "CDECDF"[i]));
+        }
+        std::shared_ptr<graph::AnnotatedDBG> anno
+            = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(3, seqs, labels, mode);
+        const std::string where = "row-diff mode " + std::to_string(mode);
+        LabelChangeCost constant;
+        cases.push_back({ where + " merge", anno, seed_of("AAA", { "C", "D", "E" }),
+                          strategy_of(R"({"bounds": {"max_extension_bp": 7}})") });
+        cases.push_back({ where + " exhaustive", anno, seed_of("AAA", { "C", "D", "E" }),
+                          strategy_of(R"({"exhaustive": true, "bounds": {"max_extension_bp": 6}})") });
+        Strategy sw = strategy_of(R"({"bounds": {"max_extension_bp": 8}, "labels": {"extra": ["E", "F"],
+            "loss_budget": 2, "change_cost": {"model": "constant", "value": 1}},
+            "branching": {"max_label_branches": 1}})", &constant);
+        cases.push_back({ where + " switching", anno, seed_of("AAA", { "C", "D" }), sw, constant });
+        cases.push_back({ where + " annotate", anno, seed_of("AAA"),
+                          strategy_of(R"({"exhaustive": true, "labels": {"mode": "annotate"},
+                                          "bounds": {"max_extension_bp": 5}})") });
+        cases.push_back({ where + " annotate merge", anno, seed_of("AAA"),
+                          strategy_of(R"({"labels": {"mode": "annotate"}, "branching": {"on_reconverge": "merge"},
+                                          "bounds": {"max_extension_bp": 6}})") });
+        cases.push_back({ where + " derived", anno, seed_of("AAA"),
+                          strategy_of(R"({"labels": {"seed_label_kind": "column"},
+                                          "bounds": {"max_extension_bp": 6}})") });
+    }
+    {
+        std::string S, T1, T2, T3, T4;
+        for (uint32_t t = 500; ; t += 5) {
+            S = random_seq(30, t); T1 = random_seq(30, t + 1); T2 = random_seq(30, t + 2);
+            T3 = random_seq(30, t + 3); T4 = random_seq(30, t + 4);
+            if (T3[0] != T4[0])
+                break;
+        }
+        std::shared_ptr<graph::AnnotatedDBG> anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+                11, { S + T1, T1.substr(10) + T2, T2.substr(10) + T3, T2.substr(10) + T4 },
+                { "A", "B", "C", "D" }, DeBruijnGraph::BASIC);
+        LabelChangeCost constant;
+        Strategy st = strategy_of(R"({"direction": "right", "labels": {"extra": ["B", "C", "D"],
+            "change_cost": {"model": "constant", "value": 1}, "loss_budget": 3},
+            "branching": {"max_label_branches": 1}, "bounds": {"max_extension_bp": 80}})", &constant);
+        cases.push_back({ "row-diff switch chain", anno, seed_of(S, { "A" }), st, constant });
+        // the same, by coordinates (TupleRowDiff), traced
+        std::shared_ptr<graph::AnnotatedDBG> coords = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+                11, { S + T1, T1.substr(10) + T2, T2.substr(10) + T3, T2.substr(10) + T4 },
+                { "A", "B", "C", "D" }, DeBruijnGraph::BASIC, true);
+        cases.push_back({ "row-diff coordinates trace", coords, seed_of(S, { "A", "B" }),
+                          strategy_of(R"({"direction": "both", "support": "trace",
+                                          "branching": {"on_reconverge": "keep"},
+                                          "bounds": {"max_extension_bp": 60}})") });
+        cases.push_back({ "row-diff coordinates annotate", coords, seed_of(S),
+                          strategy_of(R"({"labels": {"mode": "annotate", "seed_label_kind": "column"},
+                                          "bounds": {"max_extension_bp": 40}})") });
+    }
+    return cases;
+}
+
+// §14 freeze gate, "a row-diff row whose dependencies are dense but whose result is tiny":
+// along the path P (label A) the node u starts 300 records B0 .. B299, so the node v
+// before it carries A alone while its row-diff successor carries 301 labels — v's row is
+// {A}, read through a diff of 300 entries and the dense rows after it
+struct DenseCase {
+    std::shared_ptr<graph::AnnotatedDBG> anno;
+    std::string P;
+    size_t v = 30;          // v = P[v, v + k), u the k-mer after it
+};
+DenseCase dense_case() {
+    DenseCase c;
+    c.P = random_seq(80, 7000);
+    std::vector<std::string> seqs { c.P }, labels { "A" };
+    for (uint32_t i = 0; i < 300; ++i) {
+        seqs.push_back(c.P.substr(c.v + 1, 11) + random_seq(15, 7100 + i));
+        labels.push_back("B" + std::to_string(i));
+    }
+    c.anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            11, seqs, labels, DeBruijnGraph::BASIC);
+    return c;
+}
+
+// the result as the response states it, wall-clock values apart
+std::string result_text(const SeedResult &r, const Strategy &st) {
+    Json::StreamWriterBuilder w;
+    w["indentation"] = "";
+    return Json::writeString(w, seed_result_to_json(r, st, "full", false));
+}
+
+} // namespace
+
+// W1: a refusal injected at any charge of a budget-aware read. A read of several keys that
+// does not fit is retried in smaller runs, so a refused charge of a multi-key run changes
+// nothing (the result is the unrefused one); a key that does not fit alone is the stop: in
+// the seed phase or at an annotate root it fails the seed (phase annotation_decode), in a
+// level's fetch it censors the level from its first head — the result a valid prefix,
+// consistent and serialisable, its stop stated (Q ... annotation_decode). In the lookahead
+// a refusal changes nothing.
+TEST(GraphletStage3Decode, DecodeDenialLeavesAConsistentPrefix) {
+    size_t seed_failures = 0, level_stops = 0, warm_denials = 0, retried = 0;
+    for (const BudgetCase &c : rowdiff_budget_cases()) {
+        Strategy st = c.st;
+        st.max_memory_bytes = uint64_t(1) << 30;    // never trips: the reads are budget-aware
+        std::vector<DecodeCharge> charges;
+        WalkerHooks record;
+        record.deny_decode = [&](const DecodeCharge &d) { charges.push_back(d); return false; };
+        const SeedResult base = run_case(c, st, &record);
+        ASSERT_FALSE(base.resource_stop) << c.name;
+        ASSERT_TRUE(base.account.decode_charged) << c.name;
+        ASSERT_GT(charges.size(), 0u) << c.name;
+        const std::string base_text = result_text(base, st);
+        const size_t most = 60;
+        LabelOracle oracle(*c.anno);
+        for (size_t s = 0; s < std::min(charges.size(), most); ++s) {
+            const size_t ordinal = charges.size() <= most ? s : s * (charges.size() - 1) / (most - 1);
+            const DecodeCharge &denied = charges[ordinal];
+            const std::string what = c.name + " decode charge #" + std::to_string(ordinal) + " ("
+                                   + std::to_string(denied.where) + " " + to_string(denied.arm)
+                                   + " at " + std::to_string(denied.at_bp) + ")";
+            WalkerHooks deny;
+            deny.deny_decode = [&](const DecodeCharge &d) { return d.ordinal == ordinal; };
+            if (denied.where == DecodeCharge::SEED || denied.where == DecodeCharge::ROOT) {
+                try {
+                    const SeedResult r = run_case(c, st, &deny);
+                    // the run was retried in smaller runs
+                    EXPECT_EQ(base_text, result_text(r, st)) << what;
+                    retried++;
+                } catch (const SeedBudgetError &e) {
+                    EXPECT_STREQ("annotation_decode", e.stop().phase) << what;
+                    EXPECT_TRUE(e.stop().injected) << what;
+                    EXPECT_EQ(ResourceStop::MEMORY, e.stop().resource) << what;
+                    seed_failures++;
+                }
+                continue;
+            }
+            const SeedResult r = run_case(c, st, &deny);
+            if (denied.where == DecodeCharge::WARM) {
+                // the lookahead gives up silently: nothing depends on what it cached
+                EXPECT_EQ(base_text, result_text(r, st)) << what;
+                warm_denials++;
+                continue;
+            }
+            if (!r.resource_stop) {
+                EXPECT_EQ(base_text, result_text(r, st)) << what;
+                retried++;
+                continue;
+            }
+            level_stops++;
+            EXPECT_STREQ("annotation_decode", r.resource_stop->phase) << what;
+            EXPECT_TRUE(r.resource_stop->injected) << what;
+            EXPECT_EQ(denied.arm, r.resource_stop->arm) << what;
+            EXPECT_EQ(denied.at_bp, r.resource_stop->at_bp) << what;
+            const ArmResult &arm = r.arms[static_cast<size_t>(denied.arm)];
+            EXPECT_EQ(ArmResult::TRUNCATED, arm.status) << what;
+            EXPECT_EQ(denied.at_bp, arm.complete_to_bp) << what;
+            for (size_t a = 0; a < 2; ++a) {
+                const ArmResult &ra = r.arms[a];
+                if (!ra.requested)
+                    continue;
+                const std::string at = what + " arm " + to_string(ra.arm);
+                check_bins(ra, at);
+                EXPECT_EQ(walks_upto(base.arms[a], ra.complete_to_bp),
+                          walks_upto(ra, ra.complete_to_bp)) << at;
+                if (&ra != &arm && ra.status != ArmResult::COMPLETE) {
+                    EXPECT_GE(ra.complete_to_bp, denied.at_bp) << at;
+                    EXPECT_LE(ra.complete_to_bp, denied.at_bp + 1) << at;
+                }
+            }
+            const std::string text = check_serialised(r, c.seed, st, oracle, what);
+            EXPECT_NE(std::string::npos, text.find("\nQ locus memory annotation_decode ")) << what;
+            const Json::Value j = seed_result_to_json(r, st, "summary", false);
+            EXPECT_EQ("partial", j["outcome"]["walks"].asString()) << what;
+            EXPECT_EQ("annotation_decode", j["resource_stop"]["phase"].asString()) << what;
+            // an injected refusal names no budget's levers
+            Json::Value only(Json::arrayValue);
+            only.append("continue_from_leaves");
+            EXPECT_EQ(only, j["resource_stop"]["actions"]) << what;
+        }
+    }
+    EXPECT_GT(seed_failures, 20u);
+    EXPECT_GT(level_stops, 100u);
+    EXPECT_GT(warm_denials, 5u);
+    EXPECT_GT(retried, 5u);
+    std::cerr << "decode denials: " << seed_failures << " seed failures, " << level_stops
+              << " level stops, " << warm_denials << " in the lookahead, " << retried
+              << " retried in smaller runs" << std::endl;
+}
+
+// W3, W4: memory and work budgets swept across the stops, with annotation.batch_kmers from 1
+// to 1000: the same result, the same stop (phase, used, remaining, depth) and the same
+// failures, whatever the lookahead decoded
+TEST(GraphletStage3Decode, StopsDoNotDependOnBatchKmers) {
+    size_t compared = 0, decode_stops = 0, decode_failures = 0;
+    for (const BudgetCase &c : rowdiff_budget_cases()) {
+        Strategy big = c.st;
+        big.max_memory_bytes = uint64_t(1) << 30;
+        const SeedResult full = run_case(c, big);
+        const uint64_t peak = full.account.memory_peak;
+        const uint64_t work = full.account.work_used;
+        std::vector<std::pair<uint64_t, uint64_t>> budgets;    // memory, work
+        for (uint64_t m = 8192; m < 8 * peak; m = m * 5 / 4 + 1) budgets.emplace_back(m, 0);
+        for (uint64_t w = 1; w < 2 * work; w = w * 3 / 2 + 1) budgets.emplace_back(0, w);
+        for (const auto &[memory, units] : budgets) {
+            std::string reference;
+            for (size_t batch : { 1, 3, 64, 1000 }) {
+                Strategy st = c.st;
+                st.max_memory_bytes = memory;
+                st.max_work_units = units;
+                st.batch_kmers = batch;
+                std::string text;
+                try {
+                    const SeedResult r = run_case(c, st);
+                    text = result_text(r, st);
+                    if (batch == 64 && r.resource_stop
+                            && std::string(r.resource_stop->phase) == "annotation_decode")
+                        decode_stops++;
+                } catch (const SeedBudgetError &e) {
+                    text = std::string("failed: ") + e.what() + " " + e.stop().phase + " "
+                         + std::to_string(e.stop().used) + " " + std::to_string(e.stop().demand)
+                         + " " + std::to_string(e.account().work_used)
+                         + " " + std::to_string(e.account().soft_overshoot);
+                    if (batch == 64 && std::string(e.stop().phase) == "annotation_decode")
+                        decode_failures++;
+                } catch (const SeedDerivationError &e) {
+                    text = std::string("derivation: ") + e.what();
+                }
+                if (reference.empty()) {
+                    reference = text;
+                } else {
+                    EXPECT_EQ(reference, text) << c.name << " memory " << memory << " work "
+                                               << units << " batch_kmers " << batch;
+                }
+                compared++;
+            }
+        }
+    }
+    EXPECT_GT(compared, 1000u);
+    EXPECT_GT(decode_stops, 5u);
+    EXPECT_GT(decode_failures, 5u);
+}
+
+// W5 (§14 freeze gate), W6, W7: a row whose dependencies are dense but whose result is tiny
+// stops the walk at the level that reads it (partial, phase annotation_decode, complete to
+// that level) under a budget the walk otherwise holds; read in the seed phase — to validate
+// the seed, to derive its labels, or as an annotate root — it fails the seed. The work of a
+// row includes its dependency rows.
+TEST(GraphletStage3Decode, DenseDependenciesTinyResult) {
+    const DenseCase dc = dense_case();
+    LabelOracle oracle(*dc.anno);
+    ASSERT_TRUE(oracle.decode_charged());
+    // the walk: right from P[0, 20) under label A, past v
+    const Seed walk = seed_of(dc.P.substr(0, 20), { "A" });
+    const Strategy base_st = strategy_of(R"({"direction": "right", "bounds": {"max_extension_bp": 40}})");
+    const SeedResult unbudgeted = traverse_seed(oracle, walk, base_st, LabelChangeCost::forbid());
+    EXPECT_EQ(ArmResult::COMPLETE, unbudgeted.arms[static_cast<size_t>(Arm::RIGHT)].status);
+    // v is first read by the level at depth v + 1 - 20 (the successor keys of its heads)
+    const uint64_t v_level = dc.v + 11 - 20;
+    size_t stopped_at_v = 0;
+    uint64_t smallest_complete = 0;
+    for (uint64_t memory = 16384; memory < (uint64_t(4) << 20); memory = memory * 9 / 8 + 1) {
+        Strategy st = base_st;
+        st.max_memory_bytes = memory;
+        SeedResult r;
+        try {
+            r = traverse_seed(oracle, walk, st, LabelChangeCost::forbid());
+        } catch (const SeedBudgetError &) {
+            continue;
+        }
+        if (!r.resource_stop) {
+            if (!smallest_complete)
+                smallest_complete = memory;
+            continue;
+        }
+        if (std::string(r.resource_stop->phase) != "annotation_decode")
+            continue;
+        const ArmResult &arm = r.arms[static_cast<size_t>(Arm::RIGHT)];
+        EXPECT_EQ(arm.complete_to_bp, r.resource_stop->at_bp);
+        EXPECT_EQ(ArmResult::TRUNCATED, arm.status);
+        stopped_at_v += r.resource_stop->at_bp == v_level || r.resource_stop->at_bp == v_level + 1;
+        // the dense rows are read whole only under a budget that holds them: what a stop
+        // leaves is a valid prefix, stated
+        const Json::Value j = seed_result_to_json(r, st, "summary", false);
+        EXPECT_EQ("partial", j["outcome"]["walks"].asString());
+        check_serialised(r, walk, st, oracle, "dense " + std::to_string(memory));
+    }
+    EXPECT_GT(stopped_at_v, 0u) << "no budget stopped the walk at the dense row";
+    ASSERT_GT(smallest_complete, 0u);
+    // the work of the walk counts v's dependency rows (300 entries and more)
+    {
+        Strategy st = base_st;
+        st.max_memory_bytes = smallest_complete;
+        const SeedResult r = traverse_seed(oracle, walk, st, LabelChangeCost::forbid());
+        EXPECT_GT(r.arms[static_cast<size_t>(Arm::RIGHT)].work_units,
+                  unbudgeted.arms[static_cast<size_t>(Arm::RIGHT)].work_units + 300);
+        EXPECT_TRUE(r.account.decode_charged);
+    }
+    // in the seed phase the same read fails the seed, with the seed's levers
+    struct SeedPhase { std::string what; Seed seed; Strategy st; };
+    std::vector<SeedPhase> phases {
+        { "validation", seed_of(dc.P.substr(dc.v - 5, 20), { "A" }), base_st },
+        { "derivation", seed_of(dc.P.substr(dc.v - 5, 20)),
+          strategy_of(R"({"direction": "right", "labels": {"seed_label_kind": "column"},
+                          "bounds": {"max_extension_bp": 40}})") },
+        { "annotate root", seed_of(dc.P.substr(dc.v - 9, 20)),
+          strategy_of(R"({"direction": "right", "labels": {"mode": "annotate"},
+                          "bounds": {"max_extension_bp": 10}})") },
+    };
+    for (const SeedPhase &p : phases) {
+        size_t failed = 0;
+        for (uint64_t memory = 8192; memory < (uint64_t(4) << 20); memory = memory * 9 / 8 + 1) {
+            Strategy st = p.st;
+            st.max_memory_bytes = memory;
+            try {
+                traverse_seed(oracle, p.seed, st, LabelChangeCost::forbid());
+            } catch (const SeedBudgetError &e) {
+                if (std::string(e.stop().phase) != "annotation_decode")
+                    continue;
+                failed++;
+                EXPECT_FALSE(e.stop().injected) << p.what;
+                // what admitting the refused row needed, beside what was held: more than the
+                // budget (review of stage 3, F7: it was the budget plus one byte)
+                EXPECT_GT(e.stop().demand, memory) << p.what;
+                EXPECT_EQ(ResourceStop::READ_ROW, e.stop().cause) << p.what;
+                EXPECT_TRUE(e.account().decode_charged) << p.what;
+            }
+        }
+        EXPECT_GT(failed, 0u) << p.what;
+    }
+}
+
+// The statements a decode stop adds fit the widths the delivery bound prices (kMessage,
+// kEffect), at the widest numbers, and a work stop's on every annotation format
+TEST(GraphletStage3Decode, StatementsFitTheirWidths) {
+    const uint64_t big = std::numeric_limits<uint64_t>::max() / 2;
+    for (bool annotate : { false, true }) {
+        // 0, 1: a level's row (its demand known), injected; 2 .. 4: work stops; 5: a row whose
+        // read alone was refused; 6: the labels a row names (phase traversal); 7: the level's
+        // own lists (phase traversal)
+        for (int variant = 0; variant < 8; ++variant) {
+            SeedResult r;
+            Strategy st;
+            st.label_mode = annotate ? LabelMode::ANNOTATE : LabelMode::CONSTRAIN;
+            st.max_memory_bytes = big & ~((uint64_t(1) << 20) - 1);
+            st.max_work_units = big;
+            ResourceStop q;
+            const bool memory = variant < 2 || variant > 4;
+            q.resource = memory ? ResourceStop::MEMORY : ResourceStop::WORK;
+            q.phase = variant < 2 || variant == 5 ? "annotation_decode" : "traversal";
+            q.cause = variant < 2 || variant == 5 ? ResourceStop::READ_ROW
+                    : variant == 6 ? ResourceStop::LABEL_NAMES
+                    : variant == 7 ? ResourceStop::LEVEL_LISTS : ResourceStop::HEAD;
+            q.row_demand = variant == 5 ? 0 : big;
+            q.left = q.held = q.labels = q.label_bytes = big;
+            q.lower_bound = variant == 5 || variant == 7;
+            q.injected = variant == 1;
+            q.arm = Arm::RIGHT;
+            q.at_bp = big;
+            q.limit = static_cast<double>(st.max_memory_bytes);
+            q.used = 1;
+            q.demand = q.limit + 1;
+            if (q.resource == ResourceStop::WORK) {
+                q.limit = static_cast<double>(big);
+                q.used = q.demand = static_cast<double>(big) * 1.5;
+            }
+            r.resource_stop = q;
+            r.account.decode_charged = variant != 3;
+            r.account.row_diff_uncounted = variant == 3;
+            r.account.largest_charge = big;
+            r.account.soft_overshoot = big;
+            for (ArmResult &arm : r.arms) {
+                arm.status = ArmResult::TRUNCATED;
+                arm.complete_to_bp = big;
+                arm.cap_trigger = CapTrigger{ EndReason::RESOURCE_LIMIT, big, 0, 1, 1, true,
+                                              static_cast<double>(big) };
+            }
+            const Json::Value j = seed_result_to_json(r, st, "summary", false);
+            check_widths(j, 2, "", "variant " + std::to_string(variant));
+            EXPECT_EQ(q.phase, j["resource_stop"]["phase"].asString());
+        }
+    }
+}
+
+
+/********* stage 3, review fixes: true causes, the window, the seed phase *********/
+
+namespace {
+
+// Annotate mode against a row that names many labels with long names: along P (label A) the
+// node u = P[v + 1, v + 12) starts |n| records, each its own column with a name of |name_bytes|
+// bytes, so reading u names n labels whose dictionary entries and delivery cost megabytes
+// while u's row itself (n entries) costs kilobytes
+struct NamesCase {
+    std::shared_ptr<graph::AnnotatedDBG> anno;
+    std::string P;
+    size_t v = 30;
+};
+NamesCase names_case(size_t n = 300, size_t name_bytes = 4000) {
+    NamesCase c;
+    c.P = random_seq(80, 8100);
+    std::vector<std::string> seqs { c.P }, labels { "A" };
+    for (uint32_t i = 0; i < n; ++i) {
+        seqs.push_back(c.P.substr(c.v + 1, 11) + random_seq(15, 8200 + i));
+        labels.push_back("B" + std::to_string(i) + std::string(name_bytes, 'x'));
+    }
+    c.anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            11, seqs, labels, DeBruijnGraph::BASIC);
+    return c;
+}
+
+Json::Value names_request(const NamesCase &c, const std::string &sequence, const std::string &direction,
+                          uint64_t memory_mb, size_t max_labels_per_node) {
+    Json::Value r;
+    Json::Value s;
+    s["seed_id"] = "s";
+    s["sequence"] = sequence;
+    r["seeds"].append(s);
+    r["strategy"] = parse_json(R"({"labels": {"mode": "annotate"}, "output": {"timing": false,
+                                   "detail": "full"}, "bounds": {"max_extension_bp": 30}})");
+    r["strategy"]["direction"] = direction;
+    r["strategy"]["bounds"]["max_memory_mb"] = Json::UInt64(memory_mb);
+    r["strategy"]["labels"]["max_labels_per_node"] = Json::UInt64(max_labels_per_node);
+    return process_traverse_request(r, *c.anno, "");
+}
+
+std::set<std::string> actions_of(const Json::Value &q) {
+    std::set<std::string> out;
+    for (const Json::Value &a : q["actions"]) out.insert(a.asString());
+    return out;
+}
+
+} // namespace
+
+// F2: in annotate mode a level's key whose row fits but whose new dictionary labels do not is
+// a stop by those labels — phase traversal, with the levers that name fewer or cheaper labels —
+// not a row that "needs more than the walk had left"; with fewer labels per node the same
+// budget walks on
+TEST(GraphletStage3Review, LabelsThatDoNotFitAreNotARowStop) {
+    const NamesCase c = names_case();
+    const Json::Value out = names_request(c, c.P.substr(0, 20), "right", 2, 1000);
+    const Json::Value &res = out["results"][0];
+    ASSERT_TRUE(res.isMember("resource_stop")) << res.toStyledString().substr(0, 2000);
+    const Json::Value &q = res["resource_stop"];
+    EXPECT_EQ("traversal", q["phase"].asString());
+    EXPECT_EQ("memory", q["resource"].asString());
+    const std::string message = q["message"].asString();
+    EXPECT_NE(std::string::npos, message.find("new dictionary label(s)")) << message;
+    EXPECT_EQ(std::string::npos, message.find("needs more")) << message;
+    const auto actions = actions_of(q);
+    for (const char *a : { "raise_memory_budget", "use_graphlet", "lower_max_labels_per_node",
+                           "label_constrained_query", "continue_from_leaves" }) {
+        EXPECT_TRUE(actions.count(a)) << a;
+    }
+    EXPECT_FALSE(actions.count("more_selective_seed"));
+    const uint64_t stopped_at = res["arms"]["right"]["complete_to_bp"].asUInt64();
+    EXPECT_GT(stopped_at, 0u);
+    // the lever works: with one label per node the same budget walks past u (where its 300
+    // branches, one new label each, stop it again)
+    const Json::Value fewer = names_request(c, c.P.substr(0, 20), "right", 2, 1)["results"][0];
+    EXPECT_GT(fewer["arms"]["right"]["complete_to_bp"].asUInt64(), stopped_at);
+}
+
+// F7: an annotate root whose row fits but whose labels (with their delivery) do not fails the
+// seed as a depth-0 state — phase traversal, the depth-0 levers, its need stated as a lower
+// bound — not as the row's decoding; use_graphlet and lower_max_labels_per_node turn it into
+// a walk
+TEST(GraphletStage3Review, RootLabelsThatDoNotFitFailAsDepthZero) {
+    const NamesCase c = names_case();
+    // the right root is u
+    const std::string seed = c.P.substr(c.v + 1 - 9, 20);
+    const Json::Value res = names_request(c, seed, "right", 2, 1000)["results"][0];
+    ASSERT_EQ("failed", res["outcome"]["walks"].asString()) << res.toStyledString().substr(0, 2000);
+    const Json::Value &q = res["resource_stop"];
+    EXPECT_EQ("traversal", q["phase"].asString());
+    const std::string error = res["error"].asString();
+    EXPECT_NE(std::string::npos, error.find("does not hold the seed's depth-0 state")) << error;
+    EXPECT_NE(std::string::npos, error.find("need at least")) << error;
+    const auto actions = actions_of(q);
+    for (const char *a : { "raise_memory_budget", "use_graphlet", "lower_max_labels_per_node" }) {
+        EXPECT_TRUE(actions.count(a)) << a;
+    }
+    // observed: at least the labels' bytes (300 names of 4 KB, priced twice and delivered)
+    bool walk_domain = false;
+    for (const Json::Value &l : res["limitations"]) {
+        if (l["kind"].asString() != "walk_domain")
+            continue;
+        walk_domain = true;
+        EXPECT_GE(l["observed"].asUInt64(), 3u);
+        EXPECT_NE(std::string::npos, l["effect"].asString().find("at least"));
+    }
+    EXPECT_TRUE(walk_domain);
+    const Json::Value fewer = names_request(c, seed, "right", 2, 1)["results"][0];
+    EXPECT_NE("failed", fewer["outcome"]["walks"].asString());
+}
+
+// F7, byte by byte: a root's budget-aware read is reported as a decode failure only while the
+// account had room for it; when the depth-0 state built before it (the other arm's root, its
+// labels and reservation) already reached the budget, the seed fails as a depth-0 state whose
+// need is stated as a lower bound
+TEST(GraphletStage3Review, RootReadIsBlamedOnlyWithRoomLeft) {
+    const NamesCase c = names_case(120, 200);
+    LabelOracle oracle(*c.anno);
+    const Seed seed = seed_of(c.P.substr(c.v + 1, 11));     // both roots are u
+    size_t decode = 0, unread = 0, names = 0;
+    for (uint64_t memory = 16384; memory < (uint64_t(8) << 20); memory = memory * 21 / 20 + 1) {
+        Strategy st = strategy_of(R"({"direction": "both", "labels": {"mode": "annotate"},
+                                      "bounds": {"max_extension_bp": 3}})");
+        st.max_labels_per_node = 1000;
+        st.max_memory_bytes = memory;
+        st.delivery = delivery_costs("full", true);
+        try {
+            traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        } catch (const SeedBudgetError &e) {
+            const ResourceStop &q = e.stop();
+            if (std::string(q.phase) == "annotation_decode") {
+                EXPECT_EQ(ResourceStop::ROOT, q.where) << memory;
+                EXPECT_LT(q.used, static_cast<double>(memory)) << memory;
+                EXPECT_GT(q.demand, static_cast<double>(memory)) << memory;
+                decode++;
+            } else if (q.lower_bound) {
+                EXPECT_GT(q.demand, static_cast<double>(memory)) << memory;
+                const std::string what = e.what();
+                unread += what.find("was not read") != std::string::npos;
+                names += what.find("further label(s)") != std::string::npos;
+            }
+        }
+    }
+    EXPECT_GT(unread + names, 0u);
+    std::cerr << "root failures: " << decode << " decode, " << unread << " root not read, "
+              << names << " labels that do not fit" << std::endl;
+}
+
+// F6: a memory stop whose used exceeds the budget states that excess as memory_bound_soft
+// (it was observed as 0: the level's lists were never observed before the read refused), and a
+// level whose own lists leave nothing for its read is stopped by them (phase traversal)
+TEST(GraphletStage3Review, ExcessAtAStopIsObserved) {
+    size_t over = 0, stops = 0;
+    for (const BudgetCase &c : rowdiff_budget_cases()) {
+        Strategy big = c.st;
+        big.max_memory_bytes = uint64_t(1) << 30;
+        const uint64_t peak = run_case(c, big).account.memory_peak;
+        for (uint64_t memory = 8192; memory < 4 * peak; memory = memory * 51 / 50 + 1) {
+            Strategy st = c.st;
+            st.max_memory_bytes = memory;
+            SeedResult r;
+            try {
+                r = run_case(c, st);
+            } catch (const SeedBudgetError &) {
+                continue;
+            }
+            if (!r.resource_stop || r.resource_stop->resource != ResourceStop::MEMORY)
+                continue;
+            stops++;
+            const ResourceStop &q = *r.resource_stop;
+            if (q.cause == ResourceStop::LEVEL_LISTS)
+                EXPECT_STREQ("traversal", q.phase) << c.name << " " << memory;
+            if (q.used > q.limit) {
+                over++;
+                EXPECT_GE(static_cast<double>(r.account.soft_overshoot), q.used - q.limit)
+                    << c.name << " memory " << memory << " cause " << q.cause;
+            }
+        }
+    }
+    EXPECT_GT(stops, 50u);
+    std::cerr << "memory stops: " << stops << ", " << over << " with used above the budget"
+              << std::endl;
+}
+
+// F9: a seed phase that has run past the work budget by less than W when it is compared is
+// let finish, and the walk stops at its first head with a valid result complete to 0 bp (it
+// failed the seed); one that has run past it by W or more fails the seed. The overrun of the
+// result stays within the stretch it states.
+TEST(GraphletStage3Review, SeedPhasePastTheBudgetByLessThanAnIntervalFinishes) {
+    // a long seed whose validation charges between one and two intervals
+    std::string S = random_seq(6000, 8800);
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            11, { S, S.substr(1000, 3000) }, { "A", "B" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    Strategy st = strategy_of(R"({"direction": "right", "bounds": {"max_extension_bp": 10}})");
+    st.max_work_units = uint64_t(1) << 40;
+    size_t len = 0;
+    uint64_t seed_work = 0;
+    for (size_t l = 100; l <= S.size(); l += 10) {
+        const SeedResult r = traverse_seed(oracle, seed_of(S.substr(0, l), { "A" }), st,
+                                           LabelChangeCost::forbid());
+        if (r.account.work_seed > kWorkCheckInterval + 4096
+                && r.account.work_seed + 4096 < 2 * kWorkCheckInterval) {
+            len = l;
+            seed_work = r.account.work_seed;
+            break;
+        }
+    }
+    ASSERT_GT(len, 0u) << "no seed length charges between one and two intervals";
+    const Seed seed = seed_of(S.substr(0, len), { "A" });
+    // compared at about W, over the budget by less than W: let finish
+    st.max_work_units = kWorkCheckInterval - 2048;
+    const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    ASSERT_TRUE(r.resource_stop);
+    EXPECT_EQ(ResourceStop::WORK, r.resource_stop->resource);
+    EXPECT_EQ(0u, r.arms[static_cast<size_t>(Arm::RIGHT)].complete_to_bp);
+    EXPECT_GE(r.account.work_used, seed_work);
+    EXPECT_GE(r.account.largest_charge, r.account.work_used - st.max_work_units);
+    const Json::Value j = seed_result_to_json(r, st, "summary", false);
+    EXPECT_EQ("partial", j["outcome"]["walks"].asString());
+    // compared at about W, over the budget by W or more at the next comparison: failed
+    st.max_work_units = 1;
+    try {
+        const SeedResult r1 = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        // a seed phase that ended before its second comparison is let finish too
+        EXPECT_LT(r1.account.work_seed, 2 * kWorkCheckInterval);
+        EXPECT_EQ(0u, r1.arms[static_cast<size_t>(Arm::RIGHT)].complete_to_bp);
+    } catch (const SeedBudgetError &e) {
+        EXPECT_GE(e.stop().used - 1, static_cast<double>(kWorkCheckInterval));
+    }
+    // a longer seed phase is cut once it has run W past the budget
+    const Seed longer = seed_of(S, { "A" });
+    try {
+        traverse_seed(oracle, longer, st, LabelChangeCost::forbid());
+        FAIL() << "a seed phase far past the budget finished";
+    } catch (const SeedBudgetError &e) {
+        EXPECT_EQ(ResourceStop::WORK, e.stop().resource);
+        EXPECT_GE(e.stop().used - 1, static_cast<double>(kWorkCheckInterval));
+        EXPECT_LT(e.stop().used, 3.0 * kWorkCheckInterval);
+    }
+}
+
+// F3: the derivation holds its window of up to 64 rows at once (to choose the cheapest). Its
+// rows are read in runs and admitted one by one beside the rows before them, and a window that
+// does not fit says so — the refused row's demand, what the seed phase had left and what the
+// window's earlier rows held — instead of claiming that a row read alone needs more than the
+// seed phase had, when each row alone fits easily
+TEST(GraphletStage3Review, DerivationWindowStatesWhatItHolds) {
+    // every k-mer of S[0, 40) occurs in 60 copies of it: rows of 60 coordinates, whose
+    // row-diff paths share the anchors (empty diffs between consecutive k-mers)
+    const std::string S = random_seq(60, 9100);
+    std::string R;
+    for (uint32_t i = 0; i < 60; ++i) {
+        R += S.substr(0, 40) + random_seq(12, 9200 + i);
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            11, { S, R }, { "A", "B" }, DeBruijnGraph::BASIC, true);
+    LabelOracle oracle(*anno);
+    ASSERT_TRUE(oracle.decode_charged());
+    const Seed seed = seed_of(S.substr(0, 40));
+    const Strategy base = strategy_of(R"({"direction": "right", "support": "trace",
+        "branching": {"on_reconverge": "keep"}, "labels": {"seed_label_kind": "column"},
+        "bounds": {"max_extension_bp": 10}})");
+    size_t failures = 0, beside_rows = 0;
+    uint64_t passes_from = 0;
+    for (uint64_t memory = 4096; memory < (uint64_t(4) << 20); memory = memory * 21 / 20 + 1) {
+        Strategy st = base;
+        st.max_memory_bytes = memory;
+        try {
+            traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+            if (!passes_from)
+                passes_from = memory;
+        } catch (const SeedBudgetError &e) {
+            const ResourceStop &q = e.stop();
+            if (q.where != ResourceStop::DERIVATION)
+                continue;
+            failures++;
+            EXPECT_STREQ("annotation_decode", q.phase) << memory;
+            EXPECT_GT(q.demand, static_cast<double>(memory)) << memory;
+            EXPECT_LT(q.index, 30u) << memory;
+            const std::string what = e.what();
+            EXPECT_NE(std::string::npos, what.find("row(s) read before it")) << what;
+            EXPECT_EQ(std::string::npos, what.find("needs more than what the seed phase had left"))
+                << what;
+            if (!q.lower_bound) {
+                EXPECT_GT(q.row_demand, q.left) << memory;
+                // the window's rows read before the refused one were held beside it: the row
+                // alone would have fitted the seed phase's budget
+                if (q.row_demand < memory / 2 && q.held > memory / 2)
+                    beside_rows++;
+            }
+        }
+    }
+    EXPECT_GT(failures, 0u);
+    EXPECT_GT(beside_rows, 0u) << "no window was refused for the rows it held before a row";
+    EXPECT_GT(passes_from, 0u);
 }

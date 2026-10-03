@@ -36,6 +36,8 @@ FIXTURES = {
     'memory_soft': ('full', 'graphlet'),
     'memory_stop': ('graphlet',),
     'memory_stop_full': ('full',),
+    # stage 3 (test_traverse_stage3_decode.py): a stop of a budget-aware annotation read
+    'decode_stop': ('graphlet',),
 }
 
 

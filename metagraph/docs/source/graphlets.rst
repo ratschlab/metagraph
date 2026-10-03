@@ -582,7 +582,14 @@ result is never evidence of absence.
 ``g.resource_stop`` (the ``Q`` record) says where a request budget stopped the walk
 (``bounds.max_memory_mb`` or ``bounds.max_work_units``): the resource, the phase, what
 was requested, used and left, and the actions that would help. The stopped arm's walks
-are partial, and its ``walk_domain`` limitation names the budget as the knob.
+are partial, and its ``walk_domain`` limitation names the budget as the knob. The phase
+is ``annotation_decode`` when, on a row-diff annotation, reading the next level's
+annotation with its row-diff dependency rows did not fit the memory left: such a read is
+refused whole, and the levers are those that read fewer rows (``more_selective_seed``,
+in annotate mode ``label_constrained_query``) -- a smaller radius would not help. In
+annotate mode a row that fits but names more new labels than the memory left holds stops
+in phase ``traversal``, with ``lower_max_labels_per_node`` among its levers; the message
+always says which of the two did not fit.
 
 These budgets bound the backend's walk. The library's own operations have none yet:
 ``compare()``, ``routes()`` and the exports (``to_fasta()``, ``to_gfa()``,

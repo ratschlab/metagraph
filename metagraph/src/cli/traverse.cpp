@@ -698,6 +698,12 @@ static bool ended_by(const ArmResult &arm, EndReason reason) {
                        [&](const PathResult &p) { return p.path_reason == reason; });
 }
 
+// A stop by a budget-aware annotation read that did not fit (stage 3 of
+// DESIGN-traverse-graphlet.md §14.1): its statements name the decoding, its levers the seed
+static bool is_decode_stop(const ResourceStop &q) {
+    return std::string(q.phase) == "annotation_decode";
+}
+
 // Every cap that limited this arm, each emitted only when it did (spec §7.0).
 // With a finite change cost and a finite branch limit, the sources left after a branch-limit
 // exclusion are re-minimised greedily (spec §6.4), so a reported loss can exceed the optimum.
@@ -728,8 +734,26 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
             const bool trigger = r == arm.cap_trigger->reason;
             std::string effect = "every walk of at most complete_to_bp bp is present, longer walks may be "
                                  "missing: ";
+            const bool decode = r == EndReason::RESOURCE_LIMIT && stop && is_decode_stop(*stop);
+            const ResourceStop::Cause cause = r == EndReason::RESOURCE_LIMIT && stop
+                ? stop->cause : ResourceStop::HEAD;
             effect += r == EndReason::BEAM_PRUNED
                 ? "the beam kept the best-supported max_live_paths heads of a level and pruned the rest"
+                : decode && stop->injected
+                ? "an injected refusal of an annotation read (a test hook, not the budget) stopped "
+                  "the exploration there (resource_limit; see resource_stop)"
+                : decode
+                ? "the request's memory budget did not admit decoding the next level's annotation "
+                  "rows with their row-diff dependency rows, and the exploration stopped there "
+                  "(resource_limit; see resource_stop)"
+                : cause == ResourceStop::LABEL_NAMES
+                ? "the request's memory budget did not admit the dictionary labels the next "
+                  "level's annotation rows name first (with their delivery in the requested "
+                  "detail), and the exploration stopped there (resource_limit; see resource_stop)"
+                : cause == ResourceStop::LEVEL_LISTS
+                ? "the next level's key and successor lists, held beside the request's account, "
+                  "left none of the memory budget for its annotation rows, and the exploration "
+                  "stopped there (resource_limit; see resource_stop)"
                 : r == EndReason::RESOURCE_LIMIT && stop && stop->injected
                 ? "an injected allocation refusal (a test hook, not the budget) did not admit the "
                   "next head, and the exploration stopped there (resource_limit; see resource_stop)"
@@ -1236,16 +1260,50 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
             // the output is charged in the requested detail: a graphlet (or no bases)
             // delivers more walk within the same budget. No lever helps against a refusal
             // a test hook injected (C++ callers only): only continuing from the leaves
+            const bool annotate = st.label_mode == LabelMode::ANNOTATE;
+            // A seed-phase read (the derivation's window, the validation) holds annotation
+            // rows, not output: the detail does not change what it needs. An annotate root's
+            // read competes with the account, which holds the other arm's root and its labels
+            // once that was read: the detail and the label cap shrink those (review of stage 3,
+            // F7: they were not offered, and they turn such a failure into a walk)
+            const bool seed_read = failed && q.cause == ResourceStop::READ_ROW
+                && q.where != ResourceStop::ROOT;
+            const bool root_read = failed && q.cause == ResourceStop::READ_ROW
+                && q.where == ResourceStop::ROOT;
+            // the other root's state competes with a root's read when the row (its demand, or
+            // the least its read alone was seen to need) would fit without it
+            const bool competes = root_read && q.label_bytes
+                && q.demand - q.used <= static_cast<double>(q.left + q.label_bytes);
             if (!q.injected) {
                 actions.append("raise_memory_budget");
-                actions.append("use_graphlet");
-                if (st.sequences)
-                    actions.append("drop_sequences");
+                if (!seed_read && !(root_read && !competes)) {
+                    actions.append("use_graphlet");
+                    if (st.sequences)
+                        actions.append("drop_sequences");
+                }
             }
-            // a depth-0 state costs per label at the roots: fewer labels fit. The lever is
-            // the knob that sets them — the derived set's cap, the named list, or (annotate
-            // mode, which permits no set) the cap on a node's recorded list
-            if (failed) {
+            if (q.injected) {
+                // no lever helps against a test hook
+            } else if (q.cause == ResourceStop::READ_ROW) {
+                // A refused annotation read (stage 3): on a row-diff annotation every read
+                // decodes a whole row with its dependency rows, so what reads fewer rows is
+                // the lever — a more selective seed, or in annotate mode (which reads every
+                // node's row) a label-constrained query; naming fewer labels or a smaller
+                // radius does not shrink a row
+                if (competes && q.labels)
+                    actions.append("lower_max_labels_per_node");
+                actions.append("more_selective_seed");
+                if (annotate)
+                    actions.append("label_constrained_query");
+            } else if (q.cause == ResourceStop::LABEL_NAMES) {
+                // the labels a level's rows name first (annotate mode): fewer recorded per node,
+                // or a label-constrained query, which names none
+                actions.append("lower_max_labels_per_node");
+                actions.append("label_constrained_query");
+            } else if (failed) {
+                // a depth-0 state costs per label at the roots: fewer labels fit. The lever
+                // is the knob that sets them — the derived set's cap, the named list, or
+                // (annotate mode, which permits no set) the cap on a node's recorded list
                 actions.append(st.label_mode == LabelMode::ANNOTATE ? "lower_max_labels_per_node"
                                : failed->labels_from_seed() ? "lower_max_seed_labels"
                                                             : "name_fewer_labels");
@@ -1283,6 +1341,59 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                        "exists within the budget, not even one complete to 0 bp)";
         return j;
     }
+    if (q.resource == ResourceStop::MEMORY && q.cause != ResourceStop::HEAD) {
+        // A level's budget-aware annotation read did not fit (stage 3): the level is censored
+        // from its first head, as at a refused head. The message names what did not fit — the
+        // row, the labels it would name first, or the level's own lists — with its bytes
+        // (review of stage 3, F2, F6)
+        const std::string where = std::to_string(q.at_bp) + " bp on the " + to_string(q.arm)
+                                + " arm";
+        const std::string present = "every walk up to each arm's complete_to_bp is present and "
+                                    "the heads not expanded end with resource_limit";
+        std::string message;
+        if (q.injected) {
+            message = "an injected refusal of an annotation read (a test hook, not " + knob
+                    + ": the budget, if any, would have admitted the read) stopped the walk at "
+                    + where + " while decoding annotation: " + present;
+        } else if (q.cause == ResourceStop::LEVEL_LISTS) {
+            message = "the memory budget (" + knob + ") stopped the walk at " + where
+                    + " before it read the next level's annotation: the level's key and "
+                      "successor lists, held until its heads are processed beside the walk's "
+                      "account (" + std::to_string(q.held) + " bytes together), left none of the "
+                    + std::to_string(static_cast<uint64_t>(q.limit)) + " bytes for its rows; "
+                    + present + "; the lists grow with the level's width, the account with the "
+                      "output's detail";
+        } else if (q.cause == ResourceStop::LABEL_NAMES) {
+            message = "the memory budget (" + knob + ") stopped the walk at " + where
+                    + " while reading the next level's annotation: a row that fits ("
+                    + std::to_string(q.row_demand) + " bytes, read alone) names "
+                    + std::to_string(q.labels) + " new dictionary label(s) whose entries, "
+                      "delivery in the requested detail and provisional naming come to "
+                    + std::to_string(q.label_bytes) + " bytes, more than the "
+                    + std::to_string(q.left) + " bytes it had left beside the walk's account, "
+                      "the level's lists and the rows read before it (" + std::to_string(q.held)
+                    + " bytes); " + present + "; labels are named and charged with the rows that "
+                      "first carry them, a refused read names none; a lower "
+                      "labels.max_labels_per_node, detail graphlet or a label-constrained query "
+                      "names fewer or cheaper labels";
+        } else {
+            message = "the memory budget (" + knob + ") stopped the walk at " + where
+                    + " while decoding annotation: a row of the next level read alone with its "
+                      "row-diff dependency rows needs more than the "
+                    + std::to_string(q.left) + " bytes the walk had left beside "
+                      "its account, the level's lists and the rows read before it ("
+                    + std::to_string(q.held) + " bytes); " + present + "; each dependency row and "
+                      "coordinate tuple is charged before it is held, every row a fetch returns is "
+                      "admitted against its standalone demand, and a read that does not fit is "
+                      "refused whole, so the stop does not depend on annotation.batch_kmers; "
+                    + (st.label_mode == LabelMode::ANNOTATE
+                        ? "a more selective seed or a label-constrained query reads fewer rows"
+                        : "a more selective seed reads fewer rows")
+                    + ", a smaller radius does not";
+        }
+        j["message"] = message + "; a continuation from a leaf is a new traversal";
+        return j;
+    }
     // A refusal injected by a test hook (WalkerHooks::deny, C++ callers only) is reported as
     // a memory stop so that it stays representable in Q and K, but no budget refused the
     // head (without one the limit reads "unlimited"), so the message must not say a budget did
@@ -1294,7 +1405,12 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
         + to_string(q.arm) + " arm: every walk up to each arm's complete_to_bp is present and the "
           "heads not expanded end with "
         + (q.resource == ResourceStop::TIME ? "time_budget" : "resource_limit");
-    if (q.resource == ResourceStop::MEMORY && !q.injected) {
+    if (q.resource == ResourceStop::MEMORY && !q.injected && account && account->decode_charged) {
+        message += "; memory is modelled (the walker's state and the output in the "
+                   "requested detail, charged per head; detail graphlet costs the least), "
+                   "annotation reads are charged inside the decoder (what a level's fetch holds "
+                   "until its heads are processed is not: memory_bound_soft)";
+    } else if (q.resource == ResourceStop::MEMORY && !q.injected) {
         message += "; memory is modelled (the walker's state and the output in the "
                    "requested detail, charged per head; detail graphlet costs the least), "
                    "annotation decoding is not charged yet (memory_bound_soft)";
@@ -1314,11 +1430,19 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
             message += " (the most this seed charged between two comparisons: "
                      + std::to_string(account->largest_charge) + " units)";
         }
-        message += ", one indivisible charge: a fetch call's annotation rows, decoded whole "
-                   "with their coordinates (8 units per key, 1 per entry and coordinate; near "
-                   "the budget a call reads one key), a node's label-state scan, or the roots' "
-                   "rows of the arms (with the end of the seed phase, which is cut every "
-                 + std::to_string(kWorkCheckInterval) + " units), charged as one so that the "
+        // with the budget-aware reads a row is charged with its row-diff dependency rows
+        // (stage 3); a row-diff annotation without them says that they are not counted
+        const char *weights = account && account->decode_charged
+            ? "(8 units per key and per dependency row, 1 per entry and coordinate; near the "
+              "budget a call reads one key)"
+            : account && account->row_diff_uncounted
+            ? "(8 units per key, 1 per entry and coordinate, none per dependency row; near the "
+              "budget a call reads one key)"
+            : "(8 units per key, 1 per entry and coordinate; near the budget a call reads one key)";
+        message += std::string(", one indivisible charge: a fetch call's annotation rows, decoded "
+                   "whole with their coordinates ") + weights + ", a node's label-state scan, or "
+                   "the roots' rows of the arms (with the end of the seed phase, cut "
+                 + std::to_string(kWorkCheckInterval) + " units past the budget), charged as one so that the "
                    "result complete to 0 bp is delivered, as wide as the index makes them; work "
                    "bounds the walk, not its delivery: the size of the "
                    "output (and the time to write it) is bounded by bounds.max_memory_mb";
@@ -1328,18 +1452,31 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
     return j;
 }
 
-// memory_bound_soft (§7.0): stated by every response under a memory budget until stage 3
-// charges annotation decoding — a failed seed's too
+// memory_bound_soft (§7.0): stated by every response under a memory budget — a failed
+// seed's too — because something is always held beyond the admitted account. With the
+// budget-aware reads (stage 3, account.decode_charged) the annotation reads are charged
+// before they are held, and the statement names only what is still uncharged; otherwise
+// stage 2's statement, word for word.
 static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &account) {
     return limitation("memory_bound_soft", "bounds.max_memory_mb",
                       uint_json(st.max_memory_bytes >> 20),
                       uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
-                      "the memory budget is enforced on the walker's modelled state and on "
-                      "this response's output, admitted per head; the annotation rows the "
-                      "seed phase and each level decode (with an annotate dictionary's "
-                      "growth and a cache beyond its allotment) are held before they can be "
-                      "charged, so the peak can exceed the budget by them (observed: the "
-                      "excess seen, MiB, rounded up)");
+                      account.decode_charged
+                      ? "the memory budget is enforced on the walker's modelled state, this "
+                        "response's output and the annotation reads (row-diff dependency rows and "
+                        "coordinate tuples are charged before they are held; a read that does not "
+                        "fit is refused whole); what is held beyond the admitted account can "
+                        "exceed the budget by it: a level's keys and fetched rows until its heads "
+                        "are processed, the seed phase's intersection and hits, a failed seed's "
+                        "depth-0 dictionary (observed: the largest excess seen, MiB, rounded up) "
+                        "and, not observed, an index-wide header lookup and the label "
+                        "dictionary's first table and its growth copy (about 1.5 KB)"
+                      : "the memory budget is enforced on the walker's modelled state and on "
+                        "this response's output, admitted per head; the annotation rows the "
+                        "seed phase and each level decode (with an annotate dictionary's "
+                        "growth and a cache beyond its allotment) are held before they can be "
+                        "charged, so the peak can exceed the budget by them (observed: the "
+                        "excess seen, MiB, rounded up)");
 }
 
 Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const std::string &detail, bool timing) {
@@ -3516,7 +3653,8 @@ static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t obser
 // knob instead of parsing the message. |clamped| supplies `server_limit` when the server
 // clamped that knob: raising it beyond the server's value does nothing.
 static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationError &e,
-                                       const Strategy &st, const Json::Value &clamped) {
+                                       const Strategy &st, const Json::Value &clamped,
+                                       bool decode_charged) {
     auto server_limit = [&](const std::string &knob, Json::Value *l) {
         for (const Json::Value &c : clamped) {
             if (c["field"].asString() == knob)
@@ -3615,6 +3753,7 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
         ResourceAccount account;
         account.memory_limit = st.max_memory_bytes;
         account.soft_overshoot = failed_soft(st, seed, e.soft_overshoot());
+        account.decode_charged = decode_charged;
         lims.append(memory_bound_soft(st, account));
     }
     rj["limitations"] = std::move(lims);
@@ -3745,15 +3884,50 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
     rj["seed"] = std::move(sj);
     rj["error"] = e.what();
     Json::Value lims(Json::arrayValue);
-    if (q.resource == ResourceStop::MEMORY) {
+    if (q.resource == ResourceStop::MEMORY && is_decode_stop(q)) {
+        // A seed-phase or root read did not fit (stage 3). Observed: what admitting the refused
+        // row needed — its standalone demand beside what was held — or, where its read alone was
+        // refused, the least it was seen to need (review of stage 3, F7: the budget's MiB plus
+        // one told an agent to raise the budget to a value that failed again)
+        constexpr double kMiB = 1 << 20;
+        const bool root = q.where == ResourceStop::ROOT;
+        lims.append(limitation("walk_domain", "bounds.max_memory_mb",
+                               st.max_memory_bytes ? uint_json(st.max_memory_bytes >> 20)
+                                                   : Json::Value("unlimited"),
+                               uint_json(static_cast<uint64_t>(std::ceil(q.demand / kMiB))),
+                               q.injected
+                               ? "an injected refusal of an annotation read (a test hook, not the "
+                                 "budget) failed the seed before any traversal; no request knob "
+                                 "caused it"
+                               : std::string("the memory budget did not admit reading ")
+                                 + (root ? "an annotate root's annotation row"
+                                         : q.where == ResourceStop::DERIVATION
+                                         ? "the seed's annotation rows to derive its labels (a "
+                                           "window of up to 64 held at once)"
+                                         : "the seed's annotation rows to validate its labels")
+                                 + " with their row-diff dependency rows, so no traversal was made "
+                                   "(observed: what admitting the refused row needed beside what "
+                                   "was held, MiB rounded up"
+                                 + (q.lower_bound ? ", at least: its read alone was refused" : "")
+                                 + "); raise the knob or start from a more selective seed"
+                                 + (root && q.label_bytes
+                                         && q.demand - q.used
+                                                <= static_cast<double>(q.left + q.label_bytes)
+                                     ? "; detail graphlet or a lower labels.max_labels_per_node "
+                                       "shrinks the other root's state it competes with"
+                                     : "")));
+    } else if (q.resource == ResourceStop::MEMORY) {
         constexpr double kMiB = 1 << 20;
         lims.append(limitation("walk_domain", "bounds.max_memory_mb",
                                uint_json(st.max_memory_bytes >> 20),
                                uint_json(static_cast<uint64_t>(std::ceil(q.demand / kMiB))),
-                               "the memory budget does not hold the seed's depth-0 state (its "
+                               std::string("the memory budget does not hold the seed's depth-0 state (its "
                                "label dictionary and both arms' roots, with what ending and "
                                "delivering them costs in the requested detail), so no traversal "
-                               "was made (observed: the MiB it needs, rounded up); raise the knob, "
+                               "was made (observed: the MiB it needs, rounded up")
+                               + (q.lower_bound ? ", at least: a root's row or labels were not "
+                                                  "built once the budget was reached" : "")
+                               + "); raise the knob, "
                                "use detail graphlet, or start from fewer labels (fewer permitted; "
                                "in annotate mode a lower labels.max_labels_per_node)"));
     } else {
@@ -3935,7 +4109,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             // labels, so it had no lever on that and nothing to fix in the request:
             // report it against the seed and keep the other seeds' traversals, instead of
             // discarding a 100-seed batch because seed 57 spans a recombination point.
-            results.append(failed_seed_to_json(seed, e, req.strategy, clamped));
+            results.append(failed_seed_to_json(seed, e, req.strategy, clamped,
+                                               oracle.decode_charged()));
             per_seed(oracle.counters());   // do not bill this seed's reads to the next
         } catch (const SeedBudgetError &e) {
             // a request budget does not hold this seed (§14): failed per seed, like a

@@ -232,7 +232,9 @@ to a header).
   omitted budget is not echoed, so the response to a request without one is what it always was. Memory is the
   modelled bytes the request retains at once: the walker's state, the label caches (a fixed allotment of the
   budget, which they evict within) and the output **in the requested detail** (a graphlet costs the least,
-  `detail: full` spells every path's chain). Work is charged work units (§6.8). Either budget stops the whole
+  `detail: full` spells every path's chain); on an annotation whose reads are budget-aware (§6.8, stage 3 of
+  `DESIGN-traverse-graphlet.md` §14.1) also every annotation read, charged inside the decoder. Work is charged
+  work units (§6.8). Either budget stops the whole
   seed when a head cannot be admitted (§6.8), with `resource_limit`, a `resource_stop` and a `walk_domain`
   limitation (§7.0). Both budgets are **per seed** (the design's *locus* scope): each seed of a request is
   walked under budgets of its own, so that its result does not depend on the other seeds, and a request of n
@@ -619,11 +621,12 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   merging and delivering each of them costs — against the memory budget), **commit** (cannot fail). A head that
   is not admitted is censored exactly like a head beyond a cap (`resource_limit`), and its level does not count
   toward `complete_to_bp`; every admitted prefix can be finished and delivered within what it reserved. The
-  model is deterministic (fixed bytes per object, never a measurement), so a memory stop is reproducible and
-  independent of `annotation.batch_kmers`. Work units are a weighted sum of what the walk did — successor
-  enumerations (4), the annotation rows its fetches return (8 per key, 1 per entry and, under `trace`, 1 per
-  coordinate: a recorded row its whole width), pair evaluations, refusal scans, edge-reuse probes, derivation
-  scans and steps (1 each). A row is charged **when a fetch returns it** (the design's "rows decoded"), whether
+  model is deterministic (fixed bytes per object, never a measurement), so a memory stop, in either phase
+  (`traversal`, `annotation_decode`), is reproducible and independent of `annotation.batch_kmers`. Work units
+  are a weighted sum of what the walk did — successor enumerations (4), the annotation rows its fetches return
+  (8 per key, 1 per entry and, under `trace`, 1 per coordinate: a recorded row its whole width; on a
+  budget-aware annotation each row also its row-diff dependency rows, below), pair evaluations, refusal scans,
+  edge-reuse probes, derivation scans and steps (1 each). A row is charged **when a fetch returns it** (the design's "rows decoded"), whether
   or not a head then consumes it: a level cut mid-way decoded its later rows all the same, and charging only
   consumed rows hid that decoding from the budget and from `used`. A row the lookahead decoded ahead is charged
   when a level's fetch returns it from the cache; a row the lookahead decoded that no fetch asks for (at most
@@ -633,11 +636,13 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   enumeration); the previous comparison passed, so a stop exceeds the budget by at most what was charged since,
   and every work stop's message states the most its seed charged between two comparisons
   (`ResourceAccount::largest_charge`), whatever the charge was: a fetch call's rows, decoded whole with their
-  coordinates (stage 3 of `DESIGN-traverse-graphlet.md` §14.1 makes the decoder interruptible), a node's
+  coordinates (on a budget-aware annotation each with its row-diff dependency rows: near the budget a call reads
+  one key, so the overrun is then one row with its whole dependency path), a node's
   label-state scan (|σ| + |A(v)|), or the seed phase with the roots' rows (both arms' roots belong to the
   result complete to 0 bp, so they are charged before the first comparison). It can exceed `W` on a wide index
   (70,000 records on one k-mer: one row of 70,008 units; with `direction: both`, both roots: 140,016): only the
-  seed phase is cut at `W`, while the roots' rows are one charge as wide as the index makes them. Under a
+  seed phase is cut, once a comparison finds it `W` past the budget, while the roots' rows are one charge as
+  wide as the index makes them. Under a
   request budget a level's annotation is fetched in calls of at most 8,192 keys, sized so that a call holds about
   `W` units at the widest row fetched so far and, under a work budget, no more than the budget has left (down to
   one key near the budget), growing from one key at the start of each level so that rows wider than any fetched
@@ -646,10 +651,11 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   units otherwise; without a request budget a level's fetch is one uninterruptible call, which the deadline can
   run past. The seed phase is charged too (8 per seed k-mer read, 1 per annotation entry and coordinate, as the
   walk charges a fetched row; `account.work_seed` beside each arm's `work_units`), compared once every `W`
-  units: a seed phase that ran past the budget by less than an interval is let finish, so that the stop at the
-  first head delivers a valid result complete to 0 bp (the roots' rows charged after it are the one further
-  charge stated above); a longer one is cut within the interval (plus one fetch
-  call) and fails the seed. The depth-0 state is admitted like a head: a memory budget that does not hold it
+  units of its own work: a comparison that finds it past the budget by less than an interval lets it go on, so
+  that once it ends the stop at the first head delivers a valid result complete to 0 bp (what it charged since
+  the last comparison that passed, with the roots' rows charged after it, is the one further charge stated
+  above, `largest_charge`); a comparison that finds it an interval or more past the budget fails the seed (so a
+  failed seed phase ran past the budget by less than two intervals plus one fetch call). The depth-0 state is admitted like a head: a memory budget that does not hold it
   fails the seed (what its dictionary held is stated, §7.0 `memory_bound_soft`). Every counter
   belongs to the arm whose head did the work. The deadline is never checked at depth 0 (`time_budget_ms: 0`
   still means one level, then the boundary check), and **a level at the radius is never stopped**: its heads
@@ -661,6 +667,62 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   request is traversed, each under its own `time_budget_ms`, and the server bounds a request by
   `--traverse-max-seeds` (§10.3) — and a hard overall deadline, which would have to be enforced while the
   response is serialised and compressed (the walk's deadline stops at the walk; §5, request budgets).
+- **Annotation reads under a budget** (stage 3 of `DESIGN-traverse-graphlet.md` §14.1). On an annotation whose
+  reads are budget-aware — `RowDiff` over BRWT or ColumnMajor, with or without coordinates
+  (`row_diff_brwt`, `row_diff_brwt_coord`, `row_diff`, `row_diff_coord`) — a request with a budget reads its
+  annotation through the decoder's budget-aware path (`IRowDiff::decode_rows` / `decode_row_tuples`); every
+  other read, and every read without a budget, is the default decode, unchanged.
+  - **Work.** A returned row's work also counts its **dependency rows** — every other row on its row-diff path to
+    the anchor: 8 units each and 1 per entry and coordinate they store — whichever read decoded them (a fetch,
+    the lookahead, an earlier level). The weight is a property of the row, kept with it in the caches, so work
+    stays independent of `annotation.batch_kmers`; it is conservative (a batched read shares dependency rows
+    between keys, and the charge does not).
+  - **Memory.** Under a memory budget the decoder charges every buffer before allocating it: the row-diff trace,
+    each dependency row (read alone by the index matrix's single-row descent), each coordinate tuple (its size
+    read from the delimiters before it is copied), the reconstruction's buffers, and what building a row's hits
+    or label list holds beside it. The bytes are a deterministic model (jemalloc's size classes and the
+    containers' growth), never a measurement; the tests check it against jemalloc's own peak. A read is charged
+    against what the request has left — the budget minus the admitted account and what the level's fetch holds
+    beyond it — and one that does not fit is **refused whole**: nothing is returned, and no cache, dictionary or
+    result counter (`annotation.rows_requested`) changes; the physical counters in `timing` (`rows_fetched`,
+    `tuple_rows_fetched`, `coords_mapped`, `annotation_fetch_ms`) count every decode made, a refused read's
+    included. In annotate mode a key's admission also counts the dictionary labels it names first, each priced as
+    the account charges a dictionary label (its entry and its delivery in the requested detail) plus a fixed 640
+    bytes that bound what naming it provisionally holds (one flat table and list per call, their growth
+    included); the names are charged with the dictionary on success, the naming charge stays with the level
+    until its heads are processed, and a refused read names nothing.
+  - **Admission of every returned row.** Every key a fetch returns is admitted against its **standalone
+    demand**, a deterministic upper bound of what reading it alone holds (the decode, building its hits, the
+    result), computed with the row and kept with it in the caches. A key is admitted, cached or not, exactly when
+    its demand fits what is left at its position in the level (the budget minus the account and the rows the
+    level's earlier keys returned), so that where a level stops does not depend on how it is cut into calls nor
+    on what the lookahead cached. Keys are decoded in runs; a run that does not fit is retried in halves, and a
+    key that does not fit alone is the stop.
+  - **What a refusal does.** In a level's fetch it stops the seed like a refused head at the level's first head:
+    every head of the level ends `resource_limit` and the arm is complete to the level's depth. The stop names
+    its cause (§7.0): a row that does not fit what was left (its standalone demand, or its read alone with its
+    dependency rows) stops in phase `annotation_decode`, stated as needing more than the bytes left — whether the
+    exact demand was known depends on what the lookahead had read, so the statement does not give it; in annotate mode a row that fits but whose new dictionary labels do not
+    stops in phase `traversal` (the dictionary is walker state), with the labels' number and bytes; a level whose
+    own key and successor lists, held beside the account, leave none of the budget for its read stops in phase
+    `traversal` too, before reading anything. In the seed phase — the derivation's rows, the validation's — or at
+    an annotate root a row that does not fit fails the seed in phase `annotation_decode` (no result complete to 0
+    bp exists yet). At an annotate root, labels that fit beside the row but not beside the depth-0 state, and a
+    depth-0 state that already reaches the budget before a root's read (the other arm's root, its labels and
+    reservation), fail the seed as a depth-0 state (phase `traversal`), without naming the labels or reading the
+    row, its need stated as a lower bound ("at least"). The lookahead decodes within what is left and gives up
+    silently. Under a request budget the label caches never exceed their allotments, and the
+    structural lookahead is cleared before a chain would push it past its allotment (counted keys: each key the
+    walk consumes once, `annotation.keys_mapped`).
+  - Under a request budget the derivation reads 64 k-mers per sub-batch whatever `annotation.batch_kmers` is,
+    and holds the sub-batch's rows at once (its window, in which it chooses the cheapest row). The window's
+    distinct rows are read in runs, a run that does not fit retried in halves, every row admitted against its
+    standalone demand beside the rows read before it. A window whose rows do not fit together fails the seed,
+    and the statement names the refused row's seed k-mer and demand (or that its read alone did not fit), what
+    the seed phase had left, and what the window's earlier rows held — conservative (each row alone may fit),
+    and stated.
+  Formats without the budget-aware path are read by the default decode under a budget too; what their reads hold
+  is observed, not charged (§7.0, `memory_bound_soft`).
 - **Overflow** (`on_overflow`): `stop` ends the arm's live paths with that reason; `beam` keeps, at the end of each
   level, the `max_live_paths` heads with the most support (`(−|σ|, min loss, path_id)`; in `annotate` mode |σ| is
   the true count recorded at the head node, §6.11), whatever `frontier.order` is, and ends the others with
@@ -879,7 +941,7 @@ is rejected instead (§5).
 | `trace_record_boundaries` | seed | `support: trace` with column labels | `labels.seed_label_kind` (`limit: "column"`) | column labels in the dictionary |
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, or a budget raised from zero (the walk ran under it) | the clamped field | the requested value (`limit` is the effective one) |
-| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment) are held before they can be charged — stage 3 of `DESIGN-traverse-graphlet.md` §14.1 charges them inside the decoder. In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account (the decoded rows, a cache beyond its allotment, the dictionary a fetch grew), MiB rounded up (0: none), observed wherever it is held — after every call of a level's fetch, the roots' rows, the lookahead's warming, the seed phase's rows (each fetch call of the label validation before the first of its charges, which can fail the seed) — and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
+| `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: something is always held beyond the admitted account. **(i) On an annotation whose reads are budget-aware** (§6.8; `ResourceAccount::decode_charged`) the reads are charged inside the decoder, and the statement names only what is still uncharged: a level's key and successor lists and its fetched rows until its heads are processed, the seed phase's intersection and hits, the dictionary a failed seed's depth-0 state built, an index-wide header lookup that the first request needing it builds (not observed: charging it would make a result depend on the server's history), the label dictionary's first table (about 1.5 KB per request) with the transient copy while its list grows (not observed), and a failed seed's echo. **(ii) Other formats**: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment) are held before they can be charged. In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account, MiB rounded up (0: none), observed wherever it is held and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Observed once a level's key and successor lists are built, after every call of a level's fetch (with the call's raw rows in (ii)) and at a refused read (with the rows read before it), at **every head admission** (the account the head needs with the level's lists and fetched rows beside it), after the roots' rows and the lookahead's warming, and over the seed phase's rows and intersection (after each sub-batch is read and again once it is consumed; each fetch call of the label validation before the first of its charges, which can fail the seed). In (ii) the decoder's own transient buffers are not counted (the materialised rows are). Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
 | `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode) | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
 
 ```json
@@ -892,7 +954,8 @@ is rejected instead (§5).
 
 - **A resource stop**, per seed result, when a request budget stopped the walk (and for a time stop only when the
   request set a budget, so that a response without one keeps its form): `resource_stop: {scope: "locus",
-  resource: memory | work | time, phase: "traversal", requested, effective, used, remaining, actions, message}`,
+  resource: memory | work | time, phase: "traversal" | "annotation_decode", requested, effective, used,
+  remaining, actions, message}`,
   the amounts in the knob's unit (MiB — `used` rounded up, `remaining` down —, work units, ms; `requested` is the
   request's value where the server clamped it), `actions` the levers (`raise_memory_budget`, `use_graphlet`,
   `drop_sequences`, `raise_work_budget`, `raise_time_budget`, `continue_from_leaves`; on a seed a budget failed,
@@ -901,13 +964,39 @@ is rejected instead (§5).
   `shorten_seed` for a work budget the seed phase spent). The MGT `Q` record carries
   it (§7.5.2). It is a property of the walk, the same in every detail; a memory stop itself depends on the
   requested detail (the output is charged), so the same request can stop at another depth in another detail.
-  `phase` is always `traversal` in this stage: finalisation and serialisation are reserved at admission. A work
+  `phase` is `annotation_decode` when a budget-aware annotation row did not fit the memory the request had left
+  (§6.8; memory only), and `traversal` otherwise: finalisation and serialisation are reserved at admission. A
+  memory stop names its cause in its message (review of stage 3): **a row** (`annotation_decode`) — its standalone
+  demand, or that its read alone with its row-diff dependency rows did not fit, against what was left beside the
+  account, the level's lists and the rows read before it (a seed-phase failure: beside the seed and what the
+  seed phase held — for the derivation the window's earlier rows; a root's: beside the depth-0 state built so
+  far); **the labels a row names first** (annotate mode, `traversal`): their number and bytes, the row fitting;
+  **the level's own lists** (`traversal`): the key and successor lists that left none of the budget for the
+  level's read. For a refused read `used` is what the walk held (its account and what the level's fetch held
+  beside it), `remaining` the budget minus it, and the `walk_domain`'s `observed` what admitting the refused row
+  needed beside what was held, in MiB rounded up — its demand, or, where its read alone was refused, the least
+  that read was seen to need (the effect then says "at least"); either way more than the budget. The levers of a
+  row read fewer rows: `more_selective_seed`, and in annotate mode `label_constrained_query` (annotate mode reads
+  every node's row); a level stop also offers `raise_memory_budget`, `use_graphlet`, `drop_sequences` (they
+  shrink the account the read competes with) and `continue_from_leaves`; a seed-phase failure
+  `raise_memory_budget` and the levers above (the detail does not change what a seed-phase read needs); an
+  annotate root's the same, plus `use_graphlet`, `drop_sequences` and `lower_max_labels_per_node` when the other
+  arm's root, already in the account, is what the row would fit without. A stop by labels offers
+  `raise_memory_budget`, `use_graphlet`, `drop_sequences`, `lower_max_labels_per_node`, `label_constrained_query`
+  and `continue_from_leaves`; a stop by the level's lists `raise_memory_budget`, `use_graphlet`,
+  `drop_sequences` and `continue_from_leaves`. A depth-0 failure whose root row or labels were not built because
+  the budget was reached (§6.8) states its need, and its `walk_domain` observed, as a lower bound ("at least").
+  `lower_max_seed_labels` and `name_fewer_labels` are not offered for a
+  decode stop: on a row-diff annotation every read decodes a whole row, whatever labels are named. A work
   stop's message states how far `used` can exceed the budget, with its number: at most what was charged since
   the previous comparison, and the most its seed charged between two comparisons (one indivisible charge: a
-  fetch call's rows with their coordinates, a label-state scan, or the roots' rows of the arms with the end of
-  the seed phase, charged as one so that the result complete to 0 bp is delivered; only the seed phase is cut at
-  `W`; §6.8). A refusal injected by the test hook
-  (`WalkerHooks::deny`, C++ callers only) is reported as a memory stop — with `limit` `"unlimited"` when no
+  fetch call's rows with their coordinates — on a budget-aware annotation each with its row-diff dependency rows,
+  and the message gives the weights —, a label-state scan, or the roots' rows of the arms with the end of
+  the seed phase, charged as one so that the result complete to 0 bp is delivered; only the seed phase is cut,
+  `W` past the budget; §6.8); on a row-diff annotation without the budget-aware path it says that dependency
+  rows are not counted. A refusal injected by the test hooks
+  (`WalkerHooks::deny`, and `WalkerHooks::deny_decode` for an annotation read, C++ callers only) is reported as a
+  memory stop — with `limit` `"unlimited"` when no
   budget is set, so that it stays representable in `K` and `Q` — whose message and `walk_domain` effect say that
   the refusal was injected and that no budget caused it, and whose only action is `continue_from_leaves`.
 - **Not limitations:** semantic stops (`dead_end`, `label_lost`, `max_extension_bp`, …) — the requested domain
@@ -1513,8 +1602,10 @@ the server.
   budgets it accepts (`budgets: ["max_memory_mb", "max_work_units"]`), `work_check_interval` (`W` of §6.8, in
   work units), `work_bound` (the sentence of §6.8 saying how far a work stop can exceed its budget: what was
   charged since the previous comparison, one indivisible charge such as a fetch call's rows decoded whole, with
-  each stop's message stating the most its seed charged between two comparisons) and `memory_bound: "soft"` (until stage 3 charges
-  annotation decoding; not in the per-request capabilities, which stay as they were); and the **index identity**
+  each stop's message stating the most its seed charged between two comparisons) and `memory_bound: "soft"` (stage
+  3 charges budget-aware annotation reads, §6.8, but what is held beyond the admitted account is still soft,
+  §7.0 `memory_bound_soft`; the text of this response is unchanged by stage 3; not in the per-request
+  capabilities, which stay as they were); and the **index identity**
   (`DESIGN-traverse-graphlet.md` §3.1), also in every graphlet's `H` record:
   - `index_ns`: `--index-name NAME` (`[A-Za-z0-9._-]+`), a name for humans and routing, not identity; `null`
     when unset.

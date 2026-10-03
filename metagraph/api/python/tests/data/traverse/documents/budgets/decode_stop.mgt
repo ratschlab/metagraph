@@ -1,0 +1,15 @@
+H mgt 1 15 basic $ACGT c k m 64 1000 0 walk fixtures * d24e78923d7113f9
+S 0db0271ec6738626 30 16 1 CCGCGTACAGATCCGAGTGGGCCTGTATCA
+L h 0 0 0 acc_path
+O p c c i
+Q locus memory annotation_decode i:1 i:1 i:1 i:0 raise_memory_budget,use_graphlet,drop_sequences,more_selective_seed,continue_from_leaves the memory budget (bounds.max_memory_mb) stopped the walk at 33 bp on the right arm while decoding annotation: a row of the next level read alone with its row-diff dependency rows needs more than the 107617 bytes the walk had left beside its account, the level's lists and the rows read before it (940959 bytes); every walk up to each arm's complete_to_bp is present and the heads not expanded end with resource_limit; each dependency row and coordinate tuple is charged before it is held, every row a fetch returns is admitted against its standalone demand, and a read that does not fit is refused whole, so the stop does not depend on annotation.batch_kmers; a more selective seed reads fewer rows, a smaller radius does not; a continuation from a leaf is a new traversal
+K * memory_bound_soft bounds.max_memory_mb i:1 i:0 * . the memory budget is enforced on the walker's modelled state, this response's output and the annotation reads (row-diff dependency rows and coordinate tuples are charged before they are held; a read that does not fit is refused whole); what is held beyond the admitted account can exceed the budget by it: a level's keys and fetched rows until its heads are processed, the seed phase's intersection and hits, a failed seed's depth-0 dictionary (observed: the largest excess seen, MiB, rounded up) and, not observed, an index-wide header lookup and the label dictionary's first table and its growth copy (about 1.5 KB)
+K r walk_domain bounds.max_memory_mb i:1 i:2 33 . every walk of at most complete_to_bp bp is present, longer walks may be missing: the request's memory budget did not admit decoding the next level's annotation rows with their row-diff dependency rows, and the exploration stopped there (resource_limit; see resource_stop); raise the knob
+K r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use "keep" for the per-path guarantee
+A r t 33 u 1 1 1 0 0 steps=33,successor_enumerations=34,output_bp=33,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0,work_units=3810 Y,33,0,1,1,1,2 0 * 1 1 1 0 0 33
+B 0 1 1 1 1 33 0 0 0 0 0 0 0 Y:1
+G * 0 33 * * * * * * TGCCTCAACCTGCGCCGCTTTTTCGATCCCTGC
+T Y .
+C 33 0 0 0
+R 0 0 0 33 Y 0 * * 0 0 0
+Z 15
