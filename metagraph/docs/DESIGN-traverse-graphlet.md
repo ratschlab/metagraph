@@ -1,6 +1,6 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.2 (2026-10-02; v5.2 = the owner's conservative outcome rule in §14) — **stage 1 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
+**Status:** v5.3 (2026-10-03; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1 and 2 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
@@ -666,7 +666,11 @@ Frozen with the format (the wire contract): the `O`, `Q`, `K` records and the `A
 stages, each stated in every response until it lands (`limitations` entries): (1) **now** — the existing caps, the
 evidence boundary, stated limitations, the outcome dimensions (being implemented in the JSON); (2) the two-phase
 head commit and lazy paths in the walker; (3) the budget-aware row-diff decode path in the annotation library
-(`memory_bound_soft` until then); (4) the ledger in the search service. The promise at every stage is the same:
+(`memory_bound_soft` until then); (4) the ledger in the search service; and, separately, (L) work and allocation budgets for the local library's
+operations (compare, routes, export; *(v5.3)* not enforced yet, and said so in the library docs — `max_bytes` bounds
+the bytes a tool returns, not its computation or peak allocation; when they land, an interrupted comparison reports
+`unknown` and an interrupted route or export says it is incomplete). Stage 2 is implemented; how its bounds are
+stated is in §19.1. The promise at every stage is the same:
 deliver the largest certified prefix that can be safely committed and delivered, and state the limiting resource and
 the useful next action — the stages only move hard bounds from *stated* to *enforced*.
 
@@ -777,3 +781,67 @@ Per seed result (JSON, every detail level — `full`, `tree`, `summary` and `gra
 2. An extension mechanism (readers ignore unknown records of a reserved form), so later additions need no version
    bump — v1's strict reader rejects unknown records.
 Cut a v2 only when more than one strong reason has accumulated; keep v1 reading.
+
+# 19. Changes in v5.3 (as implemented, after implementation reviews 3 and 4) *(2026-10-03)*
+
+None of these changes the MGT v1 wire format; the spec carries the normative text (§5, §6.8, §7.0, §7.1).
+
+## 19.1 The resource contract as implemented (amends §14)
+
+- **Per seed.** Budgets apply per seed: a request of n seeds can hold n × budget. A seed's stop does not depend on
+  its position in the request.
+- **Work is stated with its number, not a fixed W.** Work is charged when a fetch returns a row ("rows decoded": 8
+  units per key, 1 per entry and per coordinate), plus label-state scans, pair evaluations, edge-reuse probes and
+  enumerations. The budget is compared after every charge, so a stop exceeds it by at most what was charged since
+  the previous comparison. Every work stop states the most its seed charged between two comparisons
+  (`largest_charge`). `W` = 65 536 bounds the seed phase's interval and sizes fetch calls; it is no longer the
+  overrun guarantee. The roots' rows of both arms are one charge, so that a stop still delivers a result complete
+  to 0 bp. Rows the lookahead decodes without a fetch asking for them are not charged, and the spec says so.
+- **Memory.** The account is a deterministic model, never measured RSS. Delivery is priced at worst-case escaped
+  lengths, once per place a name is written. What a fetch, a validation or the depth-0 dictionary holds beyond the
+  account is recorded before any check can stop the walk, and is stated as `memory_bound_soft.observed`.
+  `memory_bound_soft` is stated on every result under a memory budget, failures included. A failed result echoes
+  index-supplied names cut to 256 bytes under a memory budget; the request's own `seed_id` is stated, not cut.
+- **Stops.** A `resource_stop` is created only when a head below the radius was actually censored. A memory bound
+  is not a wall-clock bound, and delivery is not checked against the deadline; a hard overall deadline would need
+  enforcement during delivery (staged).
+- **The header index** (header → column, sequence) belongs to the `CoordToHeader` object and lives as long as it
+  does; there is no address-keyed cache.
+
+## 19.2 Library and tool decisions (amend §5, §5.1, §6; the reviewer's recommendations, adopted)
+
+1. **Annotate claims.** A claim is a maximal end of a label's routes under the union rule of §5.1. Its displayed
+   support starts at the last merge its witness route enters through a non-first parent. The witness is the first
+   carrying parent in stored order. One witness does not enumerate all routes, and does not establish a
+   contiguous occurrence in a source sequence.
+2. **Route stamps.** `R.route_bp` is the earliest non-first-parent merge on the lineage's route (a run closed by a
+   merge of three or more parents may carry `route_bp == to_bp`). The `T` route stamp is the latest entry. Displayed
+   support is `[evidence_from, to_bp)`, derived from the partitions — not `[R.route_bp, to_bp)`.
+3. **Names.** `next_request()` refuses names shared within the retrieval and names containing U+FFFD. A later
+   capability could relax the U+FFFD rule, but only with its provenance saved in the retrieval; a server's
+   capability today cannot vouch for an older body.
+4. **Identity.** With a manifest on one side only, continue and replay refuse with `index_unverifiable` ("cannot
+   be verified, not proven different"). A fallback needs the explicit opt-in `allow_unverified_index` (default
+   off).
+5. **Comparison at a depth.** The DAG is restricted to the comparison depth, and merges at or beyond it are left
+   out (and named). Where that cannot be exact, the result is `qualified`; a side without bases gives `unknown`.
+6. **Continuations.**
+   - The loss budget is reduced by the largest terminal loss among the continued labels. This is conservative:
+     a continuation never accepts a route the uninterrupted walk would refuse, and it says so for the lower-loss
+     labels.
+   - `labels.extra` is rebuilt around the new seed labels.
+   - Continuations that cannot share one request raise an error, with `next_requests()` as the fallback.
+   - Labels alive at a leaf but not seeded are named (`left_out`).
+7. **Tool layer.**
+   - Claims and walks filters both count `merge_entered`.
+   - Every error honours an explicit `max_bytes`; the floor is 64 bytes.
+   - The 16 KiB dry-run ceiling is stated and can be overridden.
+   - A successful export, save or load always keeps its receipt (handle or file locator): optional fields are
+     dropped first.
+   - Local operations have no work budget yet (§14.1, stage L).
+
+## 19.3 Open, for the owner
+
+- Should a continuation reduce `max_label_branches` the way it reduces the loss budget?
+- The server's one-switch reachability rule for extra labels.
+
