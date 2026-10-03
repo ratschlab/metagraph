@@ -579,14 +579,16 @@ A walk is ``complete`` when it lies within ``complete_to_bp`` and was not ended 
 cap; walk 0 was censored by ``max_steps`` at the certified depth. A capped or pruned
 result is never evidence of absence.
 
-``g.resource_stop`` (the ``Q`` record) is reserved for the budgets of later stages of
-the design; no server writes it today.
+``g.resource_stop`` (the ``Q`` record) says where a request budget stopped the walk
+(``bounds.max_memory_mb`` or ``bounds.max_work_units``): the resource, the phase, what
+was requested, used and left, and the actions that would help. The stopped arm's walks
+are partial, and its ``walk_domain`` limitation names the budget as the knob.
 
 .. note::
 
-   ``greedy_losses`` is an arm-level limitation. How the library attributes it to the
-   arm it occurred on is being finalised by a pending fix; none of the committed
-   fixtures has one.
+   ``greedy_losses`` is an arm-level limitation: it is stated on the arm whose heads
+   re-minimised their label sets, since every work counter belongs to the arm whose head
+   did the work.
 
 Every local answer carries the evidence
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -596,7 +598,8 @@ An answer read on its own must not look more certain than the retrieval it came 
 to every result: ``complete_to_bp`` and ``scope`` per arm, ``support`` and
 ``reconverge``, the four outcome dimensions, the kinds of the limitations that apply
 (seed level and per arm; an informational ``scope`` is left out) and ``exact``, which
-holds only when the label evidence is complete *and* no recorded list was cut. In the
+holds for the arm only when its label evidence is complete *and* no recorded list on it
+was cut -- a limitation of the other arm does not make it inexact. In the
 query results, ``Walk.complete``, ``Walk.beyond_certified_bp`` and ``Claim.exact`` carry
 the same information per row.
 
@@ -844,13 +847,11 @@ through the partition that holds the lineage.
 through segments 2 and 5, the second alleles.
 
 In ``annotate`` mode a label's route may pass through any parent of a merge (that is how
-``label_summary()`` measures ``direct_bp``). ``label_walks()`` and ``routes()`` follow
-it there once a pending fix lands; until then they only see the first-parent chains.
-For ``b.fa`` in the ``annotate`` fixture (the same locus, label-free) the intended
-result is its stretch to the radius through the second alleles
-(output regenerated after the pending fixes):
+``label_summary()`` measures ``direct_bp``), and ``claims()``, ``label_walks()`` and
+``routes()`` follow it there too. For ``b.fa`` in the ``annotate`` fixture (the same
+locus, label-free) the result is its stretch to the radius through the second alleles:
 
-.. graphlet-example: annotate-routes pending
+.. graphlet-example: annotate-routes
 
 .. code-block:: python
 
@@ -1057,10 +1058,9 @@ frontier between requests.
 The request names labels, and ``/traverse`` resolves a name to a label. Where the
 graphlet cannot verify that a name resolves back to the same label -- for instance when
 two labels of the retrieval share it -- ``next_request()`` refuses to build the request
-rather than constrain the new traversal to the wrong label (output regenerated after the
-pending fixes):
+rather than constrain the new traversal to the wrong label:
 
-.. graphlet-example: next-request-ambiguous pending
+.. graphlet-example: next-request-ambiguous
 
 .. code-block:: python
 
@@ -1179,10 +1179,9 @@ qualifications in ``notes``; a pair without a common certified depth is ``unknow
    unknown None 0
 
 A retrieval made with ``output.sequences: false`` carries no bases, so walks and claim
-prefixes cannot be matched: such a comparison is ``unknown`` (output regenerated after
-the pending fixes):
+prefixes cannot be matched: such a comparison is ``unknown``:
 
-.. graphlet-example: compare-no-bases pending
+.. graphlet-example: compare-no-bases
 
 .. code-block:: python
 
@@ -1362,9 +1361,9 @@ retrievals behind **opaque handles** (``g_`` and 12 random hex digits):
 
 .. note::
 
-   The RAM budget is enforced on the models' estimated size. How that size is accounted
-   (``memory_bytes()`` and the caches the queries add to a resident model) is being
-   tightened by a pending fix; treat ``max_ram_mb`` as a target until it lands.
+   The RAM budget is enforced on ``memory_bytes()``: every structure a model retains,
+   including the caches its queries add, with shared sets counted once. The store
+   charges a model again when its caches grow, so a query can evict other entries.
 
 .. graphlet-example: store
 
@@ -1468,7 +1467,7 @@ The contract:
    traverse_capabilities, traverse_continue, traverse_fetch, traverse_resolve
    partial {'right': ['scope']}
    0 max_extension_bp 4 2 ACTTAGTTCCTCACTTCACAATAG
-   4 {'route_only': 2} ['a.fa', 'both.fa', 'both.fa', 'both.fa']
+   4 {'merge_entered': 2} ['a.fa', 'both.fa', 'both.fa', 'both.fa']
    3 3 False
    bad_cursor
    unknown_label path_not_allowed
@@ -1539,8 +1538,8 @@ shown::
     python3 metagraph/docs/source/_graphlet_examples/run_examples.py            # check
     python3 metagraph/docs/source/_graphlet_examples/run_examples.py --write    # regenerate
 
-Examples marked *(output regenerated after the pending fixes)* show the intended
-behaviour of library fixes that were not merged when this page was written; the runner
-reports their difference without failing, and ``--write --pending`` replaces their
-output once the fixes are in. The client example runs against a stand-in server that
+An example whose directive carries the flag ``pending`` shows the intended behaviour
+of a library fix that is not merged yet; the runner reports its difference without
+failing, and ``--write --pending`` replaces its output once the fix is in. No example is
+pending today. The client example runs against a stand-in server that
 replays the committed fixture response.
