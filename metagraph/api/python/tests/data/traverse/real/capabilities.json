@@ -1,0 +1,167 @@
+{
+ "mini_refseq": {
+  "alphabet": "$ACGT",
+  "capabilities": {
+   "alphabet": "$ACGT",
+   "content_encodings": [
+    "gzip",
+    "deflate"
+   ],
+   "cost_models_available": [
+    "forbid",
+    "constant",
+    "table"
+   ],
+   "detail_levels": [
+    "summary",
+    "tree",
+    "full",
+    "graphlet"
+   ],
+   "direct_access": false,
+   "graphlet_format": 1,
+   "has_coord_to_header": true,
+   "has_coordinates": true,
+   "index_fp": "bea44d604ffe08d60b348b630b4a35bd0ae0b428615727345ba191228c7ef5e7",
+   "index_meta_fp": "7d99e33ed7315c3d",
+   "index_ns": "mini_refseq",
+   "k": 31,
+   "label_modes": [
+    "constrain",
+    "annotate"
+   ],
+   "max_query_bp": 0,
+   "max_seed_bp": 100000,
+   "max_seed_labels": 10000,
+   "max_seeds": 64,
+   "max_time_ms": 120000.0,
+   "num_labels": 9,
+   "regime": "basic",
+   "release": "",
+   "schema_version": 1,
+   "supports_trace": true
+  },
+  "graphlet_format": 1,
+  "has_coord_to_header": true,
+  "has_coordinates": true,
+  "index_fp": "bea44d604ffe08d60b348b630b4a35bd0ae0b428615727345ba191228c7ef5e7",
+  "index_meta_fp": "7d99e33ed7315c3d",
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "max_time_ms": 120000.0,
+  "num_labels": 9,
+  "regime": "basic",
+  "release": "",
+  "supports_trace": true
+ },
+ "sra": {
+  "alphabet": "$ACGT",
+  "capabilities": {
+   "alphabet": "$ACGT",
+   "content_encodings": [
+    "gzip",
+    "deflate"
+   ],
+   "cost_models_available": [
+    "forbid",
+    "constant",
+    "table"
+   ],
+   "detail_levels": [
+    "summary",
+    "tree",
+    "full",
+    "graphlet"
+   ],
+   "direct_access": false,
+   "graphlet_format": 1,
+   "has_coord_to_header": false,
+   "has_coordinates": false,
+   "index_fp": null,
+   "index_meta_fp": "898ea0b1d22ae707",
+   "index_ns": "sra_primary_small",
+   "k": 31,
+   "label_modes": [
+    "constrain",
+    "annotate"
+   ],
+   "max_query_bp": 0,
+   "max_seed_bp": 100000,
+   "max_seed_labels": 10000,
+   "max_seeds": 64,
+   "max_time_ms": 120000.0,
+   "num_labels": 5184,
+   "regime": "primary",
+   "release": "",
+   "schema_version": 1,
+   "supports_trace": false
+  },
+  "graphlet_format": 1,
+  "has_coord_to_header": false,
+  "has_coordinates": false,
+  "index_fp": null,
+  "index_meta_fp": "898ea0b1d22ae707",
+  "index_ns": "sra_primary_small",
+  "k": 31,
+  "max_time_ms": 120000.0,
+  "num_labels": 5184,
+  "regime": "primary",
+  "release": "",
+  "supports_trace": false
+ },
+ "uhgg": {
+  "alphabet": "$ACGT",
+  "capabilities": {
+   "alphabet": "$ACGT",
+   "content_encodings": [
+    "gzip",
+    "deflate"
+   ],
+   "cost_models_available": [
+    "forbid",
+    "constant",
+    "table"
+   ],
+   "detail_levels": [
+    "summary",
+    "tree",
+    "full",
+    "graphlet"
+   ],
+   "direct_access": false,
+   "graphlet_format": 1,
+   "has_coord_to_header": false,
+   "has_coordinates": false,
+   "index_fp": null,
+   "index_meta_fp": "c6b9e351bb3b286f",
+   "index_ns": "uhgg_k31",
+   "k": 31,
+   "label_modes": [
+    "constrain",
+    "annotate"
+   ],
+   "max_query_bp": 0,
+   "max_seed_bp": 100000,
+   "max_seed_labels": 10000,
+   "max_seeds": 64,
+   "max_time_ms": 120000.0,
+   "num_labels": 4644,
+   "regime": "basic",
+   "release": "",
+   "schema_version": 1,
+   "supports_trace": false
+  },
+  "graphlet_format": 1,
+  "has_coord_to_header": false,
+  "has_coordinates": false,
+  "index_fp": null,
+  "index_meta_fp": "c6b9e351bb3b286f",
+  "index_ns": "uhgg_k31",
+  "k": 31,
+  "max_time_ms": 120000.0,
+  "num_labels": 4644,
+  "regime": "basic",
+  "release": "",
+  "supports_trace": false
+ }
+}

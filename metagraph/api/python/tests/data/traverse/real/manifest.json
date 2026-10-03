@@ -1,0 +1,1931 @@
+{
+ "format": 1,
+ "description": "offline regression fixtures: small real retrievals of the live real-data suite (tests/real) with the /resolve answers their oracle checks need; built by tests/real/offline.py snapshot",
+ "servers": {
+  "mini_refseq": {
+   "index_ns": "mini_refseq",
+   "index_fp": "bea44d604ffe08d60b348b630b4a35bd0ae0b428615727345ba191228c7ef5e7",
+   "index_meta_fp": "7d99e33ed7315c3d",
+   "k": 31,
+   "regime": "basic",
+   "alphabet": "$ACGT",
+   "num_labels": 9,
+   "host": "127.0.0.1",
+   "port": 5703
+  },
+  "sra": {
+   "index_ns": "sra_primary_small",
+   "index_fp": null,
+   "index_meta_fp": "898ea0b1d22ae707",
+   "k": 31,
+   "regime": "primary",
+   "alphabet": "$ACGT",
+   "num_labels": 5184,
+   "host": "127.0.0.1",
+   "port": 5701
+  },
+  "uhgg": {
+   "index_ns": "uhgg_k31",
+   "index_fp": null,
+   "index_meta_fp": "c6b9e351bb3b286f",
+   "k": 31,
+   "regime": "basic",
+   "alphabet": "$ACGT",
+   "num_labels": 4644,
+   "host": "127.0.0.1",
+   "port": 5702
+  }
+ },
+ "cells": {
+  "sra/sra_hub__strict": {
+   "index": "sra",
+   "cell": "sra_hub__strict",
+   "seed": "sra_hub",
+   "seed_kind": "hub",
+   "seed_tier": "core",
+   "seed_order": 12,
+   "seed_length_bp": 50,
+   "seed_n_labels": 508,
+   "strategy": "strict",
+   "tags": [
+    "constrain",
+    "merge"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_hub__strict.request.json.gz",
+    "graphlet": "sra/sra_hub__strict.graphlet.json.gz",
+    "full": "sra/sra_hub__strict.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:40:00",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 5.372,
+    "wire_bytes": 18177,
+    "json_bytes": 84596,
+    "body_bytes": 78302,
+    "lines": 1806
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "partial"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 508,
+     "graphlet_bytes": 78302,
+     "graphlet_lines": 1806,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 83,
+       "leaves": 21,
+       "runs": 508,
+       "max_bp": 1051,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 51,
+       "leaves": 11,
+       "runs": 508,
+       "max_bp": 3948,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 4.06,
+    "wire_bytes": 40940,
+    "json_bytes": 545344
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "primary regime, the default strategy on a 50-mer carried by 508 SRA runs: 508 derived seed labels, merges (united history), runs whose displayed support starts at a merge",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "c_routes",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {}
+   }
+  },
+  "sra/sra_rand50_00__limit1": {
+   "index": "sra",
+   "cell": "sra_rand50_00__limit1",
+   "seed": "sra_rand50_00",
+   "seed_kind": "random",
+   "seed_tier": "core",
+   "seed_order": 2,
+   "seed_length_bp": 50,
+   "seed_n_labels": 35,
+   "strategy": "limit1",
+   "tags": [
+    "constrain",
+    "merge"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_rand50_00__limit1.request.json.gz",
+    "graphlet": "sra/sra_rand50_00__limit1.graphlet.json.gz",
+    "full": "sra/sra_rand50_00__limit1.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:37:14",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 1.524,
+    "wire_bytes": 8708,
+    "json_bytes": 29002,
+    "body_bytes": 24147,
+    "lines": 371
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "partial"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 35,
+     "graphlet_bytes": 24147,
+     "graphlet_lines": 371,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 43,
+       "leaves": 4,
+       "runs": 67,
+       "max_bp": 2739,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 32,
+       "leaves": 3,
+       "runs": 68,
+       "max_bp": 5000,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 3.597,
+    "wire_bytes": 13655,
+    "json_bytes": 108850
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "primary regime, branch limit 1 on a random gut-genome 50-mer: merges, merge-closed (m) runs, and runs cloned at a split that carry their source's route_bp (8 runs that the server fix of 2026-10-03 changed from 0)",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "c_routes",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {}
+   }
+  },
+  "sra/sra_rand50_07__switch1": {
+   "index": "sra",
+   "cell": "sra_rand50_07__switch1",
+   "seed": "sra_rand50_07",
+   "seed_kind": "random",
+   "seed_tier": "bulk",
+   "seed_order": 9,
+   "seed_length_bp": 50,
+   "seed_n_labels": 5,
+   "strategy": "switch1",
+   "tags": [
+    "constrain",
+    "switch"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_rand50_07__switch1.request.json.gz",
+    "graphlet": "sra/sra_rand50_07__switch1.graphlet.json.gz",
+    "full": "sra/sra_rand50_07__switch1.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:39:39",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.063,
+    "wire_bytes": 2858,
+    "json_bytes": 8557,
+    "body_bytes": 3289,
+    "lines": 43
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "lower_bound",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 5,
+     "graphlet_bytes": 3289,
+     "graphlet_lines": 43,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 1,
+       "leaves": 1,
+       "runs": 5,
+       "max_bp": 217,
+       "cap": null,
+       "limitations": [
+        "scope",
+        "greedy_losses"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 1,
+       "leaves": 1,
+       "runs": 6,
+       "max_bp": 320,
+       "cap": null,
+       "limitations": [
+        "scope",
+        "greedy_losses"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.067,
+    "wire_bytes": 3135,
+    "json_bytes": 13569
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "primary regime, one switch (E s on the right arm): a run entered by switch that ends at the loss budget (B), the silent Lw end of its source, a superseded (Ls) end",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
+  "sra/sra_rand50_00__annotate_merge": {
+   "index": "sra",
+   "cell": "sra_rand50_00__annotate_merge",
+   "seed": "sra_rand50_00",
+   "seed_kind": "random",
+   "seed_tier": "core",
+   "seed_order": 2,
+   "seed_length_bp": 50,
+   "seed_n_labels": 35,
+   "strategy": "annotate_merge",
+   "tags": [
+    "annotate",
+    "merge"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_rand50_00__annotate_merge.request.json.gz",
+    "graphlet": "sra/sra_rand50_00__annotate_merge.graphlet.json.gz",
+    "full": "sra/sra_rand50_00__annotate_merge.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:37:28",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.189,
+    "wire_bytes": 5048,
+    "json_bytes": 15258,
+    "body_bytes": 10438,
+    "lines": 424
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "partial"
+     },
+     "label_mode": "annotate",
+     "num_seed_labels": 0,
+     "graphlet_bytes": 10438,
+     "graphlet_lines": 424,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 100,
+       "scope": "united_history",
+       "segments": 57,
+       "leaves": 22,
+       "runs": 0,
+       "max_bp": 100,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 100,
+       "scope": "united_history",
+       "segments": 45,
+       "leaves": 17,
+       "runs": 0,
+       "max_bp": 100,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.227,
+    "wire_bytes": 9804,
+    "json_bytes": 97591
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "primary regime, annotate mode with on_reconverge merge: P runs, merges with one empty partition per parent, the section 5.1 union rule (b_maximal)",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_walks",
+      "b_stretch",
+      "b_maximal",
+      "d_annotate",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {}
+   }
+  },
+  "sra/sra_rand50_00__cut_lists": {
+   "index": "sra",
+   "cell": "sra_rand50_00__cut_lists",
+   "seed": "sra_rand50_00",
+   "seed_kind": "random",
+   "seed_tier": "core",
+   "seed_order": 2,
+   "seed_length_bp": 50,
+   "seed_n_labels": 35,
+   "strategy": "cut_lists",
+   "tags": [
+    "annotate",
+    "cut_lists"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_rand50_00__cut_lists.request.json.gz",
+    "graphlet": "sra/sra_rand50_00__cut_lists.graphlet.json.gz",
+    "full": "sra/sra_rand50_00__cut_lists.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:37:59",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.363,
+    "wire_bytes": 5298,
+    "json_bytes": 23130,
+    "body_bytes": 17333,
+    "lines": 864
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "lower_bound",
+      "walks": "complete"
+     },
+     "label_mode": "annotate",
+     "num_seed_labels": 0,
+     "graphlet_bytes": 17333,
+     "graphlet_lines": 864,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 100,
+       "scope": "per_path",
+       "segments": 98,
+       "leaves": 50,
+       "runs": 0,
+       "max_bp": 100,
+       "cap": null,
+       "limitations": [
+        "label_lists",
+        "inexact_counts"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 100,
+       "scope": "per_path",
+       "segments": 87,
+       "leaves": 44,
+       "runs": 0,
+       "max_bp": 100,
+       "cap": null,
+       "limitations": [
+        "label_lists",
+        "inexact_counts"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.398,
+    "wire_bytes": 11359,
+    "json_bytes": 137491
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "cut lists: annotate with max_labels_per_node 2, label_evidence lower_bound; /resolve confirms each cut list is a subset carrying the true count",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_walks",
+      "b_stretch",
+      "b_maximal",
+      "d_annotate",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {}
+   }
+  },
+  "sra/sra_rand50_01__cut_events": {
+   "index": "sra",
+   "cell": "sra_rand50_01__cut_events",
+   "seed": "sra_rand50_01",
+   "seed_kind": "random",
+   "seed_tier": "core",
+   "seed_order": 3,
+   "seed_length_bp": 50,
+   "seed_n_labels": 2,
+   "strategy": "cut_events",
+   "tags": [
+    "constrain",
+    "cut_events"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_rand50_01__cut_events.request.json.gz",
+    "graphlet": "sra/sra_rand50_01__cut_events.graphlet.json.gz",
+    "full": "sra/sra_rand50_01__cut_events.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:38:43",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.325,
+    "wire_bytes": 3464,
+    "json_bytes": 13086,
+    "body_bytes": 8405,
+    "lines": 295
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "cut",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 2,
+     "graphlet_bytes": 8405,
+     "graphlet_lines": 295,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 150,
+       "scope": "per_path",
+       "segments": 5,
+       "leaves": 3,
+       "runs": 5,
+       "max_bp": 150,
+       "cap": null,
+       "limitations": [
+        "branch_events"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 150,
+       "scope": "per_path",
+       "segments": 85,
+       "leaves": 47,
+       "runs": 47,
+       "max_bp": 150,
+       "cap": null,
+       "limitations": [
+        "branch_events"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.354,
+    "wire_bytes": 6202,
+    "json_bytes": 69869
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "cut evidence: max_branch_events 1, branch_diagnostics cut with a branch_events limitation",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
+  "sra/sra_16s_OK510341__time_tight": {
+   "index": "sra",
+   "cell": "sra_16s_OK510341__time_tight",
+   "seed": "sra_16s_OK510341",
+   "seed_kind": "16s",
+   "seed_tier": "core",
+   "seed_order": 1,
+   "seed_length_bp": 540,
+   "seed_n_labels": 6,
+   "strategy": "time_tight",
+   "tags": [
+    "constrain",
+    "time_budget"
+   ],
+   "deterministic": false,
+   "files": {
+    "request": "sra/sra_16s_OK510341__time_tight.request.json.gz",
+    "graphlet": "sra/sra_16s_OK510341__time_tight.graphlet.json.gz",
+    "full": "sra/sra_16s_OK510341__time_tight.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:37:11",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.204,
+    "wire_bytes": 3177,
+    "json_bytes": 9952,
+    "body_bytes": 5228,
+    "lines": 150
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "partial"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 6,
+     "graphlet_bytes": 5228,
+     "graphlet_lines": 150,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "truncated",
+       "complete_to_bp": 35,
+       "scope": "per_path",
+       "segments": 23,
+       "leaves": 13,
+       "runs": 43,
+       "max_bp": 35,
+       "cap": "time_budget",
+       "limitations": [
+        "walk_domain"
+       ]
+      },
+      "right": {
+       "status": "truncated",
+       "complete_to_bp": 35,
+       "scope": "per_path",
+       "segments": 9,
+       "leaves": 5,
+       "runs": 10,
+       "max_bp": 35,
+       "cap": "time_budget",
+       "limitations": [
+        "walk_domain"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": true,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.223,
+    "wire_bytes": 4523,
+    "json_bytes": 37781
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "a partial, time-budgeted result: time_budget_ms 200 stops both arms (M ends, cap_trigger time_budget), walks partial; the graphlet and the full fetch ran separately, so each is checked on its own",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "full_invariants"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {
+     "invariants": "sra_16s_OK510341__time_tight: not deterministic (the graphlet and the full fetch stopped at different points): full-JSON invariants not comparable",
+     "to_json": "sra_16s_OK510341__time_tight: not deterministic (the graphlet and the full fetch stopped at different points): to_json not comparable",
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
+  "sra/sra_batch3__batch_refuse": {
+   "index": "sra",
+   "cell": "sra_batch3__batch_refuse",
+   "seed": "sra_batch3",
+   "seed_kind": "batch",
+   "seed_tier": "core",
+   "seed_order": 13,
+   "seed_length_bp": null,
+   "seed_n_labels": null,
+   "strategy": "batch_refuse",
+   "tags": [
+    "constrain",
+    "batch",
+    "derivation_error"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_batch3__batch_refuse.request.json.gz",
+    "graphlet": "sra/sra_batch3__batch_refuse.graphlet.json.gz",
+    "full": "sra/sra_batch3__batch_refuse.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:41:23",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.155,
+    "wire_bytes": 3109,
+    "json_bytes": 10745,
+    "body_bytes": 4139,
+    "lines": 110
+   },
+   "n_results": 3,
+   "n_errors": 1,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 2,
+     "graphlet_bytes": 2187,
+     "graphlet_lines": 61,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 100,
+       "scope": "per_path",
+       "segments": 5,
+       "leaves": 3,
+       "runs": 5,
+       "max_bp": 100,
+       "cap": null,
+       "limitations": []
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 100,
+       "scope": "per_path",
+       "segments": 11,
+       "leaves": 6,
+       "runs": 6,
+       "max_bp": 100,
+       "cap": null,
+       "limitations": []
+      }
+     }
+    },
+    {
+     "error": "6 labels carry the seed and max_seed_labels is 3: under `exhaustive` the derived set is not truncated (every walk of a dropped carrier would be missing from the trie); raise labels.max_seed_labels or name the labels"
+    },
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 2,
+     "graphlet_bytes": 1952,
+     "graphlet_lines": 49,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 100,
+       "scope": "per_path",
+       "segments": 7,
+       "leaves": 4,
+       "runs": 5,
+       "max_bp": 100,
+       "cap": null,
+       "limitations": []
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 100,
+       "scope": "per_path",
+       "segments": 3,
+       "leaves": 2,
+       "runs": 3,
+       "max_bp": 100,
+       "cap": null,
+       "limitations": []
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.16,
+    "wire_bytes": 3917,
+    "json_bytes": 28428
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "a 3-seed batch with max_seed_labels 3: the middle seed is refused per seed ({seed, error}, no body), the other two are walked",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
+  "uhgg/uhgg_conserved__limit2": {
+   "index": "uhgg",
+   "cell": "uhgg_conserved__limit2",
+   "seed": "uhgg_conserved",
+   "seed_kind": "conserved",
+   "seed_tier": "core",
+   "seed_order": 12,
+   "seed_length_bp": 100,
+   "seed_n_labels": 7,
+   "strategy": "limit2",
+   "tags": [
+    "constrain",
+    "merge"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "uhgg/uhgg_conserved__limit2.request.json.gz",
+    "graphlet": "uhgg/uhgg_conserved__limit2.graphlet.json.gz",
+    "full": "uhgg/uhgg_conserved__limit2.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:36:54",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.777,
+    "wire_bytes": 16600,
+    "json_bytes": 59095,
+    "body_bytes": 54162,
+    "lines": 439
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "partial"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 7,
+     "graphlet_bytes": 54162,
+     "graphlet_lines": 439,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 101,
+       "leaves": 14,
+       "runs": 22,
+       "max_bp": 5000,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 60,
+       "leaves": 8,
+       "runs": 21,
+       "max_bp": 5000,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.731,
+    "wire_bytes": 23053,
+    "json_bytes": 145408
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "basic regime, a 100 bp window carried by 7 genomes, branch limit 2 with merge: merges, merge-closed runs, routes through non-first parents, 21 split clones carrying their source's route_bp",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "c_routes",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {}
+   }
+  },
+  "uhgg/uhgg_contig_end__annotate_merge": {
+   "index": "uhgg",
+   "cell": "uhgg_contig_end__annotate_merge",
+   "seed": "uhgg_contig_end",
+   "seed_kind": "contig_end",
+   "seed_tier": "core",
+   "seed_order": 11,
+   "seed_length_bp": 100,
+   "seed_n_labels": 6,
+   "strategy": "annotate_merge",
+   "tags": [
+    "annotate",
+    "merge"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "uhgg/uhgg_contig_end__annotate_merge.request.json.gz",
+    "graphlet": "uhgg/uhgg_contig_end__annotate_merge.graphlet.json.gz",
+    "full": "uhgg/uhgg_contig_end__annotate_merge.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:36:45",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.022,
+    "wire_bytes": 3478,
+    "json_bytes": 9972,
+    "body_bytes": 5474,
+    "lines": 182
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "partial"
+     },
+     "label_mode": "annotate",
+     "num_seed_labels": 0,
+     "graphlet_bytes": 5474,
+     "graphlet_lines": 182,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 300,
+       "scope": "united_history",
+       "segments": 42,
+       "leaves": 5,
+       "runs": 0,
+       "max_bp": 300,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 300,
+       "scope": "united_history",
+       "segments": 17,
+       "leaves": 2,
+       "runs": 0,
+       "max_bp": 300,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.025,
+    "wire_bytes": 5272,
+    "json_bytes": 37015
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "basic regime, annotate with merge on the last 100 bp of a contig: the genome labels recorded past the contig end",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_walks",
+      "b_stretch",
+      "b_maximal",
+      "d_annotate",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {}
+   }
+  },
+  "mini_refseq/mini_ndm1__trace": {
+   "index": "mini_refseq",
+   "cell": "mini_ndm1__trace",
+   "seed": "mini_ndm1",
+   "seed_kind": "gene",
+   "seed_tier": "core",
+   "seed_order": 0,
+   "seed_length_bp": 813,
+   "seed_n_labels": 19,
+   "strategy": "trace",
+   "tags": [
+    "constrain",
+    "trace",
+    "keep"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "mini_refseq/mini_ndm1__trace.request.json.gz",
+    "graphlet": "mini_refseq/mini_ndm1__trace.graphlet.json.gz",
+    "full": "mini_refseq/mini_ndm1__trace.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:14:51",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.452,
+    "wire_bytes": 22346,
+    "json_bytes": 88379,
+    "body_bytes": 84186,
+    "lines": 289
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 19,
+     "graphlet_bytes": 84186,
+     "graphlet_lines": 289,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "per_path",
+       "segments": 29,
+       "leaves": 15,
+       "runs": 19,
+       "max_bp": 5000,
+       "cap": null,
+       "limitations": []
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "per_path",
+       "segments": 25,
+       "leaves": 13,
+       "runs": 19,
+       "max_bp": 5000,
+       "cap": null,
+       "limitations": []
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.457,
+    "wire_bytes": 27973,
+    "json_bytes": 158564
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "header (accession) labels from the .seqs sidecar under support trace (coordinate-consecutive), keep; verifiable index identity (index_fp from the manifest); edge-reuse (U) ends",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_walks",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
+  "mini_refseq/mini_ndm1_rc__switch1": {
+   "index": "mini_refseq",
+   "cell": "mini_ndm1_rc__switch1",
+   "seed": "mini_ndm1_rc",
+   "seed_kind": "gene",
+   "seed_tier": "core",
+   "seed_order": 1,
+   "seed_length_bp": 813,
+   "seed_n_labels": 14,
+   "strategy": "switch1",
+   "tags": [
+    "constrain",
+    "switch"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "mini_refseq/mini_ndm1_rc__switch1.request.json.gz",
+    "graphlet": "mini_refseq/mini_ndm1_rc__switch1.graphlet.json.gz",
+    "full": "mini_refseq/mini_ndm1_rc__switch1.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:14:53",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.157,
+    "wire_bytes": 8941,
+    "json_bytes": 31306,
+    "body_bytes": 25848,
+    "lines": 174
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "lower_bound",
+      "walks": "partial"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 14,
+     "graphlet_bytes": 25848,
+     "graphlet_lines": 174,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 32,
+       "leaves": 12,
+       "runs": 18,
+       "max_bp": 5000,
+       "cap": null,
+       "limitations": [
+        "scope",
+        "greedy_losses"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 1,
+       "leaves": 1,
+       "runs": 14,
+       "max_bp": 44,
+       "cap": null,
+       "limitations": [
+        "scope",
+        "greedy_losses"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.204,
+    "wire_bytes": 11655,
+    "json_bytes": 65190
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "the reverse complement of blaNDM-1 in a basic graph (the other strand): switches between header labels, routes through merges",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "c_routes",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {}
+   }
+  },
+  "mini_refseq/mini_ndm1__annotate_exh": {
+   "index": "mini_refseq",
+   "cell": "mini_ndm1__annotate_exh",
+   "seed": "mini_ndm1",
+   "seed_kind": "gene",
+   "seed_tier": "core",
+   "seed_order": 0,
+   "seed_length_bp": 813,
+   "seed_n_labels": 19,
+   "strategy": "annotate_exh",
+   "tags": [
+    "annotate",
+    "keep",
+    "exhaustive"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "mini_refseq/mini_ndm1__annotate_exh.request.json.gz",
+    "graphlet": "mini_refseq/mini_ndm1__annotate_exh.graphlet.json.gz",
+    "full": "mini_refseq/mini_ndm1__annotate_exh.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T01:14:48",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.032,
+    "wire_bytes": 4476,
+    "json_bytes": 12380,
+    "body_bytes": 8389,
+    "lines": 226
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "complete"
+     },
+     "label_mode": "annotate",
+     "num_seed_labels": 0,
+     "graphlet_bytes": 8389,
+     "graphlet_lines": 226,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 300,
+       "scope": "per_path",
+       "segments": 46,
+       "leaves": 24,
+       "runs": 0,
+       "max_bp": 300,
+       "cap": null,
+       "limitations": []
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 300,
+       "scope": "per_path",
+       "segments": 3,
+       "leaves": 2,
+       "runs": 0,
+       "max_bp": 300,
+       "cap": null,
+       "limitations": []
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.035,
+    "wire_bytes": 6922,
+    "json_bytes": 52957
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "annotate exhaustive on header labels: the recorded sets against /resolve discover (kind header)",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_walks",
+      "b_stretch",
+      "b_maximal",
+      "d_annotate",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {}
+   }
+  },
+  "sra/sra_hairpin__left_only": {
+   "index": "sra",
+   "cell": "sra_hairpin__left_only",
+   "seed": "sra_hairpin",
+   "seed_kind": "hairpin",
+   "seed_tier": "core",
+   "seed_order": 100,
+   "seed_length_bp": 50,
+   "seed_n_labels": 977,
+   "strategy": "left_only",
+   "tags": [
+    "constrain",
+    "direction"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_hairpin__left_only.request.json.gz",
+    "graphlet": "sra/sra_hairpin__left_only.graphlet.json.gz",
+    "full": "sra/sra_hairpin__left_only.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T04:02:35",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.195,
+    "wire_bytes": 16096,
+    "json_bytes": 86412,
+    "body_bytes": 80896,
+    "lines": 1971
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 977,
+     "graphlet_bytes": 80896,
+     "graphlet_lines": 1971,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 1,
+       "leaves": 1,
+       "runs": 977,
+       "max_bp": 8,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.224,
+    "wire_bytes": 35282,
+    "json_bytes": 597958
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "primary regime, a skipped hairpin (E h .. s) and its dead_end/hairpin (Dh) run ends, on a 50-mer cut 8 bp before the first hairpin of the 2.6 MB body sra_16s_PZ326290__beam20 (a poly-A/poly-T run)",
+   "derived": {
+    "seed": "sra_hairpin",
+    "strategy": "left_only",
+    "strategy_doc": "strict, direction left",
+    "seed_source": {
+     "derived_from": "sra/sra_16s_PZ326290__beam20",
+     "arm": "left",
+     "segment": 6559,
+     "hairpin_at_bp": 158,
+     "molecule_bp": 1554,
+     "start": 8,
+     "end": 58
+    }
+   },
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
+  "sra/sra_hairpin__left_only_follow": {
+   "index": "sra",
+   "cell": "sra_hairpin__left_only_follow",
+   "seed": "sra_hairpin",
+   "seed_kind": "hairpin",
+   "seed_tier": "core",
+   "seed_order": 101,
+   "seed_length_bp": 50,
+   "seed_n_labels": 977,
+   "strategy": "left_only_follow",
+   "tags": [
+    "constrain",
+    "direction",
+    "hairpin_follow"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "sra/sra_hairpin__left_only_follow.request.json.gz",
+    "graphlet": "sra/sra_hairpin__left_only_follow.graphlet.json.gz",
+    "full": "sra/sra_hairpin__left_only_follow.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T04:02:40",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.286,
+    "wire_bytes": 16142,
+    "json_bytes": 86956,
+    "body_bytes": 81404,
+    "lines": 1973
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 977,
+     "graphlet_bytes": 81404,
+     "graphlet_lines": 1973,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "united_history",
+       "segments": 1,
+       "leaves": 1,
+       "runs": 977,
+       "max_bp": 28,
+       "cap": null,
+       "limitations": [
+        "scope"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.309,
+    "wire_bytes": 34455,
+    "json_bytes": 590810
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "primary regime, the same seed with hairpins: follow: the followed hairpin (E h .. f), the reverse-complement retrace ending edge_reuse_rc (V)",
+   "derived": {
+    "seed": "sra_hairpin",
+    "strategy": "left_only_follow",
+    "strategy_doc": "strict, direction left, branching.hairpins follow (a followed hairpin: the reverse-complement retrace ends edge_reuse_rc)",
+    "seed_source": {
+     "derived_from": "sra/sra_16s_PZ326290__beam20",
+     "arm": "left",
+     "segment": 6559,
+     "hairpin_at_bp": 158,
+     "molecule_bp": 1554,
+     "start": 8,
+     "end": 58
+    }
+   },
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_lost",
+      "b_walks",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
+  "uhgg/uhgg_contig_end__switch1_limit1_keep": {
+   "index": "uhgg",
+   "cell": "uhgg_contig_end__switch1_limit1_keep",
+   "seed": "uhgg_contig_end",
+   "seed_kind": "contig_end",
+   "seed_tier": "core",
+   "seed_order": 102,
+   "seed_length_bp": 100,
+   "seed_n_labels": 6,
+   "strategy": "switch1_limit1_keep",
+   "tags": [
+    "constrain",
+    "switch",
+    "keep"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "uhgg/uhgg_contig_end__switch1_limit1_keep.request.json.gz",
+    "graphlet": "uhgg/uhgg_contig_end__switch1_limit1_keep.graphlet.json.gz",
+    "full": "uhgg/uhgg_contig_end__switch1_limit1_keep.full.json.gz"
+   },
+   "fetched_at": "2026-10-03T04:02:41",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.361,
+    "wire_bytes": 10998,
+    "json_bytes": 86039,
+    "body_bytes": 80269,
+    "lines": 601
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "cut",
+      "delivery": "inline",
+      "label_evidence": "lower_bound",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 6,
+     "graphlet_bytes": 80269,
+     "graphlet_lines": 601,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "per_path",
+       "segments": 23,
+       "leaves": 12,
+       "runs": 13,
+       "max_bp": 5000,
+       "cap": null,
+       "limitations": [
+        "branch_events",
+        "greedy_losses"
+       ]
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 5000,
+       "scope": "per_path",
+       "segments": 18,
+       "leaves": 10,
+       "runs": 12,
+       "max_bp": 5000,
+       "cap": null,
+       "limitations": [
+        "branch_events",
+        "greedy_losses"
+       ]
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.369,
+    "wire_bytes": 14460,
+    "json_bytes": 175766
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "basic regime, the last 100 bp of contig MGYG000000041_1 with one switch allowed (the genome that continues past the contig end as labels.extra), branch limit 1, keep: the lineages switch into that genome past the end",
+   "derived": {
+    "seed": "uhgg_contig_end",
+    "strategy": "switch1_limit1_keep",
+    "strategy_doc": "switch1 (constant cost 1, loss budget 1, labels.extra = the seed's switch targets) with branch limit 1 and on_reconverge keep",
+    "seed_source": {
+     "file": "MGYG000000041.fna",
+     "record": "MGYG000000041_1",
+     "start": 313082,
+     "end": 313182
+    }
+   },
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_walks",
+      "e_direct",
+      "e_library"
+     ]
+    },
+    "skipped": {
+     "b_lost": "no label_lost / switch end inside a segment",
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  }
+ }
+}
