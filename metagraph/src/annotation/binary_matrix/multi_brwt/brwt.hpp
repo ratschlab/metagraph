@@ -8,6 +8,7 @@
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/range_partition.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 
 
 namespace mtg {
@@ -41,6 +42,17 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,
                    bool show_progress = common::get_verbose()) const;
 
+    // The budget-aware decode path (decode_budget.hpp): the set bits of ONE row appended
+    // to |scratch| (unsorted, in the order slice_rows() produces them), with their column
+    // ranks for row_column_ranks(), by a depth-first descent that allocates nothing but
+    // the scratch's growth, each growth charged to |budget| before it happens. false: a
+    // growth did not fit (|scratch| keeps what was appended before). Visited in ascending
+    // row order this runs at the speed of the batched get_rows(): the descent touches the
+    // same bit vectors, and needs no per-batch index vectors.
+    bool row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const;
+    bool row_column_ranks(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
+                          DecodeBudget &budget) const;
+
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
@@ -55,6 +67,9 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
     void print_tree_structure(std::ostream &os) const;
 
   private:
+    template <typename T>
+    bool descend_row(Row row, ChargedBuffer<T> *scratch, DecodeBudget &budget) const;
+
     // breadth-first traversal
     void BFT(std::function<void(const BRWT &node)> callback) const;
     // get all selected rows appended with -1 and concatenated

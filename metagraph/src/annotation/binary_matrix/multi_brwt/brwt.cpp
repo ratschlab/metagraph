@@ -195,6 +195,54 @@ std::vector<ColRanks> BRWT::get_column_ranks(const std::vector<Row>& row_ids,
     return result;
 }
 
+// One row by a depth-first descent (the budget-aware decode path): at a leaf the row's
+// bit (with its rank for column ranks), at an inner node the rank of the row maps it into
+// every child, whose columns are then mapped through the assignments, child by child —
+// the order slice_rows() produces. The recursion holds one frame per level of the tree.
+template <typename T>
+bool BRWT::descend_row(Row row, ChargedBuffer<T> *scratch, DecodeBudget &budget) const {
+    assert(row < num_rows());
+    if (child_nodes_.empty()) {
+        if constexpr(utils::is_pair_v<T>) {
+            if (uint64_t rank = nonzero_rows_->conditional_rank1(row)) {
+                if (!scratch->reserve_one(budget))
+                    return false;
+                // only a single column is stored in leaves
+                scratch->data.emplace_back(0, rank);
+            }
+        } else {
+            if ((*nonzero_rows_)[row]) {
+                if (!scratch->reserve_one(budget))
+                    return false;
+                scratch->data.push_back(0);
+            }
+        }
+        return true;
+    }
+    const uint64_t rank = nonzero_rows_->conditional_rank1(row);
+    if (!rank)
+        return true;
+    for (size_t j = 0; j < child_nodes_.size(); ++j) {
+        const size_t offset = scratch->data.size();
+        if (!child_nodes_[j]->descend_row<T>(rank - 1, scratch, budget))
+            return false;
+        for (size_t i = offset; i < scratch->data.size(); ++i) {
+            auto &col = utils::get_first(scratch->data[i]);
+            col = assignments_.get(j, col);
+        }
+    }
+    return true;
+}
+
+bool BRWT::row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const {
+    return descend_row<Column>(row, scratch, budget);
+}
+
+bool BRWT::row_column_ranks(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
+                            DecodeBudget &budget) const {
+    return descend_row<std::pair<Column, uint64_t>>(row, scratch, budget);
+}
+
 // Returns a pair (`nonzero_indices`, `child_row_ids`): indices into `row_ids` for
 // the rows with the set bit in `nonzero_rows_`, and their recalculated
 // (via rank) row indices for the respective rows in the children.

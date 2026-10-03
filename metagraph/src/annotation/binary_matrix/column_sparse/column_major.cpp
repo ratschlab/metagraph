@@ -66,6 +66,34 @@ ColumnMajor::get_column_ranks(const std::vector<Row> &rows, size_t num_threads) 
     });
 }
 
+bool ColumnMajor::row_columns(Row row, ChargedBuffer<Column> *scratch,
+                              DecodeBudget &budget) const {
+    for (size_t j = 0; j < columns_.size(); ++j) {
+        assert(columns_[j]);
+        assert(row < columns_[j]->size());
+        if ((*columns_[j])[row]) {
+            if (!scratch->reserve_one(budget))
+                return false;
+            scratch->data.push_back(j);
+        }
+    }
+    return true;
+}
+
+bool ColumnMajor::row_column_ranks(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
+                                   DecodeBudget &budget) const {
+    for (size_t j = 0; j < columns_.size(); ++j) {
+        assert(columns_[j]);
+        assert(row < columns_[j]->size());
+        if (uint64_t r = columns_[j]->conditional_rank1(row)) {
+            if (!scratch->reserve_one(budget))
+                return false;
+            scratch->data.emplace_back(j, r);
+        }
+    }
+    return true;
+}
+
 void ColumnMajor::call_columns(const std::vector<Column> &columns,
                                const std::function<void(size_t, const bitmap&)> &callback,
                                size_t num_threads) const {

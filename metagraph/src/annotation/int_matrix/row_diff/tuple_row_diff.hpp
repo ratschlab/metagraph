@@ -56,12 +56,109 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
 
     const BinaryMatrix& get_binary_matrix() const override { return *this; }
 
+    // the budget-aware decode path (IRowDiff), over TupleCSCMatrix<BRWT | ColumnMajor>;
+    // decode_rows() decodes the tuples and keeps their columns, as get_rows() does
+    bool supports_budgeted_decode() const override { return HasRowTuples<BaseMatrix>::value; }
+    DecodeStatus decode_rows(const std::vector<Row> &rows, DecodeBudget &budget,
+                             std::vector<SetBitPositions> *out, std::vector<RowCost> *costs,
+                             std::vector<uint64_t> *held) const override;
+    DecodeStatus decode_row_tuples(const std::vector<Row> &rows, DecodeBudget &budget,
+                                   std::vector<RowTuples> *out, std::vector<RowCost> *costs,
+                                   std::vector<uint64_t> *held) const override;
+
   private:
     static void decode_diffs(RowTuples *diffs);
     static void add_diff(const RowTuples &diff, RowTuples *row);
 
     BaseMatrix diffs_;
 };
+
+// The stored rows of a coordinate row-diff matrix for the budget-aware decode path: the
+// tuple matrix's single-row read (TupleCSCMatrix::row_tuples), which charges each tuple
+// before its coordinates are copied
+template <class BaseMatrix>
+class BudgetedTupleFetcher : public RowFetcher<MultiIntMatrix::RowTuples> {
+  public:
+    using ColRank = std::pair<BinaryMatrix::Column, uint64_t>;
+
+    explicit BudgetedTupleFetcher(const BaseMatrix &matrix) : matrix_(matrix) {}
+
+    bool fetch(BinaryMatrix::Row r, MultiIntMatrix::RowTuples *row, uint64_t *bytes,
+               DecodeBudget &budget) override {
+        return matrix_.row_tuples(r, &scratch_, row, bytes, budget);
+    }
+    uint64_t scratch_charged() const override { return scratch_.charged(); }
+    uint64_t scratch_peak(uint64_t entries) const override {
+        return ChargedBuffer<ColRank>::peak_for(entries);
+    }
+    uint64_t scratch_entries(const MultiIntMatrix::RowTuples &row) const override {
+        return row.size();
+    }
+
+  private:
+    const BaseMatrix &matrix_;
+    ChargedBuffer<ColRank> scratch_;
+};
+
+template <class BaseMatrix>
+DecodeStatus TupleRowDiff<BaseMatrix>::decode_row_tuples(const std::vector<Row> &rows,
+                                                         DecodeBudget &budget,
+                                                         std::vector<RowTuples> *out,
+                                                         std::vector<RowCost> *costs,
+                                                         std::vector<uint64_t> *held) const {
+    if constexpr(HasRowTuples<BaseMatrix>::value) {
+        BudgetedTupleFetcher<BaseMatrix> fetcher(diffs_);
+        return decode_budgeted<RowTuples>(rows, budget, fetcher, out, costs, held);
+    } else {
+        return DecodeStatus::UNSUPPORTED;
+    }
+}
+
+template <class BaseMatrix>
+DecodeStatus TupleRowDiff<BaseMatrix>::decode_rows(const std::vector<Row> &rows,
+                                                   DecodeBudget &budget,
+                                                   std::vector<SetBitPositions> *out,
+                                                   std::vector<RowCost> *costs,
+                                                   std::vector<uint64_t> *held) const {
+    if constexpr(HasRowTuples<BaseMatrix>::value) {
+        const uint64_t at_entry = budget.held();
+        std::vector<RowTuples> tuples;
+        std::vector<RowCost> row_costs;
+        std::vector<uint64_t> tuples_held;
+        const DecodeStatus status = decode_row_tuples(rows, budget, &tuples, &row_costs,
+                                                      &tuples_held);
+        if (status != DecodeStatus::OK)
+            return status;
+        // the columns replace the tuples row by row, as get_rows() converts them; a row's
+        // demand adds what converting it alone holds beside its tuples
+        const size_t n = rows.size();
+        if (!budget.charge(output_bytes<SetBitPositions>(n))) {
+            budget.restore(at_entry);
+            return DecodeStatus::REFUSED;
+        }
+        std::vector<SetBitPositions> result(n);
+        std::vector<uint64_t> result_held(n);
+        for (size_t i = 0; i < n; ++i) {
+            const uint64_t bytes = small_vector_bytes(tuples[i].size(), sizeof(Column));
+            if (!budget.charge(bytes)) {
+                budget.restore(at_entry);
+                return DecodeStatus::REFUSED;
+            }
+            result[i] = utils::get_firsts<SetBitPositions>(tuples[i]);
+            result_held[i] = bytes;
+            budget.release(tuples_held[i]);
+            RowTuples().swap(tuples[i]);
+            row_costs[i].demand += bytes + output_bytes<SetBitPositions>(1);
+        }
+        budget.release(output_bytes<RowTuples>(n));
+        out->swap(result);
+        costs->swap(row_costs);
+        held->swap(result_held);
+        return DecodeStatus::OK;
+    } else {
+        return DecodeStatus::UNSUPPORTED;
+    }
+}
 
 
 template <class BaseMatrix>

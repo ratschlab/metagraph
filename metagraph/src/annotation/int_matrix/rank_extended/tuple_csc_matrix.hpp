@@ -1,10 +1,13 @@
 #ifndef __TUPLE_CSC_MATRIX_HPP__
 #define __TUPLE_CSC_MATRIX_HPP__
 
+#include <algorithm>
 #include <vector>
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 #include "common/logger.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
@@ -44,6 +47,18 @@ class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEnt
     // return entries of the matrix -- where each entry is a set of integers
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows,
                                           size_t num_threads = 1) const;
+
+    // The budget-aware decode path (decode_budget.hpp): the tuples of ONE row into the
+    // empty |*out|, sorted by column, every byte charged to |budget| before it is
+    // allocated — the column ranks through |scratch| (the index matrix's
+    // row_column_ranks()), the row's vector, and each tuple, whose size the delimiters give
+    // before its coordinates are copied. |*bytes| receives what is charged for |*out|
+    // (released by the caller when it frees the row). false: a charge did not fit; what was
+    // charged for |*out| so far is the caller's to restore. Only for index matrices with
+    // row_column_ranks() (BRWT, ColumnMajor): a member of a class template is instantiated
+    // only where it is used.
+    bool row_tuples(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
+                    RowTuples *out, uint64_t *bytes, DecodeBudget &budget) const;
 
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
     uint64_t num_rows() const { return binary_matrix_.num_rows(); }
@@ -126,6 +141,41 @@ TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_tuples(const std::vector<Row
         }
     }
     return row_tuples;
+}
+
+template <class BaseMatrix, class Values, class Delims>
+inline bool TupleCSCMatrix<BaseMatrix, Values, Delims>
+::row_tuples(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
+             RowTuples *out, uint64_t *bytes, DecodeBudget &budget) const {
+    assert(out->empty());
+    *bytes = 0;
+    scratch->data.clear();
+    if (!binary_matrix_.row_column_ranks(row, scratch, budget))
+        return false;
+    // the row is used sorted by column (as call_rows() sorts what get_row_tuples returns)
+    std::sort(scratch->data.begin(), scratch->data.end(), utils::LessFirst());
+    const uint64_t vec = buffer_bytes(scratch->data.size(), sizeof((*out)[0]));
+    if (!budget.charge(vec))
+        return false;
+    *bytes += vec;
+    out->reserve(scratch->data.size());
+    for (auto [j, r] : scratch->data) {
+        assert(r >= 1 && "matches can't have zero-rank");
+        size_t begin = delimiters_[j].select1(r) + 1 - r;
+        size_t end = delimiters_[j].select1(r + 1) - r;
+        // charged before the coordinates are copied: the delimiters give their number
+        const uint64_t tb = small_vector_bytes(end - begin, sizeof(uint64_t));
+        if (!budget.charge(tb))
+            return false;
+        *bytes += tb;
+        Tuple tuple;
+        tuple.reserve(end - begin);
+        for (size_t t = begin; t < end; ++t) {
+            tuple.push_back(column_values_[j][t]);
+        }
+        out->emplace_back(j, std::move(tuple));
+    }
+    return true;
 }
 
 template <class BaseMatrix, class Values, class Delims>

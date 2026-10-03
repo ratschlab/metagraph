@@ -5,6 +5,7 @@
 
 #include "common/vectors/bit_vector.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/binary_matrix/base/decode_budget.hpp"
 
 
 namespace mtg {
@@ -29,6 +30,13 @@ class ColumnMajor : public BinaryMatrix, public GetEntrySupport {
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows, size_t num_threads = 1) const;
     std::vector<Row> get_column(Column column) const override;
+    // The budget-aware decode path (decode_budget.hpp, as BRWT::row_columns): the set bits
+    // of one row, ascending, appended to |scratch|, with their column ranks for
+    // row_column_ranks(); every growth of the scratch charged before it happens. false: a
+    // growth did not fit.
+    bool row_columns(Row row, ChargedBuffer<Column> *scratch, DecodeBudget &budget) const;
+    bool row_column_ranks(Row row, ChargedBuffer<std::pair<Column, uint64_t>> *scratch,
+                          DecodeBudget &budget) const;
 
     void call_columns(const std::vector<Column> &columns,
                       const std::function<void(size_t, const bitmap&)> &callback,
