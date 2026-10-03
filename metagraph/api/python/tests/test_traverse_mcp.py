@@ -607,7 +607,9 @@ class TestReviewFindings(ToolsCase):
         h = self.handle('merge')
         # b.fa reaches 100 bp only along its own route through a merge
         w = self.tools.graphlet_walks(h, 'right', label={'ref': 'c:1'})
-        self.assertEqual((0, {'route_only': 1}), (w['total'], w['filtered']))
+        # merge-entered, like the claims below (D5 of the third review): route_only is
+        # a claim's kind at a cut, which no uncut walk is
+        self.assertEqual((0, {'merge_entered': 1}), (w['total'], w['filtered']))
         self.assertIn('route_consistent=false', w['hint'])
         w = self.tools.graphlet_walks(h, 'right', label={'ref': 'c:1'}, route_consistent=False)
         self.assertEqual((1, None), (w['total'], w.get('filtered')))

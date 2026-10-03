@@ -35,7 +35,7 @@ from test_real_ops import (  # noqa: E402  (helpers only: no TestCase is importe
     has_bases, live_rows, op_rows, require_rows, sample)
 
 from metagraph.traverse import (  # noqa: E402
-    MissingEnvelope, TraverseClient, from_response, parse)
+    IncompatibleContinuations, MissingEnvelope, TraverseClient, from_response, parse)
 from metagraph.traverse._codec import REASON, RESOURCE_CODES  # noqa: E402
 from metagraph.traverse.mcp_tools import _size  # noqa: E402
 
@@ -268,11 +268,30 @@ def _without_sequences_flag(req):
     return r
 
 
+def _request_violations(req):
+    """traverse_testlib.request_violations (the server's label-list checks restated)."""
+    tests = os.path.dirname(HERE)
+    if tests not in sys.path:
+        sys.path.insert(0, tests)
+    import traverse_testlib
+    return traverse_testlib.request_violations(req)
+
+
+def _largest_loss(cs):
+    """The largest terminal loss of the continued labels (third review, finding 4: C's
+    loss_used is the SMALLEST, and subtracting it let a label at a higher loss go on with
+    more than its original budget left)."""
+    return max((x for c in cs for x in c.losses), default=0.0)
+
+
 class TestNextRequestShape(unittest.TestCase):
     """next_request() offline: one seed per walk (its continuation; constrain names its
     labels, annotate has no permitted set), the retrieval's normalized strategy with the
-    arm as direction, bp as the radius, the loss budget reduced by the largest loss_used,
-    overrides deep-merged, release kept; a body without its envelope refuses."""
+    arm as direction, bp as the radius, the loss budget reduced by the largest terminal
+    loss of the continued labels, labels.extra rebuilt around the new seeds (valid for the
+    server), overrides deep-merged, release kept; walks whose rebuilt pools differ are
+    refused as one request (IncompatibleContinuations) and built one per walk; a body
+    without its envelope refuses."""
 
     @classmethod
     def setUpClass(cls):
@@ -280,7 +299,7 @@ class TestNextRequestShape(unittest.TestCase):
         cls.rows = require_rows(op_rows())
 
     def test_request_fields(self):
-        n = reduced = 0
+        n = reduced = split = 0
         for row, c, i, g, full in results(self.rows, 'next_request.shape', full=False):
             base = copy.deepcopy(g.envelope['strategy'])
             base.pop('clamped', None)
@@ -290,28 +309,54 @@ class TestNextRequestShape(unittest.TestCase):
                     continue
                 pids = [x[0] for x in sample(conts, 3)]
                 with self.subTest(cell=c.cell, result=i, arm=side):
-                    req = g.next_request(side, pids, bp=BP)
-                    self.assertEqual(len(pids), len(req['seeds']))
-                    cs = [g.continuation(side, p) for p in pids]
-                    for seed, cont in zip(req['seeds'], cs):
-                        want = cont.as_seed()
-                        if g.mode != 'constrain':
-                            want.pop('labels', None)
-                        self.assertEqual(want, seed)
-                    st = req['strategy']
-                    want = copy.deepcopy(base)
-                    want['direction'] = side
-                    want.setdefault('bounds', {})['max_extension_bp'] = BP
-                    budget = (base.get('labels') or {}).get('loss_budget')
-                    used = max(x.loss_used for x in cs)
-                    if g.mode == 'constrain' and isinstance(budget, (int, float)) \
-                            and budget > 0 and used > 0:
-                        want['labels']['loss_budget'] = max(0.0, budget - used)
-                        reduced += 1
-                        keep = g.next_request(side, pids, reduce_budget=False)
-                        self.assertEqual(budget, keep['strategy']['labels']['loss_budget'])
-                    # everything else is the retrieval's own normalized strategy
-                    self.assertEqual(want, st)
+                    try:
+                        groups = [(pids, g.next_request(side, pids, bp=BP))]
+                    except IncompatibleContinuations:
+                        # the walks continue under different labels: one request each,
+                        # each valid and with its own labels' budget
+                        self.assertEqual('constrain', g.mode)
+                        groups = [([p], r) for p, r in
+                                  zip(pids, g.next_requests(side, pids, bp=BP))]
+                        split += 1
+                    for ids, req in groups:
+                        self.assertEqual(len(ids), len(req['seeds']))
+                        cs = [g.continuation(side, p) for p in ids]
+                        for seed, cont in zip(req['seeds'], cs):
+                            want = cont.as_seed()
+                            if g.mode != 'constrain':
+                                want.pop('labels', None)
+                            self.assertEqual(want, seed)
+                        self.assertEqual([], _request_violations(req))
+                        st = req['strategy']
+                        want = copy.deepcopy(base)
+                        want['direction'] = side
+                        want.setdefault('bounds', {})['max_extension_bp'] = BP
+                        budget = (base.get('labels') or {}).get('loss_budget')
+                        used = _largest_loss(cs)
+                        if g.mode == 'constrain' and isinstance(budget, (int, float)) \
+                                and budget > 0 and used > 0:
+                            want['labels']['loss_budget'] = max(0.0, budget - used)
+                            reduced += 1
+                            try:
+                                keeps = [g.next_request(side, ids, reduce_budget=False)]
+                            except IncompatibleContinuations:
+                                # with the whole budget more targets are reachable, and
+                                # they differ per walk
+                                keeps = g.next_requests(side, ids, reduce_budget=False)
+                            for keep in keeps:
+                                self.assertEqual(budget,
+                                                 keep['strategy']['labels']['loss_budget'])
+                                self.assertEqual([], _request_violations(keep))
+                        if g.mode == 'constrain':
+                            # rebuilt around the new seeds: the retrieval's labels minus
+                            # them, in dictionary order (each kept one valid, above)
+                            seeds = {x for sd in req['seeds'] for x in sd.get('labels', ())}
+                            pool = [l.name for l in g.labels if l.name not in seeds]
+                            got = st['labels']['extra']
+                            self.assertEqual(got, [x for x in pool if x in got])
+                            want['labels']['extra'] = got
+                        # everything else is the retrieval's own normalized strategy
+                        self.assertEqual(want, st)
                     if g.envelope.get('release'):
                         self.assertEqual(g.envelope['release'], req['release'])
                     # bp None keeps the radius; overrides deep-merge; graph is top level
@@ -327,8 +372,8 @@ class TestNextRequestShape(unittest.TestCase):
                     self.assertEqual('full', ov['strategy']['output']['detail'])
                     n += 1
         self.assertGreater(n, 0)
-        sys.stderr.write('\n[next_request] %d arms, %d with a reduced loss budget\n'
-                         % (n, reduced))
+        sys.stderr.write('\n[next_request] %d arms, %d with a reduced loss budget, %d built '
+                         'one request per walk\n' % (n, reduced, split))
 
     def test_a_body_alone_and_a_semantic_leaf_refuse(self):
         for row, c, i, g, full in results(sample(self.rows, 30), 'next_request.refuse',
@@ -446,8 +491,9 @@ class TestNextRequestLive(unittest.TestCase):
 
     def test_a_reduced_loss_budget_is_accepted_and_echoed(self):
         """A walk that spent part of the loss budget (a switch) continues with the rest:
-        the request carries budget - loss_used, the server echoes it, and the child's
-        seed labels are the continuation's (the switched-to label included)."""
+        the request carries budget minus the largest terminal loss of its labels, is
+        valid (labels.extra rebuilt around the new seeds), the server echoes it, and the
+        child's seed labels are the continuation's (the switched-to label included)."""
         n = 0
         for row, c, i, g, full in results([r for r in self.rows if r['strategy'] == 'switch1'],
                                           'live.budget', full=False):
@@ -456,11 +502,12 @@ class TestNextRequestLive(unittest.TestCase):
             for side in g.arms:
                 for pid, leaf in continued_paths(g, side):
                     cont = g.continuation(side, pid)
-                    if cont.loss_used <= 0:
+                    if _largest_loss([cont]) <= 0:
                         continue
                     req = g.next_request(side, [pid], bp=BP)
                     with self.subTest(cell=c.cell, arm=side, walk=pid):
-                        want = max(0.0, budget - cont.loss_used)
+                        self.assertEqual([], _request_violations(req))
+                        want = max(0.0, budget - _largest_loss([cont]))
                         self.assertEqual(want, req['strategy']['labels']['loss_budget'])
                         out = cl.traverse_raw(req)
                         res = out['results'][0]
@@ -485,14 +532,21 @@ class TestNextRequestLive(unittest.TestCase):
                 if len(picks) < 2:
                     continue
                 pids = [x[0] for x in picks]
-                req = g.next_request(side, pids, bp=BP)
+                try:
+                    groups = [(pids, g.next_request(side, pids, bp=BP))]
+                except IncompatibleContinuations:
+                    # different labels need different labels.extra: one request each
+                    groups = [([p], r) for p, r in
+                              zip(pids, g.next_requests(side, pids, bp=BP))]
                 with self.subTest(cell=c.cell, arm=side):
-                    resp = cl.response(cl.traverse_raw(req))
-                    self.assertEqual([], resp.errors)
-                    self.assertEqual(len(pids), len(resp.graphlets))
-                    for pid, child in zip(pids, resp.graphlets):
-                        self.assertEqual(g.continuation(side, pid).sequence,
-                                         child.seed.sequence)
+                    for ids, req in groups:
+                        self.assertEqual([], _request_violations(req))
+                        resp = cl.response(cl.traverse_raw(req))
+                        self.assertEqual([], resp.errors)
+                        self.assertEqual(len(ids), len(resp.graphlets))
+                        for pid, child in zip(ids, resp.graphlets):
+                            self.assertEqual(g.continuation(side, pid).sequence,
+                                             child.seed.sequence)
                 n += 1
                 break
             if n >= 12:

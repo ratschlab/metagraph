@@ -21,8 +21,8 @@ Stdlib only. pandas is imported lazily by frames.frames() alone, so
 from ._codec import CodecError, GraphletFormatError, UNLIMITED
 from .model import (
     AmbiguousLabel, Arm, BadSelector, Change, Claim, Comparison, Continuation, Graphlet,
-    IncompleteRecording, Label, LabelWalk, MissingEnvelope, Segment, Run, SupportRun,
-    UnknownLabel, Walk,
+    IncompatibleContinuations, IncompleteRecording, Label, LabelWalk, MissingEnvelope,
+    NextRequest, Segment, Run, SupportRun, UnknownLabel, Walk,
 )
 from .parser import FORMAT_VERSION, dump, from_response, is_canonical, load, parse, save
 from .ops import GraphletView
@@ -32,9 +32,10 @@ from .store import Entry, GraphletStore, StoreLimitExceeded, UnknownHandle
 __all__ = [
     'FORMAT_VERSION', 'parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
     'Graphlet', 'GraphletView', 'Label', 'Arm', 'Segment', 'Run', 'Walk', 'Claim',
-    'LabelWalk', 'SupportRun', 'Change', 'Continuation', 'Comparison',
+    'LabelWalk', 'SupportRun', 'Change', 'Continuation', 'NextRequest', 'Comparison',
     'GraphletFormatError', 'CodecError', 'MissingEnvelope', 'AmbiguousLabel',
-    'UnknownLabel', 'BadSelector', 'IncompleteRecording', 'UNLIMITED',
+    'UnknownLabel', 'BadSelector', 'IncompleteRecording', 'IncompatibleContinuations',
+    'UNLIMITED',
     'TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
     'GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded',
 ]

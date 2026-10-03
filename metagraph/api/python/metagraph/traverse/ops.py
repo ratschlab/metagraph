@@ -18,7 +18,19 @@ Evidence semantics (§5, §5.1):
   * annotate mode has no runs: a claim is a maximal end of a label's routes under the
     §5.1 union rule of direct_bp (through any parent of a merge), its displayed support
     starting at the last merge its route enters through a non-first parent -- route and
-    displayed evidence kept apart exactly as for a run.
+    displayed evidence kept apart exactly as for a run. Each end is shown by ONE witness
+    route, chosen deterministically by the stored parent order (at every merge the first
+    parent that records the label): it does not enumerate the label's other routes to
+    that end, and -- like every annotate claim, which rests on per-node recorded sets --
+    it does not establish a contiguous source occurrence (one indexed sequence spelling
+    the route).
+
+Resources: everything here runs locally with NO work or allocation budget -- compare(),
+routes() and the exports included (stage 2 of the design's resource contract bounds the
+backend walk only). Their time and peak allocation follow the graphlet's size (a
+comparison reads both DAGs up to the comparison depth, routes() walks one route per run,
+an export spells every chosen walk), and nothing interrupts them; an MCP tool's max_bytes
+bounds the bytes it RETURNS, not the computation behind them.
 """
 
 import collections
@@ -32,15 +44,16 @@ from . import derive
 from ._codec import REASON, RESOURCE_CODES, UNLIMITED
 from .model import (
     AmbiguousLabel, ARM_SIDES, BadSelector, Branch, Change, Claim, Comparison,
-    Continuation, IncompleteRecording, Label, LabelWalk, Path, SplitPoint, SupportRun,
-    UnknownLabel, UnverifiableLabelName, Walk,
+    Continuation, IncompatibleContinuations, IncompleteRecording, Label, LabelWalk,
+    NextRequest, Path, SplitPoint, SupportRun, UnknownLabel, UnverifiableLabelName, Walk,
 )
 
 __all__ = [
     'label', 'labels_matching', 'path_id', 'leaf_segment', 'spell', 'walks', 'claims',
-    'rank_walks', 'walks_at',
+    'rank_walks', 'walks_at', 'walk_filter_reason',
     'label_walks', 'routes', 'support_profile', 'support_changes', 'label_summary',
-    'splits', 'continuation', 'next_request', 'resubmittable_names', 'subgraph',
+    'splits', 'continuation', 'next_request', 'next_requests', 'resubmittable_names',
+    'subgraph',
     'GraphletView', 'view_from_saved',
     'compare', 'index_identity', 'memory_bytes', 'cache_bytes', 'cache_signature',
     'summary', 'evidence_block',
@@ -548,9 +561,16 @@ def claims(g, arm=None, labels=None, at_most_bp=None, strict=True):
     merge -- each with route support [0, to_bp) and displayed support [evidence_from,
     to_bp) on the first-parent chain of its anchor, kept apart exactly as for a run in
     constrain mode (route_bp > 0: the route joins that chain through a non-first merge
-    parent; at a cut with no displayed support left it is route_only). strict=True
-    raises IncompleteRecording when a recorded list was cut (the oracle would be a lower
-    bound)."""
+    parent; at a cut with no displayed support left it is route_only). One annotate claim
+    per maximal END, with one witness route (routes()) chosen by the stored parent order:
+    it does not enumerate every route to that end, nor establish a contiguous source
+    occurrence. strict=True raises IncompleteRecording when a recorded list was cut (the
+    oracle would be a lower bound).
+
+    at_most_bp keeps the §5.1 cut of a claim (evidence at the run's anchored endpoint,
+    then clipped): what the deeper DAG says about [0, D). compare() keys the claims of
+    each DAG RESTRICTED to the depth instead, which is what a retrieval walked to D says
+    (_restricted_claims)."""
     sides = [g.arm(arm).side] if arm is not None else [s for s in ARM_SIDES if s in g.arms]
     wanted = _label_ids(g, labels)
     out = []
@@ -653,6 +673,24 @@ def rank_walks(g, arm, *, by='support', labels=None, route_consistent=True, min_
                                            route_consistent, min_bp)]
 
 
+def walk_filter_reason(g, arm, walk, labels):
+    """Why route_consistent=True leaves out a walk that carries one of |labels| at its
+    end: 'merge_entered' -- the label reaches the walk's end only along its own route,
+    which joins the displayed walk through a non-first merge parent (constrain: every
+    such label has T.route_bp > 0; annotate: a route under the §5.1 union rule records it
+    on every node from the seed boundary to the end, the displayed chain does not) -- or,
+    annotate mode only, 'not_from_seed': no route records it on every node from the seed
+    boundary (it is recorded at the end but appeared, or had a gap, on the way)."""
+    a = g.arm(arm)
+    if g.mode == 'constrain':
+        return 'merge_entered'
+    p = derive.paths(a)[path_id(a, walk)]
+    alive_end, _ = _annotate_route_ends(a)
+    wanted = _label_ids(g, labels)
+    return 'merge_entered' if wanted is None or wanted & alive_end[p.leaf] \
+        else 'not_from_seed'
+
+
 def walks_at(g, arm, path_ids, with_claims=False):
     """The Walk objects of |path_ids|, in that order (claims only with with_claims)."""
     a = g.arm(arm)
@@ -710,7 +748,13 @@ def routes(g, sel, arm, spell=False):
     label's label-consistent routes under the §5.1 union rule (the rule of direct_bp,
     so the direct_bp route is always among them), passing every merge through its first
     parent, in parents order, that records the label -- the displayed chain where it
-    can. A route through a non-first merge parent is shown by no walk."""
+    can. A route through a non-first merge parent is shown by no walk. The witness is
+    one route, deterministically chosen: it does not enumerate the other routes reaching
+    the same end, and it establishes no contiguous source occurrence (the recorded sets
+    say each node carries the label, not that one indexed sequence spells the route).
+
+    No work or allocation budget applies (one route per run or end, each as long as the
+    DAG makes it): see the module docstring."""
     a = g.arm(arm)
     lab = label(g, sel)
     out = []
@@ -959,9 +1003,12 @@ def label_summary(g):
 # ------------------------------------------------------------------ continuation
 
 def continuation(g, arm, leaf):
-    """Continuation(sequence, labels, loss_used, branches_used, seed_coord, as_seed()):
-    the walker's label logic from C, the spelling derived (both arms). seed_coord is
-    the half-open whole-molecule interval in seed coordinates (seed = [0, |seed|))."""
+    """Continuation(sequence, labels, loss_used, branches_used, seed_coord, as_seed(),
+    losses, note): the walker's label logic from C, the spelling derived (both arms).
+    seed_coord is the half-open whole-molecule interval in seed coordinates (seed =
+    [0, |seed|)). loss_used is C's: the SMALLEST terminal loss of the labels; losses
+    holds each label's own (T), and note says when one loss budget cannot serve them
+    exactly (labels that ended the walk at different losses)."""
     a = g.arm(arm)
     seg_id = leaf_segment(a, leaf)
     seg = a.segments[seg_id]
@@ -977,8 +1024,400 @@ def continuation(g, arm, leaf):
     else:
         coord = (-L, -L + c.n)
     labels = _labels(g, c.labels)
+    losses = _terminal_losses(g, a, seg_id, labels)
+    note = None
+    budget = _strategy_budget(g)
+    if losses and budget and len(set(losses)) > 1:
+        top = max(losses)
+        note = ('its labels ended the walk at different losses (%s): a continuation '
+                'request carries one loss budget for all of them, so next_request() '
+                'reduces labels.loss_budget %s by the largest, %s -- exact for the labels '
+                'at that loss, conservative for the others (one uninterrupted walk would '
+                'let each spend its own remaining %s)'
+                % (_loss_list(labels, losses), _num(budget), _num(top),
+                   ', '.join('%s %s' % (_shown(l.name), _num(max(0.0, budget - x)))
+                             for l, x in zip(labels, losses) if x < top)))
     return Continuation(seq, labels, c.loss_used, c.branches_used, coord, a.side,
-                        path_id(a, leaf), _unverifiable_names(g, labels))
+                        path_id(a, leaf), _unverifiable_names(g, labels), losses, note)
+
+
+def _num(x):
+    return '%g' % x
+
+
+def _loss_list(labels, losses):
+    return ', '.join('%s %s' % (_shown(l.name), _num(x)) for l, x in zip(labels, losses))
+
+
+def _strategy_budget(g):
+    """The retrieval's labels.loss_budget (constrain), None when there is none to spend."""
+    if g.mode != 'constrain' or not g.envelope:
+        return None
+    b = ((g.envelope.get('strategy') or {}).get('labels') or {}).get('loss_budget')
+    return b if isinstance(b, (int, float)) and not isinstance(b, bool) and b > 0 else None
+
+
+def _terminal_losses(g, a, leaf_seg, labels):
+    """Constrain: each label's terminal loss at the leaf, from its T extras (a label
+    alive at the leaf with no extra has loss 0, the §2.3 rule). The C record's loss_used
+    is the SMALLEST of them: subtracting it from the budget let a continued label at a
+    higher loss go on with more than its original budget left (the review's
+    budgetchain: E at 0 and C at 2 kept the whole budget 3). () in annotate mode."""
+    if g.mode != 'constrain':
+        return ()
+    ends = {e.label: e.loss for e in derive.end_labels(a, leaf_seg)}
+    extras = a.segments[leaf_seg].leaf.extras
+    out = []
+    for l in labels:
+        if l.id in ends:
+            out.append(ends[l.id])
+        else:
+            # not alive at the leaf by its runs: the T extras still hold its loss when
+            # the writer stated one; a label with neither is at loss 0 (§2.3)
+            out.append(extras.get(l.id, (0.0, 0, 0))[0])
+    return tuple(out)
+
+
+def _is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _switch_cost(change_cost, src, dst):
+    """cost(src -> dst) by label NAME under the request's change_cost, as the server
+    prices a switch (forbid: +inf; constant: value; table: the last entry for the pair,
+    else its default, 'forbid' = +inf; a label to itself costs 0). None for a model the
+    library does not know: reachability cannot be decided then. A malformed field of a
+    model it knows is a ValueError naming the field (a caller's override; the tool layer
+    answers bad_argument), never an exception of another kind."""
+    if src == dst:
+        return 0.0
+    model = (change_cost or {}).get('model', 'forbid')
+    if model == 'forbid':
+        return math.inf
+    if model == 'constant':
+        v = change_cost.get('value')
+        if not _is_number(v):
+            raise ValueError('labels.change_cost.value is a number, not %r' % (v,))
+        return float(v)
+    if model == 'table':
+        entries = change_cost.get('entries') or []
+        if not isinstance(entries, list):
+            raise ValueError('labels.change_cost.entries is a list of [from, to, cost], not %r'
+                             % (entries,))
+        got = None
+        for e in entries:
+            if isinstance(e, list) and len(e) == 3 and e[0] == src and e[1] == dst:
+                if not _is_number(e[2]):
+                    raise ValueError('labels.change_cost.entries: the cost of %r is a number, '
+                                     'not %r' % (e[:2], e[2]))
+                got = float(e[2])
+        if got is not None:
+            return got
+        d = change_cost.get('default', 'forbid')
+        if d != 'forbid' and not _is_number(d):
+            raise ValueError('labels.change_cost.default is a number or "forbid", not %r' % (d,))
+        return math.inf if d == 'forbid' else float(d)
+    return None
+
+
+def _section(strategy, *path):
+    """The strategy section at |path| as a dict ({} when absent). The rebuild of a
+    continuation reads the merged sections as objects; one that a caller's override made
+    something else is refused with a ValueError naming it (the tool layer answers
+    bad_argument), as the server would refuse it (round 3, finding B: an AttributeError
+    escaped the tool contract)."""
+    d = strategy
+    for i, k in enumerate(path):
+        v = d.get(k)
+        if v is None:
+            return {}
+        if not isinstance(v, dict):
+            raise ValueError('strategy.%s is an object, not %r' % ('.'.join(path[:i + 1]), v))
+        d = v
+    return d
+
+
+def _rebuilt_extra(g, seed_labels, budget, strategy):
+    """labels.extra around a continuation's seed labels: the retrieval's permitted pool
+    (its seed labels and its extra labels: every label of a constrain retrieval) minus the
+    new seed labels -- the server refuses an extra label that duplicates a seed label
+    (the review: seed ['C'] with extra ['B', 'C', 'D'] was a 400) -- keeping each
+    remaining label that the server accepts as a switch target: some new seed label
+    switches to it in one step within |budget| (an unreachable extra label is refused, and
+    under forbid, or a constant above the budget, any extra label is). -> (extra names in
+    dictionary order, the labels left out as unreachable, the labels left out because
+    their names cannot be verified). The retrieval's original seed labels become switch
+    targets too: they were in the original pool."""
+    lab = strategy.get('labels') or {}
+    cost = lab.get('change_cost') or {'model': 'forbid'}
+    if cost.get('model') == 'constant' and not _is_number(cost.get('value')):
+        raise ValueError('labels.change_cost.value is a number, not %r' % (cost.get('value'),))
+    seed_names = [l.name for l in seed_labels]
+    seed_ids = {l.id for l in seed_labels}
+    seeds = set(seed_names)
+    extra, dropped, unverifiable = [], [], []
+    for l in g.labels:
+        if l.id in seed_ids:
+            continue
+        if l.name in seeds:
+            # another label under a seed label's name: it would resolve to the seed label
+            unverifiable.append(l)
+            continue
+        costs = [_switch_cost(cost, s, l.name) for s in seed_names]
+        if any(c is None for c in costs):
+            raise ValueError('change_cost model %r is not one the library can price: the '
+                             'continuation\'s labels.extra cannot be validated'
+                             % cost.get('model'))
+        if not any(c <= budget for c in costs):
+            dropped.append(l)
+        elif _unverifiable_names(g, [l]):
+            # /traverse resolves an extra label by NAME too: one the library cannot verify
+            # to be this label's is left out (and stated), never sent to resolve
+            unverifiable.append(l)
+        else:
+            extra.append(l.name)
+    if cost.get('model', 'forbid') == 'forbid' or (cost.get('model') == 'constant'
+                                                  and cost.get('value', 0) > budget):
+        # the request-level rule: no extra label at all (each is unreachable)
+        dropped = [l for l in g.labels if l.id not in seed_ids]
+        extra, unverifiable = [], []
+    return extra, dropped, unverifiable
+
+
+def _continuation_seeds(g, a, leaves):
+    conts = [continuation(g, a, x) for x in leaves]
+    seeds = []
+    for c in conts:
+        if not c.sequence:
+            raise ValueError('walk %d has no continuation sequence (output.continuation_bp '
+                             'was 0): nothing to resubmit' % c.leaf)
+        if g.mode != 'constrain':
+            seeds.append({'sequence': c.sequence})   # annotate mode has no permitted set
+        else:
+            seeds.append(c.as_seed())    # raises UnverifiableLabelName, never resolves
+    return conts, seeds
+
+
+def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
+    """A resubmittable /traverse request continuing the given walks, as a NextRequest (a
+    dict; .notes and .loss_budget state what the request format cannot carry): one seed
+    per walk (its continuation, natural orientation, with its labels named explicitly),
+    the retrieval's normalized strategy with direction = this arm and
+    max_extension_bp = bp when given.
+
+    Constrain mode, two rules no continuation may break:
+      * no route exceeds its original loss budget: with reduce_budget, labels.loss_budget
+        is reduced by the LARGEST terminal loss of the continued labels over all the
+        walks (T, not C's loss_used, which is the smallest). The request carries one
+        budget and no per-label starting loss, so it is exact for the labels at that loss
+        and conservative for the others: their continuation may stop earlier than one
+        uninterrupted walk would -- stated in .notes, with each label's remaining budget
+        in .loss_budget. reduce_budget=False keeps the original budget: every label
+        restarts at loss 0 and may spend it again (stated);
+      * the request is valid: labels.extra is rebuilt around the new seed labels -- the
+        retrieval's permitted pool minus them, each label kept that a seed label reaches
+        in one switch within the budget (the server's rule); every other label is listed
+        in .left_out (and the first few named in .notes). A labels.extra the caller gives
+        in the overrides is sent as given. An override section the rebuild reads that is
+        not an object (labels, labels.change_cost, branching), or a malformed field of it,
+        is a ValueError naming it.
+    A label alive at a leaf that does not cover the continuation's whole tail is not among
+    the continuation's labels, so it is not seeded and the continuation may lack its
+    lineage: stated in .notes and in .left_out (why 'alive_not_seeded').
+    Several walks share one strategy, so one labels.extra: they are built into one request
+    only when the rebuilt pool is the same for every walk (their continuations carry the
+    same labels, or no switch is possible); otherwise IncompatibleContinuations names
+    next_requests(), one request per walk. Keyword overrides deep-merge into the
+    strategy; release, graph and graph_path are request-level. Raises MissingEnvelope on
+    a body-only graphlet."""
+    g.require_envelope('next_request()')
+    a = g.arm(arm)
+    if isinstance(leaves, (int, Path, Walk)):
+        leaves = [leaves]
+    conts, seeds = _continuation_seeds(g, a, leaves)
+    strategy = copy.deepcopy(g.envelope.get('strategy') or {})
+    strategy.pop('clamped', None)
+    strategy['direction'] = a.side
+    if bp is not None:
+        strategy.setdefault('bounds', {})['max_extension_bp'] = bp
+    notes = []
+    budget_info = None
+    left_out = []
+    if g.mode == 'constrain':
+        labels_ = strategy.setdefault('labels', {})
+        budget = labels_.get('loss_budget')
+        budget = budget if isinstance(budget, (int, float)) and \
+            not isinstance(budget, bool) else 0.0
+        pairs = [(l, x) for c in conts for l, x in zip(c.labels, c.losses)
+                 if x != math.inf]
+        top = max((x for _, x in pairs), default=0.0)
+        effective = budget
+        if reduce_budget and budget > 0 and top > 0:
+            effective = max(0.0, budget - top)
+            labels_['loss_budget'] = effective
+            lower = [(l, x) for l, x in pairs if x < top]
+            if lower:
+                notes.append(
+                    'labels.loss_budget %s is the original %s minus the largest terminal loss '
+                    'of the continued labels, %s (%s): exact for the labels at that loss, '
+                    'conservative for %s, whose continuation may stop (loss_budget) earlier '
+                    'than one uninterrupted walk would -- the request carries one loss '
+                    'budget and no per-label starting loss'
+                    % (_num(effective), _num(budget), _num(top),
+                       ', '.join(_shown(l.name) for l, x in pairs if x == top),
+                       ', '.join('%s (loss %s, could spend %s)'
+                                 % (_shown(l.name), _num(x), _num(budget - x))
+                                 for l, x in _unique_pairs(lower))))
+        elif not reduce_budget and budget > 0 and top > 0:
+            notes.append('labels.loss_budget is the original %s although the continued '
+                         'labels have spent up to %s (reduce_budget=False): each restarts '
+                         'at loss 0, so a route of the continuation may exceed its original '
+                         'budget by up to %s' % (_num(budget), _num(top), _num(top)))
+        budget_info = {
+            'original': budget, 'effective': effective, 'largest_terminal_loss': top,
+            'labels': [dict(l.as_dict(), loss=x, remaining=max(0.0, budget - x))
+                       for l, x in _unique_pairs(pairs)]}
+        # the caller's overrides are final: labels.extra is rebuilt against the budget
+        # and the cost model the request will carry (a list the caller gives is theirs)
+        final = copy.deepcopy(strategy)
+        _deep_merge(final, {k: v for k, v in overrides.items()
+                            if k not in ('release', 'graph', 'graph_path')})
+        flab = _section(final, 'labels')
+        _section(final, 'labels', 'change_cost')
+        _section(final, 'branching')
+        given = overrides.get('labels') or {}
+        if 'loss_budget' in given and not _is_number(given['loss_budget']):
+            raise ValueError('labels.loss_budget is a number, not %r' % (given['loss_budget'],))
+        if given.get('extra') is not None and not (
+                isinstance(given['extra'], list) and all(isinstance(x, str) for x in given['extra'])):
+            raise ValueError('labels.extra is a list of label names, not %r' % (given['extra'],))
+        if 'loss_budget' in given:
+            effective = flab['loss_budget']
+            budget_info['effective'] = effective
+            if effective > budget - top:
+                notes.append('labels.loss_budget %s is the caller\'s (overrides): above the '
+                             'original %s minus the largest terminal loss %s, a route of the '
+                             'continuation may exceed its original budget'
+                             % (_num(effective), _num(budget), _num(top)))
+        if 'extra' in given:
+            # the caller's own list: the request carries it as given, unchecked
+            extra, dropped, unverifiable = list(given['extra'] or []), [], []
+        else:
+            pools = [_rebuilt_extra(g, c.labels, effective, final) for c in conts]
+            if len({(tuple(p[0]), tuple(l.id for l in p[2])) for p in pools}) > 1:
+                raise IncompatibleContinuations(
+                    'the walks %s continue under different labels, so the switch targets '
+                    'each seed needs (labels.extra) differ and one request cannot carry them '
+                    'without duplicating a seed label or dropping a switch target: build one '
+                    'request per walk with next_requests()'
+                    % ', '.join(str(c.leaf) for c in conts))
+            extra, dropped, unverifiable = pools[0] if pools else ([], [], [])
+        labels_['extra'] = extra
+        left_out = [dict(l.as_dict(), why='unreachable') for l in dropped] + \
+            [dict(l.as_dict(), why='unverifiable_name') for l in unverifiable]
+        # A label alive at the leaf that does not cover the whole tail (it switched in
+        # within the continuation's last bases) is not among C's labels, so it is no seed
+        # label of the continuation: it can come back only as a switch target from a seed
+        # label (under switch_on: loss, only where one is lost), and the continuation may
+        # lack the lineage one uninterrupted walk keeps. Conservative -- no route above the
+        # budget is accepted -- but never silent (round 3, finding D).
+        alive_not_seeded = []
+        for c in conts:
+            seeded = {l.id for l in c.labels}
+            for e in derive.end_labels(a, leaf_segment(a, c.leaf)):
+                if e.label not in seeded:
+                    alive_not_seeded.append((c.leaf, g.labels[e.label], e.loss))
+        if alive_not_seeded:
+            left_out += [dict(l.as_dict(), why='alive_not_seeded', walk=w, loss=x)
+                         for w, l, x in alive_not_seeded]
+            shown = ['%s (walk %d, loss %s)' % (_shown(l.name), w, _num(x))
+                     for w, l, x in alive_not_seeded]
+            notes.append(
+                '%s %s alive at the leaf but not among the continuation\'s labels (%s not '
+                'cover its whole tail): not seeded, %s can be entered again only by a switch '
+                'from a seed label (under switch_on: loss, only where one is lost), so the '
+                'continuation may lack %s lineage that one uninterrupted walk keeps'
+                % (', '.join(shown[:8]) + (' and %d more' % (len(shown) - 8)
+                                           if len(shown) > 8 else ''),
+                   'is' if len(shown) == 1 else 'are',
+                   'it does' if len(shown) == 1 else 'they do',
+                   'it' if len(shown) == 1 else 'they',
+                   'its' if len(shown) == 1 else 'their'))
+        if unverifiable:
+            notes.append('labels.extra leaves out %s, a switch target of the retrieval whose '
+                         'name the library cannot verify to resolve back to it (%s): the '
+                         'continuation cannot switch to it'
+                         % (', '.join(l.ref for l in unverifiable),
+                            _unverifiable_names(g, unverifiable)))
+        cost = _section(final, 'labels', 'change_cost') or {'model': 'forbid'}
+        if dropped and cost.get('model', 'forbid') != 'forbid':
+            # under forbid nothing was a switch target in the retrieval either; otherwise a
+            # label left out is a target one uninterrupted walk may still have entered
+            lost = []
+            for l in dropped:
+                via = [p for p, x in _unique_pairs(pairs)
+                       if _switch_cost(cost, p.name, l.name) <= budget - x]
+                lost.append('%s%s' % (_shown(l.name), ' (reachable for %s within its own '
+                                      'remaining budget)' % ', '.join(_shown(p.name)
+                                                                      for p in via)
+                                      if via else ''))
+            notes.append(
+                'labels.extra leaves out %s: no label of the continuation reaches %s in one '
+                'switch within loss_budget %s, and the server refuses an unreachable extra '
+                'label; one uninterrupted walk could still have entered %s through a chain '
+                'of switches%s'
+                % (', '.join(lost[:8]) + (' and %d more' % (len(lost) - 8)
+                                          if len(lost) > 8 else ''),
+                   'it' if len(lost) == 1 else 'them', _num(effective),
+                   'it' if len(lost) == 1 else 'them',
+                   ' or from a label at a lower loss' if any('reachable for' in x
+                                                            for x in lost) else ''))
+        # each continued label's own branches at the leaf (T), not C's smallest
+        branches = 0
+        for c in conts:
+            ends = {e.label: e.branches for e in derive.end_labels(a, leaf_segment(a, c.leaf))}
+            branches = max([branches, c.branches_used]
+                           + [ends.get(l.id, 0) for l in c.labels])
+        mlb = _section(final, 'branching').get('max_label_branches')
+        if branches and isinstance(mlb, int) and not isinstance(mlb, bool):
+            notes.append('branching.max_label_branches %d restarts at the continuation\'s '
+                         'seed (the server resets branch state for a new seed): the continued '
+                         'lineages had used %d, so the continuation may branch further than '
+                         'one uninterrupted walk would' % (mlb, branches))
+        if not (budget_info['original'] > 0 or budget_info['effective'] > 0):
+            # no loss budget to spend (forbid, or a budget of 0): each label's remaining
+            # budget would be 0 and say nothing, and a long list of them cost a receipt its
+            # room (round 3, finding C)
+            budget_info = None
+    request = NextRequest({'seeds': seeds}, notes, budget_info, left_out)
+    release = g.envelope.get('release')
+    if release:
+        request['release'] = release
+    for k in ('release', 'graph', 'graph_path'):
+        if k in overrides:
+            request[k] = overrides.pop(k)
+    _deep_merge(strategy, overrides)
+    request['strategy'] = strategy
+    return request
+
+
+def next_requests(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
+    """One next_request() per walk, in |leaves| order: each with its own seed labels, its
+    own rebuilt labels.extra and its budget reduced by ITS labels' largest terminal loss
+    (never less conservative than one request over all the walks)."""
+    if isinstance(leaves, (int, Path, Walk)):
+        leaves = [leaves]
+    return [next_request(g, arm, [x], bp, reduce_budget, **copy.deepcopy(overrides))
+            for x in leaves]
+
+
+def _unique_pairs(pairs):
+    """(label, loss) pairs once per label, the largest loss kept, in label order."""
+    best = {}
+    for l, x in pairs:
+        if l.id not in best or x > best[l.id][1]:
+            best[l.id] = (l, x)
+    return [best[k] for k in sorted(best)]
 
 
 # what a server before the refusal of names that are not UTF-8 wrote for the bytes it could
@@ -1037,52 +1476,6 @@ def _deep_merge(dst, src):
             _deep_merge(dst[k], v)
         else:
             dst[k] = copy.deepcopy(v)
-
-
-def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
-    """A resubmittable /traverse request continuing the given walks: one seed per walk
-    (its continuation, natural orientation, with its labels named explicitly), the
-    retrieval's normalized strategy with direction = this arm, max_extension_bp = bp
-    when given, and (reduce_budget) the loss budget reduced by the largest loss_used
-    among the walks -- one strategy serves every seed, and no lineage may exceed its
-    original budget. Keyword overrides deep-merge into the strategy; release, graph and
-    graph_path are request-level. Raises MissingEnvelope on a body-only graphlet."""
-    g.require_envelope('next_request()')
-    a = g.arm(arm)
-    if isinstance(leaves, (int, Path, Walk)):
-        leaves = [leaves]
-    conts = [continuation(g, a, x) for x in leaves]
-    seeds = []
-    for c in conts:
-        if not c.sequence:
-            raise ValueError('walk %d has no continuation sequence (output.continuation_bp '
-                             'was 0): nothing to resubmit' % c.leaf)
-        if g.mode != 'constrain':
-            seeds.append({'sequence': c.sequence})   # annotate mode has no permitted set
-        else:
-            seeds.append(c.as_seed())    # raises UnverifiableLabelName, never resolves
-    strategy = copy.deepcopy(g.envelope.get('strategy') or {})
-    strategy.pop('clamped', None)
-    strategy['direction'] = a.side
-    if bp is not None:
-        strategy.setdefault('bounds', {})['max_extension_bp'] = bp
-    if reduce_budget and g.mode == 'constrain':
-        labels_ = strategy.get('labels') or {}
-        budget = labels_.get('loss_budget')
-        used = max((c.loss_used for c in conts if c.loss_used != math.inf), default=0.0)
-        if isinstance(budget, (int, float)) and budget > 0 and used > 0:
-            labels_['loss_budget'] = max(0.0, budget - used)
-            strategy['labels'] = labels_
-    request = {'seeds': seeds}
-    release = g.envelope.get('release')
-    if release:
-        request['release'] = release
-    for k in ('release', 'graph', 'graph_path'):
-        if k in overrides:
-            request[k] = overrides.pop(k)
-    _deep_merge(strategy, overrides)
-    request['strategy'] = strategy
-    return request
 
 
 # ------------------------------------------------------------------ views
@@ -1299,7 +1692,23 @@ def compare(a, b, *, arm=None, labels=None, mode='claims'):
     prefix)), walks (walks cut at the depth, with the labels supporting the whole cut
     prefix), labels (label_summary cut at the depth), prefix_subset (every walk of |a|
     under each label is a prefix of a walk of |b| under it; |b|'s walks |a| omits are
-    listed with the reason |a| recorded for them)."""
+    listed with the reason |a| recorded for them).
+
+    Both sides are compared over their DAGs RESTRICTED to [0, depth): the walks are the
+    restricted DAG's leaves (restricted_leaves) and a claim reaching past the depth is
+    anchored on its own route at the depth. Cutting the deeper DAG's displayed walks and
+    claims instead let merges beyond the depth decide what lies before it: a branch that
+    enters such a merge through a non-first parent is shown by no walk of the deeper DAG,
+    and its lineage was route_only on the other branch's bases, so a retrieval and a
+    deeper one of the same seed differed (the review's bubbles, radius 30 vs 100 at depth
+    30, merges at 36 and 62). A merge AT the depth lies outside the restricted DAG too: a
+    retrieval walked to a merge position records it as a zero-length segment, and the runs
+    it closes are open claims at the depth, not merged ones (round 3, finding A). Where a
+    route cannot be reconstructed through a merge (its lineage in no partition) the
+    comparison is 'qualified', never a difference.
+
+    No work or allocation budget applies: the cost follows both DAGs up to the depth (see
+    the module docstring)."""
     comparable, reason, notes = _comparability(a, b)
     strategies = ((a.envelope or {}).get('strategy'), (b.envelope or {}).get('strategy'))
     if comparable is False:
@@ -1349,6 +1758,20 @@ def compare(a, b, *, arm=None, labels=None, mode='claims'):
                 if any(not _has_bases(g, s) for s in sides)]
     memo = {}
     evaluated = True
+    inexact = []
+    if mode in ('claims', 'walks', 'prefix_subset') and not no_bases:
+        beyond = {tag: sum(1 for s in sides for x in g.arms[s].segments
+                           if len(x.parents) > 1 and x.from_bp >= depth)
+                  for tag, g in (('a', a), ('b', b))}
+        if any(beyond.values()):
+            notes.append('compared over each DAG restricted to [0, %d): %s merge%s at or '
+                         'beyond the depth (%s) %s not part of it, so a walk entering one '
+                         'through a non-first parent is a walk of its own at the depth, as '
+                         'in a retrieval walked to %d'
+                         % (depth, sum(beyond.values()),
+                            '' if sum(beyond.values()) == 1 else 's',
+                            ', '.join('%d on %s' % (n, t) for t, n in beyond.items() if n),
+                            'is' if sum(beyond.values()) == 1 else 'are', depth))
     if mode in ('claims', 'walks', 'prefix_subset') and no_bases:
         comparable = _weaker(comparable, 'unknown')
         evaluated = False
@@ -1358,7 +1781,8 @@ def compare(a, b, *, arm=None, labels=None, mode='claims'):
                   % (' and '.join(no_bases) + (' each' if len(no_bases) > 1 else ''), mode,
                      'claims' if mode == 'claims' else 'walks'))
     elif mode == 'claims':
-        ka, kb = _claim_keys(a, sides, depth, sel), _claim_keys(b, sides, depth, sel)
+        ka = _claim_keys(a, sides, depth, sel, inexact)
+        kb = _claim_keys(b, sides, depth, sel, inexact)
         only_a = [_key_json(k, v, lab) for k, v in sorted(ka.items()) if k not in kb]
         only_b = [_key_json(k, v, lab) for k, v in sorted(kb.items()) if k not in ka]
         differ = [{'key': _key_json(k, None, lab), 'a': ka[k], 'b': kb[k]}
@@ -1380,9 +1804,17 @@ def compare(a, b, *, arm=None, labels=None, mode='claims'):
         differ = [dict(lab(k[1]), arm=k[0], a=la[k], b=lb[k])
                   for k in sorted(la) if k in lb and la[k] != lb[k]]
     else:
-        only_a, only_b = _prefix_subset(a, b, sides, depth, sel, memo)
+        only_a, only_b = _prefix_subset(a, b, sides, depth, sel, memo, inexact)
         for row in only_a + only_b:
             row['name'] = names.get(row['ref'])
+    if inexact:
+        # a route that cannot be reconstructed keys a claim on the wrong branch: what
+        # differs may be that, so no difference (and no equality) is asserted
+        comparable = _weaker(comparable, 'qualified')
+        notes.append('the DAG restricted to the depth could not be reconstructed exactly: '
+                     '%s%s' % ('; '.join(inexact[:3]),
+                               ' and %d more' % (len(inexact) - 3) if len(inexact) > 3
+                               else ''))
     if mode == 'prefix_subset':
         holds = not only_a
     else:
@@ -1448,11 +1880,14 @@ def _open_at(c, depth):
     return c.end_class == 'open' or (depth > 0 and c.to_bp >= depth)
 
 
-def _claim_keys(g, sides, depth, sel):
+def _claim_keys(g, sides, depth, sel, inexact=None):
+    """The claims of each arm's DAG RESTRICTED to [0, depth) (_restricted_claims) as
+    comparison keys -> {(side, ref, evidence_from or -1, displayed prefix, to_bp):
+    end class}."""
     out = {}
     for side in sides:
         a = g.arms[side]
-        for c in claims(g, side, at_most_bp=depth, strict=False):
+        for c in _restricted_claims(g, side, depth, inexact):
             if c.kind == 'merged':
                 continue             # not an end: the lineage goes on in the kept entry
             if sel is not None and c.label.ref not in sel:
@@ -1503,42 +1938,244 @@ def _cut_info(g, arm, anchor, m):
     return (None if parts is None else ''.join(parts), inter or frozenset(), have)
 
 
+def restricted_leaves(arm, depth):
+    """The leaves of the arm's DAG restricted to [0, depth) -- what a retrieval walked to
+    that depth would end its walks at: every segment starting before the depth with no
+    child starting before it (children start where their parent ends), i.e. the original
+    leaves above the depth and every segment reaching or crossing it. Among the latter is
+    a segment whose only child is a merge at or beyond the depth that it enters through a
+    NON-first parent: no displayed walk of the deeper DAG passes through it, yet at the
+    depth it is a walk of its own (the review's bubbles, merged at 36 and 62, compared at
+    30: comparing the deeper DAG's displayed walks cut at 30 reported differences that
+    the merges beyond 30 caused)."""
+    return [s.id for s in arm.segments
+            if s.from_bp < depth and (s.leaf is not None or s.end_bp >= depth)]
+
+
 def _cuts(g, side, depth, memo):
-    """[(path, m, cut info)] for every walk of the arm, m = min(length, depth). Walks
-    sharing the segment that holds base m - 1 share one cut: the work is the distinct
-    anchors' chains up to the depth, not every walk's whole chain (B1). Memoized per
-    comparison in |memo|."""
+    """[(leaf, m, cut info)] for every leaf of the arm's DAG restricted to [0, depth)
+    (restricted_leaves), m = min(its end, depth). Leaves sharing the segment that holds
+    base m - 1 share one cut: the work is the distinct anchors' chains up to the depth,
+    not every walk's whole chain (B1). Memoized per comparison in |memo|."""
     key = (id(g), side, depth)
     got = memo.get(key)
     if got is not None:
         return got
     a = g.arms[side]
     segs = a.segments
-    # the segment on each first-parent chain that holds base depth - 1 (parents first)
-    anc = [None] * len(segs)
-    if depth > 0:
-        for s in segs:
-            if s.from_bp <= depth - 1 < s.end_bp:
-                anc[s.id] = s.id
-            elif s.from_bp >= depth and s.parents:
-                anc[s.id] = anc[s.parents[0]]
     infos = {}
     out = []
-    for p in derive.paths(a):
-        m = min(p.length_bp, depth)
+    if depth <= 0:
+        # nothing is certified: one empty cut with the boundary labels, when there is a walk
+        if derive.paths(a):
+            out.append((None, 0, _cut_info(g, a, None, 0)))
+        memo[key] = out
+        return out
+    for leaf in restricted_leaves(a, depth):
+        m = min(segs[leaf].end_bp, depth)
         if m == 0:
             k = None
-        elif m == depth:
-            k = anc[p.leaf]
         else:
-            k = p.leaf
+            k = leaf                          # holds base m - 1 when it reaches the depth
             while segs[k].from_bp >= m:      # zero-length segments at the leaf's end
                 k = segs[k].parents[0]
         info = infos.get((k, m))
         if info is None:
             info = infos[(k, m)] = _cut_info(g, a, k, m)
-        out.append((p, m, info))
+        out.append((leaf, m, info))
     memo[key] = out
+    return out
+
+
+def _route_parent(a, run, seg):
+    """The parent of merge |seg| through which |run|'s lineage arrived (its incoming label
+    in that parent's partition) -> (parent, exact). Not found: parents[0], not exact."""
+    at = derive.lineage_label_at(a, run, seg.from_bp)
+    for j, part in enumerate(seg.partition):
+        if at in part:
+            return seg.parents[j], True
+    return seg.parents[0], False
+
+
+def _first_parent_at(a, pos):
+    """seg -> the segment of its first-parent chain holding outward base |pos| (None for
+    a segment ending at or before it), one pass parents first; the last position asked
+    is kept in the arm's cache."""
+    got = a.cache.get('first_parent_at')
+    if got is not None and got[0] == pos:
+        return got[1]
+    segs = a.segments
+    out = [None] * len(segs)
+    for s in segs:
+        if s.from_bp <= pos < s.end_bp:
+            out[s.id] = s.id
+        elif s.from_bp > pos and s.parents:
+            out[s.id] = out[s.parents[0]]
+    a.cache['first_parent_at'] = (pos, out)
+    return out
+
+
+def _route_segment_at(a, run, pos):
+    """The segment of |run|'s OWN route (back from its anchor, through the partition
+    holding the lineage at every merge, as routes() chooses) that holds outward base
+    |pos| -> (segment, exact). Between merges the route is the first-parent chain, so the
+    walk jumps from merge to merge (merge_above) and only the merges beyond |pos| are
+    decided per lineage."""
+    segs = a.segments
+    above = derive.merge_above(a)
+    at = _first_parent_at(a, pos)
+    s = run.segment
+    exact = True
+    while True:
+        m = above[s]
+        if m is None or segs[m].from_bp <= pos:
+            return (at[s] if at[s] is not None else s), exact
+        s, ok = _route_parent(a, run, segs[m])
+        exact = exact and ok
+
+
+def _evidence_at(a, run, anchor, t):
+    """derive.evidence() for |run| evaluated at |anchor| instead of its own anchor: the
+    §5.1 merge walk over the first-parent chain root -> anchor, merges at or before |t|.
+    For a run cut at the comparison depth, |anchor| is the segment of its own route at
+    the depth, where the restricted DAG anchors it."""
+    segs = a.segments
+    above = derive.merge_above(a)
+    route_from = 0
+    m = above[anchor]
+    while m is not None:
+        seg = segs[m]
+        if seg.from_bp <= t and derive.lineage_label_at(a, run, seg.from_bp) \
+                not in seg.partition[0]:
+            route_from = seg.from_bp
+            break
+        m = above[seg.parents[0]]
+    return route_from, max(route_from, run.from_bp)
+
+
+def _restricted_run_claim(g, a, run, depth, exact, inexact):
+    """The claim of |run| in the DAG restricted to [0, depth): the run-start guard of a
+    cut, then -- for a run reaching past the depth, closed by a merge AT the depth, or
+    anchored on a segment starting there -- anchored at the segment of its own route that
+    holds base depth - 1 (not at its deeper anchor, whose displayed chain may enter a later
+    merge through another parent), with displayed support evaluated there. Everything at
+    or beyond the depth is outside the restricted DAG: a merge at the depth is one a
+    retrieval walked to the depth never makes, so a run it closes is an open claim there
+    and a run anchored on it is anchored on its own route (round 3, finding A: a radius
+    equal to a merge position compared unequal with a deeper retrieval). Any other run
+    ending within the depth is its uncut claim (its anchor and every merge on its chain lie
+    below the depth)."""
+    zero = run.from_bp == run.to_bp
+    if zero:
+        if run.from_bp > depth:
+            return None
+    elif run.from_bp >= depth:
+        return None
+    reanchor = run.to_bp > depth or (0 < depth == run.to_bp and (
+        run.merged or a.segments[run.segment].from_bp >= depth))
+    if not reanchor:
+        return _run_claim(g, a, run, depth, exact)
+    t, ok = _route_segment_at(a, run, depth - 1)
+    if not ok and inexact is not None:
+        inexact.append('%s arm, run %d (%s): its route through a merge is not in any '
+                       'partition' % (a.side, run.id, g.labels[run.label].ref))
+    route_from, ev_from = _evidence_at(a, run, t, depth)
+    to_bp = min(run.to_bp, depth)
+    if zero:
+        kind, evidence_from = 'boundary', None
+    elif ev_from < depth:
+        kind, evidence_from = 'stretch', ev_from
+    else:
+        kind, evidence_from = 'route_only', None
+    return Claim(
+        label=g.labels[run.label], arm=a.side, path_id=_first_paths(a)[t], segment=t,
+        from_bp=run.from_bp, to_bp=to_bp, route_bp=route_from, evidence_from=evidence_from,
+        kind=kind, reason=None, qualifier=None, end_class='open', entered_by=run.entered_by,
+        from_label=None if run.from_label is None else g.labels[run.from_label],
+        cost=run.cost, loss=None, branches=None, support=g.support, exact=exact, run=run.id)
+
+
+def _annotate_route_ends_at(arm, depth):
+    """_annotate_route_ends() of the DAG restricted to [0, depth): the union rule over
+    the segments starting before the depth, P runs cut there, and a label alive at a
+    segment's restricted end with no kept child recording it ends there (at the depth for
+    a segment reaching it). -> {label: [(seg, j)]}."""
+    segs = arm.segments
+    # the whole DAG is the restricted one only when nothing starts at or beyond the depth:
+    # a merge AT the depth (zero length, ending there) is outside it (round 3, finding A)
+    if all(s.end_bp <= depth and (s.from_bp < depth or not s.parents) for s in segs):
+        return _annotate_route_ends(arm)[1]
+    alive_end = [None] * len(segs)
+    ends = {}
+    for s in segs:
+        if s.from_bp >= depth:
+            continue
+        if s.parents:
+            alive = set()
+            for p in s.parents:
+                alive.update(alive_end[p])
+        else:
+            alive = set(s.entry)
+        for pr in s.presence:
+            if not alive or pr.from_bp >= depth:
+                break
+            still = alive.intersection(pr.labels)
+            if pr.from_bp > s.from_bp or not s.parents:
+                for l in alive - still:
+                    ends.setdefault(l, []).append((s.id, pr.from_bp))
+            alive = still
+        alive_end[s.id] = frozenset(alive)
+    for s in segs:
+        if s.from_bp >= depth or not alive_end[s.id]:
+            continue
+        alive = alive_end[s.id]
+        carried = set()
+        for c in s.children:
+            if segs[c].from_bp >= depth:
+                continue
+            if not segs[c].presence:
+                carried = alive
+                break
+            carried.update(alive.intersection(segs[c].presence[0].labels))
+        for l in sorted(alive - carried):
+            ends.setdefault(l, []).append((s.id, min(s.end_bp, depth)))
+    return ends
+
+
+def _restricted_claims(g, side, depth, inexact=None):
+    """The claims of one arm's DAG restricted to [0, depth): what a retrieval walked to
+    the depth would claim, and so what a comparison at the depth must key -- not the
+    deeper DAG's claims cut at the depth (claims(at_most_bp)), whose displayed chains run
+    through merges beyond the depth: a lineage that enters such a merge through a
+    non-first parent is route_only there, on the other branch's bases, while the shallower
+    retrieval shows it as a stretch on its own branch. Constrain: _restricted_run_claim
+    per run. Annotate: the maximal route ends of the restricted DAG; their displayed
+    support is the claims' own (every merge on an anchor's chain lies below the depth).
+    |inexact| collects what could not be reconstructed exactly."""
+    a = g.arms[side]
+    exact = arm_exact(g, side)
+    out = []
+    if g.mode == 'constrain':
+        for run in a.runs:
+            c = _restricted_run_claim(g, a, run, depth, exact, inexact)
+            if c is not None:
+                out.append(c)
+        return out
+    for l, es in sorted(_annotate_route_ends_at(a, depth).items()):
+        for anchor, j in es:
+            c = _annotate_claim(g, a, l, anchor, j, _annotate_evidence(a, l, anchor), depth,
+                                exact)
+            if c is None:
+                continue
+            if j >= depth and a.segments[anchor].end_bp > depth:
+                # the restricted DAG ends the route at the depth, where the deeper one
+                # goes on: censored there (open), not lost
+                c.reason, c.end_class = None, 'open'
+                if c.evidence_from is not None and c.evidence_from < depth:
+                    c.kind = 'stretch'
+                else:
+                    c.kind, c.evidence_from = 'route_only', None
+            out.append(c)
     return out
 
 
@@ -1742,13 +2379,13 @@ def _recorded_refusal(g, arm, seq, ref):
     return None
 
 
-def _divergence(arm, seq):
+def _divergence(arm, seq, depth):
     """The length of the longest prefix of |seq| (walking order) that some walk of the
-    arm spells: where seq leaves the arm's trie."""
+    arm's DAG restricted to [0, depth) spells: where seq leaves the arm's trie there."""
     best = 0
-    for p in derive.paths(arm):
+    for leaf in restricted_leaves(arm, depth):
         try:
-            w = derive.walk_bases(arm, p.leaf)
+            w = derive.walk_bases(arm, leaf)[:depth]
         except ValueError:
             return None
         n = 0
@@ -1760,7 +2397,7 @@ def _divergence(arm, seq):
     return best
 
 
-def _prefix_subset(a, b, sides, depth, sel, memo=None):
+def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None):
     memo = {} if memo is None else memo
     pa = _route_pairs(a, sides, depth, memo)
     pb = _route_pairs(b, sides, depth, memo)
@@ -1778,7 +2415,7 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None):
     a_claims = {}
     for side in sides:
         arm = a.arms[side]
-        for c in claims(a, side, at_most_bp=depth, strict=False):
+        for c in _restricted_claims(a, side, depth, inexact):
             if c.kind == 'merged':
                 continue
             prefix = _walk_prefix(arm, c.segment, c.to_bp)
@@ -1803,7 +2440,7 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None):
             if got is not None:
                 entry['at_bp'], entry['reason'] = got
             else:
-                div = _divergence(arm, seq)
+                div = _divergence(arm, seq, depth)
                 if ev_to is not None and div is not None and div >= ev_to:
                     # beyond the evidence boundary: the refusal may have been dropped
                     entry['at_bp'], entry['reason'] = div, 'unexplained_capped'

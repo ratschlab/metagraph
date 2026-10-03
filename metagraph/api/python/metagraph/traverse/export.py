@@ -7,6 +7,12 @@ body does not carry: seed_id, seed_id_mismatch, the derived-set fields of the se
 the annotation counters, timing and duplicate. Additive fields of the design (§4, §8):
 runs[].segment/branches/loss, segments[].labels_via_parent (merges), hairpin `followed`,
 revisit `length_bp`/`same_distance`, label_dict[].column/seq_id.
+
+Resources: the exports run locally with NO work or allocation budget (stage 2 of the
+design's resource contract bounds the backend walk only). Their output is as large as
+the graphlet makes it (to_fasta() spells every chosen walk's whole chain: quadratic in the
+walk on a comb-shaped trie), and nothing interrupts them; an MCP tool's max_bytes bounds
+the bytes RETURNED, not this computation or its peak allocation.
 """
 
 import json

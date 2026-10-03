@@ -766,13 +766,25 @@ class _PlanCache:
 
 # ---------------------------------------------------------------- the checks
 
+_UNVERIFIED_STATED = set()
+
+
 def _require_oracle(index):
     """Skip unless the oracle can answer for the index the cache was filled from: a
-    live server must serve that index (equal index_meta_fp); a down server is fine as
-    long as the answers are in the oracle cache (a miss then skips)."""
+    live server must serve that index (R.live_matches_cache: equal manifest digests, or
+    equal index_meta_fp where neither side has a manifest); a down server is fine as long
+    as the answers are in the oracle cache (a miss then skips)."""
     if R.server_up(index) and not R.live_matches_cache(index):
-        raise unittest.SkipTest('%s: the live server serves another index than the '
-                                'cache was filled from' % index)
+        status, why = R.live_identity(index)
+        raise unittest.SkipTest('%s: the live server %s the index the cache was filled '
+                                'from (%s)' % (index, 'is not' if status == 'different'
+                                               else 'cannot be verified to be', why))
+    if R.server_up(index) and index not in _UNVERIFIED_STATED:
+        status, why = R.live_identity(index)
+        if status == 'unverifiable':
+            # accepted on the only check there is: say so once, never silently
+            _UNVERIFIED_STATED.add(index)
+            sys.stderr.write('\n[oracle] %s: identity unverifiable (%s)\n' % (index, why))
 
 
 class _OracleBase(unittest.TestCase):

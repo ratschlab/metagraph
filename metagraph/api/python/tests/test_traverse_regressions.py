@@ -369,38 +369,55 @@ class TestCompareSelectorsResolveOnEitherSide(unittest.TestCase):
 
 # ------------------------------------------------------------------ B1-COMPARE-WALKS-COST
 
-def _reference_cut_labels(g, a, p, m):
+def _reference_profile(g, a, leaf):
+    """The whole chain's displayed support profile root -> |leaf| (any segment): the
+    definition support_profile() applies to a walk's leaf."""
+    if g.mode == 'constrain':
+        return [(f, t, set(labs)) for f, t, labs in ops._alive_profile(g, a, leaf)]
+    return [(f, t, set(labs)) for f, t, labs, _ in ops._presence_profile(a, leaf)]
+
+
+def _reference_cut_labels(g, a, leaf, m):
     """The pre-fix definition (the whole chain's support profile, cut at m)."""
     if m == 0:
-        return {g.labels[l].ref for l in a.segments[p.segments[0]].entry}
+        return {g.labels[l].ref for l in a.segments[0].entry}
     have = None
-    for run in ops.support_profile(g, a, p.id):
-        if run.from_bp >= m:
+    for f, t, ids in _reference_profile(g, a, leaf):
+        if f >= m:
             break
-        ids = {l.id for l in run.labels}
         have = ids if have is None else have & ids
     return {g.labels[l].ref for l in (have or ())}
+
+
+def _reference_leaves(a, depth):
+    """The walks of the DAG restricted to [0, depth) (third review, finding 6): every
+    segment starting before the depth none of whose children does -- written out here
+    independently of ops.restricted_leaves. At depth 0 every walk is cut to nothing."""
+    segs = a.segments
+    if depth <= 0:
+        return [p.leaf for p in derive.paths(a)]
+    return [s.id for s in segs if s.from_bp < depth
+            and not any(segs[c].from_bp < depth for c in s.children)]
 
 
 def _reference_keys(g, side, depth):
     a = g.arms[side]
     walks, pairs, supported = {}, set(), {}
-    for p in derive.paths(a):
-        m = min(p.length_bp, depth)
-        w = derive.walk_bases(a, p.leaf)[:m]
-        refs = _reference_cut_labels(g, a, p, m)
+    for leaf in _reference_leaves(a, depth):
+        m = min(a.segments[leaf].end_bp, depth)
+        w = derive.walk_bases(a, leaf)[:m]
+        refs = _reference_cut_labels(g, a, leaf, m)
         walks.setdefault((side, w if side == 'right' else w[::-1]), set()).update(refs)
         for ref in refs:
             pairs.add((side, w, ref))
-        have = {l: 0 for l in a.segments[p.segments[0]].entry}
+        have = {l: 0 for l in a.segments[0].entry}
         cur = None
-        for r in ops.support_profile(g, a, p.id):
-            if r.from_bp >= m:
+        for f, t, ids in _reference_profile(g, a, leaf):
+            if f >= m:
                 break
-            ids = {l.id for l in r.labels}
             cur = ids if cur is None else cur & ids
             for l in cur:
-                have[l] = min(r.to_bp, m)
+                have[l] = min(t, m)
         for l, j in have.items():
             supported.setdefault((side, g.labels[l].ref), set()).add(w[:j])
     return walks, pairs, supported
@@ -409,7 +426,9 @@ def _reference_keys(g, side, depth):
 class TestCompareKeysAreDepthBounded(unittest.TestCase):
     """compare(mode='walks'|'prefix_subset') keys each walk by its cut [0, m): computed
     once per segment holding base m - 1, reading the chain only up to m. The keys must
-    equal the whole-chain definition, at every depth."""
+    equal the whole-chain definition, at every depth -- over the walks of the DAG
+    restricted to the depth (third review, finding 6: a segment entering a merge beyond
+    the depth through a non-first parent is a walk of its own there)."""
 
     def docs(self):
         for name in ('merge', 'switch_chain', 'reentry', 'fork', 'annotate', 'quorum',
@@ -800,7 +819,7 @@ class TestWalkPages(ToolCase):
         tools = self.tools(T.doc_json('merge', 'graphlet'))
         h = tools.traverse_fetch('canned', {'sequence': 'ACGT'})['handle']
         w = tools.graphlet_walks(h, 'right', label={'ref': 'c:1'})
-        self.assertEqual((0, {'route_only': 1}), (w['total'], w['filtered']))
+        self.assertEqual((0, {'merge_entered': 1}), (w['total'], w['filtered']))
         self.assertEqual(1, len(tools._ranked))
         calls = []
         real = ops.rank_walks

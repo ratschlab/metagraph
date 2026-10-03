@@ -300,13 +300,56 @@ def identity(index):
                                     'alphabet', 'num_labels')}
 
 
-def live_matches_cache(index):
-    """True iff the live server serves the index the cache was filled from (equal
-    index_meta_fp: a negative check only, but enough to catch a wrong port)."""
+def live_identity(index):
+    """How the live server's index relates to the one the cache was filled from ->
+    (status, reason), status one of
+      'same'          both state an index manifest digest (index_fp) and they are equal;
+      'unverifiable'  index_meta_fp agrees, but at most one side states index_fp: equal
+                      metadata is a negative check only (two_sided False: neither has a
+                      manifest; True: one side has one and the other not);
+      'different'     index_meta_fp, index_fp (where both state it) or index_ns differ;
+      'down'          no recorded entry, or the server does not answer.
+    Every fingerprint both sides state is compared: equal index_meta_fp alone accepted a
+    live server whose manifest digest differs from the recorded one (third review, N3)."""
     m = load_manifest().get('servers', {}).get(index)
     if not m or not server_up(index):
+        return 'down', 'no recorded identity or no live server'
+    live = live_capabilities(index) or {}
+    for key in ('index_meta_fp', 'index_fp', 'index_ns'):
+        a, b = m.get(key) or None, live.get(key) or None
+        if a and b and a != b:
+            return 'different', '%s differs (recorded %s, live %s)' % (key, a, b)
+    fp_rec, fp_live = m.get('index_fp') or None, live.get('index_fp') or None
+    if fp_rec and fp_live:
+        return 'same', 'equal index manifest digests'
+    if not (m.get('index_meta_fp') and live.get('index_meta_fp')):
+        return 'unverifiable', ('index_meta_fp is not stated on both sides and no manifest '
+                                'digest on both: nothing identifies the index')
+    if fp_rec or fp_live:
+        return 'unverifiable', ('the %s states an index manifest digest and the %s none: '
+                                'equal index_meta_fp is a negative check only'
+                                % (('cache', 'live server') if fp_rec
+                                   else ('live server', 'cache')))
+    return 'unverifiable', ('neither the cache nor the live server states an index '
+                            'manifest digest: equal index_meta_fp is a negative check only')
+
+
+def live_matches_cache(index):
+    """True iff the live server may be taken to serve the index the cache was filled
+    from: equal manifest digests ('same'), or -- where neither side has a manifest, as
+    for sra and uhgg -- equal index_meta_fp, the only check there is (a negative one, but
+    enough to catch a wrong port). A digest on one side only cannot be verified and a
+    differing fingerprint proves another index: False for both (live_identity says
+    which)."""
+    status, _ = live_identity(index)
+    if status == 'same':
+        return True
+    if status != 'unverifiable':
         return False
-    return live_capabilities(index).get('index_meta_fp') == m.get('index_meta_fp')
+    m = load_manifest().get('servers', {}).get(index) or {}
+    live = live_capabilities(index) or {}
+    return not (m.get('index_fp') or live.get('index_fp')) \
+        and bool(m.get('index_meta_fp')) and m.get('index_meta_fp') == live.get('index_meta_fp')
 
 
 def require_server(index, testcase=None):

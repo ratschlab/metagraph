@@ -63,6 +63,15 @@ class UnverifiableLabelName(ValueError):
     instead of building the request (Continuation.as_seed, next_request)."""
 
 
+class IncompatibleContinuations(ValueError):
+    """next_request() over several walks whose continuations carry different labels: one
+    request has one strategy, so one labels.extra, and the permitted pool around each
+    seed (its continuation's labels, every other label of the retrieval a switch target)
+    differs per walk -- a shared list would duplicate one seed's labels or drop another
+    seed's switch targets. Raised instead of building it: next_requests() builds one
+    request per walk."""
+
+
 # ------------------------------------------------------------------------ records
 
 @dataclass(slots=True)
@@ -505,8 +514,17 @@ class Graphlet:
         return ops.continuation(self, arm, leaf)
 
     def next_request(self, arm, leaves, bp=None, reduce_budget=True, **overrides):
+        """A NextRequest continuing |leaves| (see ops.next_request): .notes states what
+        the request cannot carry exactly (a conservative loss budget, a switch target
+        left out, a branch allowance that restarts)."""
         from . import ops
         return ops.next_request(self, arm, leaves, bp, reduce_budget, **overrides)
+
+    def next_requests(self, arm, leaves, bp=None, reduce_budget=True, **overrides):
+        """One NextRequest per walk (walks whose continuations carry different labels
+        cannot share one request: IncompatibleContinuations)."""
+        from . import ops
+        return ops.next_requests(self, arm, leaves, bp, reduce_budget, **overrides)
 
     def subgraph(self, selectors, arm=None, mode='any'):
         from . import ops
@@ -696,7 +714,7 @@ class Change:
 class Continuation:
     sequence: str
     labels: List[Label]
-    loss_used: float
+    loss_used: float                     # the SMALLEST terminal loss of |labels| (C)
     branches_used: int
     seed_coord: Tuple[int, int]
     arm: str = 'right'
@@ -704,6 +722,12 @@ class Continuation:
     # why the labels' names cannot be resubmitted (None: each is the name of exactly one
     # label of the retrieval and holds no U+FFFD)
     unverifiable: Optional[str] = None
+    # constrain: each label's own terminal loss at the leaf (T), parallel to |labels|;
+    # a continuation request can carry one loss budget only (see next_request)
+    losses: Tuple[float, ...] = ()
+    # what a continuation request cannot carry exactly for these labels (None: nothing):
+    # one loss budget for labels that ended the walk at different losses
+    note: Optional[str] = None
 
     def as_seed(self):
         """A /traverse seed: names are what the request resolves (an explicit list).
@@ -714,6 +738,29 @@ class Continuation:
                 raise UnverifiableLabelName(self.unverifiable)
             seed['labels'] = [l.name for l in self.labels]
         return seed
+
+
+class NextRequest(dict):
+    """A /traverse request built by next_request(): to the server (and to json.dumps) a
+    plain dict of the request's fields. What the request format cannot express rides
+    beside it, never inside (the server rejects unknown fields): |notes| states every
+    way the continuation may differ from one uninterrupted walk (a loss budget that is
+    conservative for some labels, a switch target left out, a label alive at a leaf that
+    is not seeded, a branch allowance that restarts), |loss_budget| how the budget was
+    derived ({original, effective, largest_terminal_loss, labels: [{name, ref, loss,
+    remaining}]}; None in annotate mode and when there is no loss budget to spend), and
+    |left_out| every label of the retrieval's permitted pool that the continuation does
+    not carry as one uninterrupted walk would ([{name, ref, why}]): neither a seed label
+    nor in labels.extra (why 'unreachable' or 'unverifiable_name'), or alive at a
+    continued leaf without covering the continuation's whole tail (why
+    'alive_not_seeded', with its walk and loss: not a seed label, though it may be a
+    switch target in labels.extra); the notes name the first few."""
+
+    def __init__(self, request=(), notes=(), loss_budget=None, left_out=()):
+        super().__init__(request)
+        self.notes = list(notes)
+        self.loss_budget = loss_budget
+        self.left_out = list(left_out)
 
 
 @dataclass(slots=True)

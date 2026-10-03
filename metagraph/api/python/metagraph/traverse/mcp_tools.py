@@ -20,9 +20,19 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
     MIN_MAX_BYTES = 64, the smallest error that fits, is a bad_argument): the cursor's
     room is measured, not guessed, and a result that cannot be made to fit is an
     explicit result_too_large whose hint names what this tool offers (raise max_bytes,
-    or export). An error keeps its code under the ceiling (its message is cut). A single
-    row larger than max_bytes is returned alone with row_truncated: true and the fields
-    that were cut named -- never shortened silently;
+    or export). An error keeps its code under the ceiling (its message is cut), also
+    when the call itself cannot be bound (a valid max_bytes it supplied still holds). A
+    single row larger than max_bytes is returned alone with row_truncated: true and the
+    fields that were cut named -- never shortened silently;
+  * an operation that makes something (traverse_fetch and traverse_continue storing a
+    handle, graphlet_subtrie, graphlet_export, graphlet_save, graphlet_load) always
+    returns its receipt -- the new handle or the file's path: over the ceiling its
+    optional fields (summary, evidence, sizes) are dropped first and named in
+    fields_cut; a receipt that could not fit even then is refused BEFORE anything is
+    stored or written (receipt_too_large), never answered with result_too_large after;
+  * max_bytes bounds the bytes a tool returns, not the work behind them: the local tools
+    (graphlet_compare, graphlet_export, the route listings) have no work or allocation
+    budget yet, and their time and peak memory follow the graphlet's size;
   * a filter never hides rows silently: what a filter removed is counted (`filtered`);
   * a derived handle (graphlet_subtrie) is a view: every local tool answers for the
     selected labels and says so (`evidence.view`, `qualified`), or refuses explicitly
@@ -41,9 +51,12 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
   * a replay or a continuation is derived from its entry only on the entry's index
     (§3.1): the backend's capabilities are checked before the request is sent and the
     returned graphlet before anything is stored -- a different release, namespace,
-    index_meta_fp or index_fp, or a manifest digest on one side only, is
-    release_mismatch / index_mismatch; with no digest on either side the result states
-    `identity: {verified: false, note}` instead of refusing;
+    index_meta_fp or index_fp is release_mismatch / index_mismatch (proven different); a
+    manifest digest on one side only is index_unverifiable (not proven either way), run
+    only when the caller passes allow_unverified_index=true -- never as an automatic
+    fallback -- and then stated as `identity: {verified: false, accepted, note}`; with no
+    digest on either side the result states `identity: {verified: false, note}` instead
+    of refusing;
   * a request that would name labels by names the library cannot verify to resolve
     back to them (two labels of the retrieval share one, or it holds U+FFFD) is not
     built: unverifiable_label_name.
@@ -78,10 +91,13 @@ MIN_MAX_BYTES = 64
 # ranked walk lists kept for paging (graphlet_walks): (handle, arm, arguments) -> ids
 _RANKED_CACHE = 16
 _LABELS_IN_ROW = 8
-_ROUTE_ONLY_HINT = ('walks whose selected label is alive at the end only along its own '
-                    'route through a merge (it joined the displayed walk through a '
-                    'non-first merge parent, so it does not spell the whole walk) were '
-                    'left out: pass route_consistent=false to include them')
+_WALKS_HINT = {
+    'merge_entered': 'walks whose selected label is alive at the end only along its own '
+                     'route through a merge (it joined the displayed walk through a '
+                     'non-first merge parent, so its displayed support starts there)',
+    'not_from_seed': 'walks whose selected label is recorded at the last node but not on '
+                     'every node from the seed boundary along any route',
+}
 _MERGE_ENTERED_HINT = ('claims whose label joined the displayed walk through a non-first '
                        'merge parent (route support from from_bp, displayed support only '
                        'from evidence_from) were left out: pass route_consistent=false to '
@@ -106,6 +122,54 @@ class ToolError(Exception):
 
     def as_dict(self):
         return dict({'error': self.code, 'message': self.message}, **self.extra)
+
+
+class _Receipt(dict):
+    """The result of an operation that has changed something (a file written, a handle
+    created): the caller must always learn its essential fields -- the file's path or the
+    new handle -- or it cannot find what was made. Over the ceiling, the optional fields
+    are dropped in |optional| order and named in fields_cut; the essential fields with
+    every optional one cut are checked to fit BEFORE the operation runs (_check_receipt),
+    so a completed operation is never answered with result_too_large."""
+
+    def __init__(self, fields, optional):
+        super().__init__(fields)
+        self.declared = list(optional)
+        self.optional = [k for k in optional if k in fields]
+
+    def minimal(self):
+        """The essential fields with every declared optional field named as cut: the
+        largest receipt the operation can be reduced to (checked before it runs, when
+        the optional fields do not exist yet)."""
+        out = {k: v for k, v in self.items() if k not in self.declared}
+        if self.declared:
+            out['fields_cut'] = list(self.declared)
+        return out
+
+    def fit(self, limit):
+        out = dict(self)
+        cut = []
+        for k in self.optional:
+            if _size(dict(out, fields_cut=cut) if cut else out) <= limit:
+                break
+            out.pop(k)
+            cut.append(k)
+        if cut:
+            out['fields_cut'] = cut
+        return out
+
+
+def _check_receipt(receipt, limit, lever='raise max_bytes'):
+    """Refuse an operation whose receipt could not be returned under the ceiling even with
+    every optional field cut -- before it runs, so that nothing is made that the caller
+    would not be told about. |lever| is what THIS tool offers (a file name only where the
+    receipt carries one)."""
+    n = _size(receipt.minimal())
+    if n > limit:
+        raise ToolError('receipt_too_large', 'the receipt of this operation (%d bytes: %s) '
+                        'would not fit the %d-byte ceiling, so nothing was stored or written: '
+                        '%s' % (n, ', '.join(k for k in receipt if k not in receipt.declared),
+                                limit, lever), max_bytes=limit)
 
 
 # ------------------------------------------------------------------ arguments
@@ -200,6 +264,11 @@ def _fit_error(out, limit):
     return None
 
 
+def _valid_ceiling(v):
+    return v is not None and not isinstance(v, bool) and isinstance(v, int) \
+        and v >= MIN_MAX_BYTES
+
+
 def _tool(fn):
     """Expected failures become {error, message, ...} results; bugs still raise. Every
     result is held to the tool's ceiling: one that cannot be made to fit is an explicit
@@ -207,26 +276,36 @@ def _tool(fn):
     name = fn.__name__
     sig = inspect.signature(fn)
     takes_max = 'max_bytes' in sig.parameters
+    # the position of max_bytes among the positional arguments after self
+    max_pos = list(sig.parameters).index('max_bytes') - 1 if takes_max else None
+
+    def default_limit(self, execute):
+        if name == 'graphlet_sequence' or (name == 'traverse_continue' and execute is False):
+            return self.sequence_max_bytes
+        return self.max_bytes
 
     def wrapped(self, *args, **kw):
         try:
             bound = sig.bind(self, *args, **kw)
         except TypeError as e:
-            # an argument the tool does not take is the caller's error, not a bug
+            # an argument the tool does not take is the caller's error, not a bug. The
+            # ceiling the caller supplied still holds for this error (the review's
+            # graphlet_list(max_bytes=64, foo=1) answered 77 bytes under the default):
+            # a valid max_bytes, by keyword or by position, is honoured even though the
+            # call as a whole cannot be bound
+            supplied = kw.get('max_bytes')
+            if supplied is None and max_pos is not None and len(args) > max_pos:
+                supplied = args[max_pos]
+            limit = supplied if takes_max and _valid_ceiling(supplied) else \
+                default_limit(self, kw.get('execute', True))
             out = {'error': 'bad_argument', 'message': str(e)}
-            return _fit_error(out, self.max_bytes) or out
+            return _fit_error(out, limit) or _too_large(_size(out), limit, takes_max)
         limit = bound.arguments.get('max_bytes')
-        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int)
-                                  or limit < MIN_MAX_BYTES):
+        if limit is not None and not _valid_ceiling(limit):
             return {'error': 'bad_argument', 'message': 'max_bytes: an int >= %d'
                     % MIN_MAX_BYTES}
         if limit is None:
-            if name == 'graphlet_sequence' or (
-                    name == 'traverse_continue' and bound.arguments.get('execute', True)
-                    is False):
-                limit = self.sequence_max_bytes
-            else:
-                limit = self.max_bytes
+            limit = default_limit(self, bound.arguments.get('execute', True))
         try:
             out = fn(self, *args, **kw)
         except ToolError as e:
@@ -268,6 +347,11 @@ def _tool(fn):
         refresh = getattr(self.store, 'refresh', None)
         if refresh is not None:
             refresh()
+        if isinstance(out, _Receipt):
+            # a completed operation (a file written, a handle created) keeps its
+            # receipt: its optional fields go first, and the essential ones were checked
+            # to fit before the operation ran (D6)
+            out = out.fit(limit)
         n = _size(out)
         if n > limit:
             fitted = None
@@ -358,6 +442,11 @@ class GraphletTools:
         return self._resolve(handle)[0]
 
     def _arm(self, g, arm, view=None):
+        # an arm is named by a string: anything else (an object, a list) is the caller's
+        # error, answered as one -- never a TypeError from using it as a key (round 3,
+        # finding B)
+        if arm is not None and not isinstance(arm, str):
+            raise ToolError('bad_arm', 'arm is "left" or "right" ("l", "r"), not %r' % (arm,))
         try:
             a = g.arm(arm)
         except (KeyError, ValueError) as e:
@@ -496,6 +585,9 @@ class GraphletTools:
         name, client = self._client(index)
         if not isinstance(sequence, str) or not sequence:
             raise ToolError('bad_argument', 'sequence is a non-empty string')
+        if labels is not None and not (isinstance(labels, list)
+                                       and all(isinstance(l, str) for l in labels)):
+            raise ToolError('bad_argument', 'labels is a list of label names, not %r' % (labels,))
         limit = _int('limit', limit, 1)
         out = self._backend(lambda: client.resolve(sequence, labels=labels,
                                                    discover=discover, select=select))
@@ -522,10 +614,18 @@ class GraphletTools:
 
     @_tool
     def traverse_fetch(self, index=None, seed=None, strategy=None, keep=True,
-                       max_graphlet_mb=8, replay=None, max_bytes=None):
+                       max_graphlet_mb=8, replay=None, allow_unverified_index=False,
+                       max_bytes=None):
         """One retrieval -> its summary and (keep) a handle. replay=<handle> re-runs the
-        stored request of an entry (also an expired one) against the same index."""
+        stored request of an entry (also an expired one) against the same index; an index
+        whose identity with the entry's cannot be verified (a manifest digest on one side
+        only) is refused as index_unverifiable unless allow_unverified_index=true, and
+        the result then states it (identity.verified false). A stored result's handle is
+        always returned: over the ceiling its summary, evidence and graphlet_bytes are
+        cut first (fields_cut)."""
         _bool('keep', keep)
+        _bool('allow_unverified_index', allow_unverified_index)
+        limit = max_bytes or self.max_bytes
         if isinstance(max_graphlet_mb, bool) or not isinstance(max_graphlet_mb, (int, float)) \
                 or max_graphlet_mb < 0:
             raise ToolError('bad_argument', 'max_graphlet_mb is a number >= 0')
@@ -548,7 +648,7 @@ class GraphletTools:
         if req is None:
             req = client.build_request([seed], strategy or {}, detail='graphlet')
         else:
-            identity = self._check_same_index(client, ident)
+            identity = self._check_same_index(client, ident, allow_unverified_index)
         response = self._backend(client.traverse_raw, req)
         results = response.get('results') or []
         if not results:
@@ -565,7 +665,17 @@ class GraphletTools:
         g = from_response(result, response)       # the whole body validated
         if identity is not None:
             # what actually answered, not only what the capabilities said before
-            _same_index(ident, self._identity_of(g), 'the replay')
+            identity = _weakest(identity, _same_index(ident, self._identity_of(g),
+                                                      'the replay', allow_unverified_index))
+        if spooled or keep:
+            # checked before the entry is stored: a handle the caller cannot be told
+            # about is not made (a spooled body is stored even with keep false)
+            receipt = {'index': name, 'delivery': g.outcome.delivery,
+                       'handle': 'g_' + '0' * 12}
+            if identity is not None:
+                receipt['identity'] = identity
+            _check_receipt(_Receipt(receipt, ('summary', 'evidence', 'graphlet_bytes')),
+                           limit)
         if spooled:
             # max_graphlet_mb is a RAM threshold: the body goes to the spool complete, the
             # model built to validate it is not kept, and the outcome says what happened
@@ -582,7 +692,9 @@ class GraphletTools:
             out['identity'] = identity
         out['evidence'] = ops.evidence_block(g)
         out['summary'] = self._fit_summary(g, out, max_bytes=max_bytes)
-        return out
+        if handle is None:
+            return out
+        return _Receipt(out, ('summary', 'evidence', 'graphlet_bytes'))
 
     def _replay_request(self, handle):
         """The stored request and index identity of an entry, live or expired."""
@@ -594,7 +706,7 @@ class GraphletTools:
                 return u.request, u.index
             raise
 
-    def _check_same_index(self, client, ident):
+    def _check_same_index(self, client, ident, allow_unverified=False):
         """A replay or a continuation runs against the same index as its entry: the
         backend's capabilities must state the entry's identity (_same_index) before
         anything is submitted. -> the identity statement for the result."""
@@ -603,7 +715,7 @@ class GraphletTools:
                                    'fp': caps.get('index_fp') or None,
                                    'meta_fp': caps.get('index_meta_fp') or None,
                                    'release': caps.get('release') or None},
-                           'the index')
+                           'the index', allow_unverified)
 
     @staticmethod
     def _identity_of(g):
@@ -612,14 +724,22 @@ class GraphletTools:
 
     @_tool
     def traverse_continue(self, handle, arm, walk, overrides=None, execute=True,
-                          max_bytes=None):
+                          allow_unverified_index=False, max_bytes=None):
         """A continuation is a new traversal: the library builds the request from the
         walk's continuation, the backend runs it (execute=False: the request only, under
         the 16 KB sequence ceiling -- it carries the continuation's bases and label
         names -- stated as ceiling_bytes; max_bytes raises it). The new entry keeps its
         parent walk, and is stored only when the parent's index identity holds before the
         request (capabilities) and in the result (_same_index); the result states it
-        (`identity`)."""
+        (`identity`). A manifest digest on one side only is index_unverifiable unless
+        allow_unverified_index=true. Both forms carry `notes` (what the request cannot
+        carry exactly: one loss budget for labels that ended at different losses is
+        conservative for the lower ones, a switch target left out, a label alive at the
+        leaf that is not seeded, a branch allowance that restarts) and, where a loss
+        budget applies, `loss_budget` ({original, effective, largest_terminal_loss}): both
+        are part of the receipt, never cut. `loss_budget_labels` (each label's terminal
+        loss and remaining budget) is the first optional field cut, and named in
+        fields_cut, when the receipt would not fit."""
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         walk = _int('walk', walk)
@@ -627,32 +747,57 @@ class GraphletTools:
         if overrides is not None and not isinstance(overrides, dict):
             raise ToolError('bad_argument', 'overrides is an object')
         _bool('execute', execute)
+        _bool('allow_unverified_index', allow_unverified_index)
         req = g.next_request(a, [walk], **(overrides or {}))
         cont = ops.continuation(g, a, walk)
         parent = {'handle': handle, 'arm': a.side, 'walk': walk,
                   'overlap_bp': len(cont.sequence)}
+        # The notes and the budget's derivation are essential: they state how the
+        # continuation differs from one uninterrupted walk. Each label's own loss and
+        # remaining budget is detail the notes already summarise, so it is the first
+        # field cut (and named) when the receipt would not fit: a continuation of a walk
+        # with many labels was refused under the default ceiling (round 3, finding C)
+        stated = {'notes': list(req.notes)}
+        per_label = None
+        if req.loss_budget is not None:
+            stated['loss_budget'] = {k: v for k, v in req.loss_budget.items() if k != 'labels'}
+            per_label = req.loss_budget.get('labels')
         if not execute:
-            return {'request': req, 'parent': parent,
-                    'ceiling_bytes': max_bytes or self.sequence_max_bytes}
+            out = dict({'request': dict(req), 'parent': parent,
+                        'ceiling_bytes': max_bytes or self.sequence_max_bytes}, **stated)
+            if per_label is not None:
+                out['loss_budget_labels'] = per_label
+            return out
         ident = self.store.get(handle).index
         name, client = self._client(ident.get('source'))
         # a continuation is derived from its parent only on the parent's index: checked
         # against the capabilities before submitting, and against what answered before
         # the parent/child link is stored
-        identity = self._check_same_index(client, ident)
+        identity = self._check_same_index(client, ident, allow_unverified_index)
+        optional = ('loss_budget_labels', 'summary', 'evidence')
+        _check_receipt(_Receipt(dict({'handle': 'g_' + '0' * 12, 'parent': parent,
+                                      'identity': identity}, **stated), optional),
+                       max_bytes or self.max_bytes)
         response = self._backend(client.traverse_raw, req)
         result = (response.get('results') or [{}])[0]
         if 'graphlet' not in result:
             return {'error': 'seed_failed', 'message': result.get('error'), 'parent': parent}
         from .parser import from_response
         g2 = from_response(result, response)
-        _same_index(ident, self._identity_of(g2), 'the continuation')
-        new = self.store.put_parsed(g2, result['graphlet'], req, source=name, parent=parent,
-                                    derived_from=handle)
-        out = {'handle': new, 'parent': parent, 'identity': identity,
-               'evidence': ops.evidence_block(g2)}
+        identity = _weakest(identity, _same_index(ident, self._identity_of(g2),
+                                                  'the continuation', allow_unverified_index))
+        # again with what answered: a weaker identity states more
+        _check_receipt(_Receipt(dict({'handle': 'g_' + '0' * 12, 'parent': parent,
+                                      'identity': identity}, **stated), optional),
+                       max_bytes or self.max_bytes)
+        new = self.store.put_parsed(g2, result['graphlet'], dict(req), source=name,
+                                    parent=parent, derived_from=handle)
+        out = dict({'handle': new, 'parent': parent, 'identity': identity}, **stated)
+        if per_label is not None:
+            out['loss_budget_labels'] = per_label
+        out['evidence'] = ops.evidence_block(g2)
         out['summary'] = self._fit_summary(g2, out, max_bytes=max_bytes)
-        return out
+        return _Receipt(out, optional)
 
     # ================================================================ local tools
 
@@ -725,13 +870,18 @@ class GraphletTools:
         base = {'handle': handle, 'arm': a.side,
                 'evidence': ops.evidence_block(g, a.side, view)}
         if filtered:
-            base['filtered'] = {'route_only': filtered}
-            base['hint'] = _ROUTE_ONLY_HINT
+            # counted as what they are, as graphlet_claims counts its claims: a walk the
+            # filter removes is merge-entered (route_only is a claim's kind at a cut,
+            # which no uncut walk is)
+            base['filtered'] = dict(sorted(filtered.items()))
+            base['hint'] = ' and '.join(_WALKS_HINT[k] for k in sorted(filtered)) + \
+                ' were left out: pass route_consistent=false to include them'
         return self._page('graphlet_walks', handle, args, rows, base, max_bytes, n)
 
     def _ranked_ids(self, handle, g, a, rank, labels, min_bp, route_consistent, keep):
-        """(the ranked path ids of graphlet_walks, how many the route_consistent filter
-        removed), cached per handle and arguments: paging an arm ranks it once (B3)."""
+        """(the ranked path ids of graphlet_walks, {why: count} of the walks the
+        route_consistent filter removed), cached per handle and arguments: paging an arm
+        ranks it once (B3)."""
         key = (handle, a.side, rank, json.dumps(labels, sort_keys=True, default=str),
                min_bp, route_consistent)
         got = self._ranked.get(key)
@@ -742,13 +892,14 @@ class GraphletTools:
                              route_consistent=route_consistent)
         if keep is not None:
             ids = [i for i in ids if i in keep]
-        filtered = 0
+        filtered = collections.Counter()
         if labels is not None and route_consistent:
             every = set(ops.rank_walks(g, a, by='id', labels=labels, min_bp=min_bp,
                                        route_consistent=False))
             if keep is not None:
                 every &= keep
-            filtered = len(every) - len(ids)
+            for pid in sorted(every - set(ids)):
+                filtered[ops.walk_filter_reason(g, a, pid, labels)] += 1
         got = self._ranked[key] = (ids, filtered)
         while len(self._ranked) > _RANKED_CACHE:
             self._ranked.popitem(last=False)
@@ -1017,7 +1168,9 @@ class GraphletTools:
         records}: fasta, gfa, json (the full results[i]; what=compare with other=<handle>
         writes the complete comparison lists; what=walk with arm and walks writes the
         complete segment chains of those walks), mgt (the standalone file). |path| is a
-        file name (default: <handle>.<ext>)."""
+        file name (default: <handle>.<ext>). The receipt is always returned: records,
+        then bytes, are cut first (fields_cut). The export has no work or allocation
+        budget: the file is as large as the graphlet makes it."""
         g, view = self._resolve(handle)
         _choice('format', format, ('fasta', 'gfa', 'json', 'mgt'))
         if format == 'json':
@@ -1034,6 +1187,8 @@ class GraphletTools:
         path = self._confined(path, [self._export_root()],
                               default='%s.%s' % (handle, {'json': 'json', 'mgt': 'mgt',
                                                           'gfa': 'gfa'}.get(format, 'fa')))
+        _check_receipt(_Receipt({'path': path}, ('records', 'bytes')), self.max_bytes,
+                       'use a shorter file name')
         if format == 'fasta':
             if view is not None:
                 parts = []
@@ -1092,10 +1247,15 @@ class GraphletTools:
         data = text.encode('utf-8')
         with open(path, 'wb') as f:
             f.write(data)
-        return {'path': path, 'bytes': len(data), 'records': records}
+        return _Receipt({'path': path, 'bytes': len(data), 'records': records},
+                        ('records', 'bytes'))
 
     @_tool
     def graphlet_compare(self, a, b, arm=None, mode='claims', cursor=None, max_bytes=None):
+        """Graphlet.compare() of two handles over their DAGs restricted to the common
+        certified depth, paged. max_bytes bounds the page returned, not the comparison:
+        it runs with no work or allocation budget (its cost follows both DAGs up to the
+        depth)."""
         ga, va = self._resolve(a)
         gb, vb = self._resolve(b)
         self._no_view(va, 'graphlet_compare', a)
@@ -1127,7 +1287,8 @@ class GraphletTools:
     @_tool
     def graphlet_subtrie(self, handle, labels, arm=None, mode='any'):
         """A derived handle: a view with the backing graphlet's original ids; every local
-        tool on it answers for the selected labels."""
+        tool on it answers for the selected labels. The new handle is always returned:
+        over the ceiling the summary, evidence and view are cut first (fields_cut)."""
         g, view = self._resolve(handle)
         self._no_view(view, 'graphlet_subtrie', handle)
         sel = _selectors(labels)
@@ -1137,6 +1298,10 @@ class GraphletTools:
         side = None if arm is None else self._arm(g, arm).side
         v = ops.subgraph(g, sel, side, mode)
         e = self.store.get(handle)
+        optional = ('summary', 'evidence', 'view')
+        _check_receipt(_Receipt({'handle': 'g_' + '0' * 12, 'of': handle}, optional),
+                       self.max_bytes, 'this tool takes no max_bytes: the configured ceiling '
+                       'is below the smallest receipt')
         import copy as _copy
         g2 = _copy.copy(g)
         g2.view = v.view_spec()
@@ -1144,8 +1309,8 @@ class GraphletTools:
         new = self.store.put_graphlet(g2, e.request, derived_from=handle,
                                       source=e.index.get('source'))
         v.of = handle
-        return {'handle': new, 'of': handle, 'view': g2.view, 'summary': v.summary(),
-                'evidence': ops.evidence_block(g, side, v)}
+        return _Receipt({'handle': new, 'of': handle, 'view': g2.view, 'summary': v.summary(),
+                         'evidence': ops.evidence_block(g, side, v)}, optional)
 
     @_tool
     def graphlet_list(self, cursor=None, max_bytes=None):
@@ -1161,14 +1326,22 @@ class GraphletTools:
     def graphlet_save(self, handle, path):
         """The standalone .mgt file of an entry, written to the export directory."""
         path = self._confined(path, [self._export_root()])
+        _check_receipt(_Receipt({'path': path}, ('bytes',)), self.max_bytes,
+                       'use a shorter file name')
         n = self.store.save(_handle(handle), path)
-        return {'path': path, 'bytes': n}
+        return _Receipt({'path': path, 'bytes': n}, ('bytes',))
 
     @_tool
     def graphlet_load(self, path):
-        """A saved .mgt file (from the export directory or the spool) -> a new handle."""
+        """A saved .mgt file (from the export directory or the spool) -> a new handle and
+        its summary (cut first, and named in fields_cut, when the answer would not fit:
+        the handle is always returned)."""
         roots = [self._export_root(), os.path.realpath(self.store.spool_dir)]
         path = self._confined(path, roots)
+        # a handle is 'g_' and 12 hex digits (GraphletStore._new_handle)
+        _check_receipt(_Receipt({'handle': 'g_' + '0' * 12}, ('summary',)), self.max_bytes,
+                       'this tool takes no max_bytes: the configured ceiling is below the '
+                       'smallest receipt')
         try:
             h = self.store.load(path)
         except GraphletFormatError as e:
@@ -1178,18 +1351,20 @@ class GraphletTools:
         except UnicodeDecodeError:
             raise ToolError('format_error', 'not a valid MGT v1 document (not UTF-8)') from None
         g = self.store.graphlet(h)
-        return {'handle': h, 'summary': self._fit_summary(g, {'handle': h})
-                if g.has_envelope else None}
+        return _Receipt({'handle': h, 'summary': self._fit_summary(g, {'handle': h})
+                         if g.has_envelope else None}, ('summary',))
 
 
-def _same_index(parent, other, what):
+def _same_index(parent, other, what, allow_unverified=False):
     """The §3.1 identity check of a retrieval derived from (or replaying) an entry: the
     release and the namespace, where both state one, must agree, a differing
     index_meta_fp proves another index, and the manifest digest index_fp must be equal
-    on both -- one side without it cannot be verified to be the same index and is
-    refused like a different one (index_mismatch). Neither with it (no manifest
-    anywhere) is not refused: the result states the identity unverifiable. -> the
-    identity statement {verified, ...}."""
+    where both state it (index_mismatch otherwise: proven different). A digest on ONE side
+    only proves nothing either way: that is index_unverifiable -- not run automatically,
+    and run only when the caller opts in with allow_unverified (the result then states the
+    identity unverified and that it was accepted). Neither with it (no manifest anywhere)
+    is not refused: the result states the identity unverifiable. -> the identity statement
+    {verified, ...}."""
     rel_a, rel_b = parent.get('release') or None, other.get('release') or None
     if rel_a and rel_b and rel_a != rel_b:
         raise ToolError('release_mismatch', 'the entry was retrieved from release %r, %s '
@@ -1209,14 +1384,30 @@ def _same_index(parent, other, what):
                             '(index_fp differs from that of %s)' % what)
         return {'verified': True, 'index_fp': fp_a}
     if fp_a or fp_b:
-        raise ToolError('index_mismatch', '%s states %s index manifest digest (index_fp) '
-                        'and the entry %s: that they are the same index cannot be verified, '
-                        'so nothing is derived from the entry across them'
-                        % (what, 'an' if fp_b else 'no', 'one' if fp_a else 'none'))
+        # one manifest digest: equal release, namespace and index_meta_fp (where stated)
+        # do not prove the same index, and nothing proves another one
+        why = ('%s states %s index manifest digest (index_fp) and the entry %s: whether '
+               'they are the same index cannot be verified (not proven different)'
+               % (what, 'an' if fp_b else 'no', 'one' if fp_a else 'none'))
+        if not allow_unverified:
+            raise ToolError('index_unverifiable', why + ', so nothing is derived from the '
+                            'entry automatically',
+                            hint='pass allow_unverified_index=true to run it anyway; the '
+                                 'result then states the identity unverified')
+        return {'verified': False, 'accepted': 'allow_unverified_index',
+                'note': why + '; run because the caller passed allow_unverified_index'}
     return {'verified': False,
             'note': 'neither the entry nor %s states an index manifest digest (index_fp): '
                     'that they are the same index cannot be verified (the server loaded no '
                     'index manifest)' % what}
+
+
+def _weakest(first, second):
+    """Of two identity statements (before the request, and of what answered), the one
+    that claims less: a verified identity never hides an unverified answer."""
+    if first.get('verified') and not second.get('verified'):
+        return second
+    return first
 
 
 def _row(x):

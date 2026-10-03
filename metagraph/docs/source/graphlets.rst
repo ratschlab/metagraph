@@ -584,6 +584,13 @@ result is never evidence of absence.
 was requested, used and left, and the actions that would help. The stopped arm's walks
 are partial, and its ``walk_domain`` limitation names the budget as the knob.
 
+These budgets bound the backend's walk. The library's own operations have none yet:
+``compare()``, ``routes()`` and the exports (``to_fasta()``, ``to_gfa()``,
+``to_json()``) run locally with no work or allocation budget, their time and peak
+memory follow the size of the graphlet (a comparison reads both DAGs up to its depth, an
+export spells every chosen walk), and nothing interrupts them. A tool's ``max_bytes``
+bounds the bytes it returns, not the computation behind them.
+
 .. note::
 
    ``greedy_losses`` is an arm-level limitation: it is stated on the arm whose heads
@@ -848,8 +855,14 @@ through segments 2 and 5, the second alleles.
 
 In ``annotate`` mode a label's route may pass through any parent of a merge (that is how
 ``label_summary()`` measures ``direct_bp``), and ``claims()``, ``label_walks()`` and
-``routes()`` follow it there too. For ``b.fa`` in the ``annotate`` fixture (the same
-locus, label-free) the result is its stretch to the radius through the second alleles:
+``routes()`` follow it there too: one claim per **maximal end** of the label's routes
+under the union rule, each shown by **one witness route**, chosen deterministically by
+the stored parent order (at every merge, the first parent that records the label). The
+witness does not enumerate the other routes that reach the same end, and it does not
+establish a contiguous source occurrence: the recorded sets say that every node of the
+route carries the label, not that one indexed sequence spells it. For ``b.fa`` in the
+``annotate`` fixture (the same locus, label-free) the result is its stretch to the radius
+through the second alleles:
 
 .. graphlet-example: annotate-routes
 
@@ -1030,15 +1043,47 @@ walked 10 bp with k = 15). A walk with a semantic end has none (``ValueError``).
    {'sequence': 'CTATTATTGCTAAGA', 'labels': ['acc2']}
    GTCGGACGGGCGTAC (-10, 5)
 
+``loss_used`` is the *smallest* terminal loss among the continuation's labels;
+``losses`` holds each label's own, and ``note`` says when one loss budget cannot serve
+them exactly.
+
 ``next_request(arm, walks, bp=None, reduce_budget=True, **overrides)`` builds the
 resubmittable request: one seed per walk (its continuation, with its labels named
 explicitly in ``constrain`` mode), the retrieval's normalized strategy with
-``direction`` set to the arm, ``bounds.max_extension_bp = bp`` when given, the loss
-budget reduced by the largest ``loss_used`` among the walks (no lineage may exceed its
-original budget), and the keyword overrides deep-merged into the strategy (``release``,
-``graph`` and ``graph_path`` go to the request level). ``TraverseClient.deepen()``
-sends it. The result is a new traversal, certified on its own; the backend keeps no
-frontier between requests.
+``direction`` set to the arm, ``bounds.max_extension_bp = bp`` when given, and the
+keyword overrides deep-merged into the strategy (``release``, ``graph`` and
+``graph_path`` go to the request level). In ``constrain`` mode two rules hold:
+
+* **No route exceeds its original loss budget.** The loss budget is reduced by the
+  *largest* terminal loss of the continued labels. A request carries one loss budget
+  and no per-label starting loss, so this is exact for the labels at that loss and
+  conservative for the others: their continuation may stop earlier than one
+  uninterrupted walk would. The returned request (a ``NextRequest``, a ``dict``) says so
+  in ``notes`` and, where a loss budget applies, lists each label's terminal loss and
+  remaining budget in ``loss_budget``; neither is sent to the server.
+  ``reduce_budget=False`` keeps the original budget, and a note states that a route may
+  then exceed it.
+* **The request is valid.** ``labels.extra`` is rebuilt around the new seed labels: the
+  retrieval's permitted labels minus the seeds, each kept that a seed label reaches in
+  one switch within the budget (what the server accepts). Every label left out is listed
+  in ``left_out``, and the notes name the first few. An override section the rebuild
+  reads that is not an object (``labels``, ``labels.change_cost``, ``branching``), or a
+  malformed field of it, is refused with a ``ValueError`` naming it.
+
+A label alive at a walk's leaf that does not cover the continuation's whole tail (it
+switched in within the last bases) is not among the continuation's labels, so the request
+does not seed it: the continuation can enter it again only by a switch from a seed label,
+and may lack the lineage that one uninterrupted walk keeps. Each such label is named in
+``notes`` and listed in ``left_out`` with ``why: 'alive_not_seeded'``, its walk and its
+loss.
+
+Walks share one strategy, so one ``labels.extra``: several walks are built into one
+request only when that list is the same for all of them; otherwise
+``IncompatibleContinuations`` is raised, and ``next_requests()`` builds one request per
+walk. ``TraverseClient.deepen()`` sends the request and returns its ``notes`` with the
+response. The result is a new traversal, certified on its own; the backend keeps no
+frontier between requests (a continuation's branch allowance restarts, which a note
+states when the walk had used some).
 
 .. graphlet-example: next-request
 
@@ -1081,7 +1126,16 @@ Comparing retrievals
 ``compare(other, *, arm=None, labels=None, mode='claims')`` compares two retrievals of
 the same locus, keyed by label ``ref`` and restricted to the smaller
 ``complete_to_bp`` of the two (``depth_used``); a claim reaching that depth is
-``open`` on both sides. It returns a ``Comparison`` with ``comparable``, ``reason``,
+``open`` on both sides. Both DAGs are **restricted to the depth** before anything is
+keyed: the walks are the restricted DAG's leaves, and a claim reaching past the depth is
+anchored on its own route there -- what a retrieval walked to that depth shows. A merge
+beyond the depth therefore decides nothing before it: the branch that enters it through
+a non-first parent, which no displayed walk of the deeper retrieval passes, is a walk of
+its own at the depth. Everything at or beyond the depth is outside the restricted DAG,
+a merge exactly at the depth included: a retrieval walked to a merge position records
+that merge as a zero-length segment, and the runs it closes are open claims at the depth,
+not merged ones. Where a route cannot be reconstructed, the comparison is
+``'qualified'`` rather than a difference. It returns a ``Comparison`` with ``comparable``, ``reason``,
 ``depth_used``, ``equal``, ``only_in_a``, ``only_in_b``, ``differ`` and ``notes``.
 Modes: ``claims`` (run ends, keyed by label, displayed start and prefix), ``walks``
 (walks cut at the depth, with the labels supporting the whole cut prefix), ``labels``
@@ -1404,8 +1458,14 @@ index names to ``TraverseClient`` objects for the backend tools.
   ``traverse_fetch`` (one retrieval: a handle plus a summary; ``replay=<handle>``
   re-runs a stored request against the same index and refuses a different release or
   index digest) and ``traverse_continue`` (a continuation as a new traversal; the new
-  entry remembers its parent walk). A body over ``max_graphlet_mb`` is spooled complete
-  and only its summary and handle are returned (``delivery: spooled``).
+  entry remembers its parent walk, and the result carries the request's ``notes`` and,
+  where a loss budget applies, ``loss_budget`` -- both part of its receipt -- and each
+  label's terminal loss and remaining budget in ``loss_budget_labels``, the first
+  optional field cut when the receipt would not fit). An index digest on one side only proves neither identity nor
+  difference: it is refused as ``index_unverifiable``, and run only when the caller
+  passes ``allow_unverified_index=true`` (the result then states the identity
+  unverified). A body over ``max_graphlet_mb`` is spooled complete and only its summary
+  and handle are returned (``delivery: spooled``).
 * **Local tools over a handle:** ``graphlet_summary``, ``graphlet_walks``,
   ``graphlet_walk``, ``graphlet_support``, ``graphlet_labels``, ``graphlet_splits``,
   ``graphlet_claims``, ``graphlet_sequence``, ``graphlet_export``,
@@ -1423,18 +1483,29 @@ The contract:
   valid across a restart while the handle does. A single row too large for a page comes
   alone with ``row_truncated`` and the cut fields named; an answer that cannot fit at
   all is the error ``result_too_large``, never a silently shortened one;
+* an operation that makes something (a stored handle, an exported or saved file, a
+  loaded handle, a view) always returns its receipt, the handle or the path: its other
+  fields are cut first and named in ``fields_cut``, and an operation whose receipt could
+  not fit is refused before it stores or writes anything (``receipt_too_large``, whose
+  message names the lever the tool offers: a larger ``max_bytes``, or a shorter file name
+  for an export or a save);
+* ``max_bytes`` bounds the bytes returned, not the work: the local tools
+  (``graphlet_compare``, ``graphlet_export``, the route listings) have no work or
+  allocation budget yet, and their time and peak memory follow the graphlet's size;
 * a filter never hides rows silently: what it removed is counted (e.g.
-  ``filtered: {route_only: N}`` with a hint how to include them);
+  ``filtered: {merge_entered: N}`` with a hint how to include them);
 * files are written to and read from the export directory (default
   ``<spool>/exports``) only;
-* failures are results ``{error, message, ...}`` with codes such as ``bad_argument``,
-  ``bad_arm``, ``bad_cursor``, ``unknown_handle`` (with ``replayable``),
+* failures are results ``{error, message, ...}`` -- a malformed argument too (an arm
+  that is not a string, a label list that is not a list, a malformed override of a
+  continuation) -- with codes such as ``bad_argument``, ``bad_arm``, ``bad_cursor``, ``unknown_handle`` (with ``replayable``),
   ``unknown_label``, ``ambiguous_label``, ``missing_envelope``,
   ``incomplete_recording``, ``not_in_view``, ``view_unsupported``, ``no_bases``,
   ``path_not_allowed``, ``format_error``, ``io_error``, ``too_large``,
-  ``result_too_large``, ``backend_error`` (with the HTTP status, and
-  ``retry_after_s`` while the server loads), ``backend_unreachable``,
-  ``not_replayable``, ``seed_failed``.
+  ``result_too_large``, ``receipt_too_large``, ``backend_error`` (with the HTTP status,
+  and ``retry_after_s`` while the server loads), ``backend_unreachable``,
+  ``not_replayable``, ``seed_failed``, ``index_mismatch``, ``index_unverifiable``,
+  ``release_mismatch``, ``unverifiable_label_name``.
 
 .. graphlet-example: tools
 

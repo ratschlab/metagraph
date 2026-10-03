@@ -518,14 +518,18 @@ class TestFinding7ContinuationChecksTheIndex(unittest.TestCase):
         self.assertIn('cannot be verified', cont['identity']['note'])
 
     def test_one_side_without_a_manifest_is_refused(self):
+        # refused as UNVERIFIABLE, not as proven different (D4 of the third review:
+        # tests/test_traverse_review3.py covers the explicit opt-in)
         client = Caps(fp='a' * 64)
         tools, parent = self.fetch(client)
         client.fp = client.caps['index_fp'] = None
-        self.assertEqual('index_mismatch', tools.traverse_continue(parent, 'right', 1)['error'])
+        self.assertEqual('index_unverifiable',
+                         tools.traverse_continue(parent, 'right', 1)['error'])
         client = Caps(fp=None)
         tools, parent = self.fetch(client)
         client.fp = client.caps['index_fp'] = 'a' * 64
-        self.assertEqual('index_mismatch', tools.traverse_continue(parent, 'right', 1)['error'])
+        self.assertEqual('index_unverifiable',
+                         tools.traverse_continue(parent, 'right', 1)['error'])
 
     def test_what_answered_is_checked_too(self):
         # the capabilities state the parent's digest, the response another one: the

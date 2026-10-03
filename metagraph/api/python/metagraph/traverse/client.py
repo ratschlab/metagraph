@@ -51,6 +51,9 @@ class TraverseResponse:
     graphlets: List[Any]                # per seed: a Graphlet, or None for an error result
     errors: List[dict] = field(default_factory=list)   # [{index, error, result}]
     raw: Optional[dict] = None
+    # deepen(): what the continuation request could not carry exactly (NextRequest.notes:
+    # a loss budget conservative for some labels, a switch target left out, ...)
+    notes: List[str] = field(default_factory=list)
 
 
 def _decode_body(data, encoding):
@@ -185,8 +188,14 @@ class TraverseClient:
 
     def deepen(self, graphlet, arm, leaves, bp=None, **overrides):
         """Iterative deepening stays a backend call: the graphlet derives the
-        continuations and builds the request, the server runs it."""
+        continuations and builds the request (Graphlet.next_request), the server runs it.
+        The response's notes carry the request's: how the continuation may differ from
+        one uninterrupted walk (a loss budget conservative for the labels that ended at a
+        lower loss, ...). Walks whose continuations carry different labels cannot share a
+        request (IncompatibleContinuations): deepen them one walk at a time."""
         if self.graph and 'graph' not in overrides:
             overrides['graph'] = self.graph
         req = graphlet.next_request(arm, leaves, bp, **overrides)
-        return self.response(self.traverse_raw(req))
+        out = self.response(self.traverse_raw(req))
+        out.notes = list(getattr(req, 'notes', ()))
+        return out
