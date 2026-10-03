@@ -88,7 +88,7 @@
      "status": "complete"
     }
    },
-   "graphlet": "H mgt 1 15 basic $ACGT a k k 1000 1000 0 walk fixtures * f61e6e391195a372\nS 3b323ea27d2ea165 30 16 0 CGGGGTGGATTAGTCAAGGCCATGATGGGC\nL h 0 0 0 ACC1\nL h 1 0 4 \nL h 0 1 3 2\nO c c c i\nA r c 40 p 0 0 1 2 0 steps=79,successor_enumerations=79,output_bp=79,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 5 0 3 2 0 79\nB 0 3 3 3 1 79 2 0 2 0 0 0 0 .\nG * 0 1 0-1 * * * 0 * G\nP 0 1 2 !\nG 0 1 19 0 * * * 0 * CATTTGGACCGTAGGAGTA\nP 1 14 1 0\nP 14 20 2 0,2\nG 0 1 29 1 * * * * * TACGGAGATATTCATCAAGATGATCATAT\nP 1 30 1 1\nT D .\nG 1 20 20 2 * * * * * CTATCACCTGCCACTTCAAT\nP 20 40 1 2\nT X .\nC 40 0 0 .\nG 1 20 10 0 * * * * * TATGGTCCTA\nP 20 30 1 0\nT D .\nZ 24\n",
+   "graphlet": "H mgt 1 15 basic $ACGT a k k 1000 1000 0 walk fixtures * f61e6e391195a372\nS 3b323ea27d2ea165 30 16 0 CGGGGTGGATTAGTCAAGGCCATGATGGGC\nL h 0 0 0 ACC1\nL h 1 0 4 \nL h 0 1 3 2\nO c c c i\nA r c 40 p 0 0 1 2 0 steps=79,successor_enumerations=79,output_bp=79,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 5 0 3 2 0 79\nB 0 3 3 3 1 79 2 0 2 0 0 0 0 .\nG * 0 1 0-1 * * * 0 * G\nP 0 1 2 !\nG 0 1 19 0 * * * 0 * CATTTGGACCGTAGGAGTA\nP 1 14 1 0\nP 14 20 2 0,2\nG 0 1 29 1 * * * * * TACGGAGATATTCATCAAGATGATCATAT\nP 1 30 1 1\nT D .\nG 1 20 20 2 * * * * * CTATCACCTGCCACTTCAAT\nP 20 40 1 2\nT X .\nC 40 0 0 2\nG 1 20 10 0 * * * * * TATGGTCCTA\nP 20 30 1 0\nT D .\nZ 24\n",
    "graphlet_bytes": 723,
    "graphlet_lines": 24,
    "label_mode": "annotate",

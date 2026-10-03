@@ -107,7 +107,9 @@
       {
        "continuation": {
         "branches_used": 0,
-        "labels": [],
+        "labels": [
+         2
+        ],
         "loss_used": 0.0,
         "sequence": "GCATTTGGACCGTAGGAGTACTATCACCTGCCACTTCAAT"
        },

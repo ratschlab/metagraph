@@ -892,6 +892,62 @@ TYPED_TEST(WalkerTest, Diamond) {
 }
 
 
+// A lineage merged in through a LATER parent, then continued by both children of a
+// split: the second child's run is a clone made at the split (commit_entries), and it
+// must keep the merge's route stamp (LabelRun::route_bp) as the leaf's
+// LabelEnd::route_bp does -- a clone with route_bp 0 would claim the whole displayed
+// flank, whose bases before the merge belong to the route it did not travel (§7.1).
+TYPED_TEST(WalkerTest, MergedLineageKeepsItsRouteAcrossASplit) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    std::vector<std::string> b;
+    for (uint32_t seed = 5; ; ++seed) {
+        b = clean_blocks({ 30, 25, 25, 30, 25, 25 }, seed);
+        if (b[1][0] != b[2][0] && b[1].back() != b[2].back() && b[4][0] != b[5][0])
+            break;
+    }
+    const std::string &X = b[0], &P = b[1], &P2 = b[2], &Y = b[3], &Q = b[4], &Q2 = b[5];
+    for (auto mode : all_modes()) {
+        // A through P, B through P'; after Y both go on along Q and along Q'
+        auto anno = build_anno_graph<Graph, Annotation>(
+                kK, { X + P + Y + Q, X + P + Y + Q2, X + P2 + Y + Q, X + P2 + Y + Q2 },
+                { "A", "A", "B", "B" }, mode);
+        // each label branches once, at the split after Y
+        Strategy st = strategy(1, true);
+        auto res = run(*anno, X, { "A", "B" }, st);
+        const ArmResult &arm = res.arms[kRight];
+        check_invariants(arm, st);
+        const Segment *y = nullptr;
+        for (const auto &seg : arm.segments) {
+            if (seg.parents.size() == 2) {
+                ASSERT_EQ(nullptr, y) << mode;
+                y = &seg;
+            }
+        }
+        ASSERT_NE(nullptr, y) << mode;
+        ASSERT_EQ(2u, y->labels_via_parent.size()) << mode;
+        ASSERT_EQ(1u, y->labels_via_parent[1].size()) << mode;
+        // the label that entered the merge through the later parent
+        const LabelId later = y->labels_via_parent[1][0];
+        ASSERT_EQ(2u, arm.paths.size()) << mode;
+        std::set<uint32_t> later_runs;
+        for (const auto &path : arm.paths) {
+            ASSERT_EQ(2u, path.end_labels.size()) << mode;
+            for (const auto &e : path.end_labels) {
+                const uint64_t want = e.label == later ? y->from_bp : 0;
+                EXPECT_EQ(want, e.route_bp) << mode << " label " << e.label;
+                EXPECT_EQ(want, arm.runs[e.run].route_bp)
+                    << mode << " label " << e.label << " run " << e.run;
+                if (e.label == later)
+                    later_runs.insert(e.run);
+            }
+        }
+        // one run per child: the first child took the stamped run, the second a clone
+        EXPECT_EQ(2u, later_runs.size()) << mode;
+    }
+}
+
+
 // T11a: simple cycle L·J·C·J·E with J a single k-mer
 TYPED_TEST(WalkerTest, CycleJunction) {
     using Graph = typename TypeParam::first_type;
@@ -3049,6 +3105,44 @@ TEST(Walker, AnnotateSummaryIsLinearOnAMergedDag) {
     EXPECT_EQ(a.size() - seed_seq.size(), r.label_summary[0][kRight].direct_bp);
     EXPECT_EQ(a.size() - seed_seq.size(), r.label_summary[0][kRight].reach_bp);
     EXPECT_LT(elapsed, 5.0) << "the summary is not linear in the DAG";
+}
+
+
+// §7.1, annotate mode: a continuation names the labels covering its whole tail, i.e.
+// recorded on every node whose k-mer lies in the tail -- not on the k - 1 nodes before
+// the tail's first k-mer, whose k-mers begin outside it. B is recorded on exactly the
+// tail's k-mers (listed), C on all of them but the first (not listed).
+TEST(Walker, AnnotateContinuationLabelsCoverTheTailKmers) {
+    const auto b = clean_blocks({ 30, 120, 40 }, 77);
+    const std::string &X = b[0], &F = b[1], &G = b[2];
+    const size_t c = 50;
+    const std::string tail = (X + F).substr(X.size() + F.size() - c);
+    for (auto mode : all_modes()) {
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, { X + F + G, tail, tail.substr(1) }, { "A", "B", "C" }, mode);
+        LabelOracle oracle(*anno);
+        Seed seed;
+        seed.sequence = X;
+        Strategy st;
+        st.label_mode = LabelMode::ANNOTATE;
+        st.direction = Strategy::RIGHT;
+        st.max_extension_bp = F.size();
+        st.continuation_bp = c;
+        auto r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        const ArmResult &arm = r.arms[kRight];
+        ASSERT_EQ(1u, arm.paths.size()) << mode;
+        ASSERT_TRUE(arm.paths[0].continuation.has_value()) << mode;
+        const Continuation &cont = *arm.paths[0].continuation;
+        EXPECT_EQ(tail, cont.sequence) << mode;
+        std::vector<std::string> names;
+        for (LabelId l : cont.labels) names.push_back(r.label_dict[l].name);
+        std::sort(names.begin(), names.end());
+        EXPECT_EQ((std::vector<std::string>{ "A", "B" }), names) << mode;
+        // each listed label is on every k-mer of the tail: the tail is a valid seed
+        auto again = run(*anno, cont.sequence, names, Strategy());
+        EXPECT_TRUE(again.dropped_labels.empty()) << mode;
+        EXPECT_EQ(names.size(), again.num_seed_labels) << mode;
+    }
 }
 
 

@@ -1960,22 +1960,31 @@ Continuation Walker::make_continuation(ArmState &arm, const Item &item) {
     c.loss_used = kInfiniteLoss;
     c.branches_used = UINT32_MAX;
     if (annotate_) {
-        // the labels recorded on EVERY node of the tail (an intersection over the
-        // runs covering it; a lower bound where a run's list was cut, which the arm's
-        // nodes_labels_truncated reports). Such a label validates as a seed label of
+        // the labels recorded on EVERY node whose k-mer lies in the tail (an
+        // intersection over the runs covering them; a lower bound where a run's list
+        // was cut, which the arm's nodes_labels_truncated reports). The tail's n - k + 1
+        // k-mers end at its last n - k + 1 bases: the nodes at outward
+        // [ext_bp - (n - k + 1), ext_bp). Its first k - 1 bases are no node's newest base
+        // inside the tail -- the nodes there start before it, so their labels must not
+        // narrow the list (§7.1: the labels covering that whole tail). A tail of at most k
+        // bases (continuation_bp 0 included) lies in the head node's k-mer. Seed nodes
+        // carry no recorded labels: a tail reaching more than k - 1 bases into the seed
+        // is checked on its flank nodes only. Such a label validates as a seed label of
         // the continuation, so the tail stays valid /traverse input.
+        const uint64_t kmers = n > k_ ? n - k_ + 1 : 1;
+        const uint64_t node_from = item.ext_bp - std::min<uint64_t>(item.ext_bp, kmers);
         std::vector<LabelId> alive = item.present;
         for (size_t s = item.segment; !alive.empty(); ) {
             const Segment &seg = arm.result.segments[s];
             for (auto it = seg.label_sets.rbegin(); it != seg.label_sets.rend() && !alive.empty(); ++it) {
-                if (it->to_bp <= covered_from)
+                if (it->to_bp <= node_from)
                     break;
                 std::vector<LabelId> still;
                 std::set_intersection(alive.begin(), alive.end(), it->labels.begin(),
                                       it->labels.end(), std::back_inserter(still));
                 alive.swap(still);
             }
-            if (seg.from_bp <= covered_from || seg.parents.empty())
+            if (seg.from_bp <= node_from || seg.parents.empty())
                 break;
             s = seg.parents[0];
         }
@@ -2174,6 +2183,12 @@ void Walker::commit_entries(ArmState &arm, const Item &item, size_t target_segme
             LabelRun src = arm.result.runs[e.run];
             e.run = new_run(arm, src.label, src.from_bp, src.entered_by_switch,
                             src.from_label, src.switch_cost, src.prev_run);
+            // the clone is the same lineage on the other child: where a merge routed it
+            // in from a later parent, its displayed evidence starts at that merge too
+            // (§7.1: route_bp 0 would claim the whole displayed flank). Every later merge
+            // is deeper (merge_level(depth + 1)), so the inherited stamp stays the
+            // earliest. |src| is a copy: new_run may reallocate the runs.
+            arm.result.runs[e.run].route_bp = src.route_bp;
         }
         e.switched = false;
         e.pred = e.label;
