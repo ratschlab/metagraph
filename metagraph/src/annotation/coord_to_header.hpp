@@ -1,7 +1,11 @@
 #ifndef __COORD_TO_HEADER_HPP__
 #define __COORD_TO_HEADER_HPP__
 
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -41,10 +45,17 @@ class CoordToHeader {
     using Tuple = mtg::annot::matrix::MultiIntMatrix::Tuple;
     using RowTuples = mtg::annot::matrix::MultiIntMatrix::RowTuples;
 
-    CoordToHeader() {}
+    // out of line, as the destructor: the header index type is private to the .cpp
+    CoordToHeader();
     // Constructor from sequence names and number of k-mers in them, per annotation column.
     CoordToHeader(std::vector<std::vector<std::string>> &&headers,
                   std::vector<std::vector<uint64_t>> &&num_kmers);
+    ~CoordToHeader();
+    // a copy or a moved-to object starts without a header index of its own (find_header)
+    CoordToHeader(const CoordToHeader &other);
+    CoordToHeader(CoordToHeader &&other);
+    CoordToHeader& operator=(const CoordToHeader &other);
+    CoordToHeader& operator=(CoordToHeader &&other);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
@@ -77,11 +88,35 @@ class CoordToHeader {
     // FASTA headers of the sequences in a column, indexed by seq_id.
     const std::vector<std::string>& get_headers(Column column) const { return headers_[column]; }
 
+    /**
+     * The (column, seq_id) of a FASTA header: its first occurrence in column order (a
+     * header is unique within a column, not within the index), or nothing. The reverse
+     * index is built on the first call and is owned by this object, so it lives and dies
+     * with the headers it indexes: a server builds it once for its loaded index, and an
+     * object constructed later at a freed address can never be answered from another
+     * object's index. That is what a process-wide cache keyed by the object's address
+     * did, and a fingerprint of a few headers could not tell two such objects apart (GPT
+     * review of stage 2, finding 7: [A,X,Y,Z] cached, [A,Y,X,Z] rebuilt at the same
+     * address, and X resolved to the sequence now named Y). load() drops the index.
+     * Thread-safe.
+     */
+    std::optional<std::pair<Column, size_t>> find_header(std::string_view header) const;
+    // how many times this object built its reverse index (to test that it is built once)
+    size_t num_header_index_builds() const;
+
     static constexpr auto kExtension = ".seqs";
 
   private:
+    struct HeaderIndex;
+
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;
+
+    // find_header(): keys are views into |headers_|, which only load() changes, and load()
+    // drops the index first
+    mutable std::mutex header_index_mutex_;
+    mutable std::unique_ptr<const HeaderIndex> header_index_;
+    mutable size_t header_index_builds_ = 0;
 };
 
 } // namespace annot

@@ -482,4 +482,55 @@ TYPED_TEST(LabelOracleCoordTest, RecorderMapsOneCoordinatePerSequence) {
     }
 }
 
+// GPT review of stage 2, finding 7: the header index was a process-wide cache keyed by the
+// CoordToHeader's address and checked by a fingerprint of the corner headers, so an object
+// made at a freed address with the same corners but other headers in between was answered
+// from the stale index. The reviewer's probe: [A,X,Y,Z] looked up, destroyed, [A,Y,X,Z] made
+// at the same address, and X resolved to sequence 1, now named Y. The index now belongs to
+// the CoordToHeader, so it dies with it; and a server, whose CoordToHeader lives as long as
+// the process, still builds it once for every oracle and request.
+TEST(LabelOracleHeaderIndex, IsBoundToItsCoordToHeader) {
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            5, { "ACGTAGATCGAA", "GTCTAACGTTGA", "TATGCCAGATCA", "AGCGTCTTGCGA" },
+            { "F", "F", "F", "F" }, DeBruijnGraph::BASIC, true, { 0, 8, 16, 24 });
+    std::aligned_storage_t<sizeof(annot::CoordToHeader), alignof(annot::CoordToHeader)> storage;
+    const std::vector<std::vector<std::string>> orders {
+        { "A", "X", "Y", "Z" }, { "A", "Y", "X", "Z" }, { "A", "Z", "Y", "X" }
+    };
+    for (const auto &order : orders) {
+        std::vector<std::vector<std::string>> headers { order };
+        std::vector<std::vector<uint64_t>> num_kmers { { 8, 8, 8, 8 } };
+        auto *cth = new (&storage) annot::CoordToHeader(std::move(headers), std::move(num_kmers));
+        {
+            LabelOracle oracle(*anno, cth);
+            for (size_t s = 0; s < order.size(); ++s) {
+                auto ref = oracle.find_header(order[s]);
+                ASSERT_TRUE(ref) << order[s];
+                EXPECT_EQ(s, ref->seq_id) << order[s];
+                EXPECT_EQ(order[s], oracle.header_name(ref->column, ref->seq_id));
+                EXPECT_EQ(ref->seq_id, oracle.resolve_label(order[s]).seq_id);
+            }
+            EXPECT_FALSE(oracle.find_header("W"));
+        }
+        cth->~CoordToHeader();
+    }
+
+    // built once per CoordToHeader, however many oracles (requests) look up through it
+    std::vector<std::vector<std::string>> headers { { "A", "X", "Y", "Z" } };
+    std::vector<std::vector<uint64_t>> num_kmers { { 8, 8, 8, 8 } };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+    EXPECT_EQ(0u, cth.num_header_index_builds());
+    for (size_t request = 0; request < 5; ++request) {
+        LabelOracle oracle(*anno, &cth);
+        EXPECT_EQ(2u, oracle.find_header("Y")->seq_id);
+    }
+    EXPECT_EQ(1u, cth.num_header_index_builds());
+    // a copy indexes its own headers; the original keeps its index
+    annot::CoordToHeader copy(cth);
+    EXPECT_EQ(0u, copy.num_header_index_builds());
+    EXPECT_EQ(3u, copy.find_header("Z")->second);
+    EXPECT_EQ(1u, copy.num_header_index_builds());
+    EXPECT_EQ(1u, cth.num_header_index_builds());
+}
+
 } // namespace

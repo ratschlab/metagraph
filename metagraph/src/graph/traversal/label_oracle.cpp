@@ -1,7 +1,6 @@
 #include "label_oracle.hpp"
 
 #include <algorithm>
-#include <mutex>
 
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -154,79 +153,18 @@ const std::string& LabelOracle::column_name(Column column) const {
     return anno_graph_.get_annotator().get_label_encoder().decode(column);
 }
 
-namespace {
-
-// header -> (column, seq_id), built once per loaded CoordToHeader
-struct HeaderIndex {
-    tsl::hopscotch_map<std::string, std::pair<Column, uint64_t>> map;
-    // what the headers looked like when the index was built (see headers_fingerprint)
-    std::string fingerprint;
-};
-
-// The cache below is keyed by the CoordToHeader's address. A server loads one for the
-// process, but a process that destroys one and makes another (the unit tests do, on the
-// stack) can get the same address back, and the stale index then resolves the new
-// headers against the old ones: a header present in the new object is "not found" (it
-// made WalkerDerive.AmbiguousDerivedHeaderNamesAreRefused fail after
-// ResolveCoordTest.TraceRunsAndHeaderDiscovery, depending on the stack layout). So an
-// entry also records the shape and the corner headers, compared in O(1) per lookup.
-std::string headers_fingerprint(const annot::CoordToHeader &cth) {
-    std::string fp = std::to_string(cth.num_columns());
-    for (Column col : { Column(0), Column(cth.num_columns() ? cth.num_columns() - 1 : 0) }) {
-        if (col >= cth.num_columns())
-            break;
-        const auto &headers = cth.get_headers(col);
-        fp += '\0' + std::to_string(headers.size());
-        if (!headers.empty())
-            fp += '\0' + headers.front() + '\0' + headers.back();
-    }
-    return fp;
-}
-
-std::shared_ptr<const HeaderIndex> get_header_index(const annot::CoordToHeader &cth) {
-    static std::mutex mu;
-    static std::vector<std::pair<const annot::CoordToHeader*, std::shared_ptr<const HeaderIndex>>> cache;
-    std::lock_guard<std::mutex> lock(mu);
-    const std::string fingerprint = headers_fingerprint(cth);
-    for (auto it = cache.begin(); it != cache.end(); ++it) {
-        if (it->first != &cth)
-            continue;
-        if (it->second->fingerprint == fingerprint)
-            return it->second;
-        cache.erase(it);    // another object at a freed address: rebuild below
-        break;
-    }
-    auto index = std::make_shared<HeaderIndex>();
-    index->fingerprint = fingerprint;
-    size_t total = 0;
-    for (Column col = 0; col < cth.num_columns(); ++col) {
-        total += cth.num_sequences(col);
-    }
-    index->map.reserve(total);
-    for (Column col = 0; col < cth.num_columns(); ++col) {
-        const auto &headers = cth.get_headers(col);
-        for (uint64_t s = 0; s < headers.size(); ++s) {
-            index->map.try_emplace(headers[s], col, s);
-        }
-    }
-    logger->trace("Built header index with {} sequences in {} columns", total, cth.num_columns());
-    cache.emplace_back(&cth, index);
-    return index;
-}
-
-} // namespace
-
 std::optional<LabelRef> LabelOracle::find_header(const std::string &name) const {
     if (!coord_to_header_)
         return std::nullopt;
-    auto index = get_header_index(*coord_to_header_);
-    auto it = index->map.find(name);
-    if (it == index->map.end())
+    // the reverse index belongs to the CoordToHeader (built once per loaded index, and
+    // gone with it), never to a cache that could outlive it
+    auto found = coord_to_header_->find_header(name);
+    if (!found)
         return std::nullopt;
     LabelRef ref;
     ref.kind = LabelKind::HEADER;
-    ref.column = it->second.first;
-    ref.seq_id = it->second.second;
+    ref.column = found->first;
+    ref.seq_id = found->second;
     ref.name = name;
     return ref;
 }

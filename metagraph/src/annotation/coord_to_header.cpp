@@ -1,5 +1,7 @@
 #include "annotation/coord_to_header.hpp"
 
+#include <tsl/hopscotch_map.h>
+
 #include "common/logger.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/file_utils.hpp"
@@ -12,6 +14,77 @@ namespace annot {
 
 using Tuple = CoordToHeader::Tuple;
 using mtg::common::logger;
+
+// header -> (column, seq_id) of its first occurrence in column order
+struct CoordToHeader::HeaderIndex {
+    tsl::hopscotch_map<std::string_view, std::pair<Column, size_t>> map;
+};
+
+CoordToHeader::CoordToHeader() {}
+CoordToHeader::~CoordToHeader() {}
+
+// The index is never shared or carried over: its keys view the headers of the object that
+// built it, so a copy or a moved-to object builds its own on first use
+CoordToHeader::CoordToHeader(const CoordToHeader &other)
+      : headers_(other.headers_), coord_offsets_(other.coord_offsets_) {}
+
+CoordToHeader::CoordToHeader(CoordToHeader &&other)
+      : headers_(std::move(other.headers_)), coord_offsets_(std::move(other.coord_offsets_)) {
+    std::lock_guard<std::mutex> lock(other.header_index_mutex_);
+    other.header_index_.reset();
+}
+
+CoordToHeader& CoordToHeader::operator=(const CoordToHeader &other) {
+    if (this != &other) {
+        std::lock_guard<std::mutex> lock(header_index_mutex_);
+        header_index_.reset();
+        headers_ = other.headers_;
+        coord_offsets_ = other.coord_offsets_;
+    }
+    return *this;
+}
+
+CoordToHeader& CoordToHeader::operator=(CoordToHeader &&other) {
+    if (this != &other) {
+        std::scoped_lock lock(header_index_mutex_, other.header_index_mutex_);
+        header_index_.reset();
+        other.header_index_.reset();
+        headers_ = std::move(other.headers_);
+        coord_offsets_ = std::move(other.coord_offsets_);
+    }
+    return *this;
+}
+
+std::optional<std::pair<CoordToHeader::Column, size_t>>
+CoordToHeader::find_header(std::string_view header) const {
+    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    if (!header_index_) {
+        auto index = std::make_unique<HeaderIndex>();
+        size_t total = 0;
+        for (const auto &column : headers_) {
+            total += column.size();
+        }
+        index->map.reserve(total);
+        for (Column col = 0; col < headers_.size(); ++col) {
+            for (size_t s = 0; s < headers_[col].size(); ++s) {
+                index->map.try_emplace(std::string_view(headers_[col][s]), col, s);
+            }
+        }
+        logger->trace("Built header index with {} sequences in {} columns", total,
+                      headers_.size());
+        header_index_ = std::move(index);
+        header_index_builds_++;
+    }
+    auto it = header_index_->map.find(header);
+    if (it == header_index_->map.end())
+        return std::nullopt;
+    return it->second;
+}
+
+size_t CoordToHeader::num_header_index_builds() const {
+    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    return header_index_builds_;
+}
 
 CoordToHeader::CoordToHeader(std::vector<std::vector<std::string>> &&headers,
                              std::vector<std::vector<uint64_t>> &&num_kmers)
@@ -94,6 +167,11 @@ bool CoordToHeader::load(const std::string &filename_base) {
         logger->error("Cannot open CoordToHeader file '{}': {}", path,
                       utils::file_read_failure_detail(path));
         return false;
+    }
+    {
+        // the index views the headers about to be replaced
+        std::lock_guard<std::mutex> lock(header_index_mutex_);
+        header_index_.reset();
     }
 
     try {

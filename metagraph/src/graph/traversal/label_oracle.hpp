@@ -91,8 +91,9 @@ class LabelOracle {
     // Label resolution
     std::optional<Column> find_column(const std::string &name) const;
     const std::string& column_name(Column column) const;
-    // Look up a FASTA header in the CoordToHeader index. The reverse index is built on
-    // the first call and shared by all oracles of the same loaded index.
+    // Look up a FASTA header in the CoordToHeader index. The reverse index is owned by the
+    // CoordToHeader (CoordToHeader::find_header): built on the first call, shared by all
+    // oracles of the same loaded index, and gone with it.
     std::optional<LabelRef> find_header(const std::string &name) const;
     const std::string& header_name(Column column, uint64_t seq_id) const;
     // (seq_id, local coordinate) of a column coordinate. Requires a CoordToHeader.
