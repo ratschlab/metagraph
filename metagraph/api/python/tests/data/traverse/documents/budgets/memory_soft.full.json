@@ -14,6 +14,7 @@
    "graphlet"
   ],
   "direct_access": true,
+  "feature_level": 2,
   "graphlet_format": 1,
   "has_coord_to_header": true,
   "has_coordinates": true,
@@ -499,7 +500,7 @@
    ],
    "limitations": [
     {
-     "effect": "the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment) are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)",
+     "effect": "the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of seed_id, are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)",
      "kind": "memory_bound_soft",
      "knob": "bounds.max_memory_mb",
      "limit": 1,

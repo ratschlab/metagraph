@@ -17,6 +17,7 @@
 
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 #include "cli/traverse.hpp"
+#include "cli/traverse_attempts.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -2476,6 +2477,37 @@ std::vector<BudgetCase> adversarial_name_cases() {
     return cases;
 }
 
+// Floats canonical MGT writes wide (review of the stage-2 recheck, P1: 1e-300 is written
+// positionally, 302 characters, where the model assumed 24): on a graph whose k-mers
+// alternate between labels A and B, so that every step switches, switches of 1e-300 (losses
+// summed to some 300 digits), switches of 0.1 under a loss budget of 1e300 (sums of 17
+// digits), and a time budget of 1e-300 (its time stop states it in K, Q and A)
+std::vector<BudgetCase> wide_float_cases() {
+    const std::string source = random_seq(1230, 9900);
+    std::vector<std::string> kmers, labels;
+    for (size_t i = 0; i + 31 <= source.size(); ++i) {
+        kmers.push_back(source.substr(i, 31));
+        labels.push_back(i % 2 ? "B" : "A");
+    }
+    std::shared_ptr<graph::AnnotatedDBG> anno
+        = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(31, kmers, labels,
+                                                                         DeBruijnGraph::BASIC);
+    const Seed seed = seed_of(source.substr(0, 31), { "A" });
+    const Strategy st = strategy_of(R"({"direction": "right", "labels": {"extra": ["B"],
+        "loss_budget": 1, "change_cost": {"model": "constant", "value": 1}},
+        "bounds": {"max_extension_bp": 1200}})");
+    std::vector<BudgetCase> cases;
+    cases.push_back({ "wide tiny switches", anno, seed, st, LabelChangeCost::table({}, 1e-300) });
+    Strategy sums = st;
+    sums.loss_budget = 1e300;
+    cases.push_back({ "wide sums", anno, seed, sums, LabelChangeCost::constant(0.1) });
+    Strategy late = st;
+    late.time_budget_ms = 1e-300;
+    late.max_work_units = 1'000'000'000;      // a time stop is stated (Q) under a budget
+    cases.push_back({ "wide time budget", anno, seed, late, LabelChangeCost::constant(1) });
+    return cases;
+}
+
 } // namespace
 
 TEST(GraphletCodec, JsonEscapedSizeIsTheWriters) {
@@ -2583,17 +2615,22 @@ uint64_t modelled_delivery(const SeedResult &r, const DeliveryCosts &d) {
 // keeps to the widths the model assumes, and the model stays within a small factor of the
 // output, or the budget would refuse far too early.
 TEST(Graphlet, DeliveryCostsBoundTheOutput) {
-    size_t checked = 0, names = 0;
+    size_t checked = 0, names = 0, wide = 0;
     std::vector<BudgetCase> cases = budget_cases();
     for (BudgetCase &c : adversarial_name_cases()) {
         cases.push_back(std::move(c));
     }
+    for (BudgetCase &c : wide_float_cases()) {
+        cases.push_back(std::move(c));
+    }
     for (const BudgetCase &c : cases) {
         LabelOracle oracle(*c.anno);
+        // the widest the result's floats can be written, as process_traverse_request prices it
+        const uint64_t width = mgt_float_width(c.st, c.cost);
         for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
             const std::string what = c.name + " " + detail;
             Strategy st = c.st;
-            st.delivery = delivery_costs(detail, st.sequences);
+            st.delivery = delivery_costs(detail, st.sequences, width);
             const SeedResult r = run_case(c, st);
             const DeliveryCosts &d = st.delivery;
             const uint64_t model = modelled_delivery(r, d);
@@ -2612,6 +2649,26 @@ TEST(Graphlet, DeliveryCostsBoundTheOutput) {
                     }
                 }
                 before = 3 * text.size() + index + json_tree_bytes(j);
+                // the records whose floats the model widens keep to the widths it assumes
+                const uint64_t extra = width - kMgtFloatWidth;
+                for (const std::string &line : split_on(text.substr(0, text.size() - 1), '\n')) {
+                    if (line[0] == 'R')
+                        EXPECT_LE(line.size(), 172 + 3 * extra) << what << ": " << line.substr(0, 80);
+                    if (line.rfind("E ", 0) == 0 && line.find(" s ") != std::string::npos)
+                        EXPECT_LE(line.size(), 64 + extra) << what << ": " << line.substr(0, 80);
+                    if (line[0] == 'A' || line[0] == 'Q' || line[0] == 'K') {
+                        for (const std::string &field : split_on(line, ' ')) {
+                            for (const std::string &part : split_on(field, ',')) {
+                                const size_t colon = part.find(':');
+                                const std::string number = colon == std::string::npos
+                                    ? part : part.substr(colon + 1);
+                                if (number.size() > 24 && number.find_first_not_of("0123456789.") == std::string::npos)
+                                    EXPECT_LE(number.size(), width) << what << ": " << line.substr(0, 80);
+                            }
+                        }
+                    }
+                }
+                wide += width > kMgtFloatWidth;
                 j["graphlet"] = text;
             }
             check_widths(j, 2, "", what);
@@ -2625,15 +2682,20 @@ TEST(Graphlet, DeliveryCostsBoundTheOutput) {
             EXPECT_LE(actual, model) << what;
             EXPECT_LE(model, r.account.memory_final) << what << ": the walker charges less than the model";
             // a bound fixed per object cannot know before the walk which fields will be
-            // short, '*' or delta-coded (MGT), so the model is looser than any one output
+            // short, '*' or delta-coded (MGT), so the model is looser than any one output;
+            // floats priced wider than 24 characters are priced at the widest the request
+            // allows, which most of its floats need not reach (not a useful model there,
+            // only a bound)
             const uint64_t factor = std::string(detail) == "graphlet" ? 10 : 6;
-            EXPECT_LE(model, factor * actual) << what << ": the model is not useful";
+            if (width == kMgtFloatWidth)
+                EXPECT_LE(model, factor * actual) << what << ": the model is not useful";
             checked++;
             names += c.name.rfind("names", 0) == 0;
         }
     }
     EXPECT_GT(checked, 40u);
     EXPECT_GE(names, 28u);
+    EXPECT_GE(wide, 3u);
 }
 
 // The deadline is checked between the heads of a level too (§14: at least every W work
@@ -4617,4 +4679,1112 @@ TEST(GraphletStage3Review, DerivationWindowStatesWhatItHolds) {
     EXPECT_GT(failures, 0u);
     EXPECT_GT(beside_rows, 0u) << "no window was refused for the rows it held before a row";
     EXPECT_GT(passes_from, 0u);
+}
+
+
+/********* the stage-2 recheck (P1, P2) and the stage-3 review (F3), on stage 3 *********/
+
+namespace {
+
+// The reviewer's seed-phase index (review of the stage-2 recheck, P2): k = 3, one record
+// "CGAT" + "GAT" x |n|, so that GAT, ATG and TGA each occur about |n| times (rows of |n|
+// coordinates), labelled r1, with coordinates
+std::shared_ptr<graph::AnnotatedDBG> repeat_index(size_t n, bool rowdiff) {
+    std::string record = "CGAT";
+    for (size_t i = 0; i < n; ++i) {
+        record += "GAT";
+    }
+    if (rowdiff) {
+        return test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+                3, { record }, { "r1" }, DeBruijnGraph::BASIC, true);
+    }
+    return test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            3, { record }, { "r1" }, DeBruijnGraph::BASIC, true);
+}
+
+size_t occurrences(size_t n, const std::string &kmer) {
+    std::string record = "CGAT";
+    for (size_t i = 0; i < n; ++i) {
+        record += "GAT";
+    }
+    size_t count = 0;
+    for (size_t i = 0; i + kmer.size() <= record.size(); ++i) {
+        count += record.compare(i, kmer.size(), kmer) == 0;
+    }
+    return count;
+}
+
+const char kRepeatStrategy[] = R"({"direction": "right", "support": "trace",
+    "branching": {"on_reconverge": "keep"},
+    "labels": {"seed_label_kind": "column", "max_seed_labels": 10000},
+    "bounds": {"max_extension_bp": 5}})";
+
+} // namespace
+
+// P2: every row a seed-phase read returned is charged before a comparison can fail the seed.
+// The validation reads in calls grown from one key, so a failure has charged exactly the rows
+// read (annotation.rows_requested); the derivation holds its window of up to 64 rows, all of
+// them charged at once (the reviewer's 400,019 units, reported as 200,009)
+TEST(GraphletStage2Recheck, SeedFetchChargesEveryReturnedRow) {
+    const size_t n = 70'000;
+    const uint64_t gat = 8 + 1 + occurrences(n, "GAT"), atg = 8 + 1 + occurrences(n, "ATG");
+    for (bool rowdiff : { false, true }) {
+        auto anno = repeat_index(n, rowdiff);
+        Strategy st = strategy_of(kRepeatStrategy);
+        st.max_work_units = 100;
+        // explicit labels: the validation
+        {
+            LabelOracle oracle(*anno);
+            try {
+                traverse_seed(oracle, seed_of("GATG", { "r1" }), st, LabelChangeCost::forbid());
+                ADD_FAILURE() << "rowdiff " << rowdiff << ": the validation was not failed";
+            } catch (const SeedBudgetError &e) {
+                EXPECT_EQ(ResourceStop::WORK, e.stop().resource);
+                const uint64_t read = oracle.counters().rows_requested;
+                ASSERT_GE(read, 1u);
+                const uint64_t rows = read == 1 ? gat : gat + atg;
+                if (rowdiff) {
+                    // each row with its row-diff dependency rows
+                    EXPECT_GE(e.stop().used, static_cast<double>(rows)) << read;
+                } else {
+                    EXPECT_EQ(static_cast<double>(rows), e.stop().used) << read;
+                }
+                EXPECT_EQ(e.stop().used, static_cast<double>(e.account().work_seed));
+            }
+        }
+        // derived labels: the derivation's window (both k-mers) is one charge
+        {
+            LabelOracle oracle(*anno);
+            try {
+                traverse_seed(oracle, seed_of("GATG"), st, LabelChangeCost::forbid());
+                ADD_FAILURE() << "rowdiff " << rowdiff << ": the derivation was not failed";
+            } catch (const SeedBudgetError &e) {
+                EXPECT_EQ(ResourceStop::WORK, e.stop().resource);
+                if (rowdiff) {
+                    EXPECT_GE(e.stop().used, static_cast<double>(gat + atg));
+                } else {
+                    EXPECT_EQ(static_cast<double>(gat + atg), e.stop().used);
+                }
+                // what the seed phase charged between two comparisons: the window
+                EXPECT_EQ(e.stop().used, static_cast<double>(e.account().largest_charge));
+            }
+        }
+    }
+}
+
+// P2: a seed the work budget failed states how far its seed phase ran past the budget, with
+// the most it charged between two comparisons, as a walk's work stop does; and the wording is
+// the threshold's (review of stage 3, answer 3), never an exact overshoot
+TEST(GraphletStage2Recheck, FailedWorkStopStatesLargestCharge) {
+    auto anno = repeat_index(100'000, false);
+    Json::Value r;
+    Json::Value seed;
+    seed["sequence"] = "GATG";
+    r["seeds"].append(seed);
+    r["strategy"] = parse_json(kRepeatStrategy);
+    r["strategy"]["bounds"]["max_work_units"] = 100;
+    r["strategy"]["output"]["timing"] = false;
+    const Json::Value out = process_traverse_request(r, *anno, "");
+    const Json::Value &res = out["results"][0];
+    ASSERT_EQ("failed", res["outcome"]["walks"].asString()) << res;
+    const Json::Value &q = res["resource_stop"];
+    ASSERT_EQ("work", q["resource"].asString());
+    const std::string message = q["message"].asString();
+    EXPECT_NE(std::string::npos, message.find("fails at a comparison finding it at least "
+                                              + std::to_string(kWorkCheckInterval)
+                                              + " units over budget")) << message;
+    EXPECT_NE(std::string::npos, message.find("the most this seed charged between two "
+                                              "comparisons: " + q["used"].asString() + " units"))
+        << message;
+    EXPECT_EQ(std::string::npos, message.find("past the budget")) << message;
+    check_widths(res, 2, "", "failed work seed");
+}
+
+// P2: the trace validation's coordinate copies — every label's live set and both arms'
+// boundary coordinates, beside the hits — are observed before the depth-0 admission can fail
+// the seed: the roots case (seed GAT, both arms, 1 MiB) reported 3 MiB where the copies held
+// about 9.6 MB
+TEST(GraphletStage2Recheck, ValidationCoordinatesAreObserved) {
+    const size_t n = 100'000;
+    auto anno = repeat_index(n, false);
+    LabelOracle oracle(*anno);
+    Strategy st = strategy_of(kRepeatStrategy);
+    st.direction = Strategy::BOTH;
+    st.max_memory_bytes = uint64_t(1) << 20;
+    try {
+        traverse_seed(oracle, seed_of("GAT", { "r1" }), st, LabelChangeCost::forbid());
+        FAIL() << "the depth-0 state of two roots of " << n << " coordinates fit 1 MiB";
+    } catch (const SeedBudgetError &e) {
+        // the hits, the live set and both boundary sets: four copies of the coordinates
+        const uint64_t copies = 4 * occurrences(n, "GAT") * sizeof(uint64_t);
+        EXPECT_GE(e.account().soft_overshoot, copies - st.max_memory_bytes);
+    }
+}
+
+// The stage-2 recheck's design answer: an extra label is accepted when a CHAIN of switches
+// from a seed label enters it within the loss budget (the walk enforces the cumulative loss);
+// A -> B = 1, B -> C = 1 under a budget of 2 rejected C. An extra label no chain reaches is
+// still refused, by name.
+TEST(GraphletStage2Recheck, ExtraLabelsReachableByAChain) {
+    // A carries S T1, B the last 20 bp of T1 and T2, C the last 20 bp of T2 and T3
+    std::string S, T1, T2, T3;
+    for (uint32_t t = 700; ; t += 4) {
+        S = random_seq(30, t); T1 = random_seq(30, t + 1); T2 = random_seq(30, t + 2);
+        T3 = random_seq(30, t + 3);
+        if (T1[0] != T2[0])
+            break;
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            11, { S + T1, T1.substr(10) + T2, T2.substr(10) + T3 }, { "A", "B", "C" },
+            DeBruijnGraph::BASIC);
+    auto request = [&](double budget, const std::string &entries, const std::string &fallback) {
+        Json::Value r;
+        Json::Value seed;
+        seed["sequence"] = S;
+        seed["labels"].append("A");
+        r["seeds"].append(seed);
+        r["strategy"] = parse_json(R"({"direction": "right", "labels": {"extra": ["B", "C"],
+            "change_cost": {"model": "table", "entries": )" + entries + R"(, "default": )"
+            + fallback + R"(}}, "bounds": {"max_extension_bp": 80}, "output": {"timing": false}})");
+        r["strategy"]["labels"]["loss_budget"] = budget;
+        return r;
+    };
+    const std::string chain = R"([["A", "B", 1], ["B", "C", 1]])";
+    // C is two switches away: accepted at 2, and the walk enters it at its cumulative loss
+    {
+        const Json::Value out = process_traverse_request(request(2, chain, "\"forbid\""), *anno, "");
+        LabelOracle oracle(*anno);
+        Strategy st = parse_traverse_request(request(2, chain, "\"forbid\"")).strategy;
+        st.delivery = delivery_costs("full", true);
+        const SeedResult r = traverse_seed(oracle, seed_of(S, { "A" }), st,
+                                           LabelChangeCost::table({ { { 0, 1 }, 1.0 }, { { 1, 2 }, 1.0 } },
+                                                                  kInfiniteLoss));
+        bool entered_c = false;
+        for (const LabelRun &run : r.arms[static_cast<size_t>(Arm::RIGHT)].runs) {
+            if (run.label == 2) {
+                entered_c = true;
+                EXPECT_TRUE(run.entered_by_switch);
+                EXPECT_LE(run.loss, 2.0);
+                EXPECT_EQ(1u, run.from_label);
+            }
+        }
+        EXPECT_TRUE(entered_c) << out;
+        EXPECT_EQ(1u, out["results"].size());
+    }
+    // within 1.5 no chain reaches C: refused by name
+    try {
+        process_traverse_request(request(1.5, chain, "\"forbid\""), *anno, "");
+        ADD_FAILURE() << "an unreachable extra label was accepted";
+    } catch (const std::exception &e) {
+        const std::string what = e.what();
+        EXPECT_NE(std::string::npos, what.find("'C'")) << what;
+        EXPECT_EQ(std::string::npos, what.find("'B'")) << what;
+        EXPECT_NE(std::string::npos, what.find("no chain of switches")) << what;
+    }
+    // a finite default reaches C through B although the explicit A -> C entry is above the
+    // budget (an explicit entry overrides the default of its own pair only)
+    process_traverse_request(request(2, R"([["A", "C", 10]])", "1"), *anno, "");
+    EXPECT_THROW(process_traverse_request(request(1.5, R"([["A", "C", 10]])", "1"), *anno, ""),
+                 std::exception);
+}
+
+// switch_reach against a plain fixpoint over every pair, on random tables with and without a
+// finite default, and a pool of many labels under a dense default (lazy, not quadratic)
+TEST(GraphletStage2Recheck, SwitchReachIsTheCheapestChain) {
+    std::mt19937 gen(4242);
+    for (size_t round = 0; round < 300; ++round) {
+        const size_t n = 2 + gen() % 12, sources = 1 + gen() % std::min<size_t>(3, n - 1);
+        std::map<std::pair<LabelId, LabelId>, double> entries;
+        for (size_t e = gen() % (n * 2); e > 0; --e) {
+            const LabelId a = gen() % n, b = gen() % n;
+            entries[{ a, b }] = gen() % 3 ? (gen() % 7) * 0.5 : kInfiniteLoss;
+        }
+        const double fallback = gen() % 2 ? kInfiniteLoss : (gen() % 6) * 0.5;
+        const double budget = (gen() % 8) * 0.5;
+        const LabelChangeCost cost = LabelChangeCost::table(entries, fallback);
+        std::vector<double> naive(n, kInfiniteLoss);
+        for (size_t s = 0; s < sources; ++s) naive[s] = 0;
+        for (bool changed = true; changed; ) {
+            changed = false;
+            for (LabelId u = 0; u < n; ++u) {
+                for (LabelId v = 0; v < n; ++v) {
+                    const double loss = naive[u] + cost.cost(u, v);
+                    if (naive[u] != kInfiniteLoss && loss <= budget && loss < naive[v]) {
+                        naive[v] = loss;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        EXPECT_EQ(naive, switch_reach(cost, n, sources, budget)) << "round " << round;
+    }
+    // constant and forbid
+    EXPECT_EQ(std::vector<double>({ 0, 1, 1 }), switch_reach(LabelChangeCost::constant(1), 3, 1, 1));
+    EXPECT_EQ(std::vector<double>({ 0, kInfiniteLoss }),
+              switch_reach(LabelChangeCost::constant(2), 2, 1, 1));
+    EXPECT_EQ(std::vector<double>({ 0, kInfiniteLoss }), switch_reach(LabelChangeCost::forbid(), 2, 1, 5));
+    // 20,000 labels under a finite default with a few overrides: every one reached
+    const size_t many = 20'000;
+    std::map<std::pair<LabelId, LabelId>, double> few { { { 0, 5 }, 9.0 }, { { 0, 6 }, 9.0 } };
+    const auto start = std::chrono::steady_clock::now();
+    const std::vector<double> reach = switch_reach(LabelChangeCost::table(few, 1.0), many, 1, 2);
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    EXPECT_LT(seconds, 2.0);
+    EXPECT_EQ(2.0, reach[5]);
+    EXPECT_EQ(1.0, reach[7]);
+    EXPECT_EQ(many, static_cast<size_t>(std::count_if(reach.begin(), reach.end(),
+                                                      [](double x) { return x <= 2; })));
+}
+
+// P1: the float width the delivery model prices is at least the width of every float a result
+// under the request can hold: costs, sums of costs up to the loss budget plus one cost, and
+// the time budgets with an elapsed time above them
+TEST(GraphletStage2Recheck, FloatWidthBoundsEveryFloat) {
+    std::mt19937_64 gen(77);
+    for (double c : { 1e-300, 3e-17, 0.1, 0.30000000000000004, 1.0, 7.25, 1e20, 1e300 }) {
+        for (double budget : { 0.0, 1.0, 1e10, 1e300 }) {
+            Strategy st;
+            st.loss_budget = budget;
+            const uint64_t width = mgt_float_width(st, LabelChangeCost::constant(c));
+            EXPECT_GE(width, kMgtFloatWidth);
+            EXPECT_GE(width, encode_float(c).size()) << c;
+            double loss = 0;
+            for (size_t i = 0; i < 1000 && loss + c <= budget + c; ++i) {
+                loss += c;                                    // a lineage's losses, and the
+                EXPECT_GE(width, encode_float(loss).size());  // budget a loss-budget end needs
+            }
+            // values between the smallest cost and the budget plus a cost, 17 digits each
+            for (size_t i = 0; i < 200; ++i) {
+                const double lo = std::log10(c), hi = std::log10(budget + c);
+                const double x = std::pow(10.0, lo + (hi - lo) * (gen() % 100000) / 100000.0)
+                               * (1 + 1e-16 * (gen() % 7));
+                if (x >= c && x <= budget + c)
+                    EXPECT_GE(width, encode_float(x).size()) << x;
+            }
+        }
+    }
+    for (double t : { 1e-300, 1e-5, 0.5, 30000.0, 1e17, 1e300 }) {
+        Strategy st;
+        st.time_budget_ms = t;
+        const uint64_t width = mgt_float_width(st, LabelChangeCost::forbid());
+        EXPECT_GE(width, encode_float(t).size()) << t;
+        // an elapsed time at least the budget, measured in ns ticks
+        for (double elapsed : { t * 1.0000000000000002, t * 1.2345678901234567 }) {
+            if (elapsed < 1e17)
+                EXPECT_GE(width, encode_float(elapsed).size()) << elapsed;
+        }
+    }
+    // a usual request: 24, the model's widths unchanged
+    Strategy usual;
+    usual.loss_budget = 2;
+    EXPECT_EQ(kMgtFloatWidth, mgt_float_width(usual, LabelChangeCost::constant(1)));
+    EXPECT_EQ(kMgtFloatWidth, mgt_float_width(usual, LabelChangeCost::forbid(), 1e9, 3e5));
+}
+
+// Review of stage 3, F3: a level with no key to read (the radius, where heads only end) is
+// not admitted as a read: a completed radius-0 walk whose depth-0 state fills the budget
+// exactly reported a memory stop and a truncated arm. Every budget from the first that holds
+// the depth-0 state completes (radius 0), or stops only below the radius (radius 1).
+TEST(GraphletStage3Review, RadiusOnlyLevelIsNotStopped) {
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+            3, { "AAACAAAGAAAT" }, { "A" }, DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    ASSERT_TRUE(oracle.decode_charged());
+    const Seed seed = seed_of("AAA", { "A" });
+    for (uint64_t radius : { 0, 1 }) {
+        Strategy st;
+        st.direction = Strategy::RIGHT;
+        st.max_extension_bp = radius;
+        st.delivery = delivery_costs("graphlet", true);
+        auto admitted = [&](uint64_t memory) {
+            st.max_memory_bytes = memory;
+            try {
+                traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+                return true;
+            } catch (const SeedBudgetError &) {
+                return false;
+            }
+        };
+        uint64_t lo = 1, hi = uint64_t(1) << 22;
+        while (lo < hi) {
+            const uint64_t mid = lo + (hi - lo) / 2;
+            if (admitted(mid)) hi = mid; else lo = mid + 1;
+        }
+        for (uint64_t memory = lo; memory < lo + 256; ++memory) {
+            st.max_memory_bytes = memory;
+            const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+            const ArmResult &arm = r.arms[static_cast<size_t>(Arm::RIGHT)];
+            if (radius == 0) {
+                EXPECT_FALSE(r.resource_stop) << memory;
+                EXPECT_EQ(ArmResult::COMPLETE, arm.status) << memory;
+            } else if (r.resource_stop) {
+                EXPECT_LT(r.resource_stop->at_bp, radius) << memory;
+            } else {
+                EXPECT_EQ(ArmResult::COMPLETE, arm.status) << memory;
+            }
+        }
+    }
+}
+
+// Review of stage 3, answer 2: every "at least" — a depth-0 failure's message and effect, a
+// refused read's effect at the seed or at a level, a level's lists — says that raising the
+// budget to that value may still fail; and every statement, the failed seeds' with their
+// caveats and largest charges included, keeps to its width (effect 640, message 1,024)
+TEST(GraphletStage2Recheck, LowerBoundsAreNoPromiseAndFitTheirWidths) {
+    size_t lower = 0, failed = 0, checked = 0;
+    auto inspect = [&](const Json::Value &res, const std::string &what) {
+        check_widths(res, 2, "", what);
+        checked++;
+        failed += res["outcome"]["walks"].asString() == "failed";
+        std::vector<std::string> texts { res["error"].asString(),
+                                         res["resource_stop"]["message"].asString() };
+        for (const Json::Value &l : res["limitations"]) texts.push_back(l["effect"].asString());
+        for (const std::string &side : res["arms"].getMemberNames()) {
+            for (const Json::Value &l : res["arms"][side]["limitations"]) {
+                texts.push_back(l["effect"].asString());
+            }
+        }
+        for (const std::string &t : texts) {
+            if (t.find("at least") == std::string::npos || t.find("units over budget") != std::string::npos)
+                continue;
+            lower++;
+            EXPECT_NE(std::string::npos, t.find("may still fail")) << what << ": " << t;
+        }
+    };
+    // annotate roots whose labels do not fit (depth-0 lower bounds), over budgets
+    const NamesCase c = names_case();
+    for (uint64_t mb : { 1, 2, 3, 5 }) {
+        for (const std::string &direction : { "right", "both" }) {
+            const std::string seed = c.P.substr(c.v + 1 - 9, 20);
+            inspect(names_request(c, seed, direction, mb, 1000)["results"][0],
+                    "names " + direction + " " + std::to_string(mb));
+        }
+    }
+    // level reads and level lists on row-diff budget cases (arm-level lower bounds)
+    for (const BudgetCase &bc : rowdiff_budget_cases()) {
+        for (uint64_t memory = 8192; memory < (uint64_t(1) << 22); memory = memory * 3 / 2) {
+            Strategy st = bc.st;
+            st.max_memory_bytes = memory;
+            st.delivery = delivery_costs("full", st.sequences);
+            try {
+                const SeedResult r = run_case(bc, st);
+                inspect(seed_result_to_json(r, st, "full", false), bc.name);
+            } catch (const SeedBudgetError &) {
+                // failed seeds are inspected through the request below
+            }
+        }
+    }
+    // failed seeds through the request: work in validation and derivation, memory in the
+    // trace roots
+    auto anno = repeat_index(70'000, false);
+    for (bool named : { false, true }) {
+        for (const char *budget : { "max_work_units", "max_memory_mb" }) {
+            Json::Value r;
+            Json::Value seed;
+            seed["sequence"] = named ? "GAT" : "GATG";
+            if (named)
+                seed["labels"].append("r1");
+            r["seeds"].append(seed);
+            r["strategy"] = parse_json(kRepeatStrategy);
+            r["strategy"]["direction"] = "both";
+            r["strategy"]["bounds"][budget] = 1;
+            r["strategy"]["output"]["timing"] = false;
+            inspect(process_traverse_request(r, *anno, "")["results"][0],
+                    std::string(named ? "validation " : "derivation ") + budget);
+        }
+    }
+    EXPECT_GT(lower, 5u);
+    EXPECT_GE(failed, 4u);
+    EXPECT_GT(checked, 20u);
+}
+
+
+/********* stage 4, backend half: an attempt stopped from outside the walk *********/
+
+namespace {
+
+// A control whose poll answers |stop| from its |at|-th call on (0-based), counting every call:
+// a cancel, the attempt's bound or a gone client injected at any checkpoint the walk polls
+struct InjectedStop {
+    uint64_t at;
+    ExternalStop stop;
+    uint64_t calls = 0;
+    AttemptMeter meter;
+    AttemptControl control;
+    explicit InjectedStop(uint64_t at = std::numeric_limits<uint64_t>::max(),
+                          ExternalStop stop = ExternalStop::CANCELLED)
+          : at(at), stop(stop) {
+        control.poll = [this]() {
+            return calls++ >= this->at ? this->stop : ExternalStop::NONE;
+        };
+        control.elapsed_ms = [this]() { return 1000.5 + static_cast<double>(calls); };
+        control.bound_ms = 70'000;
+        control.meter = &meter;
+    }
+    InjectedStop(const InjectedStop&) = delete;
+    InjectedStop& operator=(const InjectedStop&) = delete;
+};
+
+SeedResult run_stopped(const BudgetCase &c, const Strategy &st, InjectedStop *inject) {
+    LabelOracle oracle(*c.anno);
+    return traverse_seed(oracle, c.seed, st, c.cost, "", nullptr, &inject->control);
+}
+
+const char* stop_token(ExternalStop s) {
+    return s == ExternalStop::CANCELLED ? "cancelled" : "attempt_deadline";
+}
+
+ResourceStop::Resource stop_resource(ExternalStop s) {
+    return s == ExternalStop::CANCELLED ? ResourceStop::CANCELLED : ResourceStop::ATTEMPT_DEADLINE;
+}
+
+// A server-side attempt (traverse_attempts.hpp) whose |at|-th poll (1-based, the polls
+// between seeds included) finds it cancelled, as POST /traverse/cancel would: the client check
+// runs at every poll and asks for the cancel itself
+struct CancelAtPoll {
+    AttemptSettings settings;
+    std::shared_ptr<Attempt> attempt;
+    uint64_t calls = 0;
+    uint64_t at;
+    explicit CancelAtPoll(uint64_t at, const std::string &id = "t-1") : at(at) {
+        settings.client_check_ms = 0;
+        settings.poll_stride = 1;
+        settings.allowance_ms = 1000;
+        attempt = std::make_shared<Attempt>(0, std::chrono::system_clock::time_point(), settings,
+                                            "0123456789abcdef", true, [this]() {
+            if (++calls == this->at)
+                attempt->cancel();
+            return false;
+        });
+        AttemptIds ids;
+        ids.attempt_id = id;
+        attempt->set_ids(ids);
+    }
+};
+
+Json::Value request_of(const std::vector<Seed> &seeds, const std::string &strategy,
+                       const std::string &detail = "graphlet") {
+    Json::Value r;
+    for (const Seed &s : seeds) {
+        Json::Value j;
+        j["sequence"] = s.sequence;
+        for (const std::string &l : s.labels) {
+            j["labels"].append(l);
+        }
+        r["seeds"].append(j);
+    }
+    r["strategy"] = parse_json(strategy);
+    r["strategy"]["output"]["detail"] = detail;
+    r["strategy"]["output"]["timing"] = false;
+    return r;
+}
+
+std::string compact_json(const Json::Value &v) {
+    Json::StreamWriterBuilder b;
+    b["indentation"] = "";
+    return Json::writeString(b, v);
+}
+
+} // namespace
+
+// A cancel, or the attempt's bound, at every checkpoint the walk polls leaves a consistent
+// prefix (as an allocation denial does, §14): every walk up to each arm's complete_to_bp is
+// the unstopped walk's, the stop is stated (resource_stop with scope attempt, Q, a walk_domain
+// naming attempt_id), the result serialises both ways, and a later stop never walks less. A
+// stop in the seed phase fails the seed (no result exists to deliver).
+TEST(GraphletAttempt, StopAtEveryPollLeavesAConsistentPrefix) {
+    size_t stops = 0, seed_phase = 0, mid_walk = 0;
+    for (const BudgetCase &c : budget_cases()) {
+        InjectedStop count;
+        const SeedResult base = run_stopped(c, c.st, &count);
+        EXPECT_FALSE(base.resource_stop) << c.name;
+        const uint64_t polls = count.calls;
+        ASSERT_GT(polls, 0u) << c.name;
+        const size_t most = c.name.rfind("mode ", 0) == 0 ? 6 : 16;
+        std::vector<uint64_t> ats;
+        for (size_t i = 0; i < std::min<uint64_t>(polls, most); ++i) {
+            ats.push_back(polls <= most ? i : i * (polls - 1) / (most - 1));
+        }
+        LabelOracle oracle(*c.anno);
+        for (ExternalStop which : { ExternalStop::CANCELLED, ExternalStop::ATTEMPT_DEADLINE }) {
+            std::array<uint64_t, 2> depth { 0, 0 };
+            for (size_t i = 0; i < ats.size(); ++i) {
+                // the bound's stop takes the same path as a cancel's: every other poll
+                if (which == ExternalStop::ATTEMPT_DEADLINE && i % 2)
+                    continue;
+                const uint64_t at = ats[i];
+                const std::string what = c.name + " " + stop_token(which) + " at poll "
+                                       + std::to_string(at) + " of " + std::to_string(polls);
+                InjectedStop inject(at, which);
+                SeedResult r;
+                try {
+                    r = run_stopped(c, c.st, &inject);
+                } catch (const SeedBudgetError &e) {
+                    seed_phase++;
+                    EXPECT_EQ(stop_resource(which), e.stop().resource) << what;
+                    EXPECT_EQ(70'000, e.stop().limit) << what;
+                    EXPECT_TRUE(inject.meter.walked) << what;
+                    continue;
+                }
+                stops++;
+                ASSERT_TRUE(r.resource_stop) << what;
+                const ResourceStop &q = *r.resource_stop;
+                EXPECT_EQ(stop_resource(which), q.resource) << what;
+                EXPECT_EQ(70'000, q.limit) << what;
+                EXPECT_EQ(std::ceil(q.used), q.used) << what << ": whole milliseconds";
+                EXPECT_GE(q.used, 1001) << what;
+                EXPECT_TRUE(inject.meter.walked) << what;
+                EXPECT_EQ(r.account.work_used, inject.meter.work_units) << what;
+                bool deeper = false;
+                for (size_t a = 0; a < 2; ++a) {
+                    const ArmResult &ra = r.arms[a];
+                    if (!ra.requested)
+                        continue;
+                    const std::string arm = what + " arm " + to_string(ra.arm);
+                    check_bins(ra, arm);
+                    EXPECT_EQ(walks_upto(base.arms[a], ra.complete_to_bp),
+                              walks_upto(ra, ra.complete_to_bp)) << arm;
+                    EXPECT_GE(ra.complete_to_bp, depth[a]) << arm << ": a later stop walks no less";
+                    depth[a] = ra.complete_to_bp;
+                    deeper |= ra.complete_to_bp > 0;
+                    for (const PathResult &p : ra.paths) {
+                        if (p.length_bp >= ra.complete_to_bp && p.path_reason) {
+                            EXPECT_TRUE(*p.path_reason == EndReason::RESOURCE_LIMIT
+                                        || !is_resource_stop(*p.path_reason)
+                                        || *p.path_reason == EndReason::BEAM_PRUNED)
+                                << arm << " path " << p.id << " " << to_string(*p.path_reason);
+                        }
+                    }
+                }
+                mid_walk += deeper;
+                const std::string text = check_serialised(r, c.seed, c.st, oracle, what);
+                EXPECT_NE(std::string::npos,
+                          text.find(std::string("\nQ attempt ") + stop_token(which) + " traversal "))
+                    << what;
+                const Json::Value j = seed_result_to_json(r, c.st, "summary", false);
+                check_widths(j, 2, "", what);
+                EXPECT_EQ("partial", j["outcome"]["walks"].asString()) << what;
+                EXPECT_EQ("attempt", j["resource_stop"]["scope"].asString()) << what;
+                EXPECT_EQ(stop_token(which), j["resource_stop"]["resource"].asString()) << what;
+                EXPECT_EQ("continue_from_leaves", j["resource_stop"]["actions"][0].asString()) << what;
+                EXPECT_EQ(1u, j["resource_stop"]["actions"].size()) << what;
+                bool stated = false;
+                for (const char *side : { "left", "right" }) {
+                    for (const Json::Value &l : j["arms"][side]["limitations"]) {
+                        if (l["knob"].asString() != "attempt_id")
+                            continue;
+                        stated = true;
+                        EXPECT_EQ("walk_domain", l["kind"].asString()) << what;
+                        EXPECT_EQ(70'000u, l["limit"].asUInt64()) << what;
+                        EXPECT_EQ(std::string::npos, l["effect"].asString().find("raise the knob"))
+                            << what << ": no budget ran out";
+                    }
+                }
+                EXPECT_TRUE(stated) << what;
+            }
+        }
+    }
+    EXPECT_GT(stops, 200u);
+    EXPECT_GT(seed_phase, 10u);
+    EXPECT_GT(mid_walk, 100u);
+}
+
+// No stop: the walk is the one without a control, byte for byte, and the meter is its account
+TEST(GraphletAttempt, NoStopIsByteIdentical) {
+    for (const BudgetCase &c : budget_cases()) {
+        LabelOracle oracle(*c.anno);
+        for (bool budgeted : { false, true }) {
+            Strategy st = c.st;
+            if (budgeted) {
+                st.max_memory_bytes = uint64_t(64) << 20;
+                st.max_work_units = 1'000'000'000;
+            }
+            const SeedResult plain = run_case(c, st);
+            InjectedStop never;
+            const SeedResult controlled = run_stopped(c, st, &never);
+            const std::string what = c.name + (budgeted ? " budgeted" : "");
+            EXPECT_GT(never.calls, 0u) << what;
+            EXPECT_EQ(compact_json(seed_result_to_json(plain, st, "full", false)),
+                      compact_json(seed_result_to_json(controlled, st, "full", false))) << what;
+            const Json::Value summary = seed_result_to_json(plain, st, "graphlet", false);
+            EXPECT_EQ(graphlet_text(plain, c.seed, st, context_of(oracle), summary),
+                      graphlet_text(controlled, c.seed, st, context_of(oracle), summary)) << what;
+            EXPECT_TRUE(never.meter.walked) << what;
+            EXPECT_EQ(plain.account.work_used, never.meter.work_units) << what;
+            EXPECT_EQ(plain.account.work_seed, never.meter.work_seed) << what;
+            EXPECT_GE(never.meter.memory_peak, plain.account.memory_peak) << what;
+            EXPECT_EQ(plain.account.memory_final, never.meter.memory_final) << what;
+            EXPECT_EQ(plain.account.soft_overshoot, never.meter.soft_excess) << what;
+        }
+    }
+}
+
+// A gone client abandons the walk wherever it is: nothing is finalised, and what it consumed
+// until then still reaches the caller
+TEST(GraphletAttempt, GoneClientAbandonsTheWalk) {
+    for (const BudgetCase &c : budget_cases()) {
+        InjectedStop count;
+        const SeedResult base = run_stopped(c, c.st, &count);
+        for (uint64_t at : { uint64_t(0), count.calls / 2, count.calls - 1 }) {
+            InjectedStop gone(at, ExternalStop::CLIENT_GONE);
+            EXPECT_THROW(run_stopped(c, c.st, &gone), AttemptAborted) << c.name << " at " << at;
+            EXPECT_TRUE(gone.meter.walked) << c.name;
+            EXPECT_LE(gone.meter.work_units, base.account.work_used) << c.name;
+        }
+    }
+}
+
+// A stop in the seed phase (a derivation's window, a validation's fetch call) fails the seed:
+// no result exists yet, not even one complete to 0 bp
+TEST(GraphletAttempt, SeedPhaseStopFailsTheSeed) {
+    BudgetCase c = budget_cases()[0];
+    for (bool derived : { true, false }) {
+        c.seed = derived ? seed_of("AAA") : seed_of("AAA", { "C", "D", "E" });
+        InjectedStop inject(0, ExternalStop::CANCELLED);
+        try {
+            run_stopped(c, c.st, &inject);
+            ADD_FAILURE() << "derived " << derived << ": not stopped in its seed phase";
+        } catch (const SeedBudgetError &e) {
+            EXPECT_EQ(ResourceStop::CANCELLED, e.stop().resource);
+            EXPECT_NE(std::string::npos,
+                      std::string(e.what()).find(derived ? "derive" : "validated")) << e.what();
+            EXPECT_EQ(e.stop().used, e.stop().demand);
+        }
+        // through the request: failed per seed with the attempt's stop, and its lever is a new
+        // attempt (the polls between seeds come first: the walk's first poll is the second)
+        CancelAtPoll cancel(2);
+        const Json::Value out = process_traverse_request(
+                request_of({ c.seed }, R"({"bounds": {"max_extension_bp": 7}})"), *c.anno, "", {},
+                nullptr, cancel.attempt.get());
+        const Json::Value &r = out["results"][0];
+        const std::string what = std::string("derived ") + (derived ? "true" : "false") + ": "
+                               + compact_json(r);
+        check_widths(r, 2, "", what);
+        EXPECT_EQ("failed", r["outcome"]["walks"].asString()) << what;
+        EXPECT_FALSE(r.isMember("graphlet")) << what;
+        EXPECT_EQ("attempt", r["resource_stop"]["scope"].asString()) << what;
+        EXPECT_EQ("cancelled", r["resource_stop"]["resource"].asString()) << what;
+        EXPECT_EQ("traversal", r["resource_stop"]["phase"].asString()) << what;
+        EXPECT_EQ("retry_attempt", r["resource_stop"]["actions"][0].asString()) << what;
+        EXPECT_EQ("walk_domain", r["limitations"][0]["kind"].asString()) << what;
+        EXPECT_EQ("attempt_id", r["limitations"][0]["knob"].asString()) << what;
+        EXPECT_EQ(cancel.attempt->bound_ms(), r["limitations"][0]["limit"].asDouble()) << what;
+        const Json::Value &u = out["usage"];
+        EXPECT_EQ("cancelled", u["reason"].asString()) << what;
+        EXPECT_EQ("failed", u["per_seed"][0]["outcome"].asString()) << what;
+        EXPECT_EQ("cancelled", u["per_seed"][0]["stopped_by"].asString()) << what;
+        EXPECT_EQ(1u, u["seeds"]["finished"].asUInt64()) << what;
+    }
+}
+
+// A stop between seeds leaves the rest unstarted: each failed with the stop that left it so
+// (resource_stop phase not_started, a walk_domain naming attempt_id), the seeds walked before
+// it delivered whole, and the usage stating which seeds ran
+TEST(GraphletAttempt, UnstartedSeedsAreFailedWithTheStop) {
+    const BudgetCase c = budget_cases()[0];
+    const std::string strategy = R"({"bounds": {"max_extension_bp": 7}})";
+    for (bool budgeted : { false, true }) {
+        Json::Value one = request_of({ c.seed }, strategy);
+        if (budgeted)
+            one["strategy"]["bounds"]["max_memory_mb"] = 64;
+        CancelAtPoll single(std::numeric_limits<uint64_t>::max());
+        process_traverse_request(one, *c.anno, "", {}, nullptr, single.attempt.get());
+        // the polls of one seed, the poll before it included (a budget polls between its fetch
+        // calls too): the next poll is the one before the second seed
+        const uint64_t polls = single.calls;
+        ASSERT_GT(polls, 1u);
+        Json::Value request = one;
+        request["seeds"].append(one["seeds"][0]);
+        request["seeds"].append(one["seeds"][0]);
+        CancelAtPoll cancel(polls + 1);
+        const Json::Value out = process_traverse_request(request, *c.anno, "", {}, nullptr,
+                                                         cancel.attempt.get());
+        ASSERT_EQ(3u, out["results"].size());
+        const Json::Value &first = out["results"][0];
+        EXPECT_FALSE(first.isMember("resource_stop"));
+        EXPECT_TRUE(first.isMember("graphlet"));
+        for (Json::ArrayIndex i = 1; i < 3; ++i) {
+            const Json::Value &r = out["results"][i];
+            const std::string what = "seed " + std::to_string(i) + ": " + compact_json(r);
+            check_widths(r, 2, "", what);
+            EXPECT_EQ(0u, r["error"].asString().rfind("not started: the attempt was cancelled", 0))
+                << what;
+            EXPECT_EQ("failed", r["outcome"]["walks"].asString()) << what;
+            EXPECT_EQ("not_started", r["resource_stop"]["phase"].asString()) << what;
+            EXPECT_EQ("cancelled", r["resource_stop"]["resource"].asString()) << what;
+            EXPECT_EQ("attempt", r["resource_stop"]["scope"].asString()) << what;
+            EXPECT_EQ("retry_attempt", r["resource_stop"]["actions"][0].asString()) << what;
+            EXPECT_EQ("attempt_id", r["limitations"][0]["knob"].asString()) << what;
+            // every response under a memory budget states it (§7.0)
+            EXPECT_EQ(budgeted ? 2u : 1u, r["limitations"].size()) << what;
+            if (budgeted)
+                EXPECT_EQ("memory_bound_soft", r["limitations"][1]["kind"].asString()) << what;
+        }
+        const Json::Value &u = out["usage"];
+        EXPECT_EQ("cancelled", u["reason"].asString());
+        EXPECT_EQ("t-1", u["attempt_id"].asString());
+        EXPECT_EQ(3u, u["seeds"]["requested"].asUInt64());
+        EXPECT_EQ(1u, u["seeds"]["started"].asUInt64());
+        EXPECT_EQ(1u, u["seeds"]["finished"].asUInt64());
+        EXPECT_EQ(first["outcome"]["walks"].asString(), u["per_seed"][0]["outcome"].asString());
+        EXPECT_EQ("not_started", u["per_seed"][1]["outcome"].asString());
+        EXPECT_EQ(0u, u["per_seed"][2]["work_units"].asUInt64());
+        EXPECT_EQ(u["work_units"], u["per_seed"][0]["work_units"]);
+        EXPECT_EQ(budgeted, !u["memory"]["soft_excess_bytes"].isNull());
+    }
+}
+
+// The usage block: per seed the walk's own account (the work of its seed phase and both arms,
+// the modelled peak), the request's sums; only a request with attempt_id has one, and with
+// it the response is otherwise byte for byte the one without
+TEST(GraphletAttempt, UsageStatesWhatTheSeedsConsumed) {
+    const BudgetCase c = budget_cases()[2];
+    const BudgetCase d = budget_cases()[0];
+    const std::string strategy = R"({"bounds": {"max_extension_bp": 7}})";
+    for (bool budgeted : { false, true }) {
+        Json::Value request = request_of({ d.seed, seed_of("AAA") }, strategy, "full");
+        if (budgeted)
+            request["strategy"]["bounds"]["max_memory_mb"] = 64;
+        const Json::Value plain = process_traverse_request(request, *d.anno, "");
+        EXPECT_FALSE(plain.isMember("usage"));
+        request["attempt_id"] = "cli-1";
+        request["budget_id"] = "budget-7";
+        const Json::Value with = process_traverse_request(request, *d.anno, "");
+        ASSERT_TRUE(with.isMember("usage"));
+        Json::Value without = with;
+        without.removeMember("usage");
+        EXPECT_EQ(compact_json(plain), compact_json(without));
+        const Json::Value &u = with["usage"];
+        EXPECT_EQ("cli-1", u["attempt_id"].asString());
+        EXPECT_EQ("budget-7", u["budget_id"].asString());
+        EXPECT_FALSE(u.isMember("locus_id"));
+        EXPECT_EQ("completed", u["reason"].asString());
+        // the CLI states the bound but enforces none
+        EXPECT_FALSE(u["bound"]["enforced"].asBool());
+        EXPECT_EQ(2u, u["bound"]["seeds"].asUInt64());
+        EXPECT_EQ(2u, u["seeds"]["finished"].asUInt64());
+        uint64_t total = 0, held = 0, peak = 0;
+        for (Json::ArrayIndex i = 0; i < 2; ++i) {
+            const Json::Value &s = u["per_seed"][i];
+            Strategy st = parse_traverse_request(request).strategy;
+            st.delivery = delivery_costs("full", st.sequences);
+            LabelOracle oracle(*d.anno);
+            const Seed seed = i ? seed_of("AAA") : d.seed;
+            const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+            EXPECT_EQ(r.account.work_used, s["work_units"].asUInt64()) << i;
+            EXPECT_EQ(r.account.work_seed, s["work_seed"].asUInt64()) << i;
+            EXPECT_EQ(r.account.memory_final, s["final_bytes"].asUInt64()) << i;
+            EXPECT_EQ(with["results"][i]["outcome"]["walks"].asString(), s["outcome"].asString());
+            EXPECT_EQ(budgeted, !s["soft_excess_bytes"].isNull()) << i;
+            total += s["work_units"].asUInt64();
+            peak = std::max(peak, held + s["peak_admitted_bytes"].asUInt64());
+            held += s["final_bytes"].asUInt64();
+        }
+        EXPECT_EQ(total, u["work_units"].asUInt64());
+        EXPECT_EQ(peak, u["memory"]["peak_admitted_bytes"].asUInt64());
+        EXPECT_GT(peak, 0u);
+    }
+    (void)c;
+}
+
+// The statements of a stop from outside the walk fit the widths the delivery model prices
+// (effects 640, messages 1 KiB), with the largest numbers they can carry
+TEST(GraphletAttempt, StatementsFitTheirWidths) {
+    const uint64_t big = std::numeric_limits<uint64_t>::max() / 2;
+    for (ExternalStop which : { ExternalStop::CANCELLED, ExternalStop::ATTEMPT_DEADLINE }) {
+        for (bool trigger : { true, false }) {
+            SeedResult r;
+            Strategy st;
+            st.max_memory_bytes = big & ~((uint64_t(1) << 20) - 1);
+            ResourceStop q;
+            q.resource = stop_resource(which);
+            q.arm = Arm::RIGHT;
+            q.at_bp = big;
+            q.limit = static_cast<double>(big);
+            q.used = q.demand = static_cast<double>(big);
+            r.resource_stop = q;
+            r.account.soft_overshoot = big;
+            for (ArmResult &arm : r.arms) {
+                arm.status = ArmResult::TRUNCATED;
+                arm.complete_to_bp = big;
+                arm.cap_trigger = CapTrigger{ trigger ? EndReason::RESOURCE_LIMIT
+                                                      : EndReason::BEAM_PRUNED,
+                                              big, 0, 1, 1, true, static_cast<double>(big) };
+                PathResult p;
+                p.path_reason = EndReason::RESOURCE_LIMIT;
+                arm.paths.push_back(p);
+            }
+            const Json::Value j = seed_result_to_json(r, st, "summary", false);
+            const std::string what = std::string(stop_token(which)) + (trigger ? " trigger" : " later");
+            check_widths(j, 2, "", what);
+            bool stated = false;
+            for (const Json::Value &l : j["arms"]["right"]["limitations"]) {
+                stated |= l["knob"].asString() == "attempt_id";
+            }
+            EXPECT_TRUE(stated) << what;
+        }
+    }
+}
+
+
+/********* the review of the stage-3 fixes (P2, P3) and of the stage-4 backend (F1) *********/
+
+namespace {
+
+// the roots case of the stage-2 recheck (P2): seed GAT on the repeat index, both arms, trace,
+// detail full; its depth-0 state needs about 7 MiB of its own beside the caches' allotments
+Json::Value roots_request(uint64_t mb, const std::string &attempt_id = "") {
+    Json::Value r;
+    Json::Value seed;
+    seed["sequence"] = "GAT";
+    seed["labels"].append("r1");
+    r["seeds"].append(seed);
+    r["strategy"] = parse_json(kRepeatStrategy);
+    r["strategy"]["direction"] = "both";
+    r["strategy"]["bounds"]["max_memory_mb"] = Json::UInt64(mb);
+    r["strategy"]["output"]["detail"] = "full";
+    r["strategy"]["output"]["timing"] = false;
+    if (!attempt_id.empty())
+        r["attempt_id"] = attempt_id;
+    return r;
+}
+
+const Json::Value* memory_walk_domain(const Json::Value &limitations) {
+    for (const Json::Value &l : limitations) {
+        if (l["kind"].asString() == "walk_domain" && l["knob"].asString() == "bounds.max_memory_mb")
+            return &l;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+// P2: a memory stop states the knob value that holds what it needed, not the need at its own
+// budget, which includes the caches' allotments of that budget (5/16 of it, at most 128 MiB):
+// raised to the need, the seed failed again with a larger one (1 MiB: "need 7 MiB"; 7: 9; 8
+// and 9: 10; 10 held it). The value is the smallest whole MiB that holds the need beside its
+// own allotments: raised to it the state is held, one MiB less still fails
+TEST(GraphletStage3Fixes, MemoryStopsStateTheBudgetThatHoldsThem) {
+    constexpr uint64_t kMiB = uint64_t(1) << 20;
+    std::mt19937_64 rng(5);
+    for (int i = 0; i < 20'000; ++i) {
+        const uint64_t budget = rng() % (uint64_t(1) << (10 + rng() % 30)) + 1;
+        const uint64_t allotted = memory_allotments(budget);
+        const uint64_t need = allotted + rng() % (uint64_t(1) << (rng() % 38));
+        const uint64_t b = memory_budget_holding(need, allotted);
+        ASSERT_EQ(0u, b % kMiB) << need << " " << allotted;
+        if (!allotted) {
+            // a budget below 4 bytes allots nothing: the need rounded up
+            EXPECT_EQ(std::max<uint64_t>(1, (need + kMiB - 1) / kMiB) * kMiB, b) << need;
+            continue;
+        }
+        EXPECT_LE(need - allotted + memory_allotments(b), b) << need << " " << allotted;
+        if (b > kMiB) {
+            EXPECT_GT(need - allotted + memory_allotments(b - kMiB), b - kMiB)
+                << need << " " << allotted;
+        }
+    }
+    // nothing allotted (the seed phase): the need rounded up, as before
+    EXPECT_EQ(3 * kMiB, memory_budget_holding(5 * kMiB / 2, 0));
+    EXPECT_EQ(kMiB, memory_budget_holding(1, 0));
+
+    auto anno = repeat_index(100'000, false);
+    size_t failures = 0;
+    uint64_t holds_from = 0;
+    for (uint64_t mb = 1; mb <= 12; ++mb) {
+        const Json::Value out = process_traverse_request(roots_request(mb), *anno, "");
+        const Json::Value &res = out["results"][0];
+        const std::string what = std::to_string(mb) + " MiB";
+        if (res["outcome"]["walks"].asString() != "failed") {
+            if (!holds_from)
+                holds_from = mb;
+            continue;
+        }
+        EXPECT_FALSE(holds_from) << what << ": failed above a budget that held it";
+        failures++;
+        check_widths(res, 2, "", what);
+        const Json::Value *wd = memory_walk_domain(res["limitations"]);
+        ASSERT_TRUE(wd) << what;
+        const uint64_t knob = (*wd)["observed"].asUInt64();
+        EXPECT_GT(knob, mb) << what;
+        EXPECT_NE(std::string::npos, res["error"].asString().find(
+                "the smallest budget that holds them is " + std::to_string(knob) + " MiB"))
+            << what << ": " << res["error"].asString();
+        EXPECT_NE(std::string::npos, (*wd)["effect"].asString().find("caches' allotments"))
+            << what;
+        // raised to the stated value, the depth-0 state is held; one MiB less is not
+        const Json::Value raised = process_traverse_request(roots_request(knob), *anno, "");
+        EXPECT_NE("failed", raised["results"][0]["outcome"]["walks"].asString()) << what;
+        const Json::Value below = process_traverse_request(roots_request(knob - 1), *anno, "");
+        EXPECT_EQ("failed", below["results"][0]["outcome"]["walks"].asString()) << what;
+    }
+    EXPECT_GE(failures, 5u);
+    EXPECT_GT(holds_from, 0u);
+
+    // A head's stop states its knob value too (the cap trigger's demand and the walk_domain's
+    // observed): raised to it, the walk admits the head that was refused
+    size_t heads = 0;
+    for (const BudgetCase &c : budget_cases()) {
+        for (uint64_t memory = 8192; memory < (uint64_t(2) << 20); memory = memory * 3 / 2) {
+            Strategy st = c.st;
+            st.max_memory_bytes = memory;
+            st.delivery = delivery_costs("full", st.sequences);
+            size_t admitted = 0;
+            WalkerHooks count;
+            count.deny = [&](const Admission&) { admitted++; return false; };
+            SeedResult r;
+            try {
+                r = run_case(c, st, &count);
+            } catch (const SeedBudgetError &) {
+                continue;
+            }
+            if (!r.resource_stop || r.resource_stop->resource != ResourceStop::MEMORY
+                    || r.resource_stop->cause != ResourceStop::HEAD
+                    || r.resource_stop->lower_bound || r.resource_stop->injected)
+                continue;
+            const ResourceStop &q = *r.resource_stop;
+            ASSERT_GT(q.allotted, 0u);
+            const uint64_t knob = memory_budget_holding(
+                    static_cast<uint64_t>(std::ceil(q.demand)), q.allotted);
+            const ArmResult &arm = r.arms[static_cast<size_t>(q.arm)];
+            ASSERT_TRUE(arm.cap_trigger) << c.name;
+            EXPECT_EQ(static_cast<double>(knob >> 20), arm.cap_trigger->demand) << c.name;
+            Strategy raised = st;
+            raised.max_memory_bytes = knob;
+            size_t admitted_raised = 0;
+            WalkerHooks count_raised;
+            count_raised.deny = [&](const Admission&) { admitted_raised++; return false; };
+            run_case(c, raised, &count_raised);
+            EXPECT_GT(admitted_raised, admitted) << c.name << " " << memory;
+            heads++;
+        }
+    }
+    EXPECT_GT(heads, 10u);
+}
+
+// P3: a derivation found too_wide read its window whole before it was found so: the rows are
+// the seed's work (the usage a ledger reconciles), added without a comparison so that
+// too_wide stays the cause stated (400,019 units were reported as 0)
+TEST(GraphletStage3Fixes, TooWideWindowIsTheSeedsWork) {
+    const size_t n = 70'000;
+    const uint64_t gat = 8 + 1 + occurrences(n, "GAT"), atg = 8 + 1 + occurrences(n, "ATG");
+    for (bool rowdiff : { false, true }) {
+        auto anno = repeat_index(n, rowdiff);
+        for (uint64_t work : { uint64_t(0), uint64_t(1'000'000'000) }) {
+            Strategy st = strategy_of(kRepeatStrategy);
+            st.max_seed_labels = 10;     // at most 65,536 entries: both rows are wider
+            st.max_work_units = work;
+            AttemptMeter meter;
+            AttemptControl control;
+            control.poll = []() { return ExternalStop::NONE; };
+            control.elapsed_ms = []() { return 0.0; };
+            control.meter = &meter;
+            LabelOracle oracle(*anno);
+            const std::string what = std::string(rowdiff ? "row-diff" : "column")
+                + (work ? ", work budget" : "");
+            try {
+                traverse_seed(oracle, seed_of("GATG"), st, LabelChangeCost::forbid(), "", nullptr,
+                              &control);
+                ADD_FAILURE() << what << ": the derivation was not too wide";
+            } catch (const SeedDerivationError &e) {
+                EXPECT_EQ(SeedDerivationError::TOO_WIDE, e.cause()) << what;
+                if (rowdiff && work) {
+                    // each row with its row-diff dependency rows (the budget-aware reads)
+                    EXPECT_GE(meter.work_seed, gat + atg) << what;
+                } else {
+                    EXPECT_EQ(gat + atg, meter.work_seed) << what;
+                }
+                EXPECT_EQ(meter.work_seed, meter.work_units) << what;
+            }
+        }
+    }
+}
+
+// F1 (review of the stage-4 backend): the usage of a failed or never started seed is what its
+// result states and holds — its memory_bound_soft (the echo of seed_id included), the failed
+// result as priced until the response is written, the demand a memory budget refused — and an
+// admitted peak never above the budget; held_bound_bytes bounds the request as observed
+TEST(GraphletAttempt, UsageStatesWhatFailedResultsHold) {
+    constexpr uint64_t kMiB = uint64_t(1) << 20;
+    const BudgetCase c = budget_cases()[0];
+    const std::string strategy = R"({"bounds": {"max_extension_bp": 7, "max_memory_mb": 1}})";
+    const std::string big_a(2 * kMiB, 'z'), big_b(2 * kMiB, 'q');
+    std::vector<Seed> seeds { c.seed, c.seed, c.seed, c.seed };
+    seeds[0].seed_id = big_a;   // failed at depth 0: its echo alone exceeds the budget
+    seeds[3].seed_id = big_b;   // never started: its failed result's echo exceeds it
+    // the polls of the first two seeds, the poll before each included: the next is the one
+    // before the third seed
+    Json::Value two = request_of({ seeds[0], seeds[1] }, strategy, "full");
+    for (Json::ArrayIndex i = 0; i < 2; ++i) {
+        two["seeds"][i]["seed_id"] = seeds[i].seed_id;
+    }
+    CancelAtPoll count(std::numeric_limits<uint64_t>::max());
+    process_traverse_request(two, *c.anno, "", {}, nullptr, count.attempt.get());
+    Json::Value request = request_of(seeds, strategy, "full");
+    for (Json::ArrayIndex i = 0; i < 4; ++i) {
+        if (!seeds[i].seed_id.empty())
+            request["seeds"][i]["seed_id"] = seeds[i].seed_id;
+    }
+    CancelAtPoll cancel(count.calls + 1);
+    const Json::Value out = process_traverse_request(request, *c.anno, "", {}, nullptr,
+                                                     cancel.attempt.get());
+    ASSERT_EQ(4u, out["results"].size());
+    const Json::Value &u = out["usage"];
+    EXPECT_EQ("failed", out["results"][0]["outcome"]["walks"].asString());
+    EXPECT_NE("failed", out["results"][1]["outcome"]["walks"].asString());
+    EXPECT_EQ("not_started", out["results"][2]["resource_stop"]["phase"].asString());
+    EXPECT_EQ("not_started", out["results"][3]["resource_stop"]["phase"].asString());
+    EXPECT_EQ(4u, u["seeds"]["requested"].asUInt64());
+    EXPECT_EQ(2u, u["seeds"]["started"].asUInt64());
+    EXPECT_EQ(2u, u["seeds"]["finished"].asUInt64());
+    EXPECT_EQ(0u, u["seeds"]["abandoned"].asUInt64());
+
+    Strategy st = parse_traverse_request(request).strategy;
+    st.delivery = delivery_costs("full", st.sequences);
+    auto priced = [&](const std::string &seed_id) {
+        return st.delivery.fixed + seed_id.size()
+            + (st.delivery.name ? st.delivery.name(seed_id, DeliveryCosts::Name::SEED_ID) : 0);
+    };
+    uint64_t held = 0, peak = 0, bound = 0, soft = 0;
+    for (Json::ArrayIndex i = 0; i < 4; ++i) {
+        const Json::Value &s = u["per_seed"][i];
+        const Json::Value &res = out["results"][i];
+        const std::string what = "seed " + std::to_string(i) + ": " + compact_json(s);
+        // what the result's memory_bound_soft states, in bytes
+        uint64_t stated = 0;
+        for (const Json::Value &l : res["limitations"]) {
+            if (l["kind"].asString() == "memory_bound_soft")
+                stated = l["observed"].asUInt64();
+        }
+        EXPECT_EQ(stated, (s["soft_excess_bytes"].asUInt64() + kMiB - 1) / kMiB) << what;
+        EXPECT_LE(s["peak_admitted_bytes"].asUInt64(), kMiB) << what;
+        if (res["outcome"]["walks"].asString() == "failed") {
+            EXPECT_EQ(priced(seeds[i].seed_id), s["final_bytes"].asUInt64()) << what;
+        }
+        const bool walked = i < 2;
+        if (walked) {
+            peak = std::max(peak, held + s["peak_admitted_bytes"].asUInt64());
+            bound = std::max(bound, held + kMiB + s["soft_excess_bytes"].asUInt64());
+        }
+        soft = std::max(soft, s["soft_excess_bytes"].asUInt64());
+        held += s["final_bytes"].asUInt64();
+        peak = std::max(peak, held);
+        bound = std::max(bound, held);
+    }
+    // the depth-0 failure: the refused demand, above the budget; the echo is the excess
+    EXPECT_GT(u["per_seed"][0]["refused_bytes"].asUInt64(), kMiB);
+    EXPECT_GT(u["per_seed"][0]["soft_excess_bytes"].asUInt64(), kMiB);
+    EXPECT_TRUE(u["per_seed"][2]["refused_bytes"].isNull());
+    EXPECT_GT(u["per_seed"][3]["soft_excess_bytes"].asUInt64(), kMiB);
+    EXPECT_EQ(peak, u["memory"]["peak_admitted_bytes"].asUInt64());
+    EXPECT_EQ(soft, u["memory"]["soft_excess_bytes"].asUInt64());
+    EXPECT_EQ(bound, u["memory"]["held_bound_bytes"].asUInt64());
+
+    // without a memory budget the account is no bound of what was held: no bound is stated
+    Json::Value plain = request_of({ c.seed }, R"({"bounds": {"max_extension_bp": 7}})", "full");
+    plain["attempt_id"] = "plain-1";
+    const Json::Value pu = process_traverse_request(plain, *c.anno, "")["usage"];
+    EXPECT_TRUE(pu["memory"]["held_bound_bytes"].isNull());
+    EXPECT_TRUE(pu["memory"]["soft_excess_bytes"].isNull());
+    EXPECT_TRUE(pu["per_seed"][0]["refused_bytes"].isNull());
 }

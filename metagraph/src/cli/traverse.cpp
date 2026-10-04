@@ -16,6 +16,7 @@
 
 #include "cli/config/config.hpp"
 #include "cli/load/load_annotated_graph.hpp"
+#include "cli/traverse_attempts.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "common/logger.hpp"
@@ -29,6 +30,33 @@ using mtg::common::logger;
 using namespace mtg::graph::traversal;
 
 namespace {
+
+// ---------------------------------------------------------------- the attempt's delivery check
+
+// The check of the server's attempt while the results are built (traverse_attempts.hpp): its
+// client (gone: AttemptAborted) and its bound (reached: AttemptAtBound), every 4096 objects of
+// the JSON tree and of the MGT text, so that an attempt stops at its bound wherever it is
+// rather than outliving the lease that bound is (DESIGN-traverse-graphlet.md §14 v5.1). Set by
+// process_traverse_request for its own thread (the builders take no attempt); null otherwise,
+// where a tick is one test of a thread-local pointer.
+thread_local Attempt *t_delivery = nullptr;
+thread_local uint32_t t_delivery_ticks = 0;
+
+inline void delivery_tick() {
+    if (t_delivery && !(++t_delivery_ticks & 4095))
+        t_delivery->check_delivery();
+}
+
+class DeliveryScope {
+  public:
+    explicit DeliveryScope(Attempt *attempt) : previous_(t_delivery) { t_delivery = attempt; }
+    ~DeliveryScope() { t_delivery = previous_; }
+    DeliveryScope(const DeliveryScope&) = delete;
+    DeliveryScope& operator=(const DeliveryScope&) = delete;
+
+  private:
+    Attempt *previous_;
+};
 
 // ---------------------------------------------------------------- strict JSON access
 
@@ -231,6 +259,16 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     // multi-graph request.
     req.graph = s.str("graph", "");
     req.graph_path = s.str("graph_path", "");
+    // The attempt's fields (the frozen wire contract, DESIGN-traverse-graphlet.md §14.1): the
+    // server reads them before the request is parsed, to register the attempt (attempt_ids,
+    // the same rule); declared here so that strict parsing accepts them
+    const AttemptIds ids = attempt_ids(json);
+    for (const char *field : { "attempt_id", "budget_id", "locus_id" }) {
+        s.has(field);
+    }
+    req.attempt_id = ids.attempt_id;
+    req.budget_id = ids.budget_id;
+    req.locus_id = ids.locus_id;
 
     const auto &seeds = s.raw("seeds");
     if (!seeds.isArray() || seeds.empty())
@@ -669,6 +707,22 @@ static Json::Value limitation(const char *kind, const std::string &knob, Json::V
     return j;
 }
 
+// A stop requested from outside the walk (AttemptControl): the attempt was cancelled or
+// reached the duration bound the server enforces for it. No budget of the request ran out,
+// so its statements name the attempt, never a budget knob to raise
+static bool is_external_stop(const ResourceStop &q) {
+    return q.resource == ResourceStop::CANCELLED || q.resource == ResourceStop::ATTEMPT_DEADLINE;
+}
+
+// what an external stop's statements say happened, in their words
+static const char* external_cause(const ResourceStop &q) {
+    return q.resource == ResourceStop::CANCELLED
+        ? "the attempt was cancelled (POST /traverse/cancel)"
+        : "the attempt reached the time at which the server stops walking it (the duration "
+          "bound it enforces, the seeds' time budgets plus its allowance, less half the "
+          "allowance, kept for the delivery; see usage.bound)";
+}
+
 // The request field a resource stop answers to (§6.7) and its value; a beam's width is
 // bounds.max_live_paths; a head a budget did not admit answers to the budget that refused
 // it (|stop|; a memory refusal without a budget is a test hook's, stated as unlimited).
@@ -678,6 +732,10 @@ static std::pair<std::string, Json::Value> cap_knob(EndReason reason, const Stra
         case EndReason::RESOURCE_LIMIT:
             if (stop && stop->resource == ResourceStop::WORK)
                 return { "bounds.max_work_units", uint_json(st.max_work_units) };
+            // a stop from outside the walk answers to no budget: the field that names the
+            // attempt, with the attempt's bound (ms) as its limit
+            if (stop && is_external_stop(*stop))
+                return { "attempt_id", uint_json(static_cast<uint64_t>(stop->limit)) };
             return { "bounds.max_memory_mb", st.max_memory_bytes
                                                  ? uint_json(st.max_memory_bytes >> 20)
                                                  : Json::Value("unlimited") };
@@ -702,6 +760,14 @@ static bool ended_by(const ArmResult &arm, EndReason reason) {
 // DESIGN-traverse-graphlet.md §14.1): its statements name the decoding, its levers the seed
 static bool is_decode_stop(const ResourceStop &q) {
     return std::string(q.phase) == "annotation_decode";
+}
+
+// A seed-level memory stop's walk_domain observed, in the knob's unit: the smallest budget
+// (whole MiB) that holds its demand beside the caches' allotments of THAT budget — the demand
+// includes this budget's allotments, which grow with the knob, so the demand itself, raised
+// to, failed again (review of the stage-3 fixes, P2)
+static uint64_t knob_mib(const ResourceStop &q) {
+    return memory_budget_holding(static_cast<uint64_t>(std::ceil(q.demand)), q.allotted) >> 20;
 }
 
 // Every cap that limited this arm, each emitted only when it did (spec §7.0).
@@ -737,8 +803,17 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
             const bool decode = r == EndReason::RESOURCE_LIMIT && stop && is_decode_stop(*stop);
             const ResourceStop::Cause cause = r == EndReason::RESOURCE_LIMIT && stop
                 ? stop->cause : ResourceStop::HEAD;
+            const bool external = r == EndReason::RESOURCE_LIMIT && stop && is_external_stop(*stop);
             effect += r == EndReason::BEAM_PRUNED
                 ? "the beam kept the best-supported max_live_paths heads of a level and pruned the rest"
+                : external
+                ? std::string(external_cause(*stop)) + " and the exploration stopped at the next "
+                  "checkpoint (resource_limit; see resource_stop; "
+                  + (trigger ? "limit: the attempt's bound, observed: its elapsed time, ms"
+                             : "after the cap that set complete_to_bp; limit: the attempt's "
+                               "bound, ms, observed: the walks it ended")
+                  + "); no budget of the request ran out: a new attempt can continue from the "
+                    "leaves"
                 : decode && stop->injected
                 ? "an injected refusal of an annotation read (a test hook, not the budget) stopped "
                   "the exploration there (resource_limit; see resource_stop)"
@@ -761,9 +836,29 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
                 ? "the request's budget did not admit the next head, and the exploration stopped "
                   "there (resource_limit; see resource_stop)"
                 : std::string("the exploration stopped at this cap (") + to_string(r) + ")";
-            if (!trigger)
+            if (!trigger && !external)
                 effect += " after the cap that set complete_to_bp, so raising only that knob stops here";
-            effect += r == EndReason::RESOURCE_LIMIT && stop && stop->injected
+            // A refused level read and a level whose lists left no room state the least the
+            // stop needed (the exact demand would depend on annotation.batch_kmers, §6.8), so
+            // the value is a lower bound, said as such, and raising the knob to it is no
+            // promise (review of stage 3, answer 2)
+            if (trigger && r == EndReason::RESOURCE_LIMIT && stop && !stop->injected
+                    && stop->lower_bound) {
+                effect += " (observed: at least what admitting it needed, MiB rounded up to the "
+                          "smallest budget that admits it with the caches' allotments, which grow "
+                          "with the budget; raising the knob to it may still fail: unread rows or "
+                          "later state may need more)";
+            } else if (trigger && r == EndReason::RESOURCE_LIMIT && stop && !stop->injected
+                    && stop->resource == ResourceStop::MEMORY && stop->allotted) {
+                // the need at this budget includes the caches' allotments of this budget, which
+                // grow with it: the budget that admits the head is stated (memory_budget_holding;
+                // review of the stage-3 fixes, P2)
+                effect += " (observed: what admitting it needed, MiB rounded up to the smallest "
+                          "budget that admits it with the caches' allotments, which grow with the "
+                          "budget)";
+            }
+            effect += external ? ""
+                : r == EndReason::RESOURCE_LIMIT && stop && stop->injected
                 ? "; no request knob caused it" : "; raise the knob";
             auto [knob, limit] = cap_knob(r, st, stop);
             // at the trigger what the cap compared, which exceeded the limit; for a later
@@ -970,6 +1065,7 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     if (detail != "summary") {
         Json::Value segs(Json::arrayValue);
         for (const auto &s : arm.segments) {
+            delivery_tick();
             Json::Value sj;
             sj["id"] = uint_json(s.id);
             Json::Value parents(Json::arrayValue);
@@ -1045,6 +1141,7 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     // leaf), through one buffer reused across paths
     std::vector<size_t> chain;
     for (const auto &p : arm.paths) {
+        delivery_tick();
         Json::Value pj;
         pj["id"] = uint_json(p.id);
         if (detail != "summary") {
@@ -1090,6 +1187,7 @@ static Json::Value arm_to_json(const ArmResult &arm, const Strategy &st, const s
     if (detail != "summary") {
         Json::Value runs(Json::arrayValue);
         for (const auto &r : arm.runs) {
+            delivery_tick();
             Json::Value rj;
             rj["label"] = r.label;
             rj["from_bp"] = uint_json(r.from_bp);
@@ -1242,7 +1340,8 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                                       const ResourceAccount *account = nullptr) {
     constexpr double kMiB = 1 << 20;
     Json::Value j;
-    j["scope"] = "locus";
+    // a stop from outside the walk stops the attempt, not a budget of the locus
+    j["scope"] = is_external_stop(q) ? "attempt" : "locus";
     Json::Value actions(Json::arrayValue);
     std::string knob, unit;
     switch (q.resource) {
@@ -1331,14 +1430,46 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
             j["remaining"] = q.limit > q.used ? q.limit - q.used : 0.0;
             actions.append("raise_time_budget");
             break;
+        case ResourceStop::CANCELLED:
+        case ResourceStop::ATTEMPT_DEADLINE:
+            // the attempt's bound and its elapsed time, whole milliseconds; no budget to raise:
+            // what was walked is delivered, and a new attempt does the rest
+            j["resource"] = q.resource == ResourceStop::CANCELLED ? "cancelled" : "attempt_deadline";
+            knob = "attempt_id";
+            j["requested"] = uint_json(static_cast<uint64_t>(q.limit));
+            j["effective"] = uint_json(static_cast<uint64_t>(q.limit));
+            j["used"] = uint_json(static_cast<uint64_t>(q.used));
+            j["remaining"] = uint_json(q.limit > q.used ? static_cast<uint64_t>(q.limit - q.used) : 0);
+            if (failed)
+                actions.append("retry_attempt");
+            break;
     }
     if (!failed)
         actions.append("continue_from_leaves");
     j["phase"] = q.phase;
     j["actions"] = std::move(actions);
+    if (failed && is_external_stop(q)) {
+        j["message"] = std::string(failed->what()) + " (the seed is failed: its seed phase was "
+                       "stopped before any traversal, so no result exists, not even one complete "
+                       "to 0 bp; no budget of the request ran out: a new attempt can retry it)";
+        return j;
+    }
     if (failed) {
-        j["message"] = std::string(failed->what()) + " (the seed is failed: no valid traversal "
-                       "exists within the budget, not even one complete to 0 bp)";
+        std::string message = std::string(failed->what()) + " (the seed is failed: no valid "
+                              "traversal exists within the budget, not even one complete to 0 bp)";
+        if (q.resource == ResourceStop::WORK) {
+            // how far the failed seed phase ran past the budget, with the number that bounds
+            // it, as a walk's work stop states it (review of the stage-2 recheck, P2: a failed
+            // seed's message returned before the statement)
+            message += "; the seed phase is compared with the budget once every "
+                     + std::to_string(kWorkCheckInterval) + " units and fails at a comparison "
+                       "finding it at least " + std::to_string(kWorkCheckInterval)
+                     + " units over budget (the most this seed charged between two comparisons: "
+                     + std::to_string(account ? account->largest_charge
+                                              : failed->account().largest_charge)
+                     + " units)";
+        }
+        j["message"] = message;
         return j;
     }
     if (q.resource == ResourceStop::MEMORY && q.cause != ResourceStop::HEAD) {
@@ -1394,6 +1525,18 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
         j["message"] = message + "; a continuation from a leaf is a new traversal";
         return j;
     }
+    if (is_external_stop(q)) {
+        // when the walk stopped, on the attempt's clock: what a ledger needs to release the
+        // attempt's capacity (DESIGN §14 v5.1: a cancellation must be acknowledged)
+        j["message"] = std::string(external_cause(q)) + " and the walk stopped at the next "
+            "checkpoint, " + std::to_string(static_cast<uint64_t>(q.used)) + " ms after the "
+            "request was received (the bound: " + std::to_string(static_cast<uint64_t>(q.limit))
+            + " ms), at " + std::to_string(q.at_bp) + " bp on the " + to_string(q.arm)
+            + " arm: every walk up to each arm's complete_to_bp is present and the heads not "
+              "expanded end with resource_limit; no budget of the request ran out; a "
+              "continuation from a leaf is a new traversal";
+        return j;
+    }
     // A refusal injected by a test hook (WalkerHooks::deny, C++ callers only) is reported as
     // a memory stop so that it stays representable in Q and K, but no budget refused the
     // head (without one the limit reads "unlimited"), so the message must not say a budget did
@@ -1424,8 +1567,8 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
         // two comparisons. Work is the walk's, the same in every detail (finding 5 of the
         // first stage-2 review: charging delivery would make the stop depend on the
         // detail), so it also says what bounds the output.
-        message += "; the walk compares work with the budget after every charge, so used "
-                   "exceeds it by at most what was charged since the previous comparison";
+        message += "; work is compared with the budget after every charge, so used exceeds it "
+                   "by at most what was charged since the previous comparison";
         if (account && account->largest_charge) {
             message += " (the most this seed charged between two comparisons: "
                      + std::to_string(account->largest_charge) + " units)";
@@ -1433,19 +1576,22 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
         // with the budget-aware reads a row is charged with its row-diff dependency rows
         // (stage 3); a row-diff annotation without them says that they are not counted
         const char *weights = account && account->decode_charged
-            ? "(8 units per key and per dependency row, 1 per entry and coordinate; near the "
-              "budget a call reads one key)"
+            ? "(8 per key and per dependency row, 1 per entry and coordinate; near the budget a "
+              "call reads one key)"
             : account && account->row_diff_uncounted
-            ? "(8 units per key, 1 per entry and coordinate, none per dependency row; near the "
-              "budget a call reads one key)"
-            : "(8 units per key, 1 per entry and coordinate; near the budget a call reads one key)";
-        message += std::string(", one indivisible charge: a fetch call's annotation rows, decoded "
-                   "whole with their coordinates ") + weights + ", a node's label-state scan, or "
-                   "the roots' rows of the arms (with the end of the seed phase, cut "
-                 + std::to_string(kWorkCheckInterval) + " units past the budget), charged as one so that the "
-                   "result complete to 0 bp is delivered, as wide as the index makes them; work "
-                   "bounds the walk, not its delivery: the size of the "
-                   "output (and the time to write it) is bounded by bounds.max_memory_mb";
+            ? "(8 per key, 1 per entry and coordinate, none per dependency row; near the budget a "
+              "call reads one key)"
+            : "(8 per key, 1 per entry and coordinate; near the budget a call reads one key)";
+        // W is the threshold at which a seed phase is failed, not a ceiling on how far it ran
+        // past the budget (review of stage 3, answer 3: "cut W units past the budget" read as
+        // an exact overshoot)
+        message += std::string(", one indivisible charge: a fetch call's rows, decoded whole with "
+                   "their coordinates ") + weights + ", a label-state scan, or the roots' rows "
+                   "with the end of the seed phase (one charge, so that the result complete to 0 "
+                   "bp is delivered, as wide as the index makes them; the seed phase fails at a "
+                   "comparison finding it at least " + std::to_string(kWorkCheckInterval)
+                 + " units over budget); work bounds the walk, not its delivery: the output's "
+                   "size (and the time to write it) is bounded by bounds.max_memory_mb";
     }
     message += "; a continuation from a leaf is a new traversal";
     j["message"] = message;
@@ -1456,27 +1602,29 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
 // seed's too — because something is always held beyond the admitted account. With the
 // budget-aware reads (stage 3, account.decode_charged) the annotation reads are charged
 // before they are held, and the statement names only what is still uncharged; otherwise
-// stage 2's statement, word for word.
+// stage 2's statement. Both name a failed result's echo of the request's seed_id, which only
+// the request bounds (failed_soft prices it; review of the stage-2 recheck, design answer 5).
 static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &account) {
     return limitation("memory_bound_soft", "bounds.max_memory_mb",
                       uint_json(st.max_memory_bytes >> 20),
                       uint_json((account.soft_overshoot + (1 << 20) - 1) >> 20),
                       account.decode_charged
                       ? "the memory budget is enforced on the walker's modelled state, this "
-                        "response's output and the annotation reads (row-diff dependency rows and "
+                        "response's output and the annotation reads (dependency rows and "
                         "coordinate tuples are charged before they are held; a read that does not "
-                        "fit is refused whole); what is held beyond the admitted account can "
-                        "exceed the budget by it: a level's keys and fetched rows until its heads "
-                        "are processed, the seed phase's intersection and hits, a failed seed's "
-                        "depth-0 dictionary (observed: the largest excess seen, MiB, rounded up) "
-                        "and, not observed, an index-wide header lookup and the label "
-                        "dictionary's first table and its growth copy (about 1.5 KB)"
+                        "fit is refused whole); held beyond the admitted account, so able to "
+                        "exceed the budget: a level's keys and fetched rows until its heads are "
+                        "processed, the seed phase's intersection and hits, a failed seed's "
+                        "depth-0 dictionary and a failed result's echo of seed_id (observed: the "
+                        "largest excess seen, MiB, rounded up), and, not observed, an index-wide "
+                        "header lookup and the label dictionary's first table and growth copy "
+                        "(about 1.5 KB)"
                       : "the memory budget is enforced on the walker's modelled state and on "
                         "this response's output, admitted per head; the annotation rows the "
                         "seed phase and each level decode (with an annotate dictionary's "
-                        "growth and a cache beyond its allotment) are held before they can be "
-                        "charged, so the peak can exceed the budget by them (observed: the "
-                        "excess seen, MiB, rounded up)");
+                        "growth and a cache beyond its allotment), and a failed result's echo of "
+                        "seed_id, are held before they can be charged, so the peak can exceed the "
+                        "budget by them (observed: the excess seen, MiB, rounded up)");
 }
 
 Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const std::string &detail, bool timing) {
@@ -1750,7 +1898,14 @@ static IndexIdentity identity_or_default(const IndexIdentity *given, const Label
 Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &release,
                                  const IndexIdentity *identity) {
     Json::Value c;
+    // the REQUEST schema this server accepts (strategy.schema_version): not a feature level
     c["schema_version"] = 1;
+    // What the server offers beyond the base contract, monotonic: a client states a feature as
+    // "feature_level >= n" (fields are only ever added; SPEC §10.3 lists each level). 2: attempts
+    // (attempt_id/budget_id/locus_id, usage, POST /traverse/cancel, GET /traverse/attempt/{id},
+    // the enforced attempt bound) and the stop when the client is gone. In the probe and in every
+    // response, so a multi-graph host, whose probe has no index, states it too.
+    c["feature_level"] = 2;
     c["k"] = uint_json(oracle.get_k());
     c["regime"] = to_string(oracle.regime());
     c["alphabet"] = oracle.graph().alphabet();
@@ -2970,11 +3125,13 @@ class GraphletWriter {
         }
         // ---- per segment: G P* E* T? C?
         for (const Segment &s : arm.segments) {
+            delivery_tick();
             write_segment(arm, s, ix);
         }
         // ---- R: the runs, in ArmResult::runs order (run ids keep their meaning)
         std::vector<double> needed;
         for (size_t i = 0; i < arm.runs.size(); ++i) {
+            delivery_tick();
             write_run(arm.runs[i], ix, &needed);
         }
         for (const auto &[key, ev] : ix.label_ends) {
@@ -3390,6 +3547,79 @@ uint64_t json_escaped_size(std::string_view s) {
     return n;
 }
 
+// the decimal exponent of x > 0, finite: x = d.ddd x 10^E (exact, from the shortest digits)
+static int decimal_exponent(double x) {
+    char buf[64];
+    auto res = std::to_chars(buf, buf + sizeof(buf), x, std::chars_format::scientific);
+    const std::string_view sci(buf, res.ptr - buf);
+    return static_cast<int>(std::strtol(std::string(sci.substr(sci.find('e') + 1)).c_str(),
+                                        nullptr, 10));
+}
+
+// The widest mgt::encode_float of any value in [lo, 1) (0 when lo >= 1): positional, with
+// lo's leading zeros after the point and at most 17 significant digits, "0." + zeros + 17
+static uint64_t width_from(double lo) {
+    if (!(lo > 0) || lo >= 1)
+        return 0;
+    return static_cast<uint64_t>(2 + (-decimal_exponent(lo) - 1) + 17);
+}
+
+// The widest encoding of any value in [1, hi] (0 when hi < 1): the integer digits of hi, or
+// 17 significant digits and the point; every finite double has at most 309 integer digits
+static uint64_t width_upto(double hi) {
+    if (!(hi >= 1))
+        return 0;
+    if (std::isinf(hi))
+        return 309;
+    return std::max<uint64_t>(18, decimal_exponent(hi) + 1);
+}
+
+uint64_t mgt_float_width(const Strategy &st, const LabelChangeCost &cost,
+                         double requested_time_ms, double max_time_ms) {
+    uint64_t width = kMgtFloatWidth;
+    // A result's floats are costs (E, R), losses (R, T, C) and the budget a loss-budget end
+    // needed (R), the time a time stop compared (A, Q, K) and the time knobs (Q, K). A loss is
+    // a sum of the costs of the switches taken (positive ones at least the smallest positive
+    // cost) and at most the loss budget; a needed budget is a loss plus one cost: so every
+    // such value is 0, +inf, or in [smallest positive cost, loss budget + largest cost], and
+    // the sums are rounded monotonically. Canonical MGT writes them positionally: 1e-300 is
+    // 302 characters (review of the stage-2 recheck, P1: switches of 1e-300 delivered 22 MB
+    // within an account of 16 MiB, priced at 24 characters a float).
+    std::vector<double> costs;
+    switch (cost.model()) {
+        case LabelChangeCost::FORBID:
+            break;
+        case LabelChangeCost::CONSTANT:
+            costs.push_back(cost.default_cost());
+            break;
+        case LabelChangeCost::TABLE:
+            costs.push_back(cost.default_cost());
+            for (const auto &entry : cost.table()) {
+                costs.push_back(entry.second);
+            }
+            break;
+    }
+    double smallest = kInfiniteLoss, largest = 0;
+    for (double c : costs) {
+        if (c > 0 && c != kInfiniteLoss) {
+            smallest = std::min(smallest, c);
+            largest = std::max(largest, c);
+        }
+    }
+    if (smallest != kInfiniteLoss) {
+        width = std::max(width, width_from(smallest));
+        width = std::max(width, width_upto(st.loss_budget + largest));
+    }
+    // A time stop compares the elapsed time, at least the budget, with it; an elapsed time
+    // is measured in clock ticks (1 ns: at least 0.000001 ms, so at most 24 characters below
+    // 1 ms) and below 10^17 ms; a budget of +inf is written "inf"
+    for (double t : { st.time_budget_ms, requested_time_ms, max_time_ms }) {
+        if (t > 0 && !std::isinf(t))
+            width = std::max({ width, width_from(t), width_upto(t) });
+    }
+    return width;
+}
+
 /**
  * What one object costs this response to deliver in |detail| (bytes, upper bounds checked
  * against the serialisers by Graphlet.DeliveryCostsBoundTheOutput, adversarial names
@@ -3422,7 +3652,8 @@ uint64_t json_escaped_size(std::string_view s) {
  * 4b + 3, a name p + 3E with p its percent-escaped length; plus the writer's per-arm index
  * (per segment, run and label end). Record fields are bounded at their widest: ids, counts
  * and positions below 10^10 (10 digits; a budget of at most 1 TiB charges more than 110 B
- * per object, so no count reaches 10^10), floats at 24 characters.
+ * per object, so no count reaches 10^10), floats at |float_width| characters (24 unless the
+ * request's costs, loss budget or time budget can be written wider: mgt_float_width).
  *
  * The fixed part holds zlib's deflate state (256 KiB), the envelope (the seed object, its
  * outcome, annotation, timing and resource_stop, both arms' certificates, counters and
@@ -3433,8 +3664,10 @@ uint64_t json_escaped_size(std::string_view s) {
  * greedy_losses), each with an effect of at most 640 bytes. A path chain costs only where
  * JSON spells it (tree, full).
  */
-DeliveryCosts delivery_costs(const std::string &detail, bool sequences) {
+DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t float_width) {
     DeliveryCosts d;
+    // the characters every float can take beyond the 24 the record bounds below assume
+    const uint64_t wide = float_width > kMgtFloatWidth ? float_width - kMgtFloatWidth : 0;
     constexpr uint64_t kTextCopies = 3;
     constexpr uint64_t kMember = 96 + 48 + kTextCopies * 80;     // 384
     constexpr uint64_t kElement = 96 + kTextCopies * 48;         // 240
@@ -3474,8 +3707,11 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences) {
                                      + kMessage + kLongString + kTextCopies * (kMessage + 8);
         constexpr uint64_t kRecords = 4 * 1024 + kMessage + 2 * 1024
                                     + kLimitations * (240 + kEffect);
+        // the floats of the fixed records: Q's four amounts, each A's cap trigger, each K's
+        // limit and observed value
+        const uint64_t fixed_floats = 4 + 2 + 2 * kLimitations;
         d.fixed = kDeflate + kEnvelope + kLimitations * kLimitationJson
-                + kCopies * kRecords + 16 * kLine;
+                + kCopies * (kRecords + fixed_floats * wide) + 16 * kLine;
         // L <c|h> <column> <seq_id> <prefix_len> <suffix>: 38 B without the name
         d.label = record(40);
         // G: parents (the first), from_bp, length_bp, the set codes and entry_total, split,
@@ -3485,14 +3721,16 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences) {
         d.merge_parent = kCopies * 13;     // ",<id>" and "|" with its list
         d.base = sequences ? kCopies : 0;
         d.continuation_base = kCopies;
-        // R: seven ids and positions, the end code, from:cost, branches, loss, needed: 172 B;
-        // its entry in the writer's index of anchored runs
-        d.run = record(172) + 8;
-        // E: at most 64 B of fields; a label end's node in the writer's index instead
-        d.event = record(64) + 96;
+        // R: seven ids and positions, the end code, from:cost, branches, loss, needed: 172 B
+        // with three floats; its entry in the writer's index of anchored runs
+        d.run = record(172 + 3 * wide) + 8;
+        // E: at most 64 B of fields (a switch's cost one float); a label end's node in the
+        // writer's index instead
+        d.event = record(64 + wide) + 96;
         d.event_label = kCopies * 11;
-        d.leaf = record(32) + record(56);  // T, and C without its labels and bases
-        d.leaf_label = kCopies * 70;       // label:loss:branches:route_bp, a label in C
+        // T, and C without its labels and bases (its loss_used one float)
+        d.leaf = record(32) + record(56 + wide);
+        d.leaf_label = kCopies * (70 + wide);   // label:loss:branches:route_bp, a label in C
         d.split_branch = kCopies;          // its first base
         d.branch_event = record(60);
         d.branch_event_entry = kCopies * 12;
@@ -3629,6 +3867,16 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
     (*rj)["outcome"] = outcome_of(*rj, false);
 }
 
+// What a result failed or refused without an admitted result holds until the response is
+// written: the fixed part of a delivered result (an upper bound of this shorter one) and its
+// echo of seed_id in every copy the serialisers hold (failed_soft's price; also the usage's
+// final_bytes of a failed or never started seed)
+static uint64_t failed_result_bytes(const Strategy &st, const Seed &seed) {
+    const DeliveryCosts &d = st.delivery;
+    return d.fixed + seed.seed_id.size()
+        + (d.name ? d.name(seed.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
+}
+
 // memory_bound_soft's observed excess (bytes) for a seed failed or refused without an
 // admitted result. Such a result is not admitted, and it echoes the request's seed_id,
 // which only the request's size bounds: a seed_id that the depth-0 admission refused still
@@ -3641,9 +3889,7 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
 static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t observed) {
     if (!st.max_memory_bytes)
         return observed;
-    const DeliveryCosts &d = st.delivery;
-    const uint64_t held = d.fixed + seed.seed_id.size()
-                        + (d.name ? d.name(seed.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
+    const uint64_t held = failed_result_bytes(st, seed);
     return std::max(observed, held > st.max_memory_bytes ? held - st.max_memory_bytes : 0);
 }
 
@@ -3889,12 +4135,11 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
         // row needed — its standalone demand beside what was held — or, where its read alone was
         // refused, the least it was seen to need (review of stage 3, F7: the budget's MiB plus
         // one told an agent to raise the budget to a value that failed again)
-        constexpr double kMiB = 1 << 20;
         const bool root = q.where == ResourceStop::ROOT;
         lims.append(limitation("walk_domain", "bounds.max_memory_mb",
                                st.max_memory_bytes ? uint_json(st.max_memory_bytes >> 20)
                                                    : Json::Value("unlimited"),
-                               uint_json(static_cast<uint64_t>(std::ceil(q.demand / kMiB))),
+                               uint_json(knob_mib(q)),
                                q.injected
                                ? "an injected refusal of an annotation read (a test hook, not the "
                                  "budget) failed the seed before any traversal; no request knob "
@@ -3908,7 +4153,13 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
                                  + " with their row-diff dependency rows, so no traversal was made "
                                    "(observed: what admitting the refused row needed beside what "
                                    "was held, MiB rounded up"
-                                 + (q.lower_bound ? ", at least: its read alone was refused" : "")
+                                 + (q.allotted ? " to the smallest budget that admits it with the "
+                                                 "caches' allotments, which grow with the budget"
+                                               : "")
+                                 + (q.lower_bound ? ", at least: its read alone was refused; "
+                                                    "raising the knob to it may still fail: unread "
+                                                    "roots, labels or later state may need more"
+                                                  : "")
                                  + "); raise the knob or start from a more selective seed"
                                  + (root && q.label_bytes
                                          && q.demand - q.used
@@ -3917,19 +4168,34 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
                                        "shrinks the other root's state it competes with"
                                      : "")));
     } else if (q.resource == ResourceStop::MEMORY) {
-        constexpr double kMiB = 1 << 20;
         lims.append(limitation("walk_domain", "bounds.max_memory_mb",
                                uint_json(st.max_memory_bytes >> 20),
-                               uint_json(static_cast<uint64_t>(std::ceil(q.demand / kMiB))),
+                               uint_json(knob_mib(q)),
                                std::string("the memory budget does not hold the seed's depth-0 state (its "
                                "label dictionary and both arms' roots, with what ending and "
                                "delivering them costs in the requested detail), so no traversal "
                                "was made (observed: the MiB it needs, rounded up")
+                               + (q.allotted ? " to the smallest budget that holds it with the "
+                                               "caches' allotments, which grow with the budget"
+                                             : "")
                                + (q.lower_bound ? ", at least: a root's row or labels were not "
-                                                  "built once the budget was reached" : "")
+                                                  "built once the budget was reached; raising the "
+                                                  "knob to it may still fail: unread roots, labels "
+                                                  "or later state may need more" : "")
                                + "); raise the knob, "
                                "use detail graphlet, or start from fewer labels (fewer permitted; "
                                "in annotate mode a lower labels.max_labels_per_node)"));
+    } else if (is_external_stop(q)) {
+        // stopped from outside in its seed phase: no result exists to deliver, and no budget
+        // of the request is to blame (the knob names the attempt)
+        lims.append(limitation("walk_domain", "attempt_id",
+                               uint_json(static_cast<uint64_t>(q.limit)),
+                               uint_json(static_cast<uint64_t>(q.used)),
+                               std::string(external_cause(q)) + " while the seed was read "
+                               "(validated against its labels, or its permitted set derived), so "
+                               "no traversal was made (limit: the attempt's bound, observed: its "
+                               "elapsed time, ms); no budget of the request ran out: a new attempt "
+                               "can retry the seed"));
     } else {
         lims.append(limitation("walk_domain", "bounds.max_work_units", uint_json(st.max_work_units),
                                uint_json(static_cast<uint64_t>(q.used)),
@@ -3951,12 +4217,104 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
     return rj;
 }
 
+// the token a resource takes in resource_stop.resource (and the usage's stopped_by)
+static const char* resource_name(ResourceStop::Resource resource) {
+    switch (resource) {
+        case ResourceStop::MEMORY: return "memory";
+        case ResourceStop::WORK: return "work";
+        case ResourceStop::TIME: return "time";
+        case ResourceStop::CANCELLED: return "cancelled";
+        case ResourceStop::ATTEMPT_DEADLINE: return "attempt_deadline";
+    }
+    return "";
+}
+
+// A seed the attempt never started (DESIGN-traverse-graphlet.md §14 v5.1): the attempt was
+// cancelled, or reached the duration bound the server enforces for it, before this seed's walk
+// began. Failed per seed in the shape of a failed derivation (no arms, an error,
+// outcome.walks: failed) with a seed-level walk_domain naming the attempt and the
+// resource_stop, phase not_started, whose action is a new attempt: nothing of the seed was
+// read, and no budget of the request ran out. Only free tokens take new values (MGT v1).
+static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop, double bound_ms,
+                                            double elapsed_ms, const Strategy &st,
+                                            bool decode_charged) {
+    ResourceStop q;
+    q.resource = stop == ExternalStop::CANCELLED ? ResourceStop::CANCELLED
+                                                 : ResourceStop::ATTEMPT_DEADLINE;
+    q.phase = "not_started";
+    q.limit = std::ceil(bound_ms);
+    q.used = std::ceil(elapsed_ms);
+    q.demand = q.used;
+    const uint64_t limit = static_cast<uint64_t>(q.limit);
+    const uint64_t used = static_cast<uint64_t>(q.used);
+    Json::Value rj;
+    Json::Value sj;
+    sj["seed_id"] = seed.seed_id;
+    sj["length_bp"] = uint_json(seed.sequence.size());
+    sj["labels_from_seed"] = seed.labels.empty();
+    rj["seed"] = std::move(sj);
+    rj["error"] = std::string("not started: ") + external_cause(q) + " before this seed began, "
+                + std::to_string(used) + " ms after the request was received; no budget of the "
+                  "request ran out: a new attempt can traverse it";
+    Json::Value lims(Json::arrayValue);
+    lims.append(limitation("walk_domain", "attempt_id", uint_json(limit), uint_json(used),
+                           std::string(external_cause(q)) + " before this seed's walk began, so "
+                           "no traversal was made (limit: the attempt's bound, observed: its "
+                           "elapsed time, ms); no budget of the request ran out: a new attempt "
+                           "can traverse the seed"));
+    if (st.max_memory_bytes) {
+        // every response under a memory budget states it (§7.0): this result echoes seed_id
+        ResourceAccount account;
+        account.memory_limit = st.max_memory_bytes;
+        account.soft_overshoot = failed_soft(st, seed, 0);
+        account.decode_charged = decode_charged;
+        lims.append(memory_bound_soft(st, account));
+    }
+    rj["limitations"] = std::move(lims);
+    rj["outcome"] = outcome_of(rj, true);
+    Json::Value j;
+    j["scope"] = "attempt";
+    j["resource"] = q.resource == ResourceStop::CANCELLED ? "cancelled" : "attempt_deadline";
+    j["phase"] = q.phase;
+    j["requested"] = uint_json(limit);
+    j["effective"] = uint_json(limit);
+    j["used"] = uint_json(used);
+    j["remaining"] = uint_json(limit > used ? limit - used : 0);
+    Json::Value actions(Json::arrayValue);
+    actions.append("retry_attempt");
+    j["actions"] = std::move(actions);
+    j["message"] = std::string(external_cause(q)) + " before this seed's walk began, "
+                 + std::to_string(used) + " ms after the request was received (the bound: "
+                 + std::to_string(limit) + " ms): the seed is failed, nothing of it was read; no "
+                   "budget of the request ran out: a new attempt can traverse it";
+    rj["resource_stop"] = std::move(j);
+    return rj;
+}
+
+// A request with attempt_id outside the server (the CLI, a test): its usage is stated as the
+// server states it, with the bound computed but not enforced (no lease to protect)
+static std::unique_ptr<Attempt> local_attempt(const AttemptIds &ids) {
+    AttemptSettings settings;
+    settings.hard_cap_ms = 0;
+    static const std::string instance = AttemptRegistry(settings).server_instance();
+    auto attempt = std::make_unique<Attempt>(0, std::chrono::system_clock::now(), settings,
+                                             instance, false);
+    attempt->set_ids(ids);
+    return attempt;
+}
+
 Json::Value process_traverse_request(const Json::Value &json,
                                      const graph::AnnotatedDBG &anno_graph,
                                      const std::string &release,
                                      const TraverseLimits &limits,
-                                     const IndexIdentity *identity) {
+                                     const IndexIdentity *identity,
+                                     Attempt *attempt) {
     TraverseRequest req = parse_traverse_request(json);
+    std::unique_ptr<Attempt> local;
+    if (!attempt && !req.attempt_id.empty()) {
+        local = local_attempt({ req.attempt_id, req.budget_id, req.locus_id });
+        attempt = local.get();
+    }
     if (!req.release.empty() && !release.empty() && req.release != release)
         throw InvalidRequest("request.release '" + req.release + "' does not match the loaded index release '"
                              + release + "'");
@@ -3987,6 +4345,8 @@ Json::Value process_traverse_request(const Json::Value &json,
     };
     const bool derives = std::any_of(req.seeds.begin(), req.seeds.end(),
                                      [](const Seed &s) { return s.labels.empty(); });
+    // the time budget as requested: a clamp states it beside the effective one (K, Q)
+    const double requested_time_ms = req.strategy.time_budget_ms;
     if (limits.max_time_ms > 0 && req.strategy.time_budget_ms > limits.max_time_ms) {
         clamp("bounds.time_budget_ms", req.strategy.time_budget_ms, limits.max_time_ms);
         req.strategy.time_budget_ms = limits.max_time_ms;
@@ -4002,9 +4362,17 @@ Json::Value process_traverse_request(const Json::Value &json,
               uint_json(limits.max_seed_labels));
         req.strategy.max_seed_labels = limits.max_seed_labels;
     }
+    // the attempt's duration bound: n_seeds x the effective per-seed time budget (after the
+    // server's clamp) plus the server's allowance, under the HTTP server's cap
+    if (attempt) {
+        attempt->set_bound(req.seeds.size(), req.strategy.time_budget_ms,
+                           req.strategy.max_memory_bytes);
+    }
 
-    // what the requested output costs per object, for the memory budget (§14)
+    // what the requested output costs per object, for the memory budget (§14); re-priced per
+    // seed where its floats can be wider (mgt_float_width)
     req.strategy.delivery = delivery_costs(req.detail, req.strategy.sequences);
+    uint64_t priced_width = kMgtFloatWidth;
 
     LabelOracle oracle(anno_graph);
     // checked here, where k is known: a continuation shorter than k is not a valid seed,
@@ -4057,13 +4425,105 @@ Json::Value process_traverse_request(const Json::Value &json,
     // building the response (the JSON tree and the graphlet text), the part a request
     // can make slow without walking more: reported apart from the walk
     double serialize_seconds = 0;
+    // The attempt's control of the walk: its stop (a cancel, its bound, a client gone) polled
+    // at the walker's checkpoints, its clock and bound for what such a stop states, and the
+    // seed's usage (the meter); the results are built under its delivery check
+    AttemptControl control;
+    if (attempt) {
+        control.poll = [attempt]() { return attempt->poll(); };
+        control.elapsed_ms = [attempt]() { return attempt->elapsed_ms(); };
+        control.bound_ms = attempt->bound_ms();
+    }
+    DeliveryScope delivery(attempt);
+    // a seed never started reads its annotation as one started would have
+    const bool decode_charged = (req.strategy.max_memory_bytes || req.strategy.max_work_units)
+                              && oracle.decode_charged();
     for (size_t i = 0; i < req.seeds.size(); ++i) {
         const Seed &seed = req.seeds[i];
+        if (attempt) {
+            // between seeds: a stop that came after the previous seed's walk (or while it was
+            // built) leaves the rest of the seeds unstarted, each failed with the stop
+            const ExternalStop stop = attempt->poll(/* force */ true);
+            if (stop == ExternalStop::CLIENT_GONE) {
+                throw AttemptAborted("the client closed its connection: the request was "
+                                     "abandoned before seed " + std::to_string(i) + " of "
+                                     + std::to_string(req.seeds.size()));
+            }
+            if (stop != ExternalStop::NONE) {
+                for (size_t j = i; j < req.seeds.size(); ++j) {
+                    results.append(not_started_seed_to_json(req.seeds[j], stop, attempt->bound_ms(),
+                                                            attempt->elapsed_ms(), req.strategy,
+                                                            decode_charged));
+                    // its usage is what its result states and holds (review of the stage-4
+                    // backend, F1: a never started seed stated a soft excess its usage did not)
+                    SeedUsage usage;
+                    usage.meter.memory_final = failed_result_bytes(req.strategy, req.seeds[j]);
+                    usage.meter.soft_excess = failed_soft(req.strategy, req.seeds[j], 0);
+                    attempt->seed_not_started(j, usage);
+                }
+                break;
+            }
+            attempt->seed_started(i);
+        }
+        Timer seed_timer;
+        AttemptMeter meter;
+        control.meter = &meter;
+        // What the seed's walk consumed and what stopped it, recorded when its walk is over
+        // (before its result is built, which the attempt's bound can still interrupt). A
+        // failed or refused seed's result is not the walk's: its usage states what that result
+        // holds and what its memory_bound_soft states, the echo of seed_id included (review of
+        // the stage-4 backend, F1: 52 bytes of soft excess beside a stated 20 MiB). |refused|:
+        // the demand a memory budget refused, when one stopped or failed the seed
+        auto walked = [&](const std::string &outcome, const std::string &stopped_by,
+                          bool failed_result = false,
+                          std::optional<uint64_t> refused = std::nullopt) {
+            if (!attempt)
+                return;
+            SeedUsage usage;
+            usage.outcome = outcome;
+            usage.stopped_by = stopped_by;
+            usage.meter = meter;
+            if (failed_result) {
+                usage.meter.memory_final = failed_result_bytes(req.strategy, seed);
+                usage.meter.soft_excess = failed_soft(req.strategy, seed, meter.soft_excess);
+            }
+            usage.refused_bytes = refused;
+            usage.elapsed_ms = seed_timer.elapsed() * 1000;
+            attempt->seed_walked(i, usage);
+        };
+        auto refused_of = [](const ResourceStop &q) -> std::optional<uint64_t> {
+            if (q.resource != ResourceStop::MEMORY || q.injected)
+                return std::nullopt;
+            return static_cast<uint64_t>(std::ceil(q.demand));
+        };
+        auto delivered = [&](const Json::Value &rj) {
+            if (attempt)
+                attempt->seed_delivered(i, rj["outcome"]["walks"].asString(), seed_timer.elapsed() * 1000);
+        };
         std::vector<std::string> dict = seed.labels;
         dict.insert(dict.end(), req.strategy.extra.begin(), req.strategy.extra.end());
         LabelChangeCost cost = make_cost(req.cost, dict);
+        // the output's floats are priced at the widest the seed's costs and the time budgets
+        // can be written (24 characters for every usual request, as before)
+        const uint64_t float_width = mgt_float_width(req.strategy, cost, requested_time_ms,
+                                                     limits.max_time_ms);
+        if (float_width != priced_width) {
+            req.strategy.delivery = delivery_costs(req.detail, req.strategy.sequences, float_width);
+            priced_width = float_width;
+        }
         try {
-            SeedResult r = traverse_seed(oracle, seed, req.strategy, cost, release);
+            SeedResult r = traverse_seed(oracle, seed, req.strategy, cost, release, nullptr,
+                                         attempt ? &control : nullptr);
+            if (attempt) {
+                // provisional until the result is built (outcome_of reads its limitations)
+                bool partial = false;
+                for (const ArmResult &arm : r.arms) {
+                    partial |= arm.requested && arm.status != ArmResult::COMPLETE;
+                }
+                walked(partial || r.resource_stop ? "partial" : "complete",
+                       r.resource_stop ? resource_name(r.resource_stop->resource) : "", false,
+                       r.resource_stop ? refused_of(*r.resource_stop) : std::nullopt);
+            }
             r.annotation_counters = per_seed(r.annotation_counters);
             // Names come from FASTA headers and file names, which need not be UTF-8. No
             // output carries such a name verbatim, and a replaced one (U+FFFD) can be the
@@ -4081,6 +4541,10 @@ Json::Value process_traverse_request(const Json::Value &json,
                     refused["limitations"].append(memory_bound_soft(req.strategy, account));
                     refused["outcome"] = outcome_of(refused, true);
                 }
+                // its result is the refusal, not the walk
+                walked("failed", r.resource_stop ? resource_name(r.resource_stop->resource) : "",
+                       true, r.resource_stop ? refused_of(*r.resource_stop) : std::nullopt);
+                delivered(refused);
                 results.append(std::move(refused));
                 continue;
             }
@@ -4102,6 +4566,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             serialize_seconds += seconds;
             if (req.timing)
                 rj["timing"]["serialize_ms"] = seconds * 1000;
+            delivered(rj);
             results.append(std::move(rj));
         } catch (const SeedDerivationError &e) {
             // The permitted set could not be derived from THIS seed (nothing carries it
@@ -4109,20 +4574,38 @@ Json::Value process_traverse_request(const Json::Value &json,
             // labels, so it had no lever on that and nothing to fix in the request:
             // report it against the seed and keep the other seeds' traversals, instead of
             // discarding a 100-seed batch because seed 57 spans a recombination point.
+            walked("failed", e.cause() == SeedDerivationError::TIME_BUDGET ? "time" : "", true);
             results.append(failed_seed_to_json(seed, e, req.strategy, clamped,
                                                oracle.decode_charged()));
+            delivered(results[results.size() - 1]);
             per_seed(oracle.counters());   // do not bill this seed's reads to the next
         } catch (const SeedBudgetError &e) {
             // a request budget does not hold this seed (§14): failed per seed, like a
-            // derivation, since the budget is per seed and the other seeds may fit
+            // derivation, since the budget is per seed and the other seeds may fit (or the
+            // attempt stopped it in its seed phase)
+            walked("failed", resource_name(e.stop().resource), true, refused_of(e.stop()));
             results.append(budget_failed_seed_to_json(seed, e, req.strategy));
+            delivered(results[results.size() - 1]);
             per_seed(oracle.counters());
+        } catch (const AttemptAborted &) {
+            // the client is gone: nothing is written, but what the seed consumed until it was
+            // abandoned is the attempt's (GET /traverse/attempt states it)
+            walked("abandoned", "client_gone");
+            throw;
         } catch (const std::invalid_argument &e) {
+            // the whole request fails (400); what the seed consumed is still the attempt's
+            walked("failed", "");
             throw InvalidRequest(std::string("seed '") + (seed.seed_id.empty() ? seed.sequence.substr(0, 32) : seed.seed_id)
                                  + "': " + e.what());
         }
     }
     out["results"] = std::move(results);
+    if (attempt) {
+        attempt->walk_ended();
+        // every response to a ledger-managed request states what it consumed (DESIGN §14.1)
+        if (attempt->managed())
+            out["usage"] = attempt->usage_json(attempt->walk_reason());
+    }
     if (req.timing) {
         Json::Value t;
         t["elapsed_ms"] = timer.elapsed() * 1000;
@@ -4136,8 +4619,17 @@ Json::Value process_resolve_request(const Json::Value &json,
                                     const graph::AnnotatedDBG &anno_graph,
                                     const std::string &release,
                                     uint64_t max_query_bp,
-                                    const IndexIdentity *identity) {
+                                    const IndexIdentity *identity,
+                                    const std::function<bool()> &client_gone) {
     ResolveRequest req = parse_resolve_request(json);
+    // a client that is gone is not answered: the request is abandoned at the next phase
+    auto abandon = []() {
+        throw AttemptAborted("the client closed its connection: the resolve request was abandoned");
+    };
+    if (client_gone) {
+        req.options.stop = client_gone;
+        req.options.abandon = abandon;
+    }
     if (max_query_bp && req.sequence.size() > max_query_bp)
         throw InvalidRequest("request.sequence: longer than the server limit of "
                              + std::to_string(max_query_bp) + " bp");
@@ -4150,6 +4642,8 @@ Json::Value process_resolve_request(const Json::Value &json,
     std::optional<SeedSelection> selection;
     try {
         profile = resolve_support(oracle, req.sequence, req.options);
+        if (client_gone && client_gone())
+            abandon();
         if (req.select) {
             req.policy.release_id = release;
             selection = select_seeds(profile, req.sequence, req.policy, oracle.regime() != Regime::BASIC);
@@ -4204,15 +4698,27 @@ int traverse_graph(Config *config) {
             logger->error("Invalid JSON in {}: {}", file, errs);
             return 1;
         }
+        // A request with attempt_id states its usage on an error after it was read too, as the
+        // server's 400 does (review of the stage-4 backend, F8); a malformed id is refused
+        // without (nothing to reconcile)
+        std::unique_ptr<Attempt> attempt;
         try {
+            if (!config->traverse_resolve) {
+                const AttemptIds ids = attempt_ids(json);
+                if (!ids.attempt_id.empty())
+                    attempt = local_attempt(ids);
+            }
             Json::Value out = config->traverse_resolve
                 ? process_resolve_request(json, *anno_graph, config->index_release, 0, &identity)
-                : process_traverse_request(json, *anno_graph, config->index_release, {}, &identity);
+                : process_traverse_request(json, *anno_graph, config->index_release, {}, &identity,
+                                           attempt.get());
             std::cout << Json::writeString(builder, out) << std::endl;
         } catch (const InvalidRequest &e) {
             logger->error("Invalid request in {}: {}", file, e.what());
             Json::Value err;
             err["error"] = e.what();
+            if (attempt)
+                err["usage"] = attempt->usage_json("error");
             std::cout << Json::writeString(builder, err) << std::endl;
             status = 1;
         }

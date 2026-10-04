@@ -375,6 +375,12 @@ Config::Config(int argc, char *argv[]) {
             traverse_max_seed_labels = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
             resolve_max_query_bp = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-attempt-allowance-ms")) {
+            traverse_attempt_allowance_ms = atof(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-attempt-retention-s")) {
+            traverse_attempt_retention_s = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-attempt-retention")) {
+            traverse_attempt_retention = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
@@ -1512,6 +1518,9 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \t\tcap on the length of a /traverse seed, 0 = unlimited [100000]\n");
             fprintf(stderr, "\t   --traverse-max-seed-labels [INT] \tcap on labels DERIVED from a seed, 0 = unlimited [10000]\n");
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \t\tcap on the /resolve query length, 0 = unlimited [0]\n");
+            fprintf(stderr, "\t   --traverse-attempt-allowance-ms [FLOAT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
+            fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long [3600]\n");
+            fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tand at most this many (oldest dropped first) [10000]\n");
         } break;
     }
 

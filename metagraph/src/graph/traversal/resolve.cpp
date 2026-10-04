@@ -117,7 +117,13 @@ SupportProfile resolve_support(LabelOracle &oracle,
     if (query.size() < profile.k)
         throw std::invalid_argument("Query shorter than k");
 
+    // a phase boundary: the caller can abandon the request here (ResolveOptions::stop)
+    auto checkpoint = [&]() {
+        if (options.stop && options.stop() && options.abandon)
+            options.abandon();
+    };
     profile.num_kmers = query.size() - profile.k + 1;
+    checkpoint();
     std::vector<node_index> keys = oracle.keys_of_sequence(query);
     assert(keys.size() == profile.num_kmers);
 
@@ -140,6 +146,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
     } else {
         if (options.discover_kind == LabelKind::HEADER && !oracle.coord_to_header())
             throw std::invalid_argument("Header discovery requires a CoordToHeader index");
+        checkpoint();
 
         std::vector<Row> rows;
         rows.reserve(present_keys.size());
@@ -167,6 +174,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 }
             }
         }
+        checkpoint();
         std::vector<std::pair<std::pair<Column, uint64_t>, uint64_t>> ranked(counts.begin(), counts.end());
         // more k-mers first; ties by column id, then seq_id
         std::stable_sort(ranked.begin(), ranked.end(),
@@ -207,7 +215,9 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // ---- support per k-mer
     const bool with_coords = options.support == Support::TRACE;
     LabelQuery query_labels(oracle, refs, with_coords);
+    checkpoint();
     auto hits = query_labels.fetch(keys);
+    checkpoint();
 
     // Presence (no coordinates) is scattered in one pass over the k-mers: iterating per
     // label and scanning each k-mer's hit list would cost O(labels x k-mers x hits),

@@ -120,6 +120,12 @@ class Config {
     uint64_t traverse_max_seed_bp = 100'000;
     size_t traverse_max_seed_labels = 10'000;
     uint64_t resolve_max_query_bp = 0;
+    // Ledger-managed /traverse attempts (requests with attempt_id, traverse_attempts.hpp):
+    // the allowance added to n_seeds x the per-seed time budget in the duration bound the
+    // server enforces, and how long (and how many) finished attempts stay queryable
+    double traverse_attempt_allowance_ms = 10'000;
+    uint64_t traverse_attempt_retention_s = 3600;
+    size_t traverse_attempt_retention = 10'000;
 
     unsigned int max_path_length = 100;
     unsigned int smoothing_window = 1;  // no smoothing by default

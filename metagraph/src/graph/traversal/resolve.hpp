@@ -1,6 +1,7 @@
 #ifndef __TRAVERSAL_RESOLVE_HPP__
 #define __TRAVERSAL_RESOLVE_HPP__
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,6 +35,12 @@ struct ResolveOptions {
 
     Support support = Support::KMER;
     uint64_t min_block_kmers = 1;
+
+    // Polled between the phases of resolve_support() (before and after the discovery read,
+    // before and after the support fetch): true abandons the request, throwing |abandon|'s
+    // exception — the server's check that the client is still connected. Not a request field.
+    std::function<bool()> stop;
+    std::function<void()> abandon;
 };
 
 struct LabelProfile {

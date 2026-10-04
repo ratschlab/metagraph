@@ -725,7 +725,11 @@ struct DroppedLabel {
  * first stop of the seed; the stop applies to the whole locus (both arms).
  */
 struct ResourceStop {
-    enum Resource { MEMORY, WORK, TIME };
+    // CANCELLED, ATTEMPT_DEADLINE: no budget of the request ran out — the walk was stopped from
+    // outside (AttemptControl): the attempt was cancelled, or it reached the duration bound the
+    // server enforces for it (DESIGN-traverse-graphlet.md §14 v5.1). Their amounts are the
+    // attempt's: |limit| its bound and |used| its elapsed time (whole milliseconds)
+    enum Resource { MEMORY, WORK, TIME, CANCELLED, ATTEMPT_DEADLINE };
     Resource resource = MEMORY;
     // traversal | finalisation | serialisation | annotation_decode. Finalisation and
     // serialisation are reserved at admission, so they never stop; annotation_decode: a
@@ -774,7 +778,28 @@ struct ResourceStop {
     // |demand| is the least the seed was seen to need (part of what it needs was not read
     // because the budget was already exceeded): its statements say "at least"
     bool lower_bound = false;
+    // MEMORY: the caches' allotments of the budget that |used| and |demand| include (bytes;
+    // 0 in the seed phase, which runs before they are charged). They are fractions of the
+    // budget, so a demand measured at this budget is not the budget that holds it: the
+    // statements give memory_budget_holding(demand, allotted) instead
+    uint64_t allotted = 0;
 };
+
+// The caches' allotments of a memory budget of |budget| bytes, charged in the account with the
+// depth-0 state (Walker::init_budgets): a quarter of it, at most 64 MiB, for the label cache and
+// a sixteenth, at most 64 MiB, for the lookahead
+uint64_t memory_allotments(uint64_t budget);
+
+/**
+ * The smallest bounds.max_memory_mb, in bytes (a whole number of MiB), whose admitted account
+ * holds |need| bytes measured at a budget whose caches' allotments were |allotted| bytes: the
+ * allotments grow with the budget (memory_allotments), so a budget of |need| holds less than
+ * |need| beside them and the same state fails again (review of the stage-3 fixes, P2: a depth-0
+ * failure stated "need 7 MiB" at 1 MiB, then "need 9 MiB" at 7 and "need 10 MiB" at 8 and 9;
+ * 10 held it). With |allotted| 0 (nothing allotted in the account yet: the seed phase) it is
+ * |need| rounded up to whole MiB, as before.
+ */
+uint64_t memory_budget_holding(uint64_t need, uint64_t allotted);
 
 // The request's accounts at the end of the seed (memory in modelled bytes)
 struct ResourceAccount {
@@ -947,6 +972,51 @@ struct DecodeCharge {
     uint64_t ordinal = 0;
 };
 
+/**
+ * A stop requested from outside the walk (DESIGN-traverse-graphlet.md §14 v5.1: a lease is a
+ * valid release point only because the backend stops the attempt itself): the attempt was
+ * cancelled, it reached the duration bound the server enforces for it, or its client closed
+ * the connection. The core library knows no HTTP (spec §10.1): the caller decides, the walker
+ * only asks.
+ */
+enum class ExternalStop : uint8_t { NONE = 0, CANCELLED, ATTEMPT_DEADLINE, CLIENT_GONE };
+
+// The client of the request is gone (ExternalStop::CLIENT_GONE): nothing can be delivered, so
+// the walk is abandoned where it is — no result is finalised — and the caller writes nothing.
+// Not an std::invalid_argument: it is no fault of the request.
+class AttemptAborted : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+};
+
+// What the walk of one seed consumed, written when traverse_seed() returns or throws, however
+// it ends (a result, a failed seed, an invalid request, an abandoned walk): what a ledger
+// reconciles a reservation against (DESIGN §14, "usage on every response")
+struct AttemptMeter {
+    uint64_t work_units = 0;         // ResourceAccount::work_used
+    uint64_t work_seed = 0;          // ResourceAccount::work_seed
+    uint64_t memory_peak = 0;        // the modelled account's peak (bytes)
+    uint64_t memory_final = 0;       // what the result holds when the walk ended
+    uint64_t soft_excess = 0;        // ResourceAccount::soft_overshoot (0 without a budget)
+    bool walked = false;             // the walker ran (false: the strategy was refused first)
+};
+
+/**
+ * The caller's control of a walk from outside (the server's attempt): |poll| is asked where
+ * the walk already looks at its budgets and its deadline — before every head, at least every
+ * kWorkCheckInterval charged units, at every charge of the seed phase and per k-mer of a
+ * derivation — so it must be cheap. CANCELLED and ATTEMPT_DEADLINE stop the walk like a budget
+ * (a valid partial result, censored with resource_limit; in the seed phase the seed fails);
+ * CLIENT_GONE throws AttemptAborted. |elapsed_ms| is the attempt's clock and |bound_ms| its
+ * bound: what such a stop states. |meter|, when given, receives the seed's usage.
+ */
+struct AttemptControl {
+    std::function<ExternalStop()> poll;
+    std::function<double()> elapsed_ms;
+    double bound_ms = 0;
+    AttemptMeter *meter = nullptr;
+};
+
 struct WalkerHooks {
     std::function<bool(const Admission&)> deny;
     // asked at every charge of a budget-aware annotation read (only on an index whose reads
@@ -972,13 +1042,37 @@ struct WalkerHooks {
  * labels in the given order, then strategy.extra.
  * An empty |seed.labels| derives the permitted set from the seed (see Seed::labels);
  * the derived labels then take the place of the given ones in both orders.
+ * |control|: a stop from outside the walk (AttemptControl); null: none, as before.
  */
 SeedResult traverse_seed(LabelOracle &oracle,
                          const Seed &seed,
                          const Strategy &strategy,
                          const LabelChangeCost &cost,
                          const std::string &release_id = "",
-                         const WalkerHooks *hooks = nullptr);
+                         const WalkerHooks *hooks = nullptr,
+                         const AttemptControl *control = nullptr);
+
+/**
+ * The cheapest loss at which a chain of switches from any of the labels [0, |sources|)
+ * enters each label of [0, |n|) under |cost|, for every label it enters within |budget|
+ * (+inf for the others): a multi-source shortest path over the cost model, summed the way
+ * the walk sums a lineage's loss (left to right along the chain, so a label the walk can
+ * enter within the budget is found within it). An extra label is a switch target; the walk
+ * enforces cumulative losses switch by switch, so it is accepted when SOME chain reaches it
+ * within the budget, not only one switch from a seed label (the stage-2 recheck's design
+ * answer: A -> B = 1, B -> C = 1 under a budget of 2 rejected C, which the walk enters).
+ *
+ * A constant cost reaches every label in one switch (a chain costs more), so only
+ * cost <= budget matters. A table is relaxed by Dijkstra: a popped label relaxes its
+ * explicit entries, and the default (when finite) is relaxed lazily — the labels no popped
+ * label has relaxed by default yet are kept in |pending|, and each pop gives every one of
+ * them without an explicit entry from the popped label the default from it, then drops it:
+ * pops come in ascending loss, so the first default a label receives is its cheapest. A
+ * label is skipped there only for an explicit entry, so the work is O((n + entries) log n),
+ * not O(n^2) for a pool of thousands of extra labels.
+ */
+std::vector<double> switch_reach(const LabelChangeCost &cost, size_t n, size_t sources,
+                                 double budget);
 
 // Reconstruct the flank of |path| in natural orientation from the segments.
 std::string spell_path(const ArmResult &arm, const PathResult &path);

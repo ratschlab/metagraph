@@ -867,6 +867,11 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
 void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget) {
     if (costs_.size() != cache_.size())
         clear_cache();
+    // A cache of capacity zero keeps nothing, so there is nothing to warm; the runs below
+    // are at most that capacity long and would never advance (review of stage 3, F1: a
+    // warm with max_cache_size 0 did not return)
+    if (!max_cache_size_)
+        return;
     // the misses, charged like the rest of the lookahead's read
     const uint64_t at_entry = budget.held();
     if (!budget.charge(buffer_bytes(keys.size(), sizeof(node_index))))
@@ -1055,9 +1060,7 @@ LabelRecorder::fetch(const std::vector<node_index> &keys) {
         // working set is then refetched so that the lookups below cannot throw
         if (cache_.size() + missing.size() > max_cache_size_ || cached_keys_ > max_cache_keys_
                 || cache_bytes_ > max_cache_bytes_) {
-            cache_.clear();
-            cached_keys_ = 0;
-            cache_bytes_ = 0;
+            clear_cache();
             missing = wanted;
         }
         fetch_uncached(missing);
@@ -1094,9 +1097,7 @@ void LabelRecorder::warm(const std::vector<node_index> &keys) {
     missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
     if (cache_.size() + missing.size() > max_cache_size_ || cached_keys_ > max_cache_keys_
             || cache_bytes_ > max_cache_bytes_) {
-        cache_.clear();
-        cached_keys_ = 0;
-        cache_bytes_ = 0;
+        clear_cache();
     }
     if (missing.size() >= max_cache_size_)
         return;
@@ -1339,12 +1340,8 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
                           std::vector<NodeLabels> *out, std::vector<KeyCost> *costs,
                           size_t *refused_at,
                           const std::function<uint64_t(std::string_view name)> &name_bytes) {
-    if (costs_.size() != cache_.size()) {
-        cache_.clear();
-        costs_.clear();
-        cached_keys_ = 0;
-        cache_bytes_ = 0;
-    }
+    if (costs_.size() != cache_.size())
+        clear_cache();
     const uint64_t at_entry = budget.held();
     const size_t base = out->size();
     assert(costs->size() == base);
@@ -1562,10 +1559,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         return true;
     if (cache_bytes_ + fresh > max_cache_bytes_ || cache_.size() + fresh_count > max_cache_size_
             || cached_keys_ + fresh_kept > max_cache_keys_) {
-        cache_.clear();
-        costs_.clear();
-        cached_keys_ = 0;
-        cache_bytes_ = 0;
+        clear_cache();
         if (all > max_cache_bytes_ || all_count > max_cache_size_ || all_kept > max_cache_keys_)
             return true;
     }
@@ -1587,12 +1581,11 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
 }
 
 void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budget) {
-    if (costs_.size() != cache_.size()) {
-        cache_.clear();
-        costs_.clear();
-        cached_keys_ = 0;
-        cache_bytes_ = 0;
-    }
+    if (costs_.size() != cache_.size())
+        clear_cache();
+    // as LabelQuery's: a cache of capacity zero keeps nothing, and its runs would not advance
+    if (!max_cache_size_)
+        return;
     // the misses, charged like the rest of the lookahead's read
     const uint64_t at_entry = budget.held();
     if (!budget.charge(buffer_bytes(keys.size(), sizeof(node_index))))
@@ -1626,10 +1619,7 @@ void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budg
         }
         if (cache_bytes_ + bytes > max_cache_bytes_ || cache_.size() + len > max_cache_size_
                 || cached_keys_ + kept > max_cache_keys_) {
-            cache_.clear();
-            costs_.clear();
-            cached_keys_ = 0;
-            cache_bytes_ = 0;
+            clear_cache();
         }
         if (bytes <= max_cache_bytes_ && len <= max_cache_size_ && kept <= max_cache_keys_) {
             for (size_t i = 0; i < len; ++i) {

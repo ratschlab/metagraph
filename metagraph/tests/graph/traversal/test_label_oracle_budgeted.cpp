@@ -3,7 +3,11 @@
 // nothing, every key admitted against its demand whether it is cached or not.
 #include "gtest/gtest.h"
 
+#include <chrono>
+#include <future>
+#include <memory>
 #include <random>
+#include <thread>
 
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
@@ -475,6 +479,166 @@ TEST(LabelOracleBudgeted, DecodeChargedTruthTable) {
     EXPECT_FALSE(LabelOracle(*row_disk).decode_charged());
     EXPECT_TRUE(LabelOracle(*row_disk).row_diff());
     EXPECT_FALSE(LabelOracle(*row_flat).decode_charged());
+}
+
+// Runs |body| on a thread of its own and fails if it has not returned within |seconds|: a
+// warm that never advances would otherwise hang the whole suite. On a timeout the thread is
+// left behind (it owns what it uses), and the process ends with the suite.
+template <class Body>
+void returns_within(Body body, int seconds, const std::string &what) {
+    auto done = std::make_shared<std::promise<void>>();
+    std::future<void> finished = done->get_future();
+    std::thread([done, body]() mutable {
+        body();
+        done->set_value();
+    }).detach();
+    if (finished.wait_for(std::chrono::seconds(seconds)) != std::future_status::ready)
+        ADD_FAILURE() << what << " did not return within " << seconds << " s";
+}
+
+// Review of stage 3, F1: a budgeted warm of a cache whose capacity is zero returned never
+// (its runs were at most the capacity long and did not advance); it returns at once, warms
+// nothing and leaves the budget as it was, for the query and the recorder alike
+TEST(LabelOracleBudgetedQuery, ZeroCacheWarmReturns) {
+    for (bool coordinates : { false, true }) {
+        auto fx = std::make_shared<Fixture>(coordinates);
+        returns_within([fx, coordinates]() {
+            LabelOracle oracle(*fx->anno, fx->cth.get());
+            for (const auto &[names, with_coords] : label_sets(coordinates)) {
+                LabelQuery query(oracle, refs(oracle, names), with_coords,
+                                 LabelOracle::Access::AUTO, 0);
+                std::vector<node_index> keys = oracle.keys_of_sequence(fx->seqs[0]);
+                DecodeBudget budget;
+                query.warm(keys, budget);
+                EXPECT_EQ(0u, budget.held());
+                EXPECT_EQ(0u, query.cache_bytes());
+                // and a fetch still answers
+                std::vector<LabelQuery::NodeHits> hits;
+                std::vector<KeyCost> costs;
+                hits.reserve(keys.size());
+                costs.reserve(keys.size());
+                DecodeBudget fetch_budget;
+                size_t refused = 0;
+                EXPECT_TRUE(query.fetch(keys.data(), keys.size(), fetch_budget, &hits, &costs,
+                                        &refused));
+                EXPECT_EQ(keys.size(), hits.size());
+            }
+        }, 30, "LabelQuery::warm with a cache of capacity zero");
+    }
+}
+
+TEST(LabelOracleBudgetedRecorder, ZeroCacheWarmReturns) {
+    for (bool coordinates : { false, true }) {
+        auto fx = std::make_shared<Fixture>(coordinates);
+        returns_within([fx, coordinates]() {
+            LabelOracle oracle(*fx->anno, fx->cth.get());
+            std::vector<LabelKind> kinds { LabelKind::COLUMN };
+            if (coordinates)
+                kinds.push_back(LabelKind::HEADER);
+            for (LabelKind kind : kinds) {
+                LabelRecorder recorder(oracle, kind, 64, 0);
+                std::vector<node_index> keys = oracle.keys_of_sequence(fx->seqs[0]);
+                DecodeBudget budget;
+                recorder.warm(keys, budget);
+                EXPECT_EQ(0u, budget.held());
+                EXPECT_EQ(0u, recorder.cache_bytes());
+                std::vector<LabelRecorder::NodeLabels> lists;
+                std::vector<KeyCost> costs;
+                lists.reserve(keys.size());
+                costs.reserve(keys.size());
+                DecodeBudget fetch_budget;
+                size_t refused = 0;
+                EXPECT_TRUE(recorder.fetch(keys.data(), keys.size(), fetch_budget, &lists, &costs,
+                                           &refused, [](std::string_view n) { return 100 + n.size(); }));
+                EXPECT_EQ(keys.size(), lists.size());
+            }
+        }, 30, "LabelRecorder::warm with a cache of capacity zero");
+    }
+}
+
+// Review of stage 3, F2: the ordinary and the budget-aware path evict through one helper,
+// rows and costs together. With a cache of one row: budgeted fetch A, ordinary fetch (or
+// warm) B, budgeted fetch (or warm) B — the recorder threw std::out_of_range for B, whose row
+// was cached without its cost beside A's stale cost. Each answer equals the unbudgeted one.
+TEST(LabelOracleBudgetedQuery, AlternatingFetchPathsKeepCosts) {
+    Fixture fx(true);
+    LabelOracle oracle(*fx.anno, fx.cth.get());
+    const std::vector<node_index> keys = oracle.keys_of_sequence(fx.seqs[0]);
+    ASSERT_GT(keys.size(), 2u);
+    ASSERT_NE(keys[0], keys[1]);
+    for (const auto &[names, with_coords] : label_sets(true)) {
+        LabelQuery plain(oracle, refs(oracle, names), with_coords);
+        for (int variant = 0; variant < 4; ++variant) {
+            LabelQuery query(oracle, refs(oracle, names), with_coords,
+                             LabelOracle::Access::AUTO, 1);
+            std::vector<LabelQuery::NodeHits> hits;
+            std::vector<KeyCost> costs;
+            hits.reserve(8);
+            costs.reserve(8);
+            size_t refused = 0;
+            DecodeBudget first;
+            ASSERT_TRUE(query.fetch(&keys[0], 1, first, &hits, &costs, &refused));
+            if (variant % 2) {
+                query.warm(std::vector<node_index>{ keys[1] });
+            } else {
+                EXPECT_EQ(plain.fetch(std::vector<node_index>{ keys[1] }),
+                          query.fetch(std::vector<node_index>{ keys[1] }));
+            }
+            if (variant >= 2) {
+                DecodeBudget warm;
+                EXPECT_NO_THROW(query.warm(std::vector<node_index>{ keys[1], keys[2] }, warm));
+            }
+            DecodeBudget next;
+            EXPECT_NO_THROW(EXPECT_TRUE(query.fetch(&keys[1], 1, next, &hits, &costs, &refused)))
+                << names[0] << " variant " << variant;
+            ASSERT_EQ(2u, hits.size());
+            EXPECT_EQ(plain.fetch(std::vector<node_index>{ keys[1] })[0], hits[1]) << names[0] << " variant " << variant;
+        }
+    }
+}
+
+TEST(LabelOracleBudgetedRecorder, AlternatingFetchPathsKeepCosts) {
+    Fixture fx(true);
+    LabelOracle oracle(*fx.anno, fx.cth.get());
+    const std::vector<node_index> keys = oracle.keys_of_sequence(fx.seqs[0]);
+    ASSERT_GT(keys.size(), 2u);
+    ASSERT_NE(keys[0], keys[1]);
+    auto name_bytes = [](std::string_view n) { return 100 + n.size(); };
+    for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
+        for (int variant = 0; variant < 4; ++variant) {
+            LabelRecorder plain(oracle, kind, 64);
+            LabelRecorder recorder(oracle, kind, 64, 1);
+            std::vector<LabelRecorder::NodeLabels> lists;
+            std::vector<KeyCost> costs;
+            lists.reserve(8);
+            costs.reserve(8);
+            size_t refused = 0;
+            DecodeBudget first;
+            ASSERT_TRUE(recorder.fetch(&keys[0], 1, first, &lists, &costs, &refused, name_bytes));
+            if (variant % 2) {
+                recorder.warm(std::vector<node_index>{ keys[1] });
+            } else {
+                recorder.fetch(std::vector<node_index>{ keys[1] });
+            }
+            if (variant >= 2) {
+                DecodeBudget warm;
+                EXPECT_NO_THROW(recorder.warm(std::vector<node_index>{ keys[1], keys[2] }, warm));
+            }
+            DecodeBudget next;
+            EXPECT_NO_THROW(EXPECT_TRUE(recorder.fetch(&keys[1], 1, next, &lists, &costs,
+                                                       &refused, name_bytes)))
+                << static_cast<int>(kind) << " variant " << variant;
+            ASSERT_EQ(2u, lists.size());
+            // the same labels as an unbudgeted read of the same keys in the same order
+            const auto expected = plain.fetch(std::vector<node_index>{ keys[0], keys[1] });
+            EXPECT_EQ(expected[1].total, lists[1].total);
+            ASSERT_EQ(expected[1].labels.size(), lists[1].labels.size());
+            for (size_t i = 0; i < lists[1].labels.size(); ++i) {
+                EXPECT_EQ(plain.labels()[expected[1].labels[i]].name,
+                          recorder.labels()[lists[1].labels[i]].name);
+            }
+        }
+    }
 }
 
 } // namespace

@@ -440,6 +440,17 @@ class LabelRecorder {
     // as LabelQuery::set_max_cache_bytes
     void set_max_cache_bytes(uint64_t bytes) { max_cache_bytes_ = bytes; }
     uint64_t cache_bytes() const { return cache_bytes_; }
+    // Every eviction, by either path, drops the rows and their costs together, so that every
+    // key with a cost is a cached key: the budget-aware path's size check (equal sizes, equal
+    // keys) relies on it. Clearing the rows alone let an ordinary fetch leave a stale cost
+    // behind, and a budgeted fetch of an equal-sized cache then found a row without its cost
+    // (review of stage 3, F2: std::out_of_range for a valid key)
+    void clear_cache() {
+        cache_.clear();
+        costs_.clear();
+        cached_keys_ = 0;
+        cache_bytes_ = 0;
+    }
 
   private:
     // (column, seq_id); seq_id is 0 for COLUMN labels

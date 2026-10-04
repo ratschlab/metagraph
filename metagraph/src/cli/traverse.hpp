@@ -1,6 +1,7 @@
 #ifndef __METAGRAPH_CLI_TRAVERSE_HPP__
 #define __METAGRAPH_CLI_TRAVERSE_HPP__
 
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -22,6 +23,7 @@ class AnnotatedDBG;
 namespace cli {
 
 class Config;
+class Attempt;
 
 // A request error: reported as HTTP 400 by the server, exit code 1 by the CLI.
 class InvalidRequest : public std::invalid_argument {
@@ -43,6 +45,12 @@ struct TraverseRequest {
     std::string release;
     std::string graph;        // multi-graph mode: index name (resolved by the server)
     std::string graph_path;   // optional disambiguation when a name spans several shards
+    // A ledger-managed attempt (DESIGN-traverse-graphlet.md §14.1: the frozen wire contract's
+    // request fields; traverse_attempts.hpp): its id, unique per server process while it runs
+    // or is retained, and the budget and locus it is charged to, echoed in `usage` only
+    std::string attempt_id;
+    std::string budget_id;
+    std::string locus_id;
     std::vector<graph::traversal::Seed> seeds;
     graph::traversal::Strategy strategy;
     CostSpec cost;
@@ -129,10 +137,21 @@ Json::Value capabilities_to_json(const graph::traversal::LabelOracle &oracle,
                                  const std::string &release,
                                  const IndexIdentity *identity = nullptr);
 
+// The width at which the delivery model prices an MGT float when nothing makes it wider.
+constexpr uint64_t kMgtFloatWidth = 24;
+// The widest an MGT float of a result walked under |st| and |cost| can be written (canonical
+// MGT writes floats positionally: 1e-300 takes 302 characters), from the costs, the loss
+// budget and the time budgets (|requested_time_ms|: before a server clamp, |max_time_ms|: the
+// server's cap; 0: none): at least kMgtFloatWidth.
+uint64_t mgt_float_width(const graph::traversal::Strategy &st,
+                         const graph::traversal::LabelChangeCost &cost,
+                         double requested_time_ms = 0, double max_time_ms = 0);
 // What one object of a result costs to deliver in |detail| (per object, bytes; upper
 // bounds): the output part of the memory budget's model (DESIGN-traverse-graphlet.md §14),
-// which process_traverse_request sets as Strategy::delivery
-graph::traversal::DeliveryCosts delivery_costs(const std::string &detail, bool sequences);
+// which process_traverse_request sets as Strategy::delivery, with every MGT float priced at
+// |float_width| characters (mgt_float_width)
+graph::traversal::DeliveryCosts delivery_costs(const std::string &detail, bool sequences,
+                                               uint64_t float_width = kMgtFloatWidth);
 // the length the JSON writers here give |s| inside a JSON string, quotes excluded: what
 // delivery_costs prices a name's text by
 uint64_t json_escaped_size(std::string_view s);
@@ -229,17 +248,27 @@ struct TraverseLimits {
 };
 
 // Shared by the CLI and the server. |release| is the configured index release id ("" if
-// none); |identity| as in capabilities_to_json.
+// none); |identity| as in capabilities_to_json. |attempt|: the server's control of the
+// request (traverse_attempts.hpp) — polled between seeds, at the walker's checkpoints and
+// while the results are built, and, for a request with attempt_id, the usage it records and
+// states and the bound it enforces; null (the CLI, tests): none, and a request with
+// attempt_id states its usage with the bound not enforced. Throws
+// graph::traversal::AttemptAborted when the client is gone, AttemptAtBound when the attempt
+// reached its bound while the results were built.
 Json::Value process_traverse_request(const Json::Value &json,
                                      const graph::AnnotatedDBG &anno_graph,
                                      const std::string &release,
                                      const TraverseLimits &limits = {},
-                                     const IndexIdentity *identity = nullptr);
+                                     const IndexIdentity *identity = nullptr,
+                                     Attempt *attempt = nullptr);
+// |client_gone|: polled between the phases of the request (the discovery read, the support
+// fetch, the selection); true abandons it (graph::traversal::AttemptAborted)
 Json::Value process_resolve_request(const Json::Value &json,
                                     const graph::AnnotatedDBG &anno_graph,
                                     const std::string &release,
                                     uint64_t max_query_bp = 0,
-                                    const IndexIdentity *identity = nullptr);
+                                    const IndexIdentity *identity = nullptr,
+                                    const std::function<bool()> &client_gone = nullptr);
 
 // CLI entry point: `metagraph traverse [--resolve] -i GRAPH -a ANNOTATION request.json ...`
 int traverse_graph(Config *config);

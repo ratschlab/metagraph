@@ -20,6 +20,7 @@
 #include "query.hpp"
 #include "align.hpp"
 #include "traverse.hpp"
+#include "traverse_attempts.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "server_utils.hpp"
 #include "cli/load/load_annotation.hpp"
@@ -32,6 +33,11 @@ using mtg::common::logger;
 using namespace mtg::graph;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
+
+// How long the HTTP server gives a request after its header was read (the body, the handler
+// and sending the response) before it shuts the connection: also the cap on the duration
+// bound of a /traverse attempt (traverse_attempts.hpp), less a second for the response
+constexpr long kContentTimeoutS = 900;
 
 
 Json::Value process_search_request(const Json::Value &json,
@@ -216,7 +222,7 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     }
     server_startup.config.port = config.port;
     server_startup.config.timeout_request = 30;    // 30 sec to finish headers
-    server_startup.config.timeout_content = 900;   // 15 minutes for body/compute (per request) max
+    server_startup.config.timeout_content = kContentTimeoutS;   // 15 minutes for body/compute (per request) max
 
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
@@ -602,6 +608,18 @@ int run_server(Config *config) {
         });
     };
 
+    // The ledger-managed /traverse attempts of this process (requests with attempt_id): the
+    // backend half of stage 4 of DESIGN-traverse-graphlet.md §14 (traverse_attempts.hpp)
+    AttemptSettings attempt_settings;
+    attempt_settings.allowance_ms = config->traverse_attempt_allowance_ms;
+    attempt_settings.hard_cap_ms = kContentTimeoutS * 1000.0 - 1000;
+    attempt_settings.retention_s = config->traverse_attempt_retention_s;
+    attempt_settings.retention_count = config->traverse_attempt_retention;
+    AttemptRegistry attempts(attempt_settings);
+    logger->info("[Server] Traverse attempts: server_instance {}, allowance {} ms, {}",
+                 attempts.server_instance(), attempt_settings.allowance_ms,
+                 attempts.retention_text());
+
     // Report where a query is supported and which labels carry which blocks, and
     // optionally freeze seeds for /traverse. No graph traversal.
     server.resource["^/resolve$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
@@ -614,28 +632,171 @@ int run_server(Config *config) {
             const auto &index = resolve_traverse_index(json, *config, anno_graph,
                                                        indexes, graphs_cache);
             const IndexIdentity identity = identity_of(index);
-            return process_resolve_request(json, index, config->index_release,
-                                           config->resolve_max_query_bp, &identity);
+            // a client that is gone is not answered: abandoned between the request's phases
+            try {
+                return process_resolve_request(json, index, config->index_release,
+                                               config->resolve_max_query_bp, &identity,
+                                               [&request]() { return client_gone(*request); });
+            } catch (const graph::traversal::AttemptAborted &e) {
+                throw ClientGone(e.what());
+            }
         }, /* compact */ true);
     };
 
     // Extend frozen seeds along consistent annotation labels.
     server.resource["^/traverse$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                  shared_ptr<HttpServer::Request> request) {
-        process_request(response, request, num_requests++, [&](const std::string &content) {
+        const size_t request_id = num_requests++;
+        // Every traversal is stopped when its client is gone: its walk polls the client's
+        // connection, and nothing is written. A request with attempt_id is also an attempt of
+        // the service's ledger: registered, cancellable by id, bounded in duration by the
+        // server itself, and every response to it states its usage (traverse_attempts.hpp)
+        // (the client check holds the request weakly: a finished attempt is retained for its
+        // state, not with the request's body)
+        auto attempt = std::make_shared<Attempt>(
+                request_id, request->header_read_time, attempts.settings(),
+                attempts.server_instance(), /* enforced */ true,
+                [weak = std::weak_ptr<HttpServer::Request>(request)]() {
+                    auto r = weak.lock();
+                    return !r || client_gone(*r);
+                });
+        bool registered = false;
+        // what an error states besides its message once the attempt is registered: its usage
+        auto with_usage = [&](int status, const std::string &what, const std::string &reason) {
+            Json::Value body;
+            body["error"] = what;
+            body["usage"] = attempt->usage_json(reason);
+            return HttpError(status, std::move(body));
+        };
+        ResponseControl control;
+        // the attempt's client and bound while the response is written and compressed
+        control.check = [&]() {
+            try {
+                attempt->check_delivery();
+            } catch (const graph::traversal::AttemptAborted &e) {
+                throw ClientGone(e.what());
+            } catch (const AttemptAtBound &e) {
+                throw with_usage(503, e.what(), "deadline");
+            }
+        };
+        control.on_written = [&](int status, std::optional<size_t> bytes) {
+            if (!registered) {
+                if (!status) {
+                    logger->info("[Server] Request {}: client gone, {}; no response written",
+                                 request_id, attempt->stop_summary());
+                }
+                return;
+            }
+            const std::string reason = !status ? "client_gone"
+                                     : status == 503 ? "deadline"
+                                     : status >= 400 ? "error"
+                                     : attempt->walk_reason();
+            attempts.finish(attempt, reason, status, bytes);
+            logger->info("[Server] Attempt {} (request {}) finished ({}): {}; {}",
+                         attempt->ids().attempt_id, request_id, reason, attempt->stop_summary(),
+                         status ? fmt::format("response {}, {} bytes, {:.0f} ms", status,
+                                              bytes.value_or(0), attempt->elapsed_ms())
+                                : std::string("no response written (the client is gone)"));
+        };
+        process_request(response, request, request_id, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
 
             Json::Value json = parse_json_string(content);
-            const auto &index = resolve_traverse_index(json, *config, anno_graph,
-                                                       indexes, graphs_cache);
-            TraverseLimits limits;
-            limits.max_time_ms = config->traverse_max_time_ms;
-            limits.max_seeds = config->traverse_max_seeds;
-            limits.max_seed_bp = config->traverse_max_seed_bp;
-            limits.max_seed_labels = config->traverse_max_seed_labels;
-            const IndexIdentity identity = identity_of(index);
-            return process_traverse_request(json, index, config->index_release, limits, &identity);
+            // a malformed id is refused before anything is registered (400, no usage)
+            attempt->set_ids(attempt_ids(json));
+            if (attempt->managed()) {
+                // an attempt runs once per server process: a second request with a running or
+                // retained id is refused, without usage (it would be reconciled against the
+                // other attempt)
+                if (auto other = attempts.start(attempt)) {
+                    Json::Value body;
+                    body["error"] = "attempt_id '" + attempt->ids().attempt_id + "' is running "
+                                    "or was used on this server within the retention period ("
+                                  + attempts.retention_text() + "): an attempt runs once";
+                    body["attempt"] = *other;
+                    throw HttpError(409, std::move(body));
+                }
+                registered = true;
+                logger->info("[Server] Attempt {} (request {}): registered",
+                             attempt->ids().attempt_id, request_id);
+            }
+            try {
+                const auto &index = resolve_traverse_index(json, *config, anno_graph,
+                                                           indexes, graphs_cache);
+                TraverseLimits limits;
+                limits.max_time_ms = config->traverse_max_time_ms;
+                limits.max_seeds = config->traverse_max_seeds;
+                limits.max_seed_bp = config->traverse_max_seed_bp;
+                limits.max_seed_labels = config->traverse_max_seed_labels;
+                const IndexIdentity identity = identity_of(index);
+                return process_traverse_request(json, index, config->index_release, limits,
+                                                &identity, attempt.get());
+            } catch (const graph::traversal::AttemptAborted &e) {
+                throw ClientGone(e.what());
+            } catch (const AttemptAtBound &e) {
+                throw with_usage(503, e.what(), "deadline");
+            } catch (const std::exception &e) {
+                if (!attempt->managed())
+                    throw;
+                throw with_usage(400, e.what(), "error");
+            } catch (...) {
+                if (!attempt->managed())
+                    throw;
+                throw with_usage(500, "Internal server error", "error");
+            }
+        }, /* compact */ true, &control);
+    };
+
+    // Cancel a running attempt by its id (POST {"attempt_id", "wait_ms"?}): 200 when it was
+    // asked to stop (state stopping, or finished within wait_ms), 404 when it has finished or
+    // is unknown. Not refused while the index loads: an attempt may be cancelled at any time
+    server.resource["^/traverse/cancel$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
+                                                        shared_ptr<HttpServer::Request> request) {
+        const size_t request_id = num_requests++;
+        process_request(response, request, request_id, [&](const std::string &content) {
+            Json::Value json = parse_json_string(content);
+            if (!json.isObject())
+                throw InvalidRequest("request: expected an object");
+            for (const std::string &name : json.getMemberNames()) {
+                if (name != "attempt_id" && name != "wait_ms")
+                    throw InvalidRequest("request: unknown field '" + name + "'");
+            }
+            if (!json["attempt_id"].isString() || !valid_attempt_id(json["attempt_id"].asString())) {
+                throw InvalidRequest("request.attempt_id: expected a string of 1 to 128 "
+                                     "characters from [A-Za-z0-9._:-]");
+            }
+            uint64_t wait_ms = 0;
+            if (json.isMember("wait_ms")) {
+                const Json::Value &w = json["wait_ms"];
+                if (!w.isIntegral() || (w.isInt64() && w.asInt64() < 0) || w.asUInt64() > 10'000)
+                    throw InvalidRequest("request.wait_ms: expected an integer in [0, 10000]");
+                wait_ms = w.asUInt64();
+            }
+            const std::string id = json["attempt_id"].asString();
+            auto [status, body] = attempts.cancel(id, wait_ms);
+            logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}", id,
+                         request_id, status, body.get("state", "").asString());
+            if (status != 200)
+                throw HttpError(status, std::move(body));
+            return body;
+        }, /* compact */ true);
+    };
+
+    // The state of an attempt (running | stopping | finished, with the reason and when it
+    // stopped), kept for the retention period after it finished; 404 after that
+    server.resource["^/traverse/attempt/([^/]+)$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
+                                                               shared_ptr<HttpServer::Request> request) {
+        const std::string id = request->path_match[1].str();
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            if (!valid_attempt_id(id)) {
+                throw InvalidRequest("attempt_id: expected 1 to 128 characters from "
+                                     "[A-Za-z0-9._:-]");
+            }
+            auto [status, body] = attempts.state(id);
+            if (status != 200)
+                throw HttpError(status, std::move(body));
+            return body;
         }, /* compact */ true);
     };
 
@@ -670,17 +831,46 @@ int run_server(Config *config) {
             caps["budgets"] = budgets;
             caps["work_check_interval"]
                 = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
-            caps["work_bound"] = "the walk compares bounds.max_work_units after every charge, so a "
-                "work stop exceeds it by at most what was charged since the previous comparison, "
-                "one indivisible charge, and the stop's message states the most its seed charged "
-                "between two comparisons: a fetch call's annotation rows, decoded whole with "
-                "their coordinates (8 units per key, 1 per entry and coordinate; calls are sized "
-                "from the budget left, down to one key), a node's label-state scan, or the roots' "
-                "rows of the arms (with the end of the seed phase, which is cut every "
-                "work_check_interval units), charged as one so that the result complete to 0 bp "
-                "is delivered, as wide as the index makes them; the deadline is read before "
-                "every head and at least every work_check_interval units";
+            // Work is deterministic LOGICAL work, not measured decode effort (review of stage 3,
+            // answer 1): the physical decode counters are in each response's timing
+            caps["work_bound"] = "bounds.max_work_units counts deterministic logical work, not "
+                "measured decode effort: 4 per successor enumeration; per annotation row a fetch "
+                "returns 8 per key and 1 per entry and coordinate, and on a budget-aware "
+                "(row-diff) annotation 8 per row-diff dependency row and 1 per entry it stores, "
+                "whatever the decode shared or cached; 1 per pair evaluation, refusal-scan "
+                "entry, edge-reuse probe and step. The walk compares the budget after every "
+                "charge, so a stop exceeds it by at most what was charged since the previous "
+                "comparison, one indivisible charge (a fetch call's rows, sized from the budget "
+                "left down to one key; a label-state scan; or the roots' rows with the end of the "
+                "seed phase), and the stop states the most its seed charged between two "
+                "comparisons; the seed phase is compared every work_check_interval units and "
+                "fails at a comparison finding it at least that much over budget; the deadline "
+                "is read before every head and at least every work_check_interval units; the "
+                "physical decode counters are in timing";
             caps["memory_bound"] = "soft";
+            // the ledger-managed attempts (requests with attempt_id): how they are named,
+            // cancelled, queried, kept and bounded (traverse_attempts.hpp)
+            Json::Value att;
+            Json::Value fields(Json::arrayValue);
+            fields.append("attempt_id");
+            fields.append("budget_id");
+            fields.append("locus_id");
+            att["fields"] = std::move(fields);
+            att["id_pattern"] = "^[A-Za-z0-9._:-]{1,128}$";
+            att["cancel"] = "POST /traverse/cancel";
+            att["state"] = "GET /traverse/attempt/{attempt_id}";
+            att["server_instance"] = attempts.server_instance();
+            att["retention_s"] = static_cast<Json::UInt64>(attempt_settings.retention_s);
+            att["retention_count"] = static_cast<Json::UInt64>(attempt_settings.retention_count);
+            att["allowance_ms"] = attempt_settings.allowance_ms;
+            att["content_timeout_s"] = static_cast<Json::Int64>(kContentTimeoutS);
+            att["client_check_ms"] = static_cast<Json::UInt64>(attempt_settings.client_check_ms);
+            att["bound"] = "min(seeds x the effective bounds.time_budget_ms + allowance_ms, "
+                "content_timeout_s x 1000 - 1000) ms on the attempt's clock, which starts when the "
+                "server read the request's header (time queued before that, all server threads "
+                "busy, is not in it); seeds stop being walked at bound - allowance_ms / 2, and a "
+                "response not written by the bound is not written (503 with usage)";
+            caps["attempts"] = std::move(att);
             // transport: the traversal routes write compact JSON and honour
             // Accept-Encoding (gzip preferred, deflate accepted)
             Json::Value encodings(Json::arrayValue);

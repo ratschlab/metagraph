@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -405,6 +406,26 @@ class TestTraverseCLI(TestTraverseBase):
             self.assertEqual(1, rc, f'expected failure for {bad}')
             self.assertIn('error', out)
             self.assertIn(expect, out['error'])
+
+    def test_traverse_attempt_errors_state_their_usage(self):
+        """The CLI states the usage of a request with attempt_id on an error after the
+        request was read, as the server's 400 does; a malformed id is refused without."""
+        bad = {'seeds': [{'sequence': self.element, 'labels': ['nope']}], 'strategy': {},
+               'attempt_id': 'cli-err', 'locus_id': 'l-1'}
+        out, rc = self._traverse(bad)
+        self.assertEqual(1, rc)
+        self.assertIn('nope', out['error'])
+        self.assertEqual(('cli-err', 'l-1', 'error', False),
+                         (out['usage']['attempt_id'], out['usage']['locus_id'],
+                          out['usage']['reason'], out['usage']['bound']['enforced']))
+        out, rc = self._traverse(dict(bad, attempt_id='not an id'))
+        self.assertEqual(1, rc)
+        self.assertIn('attempt_id', out['error'])
+        self.assertNotIn('usage', out)
+        # without attempt_id the error is as it was
+        plain = {k: v for k, v in bad.items() if k not in ('attempt_id', 'locus_id')}
+        out, rc = self._traverse(plain)
+        self.assertEqual((1, ['error']), (rc, list(out)))
 
     def test_traverse_reports_caps(self):
         out, rc = self._traverse({
@@ -2109,6 +2130,521 @@ class TestTraverseAPI(TestTraverseBase):
         # reported per label in this mode (no path-level reason)
         self.assertEqual([{'dead_end': 2}], [p['end_reasons'] for p in right['paths']])
         self.assertNotIn('path_reason', right['paths'][0])
+
+    def test_api_attempts(self):
+        """Stage 4, backend half: a request with attempt_id (budget_id and locus_id echoed)
+        states its usage in every response — successful, partial, with a failed seed, or a
+        400 after the request was read — and is otherwise the response without it; an id
+        runs once (409, no usage), a malformed one is a 400 without usage, and a cancel or a
+        state query of a finished or unknown id is a 404 (an unknown id is tombstoned)."""
+        url = f'http://{self.host}:{self.port}'
+        caps = requests.get(url=url + '/traverse/capabilities').json()
+        att = caps['attempts']
+        self.assertEqual(['attempt_id', 'budget_id', 'locus_id'], att['fields'])
+        self.assertEqual('POST /traverse/cancel', att['cancel'])
+        self.assertEqual('GET /traverse/attempt/{attempt_id}', att['state'])
+        self.assertEqual(16, len(att['server_instance']))
+        for key in ('retention_s', 'retention_count', 'allowance_ms', 'content_timeout_s',
+                    'client_check_ms', 'bound', 'id_pattern'):
+            self.assertIn(key, att)
+        strategy = {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                    'output': {'timing': False}}
+        base = {'seeds': [{'sequence': self.element}], 'strategy': strategy}
+        plain = self._post('traverse', base)
+        self.assertEqual(200, plain.status_code, plain.text)
+        self.assertNotIn('usage', plain.json())
+
+        def attempt(name, **fields):
+            req = copy.deepcopy(base)
+            req.update(attempt_id=name, **fields)
+            return req
+
+        ret = self._post('traverse', attempt('api-ok', budget_id='budget-1', locus_id='locus-1'))
+        self.assertEqual(200, ret.status_code, ret.text)
+        out = ret.json()
+        usage = out.pop('usage')
+        # nothing else changes
+        self.assertEqual(plain.json(), out)
+        self.assertEqual(('api-ok', 'budget-1', 'locus-1', att['server_instance'], 'completed'),
+                         (usage['attempt_id'], usage['budget_id'], usage['locus_id'],
+                          usage['server_instance'], usage['reason']))
+        for key in ('received_at', 'stopped_at'):
+            self.assertRegex(usage[key], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$')
+        self.assertIsInstance(usage['elapsed_ms'], int)
+        self.assertEqual({'requested': 1, 'started': 1, 'finished': 1, 'abandoned': 0},
+                         usage['seeds'])
+        bound = usage['bound']
+        self.assertTrue(bound['enforced'])
+        self.assertEqual(1, bound['seeds'])
+        self.assertEqual(usage['bound_ms'],
+                         round(bound['seeds'] * bound['time_budget_ms'] + bound['allowance_ms']))
+        self.assertGreater(usage['work_units'], 0)
+        self.assertGreater(usage['memory']['peak_admitted_bytes'], 0)
+        self.assertIsNone(usage['memory']['soft_excess_bytes'])
+        # without a memory budget the account bounds nothing that was held: no bound stated
+        self.assertIsNone(usage['memory']['held_bound_bytes'])
+        seed = usage['per_seed'][0]
+        self.assertIsNone(seed['refused_bytes'])
+        self.assertEqual(usage['work_units'], seed['work_units'])
+        self.assertEqual(out['results'][0]['outcome']['walks'], seed['outcome'])
+        state = requests.get(url + '/traverse/attempt/api-ok')
+        self.assertEqual(200, state.status_code, state.text)
+        state = state.json()
+        self.assertEqual(('finished', 'completed', True, 200),
+                         (state['state'], state['reason'], state['response']['written'],
+                          state['response']['status']))
+        self.assertEqual(usage['work_units'], state['usage']['work_units'])
+        # an id runs once: refused while it is retained, without usage
+        dup = self._post('traverse', attempt('api-ok'))
+        self.assertEqual(409, dup.status_code, dup.text)
+        self.assertNotIn('usage', dup.json())
+        self.assertEqual('finished', dup.json()['attempt']['state'])
+        # nothing to cancel any more
+        cancel = self._post('traverse/cancel', {'attempt_id': 'api-ok'})
+        self.assertEqual(404, cancel.status_code, cancel.text)
+        self.assertEqual((False, 'finished'), (cancel.json()['cancelled'], cancel.json()['state']))
+
+        # a work budget stops the walk: partial, and the usage says what stopped it
+        partial = copy.deepcopy(attempt('api-partial'))
+        partial['strategy']['bounds']['max_work_units'] = 20
+        ret = self._post('traverse', partial)
+        self.assertEqual(200, ret.status_code, ret.text)
+        seed = ret.json()['usage']['per_seed'][0]
+        self.assertEqual(('partial', 'work'), (seed['outcome'], seed['stopped_by']))
+        self.assertEqual('completed', ret.json()['usage']['reason'])
+
+        # a failed seed beside a walked one
+        failed = attempt('api-failed')
+        failed['seeds'] = [{'sequence': self.element},
+                           {'sequence': self.left2 + self.element + self.right2}]
+        ret = self._post('traverse', failed)
+        self.assertEqual(200, ret.status_code, ret.text)
+        per_seed = ret.json()['usage']['per_seed']
+        self.assertEqual('failed', per_seed[1]['outcome'])
+        self.assertEqual(2, ret.json()['usage']['seeds']['finished'])
+
+        # a 400 after the request was read states the usage too
+        bad = attempt('api-bad')
+        bad['strategy'] = dict(strategy, bogus=1)
+        ret = self._post('traverse', bad)
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertIn('bogus', ret.json()['error'])
+        self.assertEqual(('api-bad', 'error'), (ret.json()['usage']['attempt_id'],
+                                                ret.json()['usage']['reason']))
+        self.assertEqual('error', requests.get(url + '/traverse/attempt/api-bad').json()['reason'])
+        # ... but not a malformed id, nor an echo without the attempt it belongs to
+        for req in (attempt('not an id'), attempt('x' * 129), dict(base, budget_id='b')):
+            ret = self._post('traverse', req)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertNotIn('usage', ret.json())
+        self.assertEqual(400, requests.get(url + '/traverse/attempt/not%20an%20id').status_code)
+        self.assertEqual(400, self._post('traverse/cancel', {'attempt_id': 7}).status_code)
+        self.assertEqual(400, self._post('traverse/cancel', {'attempt_id': 'a', 'x': 1}).status_code)
+
+        # an unknown id: 404 to both; a cancel tombstones it, so it never runs here
+        state = requests.get(url + '/traverse/attempt/api-unknown')
+        self.assertEqual(404, state.status_code)
+        self.assertEqual('unknown', state.json()['state'])
+        cancel = self._post('traverse/cancel', {'attempt_id': 'api-early'})
+        self.assertEqual(404, cancel.status_code)
+        self.assertEqual(('unknown', True, False),
+                         (cancel.json()['state'], cancel.json()['tombstone'],
+                          cancel.json()['cancelled']))
+        late = self._post('traverse', attempt('api-early'))
+        self.assertEqual(409, late.status_code, late.text)
+        self.assertTrue(late.json()['attempt']['tombstone'])
+
+        # the library sends the fields and reads the answers
+        client = graphlet_lib.TraverseClient(self.host, self.port)
+        resp = client.traverse([self.element], strategy, attempt_id='api-lib', locus_id='l-9')
+        self.assertEqual(('api-lib', 'l-9'), (resp.usage['attempt_id'], resp.usage['locus_id']))
+        self.assertEqual('finished', client.attempt('api-lib')['state'])
+        self.assertFalse(client.cancel('api-lib')['cancelled'])
+        self.assertEqual('unknown', client.attempt('api-none')['state'])
+        # an error after the request was read carries its usage in the error
+        with self.assertRaises(graphlet_lib.TraverseError) as cm:
+            client.traverse([self.element], dict(strategy, bogus=1), attempt_id='api-lib-bad')
+        self.assertEqual('error', cm.exception.usage['reason'])
+
+        # a memory budget: what a failed seed's result holds and states is its usage
+        failed = attempt('api-memory')
+        failed['seeds'] = [{'sequence': self.element, 'seed_id': 'z' * (2 << 20)},
+                           {'sequence': self.element}]
+        failed['strategy'] = copy.deepcopy(strategy)
+        failed['strategy']['bounds']['max_memory_mb'] = 1
+        ret = self._post('traverse', failed)
+        self.assertEqual(200, ret.status_code, ret.text[:500])
+        out = ret.json()
+        usage = out['usage']
+        first = usage['per_seed'][0]
+        self.assertEqual(('failed', 'memory'), (first['outcome'], first['stopped_by']))
+        soft = [l['observed'] for l in out['results'][0]['limitations']
+                if l['kind'] == 'memory_bound_soft']
+        self.assertEqual(soft, [-(-first['soft_excess_bytes'] // (1 << 20))])
+        self.assertGreater(first['refused_bytes'], 1 << 20)
+        self.assertLessEqual(first['peak_admitted_bytes'], 1 << 20)
+        self.assertGreaterEqual(usage['memory']['held_bound_bytes'],
+                                (1 << 20) + first['soft_excess_bytes'])
+
+        # the MCP tool returns the real server's capabilities at its default ceiling
+        from metagraph.traverse.mcp_tools import GraphletTools
+        with tempfile.TemporaryDirectory() as root:
+            tools = GraphletTools(graphlet_lib.GraphletStore(root), {'api': client})
+            got = tools.traverse_capabilities(index='api')
+        self.assertNotIn('error', got, str(got)[:300])
+        self.assertEqual(caps['attempts']['fields'], got['capabilities']['attempts']['fields'])
+
+
+def _free_port():
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _instant(text):
+    """an ISO-8601 instant of the attempt state (UTC, milliseconds) as seconds"""
+    import datetime
+    return datetime.datetime.strptime(text, '%Y-%m-%dT%H:%M:%S.%fZ').replace(
+        tzinfo=datetime.timezone.utc).timestamp()
+
+
+@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
+@unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
+class TestTraverseAttempts(TestingBase):
+    """Stage 4, backend half (DESIGN-traverse-graphlet.md §14 v5.1), against a walk slow
+    enough to be stopped in its middle: two haplotypes of 200 kbp with a SNP every 64 bp
+    (k = 31), walked in annotate mode with every route kept and a beam of 64, so that a seed
+    takes seconds. Each test starts its own short-lived server: a cancel by id with the client
+    still connected, a client that goes away (with and without attempt_id), a cancel that
+    waits for the end, the server's duration bound, the retention of finished attempts, and
+    concurrent attempts with mixed cancels."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        rng = random.Random(20261003)
+        h1 = ''.join(rng.choice('ACGT') for _ in range(200_000))
+        h2 = list(h1)
+        for i in range(32, len(h2), 64):
+            h2[i] = rng.choice([c for c in 'ACGT' if c != h1[i]])
+        h2 = ''.join(h2)
+        d = cls.tempdir.name
+        fastas = []
+        for name, s in (('h1', h1), ('h2', h2)):
+            fastas.append(f'{d}/{name}.fa')
+            with open(fastas[-1], 'w') as f:
+                f.write(f'>{name}\n{s}\n')
+        cls.graph = d + '/slow_k31.dbg'
+        cls._build_graph(fastas, cls.graph, K, 'succinct', mode='basic')
+        cls._annotate_graph(fastas, cls.graph, d + '/slow', 'column', anno_type='filename')
+        cls.anno = d + '/slow.column.annodbg'
+        cls.seed = h1[:40]
+        # how long one uncancelled seed walks in this build (the CLI's own timing): a test
+        # that needs to stop a walk in its middle is skipped when the walk is too fast
+        path = d + '/one.json'
+        with open(path, 'w') as f:
+            json.dump(cls._request(1), f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '-i', cls.graph, '-a', cls.anno,
+                                                       path], stdout=subprocess.PIPE)
+        cls.walk_ms = json.loads(res.stdout)['timing']['elapsed_ms']
+
+    @classmethod
+    def _request(cls, seeds, time_budget_ms=30000, radius=20000, **fields):
+        req = {'seeds': [{'sequence': cls.seed}] * seeds,
+               'strategy': {'direction': 'right', 'labels': {'mode': 'annotate'},
+                            'branching': {'on_reconverge': 'keep'},
+                            'frontier': {'on_overflow': 'beam'},
+                            'bounds': {'max_extension_bp': radius, 'max_live_paths': 64,
+                                       'max_paths': 100_000_000, 'max_steps': 1_000_000_000,
+                                       'max_output_bp': 1_000_000_000,
+                                       'time_budget_ms': time_budget_ms},
+                            'output': {'detail': 'summary', 'timing': True,
+                                       'max_branch_events': 10, 'sequences': False}}}
+        req.update(fields)
+        return req
+
+    def _need_a_slow_walk(self):
+        if self.walk_ms < 1500:
+            self.skipTest(f'one seed walks {self.walk_ms:.0f} ms in this build: too fast to '
+                          'stop in its middle')
+
+    class _Server:
+        def __init__(self, test, *flags, threads=4):
+            self.port = _free_port()
+            self.url = f'http://127.0.0.1:{self.port}'
+            self.log_path = f'{test.tempdir.name}/server-{self.port}.log'
+            self.log = open(self.log_path, 'w')
+            self.process = subprocess.Popen(
+                shlex.split(METAGRAPH) + ['server_query', '-i', test.graph, '-a', test.anno,
+                                          '--port', str(self.port), '--address', '127.0.0.1',
+                                          '-p', str(threads)] + list(flags),
+                stdout=self.log, stderr=subprocess.STDOUT)
+            for _ in range(600):
+                try:
+                    if requests.get(self.url + '/traverse/capabilities', timeout=2).ok:
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.process.kill()
+            self.process.wait()
+            self.log.close()
+
+        def text(self):
+            with open(self.log_path) as f:
+                return f.read()
+
+        def post(self, route, payload, **kw):
+            return requests.post(f'{self.url}/{route}', data=json.dumps(payload), **kw)
+
+        def state(self, attempt_id, **kw):
+            return requests.get(f'{self.url}/traverse/attempt/{attempt_id}', **kw)
+
+    def test_cancel_mid_walk_with_the_client_connected(self):
+        """POST /traverse/cancel stops the running seed at its next checkpoint (partial,
+        resource_stop scope attempt, resource cancelled) and leaves the other seeds unstarted;
+        the client still connected receives that partial response with its usage, and the
+        attempt's state says when the walk stopped."""
+        self._need_a_slow_walk()
+        with self._Server(self) as server:
+            req = self._request(3, attempt_id='cancel-1', budget_id='budget-1', locus_id='locus-1')
+            got = {}
+            walker = threading.Thread(target=lambda: got.update(
+                r=server.post('traverse', req, timeout=300)))
+            started = time.time()
+            walker.start()
+            time.sleep(0.5)
+            cancel = server.post('traverse/cancel', {'attempt_id': 'cancel-1'})
+            walker.join()
+            took = time.time() - started
+            self.assertEqual(200, cancel.status_code, cancel.text)
+            self.assertTrue(cancel.json()['cancelled'])
+            self.assertIn(cancel.json()['state'], ('stopping', 'finished'))
+            ret = got['r']
+            self.assertEqual(200, ret.status_code, ret.text)
+            out = ret.json()
+            first = out['results'][0]
+            self.assertEqual('partial', first['outcome']['walks'])
+            q = first['resource_stop']
+            self.assertEqual(('attempt', 'cancelled', 'traversal', ['continue_from_leaves']),
+                             (q['scope'], q['resource'], q['phase'], q['actions']))
+            self.assertIn('attempt_id', [l['knob'] for l in first['arms']['right']['limitations']])
+            for unstarted in out['results'][1:]:
+                self.assertTrue(unstarted['error'].startswith('not started'))
+                self.assertEqual(('not_started', 'cancelled', ['retry_attempt']),
+                                 (unstarted['resource_stop']['phase'],
+                                  unstarted['resource_stop']['resource'],
+                                  unstarted['resource_stop']['actions']))
+            usage = out['usage']
+            self.assertEqual(('cancelled', 'budget-1', 'locus-1'),
+                             (usage['reason'], usage['budget_id'], usage['locus_id']))
+            self.assertEqual({'requested': 3, 'started': 1, 'finished': 1, 'abandoned': 0},
+                             usage['seeds'])
+            self.assertEqual(['partial', 'not_started', 'not_started'],
+                             [s['outcome'] for s in usage['per_seed']])
+            # stopped early: three seeds walk 3 x walk_ms uncancelled
+            self.assertLess(took, 0.5 + self.walk_ms / 1000 + 2)
+            state = server.state('cancel-1').json()
+            self.assertEqual(('finished', 'cancelled', 'cancel', True, 200),
+                             (state['state'], state['reason'], state['stop_requested_by'],
+                              state['response']['written'], state['response']['status']))
+            self.assertLess(_instant(state['stopped_at']) - _instant(state['cancel_requested_at']),
+                            2.0)
+            self.assertLessEqual(_instant(state['stopped_at']), _instant(state['finished_at']))
+            log = server.text()
+            self.assertIn('Attempt cancel-1: cancel requested', log)
+            self.assertIn('finished (cancelled): walk stopped at', log)
+
+    def test_client_disconnect_stops_the_walk(self):
+        """A client that goes away (here: a read timeout) stops its walk at the next client
+        check, with or without attempt_id, and nothing is written; with one server thread,
+        the next request is served at once rather than after the abandoned walk."""
+        self._need_a_slow_walk()
+        with self._Server(self, threads=1) as server:
+            started = time.time()
+            with self.assertRaises(requests.exceptions.ReadTimeout):
+                server.post('traverse', self._request(3, attempt_id='gone-1'), timeout=0.5)
+            # the one thread is free again only once the walk stopped
+            state = server.state('gone-1', timeout=60).json()
+            freed = time.time() - started
+            self.assertLess(freed, 0.5 + min(3.0, self.walk_ms / 1000 / 2), state)
+            self.assertEqual(('finished', 'client_gone', False),
+                             (state['state'], state['reason'], state['response']['written']))
+            self.assertEqual('client_gone', state['stop_requested_by'])
+            self.assertEqual('client_gone', state['usage']['reason'])
+            # the first seed's walk was cut: abandoned, not finished
+            self.assertEqual({'requested': 3, 'started': 1, 'finished': 0, 'abandoned': 1},
+                             state['seeds'])
+            # without attempt_id: stated in the log only
+            with self.assertRaises(requests.exceptions.ReadTimeout):
+                server.post('traverse', self._request(3), timeout=0.5)
+            started = time.time()
+            requests.get(server.url + '/traverse/capabilities', timeout=60)
+            self.assertLess(time.time() - started, min(3.0, self.walk_ms / 1000 / 2))
+            log = server.text()
+            self.assertIn('Attempt gone-1 (request', log)
+            self.assertIn('no response written (the client is gone)', log)
+            self.assertIn('client gone, walk stopped at', log)
+
+    def test_cancel_waits_for_the_end(self):
+        """A cancel with wait_ms answers once the attempt finished: its response written."""
+        self._need_a_slow_walk()
+        with self._Server(self) as server:
+            got = {}
+            walker = threading.Thread(target=lambda: got.update(
+                r=server.post('traverse', self._request(2, attempt_id='wait-1'), timeout=300)))
+            walker.start()
+            time.sleep(0.5)
+            cancel = server.post('traverse/cancel', {'attempt_id': 'wait-1', 'wait_ms': 10000})
+            walker.join()
+            self.assertEqual(200, cancel.status_code, cancel.text)
+            body = cancel.json()
+            self.assertEqual((True, 'finished'), (body['cancelled'], body['state']))
+            self.assertEqual(('cancelled', True), (body['attempt']['reason'],
+                                                   body['attempt']['response']['written']))
+            self.assertEqual(200, got['r'].status_code)
+            self.assertEqual(400, server.post('traverse/cancel', {'attempt_id': 'wait-1',
+                                                                  'wait_ms': 10001}).status_code)
+
+    def test_the_server_enforces_the_attempts_bound(self):
+        """The bound n_seeds x time_budget_ms + allowance is enforced by the server itself:
+        with an allowance of 2 ms the last seed cannot finish within it, so the walk stops at
+        the bound less half the allowance (attempt_deadline) and a response that cannot be
+        written by the bound is a 503 with the usage."""
+        self._need_a_slow_walk()
+        with self._Server(self, '--traverse-attempt-allowance-ms', '2') as server:
+            ret = server.post('traverse', self._request(4, time_budget_ms=300,
+                                                        attempt_id='deadline-1'), timeout=300)
+            self.assertIn(ret.status_code, (200, 503), ret.text)
+            usage = ret.json()['usage']
+            self.assertEqual('deadline', usage['reason'])
+            self.assertEqual(1202, usage['bound_ms'])
+            self.assertEqual(1201, usage['bound']['walk_until_ms'])
+            # stopped at the next checkpoint: one head, plus building the response
+            self.assertLess(usage['elapsed_ms'], usage['bound_ms'] + 1000)
+            if ret.status_code == 200:
+                stops = [r.get('resource_stop', {}).get('resource') for r in ret.json()['results']]
+                self.assertIn('attempt_deadline', stops)
+            state = server.state('deadline-1').json()
+            self.assertEqual(('finished', 'deadline'), (state['state'], state['reason']))
+            self.assertEqual(ret.status_code, state['response']['status'])
+            # the library tells this 503 from a loading server: it ran, and its id is used up
+            client = graphlet_lib.TraverseClient('127.0.0.1', server.port)
+            req = self._request(4, time_budget_ms=300)
+            try:
+                client.traverse(req['seeds'], req['strategy'], detail='summary',
+                                attempt_id='deadline-lib')
+            except graphlet_lib.AttemptAtBound as e:
+                self.assertEqual('deadline', e.usage['reason'])
+            self.assertEqual('deadline', client.attempt('deadline-lib')['reason'])
+
+    def test_a_close_behind_waiting_bytes_stops_the_walk(self):
+        """A client that sent bytes past its request (a trailing CRLF, a pipelined request)
+        and then closed is gone too: the peek returns those bytes, the connection's TCP state
+        tells the close behind them, so the walk stops and nothing is written."""
+        self._need_a_slow_walk()
+        with self._Server(self) as server:
+            for name, extra in (('crlf', b'\r\n'),
+                                ('pipelined', b'GET /traverse/capabilities HTTP/1.1\r\n'
+                                              b'Host: x\r\n\r\n')):
+                attempt_id = 'behind-' + name
+                body = json.dumps(self._request(3, attempt_id=attempt_id)).encode()
+                sock = socket.create_connection(('127.0.0.1', server.port))
+                sock.sendall(b'POST /traverse HTTP/1.1\r\nHost: x\r\n'
+                             b'Content-Type: application/json\r\n'
+                             + b'Content-Length: %d\r\n\r\n' % len(body) + body + extra)
+                time.sleep(0.5)
+                closed = time.time()
+                sock.close()
+                for _ in range(600):
+                    state = server.state(attempt_id, timeout=60).json()
+                    if state.get('state') == 'finished':
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(('finished', 'client_gone', False),
+                                 (state['state'], state['reason'], state['response']['written']),
+                                 name)
+                self.assertLess(_instant(state['stopped_at']) - closed, 2.0, name)
+
+    def test_a_tombstone_is_kept_its_whole_retention_period(self):
+        """A cancel of an unknown id tombstones it for retention_s, whatever finishes after
+        it; beyond --traverse-attempt-retention tombstones a cancel is refused (429, nothing
+        promised)."""
+        with self._Server(self, '--traverse-attempt-retention', '2') as server:
+            early = server.post('traverse/cancel', {'attempt_id': 'tomb-1'})
+            self.assertEqual(404, early.status_code, early.text)
+            self.assertTrue(early.json()['tombstone'])
+            for i in range(4):
+                quick = self._request(1, radius=10, attempt_id=f'tomb-done-{i}')
+                self.assertEqual(200, server.post('traverse', quick).status_code)
+            late = server.post('traverse', self._request(1, radius=10, attempt_id='tomb-1'))
+            self.assertEqual(409, late.status_code, late.text)
+            self.assertEqual(404, server.post('traverse/cancel', {'attempt_id': 'tomb-2'}).status_code)
+            full = server.post('traverse/cancel', {'attempt_id': 'tomb-3'})
+            self.assertEqual(429, full.status_code, full.text)
+            self.assertEqual((False, False, 'unknown'),
+                             (full.json()['tombstone'], full.json()['cancelled'],
+                              full.json()['state']))
+            client = graphlet_lib.TraverseClient('127.0.0.1', server.port)
+            self.assertFalse(client.cancel('tomb-4')['tombstone'])
+
+    def test_finished_attempts_are_kept_for_the_retention_period(self):
+        """GET answers for the retention period after the attempt finished, then 404; the id
+        is free again."""
+        with self._Server(self, '--traverse-attempt-retention-s', '1') as server:
+            quick = self._request(1, radius=10, attempt_id='kept-1')
+            self.assertEqual(200, server.post('traverse', quick).status_code)
+            self.assertEqual(200, server.state('kept-1').status_code)
+            self.assertEqual(409, server.post('traverse', quick).status_code)
+            time.sleep(1.5)
+            gone = server.state('kept-1')
+            self.assertEqual(404, gone.status_code)
+            self.assertIn('kept 1 s after they finish', gone.json()['error'])
+            self.assertEqual(200, server.post('traverse', quick).status_code)
+
+    def test_concurrent_attempts_with_cancels(self):
+        """Sixteen attempts at once, half of them cancelled: each response and each state
+        agree on what stopped it."""
+        self._need_a_slow_walk()
+        n = 16
+        with self._Server(self, threads=n + 1) as server:
+            got = {}
+
+            def run(i):
+                got[i] = server.post('traverse', self._request(1, attempt_id=f'conc-{i}'),
+                                     timeout=600)
+
+            threads = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+            for t in threads:
+                t.start()
+            time.sleep(0.5)
+            cancels = {i: server.post('traverse/cancel', {'attempt_id': f'conc-{i}'})
+                       for i in range(0, n, 2)}
+            for t in threads:
+                t.join()
+            for i in range(n):
+                ret = got[i]
+                self.assertEqual(200, ret.status_code, ret.text)
+                usage = ret.json()['usage']
+                state = server.state(f'conc-{i}').json()
+                self.assertEqual('finished', state['state'])
+                self.assertEqual(usage['reason'], state['reason'], i)
+                self.assertEqual(usage['work_units'], state['usage']['work_units'], i)
+                if i % 2:
+                    self.assertEqual('completed', usage['reason'], i)
+                    self.assertIsNone(state['stop_requested_by'])
+                else:
+                    self.assertEqual(200, cancels[i].status_code, cancels[i].text)
+                    self.assertEqual('cancelled', usage['reason'], i)
+                    result = ret.json()['results'][0]
+                    self.assertEqual('cancelled', result['resource_stop']['resource'], i)
 
 
 if __name__ == '__main__':

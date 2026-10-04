@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <iterator>
+#include <queue>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
@@ -533,9 +534,11 @@ class Walker {
            const Strategy &strategy,
            const LabelChangeCost &cost,
            const std::string &release_id,
-           const WalkerHooks *hooks)
+           const WalkerHooks *hooks,
+           const AttemptControl *control)
           : oracle_(oracle), graph_(oracle.graph()), seed_(seed), strategy_(strategy),
-            cost_(cost), release_id_(release_id), hooks_(hooks), k_(oracle.get_k()),
+            cost_(cost), release_id_(release_id), hooks_(hooks),
+            control_(control), k_(oracle.get_k()),
             regime_(oracle.regime()), canonical_(oracle.canonical()),
             nfc_(oracle.node_first_cache()),
             trace_(strategy.support == Support::TRACE),
@@ -760,8 +763,19 @@ class Walker {
                                   uint64_t labels = 0, uint64_t names = 0);
     // the work budget's comparison (after every charge: what was charged since the last
     // comparison is the largest_charge_ candidate) and the deadline's (|force|: now,
-    // otherwise once the interval has passed, §14). Throws BudgetTrip.
+    // otherwise once the interval has passed, §14), and with the deadline a stop from outside
+    // the walk (external_stop). Throws BudgetTrip.
     void checkpoint(bool force);
+    // A stop requested from outside the walk (AttemptControl::poll): NONE without a control.
+    // A client that is gone throws AttemptAborted here, abandoning the walk.
+    ExternalStop external_stop();
+    // the seed phase's poll: a cancelled attempt, or one past its bound, fails the seed
+    // (SeedBudgetError) — nothing has been walked yet, so no partial result exists
+    void seed_external_stop();
+    // the attempt's elapsed milliseconds, rounded up: what an external stop states
+    double attempt_ms() const;
+    // the seed's usage for the caller (AttemptControl::meter), however the walk ends
+    void write_meter() const noexcept;
     // what the trip costs the result: the resource stop (the first of the seed) and the
     // cap's demand in the knob's unit; returns the end reason of the censored heads
     EndReason note_stop(const ArmState &arm, const Item *head, ResourceStop::Resource resource,
@@ -836,6 +850,11 @@ class Walker {
     LabelChangeCost cost_;          // remapped to dictionary ids by validate_seed()
     const std::string &release_id_;
     const WalkerHooks *hooks_;
+    // a stop from outside the walk (the server's attempt), null: none
+    const AttemptControl *control_;
+    // the seed's usage was written to control_->meter (once: at the end of a walk, before its
+    // arms move into the result, or on the way out of a failed one)
+    mutable bool metered_ = false;
     const size_t k_;
     const Regime regime_;
     const CanonicalDBG *canonical_;
@@ -876,6 +895,9 @@ class Walker {
     uint64_t fixed_base_ = 0;        // base_ without the dictionary (no label charged)
     uint64_t seed_work_ = 0;         // the seed phase's charged work units
     uint64_t cache_allotment_ = 0;
+    // the caches' allotments in the account (the label cache's and the lookahead's), which a
+    // memory stop states with its demand (ResourceStop::allotted)
+    uint64_t allotted_ = 0;
     size_t dict_charged_ = 0;        // dictionary labels charged (annotate grows it)
     size_t max_lookahead_ = kMaxLookahead;
     uint64_t next_check_ = kWorkCheckInterval;
@@ -1091,11 +1113,13 @@ void Walker::validate_seed() {
             if (trace_) {
                 SmallVector<Coord> right(live[l].begin(), live[l].end());
                 SmallVector<Coord> left;
+                left.reserve(live[l].size());
                 for (Coord c : live[l]) {
                     left.push_back(c - (keys.size() - 1));
                 }
-                boundary_coords_[static_cast<size_t>(Arm::RIGHT)].push_back(right);
-                boundary_coords_[static_cast<size_t>(Arm::LEFT)].push_back(left);
+                // moved, not copied: each copy held the label's whole coordinate set once more
+                boundary_coords_[static_cast<size_t>(Arm::RIGHT)].push_back(std::move(right));
+                boundary_coords_[static_cast<size_t>(Arm::LEFT)].push_back(std::move(left));
             }
         } else {
             DroppedLabel dropped;
@@ -1104,6 +1128,29 @@ void Walker::validate_seed() {
             dropped.runs = std::move(runs[l]);
             result_.dropped_labels.push_back(std::move(dropped));
         }
+    }
+    if (trace_ && mem_limit_) {
+        // The validation's peak under trace support: the hits with their coordinates, every
+        // label's live coordinate set and both arms' boundary coordinates, all held at once
+        // here and none of them charged (the account does not exist yet). Observed before
+        // anything can fail the seed, so that a failure and a walk both state them (review
+        // of the stage-2 recheck, P2: copies of 9.6 MB under 1 MiB were reported as 3 MiB)
+        auto coords_bytes = [](const auto &sets) {
+            uint64_t bytes = 0;
+            for (const auto &set : sets) {
+                bytes += sizeof(set) + set.capacity() * sizeof(Coord);
+            }
+            return bytes;
+        };
+        uint64_t held = coords_bytes(live) + next_live.capacity() * sizeof(Coord)
+                      + coords_bytes(boundary_coords_[0]) + coords_bytes(boundary_coords_[1]);
+        for (const LabelQuery::NodeHits &node : hits) {
+            held += sizeof(node) + node.size() * sizeof(LabelQuery::Hit);
+            for (const LabelQuery::Hit &h : node) {
+                held += h.coords.capacity() * sizeof(Coord);
+            }
+        }
+        observe_seed_scratch(held);
     }
     if (result_.label_dict.empty()) {
         // under `support: trace` a derived label can still be dropped here: the set is
@@ -1160,18 +1207,31 @@ void Walker::validate_seed() {
         }
         cost_ = LabelChangeCost::table(std::move(entries), cost_.default_cost());
     }
+    // every extra label must be reachable: entered by some chain of switches from a seed
+    // label whose summed cost stays within the loss budget (switch_reach); the walk enforces
+    // the cumulative loss switch by switch. One that no chain reaches is refused, all of them
+    // named (the first eight, and how many more), as before for one
+    const std::vector<double> reach = switch_reach(cost_, result_.label_dict.size(),
+                                                   result_.num_seed_labels,
+                                                   strategy_.loss_budget);
+    std::vector<LabelId> unreachable;
     for (LabelId id = result_.num_seed_labels; id < result_.label_dict.size(); ++id) {
-        bool reachable = false;
-        if (cost_.finite()) {
-            for (LabelId s = 0; s < result_.num_seed_labels; ++s) {
-                reachable |= cost_.cost(s, id) <= strategy_.loss_budget;
-            }
+        if (reach[id] == kInfiniteLoss)
+            unreachable.push_back(id);
+    }
+    if (!unreachable.empty()) {
+        constexpr size_t kNamed = 8;
+        std::string names;
+        for (size_t i = 0; i < std::min(kNamed, unreachable.size()); ++i) {
+            names += (i ? ", '" : "'") + result_.label_dict[unreachable[i]].name + "'";
         }
-        if (!reachable) {
-            throw std::invalid_argument("Extra label '" + result_.label_dict[id].name
-                                        + "' is unreachable: no seed label can switch to it "
-                                        "within the loss budget");
-        }
+        if (unreachable.size() > kNamed)
+            names += " and " + std::to_string(unreachable.size() - kNamed) + " more";
+        throw std::invalid_argument(
+                std::string(unreachable.size() == 1 ? "Extra label " : "Extra labels ") + names
+                + (unreachable.size() == 1 ? " is" : " are") + " unreachable: no chain of "
+                  "switches from a seed label enters "
+                + (unreachable.size() == 1 ? "it" : "them") + " within the loss budget");
     }
 }
 
@@ -1483,6 +1543,17 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         for (size_t i = begin; i < end; ++i) {
             order.push_back(i);
         }
+        // The window's rows, charged as ONE charge as soon as they are read, before a
+        // comparison can fail the seed: the window was decoded whole, and charging each k-mer's
+        // row when it was consumed let the first row's comparison fail the seed with the
+        // window's later rows decoded and never charged (review of the stage-2 recheck, P2: two
+        // rows of 400,019 units reported as 200,009). Each k-mer's row is charged as the walk
+        // charges a fetched row (8 per key, 1 per entry, and its row-diff dependency rows with
+        // the budget-aware reads), a row two k-mers share once per k-mer, as before.
+        uint64_t window_units = 0;
+        for (size_t i = begin; i < end; ++i) {
+            window_units += 8 + cost_of(i) + (dependency.empty() ? 0 : dependency[row_of(i)]);
+        }
         if (done.empty()) {
             std::vector<size_t> cost(order.size());
             for (size_t j = 0; j < order.size(); ++j) {
@@ -1492,6 +1563,11 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                     std::min_element(cost.begin(), cost.end()) - cost.begin());
             std::iter_swap(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(best));
             if (cost[best] > max_candidates) {
+                // the window was read whole before it was found too wide: its rows are the
+                // seed's work (the usage a ledger reconciles), added without a comparison, so
+                // that too_wide stays the cause stated (review of the stage-3 fixes, P3: a
+                // window of 400,019 units reported 0)
+                seed_work_ += window_units;
                 throw SeedDerivationError(SeedDerivationError::TOO_WIDE,
                         "The permitted set cannot be derived from this seed: the narrowest of "
                         "its first " + std::to_string(end - begin) + " k-mers alone has "
@@ -1502,6 +1578,7 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         static_cast<double>(max_candidates), static_cast<double>(cost[best]));
             }
         }
+        charge_seed(window_units);
 
         for (size_t i : order) {
             const bool first = done.empty();
@@ -1620,10 +1697,8 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 }
                 compacted_at = live.size();
             }
-            // the row's work, as the walk charges a fetched row (8 per key, 1 per entry, and
-            // its row-diff dependency rows with the budget-aware reads); a work budget the
-            // derivation exhausts fails the seed here, between two rows
-            charge_seed(8 + cost_of(i) + (dependency.empty() ? 0 : dependency[r]));
+            // per k-mer, like the deadline: the window was charged when it was read
+            seed_external_stop();
             if (out_of_time()) {
                 throw SeedDerivationError(SeedDerivationError::TIME_BUDGET,
                         "The time budget (bounds.time_budget_ms) ran out while deriving the "
@@ -1758,6 +1833,9 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
 
 void Walker::charge_seed(uint64_t units) {
     seed_work_ += units;
+    // the seed phase has no head to stop at: a stop from outside the walk fails the seed at
+    // its next charge (a fetch call's rows, a derivation's window)
+    seed_external_stop();
     // Compared once every kWorkCheckInterval units (W). A seed phase that has run past the
     // budget by less than W at a comparison is let go on, so that, once it ends, the first
     // head's check stops the walk with a valid result complete to 0 bp (the result is
@@ -1794,27 +1872,51 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
                                                           const std::vector<node_index> &keys) {
     std::vector<LabelQuery::NodeHits> hits;
     uint64_t scratch = 0;
-    // a row is charged when it is read, key by key (8 units, 1 per hit and coordinate), so
-    // that a check never waits for a whole chunk of wide rows (charge_seed)
+    // the work of the row of key |i| (8 units, 1 per hit and coordinate)
+    auto row_work = [&](size_t i) {
+        uint64_t units = (keys[i] != npos ? 8 : 0) + hits[i].size();
+        for (const LabelQuery::Hit &h : hits[i]) {
+            units += h.coords.size();
+        }
+        return units;
+    };
+    // Every row a call returned is charged as ONE charge, before the comparison that can fail
+    // the seed: the call decoded them all, and charging them row by row let the first row's
+    // comparison fail the seed with the call's later rows decoded and never charged (review of
+    // the stage-2 recheck, P2: two rows of 400,019 units reported as 200,010). A call is one
+    // indivisible charge, as a level's fetch call is (largest_charge states it).
     auto charge = [&](size_t from) {
-        // What the call holds is observed BEFORE the first charge: a charge can fail the
-        // seed, and the failure must state what the fetched rows and the query's cache
-        // held (review of the stage-2 fixes, F2: observed 0 while the first row alone held
-        // 3.2 MB of coordinates under 1 MiB) — the rule of finding 3, observe then check
+        // What the call holds is observed BEFORE the charge: a charge can fail the seed, and
+        // the failure must state what the fetched rows and the query's cache held (review of
+        // the stage-2 fixes, F2: observed 0 while the first row alone held 3.2 MB of
+        // coordinates under 1 MiB) — the rule of finding 3, observe then check
+        uint64_t units = 0;
         for (size_t i = from; i < hits.size(); ++i) {
             scratch += sizeof(hits[i]) + hits[i].size() * sizeof(LabelQuery::Hit);
             for (const LabelQuery::Hit &h : hits[i]) {
                 scratch += h.coords.size() * sizeof(Coord);
             }
+            units += row_work(i);
         }
         observe_seed_scratch(scratch + query.cache_bytes());
-        for (size_t i = from; i < hits.size(); ++i) {
-            uint64_t units = (keys[i] != npos ? 8 : 0) + hits[i].size();
-            for (const LabelQuery::Hit &h : hits[i]) {
-                units += h.coords.size();
-            }
-            charge_seed(units);
-        }
+        charge_seed(units);
+    };
+    // How many keys the next call reads. A call is decoded whole and charged as one, so under
+    // a work budget it is the work a failed seed phase can run past its last comparison by:
+    // grown from one key, doubling, it holds about one check interval at the widest row read
+    // so far (with its hits, coordinates and, budget-aware, dependency rows), so that a failed
+    // seed phase ran past the budget by less than two intervals plus one such call. Sized from
+    // the query's labels alone, a call of rows wider than that was one charge of 2.5 million
+    // units under a budget of 1 once its rows were charged together. Without a work budget the
+    // calls are as before.
+    uint64_t widest = query.labels().size();
+    size_t grown = 1;
+    auto next_chunk = [&]() -> size_t {
+        if (!strategy_.max_work_units)
+            return std::max<size_t>(1, kWorkCheckInterval / (8 + query.labels().size()));
+        const size_t chunk = std::clamp<uint64_t>(kWorkCheckInterval / (8 + widest), 1, grown);
+        grown = std::min(2 * grown, kFetchChunk);
+        return chunk;
     };
     if (decode_charged_) {
         // The budget-aware reads (stage 3), in chunks under any budget: each within what the
@@ -1828,9 +1930,8 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
         costs.reserve(keys.size());
         uint64_t held = annot::matrix::buffer_bytes(keys.size(), sizeof(LabelQuery::NodeHits))
                       + annot::matrix::buffer_bytes(keys.size(), sizeof(KeyCost));
-        const size_t chunk = std::max<size_t>(1, kWorkCheckInterval / (8 + query.labels().size()));
-        for (size_t begin = 0; begin < keys.size(); begin += chunk) {
-            const size_t end = std::min(keys.size(), begin + chunk);
+        for (size_t begin = 0, end = 0; begin < keys.size(); begin = end) {
+            end = std::min(keys.size(), begin + next_chunk());
             const uint64_t beside = seed_bytes() + held;
             const uint64_t max = !mem_limit_ ? std::numeric_limits<uint64_t>::max()
                                : beside < mem_limit_ ? mem_limit_ - beside : 0;
@@ -1866,13 +1967,14 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
             }
             held += budget.held();
             observe_seed_scratch(held);
+            // the call's rows, each with its row-diff dependency rows, as one charge (above)
+            uint64_t units = 0;
             for (size_t i = begin; i < end; ++i) {
-                uint64_t units = (keys[i] != npos ? 8 : 0) + hits[i].size() + costs[i].dependency_units;
-                for (const LabelQuery::Hit &h : hits[i]) {
-                    units += h.coords.size();
-                }
-                charge_seed(units);
+                const uint64_t row = row_work(i) + costs[i].dependency_units;
+                widest = std::max<uint64_t>(widest, row - (keys[i] != npos ? 8 : 0));
+                units += row;
             }
+            charge_seed(units);
         }
         return hits;
     }
@@ -1882,17 +1984,17 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
         charge(0);
         return hits;
     }
-    // Under a work budget in chunks, with the check between them: a key costs at most 8
-    // units plus one per label of the query (and the coordinates of its hits), so a chunk
-    // stays within about one check interval and a long seed cannot spend the budget many
-    // times over in one call
-    const size_t chunk = std::max<size_t>(1, kWorkCheckInterval / (8 + query.labels().size()));
+    // Under a work budget in calls (next_chunk), with the comparison between them, so that a
+    // long seed cannot spend the budget many times over in one call
     hits.reserve(keys.size());
-    for (size_t begin = 0; begin < keys.size(); begin += chunk) {
-        const size_t end = std::min(keys.size(), begin + chunk);
+    for (size_t begin = 0, end = 0; begin < keys.size(); begin = end) {
+        end = std::min(keys.size(), begin + next_chunk());
         for (auto &h : query.fetch(std::vector<node_index>(keys.begin() + begin,
                                                            keys.begin() + end))) {
             hits.push_back(std::move(h));
+        }
+        for (size_t i = begin; i < end; ++i) {
+            widest = std::max<uint64_t>(widest, row_work(i) - (keys[i] != npos ? 8 : 0));
         }
         charge(begin);
     }
@@ -1911,9 +2013,12 @@ void Walker::fail_seed(ResourceStop::Resource resource, double used, double dema
     q.arm = Arm::RIGHT;
     q.at_bp = 0;
     q.limit = resource == ResourceStop::MEMORY ? static_cast<double>(strategy_.max_memory_bytes)
-                                               : static_cast<double>(strategy_.max_work_units);
+            : resource == ResourceStop::WORK ? static_cast<double>(strategy_.max_work_units)
+            : std::ceil(control_ ? control_->bound_ms : 0);   // the attempt's bound
     q.used = used;
     q.demand = demand;
+    if (resource == ResourceStop::MEMORY)
+        q.allotted = allotted_;
     ResourceAccount account;
     account.memory_limit = strategy_.max_memory_bytes;
     account.memory_peak = peak_;
@@ -1938,6 +2043,17 @@ void Walker::fail_depth0(uint64_t need, const Arm *unread, uint64_t labels, uint
           "delivering them costs in the requested detail, need "
         + (unread ? "at least " : "")
         + std::to_string((need + (uint64_t(1) << 20) - 1) >> 20) + " MiB";
+    // The need includes the caches' allotments of this budget, which grow with the budget: the
+    // knob value that holds the state is stated, not the need (raised to it, the seed failed
+    // again with a larger need; review of the stage-3 fixes, P2)
+    const uint64_t knob = memory_budget_holding(need, allotted_) >> 20;
+    if (allotted_) {
+        what += " with the caches' allotments of this budget (5/16 of it, at most 128 MiB), which "
+                "grow with it: " + (unread ? "no budget below " + std::to_string(knob)
+                                             + " MiB holds them"
+                                           : "the smallest budget that holds them is "
+                                             + std::to_string(knob) + " MiB");
+    }
     if (unread) {
         what += labels
             ? std::string(" (the ") + to_string(*unread) + " arm's root row names " + std::to_string(labels)
@@ -1947,6 +2063,10 @@ void Walker::fail_depth0(uint64_t need, const Arm *unread, uint64_t labels, uint
               "before it already reached the budget";
         what += strategy_.direction == Strategy::BOTH && *unread == Arm::LEFT
             ? "; the RIGHT arm's root was not read)" : ")";
+        // a lower bound is no promise: what was not built may need more (review of stage 3,
+        // answer 2)
+        what += "; raising the budget to that may still fail: unread roots, labels or later "
+                "state may need more";
     }
     ResourceStop detail;
     detail.lower_bound = unread;
@@ -1983,9 +2103,11 @@ void Walker::init_arm(ArmState &arm) {
         Entry e;
         e.label = l;
         e.pred = l;
+        // moved: the root's entry is the only reader of its arm's boundary coordinates, and
+        // keeping a second copy for the whole walk held them twice, uncharged
         if (trace_)
-            e.coords = boundary_coords_[static_cast<size_t>(arm.arm)][l];
-        root.state.push_back(e);
+            e.coords = std::move(boundary_coords_[static_cast<size_t>(arm.arm)][l]);
+        root.state.push_back(std::move(e));
     }
     if (annotate_) {
         // the boundary k-mer's own labels: the root's entry node, from which
@@ -2754,7 +2876,9 @@ void Walker::init_budgets() {
         cache_allotment_ = std::min<uint64_t>(mem_limit_ / 4, uint64_t(64) << 20);
         const uint64_t lookahead = std::min<uint64_t>(mem_limit_ / 16, uint64_t(64) << 20);
         max_lookahead_ = std::max<size_t>(1, lookahead / 128);
-        base_ += cache_allotment_ + lookahead;
+        allotted_ = cache_allotment_ + lookahead;
+        assert(allotted_ == memory_allotments(mem_limit_));
+        base_ += allotted_;
         if (query_)
             query_->set_max_cache_bytes(cache_allotment_);
         if (recorder_)
@@ -2912,6 +3036,74 @@ void Walker::checkpoint(bool force) {
     // such a walk after its first level.
     if (depth_ > 0 && time_exceeded())
         throw BudgetTrip { ResourceStop::TIME, timer_.elapsed() * 1000.0 };
+    // A stop from outside the walk is read where the deadline is (before every head and at
+    // least every interval), at any depth: unlike a zero time budget it says nothing about
+    // extension, and a cancelled attempt must stop as soon as it can. It stops the walk like
+    // a budget, so the prefix walked so far is delivered (resource_limit)
+    switch (external_stop()) {
+        case ExternalStop::NONE:
+            return;
+        case ExternalStop::CANCELLED:
+            throw BudgetTrip { ResourceStop::CANCELLED, attempt_ms() };
+        case ExternalStop::ATTEMPT_DEADLINE:
+        case ExternalStop::CLIENT_GONE:    // thrown as AttemptAborted by external_stop()
+            throw BudgetTrip { ResourceStop::ATTEMPT_DEADLINE, attempt_ms() };
+    }
+}
+
+ExternalStop Walker::external_stop() {
+    if (!control_ || !control_->poll)
+        return ExternalStop::NONE;
+    const ExternalStop stop = control_->poll();
+    if (stop == ExternalStop::CLIENT_GONE) {
+        // nothing of this walk can be delivered: abandoned without finalising anything (the
+        // message is logged: it names no request-supplied text, a seed_id can be megabytes)
+        throw AttemptAborted("the client closed its connection: the walk was abandoned at "
+                             "depth " + std::to_string(depth_) + " bp");
+    }
+    return stop;
+}
+
+void Walker::seed_external_stop() {
+    const ExternalStop stop = external_stop();
+    if (stop == ExternalStop::NONE)
+        return;
+    const double ms = attempt_ms();
+    const bool cancelled = stop == ExternalStop::CANCELLED;
+    fail_seed(cancelled ? ResourceStop::CANCELLED : ResourceStop::ATTEMPT_DEADLINE, ms, ms,
+              std::string(cancelled ? "the attempt was cancelled (POST /traverse/cancel)"
+                                    : "the attempt reached the time at which the server stops "
+                                      "walking it (its duration bound less half the allowance)")
+              + " while the seed was "
+              + (seed_.labels.empty() ? "read to derive its permitted set"
+                                      : "validated against its labels")
+              + ", " + std::to_string(static_cast<uint64_t>(ms)) + " ms after the request was "
+                "received: no traversal was made");
+}
+
+double Walker::attempt_ms() const {
+    // whole milliseconds, rounded up: the statements' integers (K, Q and the cap trigger), and
+    // never less than what elapsed
+    return std::ceil(control_ && control_->elapsed_ms ? control_->elapsed_ms()
+                                                      : timer_.elapsed() * 1000.0);
+}
+
+void Walker::write_meter() const noexcept {
+    if (!control_ || !control_->meter || metered_)
+        return;
+    metered_ = true;
+    AttemptMeter &m = *control_->meter;
+    m.work_units = work_used();
+    m.work_seed = seed_work_;
+    // What the budget admitted: an account past it was refused (the seed failed at depth 0, or
+    // the walk stopped) or is held beyond it as the soft excess, so under a memory budget the
+    // admitted peak is at most the budget (review of the stage-4 backend, F1: a refused depth-0
+    // demand of 21.8 MB was reported as admitted under 1 MiB)
+    const uint64_t peak = std::max(peak_, accounted());
+    m.memory_peak = mem_limit_ ? std::min(peak, mem_limit_) : peak;
+    m.memory_final = accounted();
+    m.soft_excess = overshoot_;
+    m.walked = true;
 }
 
 EndReason Walker::note_stop(const ArmState &arm, const Item *head,
@@ -2930,6 +3122,7 @@ EndReason Walker::note_stop(const ArmState &arm, const Item *head,
                 q.limit = static_cast<double>(mem_limit_);
                 // a refused read states what the walk held beyond the account too
                 q.used = used >= 0 ? used : static_cast<double>(accounted());
+                q.allotted = allotted_;
                 break;
             case ResourceStop::WORK:
                 q.limit = static_cast<double>(strategy_.max_work_units);
@@ -2939,14 +3132,23 @@ EndReason Walker::note_stop(const ArmState &arm, const Item *head,
                 q.limit = strategy_.time_budget_ms;
                 q.used = demand;
                 break;
+            case ResourceStop::CANCELLED:
+            case ResourceStop::ATTEMPT_DEADLINE:
+                // the attempt's amounts: its bound and its elapsed time, no budget's
+                q.limit = std::ceil(control_ ? control_->bound_ms : 0);
+                q.used = demand;
+                break;
         }
         result_.resource_stop = q;
     }
     // the cap trigger's demand, in the unit of the knob a reader would raise
-    // (bounds.max_memory_mb counts whole MiB)
+    // (bounds.max_memory_mb counts whole MiB): the budget that admits it, whose caches'
+    // allotments are larger than this budget's (memory_budget_holding; review of the
+    // stage-3 fixes, P2: the need at this budget, raised to, failed again)
     switch (resource) {
         case ResourceStop::MEMORY:
-            cap_demand_ = std::ceil(demand / static_cast<double>(uint64_t(1) << 20));
+            cap_demand_ = static_cast<double>(
+                    memory_budget_holding(static_cast<uint64_t>(std::ceil(demand)), allotted_) >> 20);
             return EndReason::RESOURCE_LIMIT;
         case ResourceStop::WORK:
             cap_demand_ = demand;
@@ -2954,6 +3156,13 @@ EndReason Walker::note_stop(const ArmState &arm, const Item *head,
         case ResourceStop::TIME:
             cap_demand_ = demand;
             return EndReason::TIME_BUDGET;
+        case ResourceStop::CANCELLED:
+        case ResourceStop::ATTEMPT_DEADLINE:
+            // not a time budget that ran out (time_budget would tell a reader to raise one):
+            // censored like any stop the request's own budgets did not cause, resource_limit,
+            // with the attempt's elapsed milliseconds as the demand
+            cap_demand_ = demand;
+            return EndReason::RESOURCE_LIMIT;
     }
     return EndReason::RESOURCE_LIMIT;
 }
@@ -3160,6 +3369,12 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
         // depend on how it is cut into calls nor on what the lookahead cached. The level's
         // vectors are held beside the account like its rows; each row's work includes its
         // row-diff dependency rows (KeyCost), whichever read decoded them.
+        // A level with no key to read (the radius, where heads only end, or dead ends) reads
+        // nothing, so it is not admitted as a read: it finishes within the reservations its
+        // heads already hold. Admitting its empty lists stopped a completed radius-0 walk
+        // whose depth-0 state filled the budget exactly (review of stage 3, F3).
+        if (keys.empty())
+            return {};
         std::vector<LabelQuery::NodeHits> hits;
         std::vector<KeyCost> costs;
         hits.reserve(keys.size());
@@ -3241,7 +3456,10 @@ std::vector<LabelRecorder::NodeLabels> Walker::fetch_present(ArmState &arm,
     }
     if (decode_charged_) {
         // as fetch_hits; the names a call gives are charged inside it (what the account will
-        // charge for them), then with the dictionary, so that they are held within the budget
+        // charge for them), then with the dictionary, so that they are held within the budget;
+        // a level with no key to read is not admitted as a read (see fetch_hits)
+        if (keys.empty())
+            return {};
         std::vector<LabelRecorder::NodeLabels> present;
         std::vector<KeyCost> costs;
         present.reserve(keys.size());
@@ -5160,6 +5378,12 @@ SeedResult Walker::run() {
                 + " is shorter than k = " + std::to_string(k_) + ": a continuation must be "
                   "valid traverse input; use 0 (no continuation sequence) or at least k");
     }
+    // what the walk consumed reaches the caller however it ends: a result, a failed seed or
+    // an exception (a ledger reconciles the attempt against it)
+    struct Metered {
+        const Walker &walker;
+        ~Metered() { walker.write_meter(); }
+    } metered { *this };
     // the seed phase observes what it holds against the memory budget (observe_seed_scratch)
     mem_limit_ = strategy_.max_memory_bytes;
     budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
@@ -5193,6 +5417,12 @@ SeedResult Walker::run() {
         // the bins a stop before the first level can write into
         if (arm.result.requested)
             charge_bins(arm, 0);
+    }
+    // the roots hold their coordinates now (charged with the depth-0 state); an arm that is
+    // not requested never read its boundary coordinates, which are freed here rather than
+    // held, uncharged, for the whole walk
+    for (auto &coords : boundary_coords_) {
+        std::vector<SmallVector<Coord>>().swap(coords);
     }
     if (annotate_)
         charge_dictionary();
@@ -5277,6 +5507,8 @@ SeedResult Walker::run() {
     account.largest_charge = largest_charge_;
     account.decode_charged = decode_charged_;
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
+    // before the arms' results move into the seed's
+    write_meter();
     if (annotate_) {
         summarize_annotate();
     } else {
@@ -5292,6 +5524,105 @@ SeedResult Walker::run() {
 }
 
 } // namespace
+
+
+uint64_t memory_allotments(uint64_t budget) {
+    return std::min<uint64_t>(budget / 4, uint64_t(64) << 20)
+         + std::min<uint64_t>(budget / 16, uint64_t(64) << 20);
+}
+
+uint64_t memory_budget_holding(uint64_t need, uint64_t allotted) {
+    constexpr uint64_t kMiB = uint64_t(1) << 20;
+    // what the account holds whatever the budget: the need without this budget's allotments
+    const uint64_t own = need > allotted ? need - allotted : 0;
+    if (!allotted || own > std::numeric_limits<uint64_t>::max() / 2)
+        return std::max<uint64_t>(1, (own + kMiB - 1) / kMiB) * kMiB;
+    // B - memory_allotments(B) never decreases with B (its slope is 11/16, 15/16 or 1), so
+    // the budgets that hold |own| beside their allotments are those from the smallest on;
+    // one of own + 128 MiB holds it (the allotments never exceed 128 MiB)
+    auto holds = [&](uint64_t mib) { return own + memory_allotments(mib * kMiB) <= mib * kMiB; };
+    uint64_t lo = 1, hi = (own + (uint64_t(128) << 20) + kMiB - 1) / kMiB;
+    while (lo < hi) {
+        const uint64_t mid = lo + (hi - lo) / 2;
+        if (holds(mid)) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    return lo * kMiB;
+}
+
+// see walker.hpp; validate_seed's rule for labels.extra
+std::vector<double> switch_reach(const LabelChangeCost &cost, size_t n, size_t sources,
+                                 double budget) {
+    std::vector<double> dist(n, kInfiniteLoss);
+    for (size_t s = 0; s < std::min(sources, n); ++s) {
+        dist[s] = 0;
+    }
+    if (cost.model() == LabelChangeCost::FORBID)
+        return dist;
+    if (cost.model() == LabelChangeCost::CONSTANT) {
+        const double c = cost.default_cost();
+        if (sources && c <= budget) {
+            for (size_t l = sources; l < n; ++l) {
+                dist[l] = std::min(dist[l], c);
+            }
+        }
+        return dist;
+    }
+    const auto &table = cost.table();
+    const double fallback = cost.default_cost();
+    const bool by_default = fallback != kInfiniteLoss && fallback <= budget;
+    std::vector<LabelId> pending;
+    if (by_default) {
+        pending.reserve(n);
+        for (size_t l = 0; l < n; ++l) {
+            pending.push_back(static_cast<LabelId>(l));
+        }
+    }
+    using Item = std::pair<double, LabelId>;
+    std::priority_queue<Item, std::vector<Item>, std::greater<Item>> queue;
+    for (size_t s = 0; s < std::min(sources, n); ++s) {
+        queue.emplace(0.0, static_cast<LabelId>(s));
+    }
+    std::vector<uint8_t> done(n, 0);
+    auto relax = [&](LabelId to, double loss) {
+        if (loss <= budget && loss < dist[to]) {
+            dist[to] = loss;
+            queue.emplace(loss, to);
+        }
+    };
+    while (!queue.empty()) {
+        const auto [d, u] = queue.top();
+        queue.pop();
+        if (done[u] || d > dist[u])
+            continue;
+        done[u] = 1;
+        auto first = table.lower_bound({ u, 0 });
+        for (auto it = first; it != table.end() && it->first.first == u; ++it) {
+            if (it->first.second < n && it->first.second != u && it->second != kInfiniteLoss)
+                relax(it->first.second, d + it->second);
+        }
+        if (!by_default)
+            continue;
+        size_t kept = 0;
+        for (LabelId v : pending) {
+            if (v == u || table.count({ u, v })) {
+                // no default from |u| to |v|: a later pop gives it one
+                pending[kept++] = v;
+            } else {
+                relax(v, d + fallback);
+            }
+        }
+        pending.resize(kept);
+    }
+    for (double &x : dist) {
+        if (x > budget)
+            x = kInfiniteLoss;
+    }
+    return dist;
+}
 
 
 void validate_strategy(const Strategy &st, const LabelChangeCost &cost) {
@@ -5438,9 +5769,10 @@ SeedResult traverse_seed(LabelOracle &oracle,
                          const Strategy &strategy,
                          const LabelChangeCost &cost,
                          const std::string &release_id,
-                         const WalkerHooks *hooks) {
+                         const WalkerHooks *hooks,
+                         const AttemptControl *control) {
     validate_strategy(strategy, cost);
-    Walker walker(oracle, seed, strategy, cost, release_id, hooks);
+    Walker walker(oracle, seed, strategy, cost, release_id, hooks, control);
     return walker.run();
 }
 
