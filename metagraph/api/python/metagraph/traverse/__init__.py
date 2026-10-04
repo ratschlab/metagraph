@@ -24,19 +24,22 @@ from .model import (
     IncompatibleContinuations, IncompleteRecording, Label, LabelWalk, MissingEnvelope,
     NextRequest, Segment, Run, SupportRun, UnknownLabel, Walk,
 )
-from .parser import FORMAT_VERSION, dump, from_response, is_canonical, load, parse, save
+from .parser import (FORMAT_VERSION, dump, from_response, is_canonical, load, parse, save,
+                     seed_envelope, standalone_text)
 from .ops import GraphletView
-from .client import (AttemptAtBound, ServerInitializing, TraverseClient, TraverseError,
-                     TraverseResponse)
+from .client import (AttemptAtBound, AttemptExpired, ServerInitializing, TraverseClient,
+                     TraverseError, TraverseResponse)
 from .store import Entry, GraphletStore, StoreLimitExceeded, UnknownHandle
 
 __all__ = [
     'FORMAT_VERSION', 'parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
+    'standalone_text', 'seed_envelope',
     'Graphlet', 'GraphletView', 'Label', 'Arm', 'Segment', 'Run', 'Walk', 'Claim',
     'LabelWalk', 'SupportRun', 'Change', 'Continuation', 'NextRequest', 'Comparison',
     'GraphletFormatError', 'CodecError', 'MissingEnvelope', 'AmbiguousLabel',
     'UnknownLabel', 'BadSelector', 'IncompleteRecording', 'IncompatibleContinuations',
     'UNLIMITED',
     'TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
-    'AttemptAtBound', 'GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded',
+    'AttemptAtBound', 'AttemptExpired', 'GraphletStore', 'Entry', 'UnknownHandle',
+    'StoreLimitExceeded',
 ]

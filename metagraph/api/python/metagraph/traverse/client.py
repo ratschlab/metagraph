@@ -22,13 +22,14 @@ import copy
 import gzip
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
-           'AttemptAtBound', 'ACCEPT_ENCODING']
+           'AttemptAtBound', 'AttemptExpired', 'ACCEPT_ENCODING']
 
 ACCEPT_ENCODING = 'gzip, deflate'
 
@@ -62,6 +63,14 @@ class AttemptAtBound(TraverseError):
     delivered. It was registered and ran -- its id is used up on this server (a retry under
     the same attempt_id is refused, 409) -- and |usage| states what it consumed. Not a
     loading server: never retry it as one."""
+
+
+class AttemptExpired(TraverseError):
+    """409 with `state: "expired"`: the request's not_after_ms had passed on the server's
+    clock when its handler started, so it was NOT started — nothing ran, nothing was
+    registered (no usage; GET /traverse/attempt answers 404 for its id). The body states
+    `not_after_ms` and the server's `server_time_ms`. Told apart from the other 409 (an
+    attempt_id that is running, retained or tombstoned: `attempt` in the body) by its state."""
 
 
 @dataclass
@@ -159,6 +168,8 @@ class TraverseClient:
                     raise AttemptAtBound(status, message, out)
                 raise ServerInitializing(status, message, out,
                                          int(retry) if retry and retry.isdigit() else None)
+            if status == 409 and isinstance(out, dict) and out.get('state') == 'expired':
+                raise AttemptExpired(status, message, out)
             raise TraverseError(status, message, out)
         if out is None:
             raise TraverseError(status, 'the response is not JSON', text[:500])
@@ -166,8 +177,25 @@ class TraverseClient:
 
     # ---------------------------------------------------------------- routes
 
-    def capabilities(self):
-        return self._request('GET', '/traverse/capabilities')
+    def capabilities(self, graph=None, graph_path=None):
+        """GET /traverse/capabilities: what one index supports. On a multi-graph server name
+        it: |graph| (the client's own graph by default) and, when the name spans several
+        graphs, |graph_path|."""
+        graph = graph or self.graph
+        query = []
+        if graph:
+            query.append('graph=' + urllib.parse.quote(graph, safe=''))
+        if graph_path:
+            query.append('graph_path=' + urllib.parse.quote(graph_path, safe=''))
+        return self._request('GET', '/traverse/capabilities'
+                             + ('?' + '&'.join(query) if query else ''))
+
+    def server_capabilities(self):
+        """GET /capabilities: the server-wide document — routes and features, feature_level,
+        algorithm_version, mode (single | multi) and the graph names, the attempts block and
+        how deadlines are checked (deadline_check). Answered while a single index loads
+        (`ready: false`)."""
+        return self._request('GET', '/capabilities')
 
     def resolve(self, sequence, *, labels=None, discover=None, select=None, **opts):
         req = {'sequence': sequence}
@@ -206,7 +234,8 @@ class TraverseClient:
         return self._request('GET', '/traverse/attempt/' + attempt_id, answers=(404,))
 
     def build_request(self, seeds, strategy=None, *, detail='graphlet', timing=True,
-                      graph=None, attempt_id=None, budget_id=None, locus_id=None):
+                      graph=None, attempt_id=None, budget_id=None, locus_id=None,
+                      not_after_ms=None):
         norm = []
         for s in seeds:
             norm.append({'sequence': s} if isinstance(s, str) else dict(s))
@@ -221,21 +250,24 @@ class TraverseClient:
         if graph:
             req['graph'] = graph
         for key, value in (('attempt_id', attempt_id), ('budget_id', budget_id),
-                           ('locus_id', locus_id)):
+                           ('locus_id', locus_id), ('not_after_ms', not_after_ms)):
             if value is not None:
                 req[key] = value
         return req
 
     def traverse(self, seeds, strategy=None, *, detail='graphlet', timing=True, graph=None,
-                 attempt_id=None, budget_id=None, locus_id=None):
+                 attempt_id=None, budget_id=None, locus_id=None, not_after_ms=None):
         """-> TraverseResponse(envelope, graphlets, errors). A seed whose permitted set
         could not be derived is an error result ({seed, error}), not an exception: the
         other seeds' graphlets are still returned (so is a seed an attempt never started,
         cancelled or past its bound: resource_stop phase not_started). A request error is
-        raised (TraverseError; with attempt_id its usage is in the error's .usage), and an
-        attempt whose response was stopped at its bound raises AttemptAtBound."""
+        raised (TraverseError; with attempt_id its usage is in the error's .usage), an
+        attempt whose response was stopped at its bound raises AttemptAtBound, and a request
+        whose |not_after_ms| (Unix epoch ms) had passed on the server's clock raises
+        AttemptExpired (not started)."""
         req = self.build_request(seeds, strategy, detail=detail, timing=timing, graph=graph,
-                                 attempt_id=attempt_id, budget_id=budget_id, locus_id=locus_id)
+                                 attempt_id=attempt_id, budget_id=budget_id, locus_id=locus_id,
+                                 not_after_ms=not_after_ms)
         return self.response(self.traverse_raw(req))
 
     @staticmethod

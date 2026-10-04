@@ -140,9 +140,15 @@ class _Indexes:
             graph, anno = G.build_index(name, G.resolve_cli(_cli()), cls.root)
             d = os.path.dirname(graph)
             files = []
+            loaded = {os.path.basename(graph), os.path.basename(anno)}
             for p in sorted(os.listdir(d)):
                 full = os.path.join(d, p)
                 if p == 'index.manifest.json' or not os.path.isfile(full):
+                    continue
+                # one graph with one annotation: the column annotation the column_coord one
+                # was transformed from is another annotation, which a manifest must not list
+                # (the server refuses it since the review of pass 5)
+                if p.endswith('dbg') and p not in loaded:
                     continue
                 with open(full, 'rb') as f:
                     digest = hashlib.sha256(f.read()).hexdigest()

@@ -34,6 +34,7 @@ from .model import (
 )
 
 __all__ = ['parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
+           'standalone_text', 'seed_envelope', 'RESERVED_ENVELOPE_NAMES',
            'GraphletFormatError', 'FORMAT_VERSION', 'utf8_bytes']
 
 FORMAT_VERSION = 1
@@ -722,7 +723,40 @@ def _parse_extras(tok, n_labels):
     return out
 
 
+# Top-level names of a J object that are the library's own, never a response's: a view's
+# selector and the retrieval a view or a derived graphlet came from (_attach_j reads them
+# back). A response carrying one would be misread on load, so it is refused
+# (from_response, standalone_text).
+RESERVED_ENVELOPE_NAMES = ('view', 'derived_from')
+
+
+def seed_envelope(envelope, seed_index):
+    """The envelope a single seed's graphlet keeps (a saved file's J line, a store entry):
+    the response envelope with its `usage` reduced to the totals plus THIS seed's per_seed
+    entry (the one whose index is |seed_index|, the H record's seed_index) — the other seeds'
+    entries describe graphlets this one is not. Idempotent; an envelope without a per_seed
+    list is returned as it is (a copy)."""
+    env = dict(envelope or {})
+    usage = env.get('usage')
+    if isinstance(usage, dict) and isinstance(usage.get('per_seed'), list):
+        usage = dict(usage)
+        usage['per_seed'] = [e for e in usage['per_seed']
+                             if isinstance(e, dict) and e.get('index') == seed_index]
+        env['usage'] = usage
+    return env
+
+
+def _refuse_reserved(response):
+    for name in RESERVED_ENVELOPE_NAMES:
+        if name in response:
+            raise ValueError('the response has a top-level %r, a name the library reserves '
+                             'for its own envelope (a view or a derived graphlet): refused '
+                             'rather than misread' % name)
+
+
 def _attach_j(g, j):
+    # 'view' and 'derived_from' are the library's own names (RESERVED_ENVELOPE_NAMES): a
+    # response that carried one was refused before it could be saved
     results = j.get('results')
     if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
         raise GraphletFormatError(2, 'J: results[] reduced to this seed\'s summary')
@@ -946,8 +980,9 @@ def _event_line(ev):
 
 def j_object(g):
     """The J line's object: the response envelope with results[] reduced to this seed's
-    summary (the graphlet string removed), plus a view's selector when it is one."""
-    j = dict(g.envelope or {})
+    summary (the graphlet string removed) and its usage to the totals plus this seed's
+    per_seed entry (seed_envelope), plus a view's selector when it is one."""
+    j = seed_envelope(g.envelope, g.seed_index)
     summary = {k: v for k, v in (g.seed_summary or {}).items()
                if k not in ('graphlet', 'graphlet_bytes', 'graphlet_lines')}
     j['results'] = [summary]
@@ -976,14 +1011,28 @@ def is_canonical(text):
 
 # ======================================================================= envelope
 
+def _check_transport(body, result):
+    """The body against its summary's byte and line counts (a body cut in transport)."""
+    if 'graphlet_bytes' in result:
+        n = len(utf8_bytes(body))
+        if n != result['graphlet_bytes']:
+            raise GraphletFormatError(0, 'the body has %d bytes, graphlet_bytes says %d '
+                                      '(truncated in transport)' % (n, result['graphlet_bytes']))
+    if 'graphlet_lines' in result and body.count('\n') != result['graphlet_lines']:
+        raise GraphletFormatError(0, 'graphlet_lines says %d, the body has %d'
+                                  % (result['graphlet_lines'], body.count('\n')))
+
+
 def from_response(result, response):
     """results[i] of a detail: graphlet response + the response (the envelope) ->
     Graphlet with the summary attached. A derivation failure ({seed, error}) has no
-    graphlet and raises ValueError."""
+    graphlet and raises ValueError, as does a response with a reserved top-level name
+    (RESERVED_ENVELOPE_NAMES)."""
     body = result.get('graphlet')
     if body is None:
         raise ValueError('this result carries no graphlet%s' % (
             ': ' + result['error'] if 'error' in result else ''))
+    _refuse_reserved(response)
     if 'graphlet_bytes' in result:
         n = len(utf8_bytes(body))
         if n != result['graphlet_bytes']:
@@ -996,6 +1045,55 @@ def from_response(result, response):
     g.seed_summary = {k: v for k, v in result.items() if k != 'graphlet'}
     g.envelope = {k: v for k, v in response.items() if k != 'results'}
     return g
+
+
+def standalone_text(body, result, response):
+    """The standalone .mgt text of results[i] of a detail: graphlet response — H, the J line
+    (the envelope with this seed only, seed_envelope) and the body — spliced WITHOUT parsing
+    the body: for a server body (canonical, T37) it is byte for byte
+    dump(from_response(result, response), envelope=True), at the cost of a copy, so that a
+    large retrieval can be saved or spooled without building its model. The body is checked
+    against graphlet_bytes and graphlet_lines, and for its H and Z records, but NOT
+    validated: load() or parse() of the text does that (a body that is not canonical gives a
+    text that is not what dump() would write). Raises ValueError for a body that already
+    carries a J line (not a server body) and for a response with a reserved top-level name,
+    GraphletFormatError for a body cut in transport or without its H / Z record."""
+    _refuse_reserved(response)
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            body = bytes(body).decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise GraphletFormatError(0, 'not UTF-8: %s' % e) from None
+    _check_transport(body, result)
+    if not body.endswith('\n'):
+        raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
+    first = body.find('\n')
+    head = body[:first].split(' ')
+    if len(head) != 16 or head[0] != 'H' or head[1] != 'mgt':
+        raise GraphletFormatError(1, 'expected the H record')
+    try:
+        seed_index = parse_int(head[11])
+    except CodecError as e:
+        raise GraphletFormatError(1, 'H seed_index: %s' % e) from None
+    rest = body[first + 1:]
+    if rest.startswith('J '):
+        raise ValueError('the body already carries a J line: a saved file, not a server body')
+    last = body.rfind('\n', 0, len(body) - 1) + 1
+    z = body[last:-1].split(' ')
+    if len(z) != 2 or z[0] != 'Z':
+        raise GraphletFormatError(body.count('\n'), 'expected the Z record')
+    try:
+        lines = parse_int(z[1])
+    except CodecError as e:
+        raise GraphletFormatError(body.count('\n'), 'Z: %s' % e) from None
+    envelope = seed_envelope({k: v for k, v in response.items() if k != 'results'},
+                             seed_index)
+    envelope['results'] = [{k: v for k, v in result.items()
+                            if k not in ('graphlet', 'graphlet_bytes', 'graphlet_lines')}]
+    j = json.dumps(envelope, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    # the Z record counts the lines, the J line now among them
+    return ''.join((body[:first + 1], 'J ', j, '\n', body[first + 1:last],
+                    'Z %d\n' % (lines + 1)))
 
 
 def save(g, path):

@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .parser import dump, from_response, j_object, parse, utf8_bytes
+from .parser import dump, from_response, j_object, parse, seed_envelope, utf8_bytes
 
 __all__ = ['GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded']
 
@@ -242,8 +242,11 @@ class GraphletStore:
         ident = self._identity(g)
         if source is not None:
             ident['source'] = source
+        # the envelope of THIS seed: usage reduced to the totals and its per_seed entry, the
+        # rule of a saved file's J line (parser.seed_envelope)
         e = Entry(handle=h, request=request, index=ident,
-                  envelope=g.envelope or {}, seed_summary=g.seed_summary or {},
+                  envelope=seed_envelope(g.envelope, g.seed_index) if g.envelope else {},
+                  seed_summary=g.seed_summary or {},
                   digest=digest, bytes=nbytes, created=now, accessed=now, view=g.view,
                   derived_from=g.derived_from, delivery=delivery, parent=parent, store=self)
         self._write_entry(e)

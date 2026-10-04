@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import traverse_testlib as T  # noqa: E402
 
 from metagraph.traverse import (  # noqa: E402
-    ServerInitializing, TraverseClient, TraverseError,
+    AttemptExpired, ServerInitializing, TraverseClient, TraverseError,
 )
 
 
@@ -50,6 +50,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                               {'Retry-After': '60'})
         if self.path == '/api/traverse/capabilities':
             return self._send(200, {'k': 5, 'release': '', 'graphlet_format': 1})
+        if self.path.startswith('/api/traverse/capabilities?'):
+            # a multi-graph server's probe of one pair
+            from urllib.parse import parse_qs, urlsplit
+            q = parse_qs(urlsplit(self.path).query)
+            return self._send(200, {'graph': q['graph'][0],
+                                    'graph_path': q.get('graph_path', ['/g/' + q['graph'][0]])[0]})
+        if self.path == '/api/capabilities':
+            return self._send(200, {'mode': 'multi', 'graphs': ['A', 'B'], 'feature_level': 3})
         self._send(404, {'error': 'no route'})
 
     def do_POST(self):
@@ -64,6 +72,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         seq = body['seeds'][0]['sequence']
         if seq == 'BAD':
             return self._send(400, {'error': "seed 'x': invalid character 'B'"})
+        if 'not_after_ms' in body and body['not_after_ms'] < 1000:
+            return self._send(409, {'error': 'not_after_ms 1 has passed', 'state': 'expired',
+                                    'not_after_ms': body['not_after_ms'],
+                                    'server_time_ms': 1791137002417,
+                                    'server_instance': 'f' * 16})
+        if body.get('attempt_id') == 'dup':
+            return self._send(409, {'error': 'attempt_id dup is running', 'attempt': {}})
         resp = copy.deepcopy(T.doc_json(self.server.fixture, 'graphlet'))
         result = resp['results'][0]
         resp['results'] = []
@@ -103,6 +118,30 @@ class TestClient(unittest.TestCase):
     def test_capabilities_asks_for_compression(self):
         self.assertEqual(1, self.client.capabilities()['graphlet_format'])
         self.assertEqual('gzip, deflate', self.server.seen[0][2]['Accept-Encoding'])
+
+    def test_pass5_capabilities_not_after_and_expired(self):
+        """the per-graph probe (?graph=, graph_path percent-encoded), the server-wide document,
+        not_after_ms passed through, and the expired 409 told apart from a duplicate's"""
+        got = self.client.capabilities(graph='A', graph_path='/data/x y/g.dbg')
+        self.assertEqual(('A', '/data/x y/g.dbg'), (got['graph'], got['graph_path']))
+        self.assertEqual('/api/traverse/capabilities?graph=A&graph_path=%2Fdata%2Fx%20y%2Fg.dbg',
+                         self.server.seen[-1][1])
+        multi = TraverseClient('127.0.0.1', self.server.server_address[1], api_path='api',
+                               timeout=10, graph='B')
+        self.assertEqual('B', multi.capabilities()['graph'])
+        self.assertEqual(['A', 'B'], self.client.server_capabilities()['graphs'])
+        req = self.client.build_request(['ACGT'], attempt_id='a-1', not_after_ms=1791137060000)
+        self.assertEqual(1791137060000, req['not_after_ms'])
+        self.assertNotIn('not_after_ms', self.client.build_request(['ACGT']))
+        with self.assertRaises(AttemptExpired) as cm:
+            self.client.traverse(['AAAAACCCCC'], {'direction': 'right'}, not_after_ms=1)
+        self.assertEqual((409, 1), (cm.exception.status, cm.exception.body['not_after_ms']))
+        self.assertIsNone(cm.exception.usage)
+        self.assertEqual(1, self.server.seen[-1][3]['not_after_ms'])
+        with self.assertRaises(TraverseError) as cm:
+            self.client.traverse(['AAAAACCCCC'], {'direction': 'right'}, attempt_id='dup')
+        self.assertNotIsInstance(cm.exception, AttemptExpired)
+        self.assertEqual(409, cm.exception.status)
 
     def test_traverse_builds_a_graphlet_request(self):
         resp = self.client.traverse(['AAAAACCCCC'], {'direction': 'right'})
