@@ -1,5 +1,7 @@
 #include "traverse_attempts.hpp"
 
+#include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <ctime>
 #include <random>
@@ -59,10 +61,60 @@ bool valid_attempt_id(const std::string &id) {
     return true;
 }
 
+std::string iso_utc(std::chrono::system_clock::time_point t) {
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
+    const std::time_t seconds = static_cast<std::time_t>(ms / 1000);
+    std::tm tm {};
+    gmtime_r(&seconds, &tm);
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &tm);
+    return fmt::format("{}.{:03d}Z", buf, static_cast<int>(ms % 1000));
+}
+
+static std::string iso_of_ms(uint64_t ms) {
+    return iso_utc(std::chrono::system_clock::time_point(std::chrono::milliseconds(ms)));
+}
+
+bool not_after_passed(const AttemptIds &ids, uint64_t now_ms) {
+    return ids.not_after_ms && now_ms > *ids.not_after_ms;
+}
+
+Json::Value expired_json(const AttemptIds &ids, uint64_t now_ms,
+                         const std::string &server_instance) {
+    assert(ids.not_after_ms);
+    Json::Value j;
+    j["error"] = fmt::format("not_after_ms {} ({}) has passed on this server's clock ({}, {}) "
+                             "when the request's handler started: it was not started",
+                             *ids.not_after_ms, iso_of_ms(*ids.not_after_ms), now_ms,
+                             iso_of_ms(now_ms));
+    // told apart from the other 409 (a duplicate id, which carries `attempt`) by its state
+    j["state"] = "expired";
+    j["not_after_ms"] = uint_value(*ids.not_after_ms);
+    j["server_time_ms"] = uint_value(now_ms);
+    if (!ids.attempt_id.empty())
+        j["attempt_id"] = ids.attempt_id;
+    if (!ids.budget_id.empty())
+        j["budget_id"] = ids.budget_id;
+    if (!ids.locus_id.empty())
+        j["locus_id"] = ids.locus_id;
+    j["server_instance"] = server_instance;
+    return j;
+}
+
 AttemptIds attempt_ids(const Json::Value &request) {
     AttemptIds ids;
     if (!request.isObject())
         return ids;   // parse_traverse_request names the problem
+    if (request.isMember("not_after_ms")) {
+        // an integer in [0, 2^53 - 1]: a fraction, a sign, a string or a value no JSON reader
+        // keeps exactly is refused, never rounded into an instant the ledger did not mean
+        const Json::Value &v = request["not_after_ms"];
+        if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0) || v.asUInt64() > kMaxNotAfterMs) {
+            throw InvalidRequest("request.not_after_ms: expected an integer in [0, "
+                                 + std::to_string(kMaxNotAfterMs) + "] (Unix epoch, ms)");
+        }
+        ids.not_after_ms = v.asUInt64();
+    }
     auto read = [&](const char *field, std::string *out) {
         if (!request.isMember(field))
             return;
@@ -141,10 +193,126 @@ void Attempt::set_bound(size_t seeds, double time_budget_ms, uint64_t memory_bud
     bound_time_budget_ms_ = t;
     capped_ = settings_.hard_cap_ms > 0 && !(raw <= settings_.hard_cap_ms);
     bound_ms_ = capped_ ? settings_.hard_cap_ms : raw;
-    walk_until_ms_ = std::max(0.0, bound_ms_ - settings_.allowance_ms / 2);
     bound_set_ = true;
+    checked_walk_until_ms_.store(std::numeric_limits<double>::infinity(),
+                                 std::memory_order_relaxed);
+    update_walk_until_locked();
     seeds_.assign(seeds, SeedUsage());
     seeds_requested_ = seeds;
+}
+
+double Attempt::ms_left() const {
+    if (!enforced())
+        return std::numeric_limits<double>::infinity();
+    return walk_until_ms_ - elapsed_ms();
+}
+
+double Attempt::ratio_locked() const {
+    // the measured ratios replace the configured one, the smaller (more text per account) of
+    // this server's and this attempt's own
+    if (server_ratio_ > 0 && own_ratio_ > 0)
+        return std::min(server_ratio_, own_ratio_);
+    if (server_ratio_ > 0 || own_ratio_ > 0)
+        return std::max(server_ratio_, own_ratio_);
+    return configured_ratio_;
+}
+
+double Attempt::reserve_ms() const {
+    // the measured rates replace the configured ones: this server's (the slowest of its recent
+    // responses) and, for building, this attempt's own seeds, the slower of the two
+    double build_mbps = settings_.delivery_build_mbps;
+    if (server_.build_mbps > 0 || measured_build_mbps_ > 0) {
+        build_mbps = server_.build_mbps > 0 && measured_build_mbps_ > 0
+            ? std::min(server_.build_mbps, measured_build_mbps_)
+            : std::max(server_.build_mbps, measured_build_mbps_);
+    }
+    const double compress_mbps = server_.compress_mbps > 0 ? server_.compress_mbps
+                                                           : settings_.delivery_compress_mbps;
+    // the walked seed's text, estimated from its account
+    const double walking = std::ceil(static_cast<double>(walking_account_) / ratio_locked());
+    // MB/s are bytes per microsecond: x 1000 bytes per ms. With a margin for rates that vary
+    // between responses, and the time the walk takes to end once its walk-until passed (it
+    // stops at its next poll, then finalises the stopped seed), the configured one or the
+    // longest this server measured recently
+    const double model = (static_cast<double>(delivered_bytes_) + walking) / (compress_mbps * 1000)
+                       + walking / (build_mbps * 1000);
+    return kReserveMargin * model + std::max(settings_.delivery_stop_ms, server_.stop_ms);
+}
+
+void Attempt::set_measured(const DeliveryMeasurements &measured) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    server_ = measured;
+    if (auto it = server_.account_per_text_byte.find(detail_);
+            it != server_.account_per_text_byte.end()) {
+        server_ratio_ = it->second;
+    }
+    update_walk_until_locked();
+}
+
+double Attempt::own_build_mbps() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return measured_build_mbps_;
+}
+
+double Attempt::own_account_per_text_byte() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return own_ratio_;
+}
+
+double Attempt::own_stop_ms() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return own_stop_ms_;
+}
+
+void Attempt::update_walk_until_locked() {
+    // the reserve keeps time back for a delivery the server bounds: an attempt whose bound is
+    // not enforced (the CLI) states the floor, as before pass 5
+    walk_until_ms_ = std::max(0.0, bound_ms_ - std::max(settings_.allowance_ms / 2,
+                                                        enforced() ? reserve_ms() : 0.0));
+}
+
+void Attempt::set_delivery_detail(const std::string &detail) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    detail_ = detail;
+    configured_ratio_ = detail == "graphlet" ? settings_.account_per_text_byte_graphlet
+                                             : settings_.account_per_text_byte_json;
+    auto it = server_.account_per_text_byte.find(detail);
+    server_ratio_ = it != server_.account_per_text_byte.end() ? it->second : 0;
+    update_walk_until_locked();
+}
+
+void Attempt::progress(uint64_t account) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    walking_account_ = account;
+    update_walk_until_locked();
+}
+
+void Attempt::note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    delivered_bytes_ += text_bytes;
+    walking_account_ = 0;
+    if (text_bytes >= kMeasuredTextBytes) {
+        if (build_seconds > 0) {
+            const double mbps = static_cast<double>(text_bytes) / build_seconds / 1e6;
+            measured_build_mbps_ = measured_build_mbps_ > 0 ? std::min(measured_build_mbps_, mbps)
+                                                            : mbps;
+        }
+        if (account) {
+            const double ratio = static_cast<double>(account) / static_cast<double>(text_bytes);
+            own_ratio_ = own_ratio_ > 0 ? std::min(own_ratio_, ratio) : ratio;
+        }
+    }
+    update_walk_until_locked();
+}
+
+void Attempt::note_max_read_ms(double ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    max_read_ms_ = std::max(max_read_ms_, ms);
+}
+
+double Attempt::max_read_ms() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return max_read_ms_;
 }
 
 bool Attempt::request_stop(ExternalStop reason) {
@@ -176,8 +344,18 @@ ExternalStop Attempt::poll(bool force) {
     if (!stop && (force || ++polls_ >= settings_.poll_stride)) {
         polls_ = 0;
         if (enforced() && elapsed_ms() >= walk_until_ms_) {
-            request_stop(ExternalStop::ATTEMPT_DEADLINE);
-        } else if (peer_gone_) {
+            if (request_stop(ExternalStop::ATTEMPT_DEADLINE)) {
+                // where the walk was stopped: the walk-until in force now (it moves with the
+                // delivery reserve, up again once a seed is delivered)
+                std::lock_guard<std::mutex> lock(mutex_);
+                tripped_walk_until_ms_ = walk_until_ms_;
+            }
+        } else if (enforced()
+                   && walk_until_ms_ < checked_walk_until_ms_.load(std::memory_order_relaxed)) {
+            // the walk was bounded by it here (usage.bound.walk_until_ms)
+            checked_walk_until_ms_.store(walk_until_ms_, std::memory_order_relaxed);
+        }
+        if (!stop_.load(std::memory_order_acquire) && peer_gone_) {
             const Clock::time_point t = now();
             if (t >= next_peer_check_) {
                 next_peer_check_ = t + std::chrono::milliseconds(settings_.client_check_ms);
@@ -276,6 +454,13 @@ void Attempt::seed_walked(size_t index, const SeedUsage &usage) {
     seeds_[index] = usage;
     seeds_[index].started = true;
     seeds_[index].walked = true;
+    // a walk that ended after the walk-until (stopped at a poll after it, or ended between
+    // two of them) measures what the reserve must keep beyond building and compressing
+    if (enforced() && bound_set_) {
+        const double late = elapsed_ms() - tripped_walk_until_ms_.value_or(walk_until_ms_);
+        if (late > 0)
+            own_stop_ms_ = std::max(own_stop_ms_, late);
+    }
 }
 
 void Attempt::seed_not_started(size_t index, const SeedUsage &usage) {
@@ -302,7 +487,16 @@ Json::Value Attempt::bound_json() const {
     b["seeds"] = uint_value(bound_seeds_);
     b["time_budget_ms"] = bound_set_ ? Json::Value(bound_time_budget_ms_) : Json::Value();
     b["allowance_ms"] = ms_json(settings_.allowance_ms);
-    b["walk_until_ms"] = ms_json(walk_until_ms_);
+    // When the walk-until stopped the walk, the walk-until in force then: where the seeds
+    // stopped being walked (the walk stopped at its first poll after it, usage.stopped_at).
+    // Otherwise the lowest walk-until the walk's polls checked: the floor (bound - allowance /
+    // 2) unless the delivery reserve moved it before a check. A value no poll read bounded no
+    // walk: the lowest computed read 14905 ms for walks stopped near 16000, and 20174 ms (from
+    // the last seed's text, written after its walk) for a walk its own 30 s budget ended
+    // (review of pass 5, F4)
+    const double checked = checked_walk_until_ms_.load(std::memory_order_relaxed);
+    b["walk_until_ms"] = ms_json(tripped_walk_until_ms_ ? *tripped_walk_until_ms_
+                               : std::isfinite(checked) ? checked : walk_until_ms_);
     b["capped_by"] = capped_ ? Json::Value("content_timeout") : Json::Value();
     b["enforced"] = enforced();
     return b;
@@ -328,6 +522,9 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
     if (!ids_.locus_id.empty())
         u["locus_id"] = ids_.locus_id;
     u["server_instance"] = server_instance_;
+    // echoed only when the request gave it, so that every other usage keeps its keys
+    if (ids_.not_after_ms)
+        u["not_after_ms"] = uint_value(*ids_.not_after_ms);
     u["reason"] = reason;
     u["received_at"] = iso(received_);
     u["stopped_at"] = stopped_at_ ? Json::Value(iso(*stopped_at_)) : Json::Value();
@@ -373,6 +570,9 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
         list.append(std::move(e));
     }
     u["work_units"] = uint_value(work);
+    // the longest single annotation read of the request's walks: how far a stop could come
+    // late (an observation of this attempt, not a bound; see deadline_check)
+    u["observed_max_uninterruptible_ms"] = ms_json(max_read_ms_);
     Json::Value memory;
     memory["peak_admitted_bytes"] = uint_value(peak);
     // the soft part is observed only under a memory budget, and per seed (each seed's excess
@@ -398,6 +598,8 @@ Json::Value Attempt::state_json() const {
     if (!ids_.locus_id.empty())
         j["locus_id"] = ids_.locus_id;
     j["server_instance"] = server_instance_;
+    if (ids_.not_after_ms)
+        j["not_after_ms"] = uint_value(*ids_.not_after_ms);
     if (tombstone_) {
         // a cancel that came first: no request with this id ran here, and none will
         j["state"] = "unknown";
@@ -531,6 +733,72 @@ std::string AttemptRegistry::retention_text() const {
                        settings_.retention_count);
 }
 
+void AttemptRegistry::note_uninterruptible(double ms) {
+    if (!(ms > 0))
+        return;
+    const uint64_t us = static_cast<uint64_t>(std::ceil(std::min(ms, 1e12) * 1000));
+    uint64_t seen = max_uninterruptible_us_.load(std::memory_order_relaxed);
+    while (us > seen && !max_uninterruptible_us_.compare_exchange_weak(seen, us)) {}
+}
+
+uint64_t AttemptRegistry::observed_max_uninterruptible_ms() const {
+    return (max_uninterruptible_us_.load(std::memory_order_relaxed) + 999) / 1000;
+}
+
+void AttemptRegistry::note_build_rate(double mbps) {
+    if (!(mbps > 0) || !std::isfinite(mbps))
+        return;
+    std::lock_guard<std::mutex> lock(rates_mutex_);
+    build_rates_.push_back(mbps);
+    if (build_rates_.size() > kRateWindow)
+        build_rates_.pop_front();
+}
+
+void AttemptRegistry::note_compress_rate(double mbps) {
+    if (!(mbps > 0) || !std::isfinite(mbps))
+        return;
+    std::lock_guard<std::mutex> lock(rates_mutex_);
+    compress_rates_.push_back(mbps);
+    if (compress_rates_.size() > kRateWindow)
+        compress_rates_.pop_front();
+}
+
+void AttemptRegistry::note_account_per_text_byte(const std::string &detail, double ratio) {
+    if (!(ratio > 0) || !std::isfinite(ratio) || detail.empty())
+        return;
+    std::lock_guard<std::mutex> lock(rates_mutex_);
+    std::deque<double> &ratios = ratios_[detail];
+    ratios.push_back(ratio);
+    if (ratios.size() > kRateWindow)
+        ratios.pop_front();
+}
+
+void AttemptRegistry::note_stop_latency(double ms) {
+    if (!(ms > 0) || !std::isfinite(ms))
+        return;
+    std::lock_guard<std::mutex> lock(rates_mutex_);
+    stop_latencies_.push_back(ms);
+    if (stop_latencies_.size() > kRateWindow)
+        stop_latencies_.pop_front();
+}
+
+DeliveryMeasurements AttemptRegistry::measured() const {
+    std::lock_guard<std::mutex> lock(rates_mutex_);
+    auto least = [](const std::deque<double> &values) {
+        return values.empty() ? 0.0 : *std::min_element(values.begin(), values.end());
+    };
+    DeliveryMeasurements m;
+    m.build_mbps = least(build_rates_);
+    m.compress_mbps = least(compress_rates_);
+    m.stop_ms = stop_latencies_.empty()
+        ? 0.0 : *std::max_element(stop_latencies_.begin(), stop_latencies_.end());
+    for (const auto &[detail, ratios] : ratios_) {
+        if (!ratios.empty())
+            m.account_per_text_byte[detail] = least(ratios);
+    }
+    return m;
+}
+
 void AttemptRegistry::expire_locked() {
     const Clock::time_point t = now();
     const auto keep = std::chrono::seconds(settings_.retention_s);
@@ -562,15 +830,106 @@ Json::Value AttemptRegistry::unknown_json(const std::string &id) const {
     return j;
 }
 
-std::optional<Json::Value> AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt) {
+uint64_t AttemptRegistry::now_ms() const {
+    const auto t = settings_.wall_clock ? settings_.wall_clock() : std::chrono::system_clock::now();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
+    return ms > 0 ? static_cast<uint64_t>(ms) : 0;
+}
+
+std::optional<AttemptRegistry::StartRefusal>
+AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt) {
     std::lock_guard<std::mutex> lock(mutex_);
     expire_locked();
     const std::string &id = attempt->ids().attempt_id;
     auto it = attempts_.find(id);
     if (it != attempts_.end())
-        return it->second->state_json();
+        return StartRefusal { false, it->second->state_json() };
+    // not run, and not kept: a later copy of the request is expired as well, so nothing has
+    // to remember it (GET /traverse/attempt answers 404 for it)
+    const uint64_t now = now_ms();
+    if (not_after_passed(attempt->ids(), now))
+        return StartRefusal { true, expired_json(attempt->ids(), now, instance_) };
     attempts_.emplace(id, attempt);
     return std::nullopt;
+}
+
+Json::Value AttemptRegistry::capabilities_json() const {
+    Json::Value att;
+    Json::Value fields(Json::arrayValue);
+    for (const char *f : { "attempt_id", "budget_id", "locus_id", "not_after_ms" }) {
+        fields.append(f);
+    }
+    att["fields"] = std::move(fields);
+    att["id_pattern"] = "^[A-Za-z0-9._:-]{1,128}$";
+    att["cancel"] = "POST /traverse/cancel";
+    att["state"] = "GET /traverse/attempt/{attempt_id}";
+    att["server_instance"] = instance_;
+    att["retention_s"] = uint_value(settings_.retention_s);
+    att["retention_count"] = uint_value(settings_.retention_count);
+    // integers (ms), as usage.bound states them: a ledger compares them with its own
+    att["allowance_ms"] = ms_json(settings_.allowance_ms);
+    att["hard_cap_ms"] = ms_json(settings_.hard_cap_ms);
+    att["content_timeout_s"] = uint_value(settings_.content_timeout_s);
+    att["client_check_ms"] = uint_value(settings_.client_check_ms);
+    att["clock_skew_allowance_ms"] = uint_value(settings_.clock_skew_ms);
+    att["bound"] = "min(seeds x the effective bounds.time_budget_ms + allowance_ms, "
+        "hard_cap_ms) ms on the attempt's clock, which starts when the server read the "
+        "request's header (time queued before that, all server threads busy, is not in it); "
+        "hard_cap_ms = content_timeout_s x 1000 - 1000; seeds stop being walked at bound - "
+        "max(allowance_ms / 2, the delivery reserve), which moves as the walk goes (the walk "
+        "stops at its first poll after it: usage.stopped_at; usage.bound.walk_until_ms states "
+        "the walk-until in force when it stopped the walk, else the lowest in force while a seed "
+        "was walked), and a response not written by the bound is not written (503 with usage)";
+    // the time kept back from the walk to build and compress what was walked
+    Json::Value reserve;
+    reserve["compress_mbps"] = settings_.delivery_compress_mbps;
+    reserve["build_mbps"] = settings_.delivery_build_mbps;
+    Json::Value per;
+    per["json"] = settings_.account_per_text_byte_json;
+    per["graphlet"] = settings_.account_per_text_byte_graphlet;
+    reserve["account_per_text_byte"] = std::move(per);
+    reserve["measured_text_bytes"] = uint_value(kMeasuredTextBytes);
+    const DeliveryMeasurements m = measured();
+    reserve["measured_build_mbps"] = m.build_mbps > 0 ? Json::Value(m.build_mbps) : Json::Value();
+    reserve["measured_compress_mbps"] = m.compress_mbps > 0 ? Json::Value(m.compress_mbps)
+                                                            : Json::Value();
+    Json::Value ratios;
+    for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
+        auto it = m.account_per_text_byte.find(detail);
+        ratios[detail] = it != m.account_per_text_byte.end() ? Json::Value(it->second)
+                                                             : Json::Value();
+    }
+    reserve["measured_account_per_text_byte"] = std::move(ratios);
+    reserve["rate_window"] = uint_value(kRateWindow);
+    reserve["margin"] = kReserveMargin;
+    reserve["stop_ms"] = ms_json(settings_.delivery_stop_ms);
+    reserve["measured_stop_ms"] = m.stop_ms > 0 ? ms_json(m.stop_ms) : Json::Value();
+    reserve["rule"] = "reserve_ms = margin x ((T + E) / (compress x 1000) + E / (build x 1000)) "
+        "+ stop, rates in MB/s: T the exact bytes of the text of the seeds finished so far (each "
+        "seed's result is written as text once built), E the text the seed being walked is "
+        "estimated to write (its modelled account, updated at every level's end, / the account "
+        "per text byte of the requested detail), stop the time from the walk-until to the "
+        "walk's end (the walk stops at its first poll after the walk-until, then finalises the "
+        "stopped seed): stop_ms, or the longest this server measured over its last rate_window "
+        "attempts that walked past their walk-until (measured_stop_ms) when longer. Each of "
+        "compress, build and the account per text byte is the configured value (compress_mbps, "
+        "build_mbps, account_per_text_byte) until this server has measured its own on responses "
+        "and seeds of at least measured_text_bytes: then the slowest rate, and the smallest "
+        "ratio for the detail, of its last rate_window measurements (the measured_* fields, as "
+        "of this document), and the attempt's own seeds' where those are more conservative. A "
+        "response is still not delivered (503) when it is built or compressed more slowly than "
+        "the rates used allow for with the margin, a seed writes more text than its account / "
+        "the ratio used, or the walk ends later after its walk-until than stop";
+    att["delivery_reserve"] = std::move(reserve);
+    att["not_after"] = "not_after_ms (Unix epoch ms, an integer in [0, 2^53 - 1], with or "
+        "without attempt_id): a request whose not_after_ms is earlier than this server's clock "
+        "when its handler starts is refused, 409 {error, state: \"expired\", not_after_ms, "
+        "server_time_ms, the ids given, server_instance}, and never runs (no usage, nothing "
+        "registered: a later GET /traverse/attempt answers 404); the check is strict, no "
+        "allowance added. A ledger treats an attempt it has no answer for as never started "
+        "once its own clock passes not_after_ms + clock_skew_allowance_ms, and as stopped once "
+        "it passes that + bound_ms";
+    return att;
 }
 
 std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint64_t wait_ms) {

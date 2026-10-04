@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <limits>
 #include <functional>
 #include <map>
 #include <memory>
@@ -44,11 +45,33 @@ struct AttemptIds {
     std::string attempt_id;     // "" = the request is not ledger-managed
     std::string budget_id;      // echoed only
     std::string locus_id;       // echoed only
+    // The instant (Unix epoch, ms, on the server's clock) after which the request must not be
+    // started: a ledger that lost track of an attempt treats it as never started once its own
+    // clock passes this plus the server's stated clock skew allowance, so the server refuses
+    // it at handler start once it has passed (409, state expired) rather than run work the
+    // ledger has already released. With or without attempt_id; echoed in usage
+    std::optional<uint64_t> not_after_ms;
 };
 
-// The three request fields of /traverse (top level). Throws InvalidRequest when one is not a
-// string matching the pattern, or when budget_id or locus_id is given without attempt_id.
+// The largest not_after_ms accepted: 2^53 - 1, the largest integer every JSON reader keeps
+// exactly (a ledger in JavaScript or Python writes and reads it unchanged)
+constexpr uint64_t kMaxNotAfterMs = (uint64_t(1) << 53) - 1;
+
+// The request fields of /traverse (top level) the server reads before the request is parsed.
+// Throws InvalidRequest when an id is not a string matching the pattern, when budget_id or
+// locus_id is given without attempt_id, or when not_after_ms is not an integer in
+// [0, kMaxNotAfterMs].
 AttemptIds attempt_ids(const Json::Value &request);
+
+// Whether a request carrying |ids| must be refused at handler start: its not_after_ms is
+// earlier than |now_ms| (the server's clock, Unix epoch ms; strict: no allowance is added,
+// the allowance is the ledger's to add). The 409 body when it must: {error, state: "expired",
+// not_after_ms, server_time_ms, attempt_id/budget_id/locus_id as given, server_instance}
+bool not_after_passed(const AttemptIds &ids, uint64_t now_ms);
+Json::Value expired_json(const AttemptIds &ids, uint64_t now_ms,
+                         const std::string &server_instance);
+// |t| as ISO-8601 UTC with milliseconds (the instants of usage and the attempt's state)
+std::string iso_utc(std::chrono::system_clock::time_point t);
 
 // The server's settings for attempts (Config::traverse_attempt_*)
 struct AttemptSettings {
@@ -70,6 +93,57 @@ struct AttemptSettings {
     uint32_t poll_stride = 8;
     // the clock (tests inject one)
     std::function<std::chrono::steady_clock::time_point()> clock;
+    // the wall clock not_after_ms is compared with (tests inject one; system_clock by default)
+    std::function<std::chrono::system_clock::time_point()> wall_clock;
+    // What a ledger must add to not_after_ms before it treats an unanswered attempt as never
+    // started (stated in capabilities, not used by the server, whose check is strict): how far
+    // this server's clock may be from the ledger's (NTP keeps them closer; ms)
+    uint64_t clock_skew_ms = 2000;
+    // the HTTP server's content timeout (s), from which hard_cap_ms is derived: stated
+    uint64_t content_timeout_s = 900;
+    // The delivery reserve (pass 5): the rates (MB/s) at which the response is assumed to be
+    // compressed and its results' text built — the latter replaced by the slowest rate measured
+    // on the attempt's own seeds of at least kMeasuredTextBytes — and how many bytes of the
+    // walker's modelled account one byte of a seed's text is at most taken for (the model
+    // prices every delivered byte several times over: measured at 34.5 and more for JSON, 58.4
+    // and more for a graphlet on real responses)
+    double delivery_compress_mbps = 50;
+    double delivery_build_mbps = 10;
+    double account_per_text_byte_json = 20;
+    double account_per_text_byte_graphlet = 40;
+    // The walk does not stop at its walk-until but at the first poll after it — after a chunk
+    // of an annotation read, the heads between two readings of the clock — and its stopped
+    // seed is finalised before its text is built: the time from the walk-until to the walk's
+    // end assumed until the server measured its own (ms; the server sets chunk_target_ms + 200;
+    // review of pass 5, F3: a walk stopped 124 ms after its walk-until left its delivery that
+    // much short of the reserve, 503)
+    double delivery_stop_ms = 250;
+};
+
+// The delivery model's rates and ratios vary between responses: the reserve keeps this much
+// more than the model's time (review of pass 5, F3: a reserve with no margin delivered a
+// response the model fitted exactly about half the time)
+constexpr double kReserveMargin = 1.25;
+
+// a seed's text (or a response) of at least this many bytes measures a delivery rate (smaller
+// ones are dominated by fixed costs)
+constexpr uint64_t kMeasuredTextBytes = 1 << 20;
+// the delivery rates the server measured on its own responses: the slowest of the last this
+// many measurements replaces the configured rate (a machine slower than assumed is seen at
+// once, a temporarily slow response is remembered for a while)
+constexpr size_t kRateWindow = 16;
+
+// What a server measured of its own deliveries (pass 5; 0: not measured yet): the slowest
+// rates (MB/s) at which it built a seed's result text and compressed a response, and per
+// detail the smallest ratio of a seed's modelled account to its text — each over its last
+// kRateWindow measurements of at least kMeasuredTextBytes
+struct DeliveryMeasurements {
+    double build_mbps = 0;
+    double compress_mbps = 0;
+    std::map<std::string, double> account_per_text_byte;    // by output.detail
+    // the longest time from the walk-until to the walk's end (ms) of its last kRateWindow
+    // attempts that walked past their walk-until
+    double stop_ms = 0;
 };
 
 // What one seed of the attempt consumed (the usage block's per_seed)
@@ -131,7 +205,8 @@ class Attempt {
 
     // ---- the bound: min(n_seeds x T + allowance, hard cap), T the effective per-seed time
     // budget (0 when it is not positive). The seeds stop being walked at
-    // bound - allowance / 2, leaving the rest of the allowance to deliver what was walked.
+    // bound - max(allowance / 2, the delivery reserve), leaving the rest to deliver what was
+    // walked.
     // Set once the request is parsed; before that the hard cap alone bounds the attempt.
     // |memory_budget|: the request's bounds.max_memory_mb in bytes, 0 for none (the soft
     // excess is observed under one, and what was held is bounded by it)
@@ -139,6 +214,38 @@ class Attempt {
     double bound_ms() const { return bound_ms_; }
     double walk_until_ms() const { return walk_until_ms_; }
     bool enforced() const { return enforced_ && managed(); }
+    // the time left before the seeds stop being walked (ms; infinity when the bound is not
+    // enforced): what sizes the chunks of the walk's annotation reads (the handler's thread)
+    double ms_left() const;
+
+    // ---- the delivery reserve (pass 5): the seeds stop being walked at
+    // bound - max(allowance / 2, reserve), the reserve being kReserveMargin times the time to
+    // build and compress what the response will hold — the text of the seeds finished so far
+    // (exact, written as each was built) and of the seed being walked (its modelled account /
+    // the account per text byte of the requested detail) — at the stated rates, or the build
+    // rate measured on this attempt's own seeds, plus the time from the walk-until to the
+    // walk's end (delivery_stop_ms, or this server's measured stop latency). The handler's
+    // thread: each moves the walk-until.
+    // |detail|: the requested output.detail (its account per text byte: measured on this
+    // server, else the configured one for JSON or for a graphlet)
+    void set_delivery_detail(const std::string &detail);
+    const std::string& delivery_detail() const { return detail_; }
+    // the seed being walked holds |account| modelled bytes (at every level's end)
+    void progress(uint64_t account);
+    // a seed's result was written as |text_bytes| of text, built in |build_seconds|, from a
+    // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed)
+    void note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account = 0);
+    // what this server measured before the attempt started: it replaces the configured rates
+    // and ratios (a measurement of the attempt's own seeds replaces it when more conservative)
+    void set_measured(const DeliveryMeasurements &measured);
+    // the slowest build rate and the smallest account-to-text ratio measured on this
+    // attempt's own seeds (0: none), and the longest time a seed's walk ended after the
+    // walk-until (0: none did), for the server's measurements
+    double own_build_mbps() const;
+    double own_account_per_text_byte() const;
+    double own_stop_ms() const;
+    // the reserve now (ms)
+    double reserve_ms() const;
 
     // ---- stops
     // asks the walk to stop; false when another reason was first (the first one wins)
@@ -169,6 +276,10 @@ class Attempt {
     void seed_not_started(size_t index, const SeedUsage &usage);
     // the seed's outcome once its result is built, and its elapsed time with the building
     void seed_delivered(size_t index, const std::string &outcome, double elapsed_ms);
+    // The longest single annotation read of the request so far (ms: one uninterruptible piece
+    // of its walks, LabelOracle::pacer()), stated in usage as observed_max_uninterruptible_ms
+    void note_max_read_ms(double ms);
+    double max_read_ms() const;
 
     // ---- statements
     // the response-level `usage` block, |reason| completed | cancelled | deadline | error
@@ -239,6 +350,26 @@ class Attempt {
     size_t seeds_started_ = 0;
     size_t seeds_walked_ = 0;
     size_t seeds_abandoned_ = 0;                      // walks the client's departure cut
+    double max_read_ms_ = 0;                          // note_max_read_ms
+    // the delivery reserve's state (the handler's thread; written under |mutex_|)
+    std::string detail_;
+    double configured_ratio_ = 20;                    // the configured account per text byte
+    double server_ratio_ = 0;                         // measured on this server (0: none)
+    double own_ratio_ = 0;                            // measured on this attempt (0: none)
+    uint64_t delivered_bytes_ = 0;                    // the text of the seeds finished
+    uint64_t walking_account_ = 0;                    // the seed being walked, its account
+    double measured_build_mbps_ = 0;                  // this attempt's own (0: none yet)
+    DeliveryMeasurements server_;                     // set_measured
+    // the lowest walk-until a poll checked (the handler's thread writes it; usage reads it) and
+    // the walk-until in force when it stopped the walk (usage.bound.walk_until_ms states the
+    // latter, else the former)
+    std::atomic<double> checked_walk_until_ms_ { std::numeric_limits<double>::infinity() };
+    std::optional<double> tripped_walk_until_ms_;
+    double own_stop_ms_ = 0;                          // own_stop_ms()
+    // the account per text byte in use, and the walked seed's estimated text
+    double ratio_locked() const;
+    // bound - max(allowance / 2, reserve), under |mutex_|
+    void update_walk_until_locked();
     std::string reason_;                              // set by finish()
     int status_ = 0;
     std::optional<size_t> bytes_;
@@ -260,9 +391,25 @@ class AttemptRegistry {
     // are gone) from one that forgot an attempt after the retention period
     const std::string& server_instance() const { return instance_; }
 
-    // registers a managed attempt; when its id is running or retained (or tombstoned),
-    // nothing is registered and the other attempt's state is returned (the 409 body's)
-    std::optional<Json::Value> start(const std::shared_ptr<Attempt> &attempt);
+    // Why start() registered nothing (a 409): the id is running, retained or tombstoned
+    // (|body| the other attempt's state), or the request's not_after_ms has passed (|expired|,
+    // |body| the whole 409 body, expired_json)
+    struct StartRefusal {
+        bool expired = false;
+        Json::Value body;
+    };
+    // Registers a managed attempt, unless its id is running or retained (or tombstoned) —
+    // checked first, so that an expired refusal always means that no attempt with the id
+    // exists on this server_instance — or its not_after_ms has passed on the wall clock: then
+    // nothing is registered (an expired request is kept nowhere: any later copy of it is
+    // expired too)
+    std::optional<StartRefusal> start(const std::shared_ptr<Attempt> &attempt);
+    // the wall clock not_after_ms is compared with (Unix epoch ms)
+    uint64_t now_ms() const;
+    // the `attempts` block of both capabilities routes: the fields, routes, retention, the
+    // bound's parts with their number types (integers, ms) and rules, and the clock skew a
+    // ledger adds to not_after_ms
+    Json::Value capabilities_json() const;
     // POST /traverse/cancel {attempt_id, wait_ms}: (HTTP status, body). An unknown id is
     // tombstoned for retention_s (404, tombstone: true); when retention_count tombstones are
     // held already it is not, and the cancel is refused (429, tombstone: false): the promise
@@ -275,6 +422,23 @@ class AttemptRegistry {
                 std::optional<size_t> bytes);
     // the retention rule, stated by 404s and GET /traverse/capabilities
     std::string retention_text() const;
+    // The longest single annotation read — one uninterruptible piece of a deadline — that a
+    // /traverse of this process made (ms; with or without attempt_id): stated as
+    // deadline_check.observed_max_uninterruptible_ms, which is an observation, not a bound
+    void note_uninterruptible(double ms);
+    uint64_t observed_max_uninterruptible_ms() const;
+    // The delivery rates measured on this server's /traverse responses of at least
+    // kMeasuredTextBytes (MB/s): a seed's result text built, a response compressed; and per
+    // output.detail the ratio of a seed's modelled account to its text. The slowest rate and
+    // the smallest ratio of the last kRateWindow of each replace the configured ones in every
+    // attempt started afterwards (0: none measured yet)
+    void note_build_rate(double mbps);
+    void note_compress_rate(double mbps);
+    void note_account_per_text_byte(const std::string &detail, double ratio);
+    // the time an attempt's walk ended after its walk-until (ms; 0: it did not): the longest
+    // of the last kRateWindow replaces delivery_stop_ms when longer
+    void note_stop_latency(double ms);
+    DeliveryMeasurements measured() const;
 
   private:
     void expire_locked();
@@ -291,6 +455,13 @@ class AttemptRegistry {
     // retention_s, whatever finishes after it (review of the stage-4 backend, F6: sharing
     // retention_count, later finishes evicted a tombstone early and the cancelled id ran)
     std::deque<std::shared_ptr<Attempt>> tombstones_;
+    // microseconds, rounded up
+    std::atomic<uint64_t> max_uninterruptible_us_ { 0 };
+    mutable std::mutex rates_mutex_;
+    std::deque<double> build_rates_;
+    std::deque<double> compress_rates_;
+    std::deque<double> stop_latencies_;
+    std::map<std::string, std::deque<double>> ratios_;
 };
 
 } // namespace cli

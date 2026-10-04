@@ -124,11 +124,15 @@ constexpr char kSentinel = boss::BOSS::kSentinel;
 // the structural lookahead cache is cleared when it grows beyond this many nodes
 constexpr size_t kMaxLookahead = 1'000'000;
 // Under a §14 budget the level's annotation keys are fetched in calls of at most this
-// many (fewer when rows are wide or the work budget is near, fetch_chunk()): one fetch
-// call is the walker's largest uninterruptible unit of decoding, so its rows are charged
-// as work when it returns them and what it holds is observed before the comparison after
-// it. Without a budget the level is one call, as it always was (the cache, and with it
-// the direct_reads counter, depends on the batching).
+// many (fewer when rows are wide or the work budget is near, fetch_chunk()): a fetch call is
+// the unit of charging, so its rows are charged as work when it returns them and what it
+// holds is observed before the comparison after it. Without a budget the level is one
+// LOGICAL call, as it always was (the cache, and with it the direct_reads counter, depends on
+// the batching). A call the deadline may fall into is also decoded in time-sized chunks with
+// the deadline checked between them (pass 5, LabelOracle::pacer; a call far from it is one
+// piece, as splitting costs what its rows share): a call's counting and cache decisions stay
+// whole, so chunking changes nothing it returns, and the uninterruptible unit is one chunk
+// (at least one row), not the call.
 constexpr size_t kFetchChunk = 8192;
 
 // A budget or the deadline ran out while a head was being PLANNED or a level fetched
@@ -804,6 +808,20 @@ class Walker {
     // the keys of the next fetch call; |grown| is the call's growth from one key per level
     // under a work budget
     size_t fetch_chunk(size_t grown) const;
+    // ---- the chunked deadlines (pass 5, spec §6.8): which deadline a read is paced against —
+    // the seed's time budget as the walk reads it (WALK: depth > 0, time_exceeded), as the
+    // derivation reads it (DERIVATION: a positive budget only), or none (NONE: depth 0, a
+    // validation) — always with the attempt's walk-until when there is one
+    enum class Deadline { NONE, WALK, DERIVATION };
+    // what a read checks between its chunks; null when reads are not paced (target 0), so that
+    // such a read is one piece, as before
+    ReadPacing *pacing(Deadline deadline);
+    // the stop a paced read saw before a chunk, as a level's trip: the time budget, a cancel,
+    // the attempt's walk-until (BudgetTrip), or a gone client (AttemptAborted)
+    BudgetTrip paced_trip();
+    ReadPacing pacing_;
+    // what stopped the last interrupted read: TIME (the seed's time budget) or an external stop
+    bool paced_by_time_ = false;
     // the memory bound's soft part (memory_bound_soft, ResourceAccount::soft_overshoot):
     // what is held beyond the admitted account — decoded rows (|scratch|), a cache beyond its
     // allotment, dictionary labels named but not charged yet — observed wherever it is held
@@ -823,10 +841,13 @@ class Walker {
     // on the rows alone. Every row read: returns rows.size(), |*out| and |*costs| filled and
     // |budget| holding them. Otherwise the position of the first row that does not fit, with
     // |*refusal| saying why; nothing is kept, |budget| is as on entry.
+    // |pacing|: its runs at most a paced chunk long, its stop checked before each; a stop
+    // returns the position reached with |*refusal| INTERRUPTED and ReadPacing::units the work
+    // of the rows read (nothing kept)
     template <class RowT>
     size_t read_window(const std::vector<Row> &rows, annot::matrix::DecodeBudget &budget,
                        std::vector<RowT> *out, std::vector<annot::matrix::RowCost> *costs,
-                       FetchRefusal *refusal);
+                       FetchRefusal *refusal, ReadPacing *pacing = nullptr);
     // the seed's own bytes, before the account exists (observe_seed_scratch)
     uint64_t seed_bytes() const {
         return seed_upper_.size() * 2 + nodes_.size() * (sizeof(node_index) + 64);
@@ -1252,10 +1273,24 @@ std::string Walker::echoed(const std::string &name, const std::string &where) co
     return name.substr(0, cut) + "... (" + std::to_string(name.size()) + " bytes; " + where + ")";
 }
 
+// the work of one row of the derivation's window as charge_seed charges it: 8 per key, 1 per
+// entry and, read with coordinates, 1 per coordinate (its dependency rows apart)
+static uint64_t window_row_units(const annot::matrix::BinaryMatrix::SetBitPositions &row) {
+    return 8 + row.size();
+}
+
+static uint64_t window_row_units(const annot::matrix::MultiIntMatrix::RowTuples &row) {
+    uint64_t units = 8;
+    for (const auto &entry : row) {
+        units += 1 + entry.second.size();
+    }
+    return units;
+}
+
 template <class RowT>
 size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBudget &budget,
                            std::vector<RowT> *out, std::vector<annot::matrix::RowCost> *costs,
-                           FetchRefusal *refusal) {
+                           FetchRefusal *refusal, ReadPacing *pacing) {
     using annot::matrix::buffer_bytes;
     using annot::matrix::DecodeStatus;
     using annot::matrix::RowCost;
@@ -1286,9 +1321,25 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
     committed += vectors;
     out->reserve(n);
     costs->reserve(n);
+    DecodePacer &pacer = oracle_.pacer();
+    size_t previous = 0;
+    double previous_ms = 0;
     size_t run = n;
     for (size_t pos = 0; pos < n; ) {
-        const size_t len = std::min(run, n - pos);
+        size_t len = std::min(run, n - pos);
+        if (pacing) {
+            if (pacing->stop()) {
+                // the rows read so far are decoded work, the caller's to charge
+                pacing->interrupted = true;
+                pacing->units = 0;
+                for (size_t j = 0; j < out->size(); ++j) {
+                    pacing->units += window_row_units((*out)[j]) + 8 * (*costs)[j].dependency_rows
+                                   + (*costs)[j].dependency_entries;
+                }
+                return refuse(pos, FetchRefusal::INTERRUPTED, 0);
+            }
+            len = std::min(len, pacer.next(n - pos, pacing->ms_left(), previous, previous_ms));
+        }
         const uint64_t sub_bytes = buffer_bytes(len, sizeof(Row));
         if (!budget.charge(sub_bytes)) {
             if (len == 1)
@@ -1301,11 +1352,15 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
         std::vector<RowCost> got_costs;
         std::vector<uint64_t> held;
         DecodeStatus status;
+        Timer timer;
         if constexpr(std::is_same_v<RowT, annot::matrix::BinaryMatrix::SetBitPositions>) {
             status = oracle_.get_rows(sub, budget, &got, &got_costs, &held);
         } else {
             status = oracle_.get_row_tuples(sub, budget, &got, &got_costs, &held);
         }
+        previous_ms = timer.elapsed() * 1000;
+        pacer.record(len, previous_ms);
+        previous = len;
         if (status != DecodeStatus::OK) {
             assert(status == DecodeStatus::REFUSED);
             if (len == 1)
@@ -1433,6 +1488,25 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         std::vector<annot::matrix::MultiIntMatrix::RowTuples> tuples;
         // the work of each distinct row's row-diff dependency rows (budget-aware reads only)
         std::vector<uint64_t> dependency;
+        // The window's read is paced under a deadline (pass 5): the seed's time budget as the
+        // derivation reads it after every k-mer, and the attempt's walk-until. A stop between
+        // its chunks charges what they decoded (work done, stated without a comparison, as a
+        // window found too_wide) and ends the derivation as the next k-mer's check would have:
+        // time_budget after the k-mers consumed so far, or the attempt's stop failing the seed
+        ReadPacing *pace = pacing(Deadline::DERIVATION);
+        auto interrupted = [&](uint64_t units) {
+            seed_work_ += units;
+            if (paced_by_time_) {
+                throw SeedDerivationError(SeedDerivationError::TIME_BUDGET,
+                        "The time budget (bounds.time_budget_ms) ran out while deriving the "
+                        "permitted set from the seed, after " + std::to_string(done.size())
+                        + " of " + std::to_string(keys.size()) + " k-mers; name the labels "
+                          "explicitly or shorten the seed",
+                        budget_ms, timer_.elapsed() * 1000.0);
+            }
+            seed_external_stop();
+            throw std::logic_error("a paced read of the derivation stopped without a stop");
+        };
         if (decode_charged_) {
             // The sub-batch — the window the derivation holds at once, to choose its cheapest
             // row — is read within what the memory budget leaves beside the seed and the
@@ -1446,8 +1520,10 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             annot::matrix::DecodeBudget budget = decode_budget(DecodeCharge::SEED, Arm::RIGHT, max);
             std::vector<annot::matrix::RowCost> costs;
             FetchRefusal r;
-            const size_t read = with_coords ? read_window(distinct, budget, &tuples, &costs, &r)
-                                            : read_window(distinct, budget, &plain, &costs, &r);
+            const size_t read = with_coords ? read_window(distinct, budget, &tuples, &costs, &r, pace)
+                                            : read_window(distinct, budget, &plain, &costs, &r, pace);
+            if (pace && pace->interrupted)
+                interrupted(pace->units);
             if (read < distinct.size()) {
                 size_t kmer = begin;
                 while (rows[kmer - begin] != distinct[read]) {
@@ -1486,10 +1562,51 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             for (size_t r = 0; r < distinct.size(); ++r) {
                 dependency[r] = 8 * costs[r].dependency_rows + costs[r].dependency_entries;
             }
-        } else if (with_coords) {
-            tuples = oracle_.get_row_tuples(distinct);
         } else {
-            plain = oracle_.get_rows(distinct);
+            DecodePacer &pacer = oracle_.pacer();
+            size_t previous = 0;
+            double previous_ms = 0;
+            for (size_t at = 0; at < distinct.size(); ) {
+                size_t piece = distinct.size() - at;
+                if (pace) {
+                    if (pace->stop()) {
+                        uint64_t units = 0;
+                        for (const auto &row : plain) {
+                            units += window_row_units(row);
+                        }
+                        for (const auto &row : tuples) {
+                            units += window_row_units(row);
+                        }
+                        interrupted(units);
+                    }
+                    piece = pacer.next(piece, pace->ms_left(), previous, previous_ms);
+                }
+                Timer timer;
+                if (!at && piece == distinct.size()) {
+                    // one piece: the read as it always was
+                    if (with_coords) {
+                        tuples = oracle_.get_row_tuples(distinct);
+                    } else {
+                        plain = oracle_.get_rows(distinct);
+                    }
+                } else {
+                    const std::vector<Row> sub(distinct.begin() + at,
+                                               distinct.begin() + at + piece);
+                    if (with_coords) {
+                        for (auto &row : oracle_.get_row_tuples(sub)) {
+                            tuples.push_back(std::move(row));
+                        }
+                    } else {
+                        for (auto &row : oracle_.get_rows(sub)) {
+                            plain.push_back(std::move(row));
+                        }
+                    }
+                }
+                previous_ms = timer.elapsed() * 1000;
+                pacer.record(piece, previous_ms);
+                previous = piece;
+                at += piece;
+            }
         }
         // The sub-batch's decoded rows and the running intersection are held before any
         // account exists, the largest scratch of a derived seed: observed as the soft excess,
@@ -1909,6 +2026,18 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
     // the query's labels alone, a call of rows wider than that was one charge of 2.5 million
     // units under a budget of 1 once its rows were charged together. Without a work budget the
     // calls are as before.
+    // Under the attempt's walk-until the validation's reads are paced (pass 5): a stop between
+    // chunks charges the rows the chunks decoded and fails the seed (no result exists yet). The
+    // seed's own time budget never stops it (§6.8: the deadline is not checked at depth 0, and
+    // a seed validated past its budget still delivers its result complete to 0 bp)
+    ReadPacing *pace = pacing(Deadline::NONE);
+    auto interrupted = [&]() {
+        if (!pace || !pace->interrupted)
+            return;
+        charge_seed(pace->units);   // its poll fails the seed: the stop is the attempt's
+        seed_external_stop();
+        throw std::logic_error("a paced read of the seed phase stopped without a stop");
+    };
     uint64_t widest = query.labels().size();
     size_t grown = 1;
     auto next_chunk = [&]() -> size_t {
@@ -1937,7 +2066,11 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
                                : beside < mem_limit_ ? mem_limit_ - beside : 0;
             annot::matrix::DecodeBudget budget = decode_budget(DecodeCharge::SEED, Arm::RIGHT, max);
             size_t refused_at = 0;
-            if (!query.fetch(keys.data() + begin, end - begin, budget, &hits, &costs, &refused_at)) {
+            if (pace)
+                pace->interrupted = false;
+            if (!query.fetch(keys.data() + begin, end - begin, budget, &hits, &costs, &refused_at,
+                             pace)) {
+                interrupted();
                 const FetchRefusal &r = query.refusal();
                 const bool injected = decode_denied_ && r.cause == FetchRefusal::DECODE;
                 ResourceStop detail;
@@ -1979,8 +2112,10 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
         return hits;
     }
     if (!strategy_.max_work_units) {
-        // one call, as always: the fetch's counters (direct_reads) depend on the batching
-        hits = query.fetch(keys);
+        // one logical call, as always: the fetch's counters (direct_reads) depend on the
+        // batching (paced, its decoding is chunked; its counting and cache stay whole)
+        hits = query.fetch(keys, pace);
+        interrupted();
         charge(0);
         return hits;
     }
@@ -1989,8 +2124,10 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
     hits.reserve(keys.size());
     for (size_t begin = 0, end = 0; begin < keys.size(); begin = end) {
         end = std::min(keys.size(), begin + next_chunk());
-        for (auto &h : query.fetch(std::vector<node_index>(keys.begin() + begin,
-                                                           keys.begin() + end))) {
+        std::vector<LabelQuery::NodeHits> got
+            = query.fetch(std::vector<node_index>(keys.begin() + begin, keys.begin() + end), pace);
+        interrupted();
+        for (auto &h : got) {
             hits.push_back(std::move(h));
         }
         for (size_t i = begin; i < end; ++i) {
@@ -3051,6 +3188,54 @@ void Walker::checkpoint(bool force) {
     }
 }
 
+ReadPacing* Walker::pacing(Deadline deadline) {
+    if (!(oracle_.pacer().target_ms > 0))
+        return nullptr;
+    pacing_ = ReadPacing();
+    paced_by_time_ = false;
+    pacing_.ms_left = [this, deadline]() {
+        double left = std::numeric_limits<double>::infinity();
+        const double budget = strategy_.time_budget_ms;
+        if (deadline == Deadline::WALK) {
+            left = budget > 0 ? budget - timer_.elapsed() * 1000.0 : 0;
+        } else if (deadline == Deadline::DERIVATION && budget > 0) {
+            left = budget - timer_.elapsed() * 1000.0;
+        }
+        if (control_ && control_->ms_left)
+            left = std::min(left, control_->ms_left());
+        return left;
+    };
+    // the same tests the walk applies after the read (checkpoint, the derivation's
+    // out_of_time, the attempt's poll), so that a read stopped here censors the walk exactly
+    // where the read run whole would have
+    pacing_.stop = [this, deadline]() {
+        const double budget = strategy_.time_budget_ms;
+        if ((deadline == Deadline::WALK && time_exceeded())
+                || (deadline == Deadline::DERIVATION && budget > 0
+                        && timer_.elapsed() * 1000.0 >= budget)) {
+            paced_by_time_ = true;
+            return true;
+        }
+        return control_ && control_->poll_now && control_->poll_now() != ExternalStop::NONE;
+    };
+    return &pacing_;
+}
+
+BudgetTrip Walker::paced_trip() {
+    if (paced_by_time_)
+        return BudgetTrip { ResourceStop::TIME, timer_.elapsed() * 1000.0 };
+    // the stop flag is set by now: the poll returns it (a gone client throws)
+    switch (external_stop()) {
+        case ExternalStop::CANCELLED:
+            return BudgetTrip { ResourceStop::CANCELLED, attempt_ms() };
+        case ExternalStop::NONE:
+        case ExternalStop::ATTEMPT_DEADLINE:
+        case ExternalStop::CLIENT_GONE:
+            break;
+    }
+    return BudgetTrip { ResourceStop::ATTEMPT_DEADLINE, attempt_ms() };
+}
+
 ExternalStop Walker::external_stop() {
     if (!control_ || !control_->poll)
         return ExternalStop::NONE;
@@ -3073,7 +3258,9 @@ void Walker::seed_external_stop() {
     fail_seed(cancelled ? ResourceStop::CANCELLED : ResourceStop::ATTEMPT_DEADLINE, ms, ms,
               std::string(cancelled ? "the attempt was cancelled (POST /traverse/cancel)"
                                     : "the attempt reached the time at which the server stops "
-                                      "walking it (its duration bound less half the allowance)")
+                                      "walking it (its duration bound less the larger of half "
+                                      "the allowance and the delivery reserve; see "
+                                      "usage.bound.walk_until_ms)")
               + " while the seed was "
               + (seed_.labels.empty() ? "read to derive its permitted set"
                                       : "validated against its labels")
@@ -3354,9 +3541,20 @@ static uint64_t row_units(node_index key, const LabelQuery::NodeHits &h) {
 
 std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
                                                      const std::vector<node_index> &keys) {
+    // A call the deadline may fall into is decoded in time-sized chunks with the deadline
+    // checked between them (pacing, pass 5): a call's counters, cache and result are those of the
+    // whole call, so a level that the deadline does not stop is unchanged; one it stops is
+    // censored at its first head, where the whole call would have been (the rows its chunks
+    // decoded are charged: decoded work, though no row was returned)
+    ReadPacing *pace = pacing(depth_ > 0 ? Deadline::WALK : Deadline::NONE);
     if (!budgeted_) {
-        // one call, as always: the fetch's counters (direct_reads) depend on the batching
-        std::vector<LabelQuery::NodeHits> hits = query_->fetch(keys);
+        // one logical call, as always: the fetch's counters (direct_reads) depend on the
+        // batching (paced, its decoding is chunked; its counting and cache stay whole)
+        std::vector<LabelQuery::NodeHits> hits = query_->fetch(keys, pace);
+        if (pace && pace->interrupted) {
+            arm.work_extra += pace->units;
+            throw paced_trip();
+        }
         for (size_t i = 0; i < hits.size(); ++i) {
             arm.work_extra += row_units(keys[i], hits[i]);
         }
@@ -3388,8 +3586,14 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
             annot::matrix::DecodeBudget budget = decode_budget(DecodeCharge::LEVEL, arm.arm,
                                                                allowance());
             size_t refused_at = 0;
+            if (pace)
+                pace->interrupted = false;
             if (!query_->fetch(keys.data() + begin, end - begin, budget, &hits, &costs,
-                               &refused_at)) {
+                               &refused_at, pace)) {
+                if (pace && pace->interrupted) {
+                    arm.work_extra += pace->units;
+                    throw paced_trip();
+                }
                 // nothing of the level is committed yet: censored from its first head
                 throw read_trip(query_->refusal());
             }
@@ -3418,8 +3622,15 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
     size_t grown = 1;
     for (size_t begin = 0; begin < keys.size(); ) {
         const size_t end = std::min(keys.size(), begin + fetch_chunk(grown));
-        for (auto &h : query_->fetch(std::vector<node_index>(keys.begin() + begin,
-                                                             keys.begin() + end))) {
+        std::vector<LabelQuery::NodeHits> got
+            = query_->fetch(std::vector<node_index>(keys.begin() + begin, keys.begin() + end),
+                            pace);
+        if (pace && pace->interrupted) {
+            arm.work_extra += pace->units;
+            observe_soft(lists + scratch + query_->last_call_bytes());
+            throw paced_trip();
+        }
+        for (auto &h : got) {
             const size_t i = hits.size();
             scratch += sizeof(h) + h.size() * sizeof(LabelQuery::Hit);
             const uint64_t units = row_units(keys[i], h);
@@ -3447,8 +3658,13 @@ std::vector<LabelRecorder::NodeLabels> Walker::fetch_present(ArmState &arm,
     auto units = [](node_index key, const LabelRecorder::NodeLabels &nl) {
         return (key != npos ? 8 : 0) + static_cast<uint64_t>(nl.total);
     };
+    ReadPacing *pace = pacing(depth_ > 0 ? Deadline::WALK : Deadline::NONE);
     if (!budgeted_) {
-        std::vector<LabelRecorder::NodeLabels> present = recorder_->fetch(keys);
+        std::vector<LabelRecorder::NodeLabels> present = recorder_->fetch(keys, pace);
+        if (pace && pace->interrupted) {
+            arm.work_extra += pace->units;
+            throw paced_trip();
+        }
         for (size_t i = 0; i < present.size(); ++i) {
             arm.work_extra += units(keys[i], present[i]);
         }
@@ -3474,8 +3690,14 @@ std::vector<LabelRecorder::NodeLabels> Walker::fetch_present(ArmState &arm,
             annot::matrix::DecodeBudget budget = decode_budget(DecodeCharge::LEVEL, arm.arm,
                                                                allowance());
             size_t refused_at = 0;
+            if (pace)
+                pace->interrupted = false;
             if (!recorder_->fetch(keys.data() + begin, end - begin, budget, &present, &costs,
-                                  &refused_at, name_bytes)) {
+                                  &refused_at, name_bytes, pace)) {
+                if (pace && pace->interrupted) {
+                    arm.work_extra += pace->units;
+                    throw paced_trip();
+                }
                 throw read_trip(recorder_->refusal());
             }
             // The lists and the naming charges stay with the level (the names go to the
@@ -3504,8 +3726,15 @@ std::vector<LabelRecorder::NodeLabels> Walker::fetch_present(ArmState &arm,
     size_t grown = 1;
     for (size_t begin = 0; begin < keys.size(); ) {
         const size_t end = std::min(keys.size(), begin + fetch_chunk(grown));
-        for (auto &nl : recorder_->fetch(std::vector<node_index>(keys.begin() + begin,
-                                                                 keys.begin() + end))) {
+        std::vector<LabelRecorder::NodeLabels> got
+            = recorder_->fetch(std::vector<node_index>(keys.begin() + begin, keys.begin() + end),
+                               pace);
+        if (pace && pace->interrupted) {
+            arm.work_extra += pace->units;
+            observe_soft(lists + scratch + recorder_->last_call_bytes(), dictionary);
+            throw paced_trip();
+        }
+        for (auto &nl : got) {
             const size_t i = present.size();
             scratch += sizeof(nl) + nl.labels.size() * sizeof(LabelId);
             widest_row_ = std::max<uint64_t>(widest_row_, nl.total);
@@ -3644,20 +3873,24 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
         }
     }
     if (!warm_keys.empty()) {
+        // Under a deadline the lookahead's read is paced too; a deadline that stops it ends
+        // the warming silently, and the next head's checkpoint, which reads the same deadline,
+        // stops the walk there, where the whole read would have: nothing depends on the cache
+        ReadPacing *pace = pacing(depth_ > 0 ? Deadline::WALK : Deadline::NONE);
         if (decode_charged_) {
             // within what is left beside the level's rows; a read that does not fit ends the
             // warming silently (budget-aware results never depend on what is cached)
             annot::matrix::DecodeBudget budget = decode_budget(DecodeCharge::WARM, arm.arm,
                                                                allowance());
             if (annotate_) {
-                recorder_->warm(warm_keys, budget);
+                recorder_->warm(warm_keys, budget, pace);
             } else {
-                query_->warm(warm_keys, budget);
+                query_->warm(warm_keys, budget, pace);
             }
         } else if (annotate_) {
-            recorder_->warm(warm_keys);
+            recorder_->warm(warm_keys, pace);
         } else {
-            query_->warm(warm_keys);
+            query_->warm(warm_keys, pace);
         }
     }
     if (arm.lookahead.size() > max_lookahead_) {
@@ -4130,6 +4363,9 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     arm.frontier.swap(arm.next);
     if (hooks_ && hooks_->level)
         hooks_->level(arm.arm, depth, accounted());
+    // what the walk will deliver grows with its account: the caller keeps time back for it
+    if (control_ && control_->progress)
+        control_->progress(accounted());
 }
 
 std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,

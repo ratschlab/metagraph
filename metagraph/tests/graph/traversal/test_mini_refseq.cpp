@@ -14,6 +14,8 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "cli/server_checks.hpp"
+#include "cli/traverse.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 
 
@@ -784,6 +786,50 @@ TEST_F(MiniRefSeq, BudgetAwareReadsDoNotDependOnBatchKmers) {
     }
     EXPECT_GT(compared, 80u);
     EXPECT_GT(decode_stops, 0u);
+}
+
+
+// Pass 5, the chunked deadlines: every read of a request decoded in chunks of one row (with
+// the deadline checked between them) gives the response of the unchunked request, byte for
+// byte, when no deadline is reached — constrain and annotate, derived and named labels, no
+// budget, memory budgets near and at their stops (the budget-aware reads, refusals included)
+// and work budgets
+TEST_F(MiniRefSeq, PacedReadsAreByteIdentical) {
+    const std::string seed = query_.substr(0, 120);
+    size_t compared = 0, stopped = 0;
+    for (const char *mode : { "constrain", "annotate" }) {
+        for (int budget = 0; budget < 6; ++budget) {
+            Json::Value r;
+            r["seeds"][0]["sequence"] = seed;
+            Json::Value &st = r["strategy"];
+            st["labels"]["mode"] = mode;
+            st["bounds"]["max_extension_bp"] = 150;
+            st["bounds"]["time_budget_ms"] = 600000;
+            st["output"]["detail"] = budget % 2 ? "graphlet" : "full";
+            st["output"]["timing"] = false;
+            if (std::string(mode) == "annotate")
+                st["labels"]["max_labels_per_node"] = 64;
+            switch (budget) {
+                case 1: st["bounds"]["max_memory_mb"] = 1; break;
+                case 2: st["bounds"]["max_memory_mb"] = 3; break;
+                case 3: st["bounds"]["max_memory_mb"] = 16; break;
+                case 4: st["bounds"]["max_work_units"] = 20000; break;
+                case 5: st["bounds"]["max_work_units"] = 2000000; break;
+                default: break;
+            }
+            mtg::cli::TraverseLimits whole, paced;
+            paced.chunk_target_ms = 1e-9;
+            const std::string a = mtg::cli::json_text(
+                    mtg::cli::process_traverse_request(r, *anno_graph_, "", whole), true);
+            const std::string b = mtg::cli::json_text(
+                    mtg::cli::process_traverse_request(r, *anno_graph_, "", paced), true);
+            EXPECT_EQ(a, b) << mode << " budget " << budget;
+            stopped += a.find("\"resource_stop\"") != std::string::npos;
+            compared++;
+        }
+    }
+    EXPECT_EQ(12u, compared);
+    EXPECT_GT(stopped, 0u);
 }
 
 } // namespace

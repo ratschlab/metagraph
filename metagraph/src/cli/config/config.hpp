@@ -126,6 +126,22 @@ class Config {
     double traverse_attempt_allowance_ms = 10'000;
     uint64_t traverse_attempt_retention_s = 3600;
     size_t traverse_attempt_retention = 10'000;
+    // what a ledger adds to a request's not_after_ms before it treats an unanswered attempt as
+    // never started (stated in the capabilities; the server's own check is strict), ms
+    uint64_t traverse_clock_skew_ms = 2000;
+    // the expected duration of one uninterruptible piece of a /traverse annotation read under
+    // a deadline (the reads are decoded in chunks sized from the observed per-row time, the
+    // deadline checked between them); 0: one piece per read, as before (ms)
+    uint64_t traverse_chunk_target_ms = 50;
+    // the zlib level of the traversal routes' compressed bodies (the other routes keep 9):
+    // measured on real responses, level 1 writes 3-4 times faster than 9 at 1.8 times the
+    // bytes, and the time to build a response is what a delivery window bounds
+    int traverse_compression_level = 1;
+    // the throughputs the delivery reserve of an attempt assumes (MB/s): compressing at
+    // compression_level, and building the JSON text of a seed's result (replaced by the
+    // slowest rate measured on the attempt's own seeds of 1 MB or more)
+    double traverse_delivery_compress_mbps = 50;
+    double traverse_delivery_build_mbps = 10;
 
     unsigned int max_path_length = 100;
     unsigned int smoothing_window = 1;  // no smoothing by default

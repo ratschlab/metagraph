@@ -51,6 +51,10 @@ struct TraverseRequest {
     std::string attempt_id;
     std::string budget_id;
     std::string locus_id;
+    // not started after this instant (Unix epoch ms, the server's clock): enforced by the
+    // caller at handler start (the server: 409 state expired; the CLI: the same body, exit 1),
+    // echoed in usage
+    std::optional<uint64_t> not_after_ms;
     std::vector<graph::traversal::Seed> seeds;
     graph::traversal::Strategy strategy;
     CostSpec cost;
@@ -62,6 +66,16 @@ struct TraverseRequest {
 
 // The MGT format version written by `detail: graphlet` (H record, capabilities)
 constexpr int kGraphletFormatVersion = 1;
+// The traversal algorithm every /traverse response names (`algorithm_version`), also stated
+// by both capabilities routes, so that a client can tell before asking which walk it gets
+constexpr const char *kTraverseAlgorithmVersion = "traverse-0.2";
+// What the server offers beyond the base contract (capabilities.feature_level), monotonic:
+// each pass that adds capabilities fields or routes bumps it by one (SPEC §10.3 maps every
+// level). 2: attempts and the client-gone stop; 3: not_after_ms, per-graph identity and
+// GET /traverse/capabilities?graph=, GET /capabilities, algorithm_version in the
+// capabilities, attempts.hard_cap_ms (allowance_ms an integer), deadline_check and the
+// chunked deadlines, compression_level and the delivery reserve
+constexpr int kTraverseFeatureLevel = 3;
 
 /**
  * What identifies the index a response was computed on (DESIGN-traverse-graphlet.md
@@ -86,17 +100,32 @@ bool valid_index_name(const std::string &name);
 // index_meta_fp of the index behind |oracle| (cost: one pass over the column names)
 std::string index_meta_fingerprint(const graph::traversal::LabelOracle &oracle);
 /**
+ * The files an index of |graph| and |annotation| is loaded from: the two, and the sidecars the
+ * loader reads beside them when they exist — the row-diff anchors and fork successors
+ * (<graph>.anchors, <graph>.rd_succ), the succinct graph's dummy-edge mask (<graph without
+ * .dbg>.edgemask), the coordinates of a column annotation (<annotation>.coords) and the
+ * sequence headers of a coordinate annotation (<annotation without .<type>.annodbg>.seqs) —
+ * as scripts/traversal/index_manifest.py collects them.
+ */
+std::vector<std::string> index_bundle_files(const std::string &graph,
+                                            const std::string &annotation);
+/**
  * Read an index manifest, validate it and return its fingerprint. The manifest is a JSON
  * object with `files: [{path, size, sha256}, ...]` (paths relative to the manifest,
  * '/'-separated, unique; sha256 64 lowercase hex); other keys (builder, inputs) are
  * metadata and not part of the identity. The fingerprint is the lowercase hex sha256 of
  * the lines "<path>\t<size>\t<sha256>\n" in ascending byte order of path; an `index_fp`
- * the manifest states must equal it. Every file of |loaded| that exists on disk must be
- * listed (by base name) with its size: a manifest of another bundle must not lend its
- * identity. Throws std::runtime_error naming the problem.
+ * the manifest states must equal it. Every file of |loaded| (index_bundle_files) that exists
+ * on disk must be listed (by base name) with its size, and the manifest must list no graph
+ * (*dbg) or annotation (*.annodbg) file other than those of |loaded|: a manifest of another
+ * bundle, or of a directory holding several, must not lend its identity. Throws
+ * std::runtime_error naming the problem. |stated_name|, when given, receives the manifest's
+ * own `index_ns` (metadata; "" when it states none): the server's name for the index comes
+ * from its configuration, and a different one in the manifest is only logged.
  */
 std::string index_manifest_fingerprint(const std::string &manifest_path,
-                                       const std::vector<std::string> &loaded);
+                                       const std::vector<std::string> &loaded,
+                                       std::string *stated_name = nullptr);
 // lowercase hex SHA-256 (FIPS 180-4) of |data|
 std::string sha256_hex(std::string_view data);
 // the identity of the index |config| names (--index-name, --index-manifest against the
@@ -245,10 +274,27 @@ struct TraverseLimits {
     size_t max_seeds = 0;          // cap on |request.seeds|
     uint64_t max_seed_bp = 0;      // cap on the length of one seed
     size_t max_seed_labels = 0;    // cap on strategy.labels.max_seed_labels
+    // Not a cap: the chunked deadlines (spec §6.8, Config::traverse_chunk_target_ms) — an
+    // annotation read a deadline may fall into is decoded in chunks of about this many ms, the
+    // deadline checked between them; 0: one piece per read, as before
+    double chunk_target_ms = 0;
+};
+
+// The results of a /traverse response written as text, one per seed, as each was built
+// (the server: the JSON tree of a seed's result is freed at once, and an attempt knows the
+// exact bytes it has to deliver). |active|: the response's `results` are these texts, in
+// order; the envelope process_traverse_request returns then has no "results", and
+// assemble_traverse_response (server_checks.hpp) writes the whole response from both, byte
+// for byte what json_text of the tree with its results would write.
+struct ResultTexts {
+    std::vector<std::string> texts;
+    bool active = false;
 };
 
 // Shared by the CLI and the server. |release| is the configured index release id ("" if
-// none); |identity| as in capabilities_to_json. |attempt|: the server's control of the
+// none); |identity| as in capabilities_to_json. |texts|: each seed's result is written as
+// compact text once built (ResultTexts), under the attempt's delivery check; null (the CLI,
+// tests): the results stay in the returned tree. |attempt|: the server's control of the
 // request (traverse_attempts.hpp) — polled between seeds, at the walker's checkpoints and
 // while the results are built, and, for a request with attempt_id, the usage it records and
 // states and the bound it enforces; null (the CLI, tests): none, and a request with
@@ -260,7 +306,8 @@ Json::Value process_traverse_request(const Json::Value &json,
                                      const std::string &release,
                                      const TraverseLimits &limits = {},
                                      const IndexIdentity *identity = nullptr,
-                                     Attempt *attempt = nullptr);
+                                     Attempt *attempt = nullptr,
+                                     ResultTexts *texts = nullptr);
 // |client_gone|: polled between the phases of the request (the discovery read, the support
 // fetch, the selection); true abandons it (graph::traversal::AttemptAborted)
 Json::Value process_resolve_request(const Json::Value &json,

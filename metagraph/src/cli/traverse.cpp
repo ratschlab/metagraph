@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -16,6 +17,7 @@
 
 #include "cli/config/config.hpp"
 #include "cli/load/load_annotated_graph.hpp"
+#include "cli/server_checks.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/traversal/label_oracle.hpp"
@@ -263,12 +265,13 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     // server reads them before the request is parsed, to register the attempt (attempt_ids,
     // the same rule); declared here so that strict parsing accepts them
     const AttemptIds ids = attempt_ids(json);
-    for (const char *field : { "attempt_id", "budget_id", "locus_id" }) {
+    for (const char *field : { "attempt_id", "budget_id", "locus_id", "not_after_ms" }) {
         s.has(field);
     }
     req.attempt_id = ids.attempt_id;
     req.budget_id = ids.budget_id;
     req.locus_id = ids.locus_id;
+    req.not_after_ms = ids.not_after_ms;
 
     const auto &seeds = s.raw("seeds");
     if (!seeds.isArray() || seeds.empty())
@@ -719,8 +722,9 @@ static const char* external_cause(const ResourceStop &q) {
     return q.resource == ResourceStop::CANCELLED
         ? "the attempt was cancelled (POST /traverse/cancel)"
         : "the attempt reached the time at which the server stops walking it (the duration "
-          "bound it enforces, the seeds' time budgets plus its allowance, less half the "
-          "allowance, kept for the delivery; see usage.bound)";
+          "bound it enforces, the seeds' time budgets plus its allowance, less the larger of "
+          "half the allowance and the delivery reserve, kept for the delivery; see "
+          "usage.bound.walk_until_ms)";
 }
 
 // The request field a resource stop answers to (§6.7) and its value; a beam's width is
@@ -1903,9 +1907,9 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     // What the server offers beyond the base contract, monotonic: a client states a feature as
     // "feature_level >= n" (fields are only ever added; SPEC §10.3 lists each level). 2: attempts
     // (attempt_id/budget_id/locus_id, usage, POST /traverse/cancel, GET /traverse/attempt/{id},
-    // the enforced attempt bound) and the stop when the client is gone. In the probe and in every
-    // response, so a multi-graph host, whose probe has no index, states it too.
-    c["feature_level"] = 2;
+    // the enforced attempt bound) and the stop when the client is gone; 3: kTraverseFeatureLevel.
+    // In the probe and in every response, so that a client reading only responses states it too.
+    c["feature_level"] = kTraverseFeatureLevel;
     c["k"] = uint_json(oracle.get_k());
     c["regime"] = to_string(oracle.regime());
     c["alphabet"] = oracle.graph().alphabet();
@@ -2415,8 +2419,41 @@ std::string index_meta_fingerprint(const LabelOracle &oracle) {
     return buf;
 }
 
+static bool ends_with(const std::string &s, std::string_view suffix) {
+    return s.size() >= suffix.size()
+        && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::vector<std::string> index_bundle_files(const std::string &graph,
+                                            const std::string &annotation) {
+    std::vector<std::string> files { graph, annotation };
+    auto add_if_present = [&](const std::string &path) {
+        if (std::ifstream(path).good())
+            files.push_back(path);
+    };
+    // the sidecars the loader reads (load_annotated_graph.cpp, DBGSuccinct::load,
+    // load_coord_to_header): checked too, so that a manifest whose sidecars are another
+    // build's does not lend its identity (review of pass 5: a manifest with wrong .anchors,
+    // .rd_succ and .seqs was accepted, and the .seqs was loaded)
+    add_if_present(graph + ".anchors");
+    add_if_present(graph + ".rd_succ");
+    if (ends_with(graph, ".dbg"))
+        add_if_present(graph.substr(0, graph.size() - 4) + ".edgemask");
+    add_if_present(annotation + ".coords");
+    // <base>.<type>.annodbg: the sequence headers are <base>.seqs
+    if (ends_with(annotation, ".annodbg")) {
+        const std::string typed = annotation.substr(0, annotation.size() - 8);
+        const size_t dot = typed.find_last_of('.');
+        const size_t slash = typed.find_last_of('/');
+        if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+            add_if_present(typed.substr(0, dot) + ".seqs");
+    }
+    return files;
+}
+
 std::string index_manifest_fingerprint(const std::string &manifest_path,
-                                       const std::vector<std::string> &loaded) {
+                                       const std::vector<std::string> &loaded,
+                                       std::string *stated_name) {
     std::ifstream in(manifest_path);
     if (!in.good())
         throw std::runtime_error("index manifest " + manifest_path + ": cannot be read");
@@ -2464,6 +2501,24 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
                       + " bytes) is not listed with that size: the manifest describes another index");
         }
     }
+    // One graph with one annotation: a manifest that also lists another graph or annotation
+    // (one written for a directory, or with --extra) would lend one fingerprint to every index
+    // of the directory, two annotations of one graph included (review of pass 5: two
+    // annotations with swapped memberships stated one index_fp and one index_meta_fp, and
+    // compared as the same index)
+    std::set<std::string> loaded_names;
+    for (const std::string &path : loaded) {
+        loaded_names.insert(base_name(path));
+    }
+    for (const auto &[p, entry] : files) {
+        const std::string name = base_name(p);
+        const bool annotation = ends_with(name, ".annodbg");
+        if ((annotation || ends_with(name, "dbg")) && !loaded_names.count(name)) {
+            throw bad("it lists the " + std::string(annotation ? "annotation " : "graph ") + p
+                      + ", which this index does not load: a manifest describes one graph with "
+                        "one annotation (scripts/traversal/index_manifest.py writes one per pair)");
+        }
+    }
     // the canonical file list, in byte order of path (std::map's order)
     std::string canonical;
     for (const auto &[path, entry] : files) {
@@ -2474,6 +2529,8 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
     if (json.isMember("index_fp") && json["index_fp"].asString() != fp)
         throw bad("its index_fp " + json["index_fp"].asString() + " is not the digest of its files ("
                   + fp + "): the file list was edited");
+    if (stated_name)
+        *stated_name = json["index_ns"].isString() ? json["index_ns"].asString() : "";
     return fp;
 }
 
@@ -2494,10 +2551,11 @@ IndexIdentity index_identity(const Config &config, const graph::AnnotatedDBG &an
     }
     id.name = config.index_name;
     if (!config.index_manifest.empty()) {
-        std::vector<std::string> loaded { config.infbase };
-        loaded.insert(loaded.end(), config.infbase_annotators.begin(),
-                      config.infbase_annotators.end());
-        id.fp = index_manifest_fingerprint(config.index_manifest, loaded);
+        if (config.infbase_annotators.size() != 1)
+            throw std::runtime_error("--index-manifest: one annotation (-a) is loaded with it");
+        id.fp = index_manifest_fingerprint(config.index_manifest,
+                                           index_bundle_files(config.infbase,
+                                                              config.infbase_annotators[0]));
     }
     id.meta_fp = index_meta_fingerprint(LabelOracle(anno_graph));
     return id;
@@ -4293,12 +4351,16 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
 
 // A request with attempt_id outside the server (the CLI, a test): its usage is stated as the
 // server states it, with the bound computed but not enforced (no lease to protect)
+static const std::string& local_instance() {
+    static const std::string instance = AttemptRegistry(AttemptSettings()).server_instance();
+    return instance;
+}
+
 static std::unique_ptr<Attempt> local_attempt(const AttemptIds &ids) {
     AttemptSettings settings;
     settings.hard_cap_ms = 0;
-    static const std::string instance = AttemptRegistry(settings).server_instance();
     auto attempt = std::make_unique<Attempt>(0, std::chrono::system_clock::now(), settings,
-                                             instance, false);
+                                             local_instance(), false);
     attempt->set_ids(ids);
     return attempt;
 }
@@ -4308,11 +4370,12 @@ Json::Value process_traverse_request(const Json::Value &json,
                                      const std::string &release,
                                      const TraverseLimits &limits,
                                      const IndexIdentity *identity,
-                                     Attempt *attempt) {
+                                     Attempt *attempt,
+                                     ResultTexts *texts) {
     TraverseRequest req = parse_traverse_request(json);
     std::unique_ptr<Attempt> local;
     if (!attempt && !req.attempt_id.empty()) {
-        local = local_attempt({ req.attempt_id, req.budget_id, req.locus_id });
+        local = local_attempt({ req.attempt_id, req.budget_id, req.locus_id, req.not_after_ms });
         attempt = local.get();
     }
     if (!req.release.empty() && !release.empty() && req.release != release)
@@ -4367,6 +4430,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     if (attempt) {
         attempt->set_bound(req.seeds.size(), req.strategy.time_budget_ms,
                            req.strategy.max_memory_bytes);
+        attempt->set_delivery_detail(req.detail);
     }
 
     // what the requested output costs per object, for the memory budget (§14); re-priced per
@@ -4375,6 +4439,9 @@ Json::Value process_traverse_request(const Json::Value &json,
     uint64_t priced_width = kMgtFloatWidth;
 
     LabelOracle oracle(anno_graph);
+    // the chunked deadlines (spec §6.8): every annotation read of this request is decoded in
+    // pieces of about this duration under a deadline, the deadline checked between them
+    oracle.pacer().target_ms = limits.chunk_target_ms;
     // checked here, where k is known: a continuation shorter than k is not a valid seed,
     // so the promise that continuations are resubmittable (§7.1) would not hold
     const uint64_t k = oracle.get_k();
@@ -4401,7 +4468,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     // what every arm's complete_to_bp quantifies over: the per-path edge-reuse rule is
     // what makes "all walks" a finite set in a graph with cycles
     out["walk_rule"] = walk_rule_statement(req.strategy, oracle);
-    out["algorithm_version"] = "traverse-0.2";
+    out["algorithm_version"] = kTraverseAlgorithmVersion;
 
     Json::Value results(Json::arrayValue);
     std::set<std::string> seen_ids;
@@ -4433,8 +4500,36 @@ Json::Value process_traverse_request(const Json::Value &json,
         control.poll = [attempt]() { return attempt->poll(); };
         control.elapsed_ms = [attempt]() { return attempt->elapsed_ms(); };
         control.bound_ms = attempt->bound_ms();
+        // a paced read's chunks: sized by the time left to the walk-until, and preceded by a
+        // poll that reads the clock and the client (the stop flag alone is read elsewhere)
+        control.ms_left = [attempt]() { return attempt->ms_left(); };
+        control.poll_now = [attempt]() { return attempt->poll(/* force */ true); };
+        // the walked seed's account, from which its output is estimated (the delivery reserve)
+        control.progress = [attempt](uint64_t account) { attempt->progress(account); };
     }
     DeliveryScope delivery(attempt);
+    // A seed's result as the response holds it: in the tree, or (|texts|, the server) written
+    // as compact text now, under the attempt's delivery check, so that its tree is freed at
+    // once and the attempt's delivery reserve counts its exact bytes. |built_seconds|: what
+    // building its tree took (the build rate measured on large results)
+    const std::function<void()> text_check = attempt
+        ? std::function<void()>([attempt]() { attempt->check_delivery(); })
+        : std::function<void()>();
+    // |account|: the walk's final modelled account (0: no walk), whose ratio to the text the
+    // server measures for its next attempts' estimates
+    auto append = [&](Json::Value &&rj, double built_seconds, uint64_t account = 0) {
+        if (!texts) {
+            results.append(std::move(rj));
+            return;
+        }
+        Timer written;
+        texts->texts.push_back(json_text(rj, true, text_check));
+        rj = Json::Value();
+        if (attempt) {
+            attempt->note_delivered(texts->texts.back().size(), built_seconds + written.elapsed(),
+                                    account);
+        }
+    };
     // a seed never started reads its annotation as one started would have
     const bool decode_charged = (req.strategy.max_memory_bytes || req.strategy.max_work_units)
                               && oracle.decode_charged();
@@ -4451,9 +4546,9 @@ Json::Value process_traverse_request(const Json::Value &json,
             }
             if (stop != ExternalStop::NONE) {
                 for (size_t j = i; j < req.seeds.size(); ++j) {
-                    results.append(not_started_seed_to_json(req.seeds[j], stop, attempt->bound_ms(),
-                                                            attempt->elapsed_ms(), req.strategy,
-                                                            decode_charged));
+                    append(not_started_seed_to_json(req.seeds[j], stop, attempt->bound_ms(),
+                                                    attempt->elapsed_ms(), req.strategy,
+                                                    decode_charged), 0);
                     // its usage is what its result states and holds (review of the stage-4
                     // backend, F1: a never started seed stated a soft excess its usage did not)
                     SeedUsage usage;
@@ -4479,6 +4574,8 @@ Json::Value process_traverse_request(const Json::Value &json,
                           std::optional<uint64_t> refused = std::nullopt) {
             if (!attempt)
                 return;
+            // the longest single read so far (usage, and the server's deadline_check)
+            attempt->note_max_read_ms(oracle.pacer().max_read_ms);
             SeedUsage usage;
             usage.outcome = outcome;
             usage.stopped_by = stopped_by;
@@ -4496,9 +4593,10 @@ Json::Value process_traverse_request(const Json::Value &json,
                 return std::nullopt;
             return static_cast<uint64_t>(std::ceil(q.demand));
         };
-        auto delivered = [&](const Json::Value &rj) {
+        // the seed's result is appended: its outcome, and its walk and building in its time
+        auto delivered = [&](const std::string &outcome) {
             if (attempt)
-                attempt->seed_delivered(i, rj["outcome"]["walks"].asString(), seed_timer.elapsed() * 1000);
+                attempt->seed_delivered(i, outcome, seed_timer.elapsed() * 1000);
         };
         std::vector<std::string> dict = seed.labels;
         dict.insert(dict.end(), req.strategy.extra.begin(), req.strategy.extra.end());
@@ -4544,8 +4642,9 @@ Json::Value process_traverse_request(const Json::Value &json,
                 // its result is the refusal, not the walk
                 walked("failed", r.resource_stop ? resource_name(r.resource_stop->resource) : "",
                        true, r.resource_stop ? refused_of(*r.resource_stop) : std::nullopt);
-                delivered(refused);
-                results.append(std::move(refused));
+                const std::string outcome = refused["outcome"]["walks"].asString();
+                append(std::move(refused), 0);
+                delivered(outcome);
                 continue;
             }
             Timer serialize;
@@ -4566,8 +4665,9 @@ Json::Value process_traverse_request(const Json::Value &json,
             serialize_seconds += seconds;
             if (req.timing)
                 rj["timing"]["serialize_ms"] = seconds * 1000;
-            delivered(rj);
-            results.append(std::move(rj));
+            const std::string outcome = rj["outcome"]["walks"].asString();
+            append(std::move(rj), seconds, meter.memory_final);
+            delivered(outcome);
         } catch (const SeedDerivationError &e) {
             // The permitted set could not be derived from THIS seed (nothing carries it
             // in full, the budget ran out, the names are ambiguous). The caller named no
@@ -4575,17 +4675,21 @@ Json::Value process_traverse_request(const Json::Value &json,
             // report it against the seed and keep the other seeds' traversals, instead of
             // discarding a 100-seed batch because seed 57 spans a recombination point.
             walked("failed", e.cause() == SeedDerivationError::TIME_BUDGET ? "time" : "", true);
-            results.append(failed_seed_to_json(seed, e, req.strategy, clamped,
-                                               oracle.decode_charged()));
-            delivered(results[results.size() - 1]);
+            Json::Value failed = failed_seed_to_json(seed, e, req.strategy, clamped,
+                                                     oracle.decode_charged());
+            const std::string outcome = failed["outcome"]["walks"].asString();
+            append(std::move(failed), 0);
+            delivered(outcome);
             per_seed(oracle.counters());   // do not bill this seed's reads to the next
         } catch (const SeedBudgetError &e) {
             // a request budget does not hold this seed (§14): failed per seed, like a
             // derivation, since the budget is per seed and the other seeds may fit (or the
             // attempt stopped it in its seed phase)
             walked("failed", resource_name(e.stop().resource), true, refused_of(e.stop()));
-            results.append(budget_failed_seed_to_json(seed, e, req.strategy));
-            delivered(results[results.size() - 1]);
+            Json::Value failed = budget_failed_seed_to_json(seed, e, req.strategy);
+            const std::string outcome = failed["outcome"]["walks"].asString();
+            append(std::move(failed), 0);
+            delivered(outcome);
             per_seed(oracle.counters());
         } catch (const AttemptAborted &) {
             // the client is gone: nothing is written, but what the seed consumed until it was
@@ -4599,7 +4703,11 @@ Json::Value process_traverse_request(const Json::Value &json,
                                  + "': " + e.what());
         }
     }
-    out["results"] = std::move(results);
+    if (texts) {
+        texts->active = true;
+    } else {
+        out["results"] = std::move(results);
+    }
     if (attempt) {
         attempt->walk_ended();
         // every response to a ledger-managed request states what it consumed (DESIGN §14.1)
@@ -4705,13 +4813,27 @@ int traverse_graph(Config *config) {
         try {
             if (!config->traverse_resolve) {
                 const AttemptIds ids = attempt_ids(json);
+                // a request whose not_after_ms has passed is not started, as the server
+                // refuses it (409): its body, and the exit status of a request error
+                if (const uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count();
+                        not_after_passed(ids, now)) {
+                    const Json::Value body = expired_json(ids, now, local_instance());
+                    logger->error("Request in {} not started: {}", file, body["error"].asString());
+                    std::cout << Json::writeString(builder, body) << std::endl;
+                    status = 1;
+                    continue;
+                }
                 if (!ids.attempt_id.empty())
                     attempt = local_attempt(ids);
             }
+            // operator-run: no caps; the reads are chunked under a deadline as on the server
+            TraverseLimits limits;
+            limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
             Json::Value out = config->traverse_resolve
                 ? process_resolve_request(json, *anno_graph, config->index_release, 0, &identity)
-                : process_traverse_request(json, *anno_graph, config->index_release, {}, &identity,
-                                           attempt.get());
+                : process_traverse_request(json, *anno_graph, config->index_release, limits,
+                                           &identity, attempt.get());
             std::cout << Json::writeString(builder, out) << std::endl;
         } catch (const InvalidRequest &e) {
             logger->error("Invalid request in {}: {}", file, e.what());

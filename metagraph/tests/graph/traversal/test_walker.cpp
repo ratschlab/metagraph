@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <limits>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <set>
@@ -22,6 +24,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/unix_tools.hpp"
 #include "cli/traverse.hpp"
 
 
@@ -4033,5 +4036,346 @@ TEST(Walker, CountersAreAttributedToTheirArm) {
     }
 }
 
+
+
+/********** pass 5: the chunked deadlines (spec §6.8; LabelOracle::pacer) **********/
+
+namespace {
+
+// A fan: a 40 bp seed, then the 64 trimers (three levels of 4-way forks), each followed by a
+// tail of its own: the level at depth 3 holds 64 heads whose lookahead reads 64 rows each in
+// one call — the read a deadline used to wait for
+struct Fan {
+    std::unique_ptr<AnnotatedDBG> anno;
+    std::string seed;
+    explicit Fan(size_t tail = 200) {
+        auto b = clean_blocks({ 40 }, 501);
+        seed = b[0];
+        std::vector<std::string> seqs, labels;
+        for (size_t i = 0; i < 64; ++i) {
+            std::string tri { "ACGT"[i / 16], "ACGT"[(i / 4) % 4], "ACGT"[i % 4] };
+            seqs.push_back(seed + tri + random_seq(tail, 7000 + i));
+            labels.push_back("rec" + std::to_string(i));
+        }
+        anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels);
+    }
+};
+
+// reads made slow: |us| per row, busy-waited (sleeping overshoots)
+std::function<void(size_t)> slow_rows(double us) {
+    return [us](size_t rows) {
+        const auto until = std::chrono::steady_clock::now()
+                         + std::chrono::nanoseconds(static_cast<int64_t>(rows * us * 1000));
+        while (std::chrono::steady_clock::now() < until) {}
+    };
+}
+
+// an attempt that stops (|kind|) once |at_ms| passed on its clock, read where a real one is:
+// at every poll here, and in the paced reads' poll_now; its walk-until (ms_left) is |at_ms|,
+// or |until_ms| when given (a cancel is not a deadline: a real one comes before the walk-until)
+struct StopAt {
+    double at_ms;
+    ExternalStop kind;
+    double until_ms;
+    Timer timer;
+    bool tripped = false;
+    AttemptMeter meter;
+    AttemptControl control;
+    StopAt(double at, ExternalStop kind, double until = -1)
+          : at_ms(at), kind(kind), until_ms(until < 0 ? at : until) {
+        auto poll = [this]() {
+            if (timer.elapsed() * 1000 >= at_ms)
+                tripped = true;
+            return tripped ? this->kind : ExternalStop::NONE;
+        };
+        control.poll = poll;
+        control.poll_now = poll;
+        control.ms_left = [this]() { return until_ms - timer.elapsed() * 1000; };
+        control.elapsed_ms = [this]() { return timer.elapsed() * 1000; };
+        control.bound_ms = until_ms;
+        control.meter = &meter;
+    }
+};
+
+// reads whose rows share work, as a row-diff annotation's rows share the decoding of their
+// row-diff paths: every call costs |call_us| beside |row_us| per row, so that splitting a read
+// costs |call_us| per chunk; |calls| counts the calls
+std::function<void(size_t)> shared_cost(double call_us, double row_us,
+                                        std::shared_ptr<size_t> calls) {
+    return [=](size_t rows) {
+        ++*calls;
+        const auto until = std::chrono::steady_clock::now()
+                         + std::chrono::nanoseconds(static_cast<int64_t>((call_us + rows * row_us)
+                                                                         * 1000));
+        while (std::chrono::steady_clock::now() < until) {}
+    };
+}
+
+Strategy fan_strategy(double time_budget_ms) {
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.max_label_branches = Strategy::kUnlimited;
+    st.max_splits_per_path = Strategy::kUnlimited;
+    st.merge_reconverge = false;
+    st.max_extension_bp = 150;
+    st.time_budget_ms = time_budget_ms;
+    return st;
+}
+
+struct Timed {
+    SeedResult result;
+    double ms = 0;
+    double max_read_ms = 0;
+};
+
+Timed run_fan(const Fan &fan, const Strategy &st, double target_ms, double us_per_row,
+              const AttemptControl *control = nullptr, std::vector<std::string> labels = {}) {
+    LabelOracle oracle(*fan.anno);
+    oracle.pacer().target_ms = target_ms;
+    oracle.test_read_hook = slow_rows(us_per_row);
+    Seed seed;
+    seed.sequence = fan.seed;
+    seed.labels = std::move(labels);
+    Timed t;
+    Timer timer;
+    t.result = traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", nullptr, control);
+    t.ms = timer.elapsed() * 1000;
+    t.max_read_ms = oracle.pacer().max_read_ms;
+    return t;
+}
+
+} // namespace
+
+// The level's lookahead read (64 heads x 64 rows at 100 us a row: 410 ms) used to run whole
+// past a 100 ms budget; paced in chunks of 10 ms it is stopped within a chunk and a row of the
+// deadline, and the walk is censored where the whole read would have censored it
+TEST(WalkerDeadlineChunks, TimeBudgetHoldsWithinAChunk) {
+    Fan fan;
+    const Strategy st = fan_strategy(100);
+    const Timed whole = run_fan(fan, st, 0, 100);
+    const Timed paced = run_fan(fan, st, 10, 100);
+    ASSERT_TRUE(whole.result.resource_stop);
+    ASSERT_TRUE(paced.result.resource_stop);
+    EXPECT_EQ(ResourceStop::TIME, whole.result.resource_stop->resource);
+    EXPECT_EQ(ResourceStop::TIME, paced.result.resource_stop->resource);
+    // the test bites: the whole read overran the budget by far
+    EXPECT_GE(whole.ms, 100 + 150) << "the unpaced walk did not overrun";
+    EXPECT_GE(whole.max_read_ms, 150);
+    // budget + one chunk + one row + what the walk does between checks
+    EXPECT_LE(paced.ms, 100 + 10 + 0.1 + 60) << "the paced walk overran";
+    EXPECT_LE(paced.max_read_ms, 10 + 10);
+    // the same censoring point
+    const ArmResult &a = whole.result.arms[kRight];
+    const ArmResult &b = paced.result.arms[kRight];
+    EXPECT_EQ(a.complete_to_bp, b.complete_to_bp);
+    EXPECT_EQ(a.status, b.status);
+    EXPECT_LT(b.complete_to_bp, st.max_extension_bp);
+}
+
+// Without a deadline that is reached, a paced walk is the unpaced walk: the same result,
+// counters included (one-row chunks)
+TEST(WalkerDeadlineChunks, PacedWalkWithoutAStopIsTheSame) {
+    Fan fan(60);
+    Strategy st = fan_strategy(600'000);
+    st.max_extension_bp = 50;
+    LabelOracle a(*fan.anno), b(*fan.anno);
+    b.pacer().target_ms = 1e-9;
+    b.pacer().first_rows = 1;
+    b.pacer().far_factor = std::numeric_limits<double>::infinity();
+    b.pacer().rest_factor = std::numeric_limits<double>::infinity();
+    Seed seed;
+    seed.sequence = fan.seed;
+    for (bool named : { false, true }) {
+        if (named) {
+            for (size_t i = 0; i < 64; i += 3) seed.labels.push_back("rec" + std::to_string(i));
+        }
+        const SeedResult ra = traverse_seed(a, seed, st, LabelChangeCost::forbid());
+        const SeedResult rb = traverse_seed(b, seed, st, LabelChangeCost::forbid());
+        EXPECT_EQ(serialize(ra), serialize(rb));
+        EXPECT_EQ(ra.annotation_counters.rows_requested, rb.annotation_counters.rows_requested);
+        EXPECT_EQ(ra.annotation_counters.direct_reads, rb.annotation_counters.direct_reads);
+        EXPECT_EQ(ra.arms[kRight].complete_to_bp, st.max_extension_bp);
+    }
+}
+
+// The seed's validation is stopped by the attempt only (never by its own time budget): a
+// stop inside its read fails the seed (attempt_deadline) within a chunk, with the rows its
+// chunks decoded charged; a cancel inside a level's read is seen within a chunk too
+TEST(WalkerDeadlineChunks, AttemptStopsReachLongReads) {
+    // a long seed with explicit labels: its validation reads 1990 rows (200 ms at 100 us)
+    const std::string record = clean_block(2100, 77);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, { record },
+                                                                         { "long" });
+    Strategy st = fan_strategy(1);    // a 1 ms seed budget does not stop the validation
+    st.max_extension_bp = 10;
+    for (double target : { 0.0, 10.0 }) {
+        LabelOracle oracle(*anno);
+        oracle.pacer().target_ms = target;
+        oracle.test_read_hook = slow_rows(100);
+        StopAt stop(40, ExternalStop::ATTEMPT_DEADLINE);
+        Seed seed;
+        seed.sequence = record.substr(0, 2000);
+        seed.labels = { "long" };
+        Timer timer;
+        try {
+            traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", nullptr,
+                          &stop.control);
+            ADD_FAILURE() << "the seed was not failed";
+        } catch (const SeedBudgetError &e) {
+            EXPECT_EQ(ResourceStop::ATTEMPT_DEADLINE, e.stop().resource);
+        }
+        const double ms = timer.elapsed() * 1000;
+        if (target > 0) {
+            EXPECT_LE(ms, 40 + 10 + 30);
+            // the rows decoded before the stop are the seed's work
+            EXPECT_GT(stop.meter.work_seed, 8u * 64);
+        } else {
+            EXPECT_GE(ms, 150);     // the whole validation read ran first
+        }
+    }
+    // without an attempt, a seed budget of 1 ms still validates the seed and delivers the
+    // result complete to 0 bp
+    {
+        LabelOracle oracle(*anno);
+        oracle.pacer().target_ms = 10;
+        Seed seed;
+        seed.sequence = record.substr(0, 2000);
+        seed.labels = { "long" };
+        const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        EXPECT_FALSE(r.arms[kRight].requested && r.arms[kRight].segments.empty());
+    }
+
+    // a cancel inside the fan's lookahead read when the walk-until is near: the read is split,
+    // and the walk stops within a chunk, partial
+    Fan fan;
+    StopAt cancel(60, ExternalStop::CANCELLED);
+    const Timed t = run_fan(fan, fan_strategy(600'000), 10, 100, &cancel.control);
+    ASSERT_TRUE(t.result.resource_stop);
+    EXPECT_EQ(ResourceStop::CANCELLED, t.result.resource_stop->resource);
+    EXPECT_LE(t.ms, 60 + 10 + 60);
+    EXPECT_LT(t.result.arms[kRight].complete_to_bp, 150u);
+    // with the walk-until far away the read is one piece (no deadline can fall into it), as
+    // before pass 5: the cancel is seen at the checkpoint after it (stated in spec §6.8)
+    StopAt far_cancel(60, ExternalStop::CANCELLED, 600'000);
+    const Timed f = run_fan(fan, fan_strategy(600'000), 10, 100, &far_cancel.control);
+    ASSERT_TRUE(f.result.resource_stop);
+    EXPECT_EQ(ResourceStop::CANCELLED, f.result.resource_stop->resource);
+    EXPECT_GE(f.max_read_ms, 300);      // the lookahead's 4,096 rows at 100 us, whole
+}
+
+// Review of pass 5, F1: far from its deadline a read is one piece, so a paced walk the deadline
+// does not stop costs what the unpaced walk costs where splitting would cost (here 2 ms a call,
+// as a row-diff annotation decodes the paths a call's rows share once per call; chunking the
+// lookahead into rows sized by the slowest per-row time made such walks many times slower, a
+// row_diff walk of 1.8 s took 30 s and was stopped by its budget): the same calls, the same
+// result, the same time
+TEST(WalkerDeadlineChunks, FarDeadlineReadsAreOnePiece) {
+    Fan fan;
+    Strategy st = fan_strategy(600'000);
+    Seed seed;
+    seed.sequence = fan.seed;
+    auto run = [&](double target, size_t *calls, double *ms, double *max_read) {
+        LabelOracle oracle(*fan.anno);
+        oracle.pacer().target_ms = target;
+        auto counted = std::make_shared<size_t>(0);
+        oracle.test_read_hook = shared_cost(2000, 1, counted);
+        Timer timer;
+        SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        *ms = timer.elapsed() * 1000;
+        *calls = *counted;
+        *max_read = oracle.pacer().max_read_ms;
+        return serialize(r);
+    };
+    size_t whole_calls = 0, paced_calls = 0;
+    double whole_ms = 0, paced_ms = 0, whole_max = 0, paced_max = 0;
+    const std::string whole = run(0, &whole_calls, &whole_ms, &whole_max);
+    const std::string paced = run(10, &paced_calls, &paced_ms, &paced_max);
+    EXPECT_EQ(whole, paced);
+    // at most the derivation's first read is probed (its budget is finite and nothing is
+    // measured yet); every other read is one piece
+    EXPECT_LE(paced_calls, whole_calls + 1);
+    EXPECT_LE(paced_ms, whole_ms * 1.2 + 30);
+    EXPECT_NEAR(whole_max, paced_max, 0.5 * whole_max + 5);
+}
+
+// Review of pass 5, F2: a split read starts with at most first_rows rows, whatever the rows of
+// earlier reads cost: here the rows before the depth-3 lookahead cost 10 us each and its rows
+// and all after 100 us, and that read's first chunk, sized from the cheap rows (10 ms at 10 us:
+// 1,000 rows, 100 ms at their real rate), was one uninterruptible piece ten times the target
+TEST(WalkerDeadlineChunks, SplitReadsStartSmall) {
+    Fan fan;
+    Seed seed;
+    seed.sequence = fan.seed;
+    // the rows read before the lookahead (the first call of 1,024 rows or more), counted on an
+    // unpaced walk: a count that chunking does not change
+    uint64_t cheap = 0;
+    {
+        LabelOracle oracle(*fan.anno);
+        auto seen = std::make_shared<std::pair<uint64_t, bool>>(0, false);
+        oracle.test_read_hook = [seen](size_t rows) {
+            if (rows >= 1024)
+                seen->second = true;
+            if (!seen->second)
+                seen->first += rows;
+        };
+        traverse_seed(oracle, seed, fan_strategy(600'000), LabelChangeCost::forbid());
+        ASSERT_TRUE(seen->second);
+        cheap = seen->first;
+    }
+    const Strategy st = fan_strategy(100);
+    for (double target : { 0.0, 10.0 }) {
+        LabelOracle oracle(*fan.anno);
+        oracle.pacer().target_ms = target;
+        auto read = std::make_shared<uint64_t>(0);
+        oracle.test_read_hook = [read, cheap](size_t rows) {
+            const uint64_t fast = *read < cheap ? std::min<uint64_t>(rows, cheap - *read) : 0;
+            *read += rows;
+            slow_rows(10)(fast);
+            slow_rows(100)(rows - fast);
+        };
+        Timer timer;
+        const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        const double ms = timer.elapsed() * 1000;
+        ASSERT_TRUE(r.resource_stop);
+        EXPECT_EQ(ResourceStop::TIME, r.resource_stop->resource);
+        if (target > 0) {
+            EXPECT_LE(oracle.pacer().max_read_ms, 10 + 10);
+            EXPECT_LE(ms, 100 + 10 + 0.1 + 60);
+        } else {
+            EXPECT_GE(oracle.pacer().max_read_ms, 150);    // the test bites: 4,096 rows whole
+        }
+    }
+}
+
+// A derivation stopped inside its window's read fails the seed with time_budget, after the
+// k-mers consumed before the window, within a chunk of the budget (it ran the whole window,
+// 64 rows at 2 ms, before)
+TEST(WalkerDeadlineChunks, DerivationWindowIsPaced) {
+    Fan fan;
+    const Strategy st = fan_strategy(30);
+    for (double target : { 0.0, 10.0 }) {
+        LabelOracle oracle(*fan.anno);
+        oracle.pacer().target_ms = target;
+        oracle.test_read_hook = slow_rows(2000);
+        Seed seed;
+        seed.sequence = fan.seed;
+        Timer timer;
+        try {
+            traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+            ADD_FAILURE() << "the derivation was not stopped";
+        } catch (const SeedDerivationError &e) {
+            EXPECT_EQ(SeedDerivationError::TIME_BUDGET, e.cause());
+            if (target > 0)
+                EXPECT_NE(std::string::npos, std::string(e.what()).find("after 0 of "))
+                    << e.what();
+        }
+        const double ms = timer.elapsed() * 1000;
+        if (target > 0) {
+            EXPECT_LE(ms, 30 + 10 + 2 + 30);
+        } else {
+            EXPECT_GE(ms, 55);      // 30 rows (the seed's k-mers) at 2 ms, read whole
+        }
+    }
+}
 
 } // namespace

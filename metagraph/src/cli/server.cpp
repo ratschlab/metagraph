@@ -230,18 +230,91 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     return std::thread([&server_startup]() { server_startup.start(); });
 }
 
+using GraphPair = std::pair<std::string, std::string>;
+using GraphIndexes = tsl::hopscotch_map<std::string, std::vector<GraphPair>>;
+
 /**
- * Address exactly one physical (graph, annotation) pair for a traversal request.
- * A traversal must stay inside one graph, so a name covering several shards is
- * rejected unless the request disambiguates it with "graph_path".
+ * Address exactly one physical (graph, annotation) pair for a traversal request or the probe.
+ * A traversal must stay inside one graph, so a name covering several shards is rejected
+ * unless the request disambiguates it with |graph_path|; a graph_path naming one graph with
+ * several annotations under the name is rejected too — a traversal reads ONE annotation, and
+ * answering from the first of them would leave the others unread without saying so.
+ */
+const GraphPair& select_traverse_pair(const std::string &name, const std::string *graph_path,
+                                      const GraphIndexes &indexes) {
+    auto it = indexes.find(name);
+    if (it == indexes.end())
+        throw InvalidRequest("Bad request: unknown graph '" + name + "'");
+
+    // the same pair listed twice under the name is one index (/search keeps its list as is)
+    std::vector<const GraphPair*> pairs;
+    for (const auto &pair : it->second) {
+        if (std::none_of(pairs.begin(), pairs.end(),
+                         [&](const GraphPair *p) { return *p == pair; })) {
+            pairs.push_back(&pair);
+        }
+    }
+    if (pairs.size() == 1)
+        return *pairs[0];
+
+    // a name whose pairs share one graph has several annotations, which graph_path cannot
+    // choose between (review of pass 5: it was told to pass graph_path, then refused for it)
+    auto several_annotations = [&](const std::string &graph) {
+        std::string annotations;
+        for (const GraphPair *pair : pairs) {
+            if (pair->first == graph)
+                annotations += (annotations.empty() ? "" : ", ") + pair->second;
+        }
+        return InvalidRequest("Bad request: " + (graph_path
+                                  ? "graph_path '" + graph + "' names a graph"
+                                  : "index '" + name + "' lists one graph (" + graph + ")")
+                              + " with several annotations" + (graph_path ? " under index '"
+                                  + name + "'" : std::string()) + " (" + annotations
+                              + "): a traversal reads one annotation, which graph_path cannot "
+                              "choose; list each annotation under a name of its own");
+    };
+    if (graph_path) {
+        const GraphPair *found = nullptr;
+        size_t matching = 0;
+        for (const GraphPair *pair : pairs) {
+            if (pair->first != *graph_path)
+                continue;
+            matching++;
+            if (!found)
+                found = pair;
+        }
+        if (!found) {
+            throw InvalidRequest("Bad request: graph_path '" + *graph_path + "' is not part of "
+                                 "index '" + name + "'");
+        }
+        if (matching > 1)
+            throw several_annotations(*graph_path);
+        return *found;
+    }
+    std::vector<std::string> graphs;
+    for (const GraphPair *pair : pairs) {
+        if (std::find(graphs.begin(), graphs.end(), pair->first) == graphs.end())
+            graphs.push_back(pair->first);
+    }
+    if (graphs.size() == 1)
+        throw several_annotations(graphs[0]);
+    std::string candidates;
+    for (const std::string &graph : graphs) {
+        candidates += (candidates.empty() ? "" : ", ") + graph;
+    }
+    throw InvalidRequest("Bad request: index '" + name + "' spans several graphs (" + candidates
+                         + "); pass 'graph_path' to pick one");
+}
+
+/**
+ * The (graph, annotation) pair of a POST /resolve or /traverse request: the single index, or in
+ * multi-graph mode the one its "graph" (and "graph_path") fields select.
  */
 const graph::AnnotatedDBG&
 resolve_traverse_index(const Json::Value &json, const Config &config,
                        const std::shared_future<std::unique_ptr<graph::AnnotatedDBG>> &anno_graph,
-                       const tsl::hopscotch_map<std::string,
-                                 std::vector<std::pair<std::string, std::string>>> &indexes,
-                       const VectorMap<std::pair<std::string, std::string>,
-                                       std::unique_ptr<graph::AnnotatedDBG>> &graphs_cache) {
+                       const GraphIndexes &indexes,
+                       const VectorMap<GraphPair, std::unique_ptr<graph::AnnotatedDBG>> &graphs_cache) {
     if (config.fnames.empty()) {
         if (json.isMember("graph") || json.isMember("graph_path")) {
             throw InvalidRequest("Bad request: this server hosts a single graph; "
@@ -251,35 +324,16 @@ resolve_traverse_index(const Json::Value &json, const Config &config,
     }
     if (!json.isMember("graph") || !json["graph"].isString())
         throw InvalidRequest("Bad request: 'graph' (index name) is required in multi-graph mode");
-
-    const std::string name = json["graph"].asString();
-    auto it = indexes.find(name);
-    if (it == indexes.end())
-        throw InvalidRequest("Bad request: unknown graph '" + name + "'");
-
-    const auto &pairs = it->second;
-    if (pairs.size() == 1)
-        return *graphs_cache.at(pairs[0]);
-
-    if (json.isMember("graph_path") && json["graph_path"].isString()) {
-        const std::string wanted = json["graph_path"].asString();
-        for (const auto &pair : pairs) {
-            if (pair.first == wanted)
-                return *graphs_cache.at(pair);
-        }
-        throw InvalidRequest("Bad request: graph_path '" + wanted + "' is not part of index '"
-                             + name + "'");
-    }
-    std::string candidates;
-    for (const auto &pair : pairs) {
-        candidates += (candidates.empty() ? "" : ", ") + pair.first;
-    }
-    throw InvalidRequest("Bad request: index '" + name + "' spans several graphs (" + candidates
-                         + "); pass 'graph_path' to pick one");
+    std::string wanted;
+    const bool has_path = json.isMember("graph_path") && json["graph_path"].isString();
+    if (has_path)
+        wanted = json["graph_path"].asString();
+    return *graphs_cache.at(select_traverse_pair(json["graph"].asString(),
+                                                 has_path ? &wanted : nullptr, indexes));
 }
 
 std::vector<std::string> filter_graphs_from_list(
-        const tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> &indexes,
+        const GraphIndexes &indexes,
         const Json::Value &content_json,
         size_t request_id,
         size_t max_names_without_filtering = 10) {
@@ -317,7 +371,7 @@ int run_server(Config *config) {
     ThreadPool graph_loader(1, 1);
     std::shared_future<std::unique_ptr<AnnotatedDBG>> anno_graph;
 
-    tsl::hopscotch_map<std::string, std::vector<std::pair<std::string, std::string>>> indexes;
+    GraphIndexes indexes;
 
     ThreadPool graphs_pool(get_num_threads(), 1000 /* max_num_tasks */);
     size_t num_server_threads = std::max(1u, get_num_threads());
@@ -331,7 +385,9 @@ int run_server(Config *config) {
     // The index identity stated by /traverse and /resolve (DESIGN-traverse-graphlet.md
     // §3.1). Single-index mode: --index-name and --index-manifest, checked against the
     // loaded files before the index is served; the meta fingerprint once the index is
-    // loaded. Multi-index mode: the meta fingerprint per index, computed on first use.
+    // loaded. Multi-index mode: per (graph, annotation) pair, the name and the manifest of the
+    // graph list's optional columns, checked before loading, and the meta fingerprint computed
+    // on first use (a pair without them states null, as before).
     IndexIdentity single_identity;
     std::mutex identities_mutex;
     std::map<const AnnotatedDBG*, IndexIdentity> identities;
@@ -339,13 +395,10 @@ int run_server(Config *config) {
         if (config->fnames.empty())
             return single_identity;
         std::lock_guard<std::mutex> lock(identities_mutex);
-        auto it = identities.find(&index);
-        if (it == identities.end()) {
-            IndexIdentity id;
+        IndexIdentity &id = identities[&index];
+        if (id.meta_fp.empty())
             id.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(index));
-            it = identities.emplace(&index, std::move(id)).first;
-        }
-        return it->second;
+        return id;
     };
 
     if (config->infbase_annotators.size() == 1) {
@@ -355,7 +408,8 @@ int run_server(Config *config) {
             single_identity.name = config->index_name;
             if (!config->index_manifest.empty()) {
                 single_identity.fp = index_manifest_fingerprint(
-                        config->index_manifest, { config->infbase, config->infbase_annotators[0] });
+                        config->index_manifest,
+                        index_bundle_files(config->infbase, config->infbase_annotators[0]));
                 logger->info("[Server] Index manifest {}: index_fp {}", config->index_manifest,
                              single_identity.fp);
             }
@@ -383,26 +437,55 @@ int run_server(Config *config) {
 
         size_t num_indexes = 0;
         std::string line;
-        while (std::getline(file, line)) {
+        std::vector<GraphListEntry> entries;
+        for (size_t line_no = 1; std::getline(file, line); ++line_no) {
             if (line.empty())
                 continue; // skip empty lines
-
-            std::stringstream ss(line);
-
-            std::string name;
-            std::string graph_path;
-            std::string annotation_path;
-
-            std::getline(ss, name, ',');
-            std::getline(ss, graph_path, ',');
-            if (ss.eof()) {
-                logger->error("[Server] Invalid line in the csv file: `{}`", line);
+            try {
+                entries.push_back(parse_graph_list_line(line, line_no));
+            } catch (const std::exception &e) {
+                logger->error("[Server] Invalid line in the csv file: {}", e.what());
                 std::exit(1);
             }
-            std::getline(ss, annotation_path, ',');
-
-            indexes[name].emplace_back(std::move(graph_path), std::move(annotation_path));
+            const GraphListEntry &e = entries.back();
+            indexes[e.name].emplace_back(e.graph_path, e.annotation_path);
             num_indexes++;
+        }
+        // The per-graph identity (DESIGN-traverse-graphlet.md §21): every listed manifest is
+        // checked against the files its pair loads — sizes and the digest of its list, no
+        // re-hashing, as --index-manifest — before hours of loading, and a mismatch, or two
+        // lines stating different identities for one pair, refuses to start
+        std::map<GraphPair, std::pair<std::string, std::string>> pair_identity;
+        try {
+            pair_identity = graph_list_identities(entries, [&](const GraphListEntry &e) {
+                std::string stated;
+                std::string fp;
+                try {
+                    fp = index_manifest_fingerprint(e.manifest_path,
+                                                    index_bundle_files(e.graph_path,
+                                                                       e.annotation_path),
+                                                    &stated);
+                } catch (const std::exception &ex) {
+                    throw std::invalid_argument("line " + std::to_string(e.line) + " of the "
+                                                "graph list: " + ex.what());
+                }
+                if (!stated.empty() && stated != e.index_ns) {
+                    logger->warn("[Server] Index manifest {} names the index '{}'; line {} of "
+                                 "the graph list names it '{}', which its responses state",
+                                 e.manifest_path, stated, e.line, e.index_ns);
+                }
+                return fp;
+            });
+        } catch (const std::exception &e) {
+            logger->error("[Server] {}", e.what());
+            std::exit(1);
+        }
+        for (const auto &[pair, id] : pair_identity) {
+            if (!id.first.empty() || !id.second.empty()) {
+                logger->info("[Server] Index ({}, {}): index_ns {}, index_fp {}", pair.first,
+                             pair.second, id.first.empty() ? "null" : id.first,
+                             id.second.empty() ? "null (no manifest)" : id.second);
+            }
         }
         std::vector<std::string> names;
         for (const auto &[name, _] : indexes) {
@@ -455,6 +538,13 @@ int run_server(Config *config) {
             config_copy.infbase_annotators = { anno_fname };
             it.value() = initialize_annotated_dbg(loaded_graphs[graph_path_to_idx.at(graph_fname)],
                                                   config_copy);
+        }
+        // every response computed on a pair states its identity
+        for (const auto &[pair, index] : graphs_cache) {
+            const auto &[name, fp] = pair_identity.at(pair);
+            IndexIdentity &id = identities[index.get()];
+            id.name = name;
+            id.fp = fp;
         }
         logger->info("[Server] All graphs were loaded ({}). Ready to serve queries.",
                      loaded_with_mmap ? "with mmap" : "into RAM");
@@ -615,10 +705,25 @@ int run_server(Config *config) {
     attempt_settings.hard_cap_ms = kContentTimeoutS * 1000.0 - 1000;
     attempt_settings.retention_s = config->traverse_attempt_retention_s;
     attempt_settings.retention_count = config->traverse_attempt_retention;
+    attempt_settings.clock_skew_ms = config->traverse_clock_skew_ms;
+    attempt_settings.content_timeout_s = kContentTimeoutS;
+    attempt_settings.delivery_compress_mbps = config->traverse_delivery_compress_mbps;
+    attempt_settings.delivery_build_mbps = config->traverse_delivery_build_mbps;
+    // until measured, the walk is taken to end at most a chunk of a read and 200 ms (the heads
+    // between two readings of the clock, the stopped seed's finalisation) after its walk-until
+    attempt_settings.delivery_stop_ms = static_cast<double>(config->traverse_chunk_target_ms) + 200;
     AttemptRegistry attempts(attempt_settings);
     logger->info("[Server] Traverse attempts: server_instance {}, allowance {} ms, {}",
                  attempts.server_instance(), attempt_settings.allowance_ms,
                  attempts.retention_text());
+
+    // The traversal routes' transport: compact JSON, compressed (when the client accepts it)
+    // at a faster zlib level than the other routes' 9 — the time to build a response is what
+    // an attempt's delivery window bounds, and level 1 writes 3-4 times faster than 9 at
+    // about 1.8 times the bytes (measured on real responses); the decompressed bytes are the
+    // same at every level
+    ResponseControl traversal_io;
+    traversal_io.compression_level = config->traverse_compression_level;
 
     // Report where a query is supported and which labels carry which blocks, and
     // optionally freeze seeds for /traverse. No graph traversal.
@@ -640,7 +745,7 @@ int run_server(Config *config) {
             } catch (const graph::traversal::AttemptAborted &e) {
                 throw ClientGone(e.what());
             }
-        }, /* compact */ true);
+        }, /* compact */ true, &traversal_io);
     };
 
     // Extend frozen seeds along consistent annotation labels.
@@ -660,6 +765,9 @@ int run_server(Config *config) {
                     auto r = weak.lock();
                     return !r || client_gone(*r);
                 });
+        // what this server measured of its deliveries replaces the configured rates and ratios
+        // in the attempt's reserve (the slowest, the smallest, of its recent responses)
+        attempt->set_measured(attempts.measured());
         bool registered = false;
         // what an error states besides its message once the attempt is registered: its usage
         auto with_usage = [&](int status, const std::string &what, const std::string &reason) {
@@ -669,6 +777,19 @@ int run_server(Config *config) {
             return HttpError(status, std::move(body));
         };
         ResponseControl control;
+        control.compression_level = config->traverse_compression_level;
+        control.on_compressed = [&](size_t text_bytes, double seconds) {
+            if (text_bytes >= kMeasuredTextBytes && seconds > 0)
+                attempts.note_compress_rate(static_cast<double>(text_bytes) / seconds / 1e6);
+        };
+        // each seed's result is written as text once built (its tree freed at once, its bytes
+        // known to the attempt's delivery reserve); the response is assembled from them, byte
+        // for byte the text of the whole tree
+        ResultTexts texts;
+        control.write = [&texts](const Json::Value &envelope, const std::function<void()> &check) {
+            return texts.active ? assemble_traverse_response(envelope, texts.texts, check)
+                                : json_text(envelope, true, check);
+        };
         // the attempt's client and bound while the response is written and compressed
         control.check = [&]() {
             try {
@@ -680,6 +801,13 @@ int run_server(Config *config) {
             }
         };
         control.on_written = [&](int status, std::optional<size_t> bytes) {
+            // the longest single annotation read of any /traverse (deadline_check), and the
+            // slowest build rate measured on its large seeds (the delivery reserve)
+            attempts.note_uninterruptible(attempt->max_read_ms());
+            attempts.note_build_rate(attempt->own_build_mbps());
+            attempts.note_account_per_text_byte(attempt->delivery_detail(),
+                                                attempt->own_account_per_text_byte());
+            attempts.note_stop_latency(attempt->own_stop_ms());
             if (!registered) {
                 if (!status) {
                     logger->info("[Server] Request {}: client gone, {}; no response written",
@@ -703,23 +831,39 @@ int run_server(Config *config) {
                 throw CurrentlyInitializingError();
 
             Json::Value json = parse_json_string(content);
-            // a malformed id is refused before anything is registered (400, no usage)
+            // a malformed id or not_after_ms is refused before anything is registered (400, no
+            // usage)
             attempt->set_ids(attempt_ids(json));
             if (attempt->managed()) {
                 // an attempt runs once per server process: a second request with a running or
                 // retained id is refused, without usage (it would be reconciled against the
-                // other attempt)
-                if (auto other = attempts.start(attempt)) {
+                // other attempt); and one whose not_after_ms has passed is not started at all
+                // (its ledger may already have released it), also without usage
+                if (auto refused = attempts.start(attempt)) {
+                    if (refused->expired) {
+                        logger->info("[Server] Attempt {} (request {}): not started, {}",
+                                     attempt->ids().attempt_id, request_id,
+                                     refused->body["error"].asString());
+                        throw HttpError(409, std::move(refused->body));
+                    }
                     Json::Value body;
                     body["error"] = "attempt_id '" + attempt->ids().attempt_id + "' is running "
                                     "or was used on this server within the retention period ("
                                   + attempts.retention_text() + "): an attempt runs once";
-                    body["attempt"] = *other;
+                    body["attempt"] = std::move(refused->body);
                     throw HttpError(409, std::move(body));
                 }
                 registered = true;
                 logger->info("[Server] Attempt {} (request {}): registered",
                              attempt->ids().attempt_id, request_id);
+            } else if (const uint64_t now = attempts.now_ms();
+                       not_after_passed(attempt->ids(), now)) {
+                // not_after_ms without attempt_id is honoured the same way: refused at
+                // handler start once passed, nothing run
+                Json::Value body = expired_json(attempt->ids(), now, attempts.server_instance());
+                logger->info("[Server] Request {}: not started, {}", request_id,
+                             body["error"].asString());
+                throw HttpError(409, std::move(body));
             }
             try {
                 const auto &index = resolve_traverse_index(json, *config, anno_graph,
@@ -729,9 +873,10 @@ int run_server(Config *config) {
                 limits.max_seeds = config->traverse_max_seeds;
                 limits.max_seed_bp = config->traverse_max_seed_bp;
                 limits.max_seed_labels = config->traverse_max_seed_labels;
+                limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
                 const IndexIdentity identity = identity_of(index);
                 return process_traverse_request(json, index, config->index_release, limits,
-                                                &identity, attempt.get());
+                                                &identity, attempt.get(), &texts);
             } catch (const graph::traversal::AttemptAborted &e) {
                 throw ClientGone(e.what());
             } catch (const AttemptAtBound &e) {
@@ -780,7 +925,7 @@ int run_server(Config *config) {
             if (status != 200)
                 throw HttpError(status, std::move(body));
             return body;
-        }, /* compact */ true);
+        }, /* compact */ true, &traversal_io);
     };
 
     // The state of an attempt (running | stopping | finished, with the reason and when it
@@ -797,7 +942,111 @@ int run_server(Config *config) {
             if (status != 200)
                 throw HttpError(status, std::move(body));
             return body;
-        }, /* compact */ true);
+        }, /* compact */ true, &traversal_io);
+    };
+
+    // The content encodings of the traversal routes (compact JSON, Accept-Encoding honoured:
+    // gzip preferred, deflate accepted)
+    auto encodings_json = []() {
+        Json::Value encodings(Json::arrayValue);
+        encodings.append("gzip");
+        encodings.append("deflate");
+        return encodings;
+    };
+
+    // How a deadline reaches the walk (both capabilities routes): the time-sized chunks of
+    // the annotation reads it may fall into, what stays uninterruptible, and the longest single
+    // piece seen
+    auto deadline_check_json = [&]() {
+        Json::Value d;
+        d["chunk_target_ms"] = static_cast<Json::UInt64>(config->traverse_chunk_target_ms);
+        // no bound on one row's decode exists before stage 3c (selected-label decoding): a
+        // row-diff row reads its whole dependency path, however wide
+        d["max_uninterruptible_ms"] = Json::Value();
+        d["observed_max_uninterruptible_ms"]
+            = static_cast<Json::UInt64>(attempts.observed_max_uninterruptible_ms());
+        const graph::traversal::DecodePacer pacer;
+        d["rule"] = fmt::format(
+            "under a deadline — the seed's bounds.time_budget_ms (at depth > 0 and in a "
+            "derivation) and, with attempt_id, the attempt's walk-until — every /traverse "
+            "annotation read (a level's fetch, the lookahead, a seed's validation, a "
+            "derivation's window) that the deadline may fall into is decoded in chunks, the "
+            "deadline checked before each: a read is one piece when, at the slowest per-row "
+            "time the request has seen, it would take less than 1/{} of the time left (rows "
+            "more than {} times slower than any seen before can make such a read overrun); "
+            "else its first chunk is at most {} rows, each next one at most 4 times the "
+            "previous and sized at the rate the previous measured to take chunk_target_ms (or "
+            "the time left), taken in the walk's order (the rows of one path share their "
+            "row-diff decoding), and the rest is one piece once predicted at that rate to take "
+            "less than 1/{} of the time left. A read far from its deadline is thus one piece, "
+            "as before, and a cancel or a gone client is seen after it. A seed's validation is "
+            "stopped by the attempt only, never by its own time budget. One chunk, at least "
+            "one row, is uninterruptible, and no bound on one row exists before stage 3c "
+            "(max_uninterruptible_ms: null); observed_max_uninterruptible_ms is the longest "
+            "single piece of this process, a whole read far from its deadline included, an "
+            "observation, not a bound. A chunked read returns exactly what one read would (the "
+            "same rows, caches and counters) unless the deadline stops it, and a stopped read "
+            "censors the walk at the read (the unchunked walk ran it to its end, past the "
+            "deadline, before its next check). Not chunked: /resolve, the mapping of a seed's "
+            "k-mers, a head's processing (checked every work_check_interval units), a seed's "
+            "finalisation and summary, the response's building between the attempt's delivery "
+            "checks, and the transport; chunk_target_ms 0: one piece per read",
+            pacer.far_factor, pacer.far_factor, pacer.first_rows, pacer.rest_factor);
+        return d;
+    };
+
+    // What one index of this deployment supports, so a client can pick a strategy before
+    // asking: GET /traverse/capabilities (per graph in multi-graph mode)
+    auto probe_json = [&](const AnnotatedDBG &index, const IndexIdentity &identity) {
+        graph::traversal::LabelOracle oracle(index);
+        Json::Value caps = capabilities_to_json(oracle, config->index_release, &identity);
+        caps["max_time_ms"] = config->traverse_max_time_ms;
+        caps["max_seeds"] = static_cast<Json::UInt64>(config->traverse_max_seeds);
+        caps["max_seed_bp"] = static_cast<Json::UInt64>(config->traverse_max_seed_bp);
+        caps["max_seed_labels"] = static_cast<Json::UInt64>(config->traverse_max_seed_labels);
+        caps["max_query_bp"] = static_cast<Json::UInt64>(config->resolve_max_query_bp);
+        // the request budgets of DESIGN-traverse-graphlet.md §14 (bounds.max_memory_mb,
+        // bounds.max_work_units) and W, the interval in charged work units at which the
+        // walker reads the clock at the latest; stated here, not in every response, where
+        // the per-request capabilities stay as they were. How far a work stop can exceed
+        // its budget is stated with what bounds it, not as a fixed maximum: a fetch
+        // call's rows are decoded and charged whole (GPT review of stage 2, finding 2),
+        // and each stop states the most its seed charged between two comparisons (the
+        // review of the stage-2 fixes, F7: no fixed kind of charge bounds them all)
+        Json::Value budgets(Json::arrayValue);
+        budgets.append("max_memory_mb");
+        budgets.append("max_work_units");
+        caps["budgets"] = budgets;
+        caps["work_check_interval"]
+            = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
+        // Work is deterministic LOGICAL work, not measured decode effort (review of stage 3,
+        // answer 1): the physical decode counters are in each response's timing
+        caps["work_bound"] = "bounds.max_work_units counts deterministic logical work, not "
+            "measured decode effort: 4 per successor enumeration; per annotation row a fetch "
+            "returns 8 per key and 1 per entry and coordinate, and on a budget-aware "
+            "(row-diff) annotation 8 per row-diff dependency row and 1 per entry it stores, "
+            "whatever the decode shared or cached; 1 per pair evaluation, refusal-scan "
+            "entry, edge-reuse probe and step. The walk compares the budget after every "
+            "charge, so a stop exceeds it by at most what was charged since the previous "
+            "comparison, one indivisible charge (a fetch call's rows, sized from the budget "
+            "left down to one key; a label-state scan; or the roots' rows with the end of the "
+            "seed phase), and the stop states the most its seed charged between two "
+            "comparisons; the seed phase is compared every work_check_interval units and "
+            "fails at a comparison finding it at least that much over budget; the deadline "
+            "is read before every head and at least every work_check_interval units; the "
+            "physical decode counters are in timing";
+        caps["memory_bound"] = "soft";
+        // which walk a response gives (every /traverse response names it too)
+        caps["algorithm_version"] = kTraverseAlgorithmVersion;
+        // the ledger-managed attempts (requests with attempt_id): how they are named,
+        // cancelled, queried, kept and bounded (traverse_attempts.hpp)
+        caps["attempts"] = attempts.capabilities_json();
+        // transport: the traversal routes write compact JSON and honour Accept-Encoding
+        // (gzip preferred, deflate accepted), at this zlib level
+        caps["content_encodings"] = encodings_json();
+        caps["compression_level"] = config->traverse_compression_level;
+        caps["deadline_check"] = deadline_check_json();
+        return caps;
     };
 
     // What this deployment supports, so a client can pick a strategy before asking.
@@ -806,79 +1055,109 @@ int run_server(Config *config) {
         process_request(response, request, num_requests++, [&](const std::string&) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
-            if (config->fnames.size()) {
-                throw InvalidRequest("Bad request: in multi-graph mode the capabilities are "
-                                     "returned per request by POST /resolve and /traverse");
+            const auto query = request->parse_query_string();
+            if (config->fnames.empty()) {
+                // a single index: the parameters that would select one are refused (they name
+                // what this server does not have), any other is ignored, as it always was
+                for (const auto &[key, value] : query) {
+                    if (key == "graph" || key == "graph_path") {
+                        throw InvalidRequest("Bad request: this server hosts a single graph; "
+                                             "remove the 'graph' / 'graph_path' parameter");
+                    }
+                }
+                return probe_json(*anno_graph.get(), single_identity);
             }
-            graph::traversal::LabelOracle oracle(*anno_graph.get());
-            Json::Value caps = capabilities_to_json(oracle, config->index_release, &single_identity);
-            caps["max_time_ms"] = config->traverse_max_time_ms;
-            caps["max_seeds"] = static_cast<Json::UInt64>(config->traverse_max_seeds);
-            caps["max_seed_bp"] = static_cast<Json::UInt64>(config->traverse_max_seed_bp);
-            caps["max_seed_labels"] = static_cast<Json::UInt64>(config->traverse_max_seed_labels);
-            caps["max_query_bp"] = static_cast<Json::UInt64>(config->resolve_max_query_bp);
-            // the request budgets of DESIGN-traverse-graphlet.md §14 (bounds.max_memory_mb,
-            // bounds.max_work_units) and W, the interval in charged work units at which the
-            // walker reads the clock at the latest; stated here, not in every response, where
-            // the per-request capabilities stay as they were. How far a work stop can exceed
-            // its budget is stated with what bounds it, not as a fixed maximum: a fetch
-            // call's rows are decoded and charged whole (GPT review of stage 2, finding 2),
-            // and each stop states the most its seed charged between two comparisons (the
-            // review of the stage-2 fixes, F7: no fixed kind of charge bounds them all)
-            Json::Value budgets(Json::arrayValue);
-            budgets.append("max_memory_mb");
-            budgets.append("max_work_units");
-            caps["budgets"] = budgets;
-            caps["work_check_interval"]
-                = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
-            // Work is deterministic LOGICAL work, not measured decode effort (review of stage 3,
-            // answer 1): the physical decode counters are in each response's timing
-            caps["work_bound"] = "bounds.max_work_units counts deterministic logical work, not "
-                "measured decode effort: 4 per successor enumeration; per annotation row a fetch "
-                "returns 8 per key and 1 per entry and coordinate, and on a budget-aware "
-                "(row-diff) annotation 8 per row-diff dependency row and 1 per entry it stores, "
-                "whatever the decode shared or cached; 1 per pair evaluation, refusal-scan "
-                "entry, edge-reuse probe and step. The walk compares the budget after every "
-                "charge, so a stop exceeds it by at most what was charged since the previous "
-                "comparison, one indivisible charge (a fetch call's rows, sized from the budget "
-                "left down to one key; a label-state scan; or the roots' rows with the end of the "
-                "seed phase), and the stop states the most its seed charged between two "
-                "comparisons; the seed phase is compared every work_check_interval units and "
-                "fails at a comparison finding it at least that much over budget; the deadline "
-                "is read before every head and at least every work_check_interval units; the "
-                "physical decode counters are in timing";
-            caps["memory_bound"] = "soft";
-            // the ledger-managed attempts (requests with attempt_id): how they are named,
-            // cancelled, queried, kept and bounded (traverse_attempts.hpp)
-            Json::Value att;
-            Json::Value fields(Json::arrayValue);
-            fields.append("attempt_id");
-            fields.append("budget_id");
-            fields.append("locus_id");
-            att["fields"] = std::move(fields);
-            att["id_pattern"] = "^[A-Za-z0-9._:-]{1,128}$";
-            att["cancel"] = "POST /traverse/cancel";
-            att["state"] = "GET /traverse/attempt/{attempt_id}";
-            att["server_instance"] = attempts.server_instance();
-            att["retention_s"] = static_cast<Json::UInt64>(attempt_settings.retention_s);
-            att["retention_count"] = static_cast<Json::UInt64>(attempt_settings.retention_count);
-            att["allowance_ms"] = attempt_settings.allowance_ms;
-            att["content_timeout_s"] = static_cast<Json::Int64>(kContentTimeoutS);
-            att["client_check_ms"] = static_cast<Json::UInt64>(attempt_settings.client_check_ms);
-            att["bound"] = "min(seeds x the effective bounds.time_budget_ms + allowance_ms, "
-                "content_timeout_s x 1000 - 1000) ms on the attempt's clock, which starts when the "
-                "server read the request's header (time queued before that, all server threads "
-                "busy, is not in it); seeds stop being walked at bound - allowance_ms / 2, and a "
-                "response not written by the bound is not written (503 with usage)";
-            caps["attempts"] = std::move(att);
-            // transport: the traversal routes write compact JSON and honour
-            // Accept-Encoding (gzip preferred, deflate accepted)
-            Json::Value encodings(Json::arrayValue);
-            encodings.append("gzip");
-            encodings.append("deflate");
-            caps["content_encodings"] = encodings;
+            // Multi-graph mode: the probe of one (graph, annotation) pair, selected by the
+            // request fields' rules (?graph=<name>, and graph_path=<path> when the name spans
+            // several graphs); it states which pair it describes
+            std::optional<std::string> name, graph_path;
+            for (const auto &[key, value] : query) {
+                std::optional<std::string> *slot = key == "graph" ? &name
+                                                 : key == "graph_path" ? &graph_path : nullptr;
+                if (!slot) {
+                    throw InvalidRequest("Bad request: unknown parameter '" + key + "' of GET "
+                                         "/traverse/capabilities (graph, graph_path)");
+                }
+                if (*slot)
+                    throw InvalidRequest("Bad request: the parameter '" + key + "' is given twice");
+                *slot = value;
+            }
+            if (!name) {
+                throw InvalidRequest("Bad request: in multi-graph mode GET /traverse/capabilities "
+                                     "needs ?graph=<name> (and graph_path=<path> when the name "
+                                     "spans several graphs); GET /capabilities lists the graphs");
+            }
+            const GraphPair &pair = select_traverse_pair(*name, graph_path ? &*graph_path : nullptr,
+                                                         indexes);
+            const AnnotatedDBG &index = *graphs_cache.at(pair);
+            Json::Value caps = probe_json(index, identity_of(index));
+            caps["graph"] = *name;
+            caps["graph_path"] = pair.first;
             return caps;
-        }, /* compact */ true);
+        }, /* compact */ true, &traversal_io);
+    };
+
+    // The server-wide capabilities (DESIGN-traverse-graphlet.md §21, the owner's note): the
+    // routes and features this server offers, its mode and graphs, the attempts and how
+    // deadlines are checked — answered while the single index loads (ready: false), so that a
+    // service can learn the server's instance and contract before it routes anything to it
+    server.resource["^/capabilities$"]["GET"] = [&](shared_ptr<HttpServer::Response> response,
+                                                   shared_ptr<HttpServer::Request> request) {
+        process_request(response, request, num_requests++, [&](const std::string&) {
+            const bool multi = !config->fnames.empty();
+            Json::Value c;
+            c["algorithm_version"] = kTraverseAlgorithmVersion;
+            c["attempts"] = attempts.capabilities_json();
+            c["compression_level"] = config->traverse_compression_level;
+            c["content_encodings"] = encodings_json();
+            c["deadline_check"] = deadline_check_json();
+            c["feature_level"] = kTraverseFeatureLevel;
+            Json::Value features(Json::arrayValue);
+            Json::Value routes;
+            routes["capabilities"] = "GET /capabilities";
+            routes["search"] = "POST /search";
+            features.append("search");
+            if (!multi) {
+                // a multi-graph server answers /align with 400
+                routes["align"] = "POST /align";
+                features.append("align");
+            }
+            routes["resolve"] = "POST /resolve";
+            routes["traverse"] = "POST /traverse";
+            routes["traverse_capabilities"] = multi
+                ? "GET /traverse/capabilities?graph={name}[&graph_path={path}]"
+                : "GET /traverse/capabilities";
+            routes["cancel"] = "POST /traverse/cancel";
+            routes["attempt"] = "GET /traverse/attempt/{attempt_id}";
+            routes["column_labels"] = "GET /column_labels";
+            routes["stats"] = "GET /stats";
+            for (const char *f : { "resolve", "traverse", "attempts" }) {
+                features.append(f);
+            }
+            c["features"] = std::move(features);
+            if (multi) {
+                std::vector<std::string> names;
+                for (const auto &[name, _] : indexes) {
+                    names.push_back(name);
+                }
+                std::sort(names.begin(), names.end());
+                Json::Value graphs(Json::arrayValue);
+                for (const std::string &name : names) {
+                    graphs.append(name);
+                }
+                c["graphs"] = std::move(graphs);
+            } else {
+                c["graphs"] = Json::Value();
+            }
+            c["mode"] = multi ? "multi" : "single";
+            // a multi-graph server loads every index before it listens
+            c["ready"] = multi || anno_graph.wait_for(0s) == std::future_status::ready;
+            c["release"] = config->index_release;
+            c["routes"] = std::move(routes);
+            c["schema_version"] = 1;
+            c["server_instance"] = attempts.server_instance();
+            return c;
+        }, /* compact */ true, &traversal_io);
     };
 
     server.resource["^/column_labels"]["GET"] = [&](shared_ptr<HttpServer::Response> response,

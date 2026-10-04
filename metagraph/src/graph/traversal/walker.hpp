@@ -1015,6 +1015,17 @@ struct AttemptControl {
     std::function<double()> elapsed_ms;
     double bound_ms = 0;
     AttemptMeter *meter = nullptr;
+    // The chunked deadlines (pass 5, spec §6.8): |ms_left| the time left before the walk must
+    // stop (the attempt's walk-until; infinity: none), which sizes the chunks of an annotation
+    // read, and |poll_now| the poll asked before each chunk — a poll that also reads the clock
+    // and the client (not only the stop flag), so that a stop that fell inside a long read is
+    // seen within one chunk. Either may be null.
+    std::function<double()> ms_left;
+    std::function<ExternalStop()> poll_now;
+    // the walk's modelled account (bytes, the memory model's, computed with or without a
+    // budget) at every level's end: what the caller estimates the seed's output from (the
+    // server's delivery reserve)
+    std::function<void(uint64_t account)> progress;
 };
 
 struct WalkerHooks {

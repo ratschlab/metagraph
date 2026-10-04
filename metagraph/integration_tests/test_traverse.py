@@ -4,12 +4,14 @@ import json
 import os
 import random
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 
 import requests
@@ -2131,6 +2133,207 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual([{'dead_end': 2}], [p['end_reasons'] for p in right['paths']])
         self.assertNotIn('path_reason', right['paths'][0])
 
+    def test_api_not_after_ms(self):
+        """Pass 5, W1: a request whose not_after_ms has passed on the server's clock is refused
+        at handler start, 409 {error, state: expired, not_after_ms, server_time_ms, ids,
+        server_instance}, runs nothing and registers nothing (GET answers 404), with or
+        without attempt_id; one not passed runs and echoes it in usage; a malformed one is a
+        400 without usage. The probe states the clock skew a ledger adds."""
+        url = f'http://{self.host}:{self.port}'
+        caps = requests.get(url=url + '/traverse/capabilities').json()
+        att = caps['attempts']
+        self.assertIn('not_after_ms', att['fields'])
+        self.assertIs(type(att['clock_skew_allowance_ms']), int)
+        self.assertEqual(2000, att['clock_skew_allowance_ms'])
+        self.assertIn('clock_skew_allowance_ms', att['not_after'])
+        base = {'seeds': [{'sequence': self.element}],
+                'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 10},
+                             'output': {'timing': False}}}
+        now = int(time.time() * 1000)
+        past = dict(base, attempt_id='na-past', budget_id='b-1', not_after_ms=now - 1000)
+        ret = self._post('traverse', past)
+        self.assertEqual(409, ret.status_code, ret.text)
+        body = ret.json()
+        self.assertEqual({'error', 'state', 'not_after_ms', 'server_time_ms', 'attempt_id',
+                          'budget_id', 'server_instance'}, set(body))
+        self.assertEqual(('expired', now - 1000, 'na-past', 'b-1', att['server_instance']),
+                         (body['state'], body['not_after_ms'], body['attempt_id'],
+                          body['budget_id'], body['server_instance']))
+        self.assertGreaterEqual(body['server_time_ms'], now - 1000)
+        self.assertIs(type(body['server_time_ms']), int)
+        # nothing registered: the state is unknown, and the id is still free
+        self.assertEqual(404, requests.get(url + '/traverse/attempt/na-past').status_code)
+        # without attempt_id the same refusal, without ids
+        ret = self._post('traverse', dict(base, not_after_ms=now - 1000))
+        self.assertEqual(409, ret.status_code, ret.text)
+        self.assertEqual({'error', 'state', 'not_after_ms', 'server_time_ms',
+                          'server_instance'}, set(ret.json()))
+        # not passed: runs, echoed in usage and in the state; the rest unchanged
+        plain = self._post('traverse', base)
+        future = now + 600_000
+        ret = self._post('traverse', dict(base, attempt_id='na-future', not_after_ms=future))
+        self.assertEqual(200, ret.status_code, ret.text)
+        out = ret.json()
+        self.assertEqual(future, out['usage']['not_after_ms'])
+        out.pop('usage')
+        self.assertEqual(plain.json(), out)
+        self.assertEqual(future, requests.get(url + '/traverse/attempt/na-future').json()
+                         ['not_after_ms'])
+        ret = self._post('traverse', dict(base, not_after_ms=future))
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual(plain.json(), ret.json())
+        # malformed: a 400 naming the field, no usage, nothing registered
+        for bad in (now + 0.5, -1, str(future), 2 ** 53):
+            ret = self._post('traverse', dict(base, attempt_id='na-bad', not_after_ms=bad))
+            self.assertEqual(400, ret.status_code, (bad, ret.text))
+            self.assertIn('not_after_ms', ret.json()['error'])
+            self.assertNotIn('usage', ret.json())
+        self.assertEqual(404, requests.get(url + '/traverse/attempt/na-bad').status_code)
+        # /resolve does not take it
+        ret = self._post('resolve', {'sequence': self.element, 'labels': ['acc1'],
+                                     'not_after_ms': future})
+        self.assertEqual(400, ret.status_code, ret.text)
+        # the library passes it through and tells the expired 409 apart from a duplicate
+        client = graphlet_lib.TraverseClient(self.host, self.port)
+        with self.assertRaises(graphlet_lib.AttemptExpired) as cm:
+            client.traverse([self.element], base['strategy'], attempt_id='na-lib',
+                            not_after_ms=now - 1)
+        self.assertEqual(409, cm.exception.status)
+        self.assertEqual(now - 1, cm.exception.body['not_after_ms'])
+        resp = client.traverse([self.element], base['strategy'], attempt_id='na-lib2',
+                               not_after_ms=future)
+        self.assertEqual(future, resp.usage['not_after_ms'])
+        # the CLI refuses the same way: the body on stdout, exit status 1
+        path = os.path.join(self.tempdir.name, 'na_cli.json')
+        with open(path, 'w') as f:
+            json.dump(dict(base, attempt_id='na-cli', not_after_ms=now - 1000), f)
+        res = subprocess.run([METAGRAPH, 'traverse', '--json', '-i', self.graph, '-a', self.anno,
+                              path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(1, res.returncode)
+        cli = json.loads(res.stdout)
+        self.assertEqual(('expired', now - 1000, 'na-cli'),
+                         (cli['state'], cli['not_after_ms'], cli['attempt_id']))
+
+    def test_api_bodies_are_the_cli_output_at_every_encoding(self):
+        """Pass 5, W6: the traversal routes compress at level 1 (the probe says so) and write
+        each seed's result as text once built; the gzip, deflate and identity bodies all
+        decompress to the same bytes, which are those of `metagraph traverse --json` for the
+        same request (with several seeds, a failed one among them, in two details)."""
+        url = f'http://{self.host}:{self.port}'
+        self.assertEqual(1, requests.get(url + '/traverse/capabilities').json()['compression_level'])
+        for detail in ('full', 'graphlet'):
+            req = {'seeds': [{'sequence': self.element},
+                             {'sequence': self.left1 + self.element[:40], 'labels': ['acc1']},
+                             {'sequence': self.left2 + self.element + self.right2}],
+                   'strategy': {'direction': 'both', 'bounds': {'max_extension_bp': BLOCK},
+                                'output': {'detail': detail, 'timing': False}}}
+            bodies = {}
+            for enc in ('gzip', 'deflate', 'identity'):
+                ret = requests.post(url + '/traverse', data=json.dumps(req),
+                                    headers={'Accept-Encoding': enc}, stream=True)
+                self.assertEqual(200, ret.status_code)
+                raw = ret.raw.read(decode_content=True)
+                bodies[enc] = raw
+            self.assertEqual(bodies['gzip'], bodies['deflate'])
+            self.assertEqual(bodies['gzip'], bodies['identity'])
+            out = json.loads(bodies['gzip'])
+            self.assertIn('error', out['results'][2])
+            path = os.path.join(self.tempdir.name, f'enc_{detail}.json')
+            with open(path, 'w') as f:
+                json.dump(req, f)
+            res = subprocess.run([METAGRAPH, 'traverse', '--json', '-i', self.graph, '-a',
+                                  self.anno, '--index-name', 'tiny', '--index-manifest',
+                                  self.manifest, path], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            self.assertEqual(0, res.returncode, res.stderr.decode()[-500:])
+            self.assertEqual(bodies['gzip'], res.stdout.rstrip(b'\n'), detail)
+
+    def test_api_spec_resolve_example_is_accepted(self):
+        """Review of pass 5: SPEC §4.1's resolve request example set both labels and discover,
+        which the server refuses (exactly one); copied with a real sequence, it is answered."""
+        with open(os.path.join(REPO, 'docs', 'SPEC-labeled-traversal-core.md'),
+                  encoding='utf-8') as f:
+            spec = f.read()
+        section = spec[spec.index('### 4.1 Request'):]
+        block = section[section.index('```json') + len('```json'):]
+        example = json.loads(block[:block.index('```')])
+        example['sequence'] = self.element
+        ret = self._post('resolve', example)
+        self.assertEqual(200, ret.status_code, ret.text)
+        # with explicit labels in place of discover, as the SPEC says, too
+        example.pop('discover')
+        example['labels'] = [next(iter(self.records))]
+        ret = self._post('resolve', example)
+        self.assertEqual(200, ret.status_code, ret.text)
+
+    def test_api_server_capabilities(self):
+        """Pass 5, W3/W4: GET /capabilities, the server-wide document: routes and features,
+        feature_level 3, algorithm_version (as every response's), mode single, no graph list,
+        the attempts block (as the probe's) and how deadlines are checked; the number types
+        a ledger compares are integers."""
+        url = f'http://{self.host}:{self.port}'
+        ret = requests.get(url + '/capabilities', headers={'Accept-Encoding': 'gzip'})
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual('gzip', ret.headers.get('Content-Encoding'))
+        c = ret.json()
+        self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
+                          'content_encodings', 'deadline_check', 'feature_level', 'features',
+                          'graphs', 'mode', 'ready', 'release', 'routes', 'schema_version',
+                          'server_instance'}, set(c))
+        self.assertEqual((3, 'single', None, True, 1),
+                         (c['feature_level'], c['mode'], c['graphs'], c['ready'],
+                          c['schema_version']))
+        self.assertEqual(['search', 'align', 'resolve', 'traverse', 'attempts'], c['features'])
+        self.assertEqual({'align': 'POST /align', 'attempt': 'GET /traverse/attempt/{attempt_id}',
+                          'cancel': 'POST /traverse/cancel', 'capabilities': 'GET /capabilities',
+                          'column_labels': 'GET /column_labels', 'resolve': 'POST /resolve',
+                          'search': 'POST /search', 'stats': 'GET /stats',
+                          'traverse': 'POST /traverse',
+                          'traverse_capabilities': 'GET /traverse/capabilities'}, c['routes'])
+        probe = requests.get(url + '/traverse/capabilities').json()
+        self.assertEqual(probe['attempts'], c['attempts'])
+        self.assertEqual(probe['attempts']['server_instance'], c['server_instance'])
+        self.assertEqual(probe['deadline_check'], c['deadline_check'])
+        self.assertEqual(probe['algorithm_version'], c['algorithm_version'])
+        self.assertEqual(3, probe['feature_level'])
+        self.assertEqual(1, c['compression_level'])
+        self.assertEqual(1, probe['compression_level'])
+        out = self._post('traverse', {'seeds': [{'sequence': self.element}],
+                                      'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
+        self.assertEqual(c['algorithm_version'], out['algorithm_version'])
+        self.assertEqual(3, out['capabilities']['feature_level'])
+        att = c['attempts']
+        for key in ('allowance_ms', 'hard_cap_ms', 'clock_skew_allowance_ms', 'retention_s',
+                    'retention_count', 'content_timeout_s', 'client_check_ms'):
+            self.assertIs(type(att[key]), int, key)
+        self.assertEqual(899000, att['hard_cap_ms'])
+        self.assertEqual(10000, att['allowance_ms'])
+        reserve = att['delivery_reserve']
+        self.assertEqual({'compress_mbps', 'build_mbps', 'account_per_text_byte',
+                          'measured_text_bytes', 'measured_compress_mbps', 'measured_build_mbps',
+                          'measured_account_per_text_byte', 'rate_window', 'rule', 'margin',
+                          'stop_ms', 'measured_stop_ms'}, set(reserve))
+        # the reserve's margin and the walk's stop time (review of pass 5, F3)
+        self.assertEqual(1.25, reserve['margin'])
+        self.assertIs(type(reserve['stop_ms']), int)
+        self.assertEqual(c['deadline_check']['chunk_target_ms'] + 200, reserve['stop_ms'])
+        self.assertEqual({'summary', 'tree', 'full', 'graphlet'},
+                         set(reserve['measured_account_per_text_byte']))
+        self.assertEqual((50, 10, 16, 1 << 20),
+                         (reserve['compress_mbps'], reserve['build_mbps'], reserve['rate_window'],
+                          reserve['measured_text_bytes']))
+        for key in ('measured_compress_mbps', 'measured_build_mbps'):
+            self.assertTrue(reserve[key] is None or reserve[key] > 0, key)
+        dc = c['deadline_check']
+        self.assertIsNone(dc['max_uninterruptible_ms'])
+        for key in ('chunk_target_ms', 'observed_max_uninterruptible_ms'):
+            self.assertIs(type(dc[key]), int, key)
+        self.assertEqual(50, dc['chunk_target_ms'])
+        # the library reads both documents
+        client = graphlet_lib.TraverseClient(self.host, self.port)
+        self.assertEqual('single', client.server_capabilities()['mode'])
+        self.assertEqual(probe['index_meta_fp'], client.capabilities()['index_meta_fp'])
+
     def test_api_attempts(self):
         """Stage 4, backend half: a request with attempt_id (budget_id and locus_id echoed)
         states its usage in every response — successful, partial, with a failed seed, or a
@@ -2140,7 +2343,7 @@ class TestTraverseAPI(TestTraverseBase):
         url = f'http://{self.host}:{self.port}'
         caps = requests.get(url=url + '/traverse/capabilities').json()
         att = caps['attempts']
-        self.assertEqual(['attempt_id', 'budget_id', 'locus_id'], att['fields'])
+        self.assertEqual(['attempt_id', 'budget_id', 'locus_id', 'not_after_ms'], att['fields'])
         self.assertEqual('POST /traverse/cancel', att['cancel'])
         self.assertEqual('GET /traverse/attempt/{attempt_id}', att['state'])
         self.assertEqual(16, len(att['server_instance']))
@@ -2312,6 +2515,540 @@ def _instant(text):
 
 @unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
+class TestTraverseMultiGraph(TestTraverseBase):
+    """Pass 5, W2: per-graph identity on a multi-graph server. The graph list gains two
+    optional columns, manifest_path and index_ns, each manifest checked at start-up against
+    the files its pair loads (a mismatch refuses to start); every /resolve and /traverse
+    response, and every graphlet's H record, states its pair's identity; GET
+    /traverse/capabilities?graph=<name>[&graph_path=<path>] describes one pair; a graph_path
+    naming one graph with several annotations is refused (it cannot choose one). The manifests
+    of the list are written by scripts/traversal/index_manifest.py --server-csv."""
+
+    SCRIPT = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        cls.pairs = {}
+        # B: two graphs of their own (one record each), the first with a manifest written by
+        # the batch tool, the second without
+        for tag, acc in (('two', 'acc1'), ('three', 'acc2')):
+            os.makedirs(f'{d}/{tag}', exist_ok=True)
+            fasta = f'{d}/{tag}/ref.fa'
+            with open(fasta, 'w') as f:
+                f.write(f'>{acc}\n{cls.records[acc]}\n')
+            graph = f'{d}/{tag}/graph_{tag}.dbg'
+            cls._build_graph(fasta, graph, K, 'succinct', mode='basic')
+            cls._annotate_graph(fasta, graph, f'{d}/{tag}/annotation_{tag}', 'column',
+                                anno_type='header')
+            cls.pairs[tag] = (graph, f'{d}/{tag}/annotation_{tag}.column.annodbg')
+        # C: the base graph with a second annotation (one graph, two annotations)
+        os.makedirs(f'{d}/col', exist_ok=True)
+        cls._annotate_graph(cls.fasta, cls.graph, f'{d}/col/annotation_col', 'column',
+                            anno_type='header')
+        cls.pairs['col'] = (cls.graph, f'{d}/col/annotation_col.column.annodbg')
+        cls.csv = f'{d}/graphs.csv'
+        lines = [
+            f'A,{cls.graph},{cls.anno},{cls.manifest},tinyA',
+            f'B,{cls.pairs["two"][0]},{cls.pairs["two"][1]},{d}/two/two.manifest.json',
+            f'B,{cls.pairs["three"][0]},{cls.pairs["three"][1]}',
+            # the same pair as A, without columns: it states A's identity (one index)
+            f'C,{cls.graph},{cls.anno}',
+            f'C,{cls.pairs["col"][0]},{cls.pairs["col"][1]}',
+            # A's pair again under A: still one pair, addressed without graph_path
+            f'A,{cls.graph},{cls.anno}',
+        ]
+        with open(cls.csv, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        # the manifest of B's first pair, by the batch tool (A's exists and is kept)
+        sub = f'{d}/sub.csv'
+        with open(sub, 'w') as f:
+            f.write(lines[1] + '\n')
+        res = subprocess.run([sys.executable, cls.SCRIPT, '--server-csv', sub, '--jobs', '2'],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert res.returncode == 0, res.stderr.decode()
+        with open(f'{d}/two/two.manifest.json') as f:
+            cls.fp_two = json.load(f)['index_fp']
+        cls.server = cls._Server(cls, cls.csv)
+        assert cls.server.ready, cls.server.text()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.close()
+        super().tearDownClass()
+
+    class _Server:
+        def __init__(self, test, csv, wait=True):
+            self.port = _free_port()
+            self.url = f'http://127.0.0.1:{self.port}'
+            self.log_path = f'{test.tempdir.name}/multi-{self.port}.log'
+            self.log = open(self.log_path, 'w')
+            self.process = subprocess.Popen(
+                shlex.split(METAGRAPH) + ['server_query', csv, '--port', str(self.port),
+                                          '--address', '127.0.0.1', '-p', '2'],
+                stdout=self.log, stderr=subprocess.STDOUT)
+            self.ready = False
+            for _ in range(600 if wait else 0):
+                if self.process.poll() is not None:
+                    break
+                try:
+                    if requests.get(self.url + '/capabilities', timeout=2).ok:
+                        self.ready = True
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+
+        def close(self):
+            if self.process.poll() is None:
+                self.process.kill()
+            self.process.wait()
+            self.log.close()
+
+        def text(self):
+            with open(self.log_path) as f:
+                return f.read()
+
+    def _post(self, route, payload):
+        return requests.post(f'{self.server.url}/{route}', data=json.dumps(payload))
+
+    def _caps(self, query=''):
+        return requests.get(f'{self.server.url}/traverse/capabilities{query}')
+
+    def _request(self, graph, graph_path=None, detail='graphlet'):
+        req = {'graph': graph, 'seeds': [{'sequence': self.element}],
+               'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 20},
+                            'output': {'detail': detail, 'timing': False}}}
+        if graph_path:
+            req['graph_path'] = graph_path
+        return req
+
+    def test_multi_responses_state_their_pairs_identity(self):
+        expected = {
+            ('A', None): ('tinyA', self.index_fp),
+            ('B', self.pairs['two'][0]): (None, self.fp_two),
+            ('B', self.pairs['three'][0]): (None, None),
+        }
+        metas = set()
+        for (graph, path), ident in expected.items():
+            ret = self._post('traverse', self._request(graph, path))
+            self.assertEqual(200, ret.status_code, ret.text)
+            out = ret.json()
+            caps = out['capabilities']
+            self.assertEqual(ident, (caps['index_ns'], caps['index_fp']), (graph, path))
+            metas.add(caps['index_meta_fp'])
+            head = out['results'][0]['graphlet'].split('\n', 1)[0].split(' ')
+            self.assertEqual([ident[0] or '*', ident[1] or '*', caps['index_meta_fp']],
+                             head[-3:])
+            # the library reads the identity off the H record
+            g = graphlet_lib.from_response(out['results'][0], out)
+            self.assertEqual((ident[0], ident[1]), (g.index_ns, g.index_fp))
+            req = {'graph': graph, 'sequence': self.element, 'discover': {'max_labels': 10}}
+            if path:
+                req['graph_path'] = path
+            res = self._post('resolve', req)
+            self.assertEqual(200, res.status_code, res.text)
+            self.assertEqual(ident, (res.json()['capabilities']['index_ns'],
+                                     res.json()['capabilities']['index_fp']))
+        self.assertEqual(3, len(metas))
+        # C lists the base graph with two annotations: graph_path cannot choose one
+        ret = self._post('traverse', self._request('C', self.pairs['col'][0]))
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertIn('several annotations', ret.json()['error'])
+
+    def test_multi_probe_describes_one_pair(self):
+        ret = self._caps('?graph=A')
+        self.assertEqual(200, ret.status_code, ret.text)
+        caps = ret.json()
+        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 3),
+                         (caps['graph'], caps['graph_path'], caps['index_ns'],
+                          caps['index_fp'], caps['feature_level']))
+        for key in ('attempts', 'deadline_check', 'budgets', 'algorithm_version',
+                    'compression_level', 'content_encodings', 'work_bound'):
+            self.assertIn(key, caps)
+        out = self._post('traverse', self._request('A')).json()
+        for key in ('index_ns', 'index_fp', 'index_meta_fp', 'k', 'num_labels'):
+            self.assertEqual(out['capabilities'][key], caps[key], key)
+        # a name over several graphs needs graph_path, which must name one of them
+        ret = self._caps('?graph=B')
+        self.assertEqual(400, ret.status_code)
+        self.assertIn(self.pairs['two'][0], ret.json()['error'])
+        self.assertIn(self.pairs['three'][0], ret.json()['error'])
+        quoted = requests.utils.quote(self.pairs['two'][0], safe='')
+        ret = self._caps(f'?graph=B&graph_path={quoted}')
+        self.assertEqual(200, ret.status_code, ret.text)
+        self.assertEqual((self.pairs['two'][0], None, self.fp_two),
+                         (ret.json()['graph_path'], ret.json()['index_ns'],
+                          ret.json()['index_fp']))
+        # one graph with two annotations cannot be addressed by graph_path, and a name listing
+        # only that is refused as such, not told to pass graph_path (review of pass 5)
+        quoted = requests.utils.quote(self.graph, safe='')
+        ret = self._caps(f'?graph=C&graph_path={quoted}')
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertIn('several annotations', ret.json()['error'])
+        ret = self._caps('?graph=C')
+        self.assertEqual(400, ret.status_code, ret.text)
+        self.assertIn("index 'C' lists one graph", ret.json()['error'])
+        self.assertIn('several annotations', ret.json()['error'])
+        self.assertNotIn('graph_path\' to pick one', ret.json()['error'])
+        for query, needle in (('', 'needs ?graph=<name>'), ('?graph=Z', "unknown graph 'Z'"),
+                              ('?graph=A&x=1', "unknown parameter 'x'"),
+                              ('?graph=A&graph=B', 'given twice'),
+                              ('?graph=B&graph_path=/nowhere', 'is not part of')):
+            ret = self._caps(query)
+            self.assertEqual(400, ret.status_code, query)
+            self.assertIn(needle, ret.json()['error'], query)
+        # the server-wide document lists the names; align is not offered here
+        c = requests.get(self.server.url + '/capabilities').json()
+        self.assertEqual(('multi', ['A', 'B', 'C'], True),
+                         (c['mode'], c['graphs'], c['ready']))
+        self.assertNotIn('align', c['features'])
+        self.assertNotIn('align', c['routes'])
+        self.assertEqual('GET /traverse/capabilities?graph={name}[&graph_path={path}]',
+                         c['routes']['traverse_capabilities'])
+        self.assertEqual(caps['attempts'], c['attempts'])
+        # the library asks for one pair
+        client = graphlet_lib.TraverseClient('127.0.0.1', self.server.port, graph='A')
+        self.assertEqual('tinyA', client.capabilities()['index_ns'])
+        self.assertEqual(self.fp_two, client.capabilities(graph='B', graph_path=self.pairs['two'][0])
+                         ['index_fp'])
+        self.assertEqual(['A', 'B', 'C'], client.server_capabilities()['graphs'])
+
+    def test_multi_list_errors_refuse_to_start(self):
+        """A manifest that does not describe its pair's files, two identities for one pair, a
+        line of six columns and an index_ns that is no token each refuse to start (exit 1,
+        an [error] line naming the problem) before anything is loaded."""
+        d = self.tempdir.name
+        with open(self.manifest) as f:
+            wrong = json.load(f)
+        for e in wrong['files']:
+            e['size'] += 1
+        wrong.pop('index_fp')
+        with open(f'{d}/wrong.manifest.json', 'w') as f:
+            json.dump(wrong, f)
+        cases = {
+            'size': (f'A,{self.graph},{self.anno},{d}/wrong.manifest.json',
+                     'wrong.manifest.json'),
+            'conflict': (f'A,{self.graph},{self.anno},,one\nB,{self.graph},{self.anno},,two',
+                         'one index has one identity'),
+            'columns': (f'A,{self.graph},{self.anno},,ns,extra', 'at most five'),
+            'token': (f'A,{self.graph},{self.anno},,bad/ns', 'does not match'),
+            'missing': (f'A,{self.graph},{self.anno},{d}/nowhere.json', 'cannot be read'),
+        }
+        for name, (text, needle) in cases.items():
+            csv = f'{d}/bad_{name}.csv'
+            with open(csv, 'w') as f:
+                f.write(text + '\n')
+            server = self._Server(self, csv, wait=False)
+            try:
+                code = server.process.wait(timeout=120)
+            finally:
+                server.close()
+            log = server.text()
+            self.assertEqual(1, code, (name, log[-2000:]))
+            self.assertIn('[error]', log, name)
+            self.assertIn(needle, log, (name, log[-2000:]))
+            self.assertNotIn('Loading', log.split('[error]')[0][-200:] + '', name)
+
+    def test_multi_identity_holes_refuse_to_start(self):
+        """Review of pass 5: one index_fp could describe two indexes, and a manifest's sidecars
+        were not checked. A manifest that also lists another annotation (one written for a
+        directory, as for two annotations of one graph with swapped memberships), one whose
+        sidecar (the .seqs the server loads) is another build's, and two different pairs stating
+        one index_fp (copies of one bundle under two paths) each refuse to start."""
+        d = self.tempdir.name
+        with open(self.manifest) as f:
+            base = json.load(f)
+        names = [e['path'] for e in base['files']]
+        self.assertIn('annotation.seqs', names)
+        # a directory's manifest: the base graph, both of its annotations
+        col = self.pairs['col'][1]
+        bundle = copy.deepcopy(base)
+        bundle.pop('index_fp')
+        with open(col, 'rb') as f:
+            data = f.read()
+        bundle['files'].append({'path': os.path.basename(col), 'size': len(data),
+                                'sha256': hashlib.sha256(data).hexdigest()})
+        with open(f'{d}/bundle.manifest.json', 'w') as f:
+            json.dump(bundle, f)
+        # another build's sidecar
+        sidecar = copy.deepcopy(base)
+        sidecar.pop('index_fp')
+        for e in sidecar['files']:
+            if e['path'] == 'annotation.seqs':
+                e['size'] += 12345
+                e['sha256'] = 'f' * 64
+        with open(f'{d}/sidecar.manifest.json', 'w') as f:
+            json.dump(sidecar, f)
+        # a copy of the bundle under another path, stating the same manifest
+        os.makedirs(f'{d}/copy', exist_ok=True)
+        for name in names:
+            shutil.copyfile(f'{d}/{name}', f'{d}/copy/{name}')
+        cases = {
+            'directory': (f'A,{self.graph},{self.anno},{d}/bundle.manifest.json',
+                          'which this index does not load'),
+            'sidecar': (f'A,{self.graph},{self.anno},{d}/sidecar.manifest.json',
+                        'annotation.seqs'),
+            'shared_fp': (f'A,{self.graph},{self.anno},{self.manifest}\n'
+                          f'B,{d}/copy/{os.path.basename(self.graph)},'
+                          f'{d}/copy/{os.path.basename(self.anno)},{self.manifest}',
+                          'one index_fp'),
+        }
+        for name, (text, needle) in cases.items():
+            csv = f'{d}/hole_{name}.csv'
+            with open(csv, 'w') as f:
+                f.write(text + '\n')
+            server = self._Server(self, csv, wait=False)
+            try:
+                code = server.process.wait(timeout=120)
+            finally:
+                server.close()
+            log = server.text()
+            self.assertEqual(1, code, (name, log[-2000:]))
+            self.assertIn('[error]', log, name)
+            self.assertIn(needle, log, (name, log[-2000:]))
+        # the same pair spelled two ways is one index (one identity), not two
+        csv = f'{d}/spellings.csv'
+        rel = os.path.relpath(self.graph, d)
+        with open(csv, 'w') as f:
+            f.write(f'A,{self.graph},{self.anno},{self.manifest}\n'
+                    f'B,{d}/./{rel},{self.anno},{self.manifest}\n')
+        server = self._Server(self, csv)
+        try:
+            self.assertTrue(server.ready, server.text())
+            out = requests.post(server.url + '/traverse',
+                                data=json.dumps(self._request('B'))).json()
+            self.assertEqual(self.index_fp, out['capabilities']['index_fp'])
+        finally:
+            server.close()
+
+    def test_multi_three_column_list_states_nulls(self):
+        """A list of three columns is read as it always was: null name and fingerprint."""
+        d = self.tempdir.name
+        csv = f'{d}/plain.csv'
+        with open(csv, 'w') as f:
+            f.write(f'P,{self.pairs["three"][0]},{self.pairs["three"][1]}\n')
+        server = self._Server(self, csv)
+        try:
+            self.assertTrue(server.ready, server.text())
+            out = requests.post(server.url + '/traverse',
+                                data=json.dumps(self._request('P'))).json()
+            caps = out['capabilities']
+            self.assertEqual((None, None), (caps['index_ns'], caps['index_fp']))
+            self.assertEqual(16, len(caps['index_meta_fp']))
+        finally:
+            server.close()
+
+
+@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
+@unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
+class TestTraverseWideIndex(TestingBase):
+    """Pass 5, W5 (the chunked deadlines): a fan-out index — a 61 bp seed, then all 1024
+    five-base continuations, each with a 400 bp tail of its own, one header label each — where
+    one level's lookahead reads about 66,000 annotation rows in one call. A time budget of 50 to
+    200 ms used to be overrun to about half a second by that call (measured 507-534 ms); the
+    reads are now decoded in chunks of chunk_target_ms with the deadline between them, so the
+    walk stops within about a chunk of its budget, where the whole read would have stopped it.
+    With --traverse-chunk-target-ms 0 the read is one piece again (the test bites)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        rng = random.Random(20261004)
+
+        def seq(n):
+            return ''.join(rng.choice('ACGT') for _ in range(n))
+
+        cls.seed = seq(61)
+        d = cls.tempdir.name
+        fasta = f'{d}/fan.fa'
+        with open(fasta, 'w') as f:
+            for i in range(4 ** 5):
+                penta = ''.join('ACGT'[(i >> (2 * j)) & 3] for j in range(5))
+                f.write(f'>r{i:04d}\n{cls.seed}{penta}{seq(400)}\n')
+        cls.graph = f'{d}/fan.dbg'
+        cls._build_graph(fasta, cls.graph, K, 'succinct', mode='basic')
+        cls._annotate_graph(fasta, cls.graph, f'{d}/fan', 'column', anno_type='header')
+        cls.anno = f'{d}/fan.column.annodbg'
+        # Review of pass 5, F1/F2: the same index on row-diff annotations, whose rows share the
+        # decoding of their row-diff paths within a call (a graph copy each: the transforms write
+        # sidecars beside the graph)
+        cls.variants = {}
+        for anno_type in ('row_diff', 'row_diff_brwt'):
+            graph = f'{d}/fan_{anno_type}.dbg'
+            shutil.copyfile(cls.graph, graph)
+            cls._annotate_graph(fasta, graph, f'{d}/fan_{anno_type}', anno_type,
+                                anno_type='header')
+            cls.variants[anno_type] = types.SimpleNamespace(
+                graph=graph, anno=f'{d}/fan_{anno_type}.{anno_type}.annodbg',
+                tempdir=cls.tempdir)
+
+    def _request(self, mode, budget_ms, **fields):
+        labels = ({'mode': 'annotate', 'max_labels_per_node': 2000} if mode == 'annotate'
+                  else {'max_seed_labels': 2000})
+        strategy = {'direction': 'right', 'labels': labels,
+                    'branching': {'on_reconverge': 'keep', 'max_label_branches': 'unlimited',
+                                  'max_splits_per_path': 'unlimited'},
+                    'bounds': {'max_extension_bp': 400, 'time_budget_ms': budget_ms,
+                               'max_live_paths': 100000, 'max_paths': 100000},
+                    'output': {'detail': 'summary', 'timing': True}}
+        req = {'seeds': [{'sequence': self.seed}], 'strategy': strategy}
+        req.update(fields)
+        return req
+
+    def _server(self, *flags, index=None):
+        return TestTraverseAttempts._Server(index or self, *flags)
+
+    def test_row_diff_walks_no_deadline_stops_keep_their_bytes_and_time(self):
+        """Review of pass 5, F1: on a row-diff annotation the rows of one call share the
+        decoding of their paths, and chunks of sorted rows decoded them again per chunk — a walk
+        of about 1.8 s took 30 s on row_diff, ran into its budget and came back partial (its
+        bytes changed), and row_diff_brwt walks were 1.4-2.9 times slower. A read the deadline
+        cannot fall into is one piece now: the same bytes as unchunked, in about its time."""
+        for anno_type, ext in (('row_diff', 8), ('row_diff_brwt', 400)):
+            index = self.variants[anno_type]
+            with self._server('--traverse-chunk-target-ms', '0', index=index) as whole, \
+                    self._server(index=index) as paced:
+                for mode in ('annotate', 'constrain'):
+                    req = self._request(mode, 30000)
+                    req['strategy']['bounds']['max_extension_bp'] = ext
+                    times = {}
+                    results = {}
+                    for name, server in (('whole', whole), ('paced', paced)) * 2:
+                        out = server.post('traverse', req).json()
+                        times.setdefault(name, []).append(out['timing']['elapsed_ms'])
+                        result = out['results'][0]
+                        self.assertEqual('complete', result['outcome']['walks'],
+                                         (anno_type, mode, name))
+                        result.pop('timing', None)
+                        results.setdefault(name, set()).add(json.dumps(result, sort_keys=True))
+                    self.assertEqual(results['whole'], results['paced'], (anno_type, mode))
+                    self.assertEqual(1, len(results['paced']))
+                    # (the unchunked time, the better of two, with room for a loaded machine)
+                    self.assertLessEqual(min(times['paced']), 1.5 * min(times['whole']) + 300,
+                                         (anno_type, mode, times))
+
+    def test_flags_stated_as_integers_are_validated(self):
+        """Review of pass 5: --traverse-clock-skew-ms and --traverse-chunk-target-ms were read
+        with atoll, so -1 wrapped to 2^64 - 1 and the capabilities stated it (a JSON client
+        cannot represent it, a ledger adding to it overflows). Integers in [0, 2^53 - 1] only."""
+        for flag in ('--traverse-clock-skew-ms', '--traverse-chunk-target-ms',
+                     '--traverse-attempt-allowance-ms'):
+            for value in ('-1', '1.5', '9007199254740992', '5x'):
+                res = subprocess.run(shlex.split(METAGRAPH) + [
+                    'server_query', '-i', self.graph, '-a', self.anno, flag, value,
+                    '--port', str(_free_port()), '--address', '127.0.0.1'],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+                self.assertNotEqual(0, res.returncode, (flag, value))
+                self.assertIn(f'{flag} must be an integer in [0, 2^53 - 1]',
+                              res.stdout.decode(), (flag, value))
+
+    def test_row_diff_budgets_are_kept_within_a_chunk(self):
+        """Review of pass 5, F2: the first chunk of a read was sized from other reads' rows (a
+        level's cheap shared rows) and took 650-880 ms against chunk_target_ms 50, so 50-500
+        ms budgets overran as before on row_diff; a split read starts with at most 8 rows now,
+        and a read is one piece only when predicted at the slowest per-row time seen to end
+        well before the deadline. With and without a memory budget (its reads are budget-aware
+        on these annotations)."""
+        for anno_type in ('row_diff', 'row_diff_brwt'):
+            with self._server(index=self.variants[anno_type]) as server:
+                for extra in ({}, {'max_memory_mb': 4096}):
+                    for mode in ('constrain', 'annotate'):
+                        for budget in (50, 200):
+                            req = self._request(mode, budget, attempt_id=f'rd-{anno_type}-'
+                                                f'{mode}-{budget}-{len(extra)}')
+                            req['strategy']['bounds'].update(extra)
+                            ret = server.post('traverse', req)
+                            self.assertEqual(200, ret.status_code, ret.text[:500])
+                            out = ret.json()
+                            what = (anno_type, extra, mode, budget)
+                            right = out['results'][0]['arms']['right']
+                            self.assertEqual('time_budget', right['cap_trigger']['reason'], what)
+                            self.assertLessEqual(out['timing']['elapsed_ms'], budget + 50 + 150,
+                                                 what)
+                            self.assertLessEqual(out['usage']['observed_max_uninterruptible_ms'],
+                                                 50 + 100, what)
+
+    def test_wide_index_budget_is_kept_within_a_chunk(self):
+        with self._server() as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()
+            dc = caps['deadline_check']
+            self.assertEqual(50, dc['chunk_target_ms'])
+            self.assertIsNone(dc['max_uninterruptible_ms'])
+            n = 0
+            for mode in ('constrain', 'annotate'):
+                for budget in (50, 100, 200):
+                    ret = server.post('traverse', self._request(mode, budget,
+                                                                attempt_id=f'w-{mode}-{budget}'))
+                    self.assertEqual(200, ret.status_code, ret.text[:500])
+                    out = ret.json()
+                    right = out['results'][0]['arms']['right']
+                    self.assertEqual('time_budget', right['cap_trigger']['reason'], (mode, budget))
+                    self.assertLess(right['complete_to_bp'], 400)
+                    elapsed = out['timing']['elapsed_ms']
+                    self.assertLessEqual(elapsed, budget + 50 + 150, (mode, budget))
+                    seen = out['usage']['observed_max_uninterruptible_ms']
+                    self.assertIs(type(seen), int)
+                    self.assertLessEqual(seen, 50 + 100, (mode, budget))
+                    n += 1
+            self.assertEqual(6, n)
+            # the process-wide observation, in both capabilities documents
+            dc = requests.get(server.url + '/capabilities').json()['deadline_check']
+            self.assertGreater(dc['observed_max_uninterruptible_ms'], 0)
+
+    def test_wide_index_delivery_reserve_stops_the_walk(self):
+        """Pass 5, W6: the delivery reserve keeps back from the walk the time to build and
+        compress what it will deliver, from the walked seed's modelled account. Under rates
+        far below this machine's (0.001 MB/s) the reserve exceeds the whole bound at the first
+        level: the attempt answers 200 at once, the first seed partial (attempt_deadline), the
+        others not started, and usage states the moved walk-until."""
+        with self._server('--traverse-delivery-compress-mbps', '0.001',
+                          '--traverse-delivery-build-mbps', '0.001') as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()
+            self.assertEqual(0.001, caps['attempts']['delivery_reserve']['compress_mbps'])
+            req = self._request('constrain', 20000, attempt_id='reserve-1')
+            req['seeds'] = req['seeds'] * 3
+            t0 = time.time()
+            ret = server.post('traverse', req)
+            took = (time.time() - t0) * 1000
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            out = ret.json()
+            usage = out['usage']
+            self.assertEqual('deadline', usage['reason'])
+            self.assertLess(took, usage['bound_ms'])
+            self.assertLess(usage['bound']['walk_until_ms'],
+                            usage['bound_ms'] - usage['bound']['allowance_ms'] // 2)
+            first = out['results'][0]
+            self.assertEqual(('attempt', 'attempt_deadline'),
+                             (first['resource_stop']['scope'], first['resource_stop']['resource']))
+            for r in out['results'][1:]:
+                self.assertEqual('not_started', r['resource_stop']['phase'])
+        # at the default rates the floor (allowance / 2) holds for this small output
+        with self._server() as server:
+            ret = server.post('traverse', self._request('constrain', 100, attempt_id='reserve-2'))
+            usage = ret.json()['usage']
+            self.assertEqual(usage['bound_ms'] - usage['bound']['allowance_ms'] // 2,
+                             usage['bound']['walk_until_ms'])
+
+    def test_wide_index_unpaced_overruns(self):
+        """--traverse-chunk-target-ms 0: one piece per read, as before; the same walk runs far
+        past its budget (skipped when this machine reads the rows too fast to tell), and the
+        paced walk is censored where it is (the same complete_to_bp)."""
+        with self._server('--traverse-chunk-target-ms', '0') as whole, self._server() as paced:
+            for mode in ('constrain', 'annotate'):
+                a = whole.post('traverse', self._request(mode, 100)).json()
+                b = paced.post('traverse', self._request(mode, 100)).json()
+                if a['timing']['elapsed_ms'] < 100 + 250:
+                    self.skipTest('the unpaced read took %.0f ms: too fast to show an overrun'
+                                  % a['timing']['elapsed_ms'])
+                self.assertLess(b['timing']['elapsed_ms'], a['timing']['elapsed_ms'] - 150)
+                self.assertEqual(a['results'][0]['arms']['right']['complete_to_bp'],
+                                 b['results'][0]['arms']['right']['complete_to_bp'])
+                caps = requests.get(whole.url + '/traverse/capabilities').json()
+                self.assertEqual(0, caps['deadline_check']['chunk_target_ms'])
+
+
 class TestTraverseAttempts(TestingBase):
     """Stage 4, backend half (DESIGN-traverse-graphlet.md §14 v5.1), against a walk slow
     enough to be stopped in its middle: two haplotypes of 200 kbp with a SNP every 64 bp
@@ -2526,7 +3263,9 @@ class TestTraverseAttempts(TestingBase):
             usage = ret.json()['usage']
             self.assertEqual('deadline', usage['reason'])
             self.assertEqual(1202, usage['bound_ms'])
-            self.assertEqual(1201, usage['bound']['walk_until_ms'])
+            # at most the bound less half the allowance; the delivery reserve (pass 5) moves it
+            # earlier when the walked seeds' estimated text needs more time than that to build
+            self.assertLessEqual(usage['bound']['walk_until_ms'], 1201)
             # stopped at the next checkpoint: one head, plus building the response
             self.assertLess(usage['elapsed_ms'], usage['bound_ms'] + 1000)
             if ret.status_code == 200:

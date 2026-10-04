@@ -222,6 +222,339 @@ TEST(GraphletAttempt, AbandonedWalksAreNotFinished) {
     EXPECT_NE(std::string::npos, a->stop_summary().find("1 abandoned"));
 }
 
+// not_after_ms (pass 5, W1): an integer in [0, 2^53 - 1], with or without attempt_id; a
+// fraction, a sign, a string or a value no JSON reader keeps exactly is a 400 naming the field
+TEST(GraphletAttempt, NotAfterMsIsParsedStrictly) {
+    Json::Value r;
+    r["not_after_ms"] = Json::UInt64(1759601000000ull);
+    EXPECT_EQ(1759601000000ull, attempt_ids(r).not_after_ms.value());
+    EXPECT_TRUE(attempt_ids(r).attempt_id.empty());
+    r["not_after_ms"] = Json::UInt64(kMaxNotAfterMs);
+    EXPECT_EQ(kMaxNotAfterMs, attempt_ids(r).not_after_ms.value());
+    r["not_after_ms"] = 0;
+    EXPECT_EQ(0u, attempt_ids(r).not_after_ms.value());
+    // a JSON number written with an exponent but without a fraction is the integer it denotes
+    r["not_after_ms"] = 1.759601e12;
+    EXPECT_EQ(1759601000000ull, attempt_ids(r).not_after_ms.value());
+    for (const Json::Value &bad : { Json::Value(1759601000000.5), Json::Value(-1),
+                                    Json::Value(Json::UInt64(kMaxNotAfterMs + 1)),
+                                    Json::Value("1759601000000"), Json::Value(true),
+                                    Json::Value(Json::nullValue) }) {
+        r["not_after_ms"] = bad;
+        try {
+            attempt_ids(r);
+            ADD_FAILURE() << "accepted " << bad.toStyledString();
+        } catch (const InvalidRequest &e) {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find("request.not_after_ms"));
+        }
+    }
+    r.removeMember("not_after_ms");
+    EXPECT_FALSE(attempt_ids(r).not_after_ms);
+
+    // strict parsing of the whole request declares it (no unknown-field 400)
+    Json::Value req;
+    req["seeds"][0]["sequence"] = std::string(40, 'A');
+    req["strategy"] = Json::Value(Json::objectValue);
+    req["not_after_ms"] = Json::UInt64(1759601000000ull);
+    EXPECT_EQ(1759601000000ull, parse_traverse_request(req).not_after_ms.value());
+    req["not_after_ms"] = -5;
+    EXPECT_THROW(parse_traverse_request(req), InvalidRequest);
+}
+
+// Refused at handler start once passed, strictly (no allowance added), with the exact body;
+// nothing is registered, so the state route answers 404; an id that is running, retained or
+// tombstoned is answered first (an "expired" 409 always means no attempt with the id exists)
+TEST(GraphletAttemptRegistry, NotAfterMsRefusesAtStart) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock);
+    std::atomic<int64_t> wall_ms { 1791137002417 };
+    settings.wall_clock = [&]() {
+        return std::chrono::system_clock::time_point(std::chrono::milliseconds(wall_ms.load()));
+    };
+    AttemptRegistry registry(settings);
+    EXPECT_EQ(1791137002417u, registry.now_ms());
+
+    // not passed: registered as usual, and echoed in usage and in the state
+    auto a = attempt_of(registry, "a-17");
+    AttemptIds ids = a->ids();
+    ids.not_after_ms = 1791137002417;   // equal: not passed
+    a->set_ids(ids);
+    EXPECT_FALSE(registry.start(a));
+    a->set_bound(1, 1000);
+    EXPECT_EQ(1791137002417u, a->usage_json("completed")["not_after_ms"].asUInt64());
+    EXPECT_EQ(1791137002417u, registry.state("a-17").second["not_after_ms"].asUInt64());
+
+    // passed by one ms: refused, nothing registered
+    auto b = attempt_of(registry, "a-18");
+    ids.attempt_id = "a-18";
+    ids.budget_id = "b-3";
+    ids.locus_id = "l-9";
+    ids.not_after_ms = 1791137002416;
+    b->set_ids(ids);
+    auto refused = registry.start(b);
+    ASSERT_TRUE(refused);
+    EXPECT_TRUE(refused->expired);
+    const Json::Value &body = refused->body;
+    std::vector<std::string> keys = body.getMemberNames();
+    EXPECT_EQ((std::vector<std::string>{ "attempt_id", "budget_id", "error", "locus_id",
+                                         "not_after_ms", "server_instance", "server_time_ms",
+                                         "state" }), keys);
+    EXPECT_EQ("expired", body["state"].asString());
+    EXPECT_EQ(1791137002416u, body["not_after_ms"].asUInt64());
+    EXPECT_EQ(Json::uintValue, body["not_after_ms"].type());
+    EXPECT_EQ(Json::uintValue, body["server_time_ms"].type());
+    EXPECT_EQ(1791137002417u, body["server_time_ms"].asUInt64());
+    EXPECT_EQ(registry.server_instance(), body["server_instance"].asString());
+    EXPECT_NE(std::string::npos, body["error"].asString().find("2026-10-04T18:03:22.416Z"));
+    EXPECT_FALSE(body.isMember("usage"));
+    EXPECT_EQ(404, registry.state("a-18").first);
+    // and a later copy is expired too: still nothing registered
+    EXPECT_TRUE(registry.start(b)->expired);
+    EXPECT_EQ(404, registry.state("a-18").first);
+
+    // without attempt_id the same rule and body, without the ids
+    AttemptIds plain;
+    plain.not_after_ms = 1791137002416;
+    EXPECT_TRUE(not_after_passed(plain, registry.now_ms()));
+    EXPECT_FALSE(not_after_passed(plain, 1791137002416));
+    const Json::Value pb = expired_json(plain, registry.now_ms(), registry.server_instance());
+    keys = pb.getMemberNames();
+    EXPECT_EQ((std::vector<std::string>{ "error", "not_after_ms", "server_instance",
+                                         "server_time_ms", "state" }), keys);
+    EXPECT_FALSE(not_after_passed(AttemptIds(), registry.now_ms()));
+
+    // a running id is refused as a duplicate even when the new request has also expired
+    auto dup = attempt_of(registry, "a-17");
+    ids.attempt_id = "a-17";
+    dup->set_ids(ids);
+    refused = registry.start(dup);
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(refused->expired);
+    EXPECT_EQ("running", refused->body["state"].asString());
+    // a tombstoned id too
+    EXPECT_EQ(404, registry.cancel("t-1", 0).first);
+    auto tomb = attempt_of(registry, "t-1");
+    ids.attempt_id = "t-1";
+    tomb->set_ids(ids);
+    refused = registry.start(tomb);
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(refused->expired);
+    EXPECT_TRUE(refused->body["tombstone"].asBool());
+
+    // without not_after_ms the usage and the state keep their keys
+    auto c = attempt_of(registry, "c");
+    EXPECT_FALSE(registry.start(c));
+    c->set_bound(1, 1000);
+    EXPECT_FALSE(c->usage_json("completed").isMember("not_after_ms"));
+    EXPECT_FALSE(registry.state("c").second.isMember("not_after_ms"));
+}
+
+// The attempts block of both capabilities routes (W1, W4): integers where usage.bound states
+// integers, the hard cap, the clock skew a ledger adds, the not_after rule
+TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
+    AttemptSettings s;
+    s.clock_skew_ms = 2500;
+    AttemptRegistry registry(s);
+    const Json::Value att = registry.capabilities_json();
+    for (const char *f : { "allowance_ms", "hard_cap_ms", "clock_skew_allowance_ms",
+                           "retention_s", "retention_count", "content_timeout_s",
+                           "client_check_ms" }) {
+        EXPECT_EQ(Json::uintValue, att[f].type()) << f;
+    }
+    EXPECT_EQ(10000u, att["allowance_ms"].asUInt64());
+    EXPECT_EQ(899000u, att["hard_cap_ms"].asUInt64());
+    EXPECT_EQ(2500u, att["clock_skew_allowance_ms"].asUInt64());
+    EXPECT_EQ(900u, att["content_timeout_s"].asUInt64());
+    // written as integers (jsoncpp writes an integral double as 10000.0)
+    EXPECT_NE(std::string::npos, json_text(att, true).find("\"allowance_ms\":10000,"));
+    Json::Value fields(Json::arrayValue);
+    for (const char *f : { "attempt_id", "budget_id", "locus_id", "not_after_ms" }) {
+        fields.append(f);
+    }
+    EXPECT_EQ(fields, att["fields"]);
+    EXPECT_NE(std::string::npos, att["not_after"].asString().find("clock_skew_allowance_ms"));
+    EXPECT_EQ(registry.server_instance(), att["server_instance"].asString());
+}
+
+// Pass 5, W6: the seeds stop being walked at bound - max(allowance / 2, reserve), the reserve
+// 1.25 times the time to compress the text written so far and the walked seed's estimated text
+// (its account / the account per text byte), and to build the latter — at the configured rates
+// and ratios until the server or the attempt measured its own — plus the time from the
+// walk-until to the walk's end (review of pass 5, F3: without the margin and that time, a
+// response the model fitted exactly was a 503 about half the time)
+TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
+    FakeClock clock;
+    AttemptSettings s = settings_with(&clock);
+    s.allowance_ms = 10'000;
+    s.delivery_compress_mbps = 50;     // 50,000 bytes per ms
+    s.delivery_build_mbps = 5;         // 5,000 bytes per ms
+    s.delivery_stop_ms = 100;
+    auto reserve = [](double model, double stop = 100) { return 1.25 * model + stop; };
+    AttemptRegistry registry(s);
+    auto a = attempt_of(registry, "reserve");
+    a->set_delivery_detail("full");    // 20 bytes of account per text byte
+    a->set_bound(2, 30'000);           // 70,000 ms
+    EXPECT_EQ(65'000, a->walk_until_ms());
+    EXPECT_NEAR(100, a->reserve_ms(), 1e-9);    // nothing to deliver yet: the stop alone
+    // small outputs: the floor (allowance / 2)
+    a->progress(20 * 1'000'000);       // 1 MB of text estimated
+    EXPECT_NEAR(reserve(1e6 / 5e4 + 1e6 / 5e3), a->reserve_ms(), 1e-9);
+    EXPECT_EQ(65'000, a->walk_until_ms());
+    // a large walked seed: 40 MB of text estimated -> 1.25 x (800 + 8000) + 100 ms
+    a->progress(20 * 40'000'000ull);
+    EXPECT_NEAR(reserve(800 + 8000), a->reserve_ms(), 1e-9);
+    EXPECT_NEAR(70'000 - reserve(8800), a->walk_until_ms(), 1e-9);
+    // a graphlet's account counts 40 per text byte
+    a->set_delivery_detail("graphlet");
+    a->progress(40 * 40'000'000ull);
+    EXPECT_NEAR(70'000 - reserve(8800), a->walk_until_ms(), 1e-9);
+    // the seed was written: its exact bytes replace the estimate; built at 40 MB/s, from an
+    // account of 80 bytes per text byte (both measured: a text of 1 MiB or more)
+    a->note_delivered(40'000'000, 1.0, 80 * 40'000'000ull);
+    EXPECT_NEAR(reserve(40e6 / 5e4), a->reserve_ms(), 1e-9);          // compression only
+    EXPECT_EQ(65'000, a->walk_until_ms());
+    EXPECT_EQ(40.0, a->own_build_mbps());
+    EXPECT_EQ(80.0, a->own_account_per_text_byte());
+    // the next seed's estimate uses the measured ratio (80) and build rate (40 MB/s)
+    a->progress(80 * 100'000'000ull);
+    EXPECT_NEAR(reserve((40e6 + 100e6) / 5e4 + 100e6 / 4e4), a->reserve_ms(), 1e-6);
+    const double until = 70'000 - a->reserve_ms();
+    EXPECT_NEAR(until, a->walk_until_ms(), 1e-9);
+    // the walk stops at the moved instant; usage states the walk-until in force when it stopped
+    // the walk (not the lowest computed, 70,000 - reserve(8800), before the first seed was
+    // delivered: review of pass 5, F4), also once the seed is delivered and the reserve shrinks
+    ASSERT_FALSE(registry.start(a));
+    clock.ms = static_cast<int64_t>(until) - 1;
+    EXPECT_EQ(ExternalStop::NONE, a->poll(true));
+    clock.ms = static_cast<int64_t>(until) + 1;
+    EXPECT_EQ(ExternalStop::ATTEMPT_DEADLINE, a->poll(true));
+    // the walk ended 120 ms after its walk-until: what the reserve's stop is measured on
+    clock.ms = static_cast<int64_t>(until) + 120;
+    a->seed_walked(1, SeedUsage());
+    EXPECT_NEAR(120 - (until - std::floor(until)), a->own_stop_ms(), 1e-6);
+    a->note_delivered(1000, 0.001);
+    EXPECT_EQ(static_cast<uint64_t>(std::ceil(until)),
+              a->usage_json("deadline")["bound"]["walk_until_ms"].asUInt64());
+    // a slower measured seed lowers the rate used (the slowest wins); a small one measures
+    // nothing
+    auto b = attempt_of(registry, "reserve2");
+    b->set_delivery_detail("full");
+    b->set_bound(1, 30'000);
+    b->note_delivered(1000, 10.0, 1'000'000);
+    EXPECT_EQ(0.0, b->own_build_mbps());
+    EXPECT_EQ(0.0, b->own_account_per_text_byte());
+    b->progress(20 * 10'000'000ull);
+    EXPECT_NEAR(reserve(10e6 / 5e3 + (1000 + 10e6) / 5e4), b->reserve_ms(), 1e-6);
+    b->note_delivered(2'000'000, 1.0);         // 2 MB/s, no walk: no ratio
+    b->progress(20 * 10'000'000ull);
+    EXPECT_NEAR(reserve(10e6 / 2e3 + (2'001'000 + 10e6) / 5e4), b->reserve_ms(), 1e-6);
+    // the floor holds in usage while the reserve stays below it (no walk-until stopped it)
+    auto f = attempt_of(registry, "reserve-floor");
+    f->set_delivery_detail("full");
+    f->set_bound(1, 30'000);
+    f->progress(1000);
+    EXPECT_EQ(35'000u, f->usage_json("completed")["bound"]["walk_until_ms"].asUInt64());
+    // ... also when the walk-until falls only once the last seed's text is written (its exact
+    // bytes, no walk left): no poll read that one, so it bounded no walk (review of pass 5:
+    // usage read 20174 for a walk its own 30 s budget ended)
+    clock.ms = 0;
+    ASSERT_FALSE(registry.start(f));
+    EXPECT_EQ(ExternalStop::NONE, f->poll(true));          // before the seed (between seeds)
+    f->seed_started(0);
+    f->progress(20 * 1'000'000);
+    EXPECT_EQ(ExternalStop::NONE, f->poll(true));
+    f->seed_walked(0, SeedUsage());
+    f->note_delivered(400'000'000, 10.0, 20 * 400'000'000ull);
+    EXPECT_NEAR(40'000 - reserve(400e6 / 5e4), f->walk_until_ms(), 1e-6);
+    EXPECT_EQ(35'000u, f->usage_json("completed")["bound"]["walk_until_ms"].asUInt64());
+    // the lowest walk-until a poll read counts, the reserve having moved it, though it rose
+    // again before the walk ended
+    auto w = attempt_of(registry, "reserve-walked");
+    w->set_delivery_detail("full");
+    w->set_bound(1, 30'000);
+    ASSERT_FALSE(registry.start(w));
+    w->seed_started(0);
+    w->progress(20 * 40'000'000ull);
+    EXPECT_EQ(ExternalStop::NONE, w->poll(true));
+    w->progress(20 * 1'000ull);
+    EXPECT_EQ(ExternalStop::NONE, w->poll(true));
+    w->seed_walked(0, SeedUsage());
+    EXPECT_EQ(static_cast<uint64_t>(std::ceil(40'000 - reserve(8800))),
+              w->usage_json("completed")["bound"]["walk_until_ms"].asUInt64());
+    // an attempt whose bound is not enforced (the CLI's) keeps the floor: no delivery is bounded
+    auto local = std::make_shared<Attempt>(0, std::chrono::system_clock::time_point(),
+                                           registry.settings(), registry.server_instance(),
+                                           /* enforced */ false);
+    AttemptIds local_ids;
+    local_ids.attempt_id = "local-1";
+    local->set_ids(local_ids);
+    local->set_delivery_detail("full");
+    local->set_bound(1, 30'000);
+    local->progress(20 * 40'000'000ull);
+    EXPECT_EQ(35'000, local->walk_until_ms());
+    // the capabilities state the rule and its parts
+    Json::Value r = registry.capabilities_json()["delivery_reserve"];
+    EXPECT_EQ(50, r["compress_mbps"].asDouble());
+    EXPECT_EQ(5, r["build_mbps"].asDouble());
+    EXPECT_EQ(20, r["account_per_text_byte"]["json"].asDouble());
+    EXPECT_EQ(40, r["account_per_text_byte"]["graphlet"].asDouble());
+    EXPECT_EQ(1.25, r["margin"].asDouble());
+    EXPECT_TRUE(r["stop_ms"].isIntegral());
+    EXPECT_EQ(100u, r["stop_ms"].asUInt64());
+    EXPECT_TRUE(r["measured_stop_ms"].isNull());
+    EXPECT_TRUE(r["measured_build_mbps"].isNull());
+    EXPECT_TRUE(r["measured_compress_mbps"].isNull());
+    EXPECT_TRUE(r["measured_account_per_text_byte"]["full"].isNull());
+    EXPECT_NE(std::string::npos, registry.capabilities_json()["bound"].asString()
+                                         .find("the delivery reserve"));
+
+    // the server's measurements replace the configured values: the slowest rate and the
+    // smallest ratio of the last 16, the longest stop latency
+    for (int i = 0; i < 20; ++i) {
+        registry.note_build_rate(i == 2 ? 1.0 : 100.0 + i);     // the slow one ages out
+        registry.note_compress_rate(400.0 + i);
+        registry.note_account_per_text_byte("full", 60.0 + i);
+        registry.note_stop_latency(i == 1 ? 5000.0 : 40.0 + i); // the long one ages out
+    }
+    registry.note_build_rate(0);                                 // nothing measured: ignored
+    registry.note_account_per_text_byte("graphlet", 0);
+    registry.note_stop_latency(0);
+    const DeliveryMeasurements m = registry.measured();
+    EXPECT_EQ(104.0, m.build_mbps);
+    EXPECT_EQ(404.0, m.compress_mbps);
+    EXPECT_EQ(64.0, m.account_per_text_byte.at("full"));
+    EXPECT_EQ(0u, m.account_per_text_byte.count("graphlet"));
+    EXPECT_EQ(59.0, m.stop_ms);
+    r = registry.capabilities_json()["delivery_reserve"];
+    EXPECT_EQ(104.0, r["measured_build_mbps"].asDouble());
+    EXPECT_EQ(404.0, r["measured_compress_mbps"].asDouble());
+    EXPECT_EQ(64.0, r["measured_account_per_text_byte"]["full"].asDouble());
+    EXPECT_TRUE(r["measured_account_per_text_byte"]["graphlet"].isNull());
+    EXPECT_EQ(59u, r["measured_stop_ms"].asUInt64());
+    auto c = attempt_of(registry, "reserve3");
+    c->set_measured(m);
+    c->set_delivery_detail("full");
+    c->set_bound(1, 30'000);
+    c->progress(64 * 40'000'000ull);                             // 40 MB of text estimated
+    // a measured stop shorter than the configured one does not lower it
+    EXPECT_NEAR(reserve(40e6 / 404e3 + 40e6 / 104e3), c->reserve_ms(), 1e-6);
+    EXPECT_EQ(35'000, c->walk_until_ms());                       // within the floor
+    // the attempt's own slower seed, and smaller ratio, win over the server's
+    c->note_delivered(2'000'000, 1.0, 30 * 2'000'000ull);        // 2 MB/s, 30 per byte
+    c->progress(30 * 40'000'000ull);
+    EXPECT_NEAR(reserve((2e6 + 40e6) / 404e3 + 40e6 / 2e3), c->reserve_ms(), 1e-6);
+    // a detail the server has not measured keeps its configured ratio; a longer measured stop
+    // replaces the configured one
+    DeliveryMeasurements slow_stop = m;
+    slow_stop.stop_ms = 300;
+    auto g = attempt_of(registry, "reserve4");
+    g->set_measured(slow_stop);
+    g->set_delivery_detail("graphlet");
+    g->set_bound(1, 30'000);
+    g->progress(40 * 1'000'000ull);
+    EXPECT_NEAR(reserve(1e6 / 404e3 + 1e6 / 104e3, 300), g->reserve_ms(), 1e-6);
+}
+
 TEST(GraphletAttemptRegistry, AnIdRunsOnce) {
     FakeClock clock;
     AttemptRegistry registry(settings_with(&clock, 60));
@@ -232,13 +565,13 @@ TEST(GraphletAttemptRegistry, AnIdRunsOnce) {
     auto b = attempt_of(registry, "x");
     auto conflict = registry.start(b);
     ASSERT_TRUE(conflict);
-    EXPECT_EQ("running", (*conflict)["state"].asString());
+    EXPECT_EQ("running", conflict->body["state"].asString());
     registry.finish(a, "completed", 200, 123);
     // retained: refused, the finished state
     conflict = registry.start(b);
     ASSERT_TRUE(conflict);
-    EXPECT_EQ("finished", (*conflict)["state"].asString());
-    EXPECT_EQ("completed", (*conflict)["reason"].asString());
+    EXPECT_EQ("finished", conflict->body["state"].asString());
+    EXPECT_EQ("completed", conflict->body["reason"].asString());
     // expired: the id is free again
     clock.ms = 60'000;
     EXPECT_FALSE(registry.start(b));
@@ -302,7 +635,7 @@ TEST(GraphletAttemptRegistry, CancelOfAnUnknownIdRefusesItLater) {
     auto late = attempt_of(registry, "early");
     auto conflict = registry.start(late);
     ASSERT_TRUE(conflict);
-    EXPECT_TRUE((*conflict)["tombstone"].asBool());
+    EXPECT_TRUE(conflict->body["tombstone"].asBool());
     // an id never named is simply unknown
     auto [unknown, j] = registry.state("never");
     EXPECT_EQ(404, unknown);
@@ -331,7 +664,7 @@ TEST(GraphletAttemptRegistry, TombstonesOutliveLaterFinishes) {
     auto late = attempt_of(registry, "Y");
     auto conflict = registry.start(late);
     ASSERT_TRUE(conflict);
-    EXPECT_TRUE((*conflict)["tombstone"].asBool());
+    EXPECT_TRUE(conflict->body["tombstone"].asBool());
     // the finished attempts are kept by count as before
     EXPECT_EQ(404, registry.state("done0").first);
     EXPECT_EQ(200, registry.state("done9").first);
@@ -620,5 +953,104 @@ TEST(GraphletServer, CheckedWriterIsByteIdentical) {
                      }),
                      Stop);
         EXPECT_EQ(2u, calls);
+    }
+}
+
+// The multi-graph list (pass 5, W2): three columns read as they always were, two optional
+// ones (manifest_path, index_ns), empty meaning none; more than five columns, fewer than
+// three, or an index_ns that is no token refuse the line
+TEST(GraphletServer, GraphListLinesAreParsedStrictly) {
+    GraphListEntry e = parse_graph_list_line("uhgg,/d/g.dbg,/d/a.annodbg", 3);
+    EXPECT_EQ(3u, e.line);
+    EXPECT_EQ("uhgg", e.name);
+    EXPECT_EQ("/d/g.dbg", e.graph_path);
+    EXPECT_EQ("/d/a.annodbg", e.annotation_path);
+    EXPECT_EQ("", e.manifest_path);
+    EXPECT_EQ("", e.index_ns);
+    // as before: an empty annotation column is read as given (the loader names it)
+    EXPECT_EQ("", parse_graph_list_line("n,g,", 1).annotation_path);
+    e = parse_graph_list_line("n,g,a,/m/a.manifest.json", 1);
+    EXPECT_EQ("/m/a.manifest.json", e.manifest_path);
+    EXPECT_EQ("", e.index_ns);
+    e = parse_graph_list_line("n,g,a,/m/a.manifest.json,uhgg_k31", 1);
+    EXPECT_EQ("uhgg_k31", e.index_ns);
+    // a name without a manifest, and empty optional columns
+    e = parse_graph_list_line("n,g,a,,uhgg.v2", 1);
+    EXPECT_EQ("", e.manifest_path);
+    EXPECT_EQ("uhgg.v2", e.index_ns);
+    e = parse_graph_list_line("n,g,a,,", 1);
+    EXPECT_EQ("", e.manifest_path);
+    EXPECT_EQ("", e.index_ns);
+    for (const char *bad : { "n", "n,g", "n,g,a,m,ns,extra", "n,g,a,m,bad ns", "n,g,a,m,a/b" }) {
+        try {
+            parse_graph_list_line(bad, 7);
+            ADD_FAILURE() << "accepted " << bad;
+        } catch (const std::invalid_argument &ex) {
+            EXPECT_NE(std::string::npos, std::string(ex.what()).find("line 7")) << ex.what();
+        }
+    }
+}
+
+// One index, one identity: lines naming the same pair must agree (an empty column states
+// nothing), each (pair, manifest) is checked once, and a conflict names both lines
+TEST(GraphletServer, GraphListIdentitiesAgreePerPair) {
+    std::vector<GraphListEntry> entries {
+        parse_graph_list_line("A,g1,a1,m1,ns1", 1),
+        parse_graph_list_line("B,g1,a1", 2),            // the same pair under another name
+        parse_graph_list_line("B,g2,a2,m2", 3),
+        parse_graph_list_line("C,g3,a3", 4),
+        parse_graph_list_line("D,g1,a1,m1", 5),          // the same manifest again
+    };
+    std::map<std::string, int> calls;
+    auto fp = [&](const GraphListEntry &e) {
+        calls[e.manifest_path]++;
+        return "fp-" + e.manifest_path;
+    };
+    auto ids = graph_list_identities(entries, fp);
+    EXPECT_EQ(3u, ids.size());
+    EXPECT_EQ(std::make_pair(std::string("ns1"), std::string("fp-m1")), ids.at({ "g1", "a1" }));
+    EXPECT_EQ(std::make_pair(std::string(""), std::string("fp-m2")), ids.at({ "g2", "a2" }));
+    EXPECT_EQ(std::make_pair(std::string(""), std::string("")), ids.at({ "g3", "a3" }));
+    EXPECT_EQ(1, calls["m1"]);
+    EXPECT_EQ(1, calls["m2"]);
+
+    // a different name for the same pair
+    entries.push_back(parse_graph_list_line("E,g1,a1,,ns2", 6));
+    try {
+        graph_list_identities(entries, fp);
+        ADD_FAILURE() << "accepted two names for one index";
+    } catch (const std::invalid_argument &ex) {
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("lines 1 and 6")) << ex.what();
+    }
+    entries.pop_back();
+    // a different manifest digest for the same pair
+    entries.push_back(parse_graph_list_line("E,g1,a1,m9", 6));
+    EXPECT_THROW(graph_list_identities(entries, fp), std::invalid_argument);
+    entries.pop_back();
+    // a manifest that does not describe the pair's files: the fingerprint's error
+    entries.push_back(parse_graph_list_line("F,g4,a4,bad", 7));
+    EXPECT_THROW(graph_list_identities(entries, [&](const GraphListEntry &e) -> std::string {
+        if (e.manifest_path == "bad")
+            throw std::invalid_argument("the loaded file g4 is not listed");
+        return fp(e);
+    }), std::invalid_argument);
+    entries.pop_back();
+    // Review of pass 5: one index is one pair of files however its paths are spelled — a
+    // second spelling takes the pair's identity, and may not state another one
+    entries.push_back(parse_graph_list_line("G,./g1,./a1", 8));
+    ids = graph_list_identities(entries, fp);
+    EXPECT_EQ(std::make_pair(std::string("ns1"), std::string("fp-m1")), ids.at({ "./g1", "./a1" }));
+    entries.push_back(parse_graph_list_line("H,./g1,a1,m9", 9));
+    EXPECT_THROW(graph_list_identities(entries, fp), std::invalid_argument);
+    entries.pop_back();
+    // ... and two different pairs never state one index_fp (one manifest written for both, as
+    // for two annotations of one graph with swapped memberships, which sizes cannot tell apart)
+    entries.push_back(parse_graph_list_line("I,g1,a5,m1", 10));
+    try {
+        graph_list_identities(entries, fp);
+        ADD_FAILURE() << "accepted one index_fp for two indexes";
+    } catch (const std::invalid_argument &ex) {
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("one index_fp")) << ex.what();
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("lines 1 and 10")) << ex.what();
     }
 }

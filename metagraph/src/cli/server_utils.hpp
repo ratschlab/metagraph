@@ -54,6 +54,16 @@ struct ResponseControl {
     // after the handler is done: the status written and the body's size in bytes, or 0 and
     // nullopt when nothing was written (the client is gone)
     std::function<void(int status, std::optional<size_t> bytes)> on_written;
+    // the zlib level of a compressed body (1-9; 9, the best compression, for every route
+    // that does not choose: the traversal routes choose a faster one, see
+    // Config::traverse_compression_level)
+    int compression_level = 9;
+    // after a body of |text_bytes| was compressed in |seconds| (a delivery rate measured)
+    std::function<void(size_t text_bytes, double seconds)> on_compressed;
+    // writes the result as text instead of json_text(result, compact, check) — a route that
+    // wrote parts of it already (the /traverse results, each written once built) assembles
+    // them here; must give the same bytes json_text would
+    std::function<std::string(const Json::Value &result, const std::function<void()> &check)> write;
 };
 
 // Runs |process| on the request body and writes its JSON result; compressed with gzip or

@@ -641,4 +641,316 @@ TEST(LabelOracleBudgetedRecorder, AlternatingFetchPathsKeepCosts) {
     }
 }
 
+
+/************* pass 5: the chunked deadlines (LabelOracle::pacer, ReadPacing) *************/
+
+// the pacer: a read the deadline cannot fall into is one piece (no deadline; predicted at the
+// slowest rate seen to take less than 1/64 of the time left; its rest, at its own previous
+// chunk's rate, less than 1/4); a read that may reach the deadline starts with at most
+// first_rows (8) rows whatever the rate known, then chunks sized to the target (or the time
+// left) at the previous chunk's rate, growing at most 4 times per chunk; off at target 0
+TEST(LabelOraclePacing, PacerSizesChunksByTime) {
+    const double inf = std::numeric_limits<double>::infinity();
+    DecodePacer p;
+    EXPECT_EQ(1000u, p.next(1000, 5, 0, 0));       // off: one piece
+    p.target_ms = 50;
+    EXPECT_EQ(1000u, p.next(1000, inf, 0, 0));     // no deadline: one piece
+    EXPECT_EQ(8u, p.next(1000, 1e9, 0, 0));        // no rate known yet: a first chunk measures
+    EXPECT_EQ(5u, p.next(5, 1e9, 0, 0));
+    p.record(64, 6.4);                             // 0.1 ms per row
+    EXPECT_NEAR(0.1, p.ms_per_row, 1e-12);
+    // far from the deadline: 100,000 rows predicted at 10 s, x 64 = 640 s, less than the time left
+    EXPECT_EQ(100000u, p.next(100000, 1e9, 0, 0));
+    EXPECT_EQ(100000u, p.next(100000, 640000.1, 0, 0));
+    // near it: a first chunk of at most 8 rows, though 500 would take the target at 0.1 ms
+    EXPECT_EQ(8u, p.next(100000, 639999.9, 0, 0));
+    // then sized at the previous chunk's own rate, at most 4 x its rows
+    EXPECT_EQ(32u, p.next(100000, 1000, 8, 0.8));  // 0.1 ms/row: 500 rows, at most 32
+    EXPECT_EQ(25u, p.next(100000, 1000, 8, 16));   // 2 ms/row (slower than any before): 25
+    EXPECT_EQ(5u, p.next(100000, 5, 8, 8));        // 5 ms left at 1 ms/row
+    // the rest predicted at its own rate (0.1 ms/row: 200 ms) x 4 below the time left: one piece
+    EXPECT_EQ(2000u, p.next(2000, 800.1, 64, 6.4));
+    EXPECT_EQ(256u, p.next(2000, 799.9, 64, 6.4)); // else 50 ms at 0.1 ms/row, at most 4 x 64
+    EXPECT_EQ(1u, p.next(100000, -5, 0, 0));       // past the deadline: one row, the stop decides
+    EXPECT_EQ(1u, p.next(100000, -5, 8, 0.8));
+    p.record(10, 10);                              // a slower piece raises the rate at once
+    EXPECT_NEAR(1.0, p.ms_per_row, 1e-12);
+    p.record(100, 1);                              // a faster one does not lower it
+    EXPECT_NEAR(1.0, p.ms_per_row, 1e-12);
+    EXPECT_NEAR(10.0, p.max_read_ms, 1e-12);       // the longest piece
+    // the tests' mode: infinite factors split every read into the smallest chunks
+    DecodePacer t;
+    t.target_ms = 1e-9;
+    t.first_rows = 1;
+    t.far_factor = t.rest_factor = inf;
+    EXPECT_EQ(1u, t.next(1000, inf, 0, 0));
+    EXPECT_EQ(1u, t.next(999, inf, 1, 0.5));
+    EXPECT_EQ(4u, t.next(999, inf, 1, 0));         // a chunk too fast to measure: grown 4 x
+}
+
+namespace {
+
+// a paced read that never stops, in chunks of one row once a rate is known
+ReadPacing never_stop() {
+    ReadPacing p;
+    p.ms_left = []() { return std::numeric_limits<double>::infinity(); };
+    p.stop = []() { return false; };
+    return p;
+}
+
+void expect_same_counters(const LabelOracle::Counters &a, const LabelOracle::Counters &b,
+                          const std::string &what) {
+    // (keys_mapped is not the reads': the test maps its keys with the first oracle)
+    EXPECT_EQ(a.rows_requested, b.rows_requested) << what;
+    EXPECT_EQ(a.cache_hits, b.cache_hits) << what;
+    EXPECT_EQ(a.rows_fetched, b.rows_fetched) << what;
+    EXPECT_EQ(a.tuple_rows_fetched, b.tuple_rows_fetched) << what;
+    EXPECT_EQ(a.direct_reads, b.direct_reads) << what;
+    EXPECT_EQ(a.coords_mapped, b.coords_mapped) << what;
+}
+
+// an oracle whose reads are paced in chunks of one row (a rate far above the target), every
+// read split, deadline or none
+void one_row_chunks(LabelOracle &oracle) {
+    oracle.pacer().target_ms = 1e-9;
+    oracle.pacer().first_rows = 1;
+    oracle.pacer().far_factor = std::numeric_limits<double>::infinity();
+    oracle.pacer().rest_factor = std::numeric_limits<double>::infinity();
+}
+
+} // namespace
+
+// A paced read answers exactly as one read: the same hits, labels and ids, and the same
+// counters, cache and per-call bytes, on every path (direct, rows, tuples, budget-aware), with
+// a small cache forcing evictions, in chunks of one row
+TEST(LabelOraclePacing, PacedReadsAnswerAsOneRead) {
+    for (bool coordinates : { false, true }) {
+        Fixture fx(coordinates);
+        // the direct path needs an annotation with single-cell reads
+        auto column = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, fx.seqs, fx.labels);
+        for (const auto &[names, with_coords] : label_sets(coordinates)) {
+            for (int variant = 0; variant < 3; ++variant) {
+                const AnnotatedDBG &index = variant == 2 ? *column : *fx.anno;
+                if (variant == 2 && (coordinates || with_coords))
+                    continue;
+                LabelOracle a(index, variant == 2 ? nullptr : fx.cth.get());
+                LabelOracle b(index, variant == 2 ? nullptr : fx.cth.get());
+                one_row_chunks(b);
+                const auto access = variant == 2 ? LabelOracle::Access::DIRECT
+                                  : variant == 1 && !with_coords ? LabelOracle::Access::ROWS
+                                                                 : LabelOracle::Access::AUTO;
+                bool has_headers = false;
+                for (const auto &n : names) {
+                    has_headers |= n.rfind("acc", 0) == 0 || n.find("_h") != std::string::npos;
+                }
+                if (variant == 2 && has_headers)
+                    continue;
+                LabelQuery qa(a, refs(a, names), with_coords, access, 10);
+                LabelQuery qb(b, refs(b, names), with_coords, access, 10);
+                qa.set_max_cache_bytes(1 << 12);
+                qb.set_max_cache_bytes(1 << 12);
+                const std::string what = names[0] + " variant " + std::to_string(variant)
+                                       + " path " + qa.access_path();
+                const auto batches = fx.batches(a);
+                for (size_t i = 0; i < batches.size(); ++i) {
+                    ReadPacing pacing = never_stop();
+                    ASSERT_EQ(qa.fetch(batches[i]), qb.fetch(batches[i], &pacing)) << what;
+                    EXPECT_FALSE(pacing.interrupted);
+                    EXPECT_EQ(qa.last_call_bytes(), qb.last_call_bytes()) << what;
+                    EXPECT_EQ(qa.cache_bytes(), qb.cache_bytes()) << what;
+                    if (i + 1 < batches.size()) {
+                        qa.warm(batches[i + 1]);
+                        qb.warm(batches[i + 1], &pacing);
+                        EXPECT_EQ(qa.cache_bytes(), qb.cache_bytes()) << what;
+                    }
+                }
+                expect_same_counters(a.counters(), b.counters(), what);
+                EXPECT_GT(b.pacer().max_read_ms, 0);
+            }
+        }
+        // the budget-aware path (row-diff): the same hits, costs, held bytes and counters
+        for (const auto &[names, with_coords] : label_sets(coordinates)) {
+            LabelOracle a(*fx.anno, fx.cth.get());
+            LabelOracle b(*fx.anno, fx.cth.get());
+            one_row_chunks(b);
+            LabelQuery qa(a, refs(a, names), with_coords, LabelOracle::Access::AUTO, 10);
+            LabelQuery qb(b, refs(b, names), with_coords, LabelOracle::Access::AUTO, 10);
+            qa.set_max_cache_bytes(1 << 12);
+            qb.set_max_cache_bytes(1 << 12);
+            for (const auto &batch : fx.batches(a)) {
+                std::vector<LabelQuery::NodeHits> ha, hb;
+                std::vector<KeyCost> ca, cb;
+                ha.reserve(batch.size());
+                hb.reserve(batch.size());
+                ca.reserve(batch.size());
+                cb.reserve(batch.size());
+                DecodeBudget ba, bb;
+                size_t ra = 0, rb = 0;
+                ReadPacing pacing = never_stop();
+                ASSERT_TRUE(qa.fetch(batch.data(), batch.size(), ba, &ha, &ca, &ra));
+                ASSERT_TRUE(qb.fetch(batch.data(), batch.size(), bb, &hb, &cb, &rb, &pacing));
+                ASSERT_EQ(ha, hb) << names[0];
+                ASSERT_EQ(ca.size(), cb.size());
+                for (size_t i = 0; i < ca.size(); ++i) {
+                    EXPECT_EQ(ca[i].demand, cb[i].demand);
+                    EXPECT_EQ(ca[i].dependency_units, cb[i].dependency_units);
+                }
+                EXPECT_EQ(ba.held(), bb.held());
+                EXPECT_EQ(qa.cache_bytes(), qb.cache_bytes());
+                DecodeBudget wa, wb;
+                qa.warm(batch, wa);
+                qb.warm(batch, wb, &pacing);
+                EXPECT_EQ(qa.cache_bytes(), qb.cache_bytes());
+            }
+            expect_same_counters(a.counters(), b.counters(), names[0] + " budgeted");
+        }
+    }
+}
+
+// LabelRecorder: the same lists, the same dictionary in the same order, the same counters,
+// unbudgeted and budget-aware, in chunks of one row
+TEST(LabelOraclePacing, PacedRecordingAnswersAsOneRead) {
+    Fixture fx(true);
+    auto name_bytes = [](std::string_view n) { return 100 + n.size(); };
+    for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
+        for (bool budgeted : { false, true }) {
+            LabelOracle a(*fx.anno, fx.cth.get());
+            LabelOracle b(*fx.anno, fx.cth.get());
+            one_row_chunks(b);
+            LabelRecorder ra(a, kind, 3, 10);
+            LabelRecorder rb(b, kind, 3, 10);
+            const auto batches = fx.batches(a);
+            for (size_t i = 0; i < batches.size(); ++i) {
+                const auto &batch = batches[i];
+                ReadPacing pacing = never_stop();
+                if (!budgeted) {
+                    const auto la = ra.fetch(batch);
+                    const auto lb = rb.fetch(batch, &pacing);
+                    ASSERT_EQ(la.size(), lb.size());
+                    for (size_t j = 0; j < la.size(); ++j) {
+                        EXPECT_EQ(la[j].labels, lb[j].labels);
+                        EXPECT_EQ(la[j].total, lb[j].total);
+                    }
+                    if (i + 1 < batches.size()) {
+                        ra.warm(batches[i + 1]);
+                        rb.warm(batches[i + 1], &pacing);
+                    }
+                } else {
+                    std::vector<LabelRecorder::NodeLabels> la, lb;
+                    std::vector<KeyCost> ca, cb;
+                    la.reserve(batch.size());
+                    lb.reserve(batch.size());
+                    ca.reserve(batch.size());
+                    cb.reserve(batch.size());
+                    DecodeBudget ba, bb;
+                    size_t xa = 0, xb = 0;
+                    ASSERT_TRUE(ra.fetch(batch.data(), batch.size(), ba, &la, &ca, &xa, name_bytes));
+                    ASSERT_TRUE(rb.fetch(batch.data(), batch.size(), bb, &lb, &cb, &xb, name_bytes,
+                                         &pacing));
+                    for (size_t j = 0; j < la.size(); ++j) {
+                        EXPECT_EQ(la[j].labels, lb[j].labels);
+                        EXPECT_EQ(la[j].total, lb[j].total);
+                        EXPECT_EQ(ca[j].demand, cb[j].demand);
+                    }
+                    EXPECT_EQ(ba.held(), bb.held());
+                    DecodeBudget wa, wb;
+                    ra.warm(batch, wa);
+                    rb.warm(batch, wb, &pacing);
+                }
+                EXPECT_EQ(ra.cache_bytes(), rb.cache_bytes());
+            }
+            ASSERT_EQ(ra.labels().size(), rb.labels().size());
+            for (size_t id = 0; id < ra.labels().size(); ++id) {
+                EXPECT_EQ(ra.labels()[id].name, rb.labels()[id].name);
+            }
+            expect_same_counters(a.counters(), b.counters(), budgeted ? "budgeted" : "plain");
+        }
+    }
+}
+
+// An interrupted read returns nothing and changes no counter, no result and (budget-aware)
+// neither the cache nor the budget; it states the work its finished chunks decoded, and the
+// same read run again answers as one read
+TEST(LabelOraclePacing, InterruptedReadsChangeNothing) {
+    Fixture fx(true);
+    const auto names = label_sets(true)[1].first;    // F, L2, L6 with coordinates
+    LabelOracle a(*fx.anno, fx.cth.get());
+    LabelOracle b(*fx.anno, fx.cth.get());
+    one_row_chunks(b);
+    LabelQuery qa(a, refs(a, names), true);
+    LabelQuery qb(b, refs(b, names), true);
+    std::vector<node_index> keys = a.keys_of_sequence(fx.seqs[0]);
+    ASSERT_GT(keys.size(), 10u);
+    // stopped before the third chunk
+    auto stop_at = [](int n) {
+        ReadPacing p = never_stop();
+        auto calls = std::make_shared<int>(0);
+        p.stop = [calls, n]() { return ++*calls >= n; };
+        return p;
+    };
+    const LabelOracle::Counters before = b.counters();
+    ReadPacing p = stop_at(3);
+    EXPECT_TRUE(qb.fetch(keys, &p).empty());
+    EXPECT_TRUE(p.interrupted);
+    EXPECT_GE(p.units, 2 * 8u);                     // two rows decoded, each at least its key
+    EXPECT_EQ(before.rows_requested, b.counters().rows_requested);
+    EXPECT_EQ(before.cache_hits, b.counters().cache_hits);
+    // the same call again, unstopped: what one read answers (the decoded chunks were cached,
+    // so this call's own hits differ, as a lookahead's warming makes them differ)
+    ReadPacing go = never_stop();
+    EXPECT_EQ(qa.fetch(keys), qb.fetch(keys, &go));
+    EXPECT_EQ(a.counters().rows_requested, b.counters().rows_requested);
+
+    // budget-aware: refused whole with cause INTERRUPTED, budget and cache as on entry
+    LabelQuery qc(b, refs(b, names), true);
+    std::vector<LabelQuery::NodeHits> hits;
+    std::vector<KeyCost> costs;
+    hits.reserve(keys.size());
+    costs.reserve(keys.size());
+    DecodeBudget budget;
+    ASSERT_TRUE(budget.charge(123));
+    const uint64_t cache_before = qc.cache_bytes();
+    const LabelOracle::Counters c_before = b.counters();
+    size_t refused = 0;
+    ReadPacing q = stop_at(3);
+    EXPECT_FALSE(qc.fetch(keys.data(), keys.size(), budget, &hits, &costs, &refused, &q));
+    EXPECT_TRUE(q.interrupted);
+    EXPECT_EQ(FetchRefusal::INTERRUPTED, qc.refusal().cause);
+    EXPECT_GT(q.units, 0u);
+    EXPECT_TRUE(hits.empty());
+    EXPECT_TRUE(costs.empty());
+    EXPECT_EQ(123u, budget.held());
+    EXPECT_EQ(cache_before, qc.cache_bytes());
+    EXPECT_EQ(c_before.rows_requested, b.counters().rows_requested);
+    EXPECT_EQ(c_before.cache_hits, b.counters().cache_hits);
+
+    // a recorder names nothing when interrupted, by either path
+    for (bool budgeted : { false, true }) {
+        LabelRecorder rec(b, LabelKind::HEADER, 64);
+        ReadPacing r = stop_at(3);
+        if (!budgeted) {
+            EXPECT_TRUE(rec.fetch(keys, &r).empty());
+        } else {
+            std::vector<LabelRecorder::NodeLabels> lists;
+            std::vector<KeyCost> lc;
+            lists.reserve(keys.size());
+            lc.reserve(keys.size());
+            DecodeBudget lb;
+            EXPECT_FALSE(rec.fetch(keys.data(), keys.size(), lb, &lists, &lc, &refused,
+                                   [](std::string_view) { return uint64_t(1); }, &r));
+            EXPECT_EQ(FetchRefusal::INTERRUPTED, rec.refusal().cause);
+            EXPECT_EQ(0u, lb.held());
+        }
+        EXPECT_TRUE(r.interrupted);
+        EXPECT_GE(r.units, 16u);
+        EXPECT_TRUE(rec.labels().empty());
+    }
+    // a warming stopped ends silently
+    LabelQuery qw(b, refs(b, names), true);
+    ReadPacing w = stop_at(2);
+    qw.warm(keys, &w);
+    EXPECT_TRUE(w.interrupted);
+}
+
 } // namespace

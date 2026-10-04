@@ -16,6 +16,7 @@
 #include <json/json.h>
 
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
+#include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -1458,6 +1459,81 @@ TEST(Graphlet, ReaderRebuildsTheFullResult) {
  */
 
 
+// Pass 5, W6: the server writes each seed's result as text once it is built and assembles the
+// response from the texts; the decompressed bytes are those of the whole tree written at once —
+// every detail, failed seeds beside walked ones, with and without an attempt's usage (its
+// clock-dependent values are the same in both writings of one response)
+TEST(GraphletServer, AssembledResponseIsByteIdentical) {
+    std::vector<std::string> seqs, labels;
+    std::mt19937 gen(11);
+    for (size_t i = 0; i < 6; ++i) {
+        std::string s(40, 'A');
+        for (char &c : s) c = "ACGT"[gen() % 4];
+        seqs.push_back(s);
+        labels.push_back("L" + std::to_string(i % 3));
+    }
+    // P+Q and Q+R in two labels: a path P..R through Q that no label carries whole
+    const std::string P = "GATTACAGGCATTAC", Q = "CCGTTAGCAT", R = "TTGACCAGTAGGCTA";
+    seqs.push_back(P + Q);
+    labels.push_back("X");
+    seqs.push_back(Q + R);
+    labels.push_back("Y");
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(5, seqs, labels);
+    size_t checked = 0;
+    for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
+        for (bool managed : { false, true }) {
+            Json::Value r;
+            r["seeds"][0]["sequence"] = seqs[0].substr(0, 12);
+            r["seeds"][1]["sequence"] = seqs[1].substr(3, 14);
+            r["seeds"][1]["labels"].append("L1");
+            // no carrier of every k-mer: a failed derivation beside the walked seeds
+            r["seeds"][2]["sequence"] = P.substr(10) + Q + R.substr(0, 5);
+            r["strategy"] = parse_json(R"({"bounds": {"max_extension_bp": 6}})");
+            r["strategy"]["output"]["detail"] = detail;
+            r["strategy"]["output"]["timing"] = false;
+            if (managed)
+                r["attempt_id"] = "asm-1";
+            // the tree, and the texts of one run: equal when written whole
+            const Json::Value tree = process_traverse_request(r, *anno, "");
+            ResultTexts texts;
+            Json::Value envelope = process_traverse_request(r, *anno, "", {}, nullptr, nullptr,
+                                                            &texts);
+            ASSERT_TRUE(texts.active);
+            ASSERT_EQ(3u, texts.texts.size());
+            EXPECT_TRUE(parse_json(texts.texts[2]).isMember("error"));
+            EXPECT_FALSE(envelope.isMember("results"));
+            int checks = 0;
+            const std::string assembled = assemble_traverse_response(envelope, texts.texts,
+                                                                     [&]() { checks++; });
+            // the same response: the texts are the results' compact texts
+            Json::Value whole = envelope;
+            for (const std::string &t : texts.texts) {
+                whole["results"].append(parse_json(t));
+            }
+            EXPECT_EQ(json_text(whole, true), assembled) << detail;
+            if (!managed) {
+                // no clock in it: the response of the tree, byte for byte
+                EXPECT_EQ(json_text(tree, true), assembled) << detail;
+            } else {
+                EXPECT_TRUE(envelope.isMember("usage"));
+            }
+            checked++;
+        }
+    }
+    EXPECT_EQ(8u, checked);
+    // members on one side of "results" only
+    Json::Value only_before;
+    only_before["a"] = 1;
+    EXPECT_EQ("{\"a\":1,\"results\":[{}]}", assemble_traverse_response(only_before, { "{}" }));
+    Json::Value only_after;
+    only_after["z"] = "x";
+    EXPECT_EQ("{\"results\":[1,2],\"z\":\"x\"}", assemble_traverse_response(only_after, { "1", "2" }));
+    EXPECT_EQ("{\"results\":[]}", assemble_traverse_response(Json::Value(Json::objectValue), {}));
+    Json::Value bad;
+    bad["results"] = 1;
+    EXPECT_THROW(assemble_traverse_response(bad, {}), std::logic_error);
+}
+
 TEST(Graphlet, IndexIdentity) {
     const std::string S1 = random_seq(60, 301), S2 = random_seq(60, 302);
     auto ab = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
@@ -1518,10 +1594,12 @@ TEST(Graphlet, IndexIdentity) {
     // the canonical file list, in byte order of path
     EXPECT_EQ(sha256_hex("a.annodbg\t12\t" + sha256_hex("annotation A") + "\n"
                          "g.dbg\t11\t" + sha256_hex("graph bytes") + "\n"), fp);
-    EXPECT_NE(fp, index_manifest_fingerprint(manifest("m2.json", "annotation B"), {}));
+    // (another content of the same size: what sizes cannot tell apart, the digests do)
+    EXPECT_NE(fp, index_manifest_fingerprint(manifest("m2.json", "annotation B"), { graph, anno }));
     // a stated index_fp must be the computed one
     EXPECT_EQ(fp, index_manifest_fingerprint(manifest("m3.json", "annotation A", fp), { graph, anno }));
-    EXPECT_THROW(index_manifest_fingerprint(manifest("m4.json", "annotation A", std::string(64, '0')), {}),
+    EXPECT_THROW(index_manifest_fingerprint(manifest("m4.json", "annotation A", std::string(64, '0')),
+                                            { graph, anno }),
                  std::runtime_error);
     // the loaded annotation is not the one the manifest lists (another size)
     EXPECT_THROW(index_manifest_fingerprint(manifest("m5.json", "annotation AB"), { graph, anno }),
@@ -1537,6 +1615,65 @@ TEST(Graphlet, IndexIdentity) {
                                 + R"("}, {"path": "x", "size": 1, "sha256": ")" + digest + R"("}]})"), {}),
             std::runtime_error);
     EXPECT_THROW(index_manifest_fingerprint((dir / "missing.json").string(), {}), std::runtime_error);
+
+    // Review of pass 5: a manifest describes one graph with one annotation — one that also
+    // lists another annotation (written for a directory holding both) or another graph would
+    // lend one fingerprint to several indexes, and is refused
+    auto slurp = [](const std::filesystem::path &path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    auto listing = [&](const std::string &name, const std::vector<std::string> &extra) {
+        Json::Value m = parse_json(slurp(dir / "m1.json"));
+        for (const std::string &path : extra) {
+            Json::Value e;
+            e["path"] = path;
+            e["size"] = Json::UInt64(7);
+            e["sha256"] = sha256_hex(path);
+            m["files"].append(e);
+        }
+        return write(name, compact(m));
+    };
+    for (const std::string &other : { "a2.annodbg", "other.dbg", "g2.orhashdbg" }) {
+        try {
+            index_manifest_fingerprint(listing("m9.json", { other }), { graph, anno });
+            ADD_FAILURE() << "a manifest listing " << other << " was accepted";
+        } catch (const std::runtime_error &e) {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find("which this index does not "
+                                                                    "load")) << e.what();
+        }
+    }
+    // other files (metadata the tool's --extra adds) are part of the identity, not refused
+    EXPECT_NO_THROW(index_manifest_fingerprint(listing("m10.json", { "README" }), { graph, anno }));
+    // ... and the sidecars the loader reads beside the graph and the annotation are checked as
+    // the two are: a manifest whose sidecars are another build's does not lend its identity
+    EXPECT_EQ((std::vector<std::string> { graph, anno }), index_bundle_files(graph, anno));
+    const std::string anchors = write("g.dbg.anchors", "anchors"),
+                      mask = write("g.edgemask", "mask"),
+                      coords = write("a.annodbg.coords", "coords");
+    const std::string coord_anno = write("x.row_diff_brwt_coord.annodbg", "coordinate annotation"),
+                      seqs = write("x.seqs", "headers");
+    EXPECT_EQ((std::vector<std::string> { graph, anno, anchors, mask, coords }),
+              index_bundle_files(graph, anno));
+    EXPECT_EQ((std::vector<std::string> { graph, coord_anno, anchors, mask, seqs }),
+              index_bundle_files(graph, coord_anno));
+    EXPECT_THROW(index_manifest_fingerprint((dir / "m1.json").string(),
+                                            index_bundle_files(graph, anno)), std::runtime_error);
+    Json::Value full = parse_json(slurp(dir / "m1.json"));
+    for (const auto &[name, content] : std::vector<std::pair<std::string, std::string>> {
+             { "g.dbg.anchors", "anchors" }, { "g.edgemask", "mask" },
+             { "a.annodbg.coords", "coords" } }) {
+        Json::Value e;
+        e["path"] = name;
+        e["size"] = Json::UInt64(content.size());
+        e["sha256"] = sha256_hex(content);
+        full["files"].append(e);
+    }
+    const std::string complete = write("m11.json", compact(full));
+    EXPECT_NO_THROW(index_manifest_fingerprint(complete, index_bundle_files(graph, anno)));
+    write("g.dbg.anchors", "anchors of another build");
+    EXPECT_THROW(index_manifest_fingerprint(complete, index_bundle_files(graph, anno)),
+                 std::runtime_error);
     std::filesystem::remove_all(dir);
 }
 

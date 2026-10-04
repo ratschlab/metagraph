@@ -37,6 +37,65 @@ class NodeFirstCache;
 namespace traversal {
 
 /**
+ * Paces the annotation reads of one request under a deadline (pass 5, the chunked deadlines
+ * of spec §6.8). A read the deadline cannot fall into is decoded in one piece, as before pass
+ * 5: splitting a read costs what its rows share — on a row-diff annotation the rows of one
+ * call share the decoding of their row-diff paths, which every chunk decodes again (review of
+ * pass 5: one-row chunks made a 1.8 s row_diff walk take 30 s and hit its budget, so its bytes
+ * changed) — and buys nothing when the deadline is far. A read that might reach the deadline
+ * is split: a first chunk of at most |first_rows| measures this read's own rows (another
+ * read's rows, another level's, may be far cheaper: a first chunk sized from them took 650 ms
+ * of a 50 ms target), each next chunk at most 4 times the previous one and sized at the rate
+ * the previous one measured to take min(|target_ms|, the time left), with the deadline checked
+ * before each; once the rest is predicted to end well before the deadline it is one piece.
+ * One chunk, at least one row, stays uninterruptible. It also measures every read, paced or
+ * not: |max_read_ms| is the longest single piece of decoding (and of building what it returns)
+ * the request made — what stating an uninterruptible step needs. Chunking never changes what a
+ * read returns: the callers keep a read's counting and cache decisions whole and only split
+ * its decoding.
+ */
+struct DecodePacer {
+    double target_ms = 0;          // 0: pacing off, one piece per read (as before)
+    size_t first_rows = 8;         // the most rows of a split read's first chunk
+    double ms_per_row = 0;         // the slowest per-row time of any piece of the request
+    double max_read_ms = 0;        // the longest single piece seen (ms)
+    // A read not split yet is one piece when it is predicted, at the slowest per-row time of
+    // the request (small reads and chunks make that pessimistic, which costs no more than a
+    // first chunk), to take less than 1/|far_factor| of the time left: rows up to that many
+    // times slower than any before still end before the deadline. Once a chunk measured
+    // this read's own rows, the rest is one piece when predicted at that chunk's rate to take
+    // less than 1/|rest_factor| of the time left. Tests set both to infinity to split every
+    // read, deadline or none, into the smallest chunks.
+    double far_factor = 64;
+    double rest_factor = 4;
+    // The rows of the next piece of a read with |remaining| rows left: all of them when the
+    // deadline cannot fall into them (above; no deadline: |ms_left| infinite), else a chunk —
+    // at least 1, at most |first_rows| for the read's first (|previous| = 0) and 4 x |previous|
+    // after (|previous|: the read's previous chunk's rows, |previous_ms| its time), sized to
+    // take min(target_ms, |ms_left|) at the rate the previous chunk measured
+    size_t next(size_t remaining, double ms_left, size_t previous, double previous_ms) const;
+    // a piece of |rows| rows took |ms|
+    void record(size_t rows, double ms);
+};
+
+/**
+ * What a paced read checks between its chunks (the caller's deadlines): |ms_left| the time
+ * left before the nearest one (infinity: none), |stop| whether to stop before the next chunk
+ * (also before the first). A read without it (null) is one piece, measured all the same.
+ * An interrupted read returns nothing and changes no counter and no result (as a refusal of the
+ * budget-aware reads: nothing appended, the budget as on entry); it sets |interrupted|, and
+ * |units| to the work units of the rows its finished chunks decoded (8 per key, 1 per entry
+ * and coordinate, and on the budget-aware reads the rows' dependency units): decoded work the
+ * caller still charges, though no row was returned.
+ */
+struct ReadPacing {
+    std::function<double()> ms_left;
+    std::function<bool()> stop;
+    bool interrupted = false;
+    uint64_t units = 0;
+};
+
+/**
  * Per-request access to the graph and annotation of a loaded index (the
  * "TraversalContext" of the spec). Detects the graph regime, owns the per-request
  * graph handle (a CanonicalDBG clone with a NodeFirstCache for PRIMARY indexes), maps
@@ -138,6 +197,11 @@ class LabelOracle {
                    std::vector<annot::matrix::RowCost> *costs, std::vector<uint64_t> *held) const;
 
     Counters& counters() const { return counters_; }
+    // the request's read pacing and measurement (the oracle is per request)
+    DecodePacer& pacer() const { return pacer_; }
+    // Tests: called with the row count at every annotation read of this oracle (the default
+    // and the budget-aware ones), before the read — to make the reads of a small index slow
+    std::function<void(size_t rows)> test_read_hook;
 
   private:
     const AnnotatedDBG &anno_graph_;
@@ -156,6 +220,7 @@ class LabelOracle {
     const annot::CoordToHeader *coord_to_header_ = nullptr;
 
     mutable Counters counters_;
+    mutable DecodePacer pacer_;
 };
 
 /**
@@ -193,6 +258,9 @@ struct FetchRefusal {
         // LabelRecorder only: its demand fits |left|, but with the |labels| dictionary labels
         // it would name first (|names_bytes|: as priced, with their provisional naming) not
         NAMES,
+        // no refusal of the budget: a paced fetch's deadline came before the key's run
+        // (ReadPacing), restored as a refusal is
+        INTERRUPTED,
     };
     Cause cause = DECODE;
     size_t position = 0;
@@ -249,15 +317,19 @@ class LabelQuery {
     // which accessor is used: "direct", "rows" or "tuples"
     const char* access_path() const;
 
-    // Hits for every annotation key (npos yields no hits).
-    std::vector<NodeHits> fetch(const std::vector<node_index> &keys);
+    // Hits for every annotation key (npos yields no hits). |pacing|: the misses are decoded
+    // in chunks with its stop checked before each (ReadPacing; the counters, the cache's
+    // eviction and the result are those of one call); interrupted: nothing is returned, no
+    // counter changes, and the chunks decoded stay cached.
+    std::vector<NodeHits> fetch(const std::vector<node_index> &keys,
+                                ReadPacing *pacing = nullptr);
     // Hits for one annotation key.
     const NodeHits& fetch(node_index key);
     // Fetch the misses among |keys| into the cache without materialising hits.
     // Counts the rows reconstructed but no requests or cache hits (lookahead work
     // must not change the per-request counters); evicts the cache when it would
-    // overflow.
-    void warm(const std::vector<node_index> &keys);
+    // overflow. |pacing|: as fetch(); interrupted, the warming ends silently.
+    void warm(const std::vector<node_index> &keys, ReadPacing *pacing = nullptr);
 
     /**
      * The budget-aware fetch (LabelOracle::decode_charged()), all or nothing: the hits of
@@ -274,12 +346,19 @@ class LabelQuery {
      * charged until it frees them, and the newly decoded keys are cached with their costs
      * when they fit the byte bound (never beyond it).
      */
+    // |pacing|: its runs are at most a paced chunk long, its stop checked before each; an
+    // interrupted fetch is refused like a refusal (cause INTERRUPTED: nothing appended, the
+    // cache, the counters and |budget| as on entry), with ReadPacing::interrupted set.
     bool fetch(const node_index *keys, size_t n, annot::matrix::DecodeBudget &budget,
-               std::vector<NodeHits> *out, std::vector<KeyCost> *costs, size_t *refused_at);
+               std::vector<NodeHits> *out, std::vector<KeyCost> *costs, size_t *refused_at,
+               ReadPacing *pacing = nullptr);
     // The budget-aware lookahead: decodes the misses among |keys| in runs within |budget|
     // and caches them with their costs within the byte bound; a run that does not fit
-    // ends the warming silently (nothing a later fetch returns depends on it)
-    void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget);
+    // ends the warming silently (nothing a later fetch returns depends on it); |pacing|:
+    // each run decoded in paced pieces, its stop checked before each (interrupted: the run
+    // is dropped and the warming ends silently)
+    void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
+              ReadPacing *pacing = nullptr);
     // what a copy of |hits| holds (the model of decode_budget.hpp)
     static uint64_t held_bytes(const NodeHits &hits);
     // why the last budgeted fetch was refused, and what the keys before the refused one held
@@ -321,7 +400,13 @@ class LabelQuery {
     tsl::hopscotch_map<node_index, NodeHits> cache_;
     NodeHits empty_;
 
-    void fetch_uncached(const std::vector<node_index> &keys);
+    void fetch_uncached(const node_index *keys, size_t n);
+    // fetch_uncached of |keys| (sorted, distinct) in paced chunks (one piece without
+    // |pacing|, or when the deadline cannot fall into it), each measured, chunks taken in the
+    // order of first appearance in |order| (the caller's keys); false when |pacing|'s stop came
+    // first, with ReadPacing::units the work of the keys decoded
+    bool fetch_uncached_paced(const std::vector<node_index> &keys,
+                              const std::vector<node_index> &order, ReadPacing *pacing);
     void hits_from_row(const annot::matrix::BinaryMatrix::SetBitPositions &row,
                        NodeHits *hits) const;
     void hits_from_tuples(const annot::matrix::MultiIntMatrix::RowTuples &row,
@@ -400,10 +485,12 @@ class LabelRecorder {
     const char* access_path() const;
 
     // Labels at every key (npos yields an empty list with total 0). Ids are assigned
-    // here, in |keys| order.
-    std::vector<NodeLabels> fetch(const std::vector<node_index> &keys);
+    // here, in |keys| order. |pacing|: as LabelQuery::fetch (interrupted: nothing returned
+    // and nothing named).
+    std::vector<NodeLabels> fetch(const std::vector<node_index> &keys,
+                                  ReadPacing *pacing = nullptr);
     // Fetch the misses into the row cache without naming anything (lookahead).
-    void warm(const std::vector<node_index> &keys);
+    void warm(const std::vector<node_index> &keys, ReadPacing *pacing = nullptr);
 
     /**
      * The budget-aware fetch, as LabelQuery's: all or nothing, the labels of keys[0, n)
@@ -418,8 +505,10 @@ class LabelRecorder {
      */
     bool fetch(const node_index *keys, size_t n, annot::matrix::DecodeBudget &budget,
                std::vector<NodeLabels> *out, std::vector<KeyCost> *costs, size_t *refused_at,
-               const std::function<uint64_t(std::string_view name)> &name_bytes);
-    void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget);
+               const std::function<uint64_t(std::string_view name)> &name_bytes,
+               ReadPacing *pacing = nullptr);
+    void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
+              ReadPacing *pacing = nullptr);
     static uint64_t held_bytes(const NodeLabels &labels);
     // What naming one label provisionally can hold, charged per new label beside its priced
     // name: its share of the call's pending table and list, rehash and copy transients
@@ -475,7 +564,10 @@ class LabelRecorder {
     tsl::hopscotch_map<Key, LabelId, LabelKeyHash> header_ids_;
     tsl::hopscotch_map<node_index, RawRow> cache_;
 
-    void fetch_uncached(const std::vector<node_index> &keys);
+    void fetch_uncached(const node_index *keys, size_t n);
+    // as LabelQuery's
+    bool fetch_uncached_paced(const std::vector<node_index> &keys,
+                              const std::vector<node_index> &order, ReadPacing *pacing);
     LabelId id_of(const Key &key);
 
     uint64_t last_call_bytes_ = 0;
@@ -487,12 +579,14 @@ class LabelRecorder {
     uint64_t last_naming_bytes_ = 0;
     // the dictionary id of |key|, if it is named
     std::optional<LabelId> named(const Key &key) const;
-    // decode keys[0, n) (misses) as one run into |*rows| (the cache's form), charged
+    // decode keys[0, n) (misses) as one run into (*rows)[at + i] (the cache's form) and
+    // (*rows_held)[at + i], (*costs)[at + i], charged
     annot::matrix::DecodeStatus decode_run(const node_index *keys, size_t n,
                                            annot::matrix::DecodeBudget &budget,
                                            std::vector<RawRow> *rows,
                                            std::vector<uint64_t> *rows_held,
-                                           std::vector<KeyCost> *costs, size_t *built);
+                                           std::vector<KeyCost> *costs, size_t *built,
+                                           size_t at = 0);
     bool raw_budgeted(const annot::matrix::BinaryMatrix::SetBitPositions &row,
                       annot::matrix::DecodeBudget &budget, RawRow *raw, uint64_t *peak);
     bool raw_budgeted(const annot::matrix::MultiIntMatrix::RowTuples &row,

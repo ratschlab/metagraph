@@ -1,10 +1,13 @@
 #include <cctype>
 #include <cerrno>
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <ostream>
 #include <sstream>
+#include <stdexcept>
 #include <streambuf>
+#include <vector>
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -294,6 +297,162 @@ std::string json_text(const Json::Value &value, bool compact, const std::functio
     return out;
 }
 
+std::string assemble_traverse_response(const Json::Value &envelope,
+                                       const std::vector<std::string> &results,
+                                       const std::function<void()> &check) {
+    Json::Value before(Json::objectValue);
+    Json::Value after(Json::objectValue);
+    for (const std::string &name : envelope.getMemberNames()) {
+        if (name == "results")
+            throw std::logic_error("assemble_traverse_response: the envelope holds results");
+        (name < "results" ? before : after)[name] = envelope[name];
+    }
+    std::string out = json_text(before, true, check);      // {...}
+    out.pop_back();
+    if (out.size() > 1)
+        out += ',';
+    out += "\"results\":[";
+    size_t next_check = out.size() + (size_t(1) << 16);
+    for (size_t i = 0; i < results.size(); ++i) {
+        if (i)
+            out += ',';
+        out += results[i];
+        if (check && out.size() >= next_check) {
+            next_check = out.size() + (size_t(1) << 16);
+            check();
+        }
+    }
+    out += ']';
+    const std::string tail = json_text(after, true, check);  // {...}
+    if (tail.size() > 2) {
+        out += ',';
+        out.append(tail, 1, std::string::npos);
+    } else {
+        out += '}';
+    }
+    return out;
+}
+
+GraphListEntry parse_graph_list_line(const std::string &text, size_t line) {
+    std::vector<std::string> columns;
+    size_t from = 0;
+    while (true) {
+        const size_t comma = text.find(',', from);
+        columns.push_back(text.substr(from, comma == std::string::npos ? std::string::npos
+                                                                       : comma - from));
+        if (comma == std::string::npos)
+            break;
+        from = comma + 1;
+    }
+    auto bad = [&](const std::string &what) {
+        return std::invalid_argument("line " + std::to_string(line) + " of the graph list ('"
+                                     + text + "'): " + what);
+    };
+    if (columns.size() < 3)
+        throw bad("expected name,graph_path,annotation_path[,manifest_path[,index_ns]]");
+    if (columns.size() > 5) {
+        throw bad(std::to_string(columns.size()) + " columns, at most five are read "
+                  "(name,graph_path,annotation_path,manifest_path,index_ns): a column the "
+                  "server would not read is refused rather than ignored");
+    }
+    GraphListEntry e;
+    e.line = line;
+    e.name = columns[0];
+    e.graph_path = columns[1];
+    e.annotation_path = columns[2];
+    if (columns.size() > 3)
+        e.manifest_path = columns[3];
+    if (columns.size() > 4) {
+        e.index_ns = columns[4];
+        // the name is an MGT token and goes into file names (as --index-name)
+        bool ok = !e.index_ns.empty();
+        for (unsigned char c : e.index_ns) {
+            ok &= std::isalnum(c) || c == '.' || c == '_' || c == '-';
+        }
+        if (!e.index_ns.empty() && !ok)
+            throw bad("index_ns '" + e.index_ns + "' does not match [A-Za-z0-9._-]+");
+    }
+    return e;
+}
+
+std::map<std::pair<std::string, std::string>, std::pair<std::string, std::string>>
+graph_list_identities(const std::vector<GraphListEntry> &entries,
+                      const std::function<std::string(const GraphListEntry &)> &fingerprint) {
+    using Pair = std::pair<std::string, std::string>;
+    struct Stated {
+        std::string value;
+        size_t line = 0;
+    };
+    std::map<Pair, std::pair<Stated, Stated>> stated;     // (ns, fp) and the lines stating them
+    std::map<std::pair<Pair, std::string>, std::string> digests;   // (pair, manifest) -> fp
+    auto agree = [](Stated *have, const std::string &value, size_t line, const char *what,
+                    const Pair &pair) {
+        if (value.empty())
+            return;
+        if (have->value.empty()) {
+            *have = { value, line };
+            return;
+        }
+        if (have->value != value) {
+            throw std::invalid_argument(
+                    std::string("lines ") + std::to_string(have->line) + " and "
+                    + std::to_string(line) + " of the graph list state different " + what
+                    + " for the same index (" + pair.first + ", " + pair.second + "): '"
+                    + have->value + "' and '" + value + "'; one index has one identity");
+        }
+    };
+    // One index is one pair of files, however its paths are spelled: the lines are grouped by
+    // the pair's real paths (the files themselves), so that two spellings of one pair agree too
+    auto real = [](const std::string &path) {
+        std::error_code ec;
+        const std::filesystem::path p = std::filesystem::weakly_canonical(path, ec);
+        return ec ? path : p.string();
+    };
+    std::map<Pair, Pair> real_of;                          // the pair as listed -> real paths
+    for (const GraphListEntry &e : entries) {
+        const Pair listed { e.graph_path, e.annotation_path };
+        const Pair pair = real_of.emplace(listed, Pair { real(e.graph_path),
+                                                         real(e.annotation_path) })
+                                 .first->second;
+        auto &[ns, fp] = stated[pair];
+        agree(&ns, e.index_ns, e.line, "index_ns", listed);
+        if (e.manifest_path.empty())
+            continue;
+        auto [it, fresh] = digests.try_emplace({ pair, e.manifest_path });
+        if (fresh)
+            it->second = fingerprint(e);
+        agree(&fp, it->second, e.line, "index_fp (manifest digests)", listed);
+    }
+    // Two different indexes never state one fingerprint: the server checks sizes, not
+    // contents, so one manifest whose files have the base names and sizes of another pair's
+    // (two annotations of one graph with swapped memberships, written by one tool run) would
+    // let a client take one index for the other (review of pass 5). Copies of one index under
+    // two paths are refused too (telling them apart would need hashing): list one path
+    std::map<std::string, std::pair<Pair, size_t>> by_fp;
+    for (const auto &[pair, s] : stated) {
+        if (s.second.value.empty())
+            continue;
+        auto [it, fresh] = by_fp.try_emplace(s.second.value, pair, s.second.line);
+        if (!fresh) {
+            throw std::invalid_argument(
+                    "lines " + std::to_string(it->second.second) + " and "
+                    + std::to_string(s.second.line) + " of the graph list state one index_fp "
+                    + s.second.value + " for two different indexes (" + it->second.first.first
+                    + ", " + it->second.first.second + ") and (" + pair.first + ", "
+                    + pair.second + "): a manifest states the identity of one graph with one "
+                    "annotation; give each pair its own manifest (scripts/traversal/"
+                    "index_manifest.py --server-csv writes one per pair), or list copies of one "
+                    "index by one path");
+        }
+    }
+    std::map<Pair, std::pair<std::string, std::string>> out;
+    for (const auto &[listed, pair] : real_of) {
+        const auto &s = stated.at(pair);
+        out[listed] = { s.first.value, s.second.value };
+    }
+    return out;
+}
+
 Json::Value parse_json_string(const std::string &msg) {
     Json::Value json;
 
@@ -333,10 +492,19 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
     try {
         // Return JSON string
         status = SimpleWeb::StatusCode::success_ok;
-        ret = json_text(process(content), compact, check);
+        if (control && control->write) {
+            ret = control->write(process(content), check);
+        } else {
+            ret = json_text(process(content), compact, check);
+        }
         const std::string encoding = requested_encoding(request);
         if (!encoding.empty()) {
-            ret = compress_string(ret, Z_BEST_COMPRESSION, encoding == "gzip", check);
+            Timer compressing;
+            const size_t text_bytes = ret.size();
+            ret = compress_string(ret, control ? control->compression_level : Z_BEST_COMPRESSION,
+                                  encoding == "gzip", check);
+            if (control && control->on_compressed)
+                control->on_compressed(text_bytes, compressing.elapsed());
             header.insert(std::make_pair("Content-Encoding", encoding));
             header.insert(std::make_pair("Content-Length", std::to_string(ret.size())));
         }

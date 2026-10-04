@@ -1,6 +1,8 @@
 #include "config.hpp"
 
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <unordered_set>
@@ -117,6 +119,22 @@ Config::Config(int argc, char *argv[]) {
 
     bool print_usage_and_exit = false;
     bool xdrop_override = false;
+    // An integer (ms) the traversal capabilities state: non-negative and exactly representable
+    // as a double, so that a JSON client reads it as written and a ledger can add to it (atoll
+    // wrapped -1 to 2^64 - 1, stated as such; review of pass 5). The attempts' allowance too: a
+    // fraction would be stated rounded and enforced unrounded
+    const auto exact_ms = [&](const char *option, const char *text, uint64_t *out) {
+        char *end = nullptr;
+        const double v = std::strtod(text, &end);
+        if (end == text || *end != '\0' || !(v >= 0) || v != std::floor(v)
+                || v > 9007199254740991.0) {
+            std::cerr << "Error: " << option << " must be an integer in [0, 2^53 - 1], got '"
+                      << text << "'" << std::endl;
+            print_usage_and_exit = true;
+            return;
+        }
+        *out = static_cast<uint64_t>(v);
+    };
 
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
@@ -376,7 +394,22 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
             resolve_max_query_bp = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--traverse-attempt-allowance-ms")) {
-            traverse_attempt_allowance_ms = atof(get_value(i++));
+            uint64_t ms = 0;
+            exact_ms(argv[i], get_value(i), &ms);
+            traverse_attempt_allowance_ms = static_cast<double>(ms);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-clock-skew-ms")) {
+            exact_ms(argv[i], get_value(i), &traverse_clock_skew_ms);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-chunk-target-ms")) {
+            exact_ms(argv[i], get_value(i), &traverse_chunk_target_ms);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-compression-level")) {
+            traverse_compression_level = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-delivery-compress-mbps")) {
+            traverse_delivery_compress_mbps = atof(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-delivery-build-mbps")) {
+            traverse_delivery_build_mbps = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--traverse-attempt-retention-s")) {
             traverse_attempt_retention_s = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--traverse-attempt-retention")) {
@@ -640,6 +673,16 @@ Config::Config(int argc, char *argv[]) {
                 break;
             }
         }
+    }
+
+    if (traverse_compression_level < 1 || traverse_compression_level > 9) {
+        std::cerr << "Error: --traverse-compression-level must be in [1, 9]" << std::endl;
+        print_usage_and_exit = true;
+    }
+    if (!(traverse_delivery_compress_mbps > 0) || !(traverse_delivery_build_mbps > 0)) {
+        std::cerr << "Error: the delivery rates (--traverse-delivery-compress-mbps, "
+                     "--traverse-delivery-build-mbps) must be positive" << std::endl;
+        print_usage_and_exit = true;
     }
 
     if (identity == SERVER_QUERY
@@ -1484,6 +1527,7 @@ if (advanced) {
             fprintf(stderr, "\t   --index-release [STR]\trelease id echoed in results; requests may pin it []\n");
             fprintf(stderr, "\t   --index-name [STR]\t\tname of the index in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE]\tmanifest of the index bundle (files with size and sha256); its digest is the index identity []\n");
+            fprintf(stderr, "\t   --traverse-chunk-target-ms [INT]\tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
             fprintf(stderr, "\n");
@@ -1518,9 +1562,14 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \t\tcap on the length of a /traverse seed, 0 = unlimited [100000]\n");
             fprintf(stderr, "\t   --traverse-max-seed-labels [INT] \tcap on labels DERIVED from a seed, 0 = unlimited [10000]\n");
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \t\tcap on the /resolve query length, 0 = unlimited [0]\n");
-            fprintf(stderr, "\t   --traverse-attempt-allowance-ms [FLOAT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
+            fprintf(stderr, "\t   --traverse-attempt-allowance-ms [INT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long [3600]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tand at most this many (oldest dropped first) [10000]\n");
+            fprintf(stderr, "\t   --traverse-clock-skew-ms [INT] \tclock skew a ledger adds to not_after_ms, stated in the capabilities [2000]\n");
+            fprintf(stderr, "\t   --traverse-chunk-target-ms [INT] \tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");
+            fprintf(stderr, "\t   --traverse-compression-level [INT] \tzlib level (1-9) of the traversal routes' compressed bodies; the other routes use 9 [1]\n");
+            fprintf(stderr, "\t   --traverse-delivery-compress-mbps [FLOAT] \tcompression rate the delivery reserve of an attempt assumes [50]\n");
+            fprintf(stderr, "\t   --traverse-delivery-build-mbps [FLOAT] \tresponse-building rate it assumes until the attempt measures its own [10]\n");
         } break;
     }
 
