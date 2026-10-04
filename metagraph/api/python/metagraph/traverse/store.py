@@ -14,7 +14,11 @@ Layout under spool_dir:
                               valid across a restart for as long as their handles do
 
 A body is validated (parsed in full) before it is stored: a truncated MGT document is
-never stored or returned as a graphlet. RAM holds parsed graphlets under max_ram_mb /
+never stored or returned as a graphlet. Stage L (DESIGN §21, L3): with parse limits
+(parse_limits, or an explicit parse budget) a parse that stops keeps the body -- stored
+after the checks that need no parse (graphlet_bytes, graphlet_lines, the H record and the
+Z line count) as an entry marked parsed: false, which no local answer is derived from until
+a parse completes; it can always be copied out without one (save_body, body_text). RAM holds parsed graphlets under max_ram_mb /
 max_handles (least recently used first out) and drops one not used for ttl_ram_s; a
 graphlet larger than the whole RAM budget is never kept resident (it is parsed on
 demand), and a spooled one is not made resident when it is stored. A resident model is
@@ -36,7 +40,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .parser import dump, from_response, j_object, parse, seed_envelope, utf8_bytes
+from . import budget as _B
+from ._codec import CodecError, GraphletFormatError, parse_int
+from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
+from .parser import (_check_transport, dump, from_response, j_object, parse, seed_envelope,
+                     utf8_bytes)
 
 __all__ = ['GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded']
 
@@ -87,6 +95,9 @@ class Entry:
     # a continuation's parent walk {handle, arm, walk, overlap_bp}: kept with the entry,
     # so the link survives the one-shot return value
     parent: Optional[dict] = None
+    # stage L: False when the body was stored after a parse that stopped (its integrity
+    # checked without one); True once a parse of it completed
+    parsed: bool = True
     store: Any = field(default=None, repr=False, compare=False)
 
     @property
@@ -94,11 +105,14 @@ class Entry:
         return self.store.graphlet(self.handle)
 
     def meta(self):
-        return {'handle': self.handle, 'index': self.index, 'digest': self.digest,
-                'bytes': self.bytes, 'created': self.created, 'accessed': self.accessed,
-                'view': self.view, 'derived_from': self.derived_from,
-                'parent': self.parent, 'delivery': self.delivery,
-                'seed_id': (self.seed_summary.get('seed') or {}).get('seed_id')}
+        out = {'handle': self.handle, 'index': self.index, 'digest': self.digest,
+               'bytes': self.bytes, 'created': self.created, 'accessed': self.accessed,
+               'view': self.view, 'derived_from': self.derived_from,
+               'parent': self.parent, 'delivery': self.delivery,
+               'seed_id': (self.seed_summary.get('seed') or {}).get('seed_id')}
+        if not self.parsed:
+            out['parsed'] = False
+        return out
 
 
 def set_delivery(g, delivery):
@@ -110,6 +124,44 @@ def set_delivery(g, delivery):
     if g.seed_summary and isinstance(g.seed_summary.get('outcome'), dict):
         g.seed_summary = dict(g.seed_summary, outcome=dict(g.seed_summary['outcome'],
                                                             delivery=delivery))
+
+
+def _check_frame(body):
+    """The checks of a body that need no parse: it ends with a line feed, its first line
+    is an MGT H record of this version, its last a Z record counting its lines. -> the H
+    record's fields. GraphletFormatError otherwise."""
+    if not body.endswith('\n'):
+        raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
+    first = body.find('\n')
+    head = body[:first].split(' ')
+    if len(head) != 16 or head[0] != 'H' or head[1] != 'mgt' or head[2] != '1':
+        raise GraphletFormatError(1, 'expected the H record of MGT v1')
+    last = body.rfind('\n', 0, len(body) - 1) + 1
+    z = body[last:-1].split(' ')
+    n = body.count('\n')
+    try:
+        if len(z) != 2 or z[0] != 'Z' or parse_int(z[1]) != n:
+            raise GraphletFormatError(n, 'the Z record does not count the body\'s %d lines' % n)
+        parse_int(head[11])
+    except CodecError as e:
+        raise GraphletFormatError(n, str(e)) from None
+    return head
+
+
+def _with_delivery(rest, delivery):
+    """The body after its H line with the O record's delivery token replaced (what a
+    parsed model with the entry's delivery dumps)."""
+    code = {'inline': 'i', 'spooled': 's', 'paged': 'p'}[delivery]
+    i = 0
+    while i < len(rest):
+        j = rest.find('\n', i)
+        line = rest[i:j]
+        if line.startswith('O '):
+            f = line.split(' ')
+            f[4] = code
+            return rest[:i] + ' '.join(f) + rest[j:]
+        i = j + 1
+    return rest
 
 
 def _write_atomic(path, data):
@@ -130,8 +182,16 @@ def _write_atomic(path, data):
 class GraphletStore:
     def __init__(self, spool_dir, max_ram_mb=512, max_handles=64, ttl_ram_s=1800,
                  ttl_disk_s=7 * 86400, *, clock=time.time, max_body_mb=None,
-                 ttl_tomb_s=30 * 86400):
+                 ttl_tomb_s=30 * 86400, parse_limits=None):
         self.spool_dir = spool_dir
+        if parse_limits is not None and not isinstance(parse_limits, LocalLimits):
+            raise TypeError('parse_limits is a LocalLimits, not %r' % (parse_limits,))
+        # stage L: every parse the store performs (validation in put, a parse on demand,
+        # load) runs under a fresh budget of these limits; None: unbudgeted
+        self.parse_limits = parse_limits
+        # the usage of the last parse the store ran under a budget ({work_units,
+        # memory_bytes}, None when the last access parsed nothing)
+        self.last_parse = None
         self.max_ram_bytes = int(max_ram_mb * (1 << 20))
         self.max_handles = max_handles
         self.ttl_ram_s = ttl_ram_s
@@ -176,6 +236,8 @@ class GraphletStore:
                                         'seed_summary', 'digest', 'bytes', 'created',
                                         'accessed', 'view', 'derived_from', 'delivery',
                                         'parent')}
+        if not e.parsed:
+            j['parsed'] = False             # written only when false: older entries read True
         _write_atomic(self._entry_path(e.handle),
                       json.dumps(j, sort_keys=True, ensure_ascii=False).encode('utf-8'))
 
@@ -199,16 +261,85 @@ class GraphletStore:
             _write_atomic(path, data)
         return digest, len(data)
 
+    def _parse_budget(self, parse_budget):
+        """The budget a parse of the store runs under: the caller's, else a fresh one of
+        the store's parse limits, else None (unbudgeted)."""
+        if parse_budget is not None:
+            return parse_budget
+        if self.parse_limits is not None:
+            return LocalBudget(self.parse_limits)
+        return None
+
+    def _parsing(self, fn, pb):
+        """fn(pb): a parse of the store under its own budget, or unbudgeted -- never
+        charged to an ambient budget the caller runs under (the parse is the store's,
+        not the caller's operation; the tools report it as local.parsed)."""
+        try:
+            if pb is None:
+                with _B.unbudgeted():
+                    return fn(None)
+            return fn(pb)
+        finally:
+            self.last_parse = None if pb is None else pb.call_usage()
+
     def put(self, response, request, index=0, *, source=None, resident=True, delivery=None,
-            parent=None, derived_from=None):
+            parent=None, derived_from=None, parse_budget=None):
         """Store results[index] of a detail: graphlet response -> an opaque handle. The
         body is parsed first: an invalid or truncated one raises and nothing is
-        stored. |source| names the index (the client) it came from, for replays."""
+        stored. |source| names the index (the client) it came from, for replays.
+
+        Under parse limits (parse_limits, or |parse_budget|) a parse that stops raises its
+        LocalBudgetExceeded AFTER storing the body as an unparsed entry (parsed: false)
+        when it passes the checks that need no parse: e.handle names it."""
         result = response['results'][index]
-        g = from_response(result, response)   # validates the whole body
+        try:
+            g = self._parsing(lambda b: from_response(result, response, budget=b),
+                              self._parse_budget(parse_budget))   # validates the whole body
+        except LocalBudgetExceeded as e:
+            e.handle = self.put_unparsed(result, response, request, source=source,
+                                         delivery=delivery, parent=parent,
+                                         derived_from=derived_from)
+            raise
         return self.put_parsed(g, result['graphlet'], request, source=source,
                                resident=resident, delivery=delivery, parent=parent,
                                derived_from=derived_from)
+
+    def put_unparsed(self, result, response, request, *, source=None, delivery=None,
+                     parent=None, derived_from=None):
+        """Store results[i] WITHOUT parsing its body (stage L, L3: a parse stopped on its
+        budget): only after the checks that need no parse -- graphlet_bytes and
+        graphlet_lines against the body, its H record, and its Z line counting its lines
+        -- so a body cut in transport is still refused. The entry is marked parsed:
+        false: its identity is read from the H record, and the server's per-seed summary
+        is kept as it came. A local answer needs a parse that completes first."""
+        body = result.get('graphlet')
+        if body is None:
+            raise ValueError('this result carries no graphlet')
+        if isinstance(body, (bytes, bytearray)):
+            body = bytes(body).decode('utf-8')
+        _check_transport(body, result)
+        head = _check_frame(body)
+        ident = {'ns': None if head[13] == '*' else head[13],
+                 'fp': None if head[14] == '*' else head[14],
+                 'meta_fp': None if head[15] == '*' else head[15],
+                 'release': response.get('release') or None}
+        if source is not None:
+            ident['source'] = source
+        envelope = seed_envelope({k: v for k, v in response.items() if k != 'results'},
+                                 parse_int(head[11]))
+        summary = {k: v for k, v in result.items() if k != 'graphlet'}
+        if delivery is not None and isinstance(summary.get('outcome'), dict):
+            summary['outcome'] = dict(summary['outcome'], delivery=delivery)
+        digest, nbytes = self._store_body(body)
+        now = self.clock()
+        h = self._new_handle()
+        e = Entry(handle=h, request=request, index=ident, envelope=envelope,
+                  seed_summary=summary, digest=digest, bytes=nbytes, created=now,
+                  accessed=now, derived_from=derived_from, delivery=delivery, parent=parent,
+                  parsed=False, store=self)
+        self._write_entry(e)
+        self._entries[h] = e
+        return h
 
     def put_parsed(self, g, body, request, *, source=None, resident=True, delivery=None,
                    parent=None, derived_from=None):
@@ -233,6 +364,28 @@ class GraphletStore:
         """Store a graphlet built elsewhere (a loaded file, a view's backing body)."""
         g.derived_from = derived_from or g.derived_from
         return self._put_graphlet(g, dump(g, envelope=False), request, source)
+
+    def put_view(self, backing, g, request=None, derived_from=None, source=None):
+        """Store the view |g| (a copy of the graphlet of entry |backing| with its view
+        spec) WITHOUT dumping its body: the view entry shares the backing entry's stored
+        body, which is what dump(g, envelope=False) writes for every body the store holds
+        (stage L: a view costs no copy of the body)."""
+        e = self.get(backing)
+        g.derived_from = derived_from or g.derived_from
+        now = self.clock()
+        h = self._new_handle()
+        ident = self._identity(g)
+        if source is not None:
+            ident['source'] = source
+        v = Entry(handle=h, request=request, index=ident,
+                  envelope=seed_envelope(g.envelope, g.seed_index) if g.envelope else {},
+                  seed_summary=g.seed_summary or {}, digest=e.digest, bytes=e.bytes,
+                  created=now, accessed=now, view=g.view, derived_from=g.derived_from,
+                  delivery=e.delivery, store=self)
+        self._write_entry(v)
+        self._entries[h] = v
+        self._remember(h, g, now)
+        return h
 
     def _put_graphlet(self, g, body, request, source=None, *, resident=True, delivery=None,
                       parent=None):
@@ -289,10 +442,14 @@ class GraphletStore:
         except (OSError, ValueError):
             return UnknownHandle(handle)
 
-    def graphlet(self, handle):
+    def graphlet(self, handle, *, parse_budget=None):
+        """The entry's parsed graphlet: the resident model, or a parse of its body (under
+        the store's parse limits, or |parse_budget|: a stop raises LocalBudgetExceeded and
+        keeps the entry and its body as they are; last_parse states the parse's usage)."""
         e = self.get(handle)
         now = e.accessed
         got = self._ram.get(handle)
+        self.last_parse = None
         if got is not None and now - got[2] <= self.ttl_ram_s:
             self._ram.move_to_end(handle)
             self._ram[handle] = (got[0], got[1], now)
@@ -302,7 +459,11 @@ class GraphletStore:
             self._drop_ram(handle)
         with open(self._body_path(e.digest), 'r', encoding='utf-8', newline='') as f:
             body = f.read()
-        g = parse(body)
+        g = self._parsing(lambda b: parse(body, budget=b), self._parse_budget(parse_budget))
+        if not e.parsed:
+            # the body now passed a whole parse: it is a graphlet like any other
+            e.parsed = True
+            self._write_entry(e)
         g.envelope = e.envelope or None
         g.seed_summary = e.seed_summary or None
         g.view = e.view
@@ -312,9 +473,9 @@ class GraphletStore:
         self._remember(handle, g, now)
         return g
 
-    def view(self, handle):
+    def view(self, handle, *, parse_budget=None):
         """The entry's graphlet, or the GraphletView it stores."""
-        g = self.graphlet(handle)
+        g = self.graphlet(handle, parse_budget=parse_budget)
         if g.view:
             from .ops import GraphletView
             spec = g.view
@@ -471,10 +632,62 @@ class GraphletStore:
         from .parser import save
         return save(g, path)
 
-    def load(self, path, request=None):
-        """A saved .mgt file -> a new handle (its J line restores envelope and view)."""
+    def body_text(self, handle):
+        """The stored body, as received (no parse)."""
+        e = self.get(handle)
+        with open(self._body_path(e.digest), 'r', encoding='utf-8', newline='') as f:
+            return f.read()
+
+    def standalone_text(self, handle, *, budget=None):
+        """The entry's standalone .mgt text -- H, the entry's J line, the body -- built
+        WITHOUT a parse (stage L: the escape hatch of an entry no parse can afford): byte
+        for byte what save() writes for a canonical body (every body the store holds
+        from a server, a save or a view is one), the delivery the entry records written
+        into the O record as a parsed model would. The text of an unparsed entry
+        (Entry.parsed false) was checked for its frame only (transport, H, Z), never
+        validated record by record: a parse of it may still refuse it. budget=: the copy
+        is charged."""
+        e = self.get(handle)
+        b = _B.resolve(budget)
+        if b is not None:
+            b.charge(e.bytes >> 8, 3 * (e.bytes + 49))
+        body = self.body_text(handle)
+        head = _check_frame(body)
+        first = body.find('\n')
+        rest = body[first + 1:]
+        if rest.startswith('J '):
+            raise ValueError('the stored body carries a J line')
+        if e.delivery is not None:
+            rest = _with_delivery(rest, e.delivery)
+        has_env = bool(e.seed_summary) and bool(e.envelope)
+        last = body.rfind('\n', 0, len(body) - 1) + 1
+        lines = parse_int(body[last:-1].split(' ')[1])
+        if not (has_env or e.view is not None or e.derived_from is not None):
+            return body[:first + 1] + rest
+        j = seed_envelope(e.envelope, parse_int(head[11]))
+        j['results'] = [{k: v for k, v in (e.seed_summary or {}).items()
+                         if k not in ('graphlet', 'graphlet_bytes', 'graphlet_lines')}]
+        if e.view is not None:
+            j['view'] = e.view
+        if e.derived_from is not None:
+            j['derived_from'] = e.derived_from
+        jt = json.dumps(j, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+        cut = rest.rfind('\n', 0, len(rest) - 1) + 1
+        return ''.join((body[:first + 1], 'J ', jt, '\n', rest[:cut], 'Z %d\n' % (lines + 1)))
+
+    def save_body(self, handle, path, *, budget=None):
+        """standalone_text() written atomically to |path| (no parse) -> bytes written."""
+        data = self.standalone_text(handle, budget=budget).encode('utf-8')
+        _write_atomic(os.path.abspath(path), data)
+        return len(data)
+
+    def load(self, path, request=None, *, parse_budget=None):
+        """A saved .mgt file -> a new handle (its J line restores envelope and view).
+        Under parse limits (or |parse_budget|) a parse that stops raises and stores
+        nothing: the file is left as it is."""
         with open(path, 'r', encoding='utf-8', newline='') as f:
-            g = parse(f.read())
+            text = f.read()
+        g = self._parsing(lambda b: parse(text, budget=b), self._parse_budget(parse_budget))
         return self.put_graphlet(g, request if request is not None else
                                  self.request_of(g))
 

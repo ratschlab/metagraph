@@ -32,9 +32,20 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
     optional fields (summary, evidence, sizes) are dropped first and named in
     fields_cut; a receipt that could not fit even then is refused BEFORE anything is
     stored or written (receipt_too_large), never answered with result_too_large after;
-  * max_bytes bounds the bytes a tool returns, not the work behind them: the local tools
-    (graphlet_compare, graphlet_export, the route listings) have no work or allocation
-    budget yet, and their time and peak memory follow the graphlet's size;
+  * max_bytes bounds the bytes a tool returns, not the work behind them. Without
+    local_limits (the default) the local tools (graphlet_compare, graphlet_export, the
+    route listings) run with no work or allocation budget, and their time and peak memory
+    follow the graphlet's size -- a service must set local_limits=ToolLimits(...) (stage
+    L, DESIGN §21): then every local tool runs under a budget of its class (view, heavy,
+    parse), which the agent may raise up to the class ceiling with budget={work_units,
+    memory_mb, deadline_s}; every result carries `local` {complete, usage, limits,
+    work_model, memory_bound "model", clamped?, parsed?, stop?}; a stop is the error
+    local_budget_exceeded (held to max_bytes like every error), or for the lists whose
+    order allows it a page of whole rows with complete false, total_at_least and a
+    next_cursor that resumes after the last row, or for graphlet_compare comparable
+    "unknown"; an interrupted answer's evidence names the scope local
+    (evidence.limitations.local). traverse_capabilities, traverse_resolve, graphlet_list
+    and graphlet_free are not budgeted (no local computation beyond handling JSON);
   * a filter never hides rows silently: what a filter removed is counted (`filtered`);
   * a derived handle (graphlet_subtrie) is a view: every local tool answers for the
     selected labels and says so (`evidence.view`, `qualified`), or refuses explicitly
@@ -66,14 +77,20 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
 
 import base64
 import collections
+import contextvars
 import hashlib
 import hmac
 import inspect
 import json
 import os
+import tempfile
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
 
+from . import budget as _B
 from . import derive, export, ops
 from ._codec import GraphletFormatError
+from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
 from .client import AttemptAtBound, ServerInitializing, TraverseError
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, UnknownLabel,
@@ -82,8 +99,9 @@ from .model import (
 from .parser import utf8_bytes
 from .store import StoreLimitExceeded, UnknownHandle
 
-__all__ = ['GraphletTools', 'ToolError', 'tool_names', 'DEFAULT_MAX_BYTES',
-           'SEQUENCE_MAX_BYTES', 'CAPABILITIES_MAX_BYTES', 'MIN_MAX_BYTES']
+__all__ = ['GraphletTools', 'ToolError', 'ToolLimits', 'TOOL_CLASS', 'tool_names',
+           'DEFAULT_MAX_BYTES', 'SEQUENCE_MAX_BYTES', 'CAPABILITIES_MAX_BYTES',
+           'MIN_MAX_BYTES']
 
 DEFAULT_MAX_BYTES = 2048
 SEQUENCE_MAX_BYTES = 16 * 1024
@@ -94,6 +112,10 @@ CAPABILITIES_MAX_BYTES = 16 * 1024
 MIN_MAX_BYTES = 64
 # ranked walk lists kept for paging (graphlet_walks): (handle, arm, arguments) -> ids
 _RANKED_CACHE = 16
+# the parameters of Graphlet.next_request() / ops.next_request() that traverse_continue
+# sets itself: an override of one of them would be a second value for it (bp and
+# reduce_budget are not set by the tool and pass as overrides did before)
+_CONTINUE_OWN = frozenset({'self', 'g', 'arm', 'leaves', 'reset_branches'})
 _LABELS_IN_ROW = 8
 _WALKS_HINT = {
     'merge_entered': 'walks whose selected label is alive at the end only along its own '
@@ -110,6 +132,131 @@ _MERGE_ENTERED_HINT = ('claims whose label joined the displayed walk through a n
 
 def _size(obj):
     return len(json.dumps(obj, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))
+
+
+# ------------------------------------------------------------------ stage L limits
+
+# the budget class of each budgeted tool (DESIGN §21.8); the others are not budgeted
+TOOL_CLASS = {
+    'graphlet_summary': 'view', 'graphlet_walks': 'view', 'graphlet_walk': 'view',
+    'graphlet_support': 'view', 'graphlet_labels': 'view', 'graphlet_splits': 'view',
+    'graphlet_claims': 'view', 'graphlet_sequence': 'view',
+    'graphlet_compare': 'heavy', 'graphlet_export': 'heavy', 'graphlet_subtrie': 'heavy',
+    'graphlet_save': 'heavy',
+    'traverse_fetch': 'parse', 'traverse_continue': 'parse', 'graphlet_load': 'parse',
+}
+_GIB = 1024
+
+
+@dataclass(frozen=True)
+class ToolLimits:
+    """The local budgets of the tools (stage L, owner decision L7): per class a default
+    (view 30 M lwu / 1 GiB, heavy 300 M / 2 GiB, parse 200 M / 2 GiB; 1 lwu is about
+    0.1 us of reference CPU, so 30 M is about 3 s nominal) and a ceiling (10x each) up to
+    which an agent may raise its call's budget with the tools' budget argument (L5);
+    per_tool overrides a tool's default. budget_for(tool, request) -> LocalBudget lets a
+    service supply the budget object itself (its tiers, its ledger's reservation);
+    request is {'limits': LocalLimits (the defaults with the agent's request, clamped),
+    'clamped': [names], 'class': str}. on_usage(tool, usage) receives the usage of every
+    budgeted call, completed or stopped: {class, complete, work_units, memory_bytes,
+    parsed?, stop?}. The memory account is a model (memory_bound "model"), soft
+    in-process: hard bounds are the service's process limits."""
+    view: LocalLimits = LocalLimits(30_000_000, 1 * _GIB)
+    heavy: LocalLimits = LocalLimits(300_000_000, 2 * _GIB)
+    parse: LocalLimits = LocalLimits(200_000_000, 2 * _GIB)
+    view_ceiling: LocalLimits = LocalLimits(300_000_000, 10 * _GIB)
+    heavy_ceiling: LocalLimits = LocalLimits(3_000_000_000, 20 * _GIB)
+    parse_ceiling: LocalLimits = LocalLimits(2_000_000_000, 20 * _GIB)
+    per_tool: Optional[dict] = None
+    budget_for: Optional[Callable[[str, dict], LocalBudget]] = None
+    on_usage: Optional[Callable[[str, dict], None]] = None
+
+    def defaults(self, tool):
+        cls = TOOL_CLASS[tool]
+        return (self.per_tool or {}).get(tool) or getattr(self, cls)
+
+    def ceiling(self, tool):
+        return getattr(self, TOOL_CLASS[tool] + '_ceiling')
+
+
+# the state of the current budgeted tool call (context-local, so that calls in threads
+# do not see each other's): the budget, its limits, the store's parses, a partial answer
+_CALL = contextvars.ContextVar('graphlet_tools_local_call', default=None)
+
+
+class _LocalCall:
+    __slots__ = ('budget', 'limits', 'clamped', 'cls', 'parsed', 'stop', 'partial',
+                 'request')
+
+    def __init__(self, budget, limits, clamped, cls, request=None):
+        self.budget = budget
+        self.limits = limits
+        self.clamped = clamped
+        self.cls = cls
+        self.parsed = None
+        self.stop = None
+        self.partial = False
+        # the agent's budget argument (LocalLimits of the fields it gave), or None
+        self.request = request
+
+
+def _budget_arg(v):
+    """The tools' budget argument -> LocalLimits of the fields given (None elsewhere)."""
+    if not isinstance(v, dict) or set(v) - {'work_units', 'memory_mb', 'deadline_s'}:
+        raise ToolError('bad_argument', 'budget is {"work_units": int, "memory_mb": number, '
+                        '"deadline_s": number} (each optional), not %r' % (v,))
+    try:
+        return LocalLimits(**v)
+    except ValueError as e:
+        raise ToolError('bad_argument', 'budget: %s' % e) from None
+
+
+_LOCAL_EVIDENCE = {'work': 'local_work', 'memory': 'local_memory',
+                   'deadline': 'local_deadline', 'cancelled': 'local_cancelled'}
+
+
+def _mark_interrupted(out, stop):
+    """An interrupted answer's evidence names the scope local, so that it never reads as
+    complete on its own (§21.6)."""
+    ev = out.get('evidence')
+    blocks = [ev] if isinstance(ev, dict) and 'limitations' in ev else \
+        [v for v in (ev or {}).values() if isinstance(v, dict) and 'limitations' in v] \
+        if isinstance(ev, dict) else []
+    for e in blocks:
+        lims = dict(e.get('limitations') or {})
+        lims['local'] = [_LOCAL_EVIDENCE[stop['resource']]]
+        e['limitations'] = lims
+
+
+def _local_block(call, compact=0):
+    """The `local` block of a budgeted result; |compact| 1: the stop's essentials only, 2:
+    the least that still says whether the answer is complete and why not."""
+    b = call.budget
+    stop = call.stop
+    complete = stop is None and not call.partial
+    if compact >= 2:
+        out = {'complete': complete}
+        if stop is not None:
+            out['stop'] = {'resource': stop['resource']}
+        return out
+    out = {'complete': complete, 'usage': b.call_usage(), 'work_model': _B.WORK_MODEL,
+           'memory_bound': _B.MEMORY_BOUND}
+    if compact == 0:
+        out['limits'] = call.limits.as_dict()
+        if call.clamped:
+            out['clamped'] = list(call.clamped)
+        if call.parsed is not None:
+            out['parsed'] = dict(call.parsed)
+    if stop is not None:
+        out['stop'] = stop if compact == 0 else {
+            k: stop[k] for k in ('resource', 'op', 'phase', 'unit', 'limit', 'used',
+                                 'needed_at_least', 'deterministic', 'actions')}
+    return out
+
+
+# what a page reserves for the local block's compact form (§21.6): measured on the largest
+# compact block (a memory stop with its numbers and four levers), with room to spare
+_LOCAL_RESERVE = 420
 
 
 def _labels_json(labels, limit=None):
@@ -168,6 +315,17 @@ def _check_receipt(receipt, limit, lever='raise max_bytes'):
     every optional field cut -- before it runs, so that nothing is made that the caller
     would not be told about. |lever| is what THIS tool offers (a file name only where the
     receipt carries one)."""
+    call = _CALL.get()
+    if call is not None and 'local' not in receipt and 'local' not in receipt.declared:
+        if call.stop is not None or call.partial:
+            # an interrupted operation's local block is essential (_finish_local): its
+            # smallest form is part of the least receipt
+            receipt['local'] = _local_block(call, 2)
+        else:
+            # a completed one's is the first optional field: cut, it is named in
+            # fields_cut too (checked without it, a receipt within those bytes of the
+            # ceiling made its handle and answered result_too_large)
+            receipt.declared.insert(0, 'local')
     n = _size(receipt.minimal())
     if n > limit:
         raise ToolError('receipt_too_large', 'the receipt of this operation (%d bytes: %s) '
@@ -268,6 +426,32 @@ def _fit_error(out, limit):
     return None
 
 
+def _fit_stop_error(out, limit):
+    """local_budget_exceeded over the ceiling: the message is cut first, then the local
+    block's detail, the stop's levers and how far it got; its code, resource, operation
+    and phase are kept as long as anything fits (§21.5)."""
+    stop = dict(out.get('stop') or {})
+    local = out.get('local')
+    keep = ('resource', 'op', 'phase', 'unit', 'limit', 'used', 'needed_at_least')
+    forms = []
+    full = dict(out)
+    if local is not None:
+        full['local'] = {k: local[k] for k in ('complete', 'usage') if k in local}
+    forms.append(full)
+    forms.append(dict(full, stop={k: stop[k] for k in stop if k not in ('done', 'largest_charge')}))
+    forms.append({'error': out['error'], 'message': out.get('message', ''),
+                  'stop': {k: stop[k] for k in keep if k in stop}})
+    forms.append({'error': out['error'], 'message': out.get('message', ''),
+                  'stop': {k: stop[k] for k in ('resource', 'op', 'phase') if k in stop}})
+    forms.append({'error': out['error'], 'message': out.get('message', ''),
+                  'stop': {'resource': stop.get('resource')}})
+    for cand in forms:
+        got = _fit_error(cand, limit)
+        if got is not None and 'stop' in got:
+            return got
+    return _fit_error({'error': out['error'], 'message': out.get('message', '')}, limit)
+
+
 def _valid_ceiling(v):
     return v is not None and not isinstance(v, bool) and isinstance(v, int) \
         and v >= MIN_MAX_BYTES
@@ -293,6 +477,8 @@ def _tool(fn):
             return max(self.max_bytes, CAPABILITIES_MAX_BYTES)
         return self.max_bytes
 
+    budgeted = name in TOOL_CLASS
+
     def wrapped(self, *args, **kw):
         try:
             bound = sig.bind(self, *args, **kw)
@@ -315,8 +501,27 @@ def _tool(fn):
                     % MIN_MAX_BYTES}
         if limit is None:
             limit = default_limit(self, bound.arguments.get('execute', True))
+        call = None
+        token = None
         try:
-            out = fn(self, *args, **kw)
+            if budgeted and self.local_limits is not None:
+                call = self._local_call(name, bound.arguments.get('budget'))
+                token = _CALL.set(call)
+                with _B.local_budget(call.budget):
+                    with call.budget.scope(name, ()):
+                        out = fn(self, *args, **kw)
+            elif budgeted and bound.arguments.get('budget') is not None:
+                raise ToolError('bad_argument', 'this server runs its local tools without '
+                                'budgets (no local_limits configured): budget is not taken')
+            else:
+                out = fn(self, *args, **kw)
+        except LocalBudgetExceeded as e:
+            st = e.stop.as_dict()
+            if call is not None:
+                call.stop = st
+            # the stop's message is the error's (once)
+            out = {'error': 'local_budget_exceeded', 'message': st.pop('message'),
+                   'stop': st}
         except ToolError as e:
             out = e.as_dict()
         except UnknownHandle as e:
@@ -351,11 +556,16 @@ def _tool(fn):
             out = {'error': 'io_error', 'message': e.strerror or type(e).__name__}
         except (IndexError, ValueError) as e:
             out = {'error': 'bad_argument', 'message': str(e)}
+        finally:
+            if token is not None:
+                _CALL.reset(token)
         # the call may have grown the caches of the models it read: the store charges
         # them now, so that max_ram_mb holds between calls
         refresh = getattr(self.store, 'refresh', None)
         if refresh is not None:
             refresh()
+        if call is not None:
+            out = self._finish_local(name, call, out, limit)
         if isinstance(out, _Receipt):
             # a completed operation (a file written, a handle created) keeps its
             # receipt: its optional fields go first, and the essential ones were checked
@@ -364,7 +574,9 @@ def _tool(fn):
         n = _size(out)
         if n > limit:
             fitted = None
-            if isinstance(out.get('error'), str) and out['error'] != 'result_too_large':
+            if out.get('error') == 'local_budget_exceeded':
+                fitted = _fit_stop_error(out, limit)
+            elif isinstance(out.get('error'), str) and out['error'] != 'result_too_large':
                 fitted = _fit_error(out, limit)
             out = fitted or _too_large(n, limit, takes_max)
         return out
@@ -398,7 +610,12 @@ class _LazyRows:
 class GraphletTools:
     def __init__(self, store, clients=None, *, default_index=None,
                  max_bytes=DEFAULT_MAX_BYTES, sequence_max_bytes=SEQUENCE_MAX_BYTES,
-                 secret=None, export_dir=None):
+                 secret=None, export_dir=None, local_limits=None):
+        if local_limits is not None and not isinstance(local_limits, ToolLimits):
+            raise TypeError('local_limits is a ToolLimits, not %r' % (local_limits,))
+        # stage L: None (the default) runs the local tools without budgets, every result
+        # as before; a service sets ToolLimits()
+        self.local_limits = local_limits
         self.store = store
         self.clients = dict(clients or {})
         self.default_index = default_index or (next(iter(self.clients)) if self.clients
@@ -413,6 +630,127 @@ class GraphletTools:
         # filtered): a page of graphlet_walks ranks on cheap keys once and spells only
         # its own rows (path ids, not model objects: a re-parsed graphlet stays valid)
         self._ranked = collections.OrderedDict()
+
+    # ================================================================ stage L
+
+    def _local_call(self, tool, arg):
+        """The budget of one budgeted call: the class (or per-tool) default, raised or
+        lowered by the agent's |arg| field by field and held to the class ceiling (a
+        clamp is stated), or the service's budget_for() hook's object."""
+        L = self.local_limits
+        base = L.defaults(tool)
+        want = base
+        req = None
+        if arg is not None:
+            req = _budget_arg(arg)
+            want = LocalLimits(*(getattr(req, f) if getattr(req, f) is not None
+                                 else getattr(base, f)
+                                 for f in ('work_units', 'memory_mb', 'deadline_s')))
+        limits, clamped = want.clamped(L.ceiling(tool))
+        b = None
+        if L.budget_for is not None:
+            b = L.budget_for(tool, {'limits': limits, 'clamped': list(clamped),
+                                    'class': TOOL_CLASS[tool]})
+            if not isinstance(b, LocalBudget):
+                raise TypeError('ToolLimits.budget_for returned %r, not a LocalBudget' % (b,))
+            limits = b.limits
+        else:
+            b = LocalBudget(limits)
+        return _LocalCall(b, limits, clamped, TOOL_CLASS[tool], req)
+
+    def _parse_budget(self, call=None):
+        """The budget of a parse the store runs inside a tool call |call|: the store's own
+        parse limits when it has them (None here), else the tools' parse class RAISED,
+        field by field, by the agent's budget argument up to the parse class's ceiling --
+        never lowered by it, and never the call's budget itself (the parse is reported as
+        local.parsed, not charged to the operation, §21.7). An agent told to raise its
+        budget for a stopped parse can then do so with the call's budget argument: under
+        the parse defaults alone, raise_local_budget could never help."""
+        L = self.local_limits
+        if L is None or getattr(self.store, 'parse_limits', None) is not None:
+            return None
+        req = None if call is None else call.request
+        if req is None:
+            return LocalBudget(L.parse)
+        top = L.parse_ceiling
+        fields = []
+        for f in ('work_units', 'memory_mb', 'deadline_s'):
+            mine, want, cap = getattr(L.parse, f), getattr(req, f), getattr(top, f)
+            if mine is not None and want is not None and want > mine:
+                mine = want if cap is None else max(mine, min(want, cap))
+            fields.append(mine)
+        return LocalBudget(LocalLimits(*fields))
+
+    def _note_parse(self, pb=None):
+        """local.parsed: the store's last parse in this call -- its usage and the limits
+        it ran under (which are the parse's, not the call's local.limits)."""
+        call = _CALL.get()
+        got = getattr(self.store, 'last_parse', None)
+        if call is not None and got is not None:
+            lim = pb.limits if pb is not None else getattr(self.store, 'parse_limits', None)
+            call.parsed = dict(got, limits=lim.as_dict()) if lim is not None else dict(got)
+
+    def _parse_stop(self, e, pb):
+        """A parse on demand that stopped: the stop names the limits it ran under, and a
+        lever only where it works -- the store's own parse limits are not raised by any
+        call's budget, so raise_local_budget is not offered for them."""
+        st = e.stop
+        if pb is None:
+            st.actions = [a for a in st.actions if a != 'raise_local_budget']
+            st.restate()
+            st.message += ('. The stored body is parsed on demand under the store\'s '
+                           'parse limits, which no call\'s budget raises')
+        else:
+            st.restate()
+            st.message += ('. The stored body is parsed on demand under the parse class\'s '
+                           'limits (local.parsed.limits), which this call\'s budget '
+                           'argument raises up to that class\'s ceiling')
+        e.args = (st.message,)
+        return e
+
+    def _finish_local(self, tool, call, out, limit):
+        """The `local` block on a budgeted result (the compact forms when the full one
+        does not fit), the evidence of an interrupted answer marked, and the usage
+        reported to the service."""
+        if not isinstance(out, dict):
+            return out
+        error = isinstance(out.get('error'), str)
+        if call.stop is not None or call.partial:
+            stop = call.stop
+            if stop is not None and not error:
+                _mark_interrupted(out, stop)
+        receipt = isinstance(out, _Receipt)
+        if receipt and call.stop is None:
+            # a completed receipt's local block is optional: cut first (T-L21)
+            out['local'] = _local_block(call)
+            out.optional.insert(0, 'local')
+            out.declared.insert(0, 'local')
+        elif receipt:
+            # a receipt of an interrupted operation (a body kept unparsed): the stop is
+            # essential -- the largest form with which the receipt still fits
+            for compact in (0, 1, 2):
+                out['local'] = _local_block(call, compact)
+                if _size(out.minimal()) <= limit:
+                    break
+        else:
+            for compact in (0, 1, 2):
+                local = _local_block(call, compact)
+                if error and 'stop' in local:
+                    local.pop('stop')           # the error states it already
+                cand = dict(out, local=local)
+                if _size(cand) <= limit or compact == 2:
+                    out = cand
+                    break
+        hook = self.local_limits.on_usage
+        if hook is not None:
+            usage = dict(call.budget.call_usage(), complete=call.stop is None
+                         and not call.partial, **{'class': call.cls})
+            if call.parsed is not None:
+                usage['parsed'] = dict(call.parsed)
+            if call.stop is not None:
+                usage['stop'] = dict(call.stop)
+            hook(tool, usage)
+        return out
 
     # ================================================================ plumbing
 
@@ -446,7 +784,23 @@ class GraphletTools:
                                     or type(e).__name__)) from None
 
     def _resolve(self, handle):
-        """-> (the backing graphlet, the GraphletView of a derived handle or None)."""
+        """-> (the backing graphlet, the GraphletView of a derived handle or None). Under
+        local limits a parse on demand runs under the parse class (local.parsed): a stop
+        there is local_budget_exceeded, the entry and its body kept."""
+        call = _CALL.get()
+        if call is not None:
+            pb = self._parse_budget(call)
+            try:
+                got = self.store.view(_handle(handle), parse_budget=pb)
+            except LocalBudgetExceeded as e:
+                if any(x is e.stop for x in call.budget.stops):
+                    raise                   # the call's own (a stored view's selection)
+                raise self._parse_stop(e, pb)
+            finally:
+                self._note_parse(pb)
+            if isinstance(got, ops.GraphletView):
+                return got.backing, got
+            return got, None
         got = self.store.view(_handle(handle))
         if isinstance(got, ops.GraphletView):
             return got.backing, got
@@ -494,15 +848,24 @@ class GraphletTools:
                           sort_keys=True, default=str)
         return hashlib.sha256(('%s\0%s\0%s' % (tool, handle, norm)).encode()).hexdigest()[:16]
 
-    def _cursor(self, tool, handle, args, offset):
-        body = json.dumps({'h': handle, 't': tool, 'a': self._digest(tool, handle, args),
-                           'o': offset}, separators=(',', ':')).encode()
+    def _cursor(self, tool, handle, args, offset, resume=None, before=0):
+        j = {'h': handle, 't': tool, 'a': self._digest(tool, handle, args), 'o': offset}
+        if resume is not None:
+            # stage L: where a list stopped by its budget goes on (the library's resume
+            # token, or the tool's position), and the rows the earlier pages held
+            j['r'] = list(resume)
+            j['b'] = before
+        body = json.dumps(j, separators=(',', ':')).encode()
         mac = hmac.new(self._key, body, hashlib.sha256).hexdigest()[:16]
         return base64.urlsafe_b64encode(body).decode().rstrip('=') + '.' + mac
 
     def _offset(self, tool, handle, args, cursor):
+        return self._position(tool, handle, args, cursor)[0]
+
+    def _position(self, tool, handle, args, cursor):
+        """-> (offset, resume position or None, rows before it) of a cursor."""
         if cursor is None or cursor == '':
-            return 0
+            return 0, None, 0
         if not isinstance(cursor, str):
             raise ToolError('bad_cursor', 'a cursor is the next_cursor string of a page')
         try:
@@ -518,33 +881,75 @@ class GraphletTools:
         if j['h'] != handle or j['t'] != tool or j['a'] != self._digest(tool, handle, args):
             raise ToolError('bad_cursor', 'this cursor belongs to another handle, tool or '
                             'other arguments: repeat the original arguments with it')
-        return j['o']
+        r = j.get('r')
+        if r is not None and (self.local_limits is None or not isinstance(r, list)
+                              or not isinstance(j.get('b'), int)):
+            raise ToolError('bad_cursor', 'a resume cursor of a budgeted list, presented '
+                            'where local budgets are not configured')
+        return j['o'], (tuple(r) if r is not None else None), j.get('b', 0)
 
-    def _page(self, tool, handle, args, rows, base, max_bytes=None, n=None):
+    def _page(self, tool, handle, args, rows, base, max_bytes=None, n=None, resume=None,
+              before=0, partial=None, start=None):
         """Rows from the cursor's offset while the whole result, next_cursor included,
         stays <= max_bytes. The room for next_cursor is the length of the longest cursor
-        this list can carry (the last offset), measured, not a fixed guess."""
+        this list can carry (the last offset), measured, not a fixed guess.
+
+        Stage L: |rows| may be the whole rows of a list its budget stopped (|partial|:
+        the position where it goes on); the page then says complete false and
+        total_at_least, and when it holds every row its next_cursor resumes at that
+        position. |resume|/|before|: the position the rows start at and the rows the
+        earlier pages held. A stop while a lazy row is built (graphlet_walks) ends the
+        page there, its rows whole. Budgeted pages keep room for the local block."""
         max_bytes = _opt_int('max_bytes', max_bytes, 1) or self.max_bytes
-        start = self._offset(tool, handle, args, args.get('cursor'))
-        if start > len(rows):
+        call = _CALL.get()
+        if start is None:
+            start = self._offset(tool, handle, args, args.get('cursor'))
+        if start > len(rows) and partial is None:
             raise ToolError('bad_cursor', 'the cursor is past the end of the list')
-        out = dict(base, total=len(rows), rows=[])
+        if partial is None and call is None:
+            out = dict(base, total=len(rows), rows=[])
+        elif partial is None and call is not None:
+            out = dict(base, total=before + len(rows), complete=True, rows=[])
+        else:
+            out = dict(base, total_at_least=before + len(rows), complete=False, rows=[])
+            if 'filtered' in out:
+                out['filtered_so_far'] = out.pop('filtered')
         reserve = (len(',"next_cursor":')
-                   + len(json.dumps(self._cursor(tool, handle, args, len(rows)))))
+                   + len(json.dumps(self._cursor(tool, handle, args, len(rows), resume,
+                                                 before))))
+        if partial is not None:
+            reserve = max(reserve, len(',"next_cursor":') + len(json.dumps(
+                self._cursor(tool, handle, args, 0, partial, before + len(rows)))))
+        if call is not None:
+            max_bytes -= _LOCAL_RESERVE
         i = start
-        while i < len(rows) and (n is None or len(out['rows']) < n):
-            out['rows'].append(rows[i])
-            more = i + 1 < len(rows)
-            if _size(out) + (reserve if more else 0) > max_bytes:
-                out['rows'].pop()
-                break
-            i += 1
+        if start > len(rows):
+            # a smaller budget than the cursor's own call: its position was not reached
+            out['next_cursor'] = self._cursor(tool, handle, args, start, resume, before)
+            return out
+        try:
+            while i < len(rows) and (n is None or len(out['rows']) < n):
+                out['rows'].append(rows[i])
+                more = i + 1 < len(rows) or partial is not None
+                if _size(out) + (reserve if more else 0) > max_bytes:
+                    out['rows'].pop()
+                    break
+                i += 1
+        except LocalBudgetExceeded as e:
+            # a lazy row stopped: the page so far, whole rows, and the cursor at the row
+            if not out['rows']:
+                raise
+            call.stop = e.stop.as_dict()
+            call.partial = True
+            out['complete'] = False
+            out['next_cursor'] = self._cursor(tool, handle, args, i, resume, before)
+            return out
         if not out['rows'] and i < len(rows):
             # a single row larger than the page: alone, cut, and the cut named. The
             # frame counts every field that could be named as cut, so the final list
             # (a subset) cannot push the result over
             row = rows[i]
-            more = i + 1 < len(rows)
+            more = i + 1 < len(rows) or partial is not None
             fields = [k for k, v in row.items() if isinstance(v, (str, list)) and v]
             frame = dict(out, rows=[], row_truncated=True, cut_fields=fields)
             budget = max_bytes - _size(frame) - (reserve if more else 0)
@@ -552,12 +957,18 @@ class GraphletTools:
             out = dict(out, rows=[row], row_truncated=True, cut_fields=cut)
             i += 1
         if i < len(rows):
-            out['next_cursor'] = self._cursor(tool, handle, args, i)
+            out['next_cursor'] = self._cursor(tool, handle, args, i, resume, before)
+        elif partial is not None:
+            out['next_cursor'] = self._cursor(tool, handle, args, 0, partial,
+                                              before + len(rows))
         return out
 
     def _fit_summary(self, g, frame, side=None, max_bytes=None):
-        """g.summary() sized so that |frame| with the summary in it stays <= max_bytes."""
+        """g.summary() sized so that |frame| with the summary in it stays <= max_bytes
+        (and, under local limits, the local block beside it)."""
         room = (max_bytes or self.max_bytes) - _size(dict(frame, summary={}))
+        if _CALL.get() is not None:
+            room -= _LOCAL_RESERVE
         return g.summary(side, max_bytes=max(room, 0))
 
     # ---------------------------------------------------------------- files
@@ -629,7 +1040,7 @@ class GraphletTools:
     @_tool
     def traverse_fetch(self, index=None, seed=None, strategy=None, keep=True,
                        max_graphlet_mb=8, replay=None, allow_unverified_index=False,
-                       max_bytes=None):
+                       max_bytes=None, budget=None):
         """One retrieval -> its summary and (keep) a handle. replay=<handle> re-runs the
         stored request of an entry (also an expired one) against the same index; an index
         whose identity with the entry's cannot be verified (a manifest digest on one side
@@ -676,7 +1087,14 @@ class GraphletTools:
             nbytes = len(utf8_bytes(result['graphlet']))
         spooled = nbytes > max_graphlet_mb * (1 << 20)
         from .parser import from_response
-        g = from_response(result, response)       # the whole body validated
+        try:
+            g = from_response(result, response)       # the whole body validated
+        except LocalBudgetExceeded as e:
+            # stage L (L3): the parse stopped on its budget -- the body is kept, after
+            # the checks that need no parse, as an unparsed entry (never a graphlet until
+            # a parse completes); it can always be exported as it is (format mgt)
+            return self._keep_unparsed(e, name, req, result, response, nbytes, spooled,
+                                       keep, identity, limit)
         if identity is not None:
             # what actually answered, not only what the capabilities said before
             identity = _weakest(identity, _same_index(ident, self._identity_of(g),
@@ -710,10 +1128,49 @@ class GraphletTools:
         if identity is not None:
             out['identity'] = identity
         out['evidence'] = ops.evidence_block(g)
-        out['summary'] = self._fit_summary(g, out, max_bytes=max_bytes)
+        self._summary_into(g, out, max_bytes)
         if handle is None:
             return out
         return _Receipt(out, ('summary', 'evidence', 'graphlet_bytes'))
+
+    def _summary_into(self, g, out, max_bytes, side=None):
+        """out['summary'] = the fitted summary; under a budget a stop there leaves the
+        answer without it (the handle is made already), and local states the stop."""
+        call = _CALL.get()
+        if call is None:
+            out['summary'] = self._fit_summary(g, out, side, max_bytes)
+            return
+        try:
+            out['summary'] = self._fit_summary(g, out, side, max_bytes)
+        except LocalBudgetExceeded as e:
+            call.stop = e.stop.as_dict()
+
+    def _keep_unparsed(self, e, name, req, result, response, nbytes, spooled, keep,
+                       identity, limit, parent=None, derived_from=None):
+        """The answer of a fetch (or continuation) whose parse its budget stopped: the
+        body stored as an unparsed entry when it is to be kept, the server's own per-seed
+        summary (no parse needed) and the stop; nothing local is derived from it."""
+        call = _CALL.get()
+        call.stop = e.stop.as_dict()
+        delivery = 'spooled' if spooled else (result.get('outcome') or {}).get('delivery')
+        out = {'index': name, 'delivery': delivery, 'graphlet_bytes': nbytes,
+               'parsed': False}
+        if identity is not None:
+            out['identity'] = identity
+        summary = {k: v for k, v in result.items()
+                   if k not in ('graphlet', 'graphlet_bytes', 'graphlet_lines')}
+        out['server_summary'] = summary
+        out['hint'] = ('the graphlet could not be parsed within the local parse budget: '
+                       'graphlet_export(format="mgt") copies it out without a parse, or '
+                       'raise the budget')
+        if not (spooled or keep):
+            return out
+        receipt = dict(out, handle='g_' + '0' * 12)
+        _check_receipt(_Receipt(receipt, ('server_summary', 'hint', 'graphlet_bytes')), limit)
+        out['handle'] = self.store.put_unparsed(
+            result, response, req, source=name, delivery='spooled' if spooled else None,
+            parent=parent, derived_from=derived_from)
+        return _Receipt(out, ('server_summary', 'hint', 'graphlet_bytes'))
 
     def _replay_request(self, handle):
         """The stored request and index identity of an entry, live or expired."""
@@ -743,7 +1200,8 @@ class GraphletTools:
 
     @_tool
     def traverse_continue(self, handle, arm, walk, overrides=None, execute=True,
-                          allow_unverified_index=False, max_bytes=None, reset_branches=False):
+                          allow_unverified_index=False, max_bytes=None, reset_branches=False,
+                          budget=None):
         """A continuation is a new traversal: the library builds the request from the
         walk's continuation, the backend runs it (execute=False: the request only, under
         the 16 KB sequence ceiling -- it carries the continuation's bases and label
@@ -769,6 +1227,13 @@ class GraphletTools:
         self._in_view(view, a.side, walk=walk)
         if overrides is not None and not isinstance(overrides, dict):
             raise ToolError('bad_argument', 'overrides is an object')
+        clash = sorted(set(overrides or ()) & _CONTINUE_OWN)
+        if clash:
+            # what this tool's own arguments set: passed on, they collided with them in
+            # next_request()'s call (an uncaught TypeError before)
+            raise ToolError('bad_argument', 'overrides are strategy fields; %s %s set by '
+                            'this tool\'s own arguments (arm, walk, reset_branches)'
+                            % (', '.join(clash), 'is' if len(clash) == 1 else 'are'))
         _bool('execute', execute)
         _bool('allow_unverified_index', allow_unverified_index)
         _bool('reset_branches', reset_branches)
@@ -810,7 +1275,18 @@ class GraphletTools:
         if 'graphlet' not in result:
             return {'error': 'seed_failed', 'message': result.get('error'), 'parent': parent}
         from .parser import from_response
-        g2 = from_response(result, response)
+        try:
+            g2 = from_response(result, response)
+        except LocalBudgetExceeded as e:
+            nbytes = result.get('graphlet_bytes')
+            if nbytes is None:
+                nbytes = len(utf8_bytes(result['graphlet']))
+            got = self._keep_unparsed(e, name, dict(req), result, response, nbytes, False,
+                                      True, identity, max_bytes or self.max_bytes,
+                                      parent=parent, derived_from=handle)
+            got['parent'] = parent
+            got.update(stated)
+            return got
         identity = _weakest(identity, _same_index(ident, self._identity_of(g2),
                                                   'the continuation', allow_unverified_index))
         # again with what answered: a weaker identity states more
@@ -823,14 +1299,14 @@ class GraphletTools:
         if per_label is not None:
             out['loss_budget_labels'] = per_label
         out['evidence'] = ops.evidence_block(g2)
-        out['summary'] = self._fit_summary(g2, out, max_bytes=max_bytes)
+        self._summary_into(g2, out, max_bytes)
         return _Receipt(out, optional)
 
     # ================================================================ local tools
 
     @_tool
     def graphlet_summary(self, handle, arm=None, detail='summary', cursor=None,
-                         max_bytes=None):
+                         max_bytes=None, budget=None):
         """detail='summary': the agent-facing summary (a view's for a derived handle; a
         continuation's parent walk). detail='limitations': every stated limitation in
         full (knob, limit, observed, complete_to_bp, effect) and the resource stop,
@@ -862,7 +1338,7 @@ class GraphletTools:
     @_tool
     def graphlet_walks(self, handle, arm, rank='support', n=10, min_bp=0, label=None,
                        spell='none', tail_bp=60, route_consistent=True, cursor=None,
-                       max_bytes=None):
+                       max_bytes=None, budget=None):
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         _choice('rank', rank, ('support', 'length', 'loss', 'id'))
@@ -892,6 +1368,11 @@ class GraphletTools:
                 row['sequence'] = s
             return row
         rows = _LazyRows(len(ids), row_of)
+        call = _CALL.get()
+        if call is not None:
+            # the page's row of a walk is charged with the walk (built on demand)
+            call.budget.row_extra = (_B.W_ROW, _B.dict_bytes(10) + 2 * _B.STR + tail_bp
+                                     + _LABELS_IN_ROW * _B.dict_bytes(2))
         args = dict(arm=a.side, rank=rank, min_bp=min_bp, label=label, spell=spell,
                     tail_bp=tail_bp, route_consistent=route_consistent, cursor=cursor)
         base = {'handle': handle, 'arm': a.side,
@@ -908,37 +1389,96 @@ class GraphletTools:
     def _ranked_ids(self, handle, g, a, rank, labels, min_bp, route_consistent, keep):
         """(the ranked path ids of graphlet_walks, {why: count} of the walks the
         route_consistent filter removed), cached per handle and arguments: paging an arm
-        ranks it once (B3)."""
+        ranks it once (B3). Under a budget a cached ranking is charged as the ranking
+        itself charges (its cold price, L1): the same page pays the same units and stops
+        at the same place whether an earlier call ranked the arm or not."""
         key = (handle, a.side, rank, json.dumps(labels, sort_keys=True, default=str),
                min_bp, route_consistent)
         got = self._ranked.get(key)
+        call = _CALL.get()
         if got is not None:
             self._ranked.move_to_end(key)
-            return got
+            if call is not None:
+                self._charge_ranking(g, a, rank, labels, min_bp, route_consistent, got[2],
+                                     call.budget)
+            return got[:2]
         ids = ops.rank_walks(g, a, by=rank, labels=labels, min_bp=min_bp,
                              route_consistent=route_consistent)
+        # what the charges of a ranking depend on beside its arguments: the lengths of
+        # the lists it made (before the view's filter) and the walks it left out
+        counts = [len(ids), None, 0]
         if keep is not None:
             ids = [i for i in ids if i in keep]
         filtered = collections.Counter()
         if labels is not None and route_consistent:
-            every = set(ops.rank_walks(g, a, by='id', labels=labels, min_bp=min_bp,
-                                       route_consistent=False))
+            every = ops.rank_walks(g, a, by='id', labels=labels, min_bp=min_bp,
+                                   route_consistent=False)
+            counts[1] = len(every)
+            every = set(every)
             if keep is not None:
                 every &= keep
-            for pid in sorted(every - set(ids)):
+            missing = sorted(every - set(ids))
+            counts[2] = len(missing)
+            if call is not None:
+                call.budget.charge(4 * len(missing))
+            for pid in missing:
                 filtered[ops.walk_filter_reason(g, a, pid, labels)] += 1
-        got = self._ranked[key] = (ids, filtered)
+        got = (ids, filtered, tuple(counts))
+        self._ranked[key] = got
         while len(self._ranked) > _RANKED_CACHE:
             self._ranked.popitem(last=False)
-        return got
+        return got[:2]
 
     @staticmethod
-    def _walk_rows(g, a, p, cut=_LABELS_IN_ROW):
-        """One row per segment of walk |p|: labels in and out with their TRUE totals (a
-        recorded list may be cut: entry_total, the last P total), merges, label ends."""
+    def _charge_ranking(g, a, rank, labels, min_bp, route_consistent, counts, b):
+        """Charge |b| what _ranked_ids charged when it ranked (|counts|: the lengths it
+        recorded), charge point by charge point (ops._rank_walks_replay)."""
+        n_ranked, n_every, n_missing = counts
+        ops._rank_walks_replay(g, a, rank, labels, min_bp, n_ranked, b)
+        if labels is not None and route_consistent:
+            ops._rank_walks_replay(g, a, 'id', labels, min_bp, n_every, b)
+            b.charge(4 * n_missing)
+
+    def _walk_budgeted(self, g, a, view, handle, pid, p, cursor, max_bytes, call):
+        args = dict(arm=a.side, walk=pid, cursor=cursor)
+        start, resume, before = self._position('graphlet_walk', handle, args, cursor)
+        k0 = resume[1] if resume else 0
+        base = {'handle': handle, 'arm': a.side, 'walk': pid, 'length_bp': p.length_bp,
+                'evidence': ops.evidence_block(g, a.side, view)}
+        if a.segments[p.leaf].leaf.continuation is not None:
+            c = ops.continuation(g, a, pid)
+            base['continuation'] = {'length_bp': len(c.sequence), 'loss_used': c.loss_used,
+                                    'labels': len(c.labels)}
         rows = []
-        for sid in p.segments:
+        partial = None
+        call.budget.charge(_B.W_STEP * (a.segments[p.leaf].depth + 1))
+        chain = p.segments
+        try:
+            self._walk_rows(g, a, p, out=rows, start=k0, b=call.budget, chain=chain)
+        except LocalBudgetExceeded as e:
+            if not rows:
+                raise
+            call.stop = e.stop.restate(rows=len(rows)).as_dict()
+            call.partial = True
+            partial = ('pos', k0 + len(rows))
+        return self._page('graphlet_walk', handle, args, rows, base, max_bytes,
+                          resume=resume, before=before, partial=partial, start=start)
+
+    @staticmethod
+    def _walk_rows(g, a, p, cut=_LABELS_IN_ROW, out=None, start=0, b=None, chain=None):
+        """One row per segment of walk |p|: labels in and out with their TRUE totals (a
+        recorded list may be cut: entry_total, the last P total), merges, label ends.
+        |b| (stage L): each row charged before it is built, appended to |out| from chain
+        position |start|."""
+        rows = [] if out is None else out
+        lee = derive.label_end_events(a) if b is not None else None
+        for sid in (p.segments if chain is None else chain[start:]):
             s = a.segments[sid]
+            if b is not None:
+                n = min(len(s.entry), cut or len(s.entry)) + min(len(s.end), cut or len(s.end))
+                ne = len(lee.get(sid, ()))
+                b.charge(_B.W_ROW + n + 2 * ne,
+                         _B.dict_bytes(12) + (n + min(ne, cut or ne)) * _B.dict_bytes(3))
             out_total = (s.presence[-1].total if s.presence else s.entry_total) \
                 if g.mode != 'constrain' else len(s.end)
             row = {'segment': sid, 'from_bp': s.from_bp, 'to_bp': s.end_bp,
@@ -958,14 +1498,18 @@ class GraphletTools:
         return rows
 
     @_tool
-    def graphlet_walk(self, handle, arm, walk, cursor=None, max_bytes=None):
+    def graphlet_walk(self, handle, arm, walk, cursor=None, max_bytes=None, budget=None):
         """One walk's segment chain (labels in/out per segment with their true totals,
-        events) and its continuation; the chain is paged like a list."""
+        events) and its continuation; the chain is paged like a list. Under a local
+        budget a stop leaves a page of whole rows that resumes after the last."""
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         pid = ops.path_id(a, _int('walk', walk))
         self._in_view(view, a.side, walk=pid)
         p = derive.paths(a)[pid]
+        call = _CALL.get()
+        if call is not None:
+            return self._walk_budgeted(g, a, view, handle, pid, p, cursor, max_bytes, call)
         rows = self._walk_rows(g, a, p)
         base = {'handle': handle, 'arm': a.side, 'walk': pid, 'length_bp': p.length_bp,
                 'evidence': ops.evidence_block(g, a.side, view)}
@@ -977,7 +1521,8 @@ class GraphletTools:
         return self._page('graphlet_walk', handle, args, rows, base, max_bytes)
 
     @_tool
-    def graphlet_support(self, handle, arm, walk, step=None, cursor=None, max_bytes=None):
+    def graphlet_support(self, handle, arm, walk, step=None, cursor=None, max_bytes=None,
+                         budget=None):
         """Support runs along a walk with who left / joined and why (an end code, a
         switch, "split: labels took C", a merge); n_labels_total is the true count where
         a recorded list was cut."""
@@ -988,6 +1533,10 @@ class GraphletTools:
         self._in_view(view, a.side, walk=walk)
         prof = g.support_profile(a, walk)
         changes = {c.at_bp: c for c in g.support_changes(a, walk)}
+        call = _CALL.get()
+        if call is not None:
+            call.budget.charge(_B.W_ROW * len(prof),
+                               len(prof) * _B.dict_bytes(8) * (1 + _LABELS_IN_ROW))
         rows = []
         for r in prof:
             row = {'from_bp': r.from_bp, 'to_bp': r.to_bp, 'n_labels': len(r.labels),
@@ -1009,7 +1558,7 @@ class GraphletTools:
 
     @_tool
     def graphlet_labels(self, handle, arm=None, rank='direct_bp', n=20, min_direct_bp=0,
-                        at_bp=None, name=None, cursor=None, max_bytes=None):
+                        at_bp=None, name=None, cursor=None, max_bytes=None, budget=None):
         g, view = self._resolve(handle)
         if arm is not None:
             sides = [self._arm(g, arm, view).side]
@@ -1018,11 +1567,17 @@ class GraphletTools:
                      and (view is None or s in view.segments)]
         n = _int('n', n, 1)
         in_view = None if view is None else {l.id for l in view.labels}
+        call = _CALL.get()
         if name is not None:
+            if call is not None:
+                ops._uses_g(call.budget, g, 'label_index')
             lab = ops.label(g, _selector(name))
             if in_view is not None and lab.id not in in_view:
                 raise ToolError('not_in_view', 'label %s is not one of this view\'s labels'
                                 % lab.ref)
+            if call is not None:
+                return self._label_walks_budgeted(g, view, handle, arm, sides, lab, cursor,
+                                                  max_bytes, n, call)
             walks = g.label_walks(lab, sides[0] if len(sides) == 1 else None)
             # each run's OWN route (ops.routes yields one per run of the label, in run
             # order on the arm), not the first run's; annotate mode: one witness route
@@ -1030,7 +1585,7 @@ class GraphletTools:
             routes = {}
             for side in {lw.arm for lw in walks}:
                 if g.mode == 'constrain':
-                    ids = [r.id for r in g.arms[side].runs if r.label == lab.id]
+                    ids = derive.runs_by_label(g.arms[side]).get(lab.id, ())
                     routes[side] = dict(zip(ids, ops.routes(g, lab, side)))
                 else:
                     routes[side] = iter(ops.routes(g, lab, side))
@@ -1051,6 +1606,17 @@ class GraphletTools:
         _choice('rank', rank, ('direct_bp', 'reach_bp'))
         min_direct_bp = _int('min_direct_bp', min_direct_bp)
         at_bp = _opt_int('at_bp', at_bp)
+        if call is not None:
+            # the table needs the label summary of the whole arm (no partial table)
+            b = call.budget
+            ops._uses_g(b, g, 'label_summary')
+            if at_bp is not None:
+                for s_ in sides:
+                    sp = [x for x in g.arms[s_].segments if x.from_bp <= at_bp < x.end_bp]
+                    b.charge(sum(_B.W_ELEM * 4 + (len(x.entry) >> 1) for x in sp),
+                             _B.set_bytes(sum(len(x.entry) for x in sp)))
+            nl = len(g.labels) * len(sides)
+            b.charge(_B.W_ROW * nl + _B.sort_work(nl), nl * (_B.dict_bytes(7) + 80))
         alive = None if at_bp is None else {s: _alive_at(g, g.arms[s], at_bp) for s in sides}
         summary = derive.label_summary(g)
         rows = []
@@ -1072,14 +1638,50 @@ class GraphletTools:
         base = {'handle': handle, 'evidence': ops.evidence_block(g, arm, view)}
         return self._page('graphlet_labels', handle, args, rows, base, max_bytes, n)
 
+    def _label_walks_budgeted(self, g, view, handle, arm, sides, lab, cursor, max_bytes, n,
+                              call):
+        """graphlet_labels(name=) under a budget: the label's walks (whole rows, resumable
+        where label_walks() stopped), each with its own route, charged as it is made."""
+        args = dict(arm=arm, name=lab.ref, cursor=cursor)
+        start, resume, before = self._position('graphlet_labels', handle, args, cursor)
+        b = call.budget
+        partial = None
+        # each walk comes with its own route, made and charged with it, and the page's row
+        b.row_extra = (_B.W_ROW, _B.dict_bytes(9))
+        try:
+            walks = ops.label_walks_routes(g, lab, sides[0] if len(sides) == 1 else None,
+                                           resume=resume)
+        except LocalBudgetExceeded as e:
+            if not e.partial.rows:
+                raise                           # not one walk fits: the stop itself
+            walks = e.partial.rows
+            call.stop = e.stop.as_dict()
+            call.partial = True
+            partial = e.partial.resume
+        finally:
+            b.row_extra = (0, 0)
+        rows = []
+        for lw, route in walks:
+            rows.append({'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
+                         'evidence_from': lw.evidence_from, 'end': lw.end,
+                         'walks_below': len(lw.leaves_below),
+                         'merged_into': lw.merged_into, 'route': route})
+        base = dict(lab.as_dict(), handle=handle, evidence=ops.evidence_block(g, arm, view))
+        return self._page('graphlet_labels', handle, args, rows, base, max_bytes, n,
+                          resume=resume, before=before, partial=partial, start=start)
+
     @_tool
     def graphlet_splits(self, handle, arm, n=10, min_labels_before=2, cursor=None,
-                        max_bytes=None):
+                        max_bytes=None, budget=None):
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         n = _int('n', n, 1)
         min_labels_before = _int('min_labels_before', min_labels_before)
         keep = None if view is None else set(view.segments.get(a.side, ()))
+        call = _CALL.get()
+        if call is not None:
+            return self._splits_budgeted(g, a, view, keep, handle, n, min_labels_before,
+                                         cursor, max_bytes, call)
         rows = []
         for sp in derive.splits(a, g.mode):
             if sp.labels_before < min_labels_before:
@@ -1096,9 +1698,46 @@ class GraphletTools:
                 'evidence': ops.evidence_block(g, a.side, view)}
         return self._page('graphlet_splits', handle, args, rows, base, max_bytes, n)
 
+    def _splits_budgeted(self, g, a, view, keep, handle, n, min_labels_before, cursor,
+                         max_bytes, call):
+        args = dict(arm=a.side, min_labels_before=min_labels_before, cursor=cursor)
+        start, resume, before = self._position('graphlet_splits', handle, args, cursor)
+        b = call.budget
+        derive.uses(b, g, a, 'splits')
+        sps = derive.splits(a, g.mode)
+        k0 = resume[1] if resume else 0
+        rows = []
+        partial = None
+        k = k0
+        try:
+            b.charge(max(0, len(sps) - k0))
+            for k in range(k0, len(sps)):
+                sp = sps[k]
+                if sp.labels_before < min_labels_before:
+                    continue
+                if keep is not None and sp.segment not in keep:
+                    continue
+                b.charge(_B.W_ROW + _B.W_ELEM * len(sp.children),
+                         _B.dict_bytes(6) + len(sp.children) * (_B.dict_bytes(2) + 100))
+                rows.append({'at_bp': sp.at_bp, 'segment': sp.segment,
+                             'kind': 'ambiguous' if sp.ambiguous else 'divergence',
+                             'labels_before': sp.labels_before,
+                             'branches': [{'char': x['char'], 'labels': x['labels_distinct']}
+                                          for x in derive.split_branches(a, sp, g.cap)]})
+        except LocalBudgetExceeded as e:
+            if not rows and k == k0:
+                raise
+            call.stop = e.stop.restate(rows=len(rows), position=k).as_dict()
+            call.partial = True
+            partial = ('pos', k)
+        base = {'handle': handle, 'arm': a.side,
+                'evidence': ops.evidence_block(g, a.side, view)}
+        return self._page('graphlet_splits', handle, args, rows, base, max_bytes, n,
+                          resume=resume, before=before, partial=partial, start=start)
+
     @_tool
     def graphlet_claims(self, handle, arm, min_bp=0, route_consistent=True, labels=None,
-                        cursor=None, max_bytes=None):
+                        cursor=None, max_bytes=None, budget=None):
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
         min_bp = _int('min_bp', min_bp)
@@ -1111,7 +1750,33 @@ class GraphletTools:
             sel = [{'id': i} for i in sorted(ids)]
         rows = []
         filtered = collections.Counter()
-        for c in g.claims(a, labels=sel, strict=False):
+        call = _CALL.get()
+        r_in = before = token = start = None
+        args = dict(arm=a.side, min_bp=min_bp, route_consistent=route_consistent,
+                    labels=labels, cursor=cursor)
+        if call is None:
+            got = g.claims(a, labels=sel, strict=False)
+        else:
+            start, r_in, before = self._position('graphlet_claims', handle, args, cursor)
+            resume = None
+            if r_in is not None:
+                # where the claims go on, and what the filter removed before that position
+                resume = tuple(r_in[:-1])
+                filtered.update(dict(r_in[-1]))
+            # the page's row of a claim is charged with the claim (whole rows either way)
+            call.budget.row_extra = (_B.W_ROW, _B.dict_bytes(18))
+            try:
+                got = g.claims(a, labels=sel, strict=False, resume=resume)
+            except LocalBudgetExceeded as e:
+                if not e.partial.rows:
+                    raise                       # not one claim fits: the stop itself
+                got = e.partial.rows
+                call.stop = e.stop.as_dict()
+                call.partial = True
+                token = e.partial.resume
+            finally:
+                call.budget.row_extra = (0, 0)
+        for c in got:
             ev = c.evidence_from if c.evidence_from is not None else c.to_bp
             if c.to_bp - ev < min_bp:
                 continue
@@ -1124,8 +1789,6 @@ class GraphletTools:
             d = c.as_dict()
             d.pop('arm')
             rows.append(d)
-        args = dict(arm=a.side, min_bp=min_bp, route_consistent=route_consistent,
-                    labels=labels, cursor=cursor)
         base = {'handle': handle, 'arm': a.side,
                 'evidence': ops.evidence_block(g, a.side, view)}
         if filtered:
@@ -1134,11 +1797,16 @@ class GraphletTools:
         if g.mode == 'annotate' and a.labels_per_node.nodes_truncated:
             base['caveat'] = ('recorded label lists were cut: these claims are lower bounds '
                               '(label_lists limitation)')
-        return self._page('graphlet_claims', handle, args, rows, base, max_bytes)
+        if call is None:
+            return self._page('graphlet_claims', handle, args, rows, base, max_bytes)
+        # the filter's counts up to the resume position ride in it
+        partial = None if token is None else tuple(token) + (sorted(filtered.items()),)
+        return self._page('graphlet_claims', handle, args, rows, base, max_bytes,
+                          resume=r_in, before=before, partial=partial, start=start)
 
     @_tool
     def graphlet_sequence(self, handle, arm, walk=None, segment=None, start=0, end=None,
-                          orientation='natural', with_seed=False):
+                          orientation='natural', with_seed=False, budget=None):
         """A slice [start, end) of a walk's (or a segment's) bases, at most 16 KB; the
         result states the ceiling and where to continue."""
         g, view = self._resolve(handle)
@@ -1180,24 +1848,36 @@ class GraphletTools:
                'evidence': ops.evidence_block(g, a.side, view)}
         out['to'] = start + len(part)
         out['sequence'] = part
-        if _size(out) > self.sequence_max_bytes:
+        room = self.sequence_max_bytes
+        if _CALL.get() is not None:
+            # and, under local limits, the local block beside it (as a page keeps room
+            # for it): a slice fitted to the whole ceiling was answered result_too_large
+            # once the block was added
+            room -= _LOCAL_RESERVE
+        if _size(out) > room:
             # the ceiling holds for the whole result, the continuation keys included
             frame = _size(dict(out, sequence='', truncated=True, to=end, next_from=end))
-            part = part[:max(0, self.sequence_max_bytes - frame)]
+            part = part[:max(0, room - frame)]
             out.update(sequence=part, truncated=True, to=start + len(part),
                        next_from=start + len(part))
         return out
 
     @_tool
     def graphlet_export(self, handle, format='fasta', arm=None, walks=None, path=None,
-                        what=None, other=None):
+                        what=None, other=None, budget=None):
         """Write a complete export to a file in the export directory -> {path, bytes,
         records}: fasta, gfa, json (the full results[i]; what=compare with other=<handle>
         writes the complete comparison lists; what=walk with arm and walks writes the
         complete segment chains of those walks), mgt (the standalone file). |path| is a
         file name (default: <handle>.<ext>). The receipt is always returned: records,
-        then bytes, are cut first (fields_cut). The export has no work or allocation
-        budget: the file is as large as the graphlet makes it."""
+        then bytes, are cut first (fields_cut). Without local limits the export has no
+        work or allocation budget: the file is as large as the graphlet makes it. Under
+        local limits (stage L) an export either completes or writes no file (L4:
+        local_budget_exceeded, never a partial file), and format mgt copies the stored
+        body without a parse -- also of an entry no parse could afford."""
+        call = _CALL.get()
+        if call is not None and format == 'mgt':
+            return self._export_body(handle, path, what, call)
         g, view = self._resolve(handle)
         _choice('format', format, ('fasta', 'gfa', 'json', 'mgt'))
         if format == 'json':
@@ -1224,6 +1904,9 @@ class GraphletTools:
                         continue
                     ids = [w for w in view.path_ids[s] if walks is None or w in walks]
                     parts.append(export.to_fasta(g, s, ids))
+                if call is not None:
+                    n = sum(len(x) for x in parts)
+                    call.budget.charge(n >> 8, n + 49)
                 text = ''.join(parts)
             else:
                 text = g.to_fasta(side, walks)
@@ -1240,6 +1923,9 @@ class GraphletTools:
                 gb, vb = self._resolve(other)
                 self._no_view(vb, 'graphlet_export(what=compare)', other)
                 cmp = g.compare(gb, arm=side)
+                if cmp.local_stop is not None:
+                    # an interrupted comparison has no lists to write: no partial file (L4)
+                    raise LocalBudgetExceeded(_stop_of(cmp.local_stop))
                 obj = cmp.as_dict()
                 records = len(cmp.only_in_a) + len(cmp.only_in_b) + len(cmp.differ)
             elif what == 'walk':
@@ -1257,32 +1943,63 @@ class GraphletTools:
                         seq = None
                     obj['walks'].append({'walk': pid, 'length_bp': p.length_bp,
                                          'sequence': seq,
-                                         'segments': self._walk_rows(g, a, p, cut=None)})
+                                         'segments': self._walk_rows(
+                                             g, a, p, cut=None,
+                                             b=None if call is None else call.budget)})
                 obj['evidence'] = ops.evidence_block(g, side, view)
                 records = len(obj['walks'])
             else:
                 self._no_view(view, 'graphlet_export(format=json)', handle)
                 obj = g.to_json()
                 records = sum(len(x['paths']) for x in obj['arms'].values())
-            text = json.dumps(obj, ensure_ascii=False)
+            # under local limits the object is written by _write_json_charged, charged a
+            # piece at a time, and the whole text is never made (a second, uncharged copy
+            # of the export: 77 MB on the largest fixture)
+            text = json.dumps(obj, ensure_ascii=False) if call is None else None
         else:
             from .parser import dump
             # a derived handle's graphlet carries its view: the file is the unchanged
             # backing body with the view in J (§5)
             text = dump(g, envelope=True)
             records = text.count('\n')
+        if call is not None:
+            if format == 'json':
+                n = _write_json_charged(path, obj, call.budget)
+            else:
+                n = _write_text_charged(path, text, call.budget)
+            return _Receipt({'path': path, 'bytes': n, 'records': records},
+                            ('records', 'bytes'))
         data = text.encode('utf-8')
         with open(path, 'wb') as f:
             f.write(data)
         return _Receipt({'path': path, 'bytes': len(data), 'records': records},
                         ('records', 'bytes'))
 
+    def _export_body(self, handle, path, what, call):
+        """graphlet_export(format=mgt) under local limits: the entry's standalone text
+        copied from its stored body without a parse (the escape hatch of §21.9)."""
+        if what is not None:
+            raise ToolError('bad_argument', 'what= applies to format json only')
+        e = self.store.get(_handle(handle))
+        path = self._confined(path, [self._export_root()], default='%s.mgt' % handle)
+        _check_receipt(_Receipt(dict({'path': path}, **_unvalidated(e)),
+                                _UNVALIDATED_OPTIONAL + ('records', 'bytes')),
+                       self.max_bytes, 'use a shorter file name')
+        text = self.store.standalone_text(handle, budget=call.budget)
+        n = _write_text_charged(path, text, call.budget)
+        return _Receipt(dict({'path': path, 'bytes': n, 'records': text.count('\n')},
+                             **_unvalidated(e)),
+                        _UNVALIDATED_OPTIONAL + ('records', 'bytes'))
+
     @_tool
-    def graphlet_compare(self, a, b, arm=None, mode='claims', cursor=None, max_bytes=None):
+    def graphlet_compare(self, a, b, arm=None, mode='claims', cursor=None, max_bytes=None,
+                         budget=None):
         """Graphlet.compare() of two handles over their DAGs restricted to the common
         certified depth, paged. max_bytes bounds the page returned, not the comparison:
-        it runs with no work or allocation budget (its cost follows both DAGs up to the
-        depth)."""
+        without local limits it runs with no work or allocation budget (its cost follows
+        both DAGs up to the depth). Under local limits (stage L) a comparison its budget
+        stops answers comparable "unknown", equal null, counts null and no rows -- never
+        a difference from a half-keyed side -- with local.stop."""
         ga, va = self._resolve(a)
         gb, vb = self._resolve(b)
         self._no_view(va, 'graphlet_compare', a)
@@ -1308,11 +2025,18 @@ class GraphletTools:
                 'notes': cmp.notes, 'support': list(cmp.support),
                 'scopes': list(cmp.scopes), 'evidence': evidence,
                 'export': 'graphlet_export(format=json, what=compare) writes the complete lists'}
+        if cmp.local_stop is not None:
+            call = _CALL.get()
+            if call is not None:
+                call.stop = dict(cmp.local_stop)
+            base['counts'] = None
+            base['rows'] = []
+            return base
         args = dict(b=b, arm=arm, mode=mode, cursor=cursor)
         return self._page('graphlet_compare', a, args, rows, base, max_bytes)
 
     @_tool
-    def graphlet_subtrie(self, handle, labels, arm=None, mode='any'):
+    def graphlet_subtrie(self, handle, labels, arm=None, mode='any', budget=None):
         """A derived handle: a view with the backing graphlet's original ids; every local
         tool on it answers for the selected labels. The new handle is always returned:
         over the ceiling the summary, evidence and view are cut first (fields_cut)."""
@@ -1323,7 +2047,9 @@ class GraphletTools:
             raise ToolError('bad_argument', 'labels: at least one label')
         _choice('mode', mode, ('any', 'all'))
         side = None if arm is None else self._arm(g, arm).side
-        v = ops.subgraph(g, sel, side, mode)
+        # the view of the entry: its `of` is the handle (dumping and hashing the whole body
+        # for a digest that is overwritten with the handle below was pure cost)
+        v = ops.GraphletView(g, sel, side, mode, of=handle)
         e = self.store.get(handle)
         optional = ('summary', 'evidence', 'view')
         _check_receipt(_Receipt({'handle': 'g_' + '0' * 12, 'of': handle}, optional),
@@ -1333,8 +2059,13 @@ class GraphletTools:
         g2 = _copy.copy(g)
         g2.view = v.view_spec()
         g2.view['of'] = handle
-        new = self.store.put_graphlet(g2, e.request, derived_from=handle,
+        if _CALL.get() is not None:
+            # the backing body as stored (no dump: the view entry shares it)
+            new = self.store.put_view(handle, g2, e.request, derived_from=handle,
                                       source=e.index.get('source'))
+        else:
+            new = self.store.put_graphlet(g2, e.request, derived_from=handle,
+                                          source=e.index.get('source'))
         v.of = handle
         return _Receipt({'handle': new, 'of': handle, 'view': g2.view, 'summary': v.summary(),
                          'evidence': ops.evidence_block(g, side, v)}, optional)
@@ -1350,16 +2081,26 @@ class GraphletTools:
         return {'freed': handle}
 
     @_tool
-    def graphlet_save(self, handle, path):
-        """The standalone .mgt file of an entry, written to the export directory."""
+    def graphlet_save(self, handle, path, budget=None):
+        """The standalone .mgt file of an entry, written to the export directory. Under
+        local limits (stage L) it is copied from the stored body without a parse."""
         path = self._confined(path, [self._export_root()])
         _check_receipt(_Receipt({'path': path}, ('bytes',)), self.max_bytes,
                        'use a shorter file name')
+        call = _CALL.get()
+        if call is not None:
+            e = self.store.get(_handle(handle))
+            _check_receipt(_Receipt(dict({'path': path}, **_unvalidated(e)),
+                                    _UNVALIDATED_OPTIONAL + ('bytes',)),
+                           self.max_bytes, 'use a shorter file name')
+            n = self.store.save_body(handle, path, budget=call.budget)
+            return _Receipt(dict({'path': path, 'bytes': n}, **_unvalidated(e)),
+                            _UNVALIDATED_OPTIONAL + ('bytes',))
         n = self.store.save(_handle(handle), path)
         return _Receipt({'path': path, 'bytes': n}, ('bytes',))
 
     @_tool
-    def graphlet_load(self, path):
+    def graphlet_load(self, path, budget=None):
         """A saved .mgt file (from the export directory or the spool) -> a new handle and
         its summary (cut first, and named in fields_cut, when the answer would not fit:
         the handle is always returned)."""
@@ -1369,15 +2110,31 @@ class GraphletTools:
         _check_receipt(_Receipt({'handle': 'g_' + '0' * 12}, ('summary',)), self.max_bytes,
                        'this tool takes no max_bytes: the configured ceiling is below the '
                        'smallest receipt')
+        call = _CALL.get()
         try:
-            h = self.store.load(path)
+            if call is not None:
+                # the parse is this tool's operation: under its own budget; a stop stores
+                # nothing and leaves the file as it is
+                h = self.store.load(path, parse_budget=call.budget)
+            else:
+                h = self.store.load(path)
         except GraphletFormatError as e:
             # the file may be anything the agent named: say where, never what it holds
             raise ToolError('format_error', 'not a valid MGT v1 document (line %d)'
                             % e.line_no) from None
         except UnicodeDecodeError:
             raise ToolError('format_error', 'not a valid MGT v1 document (not UTF-8)') from None
-        g = self.store.graphlet(h)
+        if call is not None:
+            # resident after the load, unless the store evicted it at once: a parse again
+            # then runs under the parse class too, never unbudgeted inside a budgeted call
+            g = self.store.graphlet(h, parse_budget=self._parse_budget(call))
+        else:
+            g = self.store.graphlet(h)
+        if call is not None:
+            out = {'handle': h, 'summary': None}
+            if g.has_envelope:
+                self._summary_into(g, out, None)
+            return _Receipt(out, ('summary',))
         return _Receipt({'handle': h, 'summary': self._fit_summary(g, {'handle': h})
                          if g.has_envelope else None}, ('summary',))
 
@@ -1439,6 +2196,85 @@ def _weakest(first, second):
 
 def _row(x):
     return x if isinstance(x, dict) else {'value': x}
+
+
+# the receipt of a body-level copy (export mgt, save under local limits) of an entry whose
+# parse stopped (L3): the file holds a body checked for its frame only, which no parse has
+# validated -- an essential field, so that the receipt never reads like that of a graphlet
+_UNVALIDATED_OPTIONAL = ('validation',)
+_UNVALIDATED_NOTE = ('the body was stored unparsed (its parse stopped on the local budget): '
+                     'only its frame was checked (transport, H record, Z count), not its '
+                     'records; graphlet_load of the file, or a parse, validates it')
+
+
+def _unvalidated(e):
+    return {'parsed': False, 'validation': _UNVALIDATED_NOTE} if not e.parsed else {}
+
+
+def _stop_of(d):
+    """A LocalStop again from its as_dict() (a comparison returns its stop as data)."""
+    return _B.LocalStop(**{k: v for k, v in d.items() if k != 'scope'})
+
+
+def _atomic_open(path):
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix='.export-', dir=d)
+    return os.fdopen(fd, 'wb'), tmp
+
+
+def _write_text_charged(path, text, b):
+    """Write |text| to |path| through a temporary file renamed on completion, charged
+    (its encoding and its bytes) before it is written: a stop writes no file (L4)."""
+    b.charge(len(text) >> 8, 2 * (len(text) + 49))
+    data = text.encode('utf-8')
+    f, tmp = _atomic_open(path)
+    try:
+        with f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return len(data)
+
+
+class _ChargedWriter:
+    """A text sink for json.dump that charges every chunk (1 lwu per 16 bytes) and writes
+    its UTF-8 bytes: the export never holds the whole JSON text."""
+
+    __slots__ = ('f', 'b', 'n')
+
+    def __init__(self, f, b):
+        self.f = f
+        self.b = b
+        self.n = 0
+
+    def write(self, chunk):
+        self.b.charge(1 + (len(chunk) >> _B.TEXT_SHIFT))
+        data = chunk.encode('utf-8')
+        self.n += len(data)
+        self.f.write(data)
+
+
+def _write_json_charged(path, obj, b):
+    """json.dumps(obj, ensure_ascii=False) written to |path| as it is encoded (the same
+    text), through a temporary file renamed on completion: a stop writes no file."""
+    f, tmp = _atomic_open(path)
+    try:
+        with f:
+            w = _ChargedWriter(f, b)
+            json.dump(obj, w, ensure_ascii=False)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return w.n
 
 
 def _alive_at(g, arm, at_bp):

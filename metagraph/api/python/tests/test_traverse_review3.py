@@ -788,8 +788,9 @@ class TestN3LiveOracleComparesTheManifest(unittest.TestCase):
 class TestD1D7StatedInTheDocs(unittest.TestCase):
     """D1: an annotate claim's witness route is one route chosen by the stored parent
     order: it enumerates no other route and establishes no contiguous source occurrence.
-    D7: compare(), routes() and the exports have no work or allocation budget; max_bytes
-    bounds returned bytes only. Both stated in the docstrings and in graphlets.rst."""
+    D7: without a budget compare(), routes() and the exports have no work or allocation
+    budget; max_bytes bounds returned bytes only. Both stated in the docstrings and in
+    graphlets.rst -- and, since stage L, that a budget is there to be passed."""
 
     def rst(self):
         with open(os.path.join(T.REPO, 'docs', 'source', 'graphlets.rst'),
@@ -813,6 +814,13 @@ class TestD1D7StatedInTheDocs(unittest.TestCase):
         rst = self.rst()
         self.assertIn('no work or allocation budget', rst)
         self.assertIn('``max_bytes`` bounds the bytes returned, not the work', rst)
+        # stage L: the budgets exist and are off by default -- said where "none" is said
+        for text in (ops.__doc__, ops.compare.__doc__, ops.routes.__doc__, export.__doc__,
+                     mcp_tools.__doc__, mcp_tools.GraphletTools.graphlet_compare.__doc__,
+                     mcp_tools.GraphletTools.graphlet_export.__doc__):
+            flat = ' '.join(text.split())
+            self.assertRegex(flat, r'(?i)without (a budget|local limits|local_limits)')
+        self.assertIn('Local budgets', rst)
 
 
 # ------------------------------------------------------------------ D4

@@ -659,12 +659,14 @@ annotate mode a row that fits but names more new labels than the memory left hol
 in phase ``traversal``, with ``lower_max_labels_per_node`` among its levers; the message
 always says which of the two did not fit.
 
-These budgets bound the backend's walk. The library's own operations have none yet:
-``compare()``, ``routes()`` and the exports (``to_fasta()``, ``to_gfa()``,
-``to_json()``) run locally with no work or allocation budget, their time and peak
-memory follow the size of the graphlet (a comparison reads both DAGs up to its depth, an
-export spells every chosen walk), and nothing interrupts them. A tool's ``max_bytes``
-bounds the bytes it returns, not the computation behind them.
+These budgets bound the backend's walk. The library's own operations have budgets of
+their own, which are off by default: called without one, ``compare()``, ``routes()`` and
+the exports (``to_fasta()``, ``to_gfa()``, ``to_json()``) run locally with no work or
+allocation budget, their time and peak memory follow the size of the graphlet (a
+comparison reads both DAGs up to its depth, an export spells every chosen walk), and
+nothing interrupts them. With ``budget=`` every local operation either completes or stops
+and says so (`Local budgets`_). A tool's ``max_bytes`` bounds the bytes it returns, not
+the computation behind them.
 
 .. note::
 
@@ -1471,6 +1473,115 @@ read with ``from_response()``; ``dump(envelope=True)`` adds the ``J`` line, whic
    1225 1225 J {"algorithm_version":"traver
 
 
+Local budgets
+-------------
+
+Every local operation takes ``budget=`` (keyword-only): a ``LocalBudget`` of **work
+units** and a **memory account**, under which the call either completes or stops and
+says so -- never a shorter answer that could be read as complete. Without one (the
+default) nothing is budgeted and every answer is byte for byte what it was before.
+
+* **Work** is counted in local work units (lwu): a deterministic, weighted count of the
+  model elements an operation visits and of the rows and text it makes (work model 1;
+  1 lwu is about 0.1 us of CPython 3.11 on the reference machine, so 30 M lwu is about
+  3 s nominal). It is not CPU time. A derivation an operation uses (paths, splits, merge
+  maps, evidence, label summaries, ...) is charged at its *cold price*, whether a cache
+  holds it or not: the same call on the same graphlet with the same budget charges the
+  same units and stops at the same row, in any process and whatever earlier calls cached.
+  Warm calls pay more than they spend.
+* **Memory** is a modelled account (``memory_bound: "model"``): the bytes of the rows,
+  spellings, text and derived caches a call builds, each charged before it is made at a
+  size modelled on CPython. It is not a measurement: Python can allocate more than the
+  model says (interpreter internals, fragmentation, another CPython version, text beyond
+  ASCII), so in-process it is a soft bound; a hard bound needs process limits. The
+  memory limit holds for each call; the work of the calls that share one budget adds
+  up (an allowance). One exception to "charged before": a record of output text is
+  charged as soon as it is built (its size is known only then).
+* ``LocalLimits(work_units=None, memory_mb=None, deadline_s=None)`` holds the limits
+  (``None``: unlimited). ``deadline_s`` (elapsed seconds since the budget was made) and
+  ``budget.cancel()`` (from another thread) stop a call at its next charge point; they
+  are not reproducible and say so (``deterministic: false``).
+* ``local_budget(...)`` sets an ambient budget for the code inside it, which every call
+  without ``budget=`` charges; an explicit budget wins. A new thread starts without one.
+* ``next_request()`` and ``next_requests()`` take a ``LocalBudget`` as ``budget=`` like
+  every other operation; any other value of ``budget=`` is, as before, a keyword
+  override like the others, deep-merged into the strategy (so the two together need the
+  ambient ``local_budget()``).
+
+A stop raises ``LocalBudgetExceeded`` (an ``Exception``, neither a ``ValueError`` nor a
+``RuntimeError``) whose ``.stop`` states it: the resource (``work``, ``memory``,
+``deadline``, ``cancelled``), the operation and its phase, the limit, what was used and
+at least what would have been needed (in lwu or bytes), how far the call got
+(``done``), and the levers (``raise_local_budget``, ``narrow_labels``,
+``narrow_arm``, ``select_walks``, ``rank_id``, ``export_mgt``, ``process_locally``,
+``retry_later``). A stop leaves only complete caches: an unbudgeted call afterwards
+answers as on a fresh model.
+
+* **Lists whose order allows it** -- ``claims()``, ``label_walks()``, ``routes()``,
+  ``splits()``, ``walks(by='id')``, ``walks_at()`` -- put the whole rows they made, a
+  prefix in their documented order, in ``e.partial.rows``, and a token in
+  ``e.partial.resume`` that the same call takes as ``resume=`` to go on after the last
+  row. A token of another call, other arguments or another graphlet is refused: it
+  binds the digest of the graphlet's body (``Graphlet.body_digest``, made by the parse),
+  which the same body parsed again, or saved and loaded, shares.
+* **Ranked lists and summaries** -- ranked ``walks()``, ``rank_walks()``,
+  ``label_summary()``, ``summary()``, ``support_profile()``, ``support_changes()``,
+  ``subgraph()``, ``continuation()``, ``next_request()`` -- raise with no partial: a
+  ranking or a summary of part of the arm would be another answer.
+* **compare()** never raises for a budget: a stopped comparison returns
+  ``comparable: 'unknown'``, ``equal: None``, no difference lists and ``local_stop``,
+  because a list from a half-keyed side would be a false difference.
+  ``ops.compare_cost(a, b, mode=...)`` estimates the charge beforehand: ``at_least`` (the
+  structural phases, certain once both sides are keyed) and ``estimate``, with the
+  phases whose size depends on the answer named in ``unpriced``.
+* **Exports and saves** (``to_json()``, ``to_fasta()``, ``to_gfa()``, ``dump()``,
+  ``save()``) return no text and write no file when they stop: never a partial export.
+* **Parsing** (``parse()``, ``from_response()``, ``load()``): a body whose line count
+  alone exceeds the work budget, or whose line list alone exceeds the account, is
+  refused before any record is read; a parse that stops is a local failure -- no model,
+  the text untouched, never a shallower graphlet.
+
+.. graphlet-example: local-budgets
+
+.. code-block:: python
+
+   from metagraph.traverse import LocalBudget, LocalBudgetExceeded, local_budget
+
+   b = LocalBudget()
+   all_claims = merge.claims(budget=b)
+   print(len(all_claims), b.usage()['work_units'] > 0, b.usage()['work_model'])
+   try:
+       merge.claims(budget=LocalBudget(work_units=b.used_work - 1))    # one unit short
+   except LocalBudgetExceeded as e:
+       print(e.stop.resource, e.stop.op, e.stop.phase, e.stop.deterministic,
+             0 < len(e.partial.rows) < len(all_claims))
+       rest = merge.claims(resume=e.partial.resume)
+       print([c.as_dict() for c in e.partial.rows + rest]
+             == [c.as_dict() for c in all_claims])
+   whole = LocalBudget()
+   merge.compare(merge, budget=whole)
+   c = merge.compare(merge, budget=LocalBudget(work_units=whole.used_work // 2))
+   print(c.comparable, c.equal, c.local_stop['resource'], c.local_stop['phase'])
+   with local_budget(work_units=10 ** 9) as allowance:    # one allowance, two calls
+       merge.to_fasta()
+       merge.label_summary()
+   print(allowance.used_work > 0, allowance.stops)
+
+.. code-block:: text
+
+   6 True 1
+   work claims rows True True
+   True
+   unknown None work keys:a
+   True []
+
+Not charged: the store's bookkeeping (``refresh``, ``memory_bytes()``), the HTTP
+client's decoding of a response, cursor MACs, ``check_rules()``, the tables of
+``frames()`` (the library calls they make are charged), and the MCP framework's
+serialisation of a result. The store runs its own parses under ``parse_limits`` (see
+below), and the MCP tools take budgets per call (``local_limits``).
+
+
 Handles, the store and the tool functions
 -----------------------------------------
 
@@ -1480,8 +1591,9 @@ The store
 ^^^^^^^^^
 
 ``GraphletStore(spool_dir, max_ram_mb=512, max_handles=64, ttl_ram_s=1800,
-ttl_disk_s=7*86400, *, max_body_mb=None, ttl_tomb_s=30*86400, clock=time.time)`` keeps
-retrievals behind **opaque handles** (``g_`` and 12 random hex digits):
+ttl_disk_s=7*86400, *, max_body_mb=None, ttl_tomb_s=30*86400, clock=time.time,
+parse_limits=None)`` keeps retrievals behind **opaque handles** (``g_`` and 12 random hex
+digits):
 
 * a handle names an *entry*: the request, the index identity, the envelope and a
   digest of the body. Bodies are deduplicated by sha256 in the spool, but a body hash is
@@ -1498,7 +1610,16 @@ retrievals behind **opaque handles** (``g_`` and 12 random hex digits):
   an expired entry leaves a tombstone with its request, so ``UnknownHandle.replayable``
   tells a caller that the retrieval can be run again. ``free(handle)`` deletes for good;
 * ``save(handle, path)`` / ``load(path)`` move entries through ``.mgt`` files, and
-  ``list()`` describes the entries.
+  ``list()`` describes the entries;
+* with ``parse_limits=LocalLimits(...)`` every parse the store runs (``put``, a parse on
+  demand, ``load``) has a fresh budget of those limits. A body whose parse stops is not
+  lost: ``put`` stores it after the checks that need no parse (``graphlet_bytes``,
+  ``graphlet_lines``, the ``H`` record, the ``Z`` line count -- a body cut in transport
+  is still refused) as an entry marked ``parsed: false``, and raises the stop with
+  ``e.handle`` naming it. No answer is derived from such an entry until a parse
+  completes (``graphlet(handle, parse_budget=...)``); ``standalone_text(handle)`` and
+  ``save_body(handle, path)`` copy any entry out without a parse, byte for byte what
+  ``save()`` writes.
 
 .. note::
 
@@ -1536,8 +1657,8 @@ The tool functions
 
 ``metagraph.traverse.mcp_tools.GraphletTools(store, clients=None, *,
 default_index=None, max_bytes=2048, sequence_max_bytes=16384, secret=None,
-export_dir=None)`` bundles framework-agnostic functions, one per tool, each returning a
-JSON-serialisable dict. They are written for an MCP server to register (with whatever
+export_dir=None, local_limits=None)`` bundles framework-agnostic functions, one per tool,
+each returning a JSON-serialisable dict. They are written for an MCP server to register (with whatever
 MCP framework it uses); this package does not run a server itself. ``clients`` maps
 index names to ``TraverseClient`` objects for the backend tools.
 
@@ -1579,9 +1700,10 @@ The contract:
   not fit is refused before it stores or writes anything (``receipt_too_large``, whose
   message names the lever the tool offers: a larger ``max_bytes``, or a shorter file name
   for an export or a save);
-* ``max_bytes`` bounds the bytes returned, not the work: the local tools
-  (``graphlet_compare``, ``graphlet_export``, the route listings) have no work or
-  allocation budget yet, and their time and peak memory follow the graphlet's size;
+* ``max_bytes`` bounds the bytes returned, not the work. Without ``local_limits`` (the
+  default) the local tools (``graphlet_compare``, ``graphlet_export``, the route
+  listings) run with no work or allocation budget, and their time and peak memory follow
+  the graphlet's size: a service sets ``local_limits`` (`Local budgets in the tools`_);
 * a filter never hides rows silently: what it removed is counted (e.g.
   ``filtered: {merge_entered: N}`` with a hint how to include them);
 * files are written to and read from the export directory (default
@@ -1632,6 +1754,86 @@ The contract:
    3 3 False
    bad_cursor
    unknown_label path_not_allowed
+
+
+Local budgets in the tools
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``GraphletTools(..., local_limits=ToolLimits())`` runs every local tool under a budget
+of its class:
+
+==========  ==========================================================  ==================  =====================
+class       tools                                                       default             ceiling
+==========  ==========================================================  ==================  =====================
+view        summary, walks, walk, support, labels, splits, claims,       30 M lwu, 1 GiB     300 M lwu, 10 GiB
+            sequence
+heavy       compare, export, subtrie, save                              300 M lwu, 2 GiB    3 G lwu, 20 GiB
+parse       fetch, continue, load (and a parse on demand)               200 M lwu, 2 GiB    2 G lwu, 20 GiB
+==========  ==========================================================  ==================  =====================
+
+``traverse_capabilities``, ``traverse_resolve``, ``graphlet_list`` and ``graphlet_free``
+are not budgeted (they compute nothing locally beyond handling JSON).
+
+* An agent may raise or lower its call's budget with ``budget={"work_units": ...,
+  "memory_mb": ..., "deadline_s": ...}``, up to the class ceiling; a value above it is
+  clamped and the clamp stated (``local.clamped``). ``ToolLimits(per_tool={...})``
+  overrides a tool's default, ``budget_for(tool, request)`` lets the service supply the
+  budget object itself (its tiers, its ledger's reservation), and ``on_usage(tool,
+  usage)`` receives the usage of every budgeted call, completed or stopped. Without
+  ``local_limits`` a ``budget`` argument is refused (``bad_argument``).
+* Every budgeted result carries ``local``: ``{complete, usage: {work_units,
+  memory_bytes}, limits, work_model, memory_bound: "model", clamped?, parsed?, stop?}``
+  (``parsed``: the usage of a parse the store ran for the call and the limits it ran
+  under, which is not charged to it). A parse on demand runs under the parse class,
+  raised field by field by the call's ``budget`` argument up to the parse class's
+  ceiling (never lowered by it), so ``raise_local_budget`` is a lever for a stopped
+  parse too; under the store's own ``parse_limits``, which no call raises, that lever is
+  not offered. An interrupted answer also names the scope local in its evidence
+  (``evidence.limitations.local: ["local_work"]``), so it never reads as complete.
+* A stop is the error ``local_budget_exceeded`` with its ``stop`` (held to
+  ``max_bytes``: the message is cut first, the code and the resource kept), except:
+  the lists whose order allows it (``graphlet_claims``, ``graphlet_labels(name=...)``,
+  ``graphlet_splits``, ``graphlet_walk``, and ``graphlet_walks`` once its ranking is
+  made) answer the whole rows made so far with ``complete: false``,
+  ``total_at_least`` and a ``next_cursor`` that resumes after the last row
+  (``filtered`` becomes ``filtered_so_far``; ``total`` appears once the list is
+  complete); ``graphlet_compare`` answers ``comparable: "unknown"``, ``equal: null``,
+  ``counts: null`` and no rows; an export, save or view stopped makes nothing.
+* A fetch or continuation whose parse stops keeps the body as an unparsed entry and
+  returns its handle with the server's own per-seed summary (``server_summary``) and the
+  stop; ``graphlet_export(format="mgt")`` and ``graphlet_save`` copy any entry out
+  without a parse, so an agent can always take a graphlet it cannot afford to process
+  here and process it with its own resources. The receipt of such a copy of an unparsed
+  entry says ``parsed: false`` (and, cut first when it does not fit, ``validation``):
+  only the body's frame was checked, and a load of the file validates its records.
+* Budgeted results keep room for the ``local`` block: a page, a summary and a
+  ``graphlet_sequence`` slice are fitted to the ceiling less that room.
+
+.. graphlet-example: tools-local
+
+.. code-block:: python
+
+   from metagraph.traverse.mcp_tools import ToolLimits
+
+   usage = []
+   budgeted = GraphletTools(store, local_limits=ToolLimits(
+       on_usage=lambda tool, u: usage.append((tool, u['complete']))))
+   page = budgeted.graphlet_claims(h, 'right', route_consistent=False)
+   print(page['local']['complete'], page['local']['limits']['work_units'],
+         page['total'])
+   small = budgeted.graphlet_claims(h, 'right', route_consistent=False,
+                                    budget={'work_units': 1})
+   print(small['error'], small['stop']['resource'], small['stop']['op'])
+   big = budgeted.graphlet_claims(h, 'right', budget={'work_units': 10 ** 12})
+   print(big['local']['clamped'], big['local']['limits']['work_units'])
+   print(usage)
+
+.. code-block:: text
+
+   True 30000000 6
+   local_budget_exceeded work claims
+   ['work_units'] 300000000
+   [('graphlet_claims', True), ('graphlet_claims', False), ('graphlet_claims', True)]
 
 
 Pitfalls

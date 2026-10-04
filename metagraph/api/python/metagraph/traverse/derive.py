@@ -15,12 +15,16 @@ from .model import EndLabel, Path, Split
 
 __all__ = [
     'entry_base', 'rule_entry', 'rule_end', 'rule_partition', 'runs_by_segment',
+    'runs_by_label', 'partition_sets',
     'leaves', 'paths', 'path_of_leaf', 'chain', 'splits', 'split_branches',
     'label_end_events', 'reconverge_events', 'end_labels', 'labels_at_end',
     'label_summary', 'needed_budgets', 'continuation_sequence', 'walk_bases',
-    'natural_flank', 'evidence', 'lineage_label_at', 'merge_above', 'run_leaves',
-    'check_rules',
+    'walk_batch', 'natural_flank', 'evidence', 'lineage_label_at', 'merge_above',
+    'run_leaves', 'check_rules',
 ]
+
+NO_BASES = 'this retrieval carries no bases (output.sequences: false)'
+_EMPTY_SET = frozenset()
 
 
 def _union(sets):
@@ -102,6 +106,42 @@ def runs_by_segment(arm):
         for r in arm.runs:
             got[r.segment].append(r.id)
         arm.cache['runs_by_segment'] = got
+    return got
+
+
+def runs_by_label(arm):
+    """label id -> the ids of its runs, in run order. routes() and label_walks() answer
+    for one label: scanning every run of the arm per label made a listing over all labels
+    quadratic (labels x runs)."""
+    got = arm.cache.get('runs_by_label')
+    if got is None:
+        got = {}
+        for r in arm.runs:
+            got.setdefault(r.label, []).append(r.id)
+        arm.cache['runs_by_label'] = got
+    return got
+
+
+def partition_sets(arm):
+    """merge segment id -> its partition (G.partition, one set per parent) as frozensets.
+    Membership in the stored array('I') is a linear scan of up to every label id, and the
+    evidence walk and the route reconstruction test one label per merge they pass; equal
+    arrays (interned: one object) share one set. Segment.partition keeps the arrays, which
+    is what dump() encodes and what the model exposes."""
+    got = arm.cache.get('partition_sets')
+    if got is None:
+        got = {}
+        shared = {}
+        for s in arm.segments:
+            if len(s.parents) > 1:
+                sets = []
+                for p in s.partition:
+                    fs = shared.get(id(p))
+                    if fs is None:
+                        fs = shared[id(p)] = frozenset(p) if len(p) else _EMPTY_SET
+                    sets.append(fs)
+                got[s.id] = tuple(sets)
+        arm.cache['partition_sets'] = got
     return got
 
 
@@ -333,12 +373,84 @@ def walk_bases(arm, leaf):
     """The flank in WALKING order, root -> leaf (outward index i is [i])."""
     segs = arm.segments
     parts = []
-    for s in chain(arm, leaf):
-        w = segs[s].walk
+    s = leaf
+    while True:
+        seg = segs[s]
+        w = seg.walk
         if w is None:
-            raise ValueError('this retrieval carries no bases (output.sequences: false)')
+            raise ValueError(NO_BASES)
         parts.append(w)
+        p = seg.parents
+        if not p:
+            break
+        s = p[0]
+    parts.reverse()
     return ''.join(parts)
+
+
+def walk_batch(arm, targets, spell=True):
+    """{seg: (chain, bases)} for every segment of |targets|: its first-parent chain root
+    -> seg (a new list per target) and, with |spell|, its bases root -> end in WALKING
+    order (None when the retrieval carries no bases; a ValueError for a model with bases
+    on some segments only, as walk_bases()).
+
+    The targets share the prefixes of their common ancestors: a prefix is kept only where
+    two targets' chains part (or one target goes on below another), so the work and the
+    memory follow the output. Spelling each target's chain on its own re-reads every
+    shared segment, which made spelling all walks quadratic in their shared depth; a
+    prefix kept at every segment of a deep chain would be quadratic in memory instead.
+    For one target this is chain() and walk_bases()."""
+    segs = arm.segments
+    tset = set(targets)
+    if not tset:
+        return {}
+    has_bases = spell and bool(segs) and segs[0].walk is not None
+    # the union of the targets' chains, and per segment how many of its first-parent
+    # children lie in it
+    inu = set()
+    kids = {}
+    for t in tset:
+        s = t
+        while s not in inu:
+            inu.add(s)
+            p = segs[s].parents
+            if not p:
+                break
+            q = p[0]
+            kids[q] = kids.get(q, 0) + 1
+            s = q
+    keep = {}          # where chains part: seg -> (chain, bases)
+    out = {}
+    for s in sorted(x for x in inu if x in tset or kids.get(x, 0) >= 2):
+        ids = []
+        x = s
+        base = None
+        while True:
+            ids.append(x)
+            p = segs[x].parents
+            if not p:
+                break
+            x = p[0]
+            base = keep.get(x)
+            if base is not None:
+                break
+        ids.reverse()
+        bases = None
+        if has_bases:
+            parts = [segs[i].walk for i in ids]
+            if None in parts:
+                raise ValueError(NO_BASES)
+            bases = ''.join(parts) if base is None else base[1] + ''.join(parts)
+        chain_ = ids if base is None else base[0] + ids
+        n = kids.get(s, 0)
+        target = s in tset
+        if n >= 2 or (target and n):
+            keep[s] = (chain_, bases)
+            if target:
+                out[s] = (list(chain_), bases)
+        elif target:
+            out[s] = (chain_, bases)
+    return out
 
 
 def natural_flank(arm, leaf):
@@ -348,10 +460,11 @@ def natural_flank(arm, leaf):
     return w if arm.side == 'right' else w[::-1]
 
 
-def continuation_sequence(g, arm, leaf):
+def continuation_sequence(g, arm, leaf, walk=None):
     """The C record's spelling (v2, both arms stated): right arm: the LAST n bases of
     seed + natural(right flank); left arm: the FIRST n bases of natural(left flank) +
-    seed (n <= |seed| + flank; a continuation may cross into the seed)."""
+    seed (n <= |seed| + flank; a continuation may cross into the seed). |walk|: the
+    leaf's bases in walking order when the caller has spelled them already."""
     seg = arm.segments[leaf]
     c = seg.leaf.continuation if seg.leaf else None
     if c is None:
@@ -360,7 +473,10 @@ def continuation_sequence(g, arm, leaf):
         return c.sequence
     if c.n == 0:
         return ''
-    flank = natural_flank(arm, leaf)
+    if walk is None:
+        flank = natural_flank(arm, leaf)
+    else:
+        flank = walk if arm.side == 'right' else walk[::-1]
     if arm.side == 'right':
         whole = g.seed.sequence + flank
         return whole[len(whole) - c.n:]
@@ -416,17 +532,265 @@ def evidence(arm, run):
     route_from = 0
     above = merge_above(arm)
     m = above[run.segment]
+    if m is not None:
+        psets = partition_sets(arm)
     while m is not None:
         seg = segs[m]
         if seg.from_bp <= t:
             label_at = lineage_label_at(arm, run, seg.from_bp)
-            if label_at not in seg.partition[0]:
+            if label_at not in psets[m][0]:
                 route_from = seg.from_bp
                 break
         m = above[seg.parents[0]]
     got = (route_from, max(route_from, run.from_bp))
     cache[run.id] = got
     return got
+
+
+# ------------------------------------------------------------------ stage L prices
+
+def arm_sizes(arm):
+    """The structural sizes of an arm that the derivations' prices are made of (stage L,
+    DESIGN §21.3): facts of the model, cached once computed. Callers charge the pass at
+    its price first (sizes_price)."""
+    got = arm.cache.get('sizes')
+    if got is None:
+        segs = arm.segments
+        entry_ids = end_ids = presence = presence_ids = events = switches = 0
+        merges = partition_ids = parts = leaves = leaf_depth = walk_bp = depth_sum = 0
+        leaf_runs = 0
+        rbs = runs_by_segment(arm)
+        for s in segs:
+            entry_ids += len(s.entry)
+            end_ids += len(s.end)
+            if s.presence:
+                presence += len(s.presence)
+                for p in s.presence:
+                    presence_ids += len(p.labels)
+            if s.events:
+                events += len(s.events)
+                for ev in s.events:
+                    if ev.type == 'switch':
+                        switches += 1
+            if len(s.parents) > 1:
+                merges += 1
+                parts += len(s.partition)
+                for p in s.partition:
+                    partition_ids += len(p)
+            d = s.depth + 1
+            depth_sum += d
+            if s.leaf is not None:
+                leaves += 1
+                leaf_depth += d
+                walk_bp += s.from_bp + s.length_bp
+                leaf_runs += len(rbs[s.id])
+        got = {'segments': len(segs), 'runs': len(arm.runs), 'leaves': leaves,
+               'merges': merges, 'parts': parts, 'partition_ids': partition_ids,
+               'entry_ids': entry_ids, 'end_ids': end_ids, 'presence': presence,
+               'presence_ids': presence_ids, 'events': events, 'switches': switches,
+               'leaf_depth': leaf_depth, 'depth_sum': depth_sum, 'walk_bp': walk_bp,
+               'leaf_runs': leaf_runs, 'splits': len(splits_of_counts(arm))}
+        arm.cache['sizes'] = got
+    return got
+
+
+def splits_of_counts(arm):
+    """The split parents (without building the Split records): for arm_sizes."""
+    return {s.parents[0] for s in arm.segments if len(s.parents) == 1}
+
+
+def merge_depth(arm):
+    """seg -> the merges at or above it on its first-parent chain: how many merges the
+    evidence walk of a run anchored there may test (the per-entry price of evidence())."""
+    got = arm.cache.get('merge_depth')
+    if got is None:
+        got = []
+        segs = arm.segments
+        for s in segs:
+            up = got[s.parents[0]] if s.parents else 0
+            got.append(up + (1 if len(s.parents) > 1 else 0))
+        arm.cache['merge_depth'] = got
+    return got
+
+
+def subtree_bounds(arm):
+    """(seg -> an upper bound of the segments a walk over ALL its children visits, seg ->
+    the segments of its first-parent subtree): the per-entry prices of run_leaves() and of
+    the displayed leaves below an anchor. Children come after their parents, so the
+    segments below seg are at most those after it."""
+    got = arm.cache.get('subtree_bounds')
+    if got is None:
+        segs = arm.segments
+        n = len(segs)
+        every = [1] * n
+        first = [1] * n
+        for s in reversed(segs):
+            tot = 1
+            fp = 1
+            for c in s.children:
+                tot += every[c]
+                if segs[c].parents[0] == s.id:
+                    fp += first[c]
+            every[s.id] = min(tot, n - s.id)
+            first[s.id] = fp
+        got = (every, first)
+        arm.cache['subtree_bounds'] = got
+    return got
+
+
+def route_depth(arm):
+    """seg -> the most segments a route root -> seg can have, through any parents (the
+    first-parent depth bounds only the displayed chain): the price of a label's own
+    route back from its anchor."""
+    got = arm.cache.get('route_depth')
+    if got is None:
+        got = []
+        for s in arm.segments:
+            got.append(1 + max((got[p] for p in s.parents), default=0))
+        arm.cache['route_depth'] = got
+    return got
+
+
+def segment_ops(arm):
+    """seg -> the label changes inside it (constrain: the runs anchored there that end
+    before its last node, and its switch-ins): the pieces of displayed support it splits
+    into are at most one more."""
+    got = arm.cache.get('segment_ops')
+    if got is None:
+        segs = arm.segments
+        got = [0] * len(segs)
+        for r in arm.runs:
+            if r.to_bp < segs[r.segment].from_bp + segs[r.segment].length_bp:
+                got[r.segment] += 1
+        for s in segs:
+            for ev in s.events:
+                if ev.type == 'switch':
+                    got[s.id] += 1
+        arm.cache['segment_ops'] = got
+    return got
+
+
+def cut_cost(arm, mode):
+    """seg -> the price (lwu) of a comparison cut of the first-parent chain root -> seg
+    (ops._cut_info): per segment its pieces of displayed support, their sets and the
+    labels kept supporting, summed along the chain. The count of a cut's work, read in
+    one lookup."""
+    got = arm.cache.get('cut_cost')
+    if got is None:
+        segs = arm.segments
+        ops_ = segment_ops(arm) if mode == 'constrain' else None
+        n0 = len(segs[0].entry) if segs else 0
+        got = []
+        for s in segs:
+            if mode == 'constrain':
+                pieces = 1 + min(ops_[s.id], s.length_bp)
+                ids = pieces * (len(s.entry) + len(s.events))
+            else:
+                pieces = len(s.presence)
+                ids = 0
+                for p in s.presence:
+                    ids += len(p.labels)
+            own = 2 * (2 + pieces) + (ids >> 5) + ((pieces * n0) >> 2) + (s.length_bp >> 8)
+            got.append((got[s.parents[0]] if s.parents else 0) + own)
+        arm.cache['cut_cost'] = got
+    return got
+
+
+def _derivation_prices(z, n_labels, mode):
+    """name -> (lwu, bytes) of each cached derivation at its structural (cold) price."""
+    from .budget import (LIST, LIST_ITEM, SET, SET_ITEM, DICT, DICT_KEY, TUPLE, INT,
+                         W_ELEM, list_bytes, dict_bytes)
+    S, R, L = z['segments'], z['runs'], z['leaves']
+    M, P = z['merges'], z['splits']
+    ids_shift = 2
+    return {
+        'leaves': (S, list_bytes(L)),
+        'paths': (S + 6 * L, list_bytes(L) + L * (72 + 2 * INT)),
+        'path_of_leaf': (2 * L, dict_bytes(L) + L * INT),
+        'splits': (3 * S + 8 * P, list_bytes(P) + P * (80 + LIST + 2 * LIST_ITEM)
+                   + dict_bytes(P)),
+        'merge_above': (2 * S, list_bytes(S)),
+        'merge_depth': (2 * S, list_bytes(S)),
+        'route_depth': (3 * S + z['parts'], list_bytes(S)),
+        'cut_cost': (8 * S + z['presence'] + R, 2 * list_bytes(S) + S * INT),
+        'segment_ops': (2 * S + R + z['events'], list_bytes(S)),
+        'subtree_bounds': (4 * S, 2 * list_bytes(S) + 2 * S * INT),
+        'first_paths': (3 * S, list_bytes(S)),
+        'label_end_events': (2 * R, dict_bytes(S) + list_bytes(R)),
+        'end_labels': (3 * L + 4 * z['leaf_runs'],
+                       dict_bytes(L) + L * LIST + z['leaf_runs'] * (72 + LIST_ITEM + FLOAT_B)),
+        'partition_sets': (2 * M + (z['partition_ids'] >> 5),
+                           dict_bytes(M) + M * (TUPLE + 16) + z['parts'] * SET
+                           + z['partition_ids'] * SET_ITEM),
+        'runs_by_label': (2 * R, dict_bytes(n_labels) + n_labels * LIST + R * LIST_ITEM),
+        'first_parent_at': (2 * S, list_bytes(S)),
+        # annotate mode: the displayed sets and the union-rule route ends (shared sets)
+        'displayed_presence': (W_ELEM * (2 * S + z['presence'])
+                               + ((z['presence_ids'] + z['entry_ids']) >> ids_shift),
+                               list_bytes(S) + S * (TUPLE + 16) + S * SET
+                               + z['entry_ids'] * SET_ITEM),
+        'annotate_route_ends': (W_ELEM * (3 * S + z['presence'])
+                                + ((z['presence_ids'] + 2 * z['entry_ids']) >> ids_shift),
+                                list_bytes(S) + S * SET + z['entry_ids'] * SET_ITEM
+                                + dict_bytes(n_labels) + n_labels * LIST
+                                + (z['presence'] + S) * (TUPLE + LIST_ITEM + INT)),
+    }
+
+
+FLOAT_B = 24
+
+
+def sizes_price(arm):
+    """The price of arm_sizes() over the segments and runs (admitted before the pass);
+    its P runs and events are charged by uses() from the sizes it read."""
+    return 3 * len(arm.segments) + len(arm.runs) // 4
+
+
+def price(arm, name, n_labels, mode):
+    """(lwu, bytes) of one derivation of |arm| at its cold price (arm_sizes must have
+    been charged: price() reads it)."""
+    table = arm.cache.get('prices')
+    if table is None:
+        table = arm.cache['prices'] = _derivation_prices(arm_sizes(arm), n_labels, mode)
+    return table[name]
+
+
+def price_list(b, g, arm, name, fn, per=1):
+    """A per-element price list of |arm| (fn() -> list): a structural derivation, cached;
+    its cold price (|per| lwu per element of the arm's segments and runs) charged once per
+    call. What block admission reads instead of pricing each row in Python."""
+    if b is not None:
+        b.uses((id(arm), name), per * (len(arm.segments) + len(arm.runs)),
+               8 * (len(arm.segments) + len(arm.runs)) + 56)
+    got = arm.cache.get(name)
+    if got is None:
+        got = arm.cache[name] = fn()
+    return got
+
+
+def uses(b, g, arm, *names):
+    """Charge budget |b| the derivations of |arm| a call uses, each at its cold price and
+    once per call (L1: whether a cache holds it or not); the sizes they are priced from
+    first. No-op without a budget."""
+    if b is None:
+        return
+    key = id(arm)
+    if (key, 'sizes') not in b._used:
+        b.uses((key, 'sizes'), sizes_price(arm))
+        z = arm_sizes(arm)
+        # the pass's P runs and events, read from what it counted (the same charge warm
+        # or cold): the one part of a price charged after its work, at most a few ns each
+        b.charge((z['presence'] + z['events']) >> 1)
+    table = arm.cache.get('prices')
+    if table is None:
+        # the prices are facts of the model (its sizes): computed once
+        table = arm.cache['prices'] = _derivation_prices(arm_sizes(arm), len(g.labels),
+                                                         g.mode)
+    used = b._used
+    for n in names:
+        if (key, n) not in used:
+            w, m = table[n]
+            b.uses((key, n), w, m)
 
 
 # ------------------------------------------------------------------ check_rules

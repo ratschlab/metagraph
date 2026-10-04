@@ -13,12 +13,14 @@ B/T maps in canonical order. dump(parse(x)) == x for every canonical document;
 is_canonical(x) tests exactly that.
 """
 
+import hashlib
 import json
 import os
 import re
 import tempfile
 from array import array
 
+from . import budget as _B
 from . import derive
 from ._codec import (
     CodecError, GraphletFormatError, LabelSetInterner, QUAL, REASON, REASON_ORDER,
@@ -27,11 +29,27 @@ from ._codec import (
     fmt_int, fmt_num, front_decode_parts, front_encode, parse_bool, parse_end_token,
     parse_int, parse_num, pct_escape, pct_unescape, tok as _tok,
 )
+from .budget import (ARRAY, LIST, LIST_ITEM, STR, TEXT_LINE, W_DUMP_LINE, W_LINE,
+                     LocalBudgetExceeded)
 from .model import (
     Arm, BranchEvent, CapTrigger, Counts, Dropped, Event, Frontier, Graphlet, GrowthBin,
     Label, LabelsPerNode, Leaf, LeafContinuation, Limitation, Outcome, PresenceRun,
     Refusal, ResourceStop, Run, Segment, SeedInfo,
 )
+
+# stage L: the account of a parse, fitted to the traced peak of the corpus (CPython 3.11,
+# 140 bodies; actual/fit at most 1.47, 1.25 on peaks of 100 KB or more) and charged at 1.5
+# times the fit: per body byte and per line (the line list, the tokens), per record of the
+# types that hold the most (a segment's raw tokens until its arm resolves, a leaf's
+# extras, the K and X records' typed values), and per label set the parse interns for the
+# first time (the array and its key)
+_MODEL_PER_BYTE = 3.1
+_MODEL_PER_LINE = 540
+_MODEL_PER_RECORD = (('\nG ', 950), ('\nT ', 640), ('\nR ', 65), ('\nV ', 71),
+                     ('\nK ', 3950), ('\nX ', 2390))
+_MODEL_PER_SET = 124
+_MODEL_PER_SET_ID = 13.3
+_LINE_BLOCK = 64
 
 __all__ = ['parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
            'standalone_text', 'seed_envelope', 'RESERVED_ENVELOPE_NAMES',
@@ -120,10 +138,22 @@ class _ArmRaw:
 
 
 class _Reader:
-    def __init__(self, lines):
+    def __init__(self, lines, b=None):
         self.lines = lines
         self.i = 0
         self.interner = LabelSetInterner()
+        # stage L: lines are paid for in blocks admitted before they are read
+        self.b = b
+        self.paid = 0
+        self.per_line_work = 0
+        self.per_line_bytes = 0
+
+    def _pay(self):
+        n = min(_LINE_BLOCK, len(self.lines) - self.i)
+        self.b.done['lines'] = self.i
+        # the block's share of the work and of the modelled model (spread evenly)
+        self.b.charge((W_LINE + self.per_line_work) * n, int(self.per_line_bytes * n))
+        self.paid = self.i + n
 
     # ------------------------------------------------------------ line access
 
@@ -139,6 +169,8 @@ class _Reader:
         if self.i >= len(self.lines):
             raise GraphletFormatError(0, 'truncated document: expected %s, found the end'
                                       % tag)
+        if self.b is not None and self.i >= self.paid:
+            self._pay()
         line = self.lines[self.i]
         self.i += 1
         if maxsplit is not None:
@@ -189,6 +221,11 @@ class _Reader:
             index_meta_fp=_opt(h[15], str), seed=None, labels=[], dropped=[],
             outcome=None, resource_stop=None, limitations=[], arms={})
         if self.peek_tag() == 'J':
+            if self.b is not None:
+                if self.i >= self.paid:
+                    self._pay()
+                # the envelope as JSON objects: a few times its text
+                self.b.charge(len(self.lines[self.i]) >> 4, 8 * len(self.lines[self.i]))
             line = self.lines[self.i]
             self.i += 1
             try:
@@ -370,7 +407,16 @@ class _Reader:
             # a CodecError, so that the caller names the record's line (the resolution
             # pass runs after the arm has been read)
             raise CodecError('label id %d beyond the %d L records' % (ids[-1], n_labels))
-        return self.interner.intern(ids)
+        if self.b is None:
+            return self.interner.intern(ids)
+        # a decoded set is charged as it is interned: the decode (a delta copies its
+        # whole base) and, for a set seen for the first time, its array
+        misses = self.interner.misses
+        self.b.charge(len(ids) >> _B.ID_SHIFT_PARSE)
+        got = self.interner.intern(ids)
+        if self.interner.misses != misses:
+            self.b.charge(0, int(_MODEL_PER_SET + _MODEL_PER_SET_ID * len(ids)))
+        return got
 
     def _segment_records(self, g, seg_id):
         line = self.i + 1
@@ -784,24 +830,94 @@ def utf8_bytes(text):
                                   % ascii(text[e.start:e.end])) from None
 
 
-def parse(text):
+def parse(text, *, budget=None):
     """-> Graphlet (BODY ONLY unless the text carries a J line: no seed_id, annotation
     counters or replay strategy; to_json(), next_request() and summary() raise
-    MissingEnvelope then). Raises GraphletFormatError(line_no, msg)."""
+    MissingEnvelope then). Raises GraphletFormatError(line_no, msg).
+
+    budget= (stage L): a body whose line count alone exceeds the work budget, or whose
+    line list alone exceeds the memory budget, is refused before any record is read; a
+    parse that stops raises LocalBudgetExceeded (not GraphletFormatError): no model, the
+    text untouched -- a cut-off parse never makes a shallower graphlet (§14)."""
+    b = _B.resolve(budget)
+    if b is None:
+        return _parse(text, None)
+    with b.scope('parse', ('export_mgt',)):
+        try:
+            return _parse(text, b)
+        except LocalBudgetExceeded as e:
+            raise e.restate(of=b.done.get('of'))
+
+
+def _parse(text, b):
+    if b is not None:
+        # admission, before anything is read: every line is parsed and the line list is
+        # held, so a body whose line count alone exceeds the work budget, or whose line
+        # list alone exceeds the account, is refused at once (certain lower bounds)
+        n = text.count(b'\n' if isinstance(text, (bytes, bytearray)) else '\n')
+        b.done = {'lines': 0, 'of': n}
+        b.phase = 'admission'
+        b.require(W_LINE * n, len(text) + (STR + LIST_ITEM) * n + LIST)
+        b.phase = 'setup'
     if isinstance(text, (bytes, bytearray)):
+        if b is not None:
+            b.charge(len(text) >> 10, STR + len(text))
         try:
             text = bytes(text).decode('utf-8')
         except UnicodeDecodeError as e:
             raise GraphletFormatError(0, 'not UTF-8: %s' % e) from None
     else:
+        if b is not None:
+            b.charge(len(text) >> 10, len(text) + 33)
+            b.release(len(text) + 33)
         utf8_bytes(text)
     if not text.endswith('\n'):
         raise GraphletFormatError(0, 'truncated document: it does not end with a line feed')
+    if b is not None:
+        # the digest below: C-speed hashing and one chunk encoded at a time
+        chunk = 2 * (STR + min(len(text), _DIGEST_CHUNK))
+        b.charge(len(text) >> 7, chunk)
+        b.release(chunk)
+    digest = body_digest(text)
+    if b is not None:
+        b.phase = 'lines'
+        # the modelled account of the model as it is built (the line list included),
+        # spread over the line blocks; the label sets interned are charged as they are
+        model = _MODEL_PER_BYTE * len(text) + _MODEL_PER_LINE * n
+        for tag, size in _MODEL_PER_RECORD:
+            model += size * text.count(tag)
+        b.charge(len(text) >> 10)
     # LF is the only record separator: names may hold VT, FF, NEL, LS, PS raw, so
     # str.splitlines() would cut records
     lines = text.split('\n')
     lines.pop()
-    return _Reader(lines).run()
+    rd = _Reader(lines, b)
+    if b is not None:
+        rd.per_line_work = (len(text) >> 3) // max(1, n)
+        rd.per_line_bytes = model / max(1, n)
+    g = rd.run()
+    g.body_digest = digest
+    return g
+
+
+_DIGEST_CHUNK = 1 << 20
+
+
+def body_digest(text):
+    """The sha-256 (hex) of an MGT text's records without its J line and its Z record --
+    Graphlet.body_digest, what binds a resume token (stage L): the J line holds the
+    envelope and a saved view, which no list reads, and the Z record counts the J line,
+    so the server's body and the standalone file saved from it have one digest. Hashed a
+    chunk at a time, so a large body is never copied whole."""
+    first = text.find('\n') + 1
+    start = first
+    if text.startswith('J ', first):
+        start = text.find('\n', first) + 1
+    end = text.rfind('\n', 0, len(text) - 1) + 1
+    h = hashlib.sha256(text[:first].encode('utf-8'))
+    for i in range(start, end, _DIGEST_CHUNK):
+        h.update(text[i:min(end, i + _DIGEST_CHUNK)].encode('utf-8'))
+    return h.hexdigest()
 
 
 # ======================================================================= writing
@@ -814,11 +930,44 @@ def _set(ids):
     return list(ids)
 
 
-def dump(g, envelope=None):
+def dump(g, envelope=None, *, budget=None):
     """Canonical text (§2.3 v3). |envelope|: None -> a J line iff the graphlet was read
-    with one; True -> whenever an envelope is attached; False -> body only."""
+    with one; True -> whenever an envelope is attached; False -> body only. budget=
+    (stage L): every record is charged; a stop raises LocalBudgetExceeded and no text is
+    returned (done: the records written)."""
+    b = _B.resolve(budget)
+    if b is None:
+        return _dump(g, envelope, None)
+    with b.scope('dump', ('export_mgt',)):
+        done = [0, 0]
+        try:
+            return _dump(g, envelope, b, done)
+        except LocalBudgetExceeded as e:
+            raise e.restate(records=done[0])
+
+
+def _dump(g, envelope, b, done=None):
     out = []
-    w = out.append
+    if b is None:
+        w = out.append
+    else:
+        b.phase = 'records'
+
+        pending = [0]
+
+        def w(line):
+            # records are charged as soon as they are built (a text's size is known only
+            # then), _LINE_BLOCK at a time: the account may run up to that many records
+            # ahead of the check
+            n = len(line)
+            done[1] += n + 1
+            pending[0] += TEXT_LINE + n
+            out.append(line)
+            if len(out) % _LINE_BLOCK == 0:
+                done[0] = len(out)
+                b.charge(0, pending[0])
+                pending[0] = 0
+        b.charge(W_DUMP_LINE * (4 + len(g.labels) + len(g.dropped) + len(g.limitations)))
     w(' '.join([
         'H', 'mgt', str(FORMAT_VERSION), fmt_int(g.k), g.regime, g.alphabet,
         _inv(_MODE)[g.mode], _inv(_SUPPORT)[g.support], _inv(_RECONVERGE)[g.reconverge],
@@ -854,13 +1003,18 @@ def dump(g, envelope=None):
     for side in ('left', 'right'):
         arm = g.arms.get(side)
         if arm is not None:
-            _dump_arm(g, arm, w)
+            _dump_arm(g, arm, w, b)
     n = len(out) + 1
+    if b is not None:
+        done[0] = len(out)
+        b.charge(0, pending[0])
+        b.phase = 'join'
+        b.charge(done[1] >> 8, 2 * (STR + done[1] + 16))
     out.append('Z %d' % n)
     return '\n'.join(out) + '\n'
 
 
-def _dump_arm(g, arm, w):
+def _dump_arm(g, arm, w, bud=None):
     counters = ','.join('%s=%s' % (k, fmt_int(v)) for k, v in arm.counters.items()) or '.'
     c = arm.cap_trigger
     cap = '*' if c is None else ','.join([c.reason, fmt_int(c.at_bp), fmt_int(c.segment),
@@ -893,7 +1047,23 @@ def _dump_arm(g, arm, w):
     segs = arm.segments
     rbs = derive.runs_by_segment(arm)
     nsl = g.seed.num_seed_labels
+    if bud is not None:
+        bud.uses((id(arm), 'dump_prices'), 3 * len(arm.segments) + len(arm.runs),
+                 16 * len(arm.segments))
+        pw, pt = _dump_prices(arm, rbs)
+        bud.charge(W_DUMP_LINE * (len(arm.growth) + len(arm.branch_events) + len(arm.runs))
+                   + arm.cache['dump_branch_ids'])
+    if bud is not None:
+        tmp = 0
     for s in segs:
+        if bud is not None and s.id % _LINE_BLOCK == 0:
+            # the next block of segments' records: their sets encoded (each against its
+            # base, the '*' rules recomputed), P runs, events, leaves and continuations;
+            # and the temporaries of the widest set among them, dropped after the block
+            bud.release(tmp)
+            j = s.id + _LINE_BLOCK
+            tmp = max(pt[s.id:j])
+            bud.charge(sum(pw[s.id:j]), tmp)
         entry = _set(s.entry)
         rule = derive.rule_entry(g.mode, nsl, s)
         if rule is not None and rule == entry:
@@ -938,6 +1108,8 @@ def _dump_arm(g, arm, w):
                         s.walk is None or c.sequence != _derived_continuation(g, arm, s)):
                     line += ' ' + c.sequence
                 w(line)
+    if bud is not None:
+        bud.release(tmp)
     for r in arm.runs:
         fields = ['R', fmt_int(r.segment), fmt_int(r.label), fmt_int(r.from_bp),
                   fmt_int(r.to_bp), r.end, fmt_int(r.route_bp),
@@ -947,6 +1119,30 @@ def _dump_arm(g, arm, w):
         if r.code == 'B':
             fields.append(fmt_num(r.needed_budget))
         w(' '.join(fields))
+
+
+def _dump_prices(arm, rbs):
+    """Per segment the work of writing its records and the temporaries of its widest set
+    (measured: about four sets and five int lists of it alive at once while the entry and
+    end sets are encoded and their '*' rules recomputed): facts of the model, cached."""
+    got = arm.cache.get('dump_prices')
+    if got is None:
+        pw, pt = [], []
+        for s in arm.segments:
+            ids = 2 * (len(s.entry) + len(s.end)) + len(rbs[s.id])
+            for p in s.presence:
+                ids += len(p.labels)
+            for p in s.partition:
+                ids += len(p)
+            lines = 1 + len(s.presence) + len(s.events) + (2 if s.leaf is not None else 0)
+            pw.append(W_DUMP_LINE * lines + ids)
+            wide = max([len(s.entry), len(s.end)] + [len(p.labels) for p in s.presence])
+            pt.append(4 * (216 + 54 * wide) + 5 * 36 * wide)
+        got = arm.cache['dump_prices'] = (pw, pt)
+        arm.cache['dump_branch_ids'] = sum(
+            len(be.ambiguous) + len(be.dropped) + sum(len(r.labels) for r in be.refused)
+            for be in arm.branch_events)
+    return got
 
 
 def _derived_continuation(g, arm, seg):
@@ -1023,7 +1219,7 @@ def _check_transport(body, result):
                                   % (result['graphlet_lines'], body.count('\n')))
 
 
-def from_response(result, response):
+def from_response(result, response, *, budget=None):
     """results[i] of a detail: graphlet response + the response (the envelope) ->
     Graphlet with the summary attached. A derivation failure ({seed, error}) has no
     graphlet and raises ValueError, as does a response with a reserved top-level name
@@ -1033,12 +1229,23 @@ def from_response(result, response):
         raise ValueError('this result carries no graphlet%s' % (
             ': ' + result['error'] if 'error' in result else ''))
     _refuse_reserved(response)
+    b = _B.resolve(budget)
+    if b is not None:
+        with b.scope('parse', ('export_mgt',)):
+            if 'graphlet_bytes' in result:
+                b.charge(len(body) >> 10, 4 * len(body) + 33)
+                b.release(4 * len(body) + 33)
+            return _from_response_checked(result, response, body, b)
+    return _from_response_checked(result, response, body, None)
+
+
+def _from_response_checked(result, response, body, b):
     if 'graphlet_bytes' in result:
         n = len(utf8_bytes(body))
         if n != result['graphlet_bytes']:
             raise GraphletFormatError(0, 'the body has %d bytes, graphlet_bytes says %d '
                                       '(truncated in transport)' % (n, result['graphlet_bytes']))
-    g = parse(body)
+    g = parse(body, budget=b)
     if 'graphlet_lines' in result and body.count('\n') != result['graphlet_lines']:
         raise GraphletFormatError(0, 'graphlet_lines says %d, the body has %d'
                                   % (result['graphlet_lines'], body.count('\n')))
@@ -1096,10 +1303,22 @@ def standalone_text(body, result, response):
                     'Z %d\n' % (lines + 1)))
 
 
-def save(g, path):
+def save(g, path, *, budget=None):
     """Write the standalone .mgt file: H, J (envelope with this seed only), body.
-    Atomic: a reader never sees a partial file."""
+    Atomic: a reader never sees a partial file. budget= (stage L): the text is made in
+    full before the file is opened, so a stop writes no file (L4)."""
+    b = _B.resolve(budget)
+    if b is not None:
+        with b.scope('save', ('export_mgt',)):
+            text = dump(g, envelope=True, budget=b)
+            b.phase = 'write'
+            b.charge(len(text) >> 8, 2 * (len(text) + 33))
+            return _write_text(text, path)
     text = dump(g, envelope=True)
+    return _write_text(text, path)
+
+
+def _write_text(text, path):
     d = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(prefix='.mgt-', dir=d)
     try:
@@ -1115,14 +1334,30 @@ def save(g, path):
     return len(text.encode('utf-8'))
 
 
-def load(path):
-    with open(path, 'r', encoding='utf-8', newline='') as f:
-        text = f.read()
-    g = parse(text)
-    if g.view is not None:
-        from . import ops
-        return ops.view_from_saved(g)
-    return g
+def load(path, *, budget=None):
+    """A saved .mgt file -> its Graphlet (or the GraphletView it saved). budget= (stage
+    L): the file's text, the parse and the view are charged; a stop raises
+    LocalBudgetExceeded and the file is left as it is."""
+    b = _B.resolve(budget)
+    if b is None:
+        with open(path, 'r', encoding='utf-8', newline='') as f:
+            text = f.read()
+        g = parse(text)
+        if g.view is not None:
+            from . import ops
+            return ops.view_from_saved(g)
+        return g
+    with b.scope('load', ('export_mgt',)):
+        n = os.path.getsize(path)
+        b.charge(n >> 10, STR + 4 * n)
+        with open(path, 'r', encoding='utf-8', newline='') as f:
+            text = f.read()
+        g = parse(text, budget=b)
+        del text
+        if g.view is not None:
+            from . import ops
+            return ops.view_from_saved(g, budget=b)
+        return g
 
 
 def body_text(g):

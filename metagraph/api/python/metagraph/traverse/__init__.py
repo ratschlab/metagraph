@@ -11,6 +11,11 @@ prepares (next_request) and the client runs.
 Stdlib only. pandas is imported lazily by frames.frames() alone, so
 `import metagraph.traverse` works without it.
 
+Every local operation takes budget= (stage L, metagraph.traverse.budget): a LocalBudget of
+work units and a modelled memory account under which a call completes or stops and says
+so (LocalBudgetExceeded; compare() answers comparable 'unknown'). Without one -- the
+default -- nothing is budgeted and every answer is what it always was.
+
     from metagraph.traverse import TraverseClient, Graphlet
     resp = TraverseClient('localhost', 5555).traverse([{'sequence': seq}], strategy)
     g = resp.graphlets[0]
@@ -27,6 +32,8 @@ from .model import (
 from .parser import (FORMAT_VERSION, dump, from_response, is_canonical, load, parse, save,
                      seed_envelope, standalone_text)
 from .ops import GraphletView
+from .budget import (LocalBudget, LocalBudgetExceeded, LocalLimits, LocalStop, Partial,
+                     local_budget)
 from .client import (AttemptAtBound, AttemptExpired, ServerInitializing, TraverseClient,
                      TraverseError, TraverseResponse)
 from .store import Entry, GraphletStore, StoreLimitExceeded, UnknownHandle
@@ -42,4 +49,6 @@ __all__ = [
     'TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
     'AttemptAtBound', 'AttemptExpired', 'GraphletStore', 'Entry', 'UnknownHandle',
     'StoreLimitExceeded',
+    'LocalBudget', 'LocalLimits', 'LocalStop', 'LocalBudgetExceeded', 'Partial',
+    'local_budget',
 ]

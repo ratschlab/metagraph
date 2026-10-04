@@ -399,33 +399,41 @@ class Graphlet:
     derived_from: Optional[str] = None
     has_j: bool = field(default=False, compare=False, repr=False)
     cache: Dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
+    # the sha-256 of the parsed text's records without its J line and Z record (parse()):
+    # what a resume token of a stopped list binds (stage L), so that a token is refused on
+    # any other graphlet and accepted on the same body parsed again or saved and loaded
+    body_digest: Optional[str] = field(default=None, compare=False, repr=False)
 
     # ---------------------------------------------------------------- text
 
-    def dump(self, envelope=None):
+    # every operation takes budget= (stage L, metagraph.traverse.budget): keyword-only,
+    # None (the default) for no work or allocation budget; the lists whose order allows
+    # it also take resume= (the token of a stopped call's Partial)
+
+    def dump(self, envelope=None, *, budget=None):
         """Canonical MGT text. envelope None: a J line iff the graphlet was read with
         one; True: whenever an envelope is attached; False: the body only."""
         from . import parser
-        return parser.dump(self, envelope=envelope)
+        return parser.dump(self, envelope=envelope, budget=budget)
 
-    def save(self, path):
+    def save(self, path, *, budget=None):
         from . import parser
-        return parser.save(self, path)
-
-    @classmethod
-    def load(cls, path):
-        from . import parser
-        return parser.load(path)
+        return parser.save(self, path, budget=budget)
 
     @classmethod
-    def parse(cls, text):
+    def load(cls, path, *, budget=None):
         from . import parser
-        return parser.parse(text)
+        return parser.load(path, budget=budget)
 
     @classmethod
-    def from_response(cls, result, response):
+    def parse(cls, text, *, budget=None):
         from . import parser
-        return parser.from_response(result, response)
+        return parser.parse(text, budget=budget)
+
+    @classmethod
+    def from_response(cls, result, response, *, budget=None):
+        from . import parser
+        return parser.from_response(result, response, budget=budget)
 
     # ---------------------------------------------------------------- lookup
 
@@ -465,59 +473,64 @@ class Graphlet:
 
     # ---------------------------------------------------------------- operations
 
-    def to_json(self):
+    def to_json(self, *, budget=None):
         from . import export
-        return export.to_json(self)
+        return export.to_json(self, budget=budget)
 
-    def summary(self, arm=None, max_bytes=2048):
+    def summary(self, arm=None, max_bytes=2048, *, budget=None):
         """Agent-facing, <= max_bytes (2 KB): per-arm status, completeness, counts, top
         labels, caveats. Raises MissingEnvelope on a body-only graphlet."""
         from . import ops
-        return ops.summary(self, arm, max_bytes)
+        return ops.summary(self, arm, max_bytes, budget=budget)
 
-    def spell(self, arm, leaf, orientation='natural', with_seed=False):
+    def spell(self, arm, leaf, orientation='natural', with_seed=False, *, budget=None):
         from . import ops
-        return ops.spell(self, arm, leaf, orientation, with_seed)
+        return ops.spell(self, arm, leaf, orientation, with_seed, budget=budget)
 
     def walks(self, arm, *, top=None, by='support', labels=None, route_consistent=True,
-              min_bp=0):
+              min_bp=0, budget=None, resume=None):
         from . import ops
         return ops.walks(self, arm, top=top, by=by, labels=labels,
-                         route_consistent=route_consistent, min_bp=min_bp)
+                         route_consistent=route_consistent, min_bp=min_bp, budget=budget,
+                         resume=resume)
 
-    def claims(self, arm=None, labels=None, at_most_bp=None, strict=True):
+    def claims(self, arm=None, labels=None, at_most_bp=None, strict=True, *, budget=None,
+               resume=None):
         from . import ops
-        return ops.claims(self, arm, labels, at_most_bp, strict)
+        return ops.claims(self, arm, labels, at_most_bp, strict, budget=budget,
+                          resume=resume)
 
-    def label_walks(self, label, arm=None):
+    def label_walks(self, label, arm=None, *, budget=None, resume=None):
         from . import ops
-        return ops.label_walks(self, label, arm)
+        return ops.label_walks(self, label, arm, budget=budget, resume=resume)
 
-    def routes(self, label, arm, spell=False):
+    def routes(self, label, arm, spell=False, *, budget=None, resume=None):
         from . import ops
-        return ops.routes(self, label, arm, spell)
+        return ops.routes(self, label, arm, spell, budget=budget, resume=resume)
 
-    def support_profile(self, arm, leaf, kind='displayed'):
+    def support_profile(self, arm, leaf, kind='displayed', *, budget=None):
         from . import ops
-        return ops.support_profile(self, arm, leaf, kind)
+        return ops.support_profile(self, arm, leaf, kind, budget=budget)
 
-    def support_changes(self, arm, leaf):
+    def support_changes(self, arm, leaf, *, budget=None):
         from . import ops
-        return ops.support_changes(self, arm, leaf)
+        return ops.support_changes(self, arm, leaf, budget=budget)
 
-    def label_summary(self):
+    def label_summary(self, *, budget=None):
         from . import ops
-        return ops.label_summary(self)
+        return ops.label_summary(self, budget=budget)
 
-    def continuation(self, arm, leaf):
+    def continuation(self, arm, leaf, *, budget=None):
         from . import ops
-        return ops.continuation(self, arm, leaf)
+        return ops.continuation(self, arm, leaf, budget=budget)
 
     def next_request(self, arm, leaves, bp=None, reduce_budget=True, reset_branches=False,
                      **overrides):
         """A NextRequest continuing |leaves| (see ops.next_request): .notes states what
         the request cannot carry exactly (a conservative loss budget or branch allowance,
-        a switch target left out, an allowance the caller restarted)."""
+        a switch target left out, an allowance the caller restarted). budget= is a
+        LocalBudget (stage L), not the request's loss budget; any other value of it is,
+        as before stage L, a keyword override like the others (passed on with them)."""
         from . import ops
         return ops.next_request(self, arm, leaves, bp, reduce_budget, reset_branches,
                                 **overrides)
@@ -525,34 +538,41 @@ class Graphlet:
     def next_requests(self, arm, leaves, bp=None, reduce_budget=True, reset_branches=False,
                       **overrides):
         """One NextRequest per walk (walks whose continuations carry different labels
-        cannot share one request: IncompatibleContinuations)."""
+        cannot share one request: IncompatibleContinuations). budget= as in
+        next_request()."""
         from . import ops
         return ops.next_requests(self, arm, leaves, bp, reduce_budget, reset_branches,
                                  **overrides)
 
-    def subgraph(self, selectors, arm=None, mode='any'):
+    def subgraph(self, selectors, arm=None, mode='any', *, budget=None):
         from . import ops
-        return ops.subgraph(self, selectors, arm, mode)
+        return ops.subgraph(self, selectors, arm, mode, budget=budget)
 
     def to_fasta(self, arm=None, leaves=None, with_seed=True, orientation='natural',
-                 width=None):
+                 width=None, *, budget=None):
         from . import export
-        return export.to_fasta(self, arm, leaves, with_seed, orientation, width)
+        return export.to_fasta(self, arm, leaves, with_seed, orientation, width,
+                               budget=budget)
 
-    def to_gfa(self, with_seed=True):
+    def to_gfa(self, with_seed=True, *, budget=None):
         from . import export
-        return export.to_gfa(self, with_seed)
+        return export.to_gfa(self, with_seed, budget=budget)
 
-    def splits(self, arm, min_labels_before=0):
+    def splits(self, arm, min_labels_before=0, *, budget=None, resume=None):
         """The arm's splits (SplitPoint: at_bp outward, kind, labels_before, branches with
         their first base, labels as {name, ref} and the first walk taking each), in the
         walker's order."""
         from . import ops
-        return ops.splits(self, arm, min_labels_before)
+        return ops.splits(self, arm, min_labels_before, budget=budget, resume=resume)
 
-    def compare(self, other, *, arm=None, labels=None, mode='claims'):
+    def compare(self, other, *, arm=None, labels=None, mode='claims', budget=None):
         from . import ops
-        return ops.compare(self, other, arm=arm, labels=labels, mode=mode)
+        return ops.compare(self, other, arm=arm, labels=labels, mode=mode, budget=budget)
+
+    def compare_cost(self, other, *, arm=None, labels=None, mode='claims'):
+        """An estimate of what compare() would charge a budget (ops.compare_cost)."""
+        from . import ops
+        return ops.compare_cost(self, other, arm=arm, labels=labels, mode=mode)
 
     def memory_bytes(self):
         from . import ops
@@ -787,12 +807,17 @@ class Comparison:
     support: Tuple[str, str] = ('kmer', 'kmer')
     scopes: Tuple[str, str] = ('per_path', 'per_path')
     strategies: Tuple[Any, Any] = (None, None)
+    # stage L: the stop of a comparison its local budget interrupted (comparable 'unknown')
+    local_stop: Optional[dict] = None
 
     def as_dict(self):
-        return {
+        out = {
             'comparable': self.comparable, 'reason': self.reason,
             'depth_used': self.depth_used, 'equal': self.equal, 'mode': self.mode,
             'only_in_a': list(self.only_in_a), 'only_in_b': list(self.only_in_b),
             'differ': list(self.differ), 'notes': list(self.notes),
             'support': list(self.support), 'scopes': list(self.scopes),
         }
+        if self.local_stop is not None:
+            out['local_stop'] = dict(self.local_stop)
+        return out
