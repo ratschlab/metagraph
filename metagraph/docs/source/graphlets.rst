@@ -130,7 +130,10 @@ reason is in ``errors``. Non-2xx answers raise ``TraverseError`` (``status``,
 loading its index raises ``ServerInitializing`` (a 503 with ``retry_after``: nothing was
 run), and an attempt stopped at its duration bound while its response was built raises
 ``AttemptAtBound`` (a 503 with ``usage``: it ran and its id is used up, so it is not
-retried under the same ``attempt_id``). ``capabilities()`` and ``resolve()`` call the other two routes,
+retried under the same ``attempt_id``). ``capabilities()`` and ``resolve()`` call the other two routes
+(on a multi-graph server ``capabilities(graph=..., graph_path=...)`` describes one of its
+indexes), ``server_capabilities()`` reads the server-wide document (``GET /capabilities``:
+the routes and features, ``feature_level``, the mode and graph names, the attempts),
 ``traverse_raw(request)`` sends a request you built yourself, and ``api_path`` is for a
 server behind a proxy prefix.
 
@@ -173,7 +176,11 @@ retention period, so nothing runs under it there in that time; when the server a
 holds its maximum of tombstones it answers 429 with ``tombstone: False`` and promises
 nothing (the cancel can be retried). An
 id runs once per server process (a second request with it is a 409). A client that
-closes its connection stops its traversal: nothing is written.
+closes its connection stops its traversal: nothing is written. ``not_after_ms=`` (Unix
+epoch ms, with or without ``attempt_id``) is the instant after which the request must not
+be started: a server whose clock has passed it when the request arrives refuses it, and the
+client raises ``AttemptExpired`` (a 409 with ``state: "expired"``: nothing ran, nothing was
+registered, no usage).
 
 .. code-block:: python
 
@@ -181,6 +188,7 @@ closes its connection stops its traversal: nothing is written.
    response.usage['work_units'], response.usage['reason']      # e.g. 1234, 'completed'
    client.cancel('a-18', wait_ms=2000)   # {'cancelled': True, 'state': 'finished', ...}
    client.attempt('a-18')['reason']      # 'cancelled'
+   client.traverse(seeds, strategy, attempt_id='a-19', not_after_ms=now_ms + 60_000)
 
 From the text alone
 ^^^^^^^^^^^^^^^^^^^
@@ -217,8 +225,15 @@ Files
 ^^^^^
 
 ``save(path)`` writes the standalone ``.mgt`` file: the body plus one ``J`` line after
-the header that holds the envelope reduced to this seed. ``load(path)`` restores both
-(and restores a saved view as a view, see `Views`_). Writing is atomic.
+the header that holds the envelope reduced to this seed — its ``results`` to this seed's
+summary, and an attempt's ``usage`` to its totals plus this seed's ``per_seed`` entry (the
+other seeds' entries describe graphlets this one is not; the store keeps the same reduced
+envelope). ``load(path)`` restores both (and restores a saved view as a view, see
+`Views`_). Writing is atomic. ``view`` and ``derived_from`` are the library's own names in
+``J``: a response that carries either at its top level is refused rather than misread. A
+file saved by an earlier version of the library, whose ``J`` kept every seed's ``per_seed``
+entry, loads as it is; it is not in today's canonical form (``is_canonical()`` is false for
+it), and ``save()`` rewrites it reduced.
 
 .. graphlet-example: files
 
@@ -238,6 +253,29 @@ the header that holds the envelope reduced to this seed. ``load(path)`` restores
 
    ['H', 'J', 'S', 'L']
    True True
+
+``standalone_text(body, result, response)`` writes the same text without parsing the body:
+it splices the ``H`` line, the ``J`` line and the rest of the body (the ``Z`` count one
+higher), checking only the summary's byte and line counts and the ``H`` and ``Z`` records,
+so that a large retrieval can be saved or spooled before (or without) building its model;
+``load()`` validates it. For a server's body it is byte for byte what ``save()`` writes.
+
+.. graphlet-example: standalone
+
+.. code-block:: python
+
+   from metagraph.traverse import dump, from_response, standalone_text
+
+   with open('merge.graphlet.json') as f:
+       response = json.load(f)
+   result = response['results'][0]
+   text = standalone_text(result['graphlet'], result, response)
+   print(text == dump(from_response(result, response), envelope=True),
+         text.split('\n')[1][0], len(text) - len(result['graphlet']))
+
+.. code-block:: text
+
+   True J 3441
 
 Integrity
 ^^^^^^^^^

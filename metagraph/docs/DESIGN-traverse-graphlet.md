@@ -943,7 +943,7 @@ per-graph identity → record coordinates → stage 3c → stage 3b → stage L.
 - L9: memory is a modelled account (`memory_bound: "model"`).
 
 **Capabilities.** `feature_level` is monotonic: each pass that adds capabilities fields or routes bumps it by one, and
-SPEC §10.3 records the mapping (2 = attempts and the client-gone stop). `schema_version` stays the request schema
+SPEC §10.3 records the mapping (2 = attempts and the client-gone stop; 3 = pass 5, §23). `schema_version` stays the request schema
 version (`strategy.schema_version`), which a bump would break.
 
 # 22. Stage 4, backend half, as implemented *(v5.5, 2026-10-04)*
@@ -1003,3 +1003,92 @@ The ledger itself lives in the search service. The backend provides what a ledge
   - A reverse proxy must forward `/traverse/cancel` and `/traverse/attempt/*`, must close its upstream connection
     when the client goes, and must keep its read timeout at or above the largest bound.
 
+
+# 23. Pass 5 as implemented *(v5.6, 2026-10-04)*
+
+The identity pass of §21 with the owner's additions: a start deadline, the server-wide capabilities, deadlines
+that reach into long annotation reads, and a delivery window that holds for large batches. MGT v1 is unchanged
+(no record, field or token changed; the library's `J` envelope record reduces `usage`, below). The SPEC (§4.1, §5, §6.8, §7.3, §7.5.2, §10.3) is normative;
+`feature_level` is 3.
+
+- **`not_after_ms`.** An optional top-level request field (Unix epoch ms, an integer up to 2⁵³ − 1, with or without
+  `attempt_id`): the instant after which the request must not be started. The server refuses, when the handler
+  starts, a request whose instant has passed on its clock — 409 `{error, state: "expired", not_after_ms,
+  server_time_ms, ids, server_instance}` — with nothing run and nothing registered (a later GET is a 404). The
+  check is strict; the allowance a ledger adds is stated (`attempts.clock_skew_allowance_ms`, 2000 by default). A
+  running, retained or tombstoned id is answered first, so `expired` always means that no attempt with the id
+  exists there. Echoed in usage and in the state. The CLI applies the same check.
+- **Per-graph identity.** The multi-graph list gains two optional columns, `manifest_path` and `index_ns`; each
+  manifest is checked at start-up against the files its pair loads (sizes and the digest of the list, as
+  `--index-manifest`), and a mismatch, two identities for one pair, more than five columns or a bad name refuses
+  to start. Every response states its pair's identity. `GET /traverse/capabilities?graph=<name>&graph_path=<path>`
+  describes one pair. A `graph_path` naming one graph listed with several annotations is refused (before, the
+  first annotation answered and the others were never read: a silent narrowing). There is no union oracle; the
+  SPEC no longer claims one, nor a parsed release column. `index_manifest.py --server-csv` writes one manifest
+  per pair, every distinct file hashed once by parallel streams or taken from precomputed sha256 digests.
+  *Review of pass 5*: the manifest check covers the sidecars the loader reads (row-diff anchors and fork
+  successors, the dummy-edge mask, column coordinates, sequence headers), in both modes; a manifest that lists
+  another graph or annotation is refused (one written for a directory lent one fingerprint to each of its
+  annotations, swapped memberships included); two different pairs never state one `index_fp`, and lines are
+  grouped by the pairs' real paths; a name listing one pair twice needs no `graph_path`, and one listing one
+  graph with several annotations is refused as such. The tool matches digests by real path (relative paths
+  from the digest file's directory), by base name only with `--match-base-names` and never one line for two
+  files, and writes a pair's manifest to the path any of its lines names.
+- **`GET /capabilities`.** A small, index-free document: routes and features, `feature_level`,
+  `algorithm_version`, `release`, `server_instance`, `mode` and the graph names, the attempts block,
+  `deadline_check`, `compression_level`. It answers while a single index loads (`ready: false`). The probe gains
+  `algorithm_version`, `compression_level`, `deadline_check`, and in `attempts` `hard_cap_ms`,
+  `clock_skew_allowance_ms`, the `not_after` rule and the `delivery_reserve`; `allowance_ms` is an integer.
+- **Chunked deadlines.** Under any deadline, every `/traverse` annotation read (a level's fetch, the lookahead, a
+  validation, a derivation's window) that the deadline may fall into is decoded in chunks, the deadline checked
+  between them. *Review of pass 5*: a read is one piece, as before, when at the slowest per-row time the request
+  has seen it would take less than 1/64 of the time left; otherwise its first chunk is at most 8 rows, each next
+  at most 4 times the previous and sized at the rate the previous measured to take `chunk_target_ms` (50 by
+  default), and the rest is one piece once predicted at that rate to take less than a quarter of the time left;
+  chunks are taken in the walk's order. The first version sized every chunk from the slowest recent per-row
+  time and cut sorted keys: on a row-diff annotation, whose rows share the decoding of their row-diff paths
+  within a call, that decoded the paths again per chunk (0.75 ms a row against 0.016 ms whole), so a row_diff
+  walk of 1.8 s took 30 s and came back partial, row_diff_brwt walks were 1.4-2.9 times slower, and a first
+  chunk sized from another level's cheap rows took 650-880 ms of a 50 ms target. A read's counting, cache
+  eviction and result are decided once for the whole read, so a request no deadline stops is byte-identical
+  (checked on real requests, also with 1 ms chunks and with every read split into one-row chunks), and a
+  stopped read censors the walk at the read. The rows a stopped read decoded are charged. A validation is
+  stopped by the attempt only, never by its own time budget. One chunk (at least one row) stays
+  uninterruptible, and so does a read decoded whole far from its deadline (a cancel is seen after it); no bound
+  on one row exists before stage 3c, so `max_uninterruptible_ms` is null, and the longest single piece is
+  stated as an observation (per process in `deadline_check`, per attempt in `usage`). Stated limits: a whole
+  read overruns when its rows are more than 64 times slower than any seen before, the rest of a split read when
+  more than 4 times slower than its chunk's. On the fan-out fixture budgets of 50-500 ms are kept to within 15
+  ms with a column annotation and 60 ms with row_diff and row_diff_brwt (with and without a memory budget; the
+  previous build overran by up to 0.9, 1.0 and 1.9 s), and walks that no deadline stops keep their bytes and
+  time (60 real UHGG requests: 15,973 ms against 15,932 ms before and 16,021 ms unchunked).
+- **The delivery window.** The traversal routes compress at zlib level 1 (630 MB/s against level 9's 153 MB/s on
+  real responses, for 1.8 times the bytes). The server writes each seed's result as text once built (its tree
+  freed at once) and assembles the response from the texts, byte for byte. Attempts stop walking at
+  `bound − max(allowance/2, reserve)`: the reserve is the time to compress the text written so far and the
+  walked seed's estimated text (its modelled account / an account per text byte) and to build the latter, times
+  1.25, plus the time from the walk-until to the walk's end (`stop_ms`: the chunk target + 200 ms, or the longest
+  the server measured recently) — *review of pass 5*: without the margin and the stop time a response the model
+  fitted exactly was a 503 about half the time (a walk stopped 124 ms after its walk-until). The
+  configured values (20 per text byte for JSON, 40 for a graphlet; compress 50, build 10 MB/s) apply until the
+  server has measured its own on responses and seeds of 1 MiB or more: then the slowest rate and the smallest
+  ratio (per detail) of its last 16 measurements, and the attempt's own where more conservative. A response is
+  no longer lost whole for want of time; the reserve can stop a large attempt earlier than before (with the
+  configured guesses alone, a 403 MB SRA response, 88 account bytes per text byte, stopped walking at 2.3 s on
+  the M5 Max, which is why measurements replace them), and what it did not walk is stated. The configured
+  values are uncalibrated on the staging server.
+- **Library.** `standalone_text(body, result, response)` writes a seed's standalone `.mgt` text (H, J, body)
+  without parsing the body, byte for byte what `save()` writes for a server body. The `J` envelope's usage is
+  reduced to the totals plus this seed's `per_seed` entry (in `save()`, `dump()` and the store). `view` and
+  `derived_from` are reserved envelope names. The client gains `not_after_ms`, `AttemptExpired`,
+  `capabilities(graph=, graph_path=)` and `server_capabilities()`. A file saved by the stage-4 library with
+  every seed's `per_seed` entry in `J` still loads as it is, but is not canonical under the reduced rule
+  (`is_canonical()` false; `save()` rewrites it reduced): `J` is the library's record, MGT v1's records and
+  tokens did not change.
+- **Flags** (*review of pass 5*): `--traverse-clock-skew-ms`, `--traverse-chunk-target-ms` and
+  `--traverse-attempt-allowance-ms` take integers in [0, 2⁵³ − 1]; a negative value had wrapped to 2⁶⁴ − 1 and
+  was stated as such.
+- **Deployment** (SPEC §10.3): `-p` above the number of concurrent traversals; a reverse proxy forwards the
+  cancel, state and both capabilities routes with their query strings, closes its upstream connection when the
+  client goes and keeps a read timeout of at least `hard_cap_ms` plus the transfer; the server's clock is
+  synchronised within `clock_skew_allowance_ms`.

@@ -90,7 +90,6 @@ walks.
 ```json
 {
   "sequence": "ACGT…",
-  "labels": ["573", "NZ_STEQ01000045.1"],
   "discover": {"max_labels": 1000, "kind": "header"},
   "support": "kmer",
   "min_block_kmers": 1,
@@ -98,11 +97,17 @@ walks.
              "max_labels_per_seed": 1000, "label_order": "hash", "sample_seed": 1,
              "merge_overlapping": true},
   "run_format": "intervals",
-  "bounds": {"max_query_bp": 100000, "time_budget_ms": 30000}
+  "bounds": {"max_query_bp": 100000}
 }
 ```
 
-- Exactly one of `labels` (explicit, ≥ 1; column or header names) or `discover` must be present.
+- `bounds.time_budget_ms` is **rejected** (400 naming the field): `/resolve` enforces no deadline
+  yet, and accepting one would promise what nothing enforces; budgets for `/resolve` arrive with
+  stage 3b (`DESIGN-traverse-graphlet.md` §21). Bound the work with `bounds.max_query_bp` and
+  `discover.max_labels`.
+- Exactly one of `labels` (explicit, ≥ 1; column or header names) or `discover` must be present
+  (both is a 400): the example discovers; with explicit labels it would carry
+  `"labels": ["573", "NZ_STEQ01000045.1"]` in place of `discover`.
   `discover.kind` is `column` (default) or `header` (requires a `CoordToHeader`).
 - `select` is optional; without it only the profile and candidates are returned.
 - Unknown keys, wrong types and out-of-range values are rejected (strict validation, as in §5).
@@ -299,6 +304,23 @@ to a header).
   states `usage`, with `bound.enforced: false` (operator-run: nothing to lease), its error output for a request
   error after the fields were read included (`{"error", "usage"}`, as the server's 400; a malformed id: no
   `usage`). `/resolve` does not accept them (400, unknown field).
+- **`not_after_ms`** (pass 5; top level, optional, with or without `attempt_id`): an integer in
+  [0, 2⁵³ − 1], a Unix epoch instant in milliseconds on the server's clock, after which the request
+  must not be **started**. A ledger that has no answer for an attempt treats it as never started once
+  its own clock passes `not_after_ms + attempts.clock_skew_allowance_ms` (§10.3), and as stopped once
+  it passes that plus the attempt's `bound_ms`; the server makes that safe by refusing, when the
+  request's handler starts, a request whose `not_after_ms` is earlier than its clock: **409**
+  `{error, state: "expired", not_after_ms, server_time_ms, attempt_id?, budget_id?, locus_id?,
+  server_instance}` (the ids as given), nothing run and nothing registered — no `usage`, and a later
+  `GET /traverse/attempt/{id}` answers 404 (a later copy of the request is expired too). The check is
+  strict: no allowance is added (the skew is the ledger's to add), and a request whose instant has
+  not passed runs whatever happens afterwards (it is a start deadline, not a run deadline: the
+  attempt's bound limits the run). An id that is running, retained or tombstoned is answered first
+  (the duplicate's 409, which carries `attempt`), so an `expired` 409 always means that no attempt
+  with that id exists on that `server_instance`. A fraction, a sign, a string or a value above
+  2⁵³ − 1 is a 400 naming the field, without `usage`. It is echoed as `usage.not_after_ms` and in the
+  attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
+  status 1). `/resolve` does not accept it (400, unknown field).
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
   and the regime is basic).
 - **`seeds[].labels` is optional.** Omitting it is the default and realizes the design note's
@@ -679,10 +701,10 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   request budget a level's annotation is fetched in calls of at most 8,192 keys, sized so that a call holds about
   `W` units at the widest row fetched so far and, under a work budget, no more than the budget has left (down to
   one key near the budget), growing from one key at the start of each level so that rows wider than any fetched
-  before are met by a small call; without a request budget the level is one call, as before (its counters depend
-  on the batching). The deadline is read before every head, between those calls and at least every `W` = 65 536
-  units otherwise; without a request budget a level's fetch is one uninterruptible call, which the deadline can
-  run past. The seed phase is charged too (8 per seed k-mer read, 1 per annotation entry and coordinate, as the
+  before are met by a small call; without a request budget the level is one logical call, as before (its counters
+  depend on the batching). The deadline is read before every head, between those calls, before every time-sized
+  chunk an annotation read is decoded in (*chunked deadlines*, below), and at least every `W` = 65 536 units
+  otherwise. The seed phase is charged too (8 per seed k-mer read, 1 per annotation entry and coordinate, as the
   walk charges a fetched row; `account.work_seed` beside each arm's `work_units`), **every row a read returned
   charged before a comparison can fail the seed** (review of the stage-2 recheck, P2: charged row by row, a
   failure left the rest of a decoded batch uncharged): the validation reads, under a work budget, in calls grown
@@ -726,7 +748,10 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   phase (a validation's fetch call, a derivation's window) and per k-mer of a derivation — and the request polls
   between seeds. A poll is an atomic load (the stop flag); every eighth poll of a walk, and every poll between
   seeds, also reads the clock (the bound) and, at most every 100 ms, the client's socket — so a cancel reaches the
-  walk at its next checkpoint, the bound and a gone client within eight.
+  walk at its next checkpoint, the bound and a gone client within eight. The poll before every chunk of a paced
+  annotation read (*chunked deadlines*, below) reads the clock and the socket too, so a stop that falls inside
+  a read the deadline splits is seen within one chunk; a read far from its deadline is one piece, as before
+  pass 5, and a cancel or a gone client is seen at the checkpoint after it.
   - **`cancelled`** (`POST /traverse/cancel`) and **`attempt_deadline`** (the attempt reached its bound,
     below), requests with `attempt_id` only: the seed being walked stops like a budget at the next checkpoint —
     its heads censored with `resource_limit` (`Y`), `complete_to_bp` the last complete level, a `resource_stop`
@@ -757,22 +782,120 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     effective per-seed `bounds.time_budget_ms` after the server's clamp (0 when not positive), `allowance_ms` the
     server's `--traverse-attempt-allowance-ms` (default 10 000) and 899 000 the content timeout less one second,
     on the attempt's clock, which starts when the server read the request's header (time queued before that,
-    every server thread busy, is not in it: §10.3). The seeds stop being walked at `bound_ms − allowance_ms / 2`
-    (`attempt_deadline`, as above; the seeds left are `not_started`), leaving the other half of the allowance to
-    deliver what was walked; the response is built and written under the bound — checked every 4096 objects of
-    the JSON tree and of the MGT text, every 64 KiB of the JSON text, between compression blocks and once before
-    it is handed to the transport — and one not ready by the bound is not written: 503 with `usage` (reason
-    `deadline`). **Stated limits**: one uninterruptible step can run past the bound by its own length (left
-    unchunked, so that `annotation.direct_reads` does not change because `attempt_id` was added) — without a
-    request budget a level's annotation fetch is one call over the level's keys (under any budget, calls of at
-    most about W units at the widest row read so far); without `bounds.max_work_units` a seed's validation is
-    **one** annotation call over all its k-mers, up to `--traverse-max-seed-bp` (100 000) on the server and
-    unbounded in the CLI (on a budget-aware annotation under `bounds.max_memory_mb`, calls of up to W / (8 +
-    labels) keys; under a work budget, calls grown from one key), and the mapping of the seed's k-mers to nodes
-    before it is not polled either (review of the stage-4 backend, F7: a cancel waited for a 100 kbp seed's whole
-    validation); a derivation reads its window of up to 64 rows in one call; a seed's finalisation and summary
-    (linear in its admitted result) are not checked; and the transport sends the written bytes after the handler
-    returned (the content timeout bounds that). A ledger that needs a tighter lease sends a work budget.
+    every server thread busy, is not in it: §10.3). The seeds stop being walked at
+    `bound_ms − max(allowance_ms / 2, reserve_ms)` (`attempt_deadline`, as above; the seeds left are
+    `not_started`) — the walk-until, which moves with the reserve; the walk stops at its first poll after it —
+    leaving the rest to deliver what was walked; the response is built and written under the
+    bound — checked every 4096 objects of the JSON tree and of the MGT text, every 64 KiB of the JSON text,
+    between compression blocks and once before it is handed to the transport — and one not ready by the bound
+    is not written: 503 with `usage` (reason `deadline`).
+    **The delivery reserve** (pass 5): `reserve_ms = 1.25 × ((T + E) / (compress_mbps × 1000) + E / (build_mbps
+    × 1000)) + stop_ms`, T the exact bytes of the text of the seeds finished so far (the server writes each seed's result
+    as compact text once it is built and assembles the response from those texts — byte for byte the text of
+    the whole tree, which is freed seed by seed), E the text the seed being walked is estimated to write (its
+    modelled account, published at every level's end, / the account per text byte of the requested detail),
+    with the configured values `account_per_text_byte` (20 for the JSON details, 40 for a graphlet; the
+    account/text ratio of real responses ranged from 34.5 to 88 for `full` and from 58.4 up for `graphlet`),
+    `compress_mbps` (`--traverse-delivery-compress-mbps`, default 50) and `build_mbps`
+    (`--traverse-delivery-build-mbps`, default 10) until the server has measured its own: then, for each, the
+    slowest rate — or for the detail the smallest ratio — of its last 16 measurements on `/traverse` responses
+    and seeds' results of at least 1 MiB of text, and the attempt's own seeds' where more conservative, so
+    that a machine slower than assumed is seen at once and a fast one is not held to the guess (both
+    capabilities routes state the measurements). On the M5 Max of the measurements the configured guesses
+    alone stopped the walk of a 403 MB SRA response at 2.3 s of its 35 s walk-until (account 35.6 GB, 88 per
+    text byte, estimated at 20); measured, they hold it to its own needs. The factor 1.25 is a margin for rates
+    that vary between responses, and `stop_ms` the time from the walk-until to the walk's end — the walk stops
+    at its first poll after the walk-until (after a chunk of an annotation read, or the heads between two
+    readings of the clock), then finalises the stopped seed: `delivery_reserve.stop_ms`
+    (`--traverse-chunk-target-ms` + 200), or the longest such time the server measured over its last 16
+    attempts that walked past their walk-until when longer (`measured_stop_ms`). Without the margin and the stop
+    time a response the model fitted exactly was a 503 about half the time (review of pass 5, F3: a walk that
+    stopped 124 ms after its walk-until left the delivery 1,277 ms of the 1,401 ms reserved, 98 ms short).
+    `usage.bound.walk_until_ms` states, when the walk-until stopped the walk, the walk-until in force then;
+    otherwise the lowest in force while a seed was walked (the floor, `bound_ms − allowance_ms / 2`, when the
+    reserve never exceeded it then; the one computed once the last seed's text is written bounds no walk);
+    `usage.stopped_at` is when the walk saw the stop. The traversal routes compress at zlib level
+    `--traverse-compression-level` (default 1; the other routes keep 9): on 10 real responses (541 MB of JSON)
+    level 1 wrote 630 MB/s against level 9's 153 MB/s (graphlet bodies 51–64 MB/s at level 9) for 1.8 times
+    the bytes, and the decompressed bytes are the same at every level. **When a 503 becomes likely**: before
+    pass 5, as soon as the response's text exceeded allowance/2 × the machine's building-and-compression rate
+    (about 87 MB on the staging server at level 9: 5 s × 17.5 MB/s measured; a few hundred MB on the M5 Max of
+    the measurements); now only when the machine builds or compresses more slowly than the rates the reserve
+    uses allow for with the 1.25 margin (a server's first large responses use the configured rates; later ones
+    its measured rates, the slowest of its recent responses), when the seed being walked when its walk-until
+    passes writes more text than its account / `account_per_text_byte`, or when the walk ends later after its
+    walk-until than `stop_ms` (a read decoded whole because it was predicted to end well before the deadline,
+    a head that runs long; a longer time is measured and kept for the next attempts). The configured rates are conservative guesses not calibrated
+    on the staging server (both capabilities routes state them and the measured ones; they are
+    configuration). So a large response is no longer
+    lost whole for want of time: the reserve stops the walk early enough to deliver what was walked, with the
+    rest stated (`attempt_deadline`, `not_started`). The reserve can stop a large attempt earlier than before
+    pass 5; what it did not walk is stated, as any stop.
+    **Stated limits**: one uninterruptible step can run past the bound by its own length: one chunk of an
+    annotation read (at least one row; no bound on one row's decode exists before stage 3c, so
+    `deadline_check.max_uninterruptible_ms` is null, and `usage.observed_max_uninterruptible_ms` states the
+    longest single piece the attempt decoded), or a read decoded whole because it was predicted to end well
+    before the walk-until, whose rows were more than 64 times slower than any read before (*chunked
+    deadlines*, below); the mapping of the seed's k-mers to nodes before its validation,
+    which is not polled (up to `--traverse-max-seed-bp` = 100 000 k-mers on the server, unbounded in the CLI;
+    review of the stage-4 backend, F7); a head's processing between two work checks; a seed's finalisation and
+    summary (linear in its admitted result); the building of the response between two delivery checks; and the
+    transport, which sends the written bytes after the handler returned (the content timeout bounds that).
+- **Chunked deadlines** (pass 5; `LabelOracle::pacer`, `ReadPacing`). Under a deadline — the seed's
+  `bounds.time_budget_ms` where the walk reads it (depth > 0, as a checkpoint does; in a derivation, a positive
+  budget, as the derivation reads it after every k-mer) and, for a request with `attempt_id`, the attempt's
+  walk-until (everywhere) — every annotation read of `/traverse` that the deadline may fall into is decoded in
+  **chunks**, the deadline checked before each. A read is **one piece**, as before pass 5, when at the slowest
+  per-row time the request has seen (any piece, any read: pessimistic, which costs at most a first chunk) it
+  would take less than 1/64 of the time left — rows up to 64 times slower than any seen before still end before
+  the deadline — and without a deadline. Otherwise its first chunk is at most 8 rows (it measures this read's
+  own rows: another read's rows, another level's, can be two orders of magnitude cheaper), each next chunk at
+  most 4 times the previous one and sized at the rate the previous chunk measured to take `chunk_target_ms`
+  (`--traverse-chunk-target-ms`, default 50, on the server and in the CLI) or the time left, and the rest of
+  the read is one piece once predicted at that rate to take less than a quarter of the time left. The chunks
+  are taken in the walk's order (a lookahead's rows path by path), each sorted as a whole read is: on a
+  row-diff annotation the rows of one call share the decoding of their row-diff paths, which a chunk of rows
+  from as many paths decodes again (review of pass 5, F1: chunks of sorted rows took 0.75 ms a row against
+  0.016 ms for the read whole, and a row_diff walk of 1.8 s took 30 s and was stopped by its budget). So
+  splitting costs a few small chunks per read near its deadline and nothing far from it. Chunked are a level's fetch, the
+  lookahead, a seed's validation — by the attempt only: a seed's own time budget never stops its validation
+  (the deadline is never checked at depth 0, and a seed validated past its budget still delivers its result
+  complete to 0 bp) — and a derivation's window. A chunked read **returns exactly what one read returns**: its
+  counting (`annotation.rows_requested`, the cache hits), its cache's eviction and its result are decided once
+  for the whole read and only the decoding is split (a budget-aware read admits every key against its
+  standalone demand, so its runs may be cut anywhere), so a request that no deadline stops is byte-identical
+  to the unchunked request, `annotation.direct_reads` and `keys_mapped` included, whatever the chunk sizes
+  (checked against the previous build on 1,380 real requests — 588 mini_refseq, 792 UHGG — and on the 588 with
+  chunks of 1 ms, and in one-row chunks, every read split, by the unit tests). A deadline that stops a read stops the walk at the read, as the check after the whole read would
+  have: a level's fetch at the level's first head (`time_budget`, `cancelled` or `attempt_deadline`), the
+  lookahead silently (the next head's checkpoint, which reads the same deadline, then stops the walk), a
+  validation by failing the seed (the attempt's stop, §7.0), a derivation with `time_budget` after the k-mers
+  consumed before its window (or the attempt's stop). The unchunked walk ran the read to its end, past the
+  deadline, and could walk on (cached levels) before its next check, so a walk stopped in a read can end at a
+  smaller `complete_to_bp` than the unchunked walk that overran (on the `row_diff_brwt` fan-out index at 100
+  ms, 5 where the overrunning walk reached 69). Only such a walk's counters (`rows_requested`, which a stopped read does not
+  add) and the time values differ from the unchunked request's — a stop by time is not deterministic anyway
+  (§6.8, determinism). The rows a stopped read's chunks decoded are **charged** as
+  work (decoded, though no row was returned; review of the stage-3 fixes, P3: what was decoded is in
+  `usage.work_units`): to the level's arm, or to the seed phase (`work_seed`) without a comparison, as a
+  window found `too_wide`. One chunk stays uninterruptible: at least one row, and no bound on one row's decode
+  exists before stage 3c (selected-label decoding) — `deadline_check.max_uninterruptible_ms: null`;
+  `deadline_check.observed_max_uninterruptible_ms` is the longest single piece the server process decoded (a
+  whole read far from its deadline included: how late a cancel can be seen), and
+  `usage.observed_max_uninterruptible_ms` the attempt's: observations, not bounds. **Stated limits**: a read
+  decoded whole because it was predicted to end before 1/64 of the time left overruns the deadline when its rows
+  are more than 64 times slower than any the request read before; the rest of a split read, when its rows are
+  more than 4 times slower than its chunk's. **Not chunked**: `/resolve`
+  (stage 3b), the mapping of a seed's k-mers, a head's processing (checked every `work_check_interval` units),
+  a seed's finalisation and summary, the response's building between two delivery checks, and the transport.
+  `--traverse-chunk-target-ms 0` decodes every read in one piece, as before pass 5. Measured on the fan-out
+  index of `TestTraverseWideIndex` (1,024 header labels, one lookahead read of about 66,000 rows), on a loaded
+  M5 Max, budgets of 50, 100, 200 and 500 ms: with a column annotation, which the previous build overran by up to
+  0.9 s, kept to within 15 ms; transformed to `row_diff` (whose depth-6 fetch of 1,024 unshared rows takes 1–2.6
+  s) and `row_diff_brwt`, with and without a memory budget, which the previous build overran by up to 1.0 and
+  1.9 s, kept to within 60 ms (the largest piece 106 ms); and a walk its 30 s budget does not stop returns the
+  same bytes in the time of the unchunked walk (one or two chunks of 8 and 32 rows per large read). On 60 real
+  UHGG requests the walks took 15,973 ms against 15,932 ms for the previous build and 16,021 ms unchunked.
 - **Annotation reads under a budget** (stage 3 of `DESIGN-traverse-graphlet.md` §14.1). On an annotation whose
   reads are budget-aware — `RowDiff` over BRWT or ColumnMajor, with or without coordinates
   (`row_diff_brwt`, `row_diff_brwt_coord`, `row_diff`, `row_diff_coord`) — a request with a budget reads its
@@ -1355,12 +1478,13 @@ attempt) nor a 400 for a malformed id:
 
 ```json
 "usage": {"attempt_id": "a-17", "budget_id": "b-3", "locus_id": "l-9", "server_instance": "9f3c0d1e2a4b5c6d",
+          "not_after_ms": 1791137060000,
           "reason": "completed", "received_at": "2026-10-03T19:17:45.540Z",
           "stopped_at": "2026-10-03T19:17:48.565Z", "elapsed_ms": 3026, "bound_ms": 40000,
           "bound": {"seeds": 1, "time_budget_ms": 30000, "allowance_ms": 10000, "walk_until_ms": 35000,
                     "capped_by": null, "enforced": true},
           "seeds": {"requested": 1, "started": 1, "finished": 1, "abandoned": 0},
-          "work_units": 47720760,
+          "work_units": 47720760, "observed_max_uninterruptible_ms": 37,
           "memory": {"peak_admitted_bytes": 698981842, "soft_excess_bytes": null, "held_bound_bytes": null},
           "per_seed": [{"index": 0, "outcome": "partial", "stopped_by": null, "work_units": 47720760,
                         "work_seed": 0, "peak_admitted_bytes": 698981842, "final_bytes": 698857938,
@@ -1376,8 +1500,18 @@ attempt) nor a 400 for a malformed id:
   the response was written; the attempt's state has the final value).
 - `bound_ms` is the bound the server enforces (§6.8) and `bound` its derivation: `seeds` × `time_budget_ms`
   (the effective per-seed budget) + `allowance_ms`, `capped_by: "content_timeout"` when the HTTP server's cap
-  applied, `walk_until_ms` where the walk stops, `enforced` (false in the CLI). A request that failed before it
-  was parsed states `seeds: 0`, `time_budget_ms: null` and the cap.
+  applied, `walk_until_ms` where the seeds stop being walked — `bound_ms − max(allowance_ms / 2, the delivery
+  reserve)`, which moves with the reserve (pass 5, §6.8): when it stopped the walk, its value then (the walk
+  stopped at its first poll after it, `stopped_at`); otherwise the lowest value in force while a seed was walked,
+  which is `bound_ms − allowance_ms / 2` when the reserve never exceeded that floor —, `enforced` (false in the CLI). A request that failed before it was parsed states `seeds: 0`,
+  `time_budget_ms: null` and the cap.
+- `not_after_ms` (pass 5): the request's own, echoed only when it gave one (§5).
+- `observed_max_uninterruptible_ms` (pass 5; every response with `usage`): the longest single piece of
+  annotation decoding of the attempt's walks — a chunk of a split read, or a read decoded whole because its
+  deadline was far (§6.8, chunked deadlines) — whole ms rounded up: how late a stop could have come. An
+  observation of this attempt, not a bound.
+- Number types: every count, byte amount and duration in `usage` is an integer (ms rounded up), except
+  `bound.time_budget_ms`, a number as the request's knob is.
 - `seeds`: `requested`; `started`; `finished` — the seeds whose walk ended (complete, partial or failed),
   delivered or not; `abandoned` — the seeds whose walk the client's departure cut (neither finished nor
   delivered; visible in the attempt's state, since no response is written then). A seed never started is in
@@ -1514,7 +1648,15 @@ derived keeps the failed shape of §7.1 (no `graphlet`).
 
 `H S X* L* O Q? K*`, then per requested arm, left before right, `A B* V*`, then per segment in id order
 `G P* E* T? C?`, then the arm's `R*`; finally `Z`. (`J`, the response envelope of a saved file, is written
-by the library after `H`, never by the server.)
+by the library after `H`, never by the server: the envelope with `results` reduced to this seed's summary — the
+graphlet string removed — and *(pass 5)* an attempt's `usage` reduced to its totals plus this seed's `per_seed`
+entry, the same rule in `save()`, `dump()`, `standalone_text()` and the store; `view` and `derived_from` are the
+library's own top-level names in it (a view's selector, a derived graphlet's source), and a response that
+carries either is refused by `from_response` and `standalone_text` rather than misread. A file saved by an
+earlier library (feature level 2) whose `J` kept every seed's `per_seed` entry stays valid and loads as it is
+(`load()`, `parse()`), but it is not in the canonical form of this rule: `is_canonical()` is false for it,
+`dump(parse(text))` differs from it, and `save()` rewrites it reduced. The `J` record is the library's, not
+MGT v1's: no record, field or token of the format changed.)
 
 ```
 H mgt 1 <k> <regime> <alphabet> <mode c|a> <support k|t> <reconverge m|k> <cap> <continuation_bp>
@@ -1798,53 +1940,142 @@ the server.
 
 ### 10.3 Server
 
-`POST /resolve`, `POST /traverse`, `GET /traverse/capabilities`, `POST /traverse/cancel` and
+`POST /resolve`, `POST /traverse`, `GET /traverse/capabilities`, `GET /capabilities`, `POST /traverse/cancel` and
 `GET /traverse/attempt/{attempt_id}` in `server.cpp` (the attempts in `traverse_attempts.{hpp,cpp}`).
 
-- **Capabilities** (also in `/stats` and every resolve/traverse response): `k`, `regime`, `alphabet`,
-  `num_labels`, `has_coordinates`, `has_coord_to_header`, `cost_models_available`, access path, server maxima,
-  `schema_version` (the request schema the server accepts, `strategy.schema_version`; 1), `feature_level` (what the
-  server offers beyond the base contract, monotonic and only ever extended, so a client states a feature as
-  `feature_level >= n`: absent or 1 = the base contract through stage 3; 2 = attempts — `attempt_id` /
-  `budget_id` / `locus_id`, the `usage` block, `POST /traverse/cancel`, `GET /traverse/attempt/{attempt_id}`, the
-  enforced attempt bound — and the stop when the client is gone), `release`, `graphlet_format` (1: the MGT version
-  `detail: graphlet` writes, §7.5),
-  `detail_levels` (`["summary", "tree", "full", "graphlet"]`); `GET /traverse/capabilities` adds the request
-  budgets it accepts (`budgets: ["max_memory_mb", "max_work_units"]`), `work_check_interval` (`W` of §6.8, in
-  work units), `work_bound` (what `bounds.max_work_units` counts and how far a work stop can exceed it, §6.8:
-  deterministic logical work, not measured decode effort, with its weights — the dependency weighting of a
-  budget-aware row included —; what was charged since the previous comparison, one indivisible charge such as a
-  fetch call's rows decoded whole, with each stop's message stating the most its seed charged between two
-  comparisons; the seed phase failing at a comparison finding it at least `work_check_interval` units over
-  budget; the physical decode counters in `timing`. Its text changed with the review of stage 3, answer 4) and
-  `memory_bound: "soft"` (stage 3 charges budget-aware annotation reads, §6.8, but what is held beyond the
-  admitted account is still soft, §7.0 `memory_bound_soft`: no hard request-wide memory bound; not in the
-  per-request capabilities, which stay as they were); and the **index identity**
-  (`DESIGN-traverse-graphlet.md` §3.1), also in every graphlet's `H` record:
-  - `index_ns`: `--index-name NAME` (`[A-Za-z0-9._-]+`), a name for humans and routing, not identity; `null`
-    when unset.
-  - `index_fp`: the identity — the lowercase hex sha256 of the index bundle's **manifest** file list
-    (`--index-manifest FILE`): a JSON object with `files: [{path, size, sha256}, …]` (every file the server
-    loads: graph, annotation and sidecars such as `.anchors`, `.rd_succ`, `.seqs`), hashed as the lines
-    `<path>\t<size>\t<sha256>\n` in ascending byte order of path; other keys (builder, inputs) are metadata. The
-    build hashes the files once; the server reads the digests, checks that every loaded file is listed (by base
-    name) with its size, and that an `index_fp` the manifest states is the computed one, and refuses to serve
-    otherwise. `null` without a manifest: labels joined across retrievals are then unverifiable, never equal.
-    `scripts/traversal/build_mini_refseq.sh` writes `<out>/annotation.relaxed.relabeled.manifest.json`
-    (`MANIFEST_ONLY=1` writes it for an existing build).
-  - `index_meta_fp`: FNV-1a-64 (16 hex) over k, regime, alphabet, the annotation's row count and its ordered
-    column names, and whether coordinates and a `CoordToHeader` exist — always present, and only a **negative**
-    check: a mismatch proves two indexes different, equality proves nothing (an index whose columns swap their
-    memberships keeps it).
-  Both flags describe one index (`-i`/`-a`) and are refused with a graph list; in multi-graph mode `index_ns` and
-  `index_fp` are `null` and `index_meta_fp` is computed per index on first use. The CLI (`metagraph traverse`)
-  takes the same two flags.
-- Single-graph mode: as `/search`. **Multi mode:** `graph` (name) is required; the server selects the
-  `(graph, annotation)` pairs under that name whose labels contain every seed and `extra` label: exactly one →
-  use it; several sharing one loaded graph → a union oracle (membership = OR, column ids namespaced per pair);
-  otherwise 400 listing candidate pairs and how many requested labels each holds. `graph_path` is an optional
-  override. The exact pair(s) are echoed. `in_ram` deployments are rejected. The 4th CSV column (`release`) is
-  parsed explicitly (today silently dropped) and `--index-release ID` serves single mode.
+- **Capabilities: which route carries which fields.** (`/stats` carries none of them: it states the graph and
+  annotation statistics only, unchanged.)
+  - **Every `/resolve` and `/traverse` response**, `capabilities`: `schema_version` (the request schema the server
+    accepts, `strategy.schema_version`; 1), `feature_level`, `k`, `regime`, `alphabet`, `num_labels`,
+    `has_coordinates`, `has_coord_to_header`, `supports_trace`, `cost_models_available`, `label_modes`,
+    `direct_access`, `release`, `graphlet_format` (1: the MGT version `detail: graphlet` writes, §7.5),
+    `detail_levels` (`["summary", "tree", "full", "graphlet"]`) and the index identity (`index_ns`, `index_fp`,
+    `index_meta_fp`, below); `/traverse` responses also carry `algorithm_version` at the top level.
+  - **`GET /traverse/capabilities`** (the probe; per graph in multi-graph mode, below): all of the above for its
+    index, plus the server maxima (`max_time_ms`, `max_seeds`, `max_seed_bp`, `max_seed_labels`,
+    `max_query_bp`), the request budgets it accepts (`budgets: ["max_memory_mb", "max_work_units"]`),
+    `work_check_interval` (`W` of §6.8, in work units), `work_bound` (what `bounds.max_work_units` counts and how
+    far a work stop can exceed it, §6.8: deterministic logical work, not measured decode effort, with its weights
+    — the dependency weighting of a budget-aware row included —; what was charged since the previous comparison,
+    one indivisible charge such as a fetch call's rows decoded whole, with each stop's message stating the most
+    its seed charged between two comparisons; the seed phase failing at a comparison finding it at least
+    `work_check_interval` units over budget; the physical decode counters in `timing`. Its text changed with the
+    review of stage 3, answer 4), `memory_bound: "soft"` (stage 3 charges budget-aware annotation reads, §6.8, but
+    what is held beyond the admitted account is still soft, §7.0 `memory_bound_soft`: no hard request-wide memory
+    bound), `attempts` (below), `content_encodings` (`["gzip", "deflate"]`) and, from feature level 3,
+    `algorithm_version`, `compression_level` (the zlib level of the traversal routes' compressed bodies) and
+    `deadline_check` (below); in multi-graph mode also `graph` and `graph_path`, the pair it describes.
+  - **`GET /capabilities`** (feature level 3; the owner's server-wide document, `DESIGN-traverse-graphlet.md`
+    §21), small and index-free, answered while a single index still loads (`ready: false`; the routes that read
+    the index answer 503 then, the cancel and state routes do not):
+
+    ```json
+    {"algorithm_version": "traverse-0.2", "attempts": {"…": "as the probe's"}, "compression_level": 1,
+     "content_encodings": ["gzip", "deflate"],
+     "deadline_check": {"chunk_target_ms": 50, "max_uninterruptible_ms": null,
+                        "observed_max_uninterruptible_ms": 37, "rule": "…"},
+     "feature_level": 3, "features": ["search", "align", "resolve", "traverse", "attempts"],
+     "graphs": null, "mode": "single", "ready": true, "release": "",
+     "routes": {"align": "POST /align", "attempt": "GET /traverse/attempt/{attempt_id}",
+                "cancel": "POST /traverse/cancel", "capabilities": "GET /capabilities",
+                "column_labels": "GET /column_labels", "resolve": "POST /resolve", "search": "POST /search",
+                "stats": "GET /stats", "traverse": "POST /traverse",
+                "traverse_capabilities": "GET /traverse/capabilities"},
+     "schema_version": 1, "server_instance": "9f3c0d1e2a4b5c6d"}
+    ```
+
+    In multi-graph mode `mode` is `"multi"`, `graphs` the sorted list of the graph list's names, `align` is in
+    neither `features` nor `routes` (it answers 400 there), and `routes.traverse_capabilities` is
+    `"GET /traverse/capabilities?graph={name}[&graph_path={path}]"`. `server_instance` is the attempts' (below).
+  - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
+    `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
+    (null: no bound on one row's decode exists before stage 3c), `observed_max_uninterruptible_ms` (integer: the
+    longest single piece of annotation decoding of any `/traverse` in this process's lifetime — a chunk, or a read
+    decoded whole far from its deadline — an observation) and `rule` (§6.8, chunked deadlines, as text, with the
+    factors 64 and 4 and the first chunk of 8 rows).
+  - **`feature_level`** — what the server offers beyond the base contract, monotonic and only ever extended, so a
+    client states a feature as `feature_level >= n` (`DESIGN-traverse-graphlet.md` §21: each pass that adds
+    capabilities fields or routes bumps it by one; `schema_version` stays the request schema version). Absent or
+    1: the base contract through stage 3. **2**: attempts — `attempt_id` / `budget_id` / `locus_id`, the `usage`
+    block, `POST /traverse/cancel`, `GET /traverse/attempt/{attempt_id}`, the enforced attempt bound — and the stop
+    when the client is gone. **3** (pass 5): `not_after_ms` with its expired 409 and
+    `attempts.clock_skew_allowance_ms`; the per-graph identity (the graph list's columns 4–5, checked at start-up)
+    and `GET /traverse/capabilities?graph=`; `GET /capabilities`; `algorithm_version` in the capabilities;
+    `attempts.hard_cap_ms` and `attempts.allowance_ms` as an integer; `deadline_check`, the chunked deadlines and
+    `usage.observed_max_uninterruptible_ms`; `compression_level` and the delivery reserve
+    (`attempts.delivery_reserve`).
+  - **The index identity** (`DESIGN-traverse-graphlet.md` §3.1), also in every graphlet's `H` record:
+    - `index_ns`: a name for humans and routing, not identity (`[A-Za-z0-9._-]+`): `--index-name NAME` for a single
+      index, the graph list's fifth column per (graph, annotation) pair; `null` when unset. A manifest's own
+      `index_ns` (metadata) is not read for it; a different one is logged.
+    - `index_fp`: the identity — the lowercase hex sha256 of the index bundle's **manifest** file list
+      (`--index-manifest FILE` for a single index, the graph list's fourth column per pair): a JSON object with
+      `files: [{path, size, sha256}, …]` (every file the server loads: graph, annotation and the sidecars it reads
+      beside them), hashed as the lines `<path>\t<size>\t<sha256>\n` in ascending byte order of path; other keys
+      (builder, inputs, an entry's `digest`) are metadata. The build hashes the files once; the server reads the
+      digests and checks, before loading anything, that every file it loads is listed (by base name) with its
+      size — the graph, the annotation and, when they exist, `<graph>.anchors` and `<graph>.rd_succ` (row-diff),
+      `<graph without .dbg>.edgemask`, `<annotation>.coords` (column coordinates) and `<annotation without
+      .<type>.annodbg>.seqs` (sequence headers) *(pass 5 review: before, the sidecars were not checked, and a
+      manifest whose sidecars were another build's was accepted)* —, that the manifest lists no graph (`*dbg`) or
+      annotation (`*.annodbg`) file other than those (a manifest describes one graph with one annotation: one
+      written for a directory holding several annotations of one graph lent one fingerprint to each), and that
+      an `index_fp` the manifest states is the computed one; it refuses to start otherwise. Sizes, not contents,
+      are checked: a file replaced by another of the same size and name is not noticed (that is what hashing at
+      build time and `index_manifest.py --verify` are for). `null` without a manifest: labels joined across
+      retrievals are then unverifiable, never equal.
+      `scripts/traversal/build_mini_refseq.sh` writes `<out>/annotation.relaxed.relabeled.manifest.json`
+      (`MANIFEST_ONLY=1` writes it for an existing build); `scripts/traversal/index_manifest.py` writes one for any
+      bundle (`-i/-a`), or one per pair of a server's graph list (`--server-csv`, below).
+    - `index_meta_fp`: FNV-1a-64 (16 hex) over k, regime, alphabet, the annotation's row count and its ordered
+      column names, and whether coordinates and a `CoordToHeader` exist — always present (computed per pair on
+      first use in multi-graph mode), and only a **negative** check: a mismatch proves two indexes different,
+      equality proves nothing (an index whose columns swap their memberships keeps it).
+    `--index-name` and `--index-manifest` describe one index (`-i`/`-a`) and are refused with a graph list. The CLI
+    (`metagraph traverse`) takes the same two flags.
+- Single-graph mode: as `/search`; `graph` / `graph_path` in a request (or as probe parameters) are refused.
+  **Multi-graph mode** (`server_query GRAPHS.csv`):
+  - **The graph list** has one line per (graph, annotation) pair, `name,graph_path,annotation_path` and *(feature
+    level 3)* optionally `,manifest_path` and `,manifest_path,index_ns` (an empty column means none; paths as the
+    server opens them, relative to its working directory). A line of three columns is read as it always was. More
+    than five columns, fewer than three, or an `index_ns` that is not `[A-Za-z0-9._-]+` refuses to start, naming
+    the line (a fourth column used to be dropped silently, so a list that carried something else there — a
+    release id, as an earlier version of this section described — now refuses to start rather than have it
+    misread). Every listed manifest is checked against the files its pair loads exactly as `--index-manifest` is
+    (sizes and the digest of its list, no re-hashing), before anything is loaded; a mismatch refuses to start. One
+    index, one identity: lines naming the same pair — the same files, however their paths are spelled (compared by
+    real path) — must agree on what they state (an empty column states nothing and takes what another line of the
+    pair states), and two different pairs never state one `index_fp` (a manifest whose files had the base names
+    and sizes of two pairs, such as two annotations of one graph with swapped memberships, would let one index
+    be taken for the other; copies of one index under two paths are refused too, as telling them apart would
+    need hashing: list one path), else the server refuses to start. Every `/resolve` and
+    `/traverse` response, and every graphlet's `H` record, states its pair's `index_ns`, `index_fp` and
+    `index_meta_fp`. `scripts/traversal/index_manifest.py --server-csv GRAPHS.csv [--jobs N] [--digests FILE …]
+    [--digests-only] [--match-base-names] [--out-dir DIR] [--write-csv OUT.csv] [--force]` writes those
+    manifests: one per pair (to the manifest path its lines give — two different ones, or two different
+    `index_ns`, are an error —, else `DIR/<name>.<annotation base>.manifest.json`, else next to the annotation),
+    every distinct file hashed once by N parallel streams or taken from precomputed sha256 digests (`<sha256>
+    <path>` lines, e.g. from storage checksums; a line names a file by its real path, relative paths taken from
+    the digest file's own directory, and two different digests for one file are an error however spelled; by
+    base name only with `--match-base-names`, only for lines whose paths name no file on this machine, only a
+    base name one such line carries, never one line for two different files — bundles share names such as
+    `graph.dbg`, and the server, checking sizes only, could not notice another bundle's digest —, each match
+    listed; each entry records `"digest": "hashed" | "precomputed" | "precomputed-by-base-name"`), and
+    `--write-csv` the list with every line's manifest column filled with its pair's manifest.
+  - **Routing**: a request's `graph` (a name) is required; when the name lists one pair (the same pair listed
+    twice is one) that pair is used; when its pairs share one graph with several annotations, the request is
+    refused (400 naming them, with or without `graph_path`): a traversal reads one annotation, and `graph_path`
+    cannot choose among them (list each annotation under a name of its own); when it lists several graphs,
+    `graph_path` must name one of them (else 400 listing the graphs), and is refused like the above when that
+    graph has several annotations under the name. There is **no union oracle**: a traversal reads one pair. The
+    pair is not echoed (its identity is); a name with one pair ignores `graph_path`. `in_ram` deployments are
+    rejected. The release id is server-wide (`--index-release ID`), in both modes.
+  - **`GET /traverse/capabilities?graph=<name>[&graph_path=<path>]`** (feature level 3; a 400 before): the probe of
+    the pair those parameters select by the rules above (percent-decoded values), with `graph` and `graph_path`
+    (the pair's graph) added; without `graph` a 400 (`Bad request: in multi-graph mode GET /traverse/capabilities
+    needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET /capabilities lists the
+    graphs`); an unknown or repeated parameter is a 400. In single-graph mode `graph` and `graph_path` are a 400,
+    any other parameter is ignored, as before.
 - Caps: `--traverse-max-time-ms` (default 30 000), `--traverse-max-seeds` (64), `--traverse-max-seed-bp`
   (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
   unlimited for each. A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
@@ -1858,19 +2089,39 @@ the server.
 - Errors: a new `InvalidRequest` exception → 400 with the message; every other exception → 500 with context
   (small change to `process_request`). 503 while the index loads. Handlers run on the io threads: `-p ≥ 2` is
   documented as required for serving `/traverse` beside `/search`.
-- **Attempts** (requests with `attempt_id`, §5; stage 4, backend half). `GET /traverse/capabilities` states them
-  under `attempts`: `fields`, `id_pattern`, `cancel`, `state`, `server_instance` (16 hex, random per process: a
-  ledger tells a restarted backend, whose attempts are gone, from an expired attempt), `retention_s`,
-  `retention_count` (the finished attempts kept, and apart from them the most tombstones held at once),
-  `allowance_ms`, `content_timeout_s` (900), `client_check_ms` (100) and the `bound` rule.
+- **Attempts** (requests with `attempt_id`, §5; stage 4, backend half). Both capabilities routes state them
+  under `attempts` (the same block): `fields` (`["attempt_id", "budget_id", "locus_id", "not_after_ms"]`),
+  `id_pattern`, `cancel`, `state`, `server_instance` (16 hex, random per process: a ledger tells a restarted
+  backend, whose attempts are gone, from an expired attempt), `retention_s`, `retention_count` (the finished
+  attempts kept, and apart from them the most tombstones held at once), `allowance_ms`, `hard_cap_ms`
+  (`content_timeout_s` × 1000 − 1000 = 899 000: the bound never exceeds it), `content_timeout_s` (900),
+  `client_check_ms` (100), `clock_skew_allowance_ms` (`--traverse-clock-skew-ms`, default 2000: what a ledger adds
+  to `not_after_ms`, §5; the server's own check adds nothing), the `bound` and `not_after` rules (text) and
+  `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}`, `margin`
+  (1.25), `stop_ms` (the configured time from the walk-until to the walk's end: `--traverse-chunk-target-ms` +
+  200), `measured_text_bytes`, `rate_window`, `measured_compress_mbps`, `measured_build_mbps`,
+  `measured_account_per_text_byte: {summary, tree, full, graphlet}` and `measured_stop_ms` — the slowest rate,
+  the smallest ratio and the longest stop time of the last `rate_window` this server measured, null until it has
+  measured one — and its `rule`, §6.8). **Number types**: `allowance_ms`, `hard_cap_ms`,
+  `clock_skew_allowance_ms`, `content_timeout_s`, `client_check_ms`, `retention_s`, `retention_count`,
+  `measured_text_bytes`, `rate_window`, `stop_ms`, `measured_stop_ms` (or null) and, in `deadline_check`,
+  `chunk_target_ms` and `observed_max_uninterruptible_ms` are integers (`allowance_ms` was written 10000.0 before
+  feature level 3; `--traverse-attempt-allowance-ms`, `--traverse-clock-skew-ms` and
+  `--traverse-chunk-target-ms` take integers in [0, 2⁵³ − 1], anything else is refused at start-up, so that a
+  JSON client reads each as written and a ledger can add to it); `compress_mbps`, `build_mbps`,
+  `account_per_text_byte`, `margin` and the measured rates and ratios (or null) are numbers (a rate may be
+  fractional), as are the probe's `max_time_ms` and the time budgets.
   - `POST /traverse` with `attempt_id`: 200 with `usage` (complete, partial, failed seeds, cancelled); 400 with
     `{error, usage}` for a request error after the attempt was registered (a bad strategy, an unknown label or
-    graph, too many seeds, an unreachable extra label, …); 400 with `{error}` alone for a malformed id or
-    `budget_id`/`locus_id` without `attempt_id`; **409** with `{error, attempt}` (the other attempt's state, no
-    `usage`) when the id is running, retained, or tombstoned by a cancel; 503 with `{error, usage}` (reason
-    `deadline`) when the bound was reached while the response was built; 500 with `{error, usage}` for a
-    non-standard exception; 503 while the index loads (no `usage`: the request was not read). A client that is
-    gone gets no response (with or without `attempt_id`).
+    graph, too many seeds, an unreachable extra label, …); 400 with `{error}` alone for a malformed id, a malformed
+    `not_after_ms`, or `budget_id`/`locus_id` without `attempt_id`; **409** with `{error, attempt}` (the other
+    attempt's state, no `usage`) when the id is running, retained, or tombstoned by a cancel; **409** with
+    `{error, state: "expired", not_after_ms, server_time_ms, attempt_id, budget_id?, locus_id?, server_instance}`
+    (no `usage`, nothing registered) when `not_after_ms` has passed (§5; the same without the ids for a request
+    without `attempt_id`; the duplicate's 409 is answered first); 503 with `{error, usage}` (reason `deadline`)
+    when the bound was reached while the response was built; 500 with `{error, usage}` for a non-standard
+    exception; 503 while the index loads (no `usage`: the request was not read). A client that is gone gets no
+    response (with or without `attempt_id`).
   - `POST /traverse/cancel` `{"attempt_id": "…", "wait_ms": 0}` (`wait_ms` 0 … 10 000, default 0: how long to
     wait for the attempt to finish): **200** `{attempt_id, server_instance, cancelled: true, state:
     "stopping" | "finished", attempt}` when the attempt was asked to stop (now or before: idempotent; `state`
@@ -1901,8 +2152,9 @@ the server.
      "response": {"written": true, "status": 200, "bytes": 13721360}, "usage": {"…": "as in §7.3, without per_seed"}}
     ```
 
-    `state`: `running`, `stopping` (a stop was requested — a cancel, the bound, a gone client — and the handler
-    has not returned) or `finished` (the handler returned: the walk's memory is freed and the response, if any,
+    The state carries `not_after_ms` at its top level when the request gave one (pass 5). `state`: `running`,
+    `stopping` (a stop was requested — a cancel, the bound, a gone client — and the handler has not returned) or
+    `finished` (the handler returned: the walk's memory is freed and the response, if any,
     handed to the transport, which holds its bytes until they are sent or the content timeout). `reason` (once
     finished): `completed | cancelled | deadline | client_gone | error`; a walk that completed before it saw a
     cancel stays `completed`. `stop_requested_by`: `cancel | deadline | client_gone | null` (the first reason
@@ -1925,6 +2177,24 @@ the server.
     they wait. `-p` must exceed the number of concurrent traversals (by one at least) for a cancel or a state
     query to be answered while they run; the attempt's clock starts when its header is read, so a request queued
     behind busy threads is not yet on it.
+- **Deployment** (as `DESIGN-traverse-graphlet.md` §22, completed by pass 5):
+  - `-p` must exceed the number of concurrent traversals by one at least, so that the cancel, state and
+    capabilities routes find an io thread while traversals run.
+  - A reverse proxy in front of the server must forward `POST /traverse/cancel`, `GET /traverse/attempt/*`,
+    `GET /capabilities` and `GET /traverse/capabilities` with their query strings (`?graph=…&graph_path=…`,
+    percent-encoded), must close its upstream connection when its client goes (the server stops a traversal whose
+    client is gone; a proxy that keeps the upstream connection open hides that), must not buffer a request's
+    answer past the client's own timeout, and must keep its read timeout at or above `hard_cap_ms` plus the
+    transfer of the largest response.
+  - The server's clock must be synchronised (NTP) to within `attempts.clock_skew_allowance_ms` of the ledger's,
+    for `not_after_ms` to mean the same instant to both; the stated allowance is configuration
+    (`--traverse-clock-skew-ms`).
+  - A graph list that gives manifests (column 4) refuses to start when one does not describe its pair's files:
+    regenerate them with `index_manifest.py --server-csv` after an index changes. Manifests written before the
+    review of pass 5 may lack sidecars the server now checks (`<graph without .dbg>.edgemask`,
+    `<annotation>.coords`, `<base>.seqs` of a `.column` annotation, which the tool used to look for under other
+    names), or list a second annotation (`--extra`): such a list refuses to start, naming the file; regenerate
+    the manifests.
 
 ## 11. Tests
 
@@ -2006,6 +2276,10 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T44 | the recheck of the stage-2 fixes and the review of stage 3 | `Graphlet.DeliveryCostsBoundTheOutput` with wide floats (switches of 1e-300 on alternating labels, sums of 0.1 under a loss budget of 1e300, a time budget of 1e-300: every R, E and float field within the priced width). `GraphletStage2Recheck.*`: every row a seed-phase read returned charged before its comparison (validation: exactly the rows read; derivation: the window, 400,019-unit analogue), a failed work seed stating its largest charge and the threshold wording, the trace validation's coordinate copies observed (four copies under 1 MiB), extra labels reachable by a chain accepted and unreachable ones refused by name, `switch_reach` against a fixpoint over every pair (and 20,000 labels under a dense default), `mgt_float_width` against encoded costs, sums and times. `GraphletStage3Review.RadiusOnlyLevelIsNotStopped` (radius 0 and 1, 256 budgets from the first admitted). `LabelOracleBudgeted{Query,Recorder}.ZeroCacheWarmReturns`, `.AlternatingFetchPathsKeepCosts`. Python `test_traverse_stage2_recheck`: the spooled receipt's boundary, `left_out` per walk, the branch allowance (reduced, reset, unlimited, the caller's, the tool's receipt; CLI: the continuation stops at 46 like one walk), extra labels by chains (library and CLI) | — |
 | T46 | the reviews of the stage-3 fixes and of the stage-4 backend | `GraphletStage3Fixes.MemoryStopsStateTheBudgetThatHoldsThem`: `memory_budget_holding` against 20,000 random needs and budgets (the smallest whole MiB whose own allotments fit beside the need), the roots case at 1 … 12 MiB (every depth-0 failure states the same knob value in its message and `walk_domain`; raised to it the state is held, one MiB less is not), and head stops of every budget case (the cap trigger's demand is the knob value; raised to it the refused head is admitted). `.TooWideWindowIsTheSeedsWork` (column and row-diff, with and without a work budget). `GraphletAttempt.UsageStatesWhatFailedResultsHold` (a depth-0 failure and a never started seed with 2 MiB `seed_id`s under 1 MiB: each seed's `soft_excess_bytes` is what its `memory_bound_soft` states, `final_bytes` the priced failed result, `refused_bytes`, the admitted peak within the budget, the request's peak and `held_bound_bytes`; no bound without a memory budget), `.AbandonedWalksAreNotFinished`. `GraphletAttemptRegistry.TombstonesOutliveLaterFinishes` (ten finishes within `retention_s` leave the tombstone; beyond `retention_count` tombstones a 429; expiry by age). `GraphletServer.PeerClosedSeesACloseBehindWaitingBytes` (a trailing CRLF and a pipelined request, then close, half-close or reset). Integration `test_traverse_attempt_errors_state_their_usage` (CLI), `test_api_attempts` (a failed seed's usage under a memory budget, an error's usage in the library, the MCP tool's capabilities at its default ceiling from the real server), `test_a_close_behind_waiting_bytes_stops_the_walk`, `test_a_tombstone_is_kept_its_whole_retention_period`, the library's `AttemptAtBound` at the bound. Python `test_traverse_stage4_review`: the note's chain through a kept extra label, the two 503s told apart (`AttemptAtBound`, `ServerInitializing`), an error's `usage`, `traverse_capabilities` at its default ceiling (2.4 KB and 12 KB) while an explicit ceiling holds, a 429 cancel returned | — |
 | T45 | stage 4, backend half: attempts (cancel, client gone, usage, the bound) | `GraphletAttempt.StopAtEveryPollLeavesAConsistentPrefix`: a cancel and the attempt's bound injected at sampled polls of every budget case leave every walk up to `complete_to_bp` the unstopped walk's, a later stop never walks less, the stop is stated (`Q attempt cancelled\|attempt_deadline traversal`, a `walk_domain` naming `attempt_id`, no "raise the knob") and serialises both ways; in the seed phase the seed fails. `.NoStopIsByteIdentical` (with and without budgets), `.GoneClientAbandonsTheWalk`, `.SeedPhaseStopFailsTheSeed` (validation and derivation, through the request), `.UnstartedSeedsAreFailedWithTheStop`, `.UsageStatesWhatTheSeedsConsumed` (per seed the walk's account; with `attempt_id` the response is otherwise byte for byte the one without), `.StatementsFitTheirWidths`, `.BoundIsEnforcedOnTheAttemptsClock`, `.IdsAreValidated`, `.GoneClientAbandonsTheAttempt`. `GraphletAttemptRegistry.*`: an id runs once (running, retained, expired), cancel idempotent and acknowledged, a cancel of an unknown id tombstones it, retention by count and age, `wait_ms`, eight threads starting, cancelling, reading and finishing. `GraphletServer.PeerClosedTellsAGoneClient` (closed, half-closed, reset, a pipelined request waiting), `.CheckedWriterIsByteIdentical`. Integration `TestTraverseAPI.test_api_attempts` (usage on success, partial, a failed seed and a 400; 409 and malformed ids without usage; 404s; the library) and `TestTraverseAttempts` (a slow index: a cancel mid-walk with the client connected, a client that goes away with and without `attempt_id`, `wait_ms`, the bound enforced, retention, sixteen concurrent attempts with mixed cancels) | — |
+| T47 | pass 5: `not_after_ms`, per-graph identity, capabilities | `GraphletAttempt.NotAfterMsIsParsedStrictly`, `GraphletAttemptRegistry.NotAfterMsRefusesAtStart` (strict at the instant, the exact 409 body, nothing registered, a duplicate answered first, usage keys unchanged without it), `GraphletAttemptRegistry.CapabilitiesStateIntegers`; `GraphletServer.GraphListLinesAreParsedStrictly` and `.GraphListIdentitiesAgreePerPair`; `test_api_not_after_ms` (server and CLI, with and without `attempt_id`, the library's `AttemptExpired`), `test_api_server_capabilities`; `TestTraverseMultiGraph` (identity per pair in responses and `H`, the probe per pair, the several-annotations refusal, start-up refusals for a wrong manifest, conflicting identities, six columns, a bad name, a missing manifest; a three-column list keeps nulls; review of pass 5: a pair listed twice needs no `graph_path`, a name over one graph with several annotations is refused as such, and a directory's manifest, another build's sidecar and one `index_fp` for two pairs refuse to start, while two spellings of one pair are one index); `Graphlet.IndexIdentity` (the sidecars checked, another graph or annotation in a manifest refused); `test_traverse_index_manifest.py` (batch = single mode, each file hashed once, parallel streams deterministic, precomputed digests, refusals; review of pass 5: digests by real path from the digest file's directory, never another bundle's by base name, a pair's manifest path from any of its lines, the sidecars the server loads) | §5, §10.3 |
+| T48 | pass 5: chunked deadlines | `LabelOraclePacing.*` (paced reads answer as one read on the direct, rows, tuples and budget-aware paths, recorder included, with evictions, in one-row chunks; an interrupted read changes nothing and states its decoded work); `WalkerDeadlineChunks.*` (a 100 ms budget held within a chunk where the whole read overran by 150+ ms, the same `complete_to_bp`; no stop: the same result; the attempt reaches a validation and a level's read within a chunk when its walk-until is near, and after the read when it is far; a derivation's window; review of pass 5: `FarDeadlineReadsAreOnePiece` — rows that share a per-call cost, as row-diff rows share their paths, read whole far from the deadline: the same calls, result and time — and `SplitReadsStartSmall` — a read whose rows are ten times slower than earlier reads' starts with a small chunk); `LabelOraclePacing.PacerSizesChunksByTime` (one piece far from the deadline, the first chunk at most 8 rows, growth and rest rules); `MiniRefSeq.PacedReadsAreByteIdentical` (12 requests, budgets included); `TestTraverseWideIndex` (budgets of 50–200 ms kept within a chunk + 150 ms on the fan-out index; the unpaced server overruns; review of pass 5: the same index on `row_diff` and `row_diff_brwt` — walks no deadline stops keep their bytes in the unchunked time, budgets of 50 and 200 ms kept with and without a memory budget — and the integer flags refused when negative, fractional, above 2⁵³ − 1 or malformed) | §6.8 |
+| T49 | pass 5: delivery | `GraphletServer.AssembledResponseIsByteIdentical` (per-seed texts assembled = the whole tree's text, every detail, a failed seed, usage); `GraphletAttempt.DeliveryReserveMovesTheWalkUntil` (with the 1.25 margin, the configured and the measured stop time, and `usage.bound.walk_until_ms` the walk-until in force when it stopped the walk); `test_api_bodies_are_the_cli_output_at_every_encoding`; `test_wide_index_delivery_reserve_stops_the_walk`; the byte-identity harness against the previous build (1,380 real requests at chunks of 50 ms, 588 of them at 1 ms, 588 from a three-column graph list, 804 SRA requests) | §6.8, §10.3 |
+| T50 | pass 5: `standalone_text` and the reduced `J` | `test_traverse_standalone.py`: byte-equal to `dump(from_response(…), envelope=True)` on every fixture result, `usage` reduced to the totals and this seed's `per_seed`, `save()` and the store write the same bytes, reserved names refused | §7.5.2 |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 
