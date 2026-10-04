@@ -6,7 +6,7 @@
 #include <ctime>
 #include <random>
 
-#include <fmt/format.h>
+#include <spdlog/fmt/fmt.h>
 
 #include "traverse.hpp"
 
