@@ -126,8 +126,11 @@ From a server
 asks for gzip, and parses each result. A seed whose permitted set could not be derived
 is an error *result*, not an exception: its slot in ``graphlets`` is ``None`` and the
 reason is in ``errors``. Non-2xx answers raise ``TraverseError`` (``status``,
-``message``); a server still loading its index raises ``ServerInitializing``
-(``retry_after``). ``capabilities()`` and ``resolve()`` call the other two routes,
+``message``, ``body``, and ``usage`` for a request with ``attempt_id``); a server still
+loading its index raises ``ServerInitializing`` (a 503 with ``retry_after``: nothing was
+run), and an attempt stopped at its duration bound while its response was built raises
+``AttemptAtBound`` (a 503 with ``usage``: it ran and its id is used up, so it is not
+retried under the same ``attempt_id``). ``capabilities()`` and ``resolve()`` call the other two routes,
 ``traverse_raw(request)`` sends a request you built yourself, and ``api_path`` is for a
 server behind a proxy prefix.
 
@@ -151,6 +154,33 @@ server behind a proxy prefix.
    100 7 True
 
 (The runner answers this request with a stand-in that replays the committed response.)
+
+A request can be an *attempt* of a ledger that reserved an allowance for it (the
+search service's): ``traverse(..., attempt_id=..., budget_id=..., locus_id=...)``. The
+server then registers it, enforces a duration bound on it (the seeds' time budgets
+plus an allowance) and states what it consumed in a response-level ``usage`` block
+(``response.usage``: work units, the modelled memory peak, seeds started and finished,
+elapsed ms, the bound and why the walk stopped); an error after the request was read
+carries it too, raised: in the error's ``usage`` (``TraverseError.usage``, also
+``AttemptAtBound``'s). ``cancel(attempt_id, wait_ms=None)`` stops it from anywhere (the running seed is
+returned partial, its ``resource_stop`` naming ``cancelled``; seeds not started are
+error results with ``resource_stop.phase`` ``not_started``), and ``attempt(attempt_id)``
+reads its state (``running``, ``stopping`` or ``finished``, with the reason and when the
+walk stopped) for the retention period after it finished. Both return the server's
+answer as a dict, a 404 included (``state`` ``finished`` or ``unknown``): a cancel of an
+id the server does not know tombstones it (``tombstone: True``), refusing that id for the
+retention period, so nothing runs under it there in that time; when the server already
+holds its maximum of tombstones it answers 429 with ``tombstone: False`` and promises
+nothing (the cancel can be retried). An
+id runs once per server process (a second request with it is a 409). A client that
+closes its connection stops its traversal: nothing is written.
+
+.. code-block:: python
+
+   response = client.traverse(seeds, strategy, attempt_id='a-17', budget_id='b-3')
+   response.usage['work_units'], response.usage['reason']      # e.g. 1234, 'completed'
+   client.cancel('a-18', wait_ms=2000)   # {'cancelled': True, 'state': 'finished', ...}
+   client.attempt('a-18')['reason']      # 'cancelled'
 
 From the text alone
 ^^^^^^^^^^^^^^^^^^^
@@ -1054,12 +1084,12 @@ walked 10 bp with k = 15). A walk with a semantic end has none (``ValueError``).
 ``losses`` holds each label's own, and ``note`` says when one loss budget cannot serve
 them exactly.
 
-``next_request(arm, walks, bp=None, reduce_budget=True, **overrides)`` builds the
-resubmittable request: one seed per walk (its continuation, with its labels named
-explicitly in ``constrain`` mode), the retrieval's normalized strategy with
+``next_request(arm, walks, bp=None, reduce_budget=True, reset_branches=False, **overrides)``
+builds the resubmittable request: one seed per walk (its continuation, with its labels
+named explicitly in ``constrain`` mode), the retrieval's normalized strategy with
 ``direction`` set to the arm, ``bounds.max_extension_bp = bp`` when given, and the
 keyword overrides deep-merged into the strategy (``release``, ``graph`` and
-``graph_path`` go to the request level). In ``constrain`` mode two rules hold:
+``graph_path`` go to the request level). In ``constrain`` mode three rules hold:
 
 * **No route exceeds its original loss budget.** The loss budget is reduced by the
   *largest* terminal loss of the continued labels. A request carries one loss budget
@@ -1070,12 +1100,25 @@ keyword overrides deep-merged into the strategy (``release``, ``graph`` and
   remaining budget in ``loss_budget``; neither is sent to the server.
   ``reduce_budget=False`` keeps the original budget, and a note states that a route may
   then exceed it.
+* **No lineage branches beyond its original allowance.** The server resets branch state
+  for a new seed, so ``branching.max_label_branches`` is reduced the same way, by the
+  *largest* terminal branch count of the continued labels (``"unlimited"`` stays
+  unlimited): exact for the lineages at that count, conservative for those that used
+  fewer. ``branch_budget`` (``{original, effective, largest_terminal_branches, reset}``)
+  says how it was derived, and a note states where the reduction is conservative, for the
+  lineages that used fewer branches (none when it is exact for every continued lineage,
+  as for the loss budget). ``reset_branches=True`` keeps
+  the original allowance, and a note states that the continuation may then branch further
+  than one uninterrupted walk would.
 * **The request is valid.** ``labels.extra`` is rebuilt around the new seed labels: the
-  retrieval's permitted labels minus the seeds, each kept that a seed label reaches in
-  one switch within the budget (what the server accepts). Every label left out is listed
-  in ``left_out``, and the notes name the first few. An override section the rebuild
-  reads that is not an object (``labels``, ``labels.change_cost``, ``branching``), or a
-  malformed field of it, is refused with a ``ValueError`` naming it.
+  retrieval's permitted labels minus the seeds, each kept that a chain of switches from a
+  seed label enters within the budget (what the server accepts: the walk enforces the
+  cumulative loss switch by switch). Every label left out is listed in ``left_out``, per
+  continued walk (``walk``), and the notes name the first few, with each that one
+  uninterrupted walk could still have entered from a continued label at a lower loss (by a
+  chain through any label of the retrieval, the kept ones included). An override section the
+  rebuild reads that is not an object (``labels``, ``labels.change_cost``,
+  ``branching``), or a malformed field of it, is refused with a ``ValueError`` naming it.
 
 A label alive at a walk's leaf that does not cover the continuation's whole tail (it
 switched in within the last bases) is not among the continuation's labels, so the request
@@ -1089,8 +1132,7 @@ request only when that list is the same for all of them; otherwise
 ``IncompatibleContinuations`` is raised, and ``next_requests()`` builds one request per
 walk. ``TraverseClient.deepen()`` sends the request and returns its ``notes`` with the
 response. The result is a new traversal, certified on its own; the backend keeps no
-frontier between requests (a continuation's branch allowance restarts, which a note
-states when the walk had used some).
+frontier between requests (which is why the branch allowance is reduced, above).
 
 .. graphlet-example: next-request
 
@@ -1465,10 +1507,11 @@ index names to ``TraverseClient`` objects for the backend tools.
   ``traverse_fetch`` (one retrieval: a handle plus a summary; ``replay=<handle>``
   re-runs a stored request against the same index and refuses a different release or
   index digest) and ``traverse_continue`` (a continuation as a new traversal; the new
-  entry remembers its parent walk, and the result carries the request's ``notes`` and,
-  where a loss budget applies, ``loss_budget`` -- both part of its receipt -- and each
-  label's terminal loss and remaining budget in ``loss_budget_labels``, the first
-  optional field cut when the receipt would not fit). An index digest on one side only proves neither identity nor
+  entry remembers its parent walk, and the result carries the request's ``notes``,
+  where a loss budget applies ``loss_budget``, and where a branch allowance applies
+  ``branch_budget`` (``reset_branches=true`` keeps the original allowance, stated) -- all
+  part of its receipt -- and each label's terminal loss and remaining budget in
+  ``loss_budget_labels``, the first optional field cut when the receipt would not fit). An index digest on one side only proves neither identity nor
   difference: it is refused as ``index_unverifiable``, and run only when the caller
   passes ``allow_unverified_index=true`` (the result then states the identity
   unverified). A body over ``max_graphlet_mb`` is spooled complete and only its summary
@@ -1485,7 +1528,9 @@ The contract:
   a string unique as a ref or a name;
 * every local answer carries the ``evidence`` block above;
 * every result fits ``max_bytes`` (2 KB by default; ``graphlet_sequence`` has its own
-  16 KB ceiling, stated in its result). List tools page: they return ``total`` and an
+  16 KB ceiling, stated in its result, and ``traverse_capabilities`` a 16 KB default, so
+  that the server's description of itself comes whole; an explicit ``max_bytes`` still
+  holds). List tools page: they return ``total`` and an
   opaque ``next_cursor`` bound to the handle, the tool and its arguments, which stays
   valid across a restart while the handle does. A single row too large for a page comes
   alone with ``row_truncated`` and the cut fields named; an answer that cannot fit at

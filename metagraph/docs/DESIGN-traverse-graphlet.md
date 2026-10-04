@@ -1,6 +1,6 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.3 (2026-10-03; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1 and 2 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
+**Status:** v5.5 (2026-10-04; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
@@ -661,7 +661,7 @@ interrupted Python parse keeping the original body and reporting a local failure
 ## 14.1 What is frozen with MGT v1, and what is enforced in stages *(v5)*
 
 Frozen with the format (the wire contract): the `O`, `Q`, `K` records and the `A` counters/evidence fields; the
-`resource_limit` end reason; the four outcome dimensions; the `limitations` kinds and their effect templates; the
+`resource_limit` end reason; the four outcome dimensions; the `limitations` kinds (*(v5.4)* their `effect` sentences are free text, which may be reworded within MGT v1; the kinds, knobs and value types are what is frozen); the
 `resource_stop` structure; `attempt_id`/`budget_id`/`locus_id` in requests and usage in every response. Enforced in
 stages, each stated in every response until it lands (`limitations` entries): (1) **now** — the existing caps, the
 evidence boundary, stated limitations, the outcome dimensions (being implemented in the JSON); (2) the two-phase
@@ -826,9 +826,11 @@ None of these changes the MGT v1 wire format; the spec carries the normative tex
 5. **Comparison at a depth.** The DAG is restricted to the comparison depth, and merges at or beyond it are left
    out (and named). Where that cannot be exact, the result is `qualified`; a side without bases gives `unknown`.
 6. **Continuations.**
-   - The loss budget is reduced by the largest terminal loss among the continued labels. This is conservative:
-     a continuation never accepts a route the uninterrupted walk would refuse, and it says so for the lower-loss
-     labels.
+   - The loss budget is reduced by the largest terminal loss among the continued labels. This conserves the
+     cumulative loss under unchanged costs: no continued route exceeds the original loss budget, and the result
+     says so for the lower-loss labels. It is not equivalence with the uninterrupted walk: branch counts, edge
+     history and other per-walk state restart in the new traversal (the notes state it), so a continuation can
+     reach further than the uninterrupted walk would have (review of `d8d3ef86`, P7).
    - `labels.extra` is rebuilt around the new seed labels.
    - Continuations that cannot share one request raise an error, with `next_requests()` as the fallback.
    - Labels alive at a leaf but not seeded are named (`left_out`).
@@ -840,8 +842,164 @@ None of these changes the MGT v1 wire format; the spec carries the normative tex
      dropped first.
    - Local operations have no work budget yet (§14.1, stage L).
 
-## 19.3 Open, for the owner
+## 19.3 Decided after the review of `d8d3ef86` *(v5.4)*
 
-- Should a continuation reduce `max_label_branches` the way it reduces the loss budget?
-- The server's one-switch reachability rule for extra labels.
+- A continuation reduces `max_label_branches` by the largest terminal branch count of the seeded labels
+  (preserving `"unlimited"`), states it, and offers an explicit reset.
+- Extra labels are accepted when every label of the declared pool is reachable from the seed labels within the
+  loss budget through the cost model (transitively, not in one switch); the walk enforces cumulative costs.
+- The `seed_id` echo of a failed response is named in `memory_bound_soft`.
+
+# 20. Stage 3 as implemented *(v5.4, 2026-10-03)*
+
+Stage 3 of §14.1 is implemented for the row-diff annotation formats (`RowDiff<BRWT>`, `RowDiff<ColumnMajor>` and
+the coordinate-aware `TupleRowDiff<...>`; the spec lists them).
+
+- **Charging inside the decoder.** The traversal's annotation reads go through an opt-in, single-threaded decode
+  path (`IRowDiff::decode_rows` / `decode_row_tuples` with a `DecodeBudget`). It charges the trace, each dependency
+  row, each coordinate tuple and the reconstruction buffers *before* they are allocated, and refuses a read whole,
+  without side effects, when it would not fit. The default decode path is unchanged.
+- **Batch independence.** Every key a fetch returns is admitted against its standalone demand, so where a walk stops
+  does not depend on `batch_kmers` or the lookahead. A stop states only facts that hold either way.
+- **Stops.** A refused read in a level stops the seed in phase `annotation_decode` (actions `more_selective_seed`,
+  `label_constrained_query`); in the seed phase, derivation or an annotate root it fails the seed. Labels that do not
+  fit, and level lists that leave nothing for the read, are `traversal`-phase stops.
+- **Work is deterministic logical work** (the review's answer). Each returned row is charged its row-diff dependency
+  path (8 units per dependency row plus 1 per stored entry), whatever was shared in the actual decode; it is not
+  measured decode effort, which depends on batching and caching. The physical decode counters in `timing` are kept
+  separately. `capabilities.work_bound` says so.
+- **Lower bounds.** A depth-0 failure from unread roots or unnamed labels states its need as "at least X"; raising the
+  budget to X may still fail, because unread roots, labels or later state need more, and the statement says so.
+- **What remains soft.** `memory_bound_soft` stays on every result under a memory budget and names what is still
+  held uncharged: a level's lists and fetched rows until its heads are processed, the seed phase's intersection and
+  hits, a failed seed's depth-0 dictionary, an index-wide header lookup, the dictionary's first table, and a failed
+  response's `seed_id` echo. Stage 3 does not establish a hard request-wide memory bound.
+- **Stage 3b** (not built): the same budget-aware path for formats without row-diff (BRWT, ColumnMajor and TupleCSC
+  alone, the disk and flat row formats, `IntRowDiff`) and for `/resolve`; charging a level's rows and lists in the
+  account.
+
+# 21. Decisions for the next stages *(owner, 2026-10-03)*
+
+The owner accepted the planners' recommendations (decision sheet C/R/B/L). Implementation order after stage 4:
+per-graph identity → record coordinates → stage 3c → stage 3b → stage L.
+
+**Record coordinates (§18).**
+- C1: opt-in. `output.coordinates: true` is echoed only when given. With it, §18 applies exactly (an object, or
+  `null` plus a reason); without it every output is unchanged.
+- C2 *(provisional; the owner is not yet sure)*: the `coordinates` limitation (a cut occurrence list) belongs to no
+  outcome class; the block states `complete: false`. To be revisited after the first review.
+- C3: a dictionary mixing header and column labels gives kind `mixed`, and each label's kind says how its positions
+  are read.
+- C4: per-run `from_bp`/`to_bp`, plus `max_occurrences`, `complete` and `occurrences_total` on cut lists.
+- C5: an occurrence is a chain that carries the whole run; a per-run `chains_ended` count appears when it is > 0.
+- C6: support is advertised in `GET /traverse/capabilities` only. The owner notes that a general, server-wide
+  capabilities document could be useful too (see the identity pass).
+- C7: `graphlet_claims` rows always carry coordinates; `graphlet_walks` / `graphlet_labels` only with
+  `coordinates=true`.
+- C8: the library requests coordinates for trace strategies when the server supports them, and `next_request`
+  carries the setting forward.
+- C9: an inconsistent block is rejected eagerly.
+- C10: column labels report global column positions in v1; mapping them to records is deferred.
+- C11: the default cap is 16 occurrences per run.
+- C12: new free tokens: K kind `coordinates` (extra `lists_cut`) and resource-stop action `drop_coordinates`.
+
+**Stage 3c (selected-label decoding).**
+- R2: `annotation.access_path` stays `tuples`; the selected mode is reported in timing and capabilities.
+- R3: a selected read charges 8 per dependency row, 1 per BRWT probe and 1 per selected coordinate.
+- R4: fall back to full-row decoding above about 64 distinct columns, or by a cost estimate.
+- R5: the binary rd_direct of spec §8.2 is built in the same change.
+- R6: no local refseq33m copy for now.
+- R7: no pre-estimate warning for now; revisit after 3c.
+
+**Stage 3b.**
+- B1: every format except the four legacy ones (rbfish, rb_brwt, bin_rel_wt, row/EigenSpMat), which stay stated as
+  uncovered.
+- B2: ColumnMajor is read as column-wise charged pairs.
+- B3: the slower BRWT single-row descent is accepted under a memory budget, to be measured on production indexes.
+- B4: work-only budgets keep the default decode on formats without row-diff.
+- B5: each head's rows are released once it is processed.
+- B6: a head stop caused by a level's rows states the bytes, with no `more_selective_seed` action.
+- B7: a stopped `/resolve` returns exactly the resolve of a query prefix.
+- B8: new `/resolve` JSON fields and tokens as proposed.
+- B9: discovery under a budget keeps every met label's runs.
+- B10: an explicit `select.policy` that stops fails the request.
+- B11: the default `--resolve-max-time-ms` is 0 (unlimited).
+- B12: no server-side default memory budget for `/resolve`.
+- B13: the memory bound stays soft for now.
+- B14: the disk reader is charged as a measured constant.
+- B15: the uncharged lookahead key list and the misleading `/resolve` error text are fixed inside 3b.
+- B16: `annotation_reads` and `resolve_budgets` appear on `GET /traverse/capabilities` only.
+- Also: a cap on `/resolve`'s explicit label list (`--resolve-max-labels`).
+
+**Stage L.**
+- L1: deterministic cold-price work units.
+- L2: off by default.
+- L3: a fetch whose parse stops stores the body as `parsed: false`.
+- L4: no partial exports.
+- L5: the agent may raise a budget up to the service's ceiling.
+- L6: re-parse billing is service policy.
+- L7: defaults are view 30 M / 1 GiB, heavy 300 M / 2 GiB, parse 200 M / 2 GiB, ceilings 10×.
+- L8: the quadratic paths are separate items, except the one-line `graphlet_subtrie` fix.
+- L9: memory is a modelled account (`memory_bound: "model"`).
+
+**Capabilities.** `feature_level` is monotonic: each pass that adds capabilities fields or routes bumps it by one, and
+SPEC §10.3 records the mapping (2 = attempts and the client-gone stop). `schema_version` stays the request schema
+version (`strategy.schema_version`), which a bump would break.
+
+# 22. Stage 4, backend half, as implemented *(v5.5, 2026-10-04)*
+
+The ledger itself lives in the search service. The backend provides what a ledger needs; the SPEC (§5, §7.0, §7.3,
+§10.3) is normative.
+
+- **Attempts.** A request may carry `attempt_id` (`^[A-Za-z0-9._:-]{1,128}$`, unique per server process while
+  running or retained), plus `budget_id` and `locus_id`, which are echoed and need an `attempt_id`. A reused id
+  (running, retained or tombstoned) is refused with 409, whose body carries the other attempt's state; nothing
+  runs twice. Requests without `attempt_id` keep their bytes.
+- **Cancel and state.**
+  - `POST /traverse/cancel {attempt_id, wait_ms}` answers:
+    - 200 when it flagged a running attempt;
+    - 404 when the attempt has finished;
+    - 404 with `tombstone: true` when the id is unknown: the id is tombstoned, so a later request with it is
+      refused (409);
+    - 429 when the tombstone store is full (no promise).
+  - `GET /traverse/attempt/{id}` returns `running`, `stopping` or `finished` with the reason (`completed`,
+    `cancelled`, `client_gone`, `deadline`, `error`). It creates nothing, so its 404 is not completion. Only a
+    tombstoned cancel answer, or a finished state, from the same `server_instance` says an attempt will not run
+    there.
+  - Finished attempts are kept for 3600 s / the last 10,000. Tombstones are kept by age, under their own cap.
+- **Usage.** Every response to a request with an `attempt_id` carries a response-level `usage` block: the ids;
+  `server_instance`; per seed and in total, work units, modelled memory (admitted, final, soft excess,
+  `held_bound_bytes`, which is null without a memory budget because the account is then no bound on what is held),
+  elapsed ms, and seeds started, finished and abandoned; and the bound actually used. This covers success,
+  partial, failed and cancelled seeds, and 400/500 after registration. The 409, the 400s before registration and
+  the loading 503 carry no usage; a client that is gone gets no response.
+- **The attempt bound** = min(seeds × the effective per-seed `time_budget_ms` + allowance (10 s by default),
+  ~899 s). The server enforces it itself:
+  - seeds stop being walked at bound − allowance/2;
+  - building, writing and compressing the response are checked against the bound;
+  - an attempt at its bound answers 503 `{error, usage}` with reason `deadline`, delivering no seeds; its partial
+    results come as a 200 instead (`resource_stop {scope: "attempt", resource: "attempt_deadline"}`, unstarted
+    seeds failed with phase `not_started`).
+
+  Enforcement is cooperative: it acts at the next checkpoint. Without `bounds.max_work_units`, a level's fetch
+  and a seed's validation are single uninterruptible calls. Chunking them by time comes next, together with
+  `not_after_ms` and the stated `max_uninterruptible_ms`.
+- **Client gone.** Every `/traverse` (and `/resolve` between its phases) stops when its client has closed the
+  connection, writing nothing. A half-closed connection counts as gone. The socket is polled at the walker's
+  checkpoints at most every 100 ms, and the kernel's TCP state is read when bytes are pending.
+- **Memory stops** state the smallest budget (whole MiB) whose account holds the need beside that budget's own
+  cache allotments, so raising the budget to the stated value holds the state. A lower bound stays "at least".
+- **New free-token values**, which MGT v1 admits:
+  - resource `cancelled` and `attempt_deadline`;
+  - scope `attempt`;
+  - phase `not_started`;
+  - action `retry_attempt`;
+  - knob `attempt_id` on the stop's `walk_domain`. This is a new knob value, like `bounds.max_memory_mb` in stage 2;
+    the kinds and value types are unchanged.
+- **Capabilities.** `feature_level` 2 (§21). `GET /traverse/capabilities` adds an `attempts` block: fields, id
+  pattern, routes, `server_instance`, retention, allowance, client check interval, and how the bound is computed.
+- **Deployment.**
+  - `-p` must exceed the number of concurrent traversals, so that the cancel and state routes find an io thread.
+  - A reverse proxy must forward `/traverse/cancel` and `/traverse/attempt/*`, must close its upstream connection
+    when the client goes, and must keep its read timeout at or above the largest bound.
 
