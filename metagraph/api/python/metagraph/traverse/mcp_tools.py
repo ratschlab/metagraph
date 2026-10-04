@@ -16,7 +16,9 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
     presented with other arguments is rejected), and stays valid across a restart (its
     secret lives in the spool). EVERY return is <= max(max_bytes, MIN_MAX_BYTES) (2048
     by default; graphlet_sequence and the request of traverse_continue(execute=False)
-    have the 16 KB sequence ceiling, stated in their result; a max_bytes below
+    have the 16 KB sequence ceiling, stated in their result, and traverse_capabilities a
+    16 KB default ceiling, CAPABILITIES_MAX_BYTES, for the server's description of itself
+    (an explicit max_bytes still holds); a max_bytes below
     MIN_MAX_BYTES = 64, the smallest error that fits, is a bad_argument): the cursor's
     room is measured, not guessed, and a result that cannot be made to fit is an
     explicit result_too_large whose hint names what this tool offers (raise max_bytes,
@@ -72,7 +74,7 @@ import os
 
 from . import derive, export, ops
 from ._codec import GraphletFormatError
-from .client import ServerInitializing, TraverseError
+from .client import AttemptAtBound, ServerInitializing, TraverseError
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, UnknownLabel,
     UnverifiableLabelName,
@@ -81,10 +83,12 @@ from .parser import utf8_bytes
 from .store import StoreLimitExceeded, UnknownHandle
 
 __all__ = ['GraphletTools', 'ToolError', 'tool_names', 'DEFAULT_MAX_BYTES',
-           'SEQUENCE_MAX_BYTES', 'MIN_MAX_BYTES']
+           'SEQUENCE_MAX_BYTES', 'CAPABILITIES_MAX_BYTES', 'MIN_MAX_BYTES']
 
 DEFAULT_MAX_BYTES = 2048
 SEQUENCE_MAX_BYTES = 16 * 1024
+# traverse_capabilities' default ceiling: the server's capabilities in one piece
+CAPABILITIES_MAX_BYTES = 16 * 1024
 # the smallest max_bytes a tool accepts: below it not even the shortest error fits
 # ({"error":"result_too_large","max_bytes":63,"message":""} is 57 bytes)
 MIN_MAX_BYTES = 64
@@ -282,6 +286,11 @@ def _tool(fn):
     def default_limit(self, execute):
         if name == 'graphlet_sequence' or (name == 'traverse_continue' and execute is False):
             return self.sequence_max_bytes
+        if name == 'traverse_capabilities':
+            # the server's description of itself, which grows with what it offers (2.4 KB once
+            # the attempts were described): an agent's first discovery call must not fail by
+            # default (review of the stage-4 backend: result_too_large at 2048)
+            return max(self.max_bytes, CAPABILITIES_MAX_BYTES)
         return self.max_bytes
 
     def wrapped(self, *args, **kw):
@@ -424,6 +433,11 @@ class GraphletTools:
             raise ToolError('backend_error', e.message or 'the server is initialising',
                             status=e.status, retry_after_s=e.retry_after,
                             hint='the index is still loading: retry later') from None
+        except AttemptAtBound as e:
+            # registered and run: its id is used up, so it is no loading server to retry
+            raise ToolError('backend_error', str(e.message), status=e.status,
+                            hint='the attempt reached the duration bound the server enforces '
+                                 'for it; a retry needs a new attempt_id') from None
         except TraverseError as e:
             raise ToolError('backend_error', str(e.message), status=e.status) from None
         except OSError as e:
@@ -667,10 +681,15 @@ class GraphletTools:
             # what actually answered, not only what the capabilities said before
             identity = _weakest(identity, _same_index(ident, self._identity_of(g),
                                                       'the replay', allow_unverified_index))
+        # the delivery the receipt will state: a spooled body's is 'spooled', one byte longer
+        # than 'inline', so the receipt is checked with it (the stage-2 recheck, P3: checked
+        # with 'inline', a receipt one byte over the ceiling stored its entry and returned
+        # result_too_large without the handle)
+        delivery = 'spooled' if spooled else g.outcome.delivery
         if spooled or keep:
             # checked before the entry is stored: a handle the caller cannot be told
             # about is not made (a spooled body is stored even with keep false)
-            receipt = {'index': name, 'delivery': g.outcome.delivery,
+            receipt = {'index': name, 'delivery': delivery,
                        'handle': 'g_' + '0' * 12}
             if identity is not None:
                 receipt['identity'] = identity
@@ -685,7 +704,7 @@ class GraphletTools:
             handle = self.store.put_parsed(g, result['graphlet'], req, source=name)
         else:
             handle = None
-        out = {'index': name, 'delivery': g.outcome.delivery, 'graphlet_bytes': nbytes}
+        out = {'index': name, 'delivery': delivery, 'graphlet_bytes': nbytes}
         if handle is not None:
             out['handle'] = handle
         if identity is not None:
@@ -724,7 +743,7 @@ class GraphletTools:
 
     @_tool
     def traverse_continue(self, handle, arm, walk, overrides=None, execute=True,
-                          allow_unverified_index=False, max_bytes=None):
+                          allow_unverified_index=False, max_bytes=None, reset_branches=False):
         """A continuation is a new traversal: the library builds the request from the
         walk's continuation, the backend runs it (execute=False: the request only, under
         the 16 KB sequence ceiling -- it carries the continuation's bases and label
@@ -734,9 +753,13 @@ class GraphletTools:
         (`identity`). A manifest digest on one side only is index_unverifiable unless
         allow_unverified_index=true. Both forms carry `notes` (what the request cannot
         carry exactly: one loss budget for labels that ended at different losses is
-        conservative for the lower ones, a switch target left out, a label alive at the
-        leaf that is not seeded, a branch allowance that restarts) and, where a loss
-        budget applies, `loss_budget` ({original, effective, largest_terminal_loss}): both
+        conservative for the lower ones, and one branch allowance likewise, a switch
+        target left out, a label alive at the leaf that is not seeded, an allowance that
+        restarts with reset_branches=true), where a loss budget applies `loss_budget`
+        ({original, effective, largest_terminal_loss}), and where a branch allowance
+        applies `branch_budget` ({original, effective, largest_terminal_branches, reset}:
+        branching.max_label_branches reduced by the largest terminal branch count of the
+        continued labels, "unlimited" kept; reset_branches=true keeps the original): all
         are part of the receipt, never cut. `loss_budget_labels` (each label's terminal
         loss and remaining budget) is the first optional field cut, and named in
         fields_cut, when the receipt would not fit."""
@@ -748,7 +771,8 @@ class GraphletTools:
             raise ToolError('bad_argument', 'overrides is an object')
         _bool('execute', execute)
         _bool('allow_unverified_index', allow_unverified_index)
-        req = g.next_request(a, [walk], **(overrides or {}))
+        _bool('reset_branches', reset_branches)
+        req = g.next_request(a, [walk], reset_branches=reset_branches, **(overrides or {}))
         cont = ops.continuation(g, a, walk)
         parent = {'handle': handle, 'arm': a.side, 'walk': walk,
                   'overlap_bp': len(cont.sequence)}
@@ -762,6 +786,9 @@ class GraphletTools:
         if req.loss_budget is not None:
             stated['loss_budget'] = {k: v for k, v in req.loss_budget.items() if k != 'labels'}
             per_label = req.loss_budget.get('labels')
+        if req.branch_budget is not None:
+            # how the branch allowance was derived, as essential as the loss budget's
+            stated['branch_budget'] = dict(req.branch_budget)
         if not execute:
             out = dict({'request': dict(req), 'parent': parent,
                         'ceiling_bytes': max_bytes or self.sequence_max_bytes}, **stated)

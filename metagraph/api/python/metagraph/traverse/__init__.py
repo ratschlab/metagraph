@@ -26,7 +26,8 @@ from .model import (
 )
 from .parser import FORMAT_VERSION, dump, from_response, is_canonical, load, parse, save
 from .ops import GraphletView
-from .client import ServerInitializing, TraverseClient, TraverseError, TraverseResponse
+from .client import (AttemptAtBound, ServerInitializing, TraverseClient, TraverseError,
+                     TraverseResponse)
 from .store import Entry, GraphletStore, StoreLimitExceeded, UnknownHandle
 
 __all__ = [
@@ -37,5 +38,5 @@ __all__ = [
     'UnknownLabel', 'BadSelector', 'IncompleteRecording', 'IncompatibleContinuations',
     'UNLIMITED',
     'TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
-    'GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded',
+    'AttemptAtBound', 'GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded',
 ]

@@ -184,6 +184,9 @@ class _Indexes:
 def tearDownModule():
     if _Indexes.root is not None:
         shutil.rmtree(_Indexes.root, ignore_errors=True)
+        # another module reusing _Indexes (test_traverse_stage2_recheck) builds them again
+        _Indexes.root = None
+        _Indexes.built = {}
 
 
 def cli_requests():

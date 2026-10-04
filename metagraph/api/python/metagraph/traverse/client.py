@@ -10,6 +10,12 @@ requests.Session or a test double.
 The traversal routes write compact JSON and compress it on request; the client asks
 explicitly for `Accept-Encoding: gzip, deflate` (gzip preferred by the server) and
 decodes either itself, so the transport does not depend on the HTTP library.
+
+A request may be an ATTEMPT of a ledger that reserved an allowance for it (DESIGN §14,
+stage 4): `attempt_id` (unique per server process while it runs or is retained), with
+`budget_id` and `locus_id` echoed. Every response to it carries a `usage` block
+(TraverseResponse.usage), the server enforces a duration bound on it (usage.bound), and it
+can be cancelled (cancel()) and its state read (attempt()) by id, also from another client.
 """
 
 import copy
@@ -22,27 +28,40 @@ from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
-           'ACCEPT_ENCODING']
+           'AttemptAtBound', 'ACCEPT_ENCODING']
 
 ACCEPT_ENCODING = 'gzip, deflate'
 
 
 class TraverseError(RuntimeError):
-    """A non-2xx answer: |status| the HTTP status, |message| the server's `error`."""
+    """A non-2xx answer: |status| the HTTP status, |message| the server's `error`, |body| the
+    answer's JSON. |usage|: the usage block an error to a request with attempt_id carries
+    (a 400 or 500 after the request was read, a 503 at the attempt's bound), else None --
+    what the attempt consumed is there, not in a TraverseResponse."""
 
     def __init__(self, status, message, body=None):
         self.status = status
         self.message = message
         self.body = body
+        self.usage = body.get('usage') if isinstance(body, dict) else None
         super().__init__('HTTP %s: %s' % (status, message))
 
 
 class ServerInitializing(TraverseError):
-    """503: the index is still loading; retry after |retry_after| seconds."""
+    """503 with Retry-After: the index is still loading (nothing was registered or run);
+    retry after |retry_after| seconds."""
 
     def __init__(self, status, message, body=None, retry_after=None):
         super().__init__(status, message, body)
         self.retry_after = retry_after
+
+
+class AttemptAtBound(TraverseError):
+    """503 with `usage` (reason `deadline`): the attempt reached the duration bound the
+    server enforces for it while its response was built or written, so nothing of it is
+    delivered. It was registered and ran -- its id is used up on this server (a retry under
+    the same attempt_id is refused, 409) -- and |usage| states what it consumed. Not a
+    loading server: never retry it as one."""
 
 
 @dataclass
@@ -54,6 +73,13 @@ class TraverseResponse:
     # deepen(): what the continuation request could not carry exactly (NextRequest.notes:
     # a loss budget conservative for some labels, a switch target left out, ...)
     notes: List[str] = field(default_factory=list)
+
+    @property
+    def usage(self):
+        """The response-level usage of a request with attempt_id (what the attempt
+        consumed: work units, modelled memory, seeds, elapsed ms, the bound the server
+        enforced); None without attempt_id."""
+        return self.envelope.get('usage')
 
 
 def _decode_body(data, encoding):
@@ -83,7 +109,9 @@ class TraverseClient:
 
     # ---------------------------------------------------------------- transport
 
-    def _request(self, method, path, payload=None):
+    def _request(self, method, path, payload=None, answers=()):
+        """|answers|: non-2xx statuses whose JSON body is an answer, returned rather than
+        raised (cancel and attempt: 404 states that nothing runs under the id)."""
         url = self.base + path
         body = None if payload is None else json.dumps(payload).encode('utf-8')
         headers = {'Accept-Encoding': ACCEPT_ENCODING}
@@ -117,10 +145,18 @@ class TraverseClient:
             out = json.loads(text) if text else {}
         except ValueError:
             out = None
+        if status in answers and isinstance(out, dict):
+            return out
         if not 200 <= status < 300:
             message = out.get('error') if isinstance(out, dict) else (text or '')[:500]
             if status == 503:
+                # Two 503s mean opposite things to a ledger: a loading index (Retry-After, no
+                # usage: nothing registered) and an attempt stopped at its bound (usage, no
+                # Retry-After: registered, consumed, its id used up). Told apart by the body,
+                # not by the status alone (review of the stage-4 backend, F4)
                 retry = hdrs.get('retry-after')
+                if isinstance(out, dict) and 'usage' in out and not retry:
+                    raise AttemptAtBound(status, message, out)
                 raise ServerInitializing(status, message, out,
                                          int(retry) if retry and retry.isdigit() else None)
             raise TraverseError(status, message, out)
@@ -149,8 +185,28 @@ class TraverseClient:
     def traverse_raw(self, request):
         return self._request('POST', '/traverse', request)
 
+    def cancel(self, attempt_id, wait_ms=None):
+        """POST /traverse/cancel: the server's answer as a dict — `cancelled: True` and
+        `state` stopping (or finished, within |wait_ms|) when the attempt was asked to stop;
+        `cancelled: False` with `state` finished or unknown (HTTP 404) when nothing runs
+        under the id. An unknown id is tombstoned (`tombstone: True`) for the server's
+        retention_s: a request arriving later with it is refused (409), so such a 404 from
+        the same `server_instance` means it will not run there within that time. When the
+        server holds its maximum of tombstones the id is NOT tombstoned (HTTP 429,
+        `tombstone: False`): nothing is promised, and the cancel can be retried."""
+        payload = {'attempt_id': attempt_id}
+        if wait_ms is not None:
+            payload['wait_ms'] = wait_ms
+        return self._request('POST', '/traverse/cancel', payload, answers=(404, 429))
+
+    def attempt(self, attempt_id):
+        """GET /traverse/attempt/{attempt_id}: the attempt's state (running | stopping |
+        finished, the reason, when it stopped, the response written, its usage), or
+        `state: unknown` (HTTP 404) once it is no longer retained."""
+        return self._request('GET', '/traverse/attempt/' + attempt_id, answers=(404,))
+
     def build_request(self, seeds, strategy=None, *, detail='graphlet', timing=True,
-                      graph=None):
+                      graph=None, attempt_id=None, budget_id=None, locus_id=None):
         norm = []
         for s in seeds:
             norm.append({'sequence': s} if isinstance(s, str) else dict(s))
@@ -164,13 +220,22 @@ class TraverseClient:
         graph = graph or self.graph
         if graph:
             req['graph'] = graph
+        for key, value in (('attempt_id', attempt_id), ('budget_id', budget_id),
+                           ('locus_id', locus_id)):
+            if value is not None:
+                req[key] = value
         return req
 
-    def traverse(self, seeds, strategy=None, *, detail='graphlet', timing=True, graph=None):
+    def traverse(self, seeds, strategy=None, *, detail='graphlet', timing=True, graph=None,
+                 attempt_id=None, budget_id=None, locus_id=None):
         """-> TraverseResponse(envelope, graphlets, errors). A seed whose permitted set
         could not be derived is an error result ({seed, error}), not an exception: the
-        other seeds' graphlets are still returned."""
-        req = self.build_request(seeds, strategy, detail=detail, timing=timing, graph=graph)
+        other seeds' graphlets are still returned (so is a seed an attempt never started,
+        cancelled or past its bound: resource_stop phase not_started). A request error is
+        raised (TraverseError; with attempt_id its usage is in the error's .usage), and an
+        attempt whose response was stopped at its bound raises AttemptAtBound."""
+        req = self.build_request(seeds, strategy, detail=detail, timing=timing, graph=graph,
+                                 attempt_id=attempt_id, budget_id=budget_id, locus_id=locus_id)
         return self.response(self.traverse_raw(req))
 
     @staticmethod

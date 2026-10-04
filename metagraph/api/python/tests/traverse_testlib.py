@@ -157,8 +157,9 @@ def request_violations(req):
     request the library builds can be checked without a server: annotate names no label;
     no extra label under forbid, nor under a constant cost above the loss budget; a table
     needs every seed's labels; per seed, no extra label equal to one of its labels, and
-    every extra label reachable from one of them in one switch within the budget. Names
-    stand for the labels they resolve to. -> [violation] ([]: valid)."""
+    every extra label reachable from one of them by a chain of switches (through the
+    labels the request names) whose summed cost stays within the budget. Names stand for
+    the labels they resolve to. -> [violation] ([]: valid)."""
     st = req.get('strategy') or {}
     lab = st.get('labels') or {}
     extra = list(lab.get('extra') or [])
@@ -184,9 +185,30 @@ def request_violations(req):
             continue
         if not names:
             out.append('seed %d: an empty label list' % i)
+        reach = _chain_reach(cost, names, extra, budget)
         for x in extra:
             if x in names:
                 out.append('seed %d: extra label %r duplicates a seed label' % (i, x))
-            elif not any(_switch_cost(cost, s, x) <= budget for s in names):
+            elif x not in reach:
                 out.append('seed %d: extra label %r is unreachable' % (i, x))
     return out
+
+
+def _chain_reach(cost, sources, targets, budget):
+    """The names of |targets| some chain of switches from |sources| enters within |budget|
+    (the server's switch_reach, restated as a plain fixpoint: relax every pair until no
+    loss improves; the request's labels are few)."""
+    nodes = list(dict.fromkeys(list(sources) + list(targets)))
+    dist = {x: 0.0 for x in sources}
+    changed = True
+    while changed:
+        changed = False
+        for u in list(dist):
+            for v in nodes:
+                if v == u:
+                    continue
+                loss = dist[u] + _switch_cost(cost, u, v)
+                if loss <= budget and loss < dist.get(v, float('inf')):
+                    dist[v] = loss
+                    changed = True
+    return {x for x in targets if x in dist}

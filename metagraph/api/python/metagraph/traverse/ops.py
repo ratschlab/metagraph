@@ -36,6 +36,7 @@ bounds the bytes it RETURNS, not the computation behind them.
 import collections
 import copy
 import hashlib
+import heapq
 import json
 import math
 import sys
@@ -1137,17 +1138,94 @@ def _section(strategy, *path):
     return d
 
 
+def _switch_reach(change_cost, sources, targets, budget, sinks=()):
+    """{name: loss} for every name of |targets| that a chain of switches from a name of
+    |sources| enters within |budget|, at the cheapest such chain's loss (summed left to
+    right, as the walk sums a lineage's loss) -- the server's rule for an extra label
+    (walker.cpp, switch_reach): the walk enforces the cumulative loss switch by switch, so
+    a label is a valid switch target when SOME chain reaches it, not only one switch from a
+    seed label (the stage-2 recheck's design answer: A -> B = 1, B -> C = 1 under a budget
+    of 2 left C out). A chain passes only through names of |sources| and |targets|: the
+    labels the request names; a name of |sinks| (also a target) ends a chain but never
+    continues one. Prices as _switch_cost does (a table's last entry for a pair
+    wins, else its default; a label to itself costs 0); None for a model the library does
+    not know. A malformed field of a model it knows is a ValueError naming it."""
+    sources = list(dict.fromkeys(sources))
+    targets = [t for t in dict.fromkeys(targets) if t not in set(sources)]
+    model = (change_cost or {}).get('model', 'forbid')
+    if not sources or model == 'forbid':
+        return {}
+    if model == 'constant':
+        # one switch reaches every label, and a chain only costs more
+        c = change_cost.get('value')
+        if not _is_number(c):
+            raise ValueError('labels.change_cost.value is a number, not %r' % (c,))
+        return {t: float(c) for t in targets if float(c) <= budget}
+    if model != 'table':
+        return None
+    names = set(sources) | set(targets)
+    entries = change_cost.get('entries') or []
+    if not isinstance(entries, list):
+        raise ValueError('labels.change_cost.entries is a list of [from, to, cost], not %r'
+                         % (entries,))
+    table = {}
+    for e in entries:
+        if isinstance(e, list) and len(e) == 3 and e[0] in names and e[1] in names:
+            if not _is_number(e[2]):
+                raise ValueError('labels.change_cost.entries: the cost of %r is a number, '
+                                 'not %r' % (e[:2], e[2]))
+            table[(e[0], e[1])] = float(e[2])     # the last entry for a pair wins
+    d = change_cost.get('default', 'forbid')
+    if d != 'forbid' and not _is_number(d):
+        raise ValueError('labels.change_cost.default is a number or "forbid", not %r' % (d,))
+    fallback = math.inf if d == 'forbid' else float(d)
+    out_edges = collections.defaultdict(list)
+    for (u, v), c in table.items():
+        if u != v and c != math.inf:
+            out_edges[u].append((v, c))
+    # the default is relaxed lazily, as on the server: the names no popped name has given
+    # the default yet; a popped name gives it to each of them it has no explicit entry to
+    pending = set(names) if fallback <= budget else set()
+    dist = {x: 0.0 for x in sources}
+    heap = [(0.0, i, x) for i, x in enumerate(sorted(sources))]
+    heapq.heapify(heap)
+    order = len(heap)
+    done = set()
+
+    def relax(v, loss):
+        nonlocal order
+        if loss <= budget and loss < dist.get(v, math.inf):
+            dist[v] = loss
+            heapq.heappush(heap, (loss, order, v))
+            order += 1
+
+    while heap:
+        loss, _, u = heapq.heappop(heap)
+        if u in done or loss > dist[u]:
+            continue
+        done.add(u)
+        if u in sinks:
+            continue
+        for v, c in out_edges.get(u, ()):
+            relax(v, loss + c)
+        for v in list(pending):
+            if v != u and (u, v) not in table:
+                relax(v, loss + fallback)
+                pending.discard(v)
+    return {t: dist[t] for t in targets if dist.get(t, math.inf) <= budget}
+
+
 def _rebuilt_extra(g, seed_labels, budget, strategy):
     """labels.extra around a continuation's seed labels: the retrieval's permitted pool
     (its seed labels and its extra labels: every label of a constrain retrieval) minus the
     new seed labels -- the server refuses an extra label that duplicates a seed label
     (the review: seed ['C'] with extra ['B', 'C', 'D'] was a 400) -- keeping each
-    remaining label that the server accepts as a switch target: some new seed label
-    switches to it in one step within |budget| (an unreachable extra label is refused, and
-    under forbid, or a constant above the budget, any extra label is). -> (extra names in
-    dictionary order, the labels left out as unreachable, the labels left out because
-    their names cannot be verified). The retrieval's original seed labels become switch
-    targets too: they were in the original pool."""
+    remaining label that the server accepts as a switch target: some chain of switches
+    from a new seed label enters it within |budget| (_switch_reach; an unreachable extra
+    label is refused, and under forbid, or a constant above the budget, any extra label
+    is). -> (extra names in dictionary order, the labels left out as unreachable, the
+    labels left out because their names cannot be verified). The retrieval's original seed
+    labels become switch targets too: they were in the original pool."""
     lab = strategy.get('labels') or {}
     cost = lab.get('change_cost') or {'model': 'forbid'}
     if cost.get('model') == 'constant' and not _is_number(cost.get('value')):
@@ -1155,6 +1233,20 @@ def _rebuilt_extra(g, seed_labels, budget, strategy):
     seed_names = [l.name for l in seed_labels]
     seed_ids = {l.id for l in seed_labels}
     seeds = set(seed_names)
+    # /traverse resolves an extra label by NAME too: one whose name the library cannot verify
+    # to be its own is never sent (left out and stated if a chain reaches it, unreachable
+    # otherwise), so no chain is counted through it -- the request does not name it
+    suspect = {l.id for l in g.labels if l.id not in seed_ids and l.name not in seeds
+               and _unverifiable_names(g, [l])}
+    others = [l for l in g.labels if l.id not in seed_ids and l.name not in seeds]
+    reach = _switch_reach(cost, seed_names, [l.name for l in others], budget,
+                          sinks={l.name for l in others if l.id in suspect})
+    if reach is None:
+        raise ValueError('change_cost model %r is not one the library can price: the '
+                         'continuation\'s labels.extra cannot be validated'
+                         % cost.get('model'))
+    # a chain within the budget enters each of its labels within it, so the reachable labels
+    # are closed: leaving out those no chain reaches changes no chain of those kept
     extra, dropped, unverifiable = [], [], []
     for l in g.labels:
         if l.id in seed_ids:
@@ -1162,17 +1254,9 @@ def _rebuilt_extra(g, seed_labels, budget, strategy):
         if l.name in seeds:
             # another label under a seed label's name: it would resolve to the seed label
             unverifiable.append(l)
-            continue
-        costs = [_switch_cost(cost, s, l.name) for s in seed_names]
-        if any(c is None for c in costs):
-            raise ValueError('change_cost model %r is not one the library can price: the '
-                             'continuation\'s labels.extra cannot be validated'
-                             % cost.get('model'))
-        if not any(c <= budget for c in costs):
+        elif l.name not in reach:
             dropped.append(l)
-        elif _unverifiable_names(g, [l]):
-            # /traverse resolves an extra label by NAME too: one the library cannot verify
-            # to be this label's is left out (and stated), never sent to resolve
+        elif l.id in suspect:
             unverifiable.append(l)
         else:
             extra.append(l.name)
@@ -1198,14 +1282,15 @@ def _continuation_seeds(g, a, leaves):
     return conts, seeds
 
 
-def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
+def next_request(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=False,
+                 **overrides):
     """A resubmittable /traverse request continuing the given walks, as a NextRequest (a
-    dict; .notes and .loss_budget state what the request format cannot carry): one seed
-    per walk (its continuation, natural orientation, with its labels named explicitly),
-    the retrieval's normalized strategy with direction = this arm and
+    dict; .notes, .loss_budget and .branch_budget state what the request format cannot
+    carry): one seed per walk (its continuation, natural orientation, with its labels named
+    explicitly), the retrieval's normalized strategy with direction = this arm and
     max_extension_bp = bp when given.
 
-    Constrain mode, two rules no continuation may break:
+    Constrain mode, three rules no continuation may break:
       * no route exceeds its original loss budget: with reduce_budget, labels.loss_budget
         is reduced by the LARGEST terminal loss of the continued labels over all the
         walks (T, not C's loss_used, which is the smallest). The request carries one
@@ -1214,13 +1299,20 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
         uninterrupted walk would -- stated in .notes, with each label's remaining budget
         in .loss_budget. reduce_budget=False keeps the original budget: every label
         restarts at loss 0 and may spend it again (stated);
+      * no lineage branches beyond its original allowance: branching.max_label_branches
+        is reduced the same way, by the LARGEST terminal branch count of the continued
+        labels ("unlimited" stays unlimited), exact for the labels at that count and
+        conservative for the others -- stated in .notes and .branch_budget ({original,
+        effective, largest_terminal_branches, reset}). reset_branches=True keeps the
+        original allowance: every lineage restarts at 0 branches and may branch again
+        (stated);
       * the request is valid: labels.extra is rebuilt around the new seed labels -- the
-        retrieval's permitted pool minus them, each label kept that a seed label reaches
-        in one switch within the budget (the server's rule); every other label is listed
-        in .left_out (and the first few named in .notes). A labels.extra the caller gives
-        in the overrides is sent as given. An override section the rebuild reads that is
-        not an object (labels, labels.change_cost, branching), or a malformed field of it,
-        is a ValueError naming it.
+        retrieval's permitted pool minus them, each label kept that a chain of switches
+        from a seed label enters within the budget (the server's rule); every other label
+        is listed in .left_out, per walk (and the first few named in .notes). A
+        labels.extra the caller gives in the overrides is sent as given. An override
+        section the rebuild reads that is not an object (labels, labels.change_cost,
+        branching), or a malformed field of it, is a ValueError naming it.
     A label alive at a leaf that does not cover the continuation's whole tail is not among
     the continuation's labels, so it is not seeded and the continuation may lack its
     lineage: stated in .notes and in .left_out (why 'alive_not_seeded').
@@ -1230,6 +1322,8 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
     next_requests(), one request per walk. Keyword overrides deep-merge into the
     strategy; release, graph and graph_path are request-level. Raises MissingEnvelope on
     a body-only graphlet."""
+    if not isinstance(reset_branches, bool):
+        raise ValueError('reset_branches is true or false, not %r' % (reset_branches,))
     g.require_envelope('next_request()')
     a = g.arm(arm)
     if isinstance(leaves, (int, Path, Walk)):
@@ -1242,6 +1336,7 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
         strategy.setdefault('bounds', {})['max_extension_bp'] = bp
     notes = []
     budget_info = None
+    branch_info = None
     left_out = []
     if g.mode == 'constrain':
         labels_ = strategy.setdefault('labels', {})
@@ -1301,7 +1396,8 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
                              % (_num(effective), _num(budget), _num(top)))
         if 'extra' in given:
             # the caller's own list: the request carries it as given, unchecked
-            extra, dropped, unverifiable = list(given['extra'] or []), [], []
+            extra = list(given['extra'] or [])
+            per_walk = []
         else:
             pools = [_rebuilt_extra(g, c.labels, effective, final) for c in conts]
             if len({(tuple(p[0]), tuple(l.id for l in p[2])) for p in pools}) > 1:
@@ -1311,10 +1407,17 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
                     'without duplicating a seed label or dropping a switch target: build one '
                     'request per walk with next_requests()'
                     % ', '.join(str(c.leaf) for c in conts))
-            extra, dropped, unverifiable = pools[0] if pools else ([], [], [])
+            extra = pools[0][0] if pools else []
+            # what each walk leaves out, from ITS seed labels: the walks share labels.extra,
+            # not their seed labels, so a label one walk leaves out may be another's seed
+            # label (the stage-2 recheck, P3: the first walk's omissions were reported for all,
+            # naming a label another walk seeded as unreachable)
+            per_walk = [(c, p[1], p[2]) for c, p in zip(conts, pools)]
         labels_['extra'] = extra
-        left_out = [dict(l.as_dict(), why='unreachable') for l in dropped] + \
-            [dict(l.as_dict(), why='unverifiable_name') for l in unverifiable]
+        for c, dropped, unverifiable in per_walk:
+            left_out += [dict(l.as_dict(), why='unreachable', walk=c.leaf) for l in dropped] + \
+                [dict(l.as_dict(), why='unverifiable_name', walk=c.leaf) for l in unverifiable]
+        unverifiable = per_walk[0][2] if per_walk else []      # the same for every walk
         # A label alive at the leaf that does not cover the whole tail (it switched in
         # within the continuation's last bases) is not among C's labels, so it is no seed
         # label of the continuation: it can come back only as a switch target from a seed
@@ -1350,46 +1453,102 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
                          % (', '.join(l.ref for l in unverifiable),
                             _unverifiable_names(g, unverifiable)))
         cost = _section(final, 'labels', 'change_cost') or {'model': 'forbid'}
-        if dropped and cost.get('model', 'forbid') != 'forbid':
-            # under forbid nothing was a switch target in the retrieval either; otherwise a
-            # label left out is a target one uninterrupted walk may still have entered
+        for c, dropped, _ in per_walk:
+            if not dropped or cost.get('model', 'forbid') == 'forbid':
+                # under forbid nothing was a switch target in the retrieval either
+                continue
+            # a label left out is a target one uninterrupted walk may still have entered from
+            # a continued label at a lower loss, whose own remaining budget is larger -- by a
+            # chain through ANY label of the retrieval's pool, the kept extra labels and the
+            # other continued labels included, as that walk could switch through every one
+            # (the review of the stage-3 fixes, P3: a chain through a kept extra label was
+            # not searched, and the note understated what the continuation may miss)
+            mine = _unique_pairs([(l, x) for l, x in zip(c.labels, c.losses) if x != math.inf])
+            pool = [l.name for l in g.labels]
+            reach_of = [(p, _switch_reach(cost, [p.name], pool, budget - x) or {})
+                        for p, x in mine]
             lost = []
             for l in dropped:
-                via = [p for p, x in _unique_pairs(pairs)
-                       if _switch_cost(cost, p.name, l.name) <= budget - x]
+                via = [p for p, r in reach_of if l.name in r]
                 lost.append('%s%s' % (_shown(l.name), ' (reachable for %s within its own '
                                       'remaining budget)' % ', '.join(_shown(p.name)
                                                                       for p in via)
                                       if via else ''))
             notes.append(
-                'labels.extra leaves out %s: no label of the continuation reaches %s in one '
-                'switch within loss_budget %s, and the server refuses an unreachable extra '
-                'label; one uninterrupted walk could still have entered %s through a chain '
-                'of switches%s'
+                'labels.extra leaves out %s%s: no chain of switches from a label of the '
+                'continuation enters %s within loss_budget %s, and the server refuses an '
+                'unreachable extra label%s'
                 % (', '.join(lost[:8]) + (' and %d more' % (len(lost) - 8)
                                           if len(lost) > 8 else ''),
+                   ' for walk %d' % c.leaf if len(per_walk) > 1 else '',
                    'it' if len(lost) == 1 else 'them', _num(effective),
-                   'it' if len(lost) == 1 else 'them',
-                   ' or from a label at a lower loss' if any('reachable for' in x
-                                                            for x in lost) else ''))
-        # each continued label's own branches at the leaf (T), not C's smallest
+                   '; one uninterrupted walk could still have entered %s from a label at a '
+                   'lower loss' % ('it' if len(lost) == 1 else 'them')
+                   if any('reachable for' in x for x in lost) else ''))
+        # Each continued label's own branches at the leaf (T), not C's smallest. The server
+        # resets branch state for a new seed, so the allowance is reduced as the loss budget
+        # is: by the largest count, conservative for the labels that used fewer (the stage-2
+        # recheck's design answer 3); reset_branches keeps it, and the note says so
         branches = 0
+        per_label = []
         for c in conts:
             ends = {e.label: e.branches for e in derive.end_labels(a, leaf_segment(a, c.leaf))}
+            per_label += [(l, ends.get(l.id, 0)) for l in c.labels]
             branches = max([branches, c.branches_used]
                            + [ends.get(l.id, 0) for l in c.labels])
+        original = _section(strategy, 'branching').get('max_label_branches')
+        given_b = overrides.get('branching') or {}
         mlb = _section(final, 'branching').get('max_label_branches')
-        if branches and isinstance(mlb, int) and not isinstance(mlb, bool):
-            notes.append('branching.max_label_branches %d restarts at the continuation\'s '
-                         'seed (the server resets branch state for a new seed): the continued '
-                         'lineages had used %d, so the continuation may branch further than '
-                         'one uninterrupted walk would' % (mlb, branches))
+        if 'max_label_branches' in given_b and not (
+                mlb == 'unlimited' or (_is_number(mlb) and int(mlb) == mlb and mlb >= 0)):
+            raise ValueError('branching.max_label_branches is a non-negative integer or '
+                             '"unlimited", not %r' % (mlb,))
+        if original == 'unlimited' or (isinstance(original, int)
+                                       and not isinstance(original, bool) and original > 0):
+            reduced = original if original == 'unlimited' or reset_branches \
+                else max(0, original - branches)
+            strategy.setdefault('branching', {})['max_label_branches'] = reduced
+            branch_info = {'original': original, 'effective': reduced,
+                           'largest_terminal_branches': branches, 'reset': reset_branches}
+            if 'max_label_branches' in given_b:
+                branch_info['effective'] = mlb
+                if mlb == 'unlimited' and original != 'unlimited' or \
+                        _is_number(mlb) and original != 'unlimited' and mlb > reduced:
+                    notes.append('branching.max_label_branches %s is the caller\'s (overrides): '
+                                 'above the original %d minus the largest terminal branch count '
+                                 '%d, a lineage of the continuation may branch further than one '
+                                 'uninterrupted walk would' % (mlb, original, branches))
+            elif original != 'unlimited' and branches:
+                # as the loss budget: exact for the lineages at the largest count (stated in
+                # branch_budget), and a note where it is conservative for others
+                fewer = [(l, b) for l, b in per_label if b < branches]
+                if reset_branches:
+                    notes.append('branching.max_label_branches is the original %d although the '
+                                 'continued lineages had used up to %d (reset_branches=True): '
+                                 'each restarts at 0 branches, so the continuation may branch '
+                                 'further than one uninterrupted walk would' % (original, branches))
+                elif fewer:
+                    seen, shown = set(), []
+                    for l, b in fewer:
+                        if l.id not in seen:
+                            seen.add(l.id)
+                            shown.append('%s (%d, could use %d)'
+                                         % (_shown(l.name), b, max(0, original - b)))
+                    notes.append('branching.max_label_branches %d is the original %d minus the '
+                                 'largest terminal branch count of the continued labels, %d: '
+                                 'exact for the lineages at that count, conservative for %s, '
+                                 'which may stop branching earlier than one uninterrupted walk '
+                                 'would -- the request carries one branch allowance and no '
+                                 'per-label starting count'
+                                 % (reduced, original, branches,
+                                    ', '.join(shown[:8]) + (' and %d more' % (len(shown) - 8)
+                                                            if len(shown) > 8 else '')))
         if not (budget_info['original'] > 0 or budget_info['effective'] > 0):
             # no loss budget to spend (forbid, or a budget of 0): each label's remaining
             # budget would be 0 and say nothing, and a long list of them cost a receipt its
             # room (round 3, finding C)
             budget_info = None
-    request = NextRequest({'seeds': seeds}, notes, budget_info, left_out)
+    request = NextRequest({'seeds': seeds}, notes, budget_info, left_out, branch_info)
     release = g.envelope.get('release')
     if release:
         request['release'] = release
@@ -1401,13 +1560,15 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
     return request
 
 
-def next_requests(g, arm, leaves, bp=None, reduce_budget=True, **overrides):
+def next_requests(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=False,
+                  **overrides):
     """One next_request() per walk, in |leaves| order: each with its own seed labels, its
-    own rebuilt labels.extra and its budget reduced by ITS labels' largest terminal loss
-    (never less conservative than one request over all the walks)."""
+    own rebuilt labels.extra and its budgets reduced by ITS labels' largest terminal loss
+    and branch count (never less conservative than one request over all the walks)."""
     if isinstance(leaves, (int, Path, Walk)):
         leaves = [leaves]
-    return [next_request(g, arm, [x], bp, reduce_budget, **copy.deepcopy(overrides))
+    return [next_request(g, arm, [x], bp, reduce_budget, reset_branches,
+                         **copy.deepcopy(overrides))
             for x in leaves]
 
 
