@@ -17,6 +17,7 @@
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "common/unix_tools.hpp"
 
 
 namespace {
@@ -830,6 +831,379 @@ TEST_F(MiniRefSeq, PacedReadsAreByteIdentical) {
     }
     EXPECT_EQ(12u, compared);
     EXPECT_GT(stopped, 0u);
+}
+
+// The efficiency pass, the row-diff path cache: the rows a request's reads reconstruct are
+// kept so that later reads stop their row-diff paths at them. The response is byte for byte
+// the one without the cache — constrain and annotate, derived labels, no budget, memory
+// budgets near and at their stops (the cache is then each seed's, within what the label
+// cache leaves of its allotment), work budgets, batch_kmers 1 and 64, a cache that keeps
+// everything and one that evicts all the time, reads in one piece and in one-row chunks —
+// and the cache is used (its hits) and emptied after a seed under a memory budget
+TEST_F(MiniRefSeq, PathCacheKeepsTheResponse) {
+    const std::string seed = query_.substr(0, 120);
+    size_t compared = 0, stopped = 0;
+    for (const char *mode : { "constrain", "annotate" }) {
+        for (int budget = 0; budget < 6; ++budget) {
+            for (int batch : { 1, 64 }) {
+                Json::Value r;
+                r["seeds"][0]["sequence"] = seed;
+                Json::Value &st = r["strategy"];
+                st["labels"]["mode"] = mode;
+                st["bounds"]["max_extension_bp"] = 150;
+                st["bounds"]["time_budget_ms"] = 600000;
+                st["annotation"]["batch_kmers"] = batch;
+                st["output"]["detail"] = budget % 2 ? "graphlet" : "full";
+                st["output"]["timing"] = false;
+                if (std::string(mode) == "annotate")
+                    st["labels"]["max_labels_per_node"] = 64;
+                switch (budget) {
+                    case 1: st["bounds"]["max_memory_mb"] = 1; break;
+                    case 2: st["bounds"]["max_memory_mb"] = 3; break;
+                    case 3: st["bounds"]["max_memory_mb"] = 16; break;
+                    case 4: st["bounds"]["max_work_units"] = 20000; break;
+                    case 5: st["bounds"]["max_work_units"] = 2000000; break;
+                    default: break;
+                }
+                mtg::cli::TraverseLimits off;
+                const std::string reference = mtg::cli::json_text(
+                        mtg::cli::process_traverse_request(r, *anno_graph_, "", off), true);
+                stopped += reference.find("\"resource_stop\"") != std::string::npos;
+                for (uint64_t bytes : { uint64_t(128) << 20, uint64_t(64) << 10 }) {
+                    for (double chunk : { 0.0, 1e-9 }) {
+                        mtg::cli::TraverseLimits on;
+                        on.path_cache_bytes = bytes;
+                        on.chunk_target_ms = chunk;
+                        EXPECT_EQ(reference, mtg::cli::json_text(
+                                mtg::cli::process_traverse_request(r, *anno_graph_, "", on), true))
+                            << mode << " budget " << budget << " batch " << batch << " cache "
+                            << bytes << " chunk " << chunk;
+                        compared++;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(96u, compared);
+    EXPECT_GT(stopped, 0u);
+
+    // the cache is used, kept from seed to seed without a memory budget, and a seed's own
+    // (emptied when it ends) under one
+    for (uint64_t memory : { uint64_t(0), uint64_t(16) << 20 }) {
+        LabelOracle oracle(*anno_graph_);
+        oracle.set_path_cache_max(uint64_t(128) << 20);
+        Strategy st;
+        st.max_extension_bp = 150;
+        st.max_memory_bytes = memory;
+        st.batch_kmers = 1;
+        Seed s;
+        s.sequence = seed;
+        traverse_seed(oracle, s, st, LabelChangeCost::forbid());
+        EXPECT_GT(oracle.path_cache().hits(), 0u) << memory;
+        if (memory) {
+            EXPECT_EQ(0u, oracle.path_cache().bytes());
+        } else {
+            EXPECT_GT(oracle.path_cache().bytes(), 0u);
+        }
+        EXPECT_EQ(uint64_t(128) << 20, oracle.path_cache().limit());
+    }
+}
+
+// Review of the efficiency pass, finding 1: under a memory budget the path cache is off until
+// the depth-0 state is admitted. A refused annotate root states whether its read alone was
+// refused (a lower bound) or its standalone demand did not fit; with the cache on while the
+// roots were read, the left root's row-diff path held the right root's row, whose read then
+// completed and was refused by its demand ("the row's standalone demand ... is 28400 bytes")
+// where the seed without the cache states "the row, read alone ..., needs more than the
+// 18850 bytes". The seed_id, charged with the depth-0 state, moves the account across the
+// right root's refusal: every such response is the same with the cache on and off
+TEST_F(MiniRefSeq, PathCacheKeepsRootRefusals) {
+    // 32 bp of a mini refseq record (mini_batch3): the left root's path holds the right root
+    const std::string seed = "AAGCGGGGACATTCTTCTCGGCTGACTCAGTC";
+    auto request = [&](size_t id_bytes) {
+        Json::Value r;
+        r["seeds"][0]["sequence"] = seed;
+        r["seeds"][0]["seed_id"] = std::string(id_bytes, 'x');
+        Json::Value &st = r["strategy"];
+        st["labels"]["mode"] = "annotate";
+        st["labels"]["max_labels_per_node"] = 1;
+        st["bounds"]["max_extension_bp"] = 33;
+        st["bounds"]["max_memory_mb"] = 1;
+        st["output"]["detail"] = "summary";
+        st["output"]["timing"] = false;
+        return r;
+    };
+    mtg::cli::TraverseLimits off, on;
+    on.path_cache_bytes = uint64_t(128) << 20;
+    auto text = [&](const Json::Value &r, const mtg::cli::TraverseLimits &limits) {
+        return mtg::cli::json_text(mtg::cli::process_traverse_request(r, *anno_graph_, "", limits),
+                                   true);
+    };
+    auto refused = [](const std::string &out, const char *arm) {
+        return out.find(std::string("annotation row of the ") + arm + " arm's root")
+                != std::string::npos;
+    };
+    // where the right root's read is refused: between the walks and the left root's refusals
+    std::vector<size_t> window;
+    for (size_t bytes = 0; bytes < (size_t(1) << 20); bytes += 8192) {
+        const std::string out = text(request(bytes), off);
+        if (refused(out, "right"))
+            window.push_back(bytes);
+        if (refused(out, "left"))
+            break;
+    }
+    ASSERT_FALSE(window.empty());
+    size_t compared = 0, read_alone = 0;
+    for (size_t bytes = window.front() > 8192 ? window.front() - 8192 : 0;
+            bytes < window.back() + 8192; bytes += 256) {
+        const Json::Value r = request(bytes);
+        const std::string a = text(r, off);
+        if (!refused(a, "right"))
+            continue;
+        compared++;
+        read_alone += a.find("the row, read alone with its row-diff dependency rows, needs more")
+                        != std::string::npos;
+        EXPECT_EQ(a, text(r, on)) << "seed_id of " << bytes << " bytes";
+    }
+    EXPECT_GT(compared, 10u);
+    // the refusals the cache changed: a read alone refused (its lower bound stated)
+    EXPECT_GT(read_alone, 0u);
+}
+
+// R16 (the owner's decision; feature level 4): the server's maxima of the budgets. Set, a
+// larger budget is lowered to the maximum and an omitted one set to it, both echoed in
+// strategy.clamped (requested "unlimited" for an omitted one) and in strategy.bounds; a smaller
+// budget is kept. A seed its clamped budget stopped states it as server_clamp, and its stop
+// what the request asked for ("unlimited" when it gave none: representable in a graphlet's
+// K and Q records, which null is not). Unset (0), nothing changes.
+TEST_F(MiniRefSeq, ServerBudgetMaxima) {
+    const std::string seed = query_.substr(0, 120);
+    auto request = [&](Json::Value bounds) {
+        Json::Value r;
+        r["seeds"][0]["sequence"] = seed;
+        bounds["max_extension_bp"] = 150;
+        r["strategy"]["bounds"] = bounds;
+        r["strategy"]["output"]["detail"] = "summary";
+        r["strategy"]["output"]["timing"] = false;
+        return r;
+    };
+    auto clamped = [](const Json::Value &out, const std::string &field) {
+        for (const Json::Value &c : out["strategy"]["clamped"]) {
+            if (c["field"].asString() == field)
+                return c;
+        }
+        return Json::Value();
+    };
+    mtg::cli::TraverseLimits limits;
+    limits.max_memory_mb = 16;
+    limits.max_work_units = 20000;
+    // omitted: set to the maxima
+    Json::Value out = mtg::cli::process_traverse_request(request(Json::Value()), *anno_graph_,
+                                                         "", limits);
+    Json::Value m = clamped(out, "bounds.max_memory_mb");
+    ASSERT_FALSE(m.isNull());
+    EXPECT_EQ("unlimited", m["requested"].asString());
+    EXPECT_EQ(16u, m["effective"].asUInt64());
+    Json::Value w = clamped(out, "bounds.max_work_units");
+    ASSERT_FALSE(w.isNull());
+    EXPECT_EQ("unlimited", w["requested"].asString());
+    EXPECT_EQ(20000u, w["effective"].asUInt64());
+    EXPECT_EQ(16u, out["strategy"]["bounds"]["max_memory_mb"].asUInt64());
+    EXPECT_EQ(20000u, out["strategy"]["bounds"]["max_work_units"].asUInt64());
+    // the work maximum stops this walk: stated as the server's clamp
+    const Json::Value &result = out["results"][0];
+    ASSERT_TRUE(result.isMember("resource_stop")) << mtg::cli::json_text(result, true);
+    EXPECT_EQ("work", result["resource_stop"]["resource"].asString());
+    EXPECT_EQ("unlimited", result["resource_stop"]["requested"].asString());
+    bool stated = false;
+    for (const Json::Value &l : result["limitations"]) {
+        stated |= l["kind"].asString() == "server_clamp"
+                && l["knob"].asString() == "bounds.max_work_units";
+    }
+    EXPECT_TRUE(stated) << mtg::cli::json_text(result["limitations"], true);
+    // a request cannot raise it: no action raising it, the walk_domain states the maximum
+    // (review of the efficiency pass, finding 2)
+    for (const Json::Value &a : result["resource_stop"]["actions"]) {
+        EXPECT_NE("raise_work_budget", a.asString());
+    }
+    size_t at_max = 0;
+    for (const char *arm : { "left", "right" }) {
+        for (const Json::Value &l : result["arms"][arm]["limitations"]) {
+            if (l["kind"].asString() != "walk_domain"
+                    || l["knob"].asString() != "bounds.max_work_units")
+                continue;
+            at_max++;
+            EXPECT_EQ(20000u, l["server_limit"].asUInt64());
+            EXPECT_EQ(std::string::npos, l["effect"].asString().find("raise the knob"));
+            EXPECT_NE(std::string::npos, l["effect"].asString().find("the server's maximum"));
+        }
+    }
+    EXPECT_GT(at_max, 0u);
+    // representable as a graphlet (its K and Q records)
+    Json::Value as_graphlet = request(Json::Value());
+    as_graphlet["strategy"]["output"]["detail"] = "graphlet";
+    out = mtg::cli::process_traverse_request(as_graphlet, *anno_graph_, "", limits);
+    ASSERT_TRUE(out["results"][0].isMember("graphlet")) << mtg::cli::json_text(out, true);
+    EXPECT_NE(std::string::npos, out["results"][0]["graphlet"].asString()
+                                     .find("server_clamp bounds.max_work_units i:20000 u "));
+    // larger: lowered (the requested value echoed); smaller: kept, nothing clamped
+    Json::Value larger;
+    larger["max_memory_mb"] = 64;
+    larger["max_work_units"] = 1000000;
+    out = mtg::cli::process_traverse_request(request(larger), *anno_graph_, "", limits);
+    EXPECT_EQ(64u, clamped(out, "bounds.max_memory_mb")["requested"].asUInt64());
+    EXPECT_EQ(16u, clamped(out, "bounds.max_memory_mb")["effective"].asUInt64());
+    EXPECT_EQ(1000000u, clamped(out, "bounds.max_work_units")["requested"].asUInt64());
+    EXPECT_EQ(20000u, out["strategy"]["bounds"]["max_work_units"].asUInt64());
+    Json::Value smaller;
+    smaller["max_memory_mb"] = 8;
+    smaller["max_work_units"] = 10000;
+    out = mtg::cli::process_traverse_request(request(smaller), *anno_graph_, "", limits);
+    EXPECT_TRUE(clamped(out, "bounds.max_memory_mb").isNull());
+    EXPECT_TRUE(clamped(out, "bounds.max_work_units").isNull());
+    EXPECT_EQ(8u, out["strategy"]["bounds"]["max_memory_mb"].asUInt64());
+    EXPECT_EQ(10000u, out["strategy"]["bounds"]["max_work_units"].asUInt64());
+    // unset: the request as it was
+    const std::string a = mtg::cli::json_text(
+            mtg::cli::process_traverse_request(request(Json::Value()), *anno_graph_, "", {}), true);
+    EXPECT_EQ(std::string::npos, a.find("max_memory_mb"));
+    EXPECT_EQ(std::string::npos, a.find("max_work_units"));
+
+    // Review of the efficiency pass, finding 2: a seed the server's maximum fails before any
+    // walk states it as a walked seed does — the server_clamp, the stop's `requested` (what the
+    // request asked for), no action raising the budget and a walk_domain with server_limit that
+    // says a request cannot raise it — whether it failed in its seed phase (work: the derived
+    // set's rows) or at its depth-0 state (memory: an annotate root's read)
+    auto failed_at_max = [&](const Json::Value &r, const mtg::cli::TraverseLimits &limits,
+                             const std::string &field, const char *resource,
+                             const Json::Value &requested, uint64_t maximum) {
+        // a knob's value: an integer, or "unlimited"
+        auto same = [](const Json::Value &a, const Json::Value &b) {
+            return a.isString() ? b.isString() && a.asString() == b.asString()
+                                : b.isNumeric() && a.asUInt64() == b.asUInt64();
+        };
+        const Json::Value out = mtg::cli::process_traverse_request(r, *anno_graph_, "", limits);
+        const Json::Value &res = out["results"][0];
+        const std::string where = mtg::cli::json_text(res, true);
+        ASSERT_TRUE(res.isMember("error")) << where;
+        EXPECT_EQ("failed", res["outcome"]["walks"].asString()) << where;
+        ASSERT_TRUE(res.isMember("resource_stop")) << where;
+        EXPECT_EQ(resource, res["resource_stop"]["resource"].asString()) << where;
+        EXPECT_TRUE(same(requested, res["resource_stop"]["requested"])) << where;
+        EXPECT_EQ(maximum, res["resource_stop"]["effective"].asUInt64()) << where;
+        for (const Json::Value &action : res["resource_stop"]["actions"]) {
+            EXPECT_EQ(std::string::npos, action.asString().find("raise_")) << where;
+        }
+        size_t clamps = 0, domains = 0;
+        for (const Json::Value &l : res["limitations"]) {
+            if (l["knob"].asString() != field)
+                continue;
+            if (l["kind"].asString() == "server_clamp") {
+                clamps++;
+                EXPECT_EQ(maximum, l["limit"].asUInt64());
+                EXPECT_TRUE(same(requested, l["observed"])) << where;
+            } else if (l["kind"].asString() == "walk_domain") {
+                domains++;
+                EXPECT_EQ(maximum, l["server_limit"].asUInt64());
+                EXPECT_EQ(std::string::npos, l["effect"].asString().find("raise the knob"))
+                    << where;
+                EXPECT_NE(std::string::npos, l["effect"].asString().find("the server's maximum"));
+            }
+        }
+        EXPECT_EQ(1u, clamps) << where;
+        EXPECT_EQ(1u, domains) << where;
+    };
+    // the seed phase: the derived set's rows of an 813 bp seed under 200 units, the request
+    // without a budget and with a larger one
+    Json::Value derive;
+    derive["seeds"][0]["sequence"] = query_;
+    derive["strategy"]["bounds"]["max_extension_bp"] = 2000;
+    derive["strategy"]["output"]["detail"] = "full";
+    derive["strategy"]["output"]["timing"] = false;
+    mtg::cli::TraverseLimits work;
+    work.max_work_units = 200;
+    failed_at_max(derive, work, "bounds.max_work_units", "work", Json::Value("unlimited"), 200);
+    derive["strategy"]["bounds"]["max_work_units"] = 5000;
+    failed_at_max(derive, work, "bounds.max_work_units", "work", Json::Value(5000), 200);
+    // the same seed failed by the request's own budget keeps the lever to raise it
+    work.max_work_units = 0;
+    derive["strategy"]["bounds"]["max_work_units"] = 200;
+    const Json::Value own = mtg::cli::process_traverse_request(derive, *anno_graph_, "", work);
+    EXPECT_EQ("raise_work_budget", own["results"][0]["resource_stop"]["actions"][0].asString());
+    for (const Json::Value &l : own["results"][0]["limitations"]) {
+        EXPECT_NE("server_clamp", l["kind"].asString());
+        EXPECT_FALSE(l.isMember("server_limit"));
+    }
+    // the depth-0 state: the right annotate root's read under the server's 1 MiB (the seed_id,
+    // charged with the depth-0 state, scanned to where that read is refused)
+    mtg::cli::TraverseLimits memory;
+    memory.max_memory_mb = 1;
+    bool root_refused = false;
+    for (size_t bytes = 0; bytes < (size_t(1) << 20) && !root_refused; bytes += 8192) {
+        Json::Value r;
+        r["seeds"][0]["sequence"] = "AAGCGGGGACATTCTTCTCGGCTGACTCAGTC";
+        r["seeds"][0]["seed_id"] = std::string(bytes, 'x');
+        r["strategy"]["labels"]["mode"] = "annotate";
+        r["strategy"]["labels"]["max_labels_per_node"] = 1;
+        r["strategy"]["bounds"]["max_extension_bp"] = 33;
+        r["strategy"]["output"]["detail"] = "summary";
+        r["strategy"]["output"]["timing"] = false;
+        const Json::Value out = mtg::cli::process_traverse_request(r, *anno_graph_, "", memory);
+        if (out["results"][0]["error"].asString().find("arm's root") == std::string::npos)
+            continue;
+        root_refused = true;
+        failed_at_max(r, memory, "bounds.max_memory_mb", "memory", Json::Value("unlimited"), 1);
+    }
+    EXPECT_TRUE(root_refused);
+}
+
+// The efficiency pass, C4: the coordinate mapping by runs (LabelOracle::map_coords) against
+// one map_single_coord per coordinate, on the tuple rows of the blaNDM query (same results,
+// checked; the time printed). A measurement, not a check of speed: run it with
+// --gtest_also_run_disabled_tests
+TEST_F(MiniRefSeq, DISABLED_CoordMappingBenchmark) {
+    std::vector<Row> rows;
+    for (node_index key : oracle_->keys_of_sequence(query_)) {
+        if (key != npos)
+            rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
+    }
+    const auto tuples = oracle_->get_row_tuples(rows);
+    uint64_t coords = 0;
+    for (const auto &row : tuples) {
+        for (const auto &entry : row) {
+            coords += entry.second.size();
+        }
+    }
+    ASSERT_GT(coords, 0u);
+    const int reps = 200;
+    uint64_t sum_a = 0, sum_b = 0;
+    Timer timer;
+    for (int rep = 0; rep < reps; ++rep) {
+        for (const auto &row : tuples) {
+            for (const auto &[c, cs] : row) {
+                for (Coord coord : cs) {
+                    const auto [seq, local] = oracle_->map_coord(c, coord);
+                    sum_a += seq * 31 + local;
+                }
+            }
+        }
+    }
+    const double per_coord_a = timer.elapsed() * 1e9 / (double(coords) * reps);
+    timer.reset();
+    for (int rep = 0; rep < reps; ++rep) {
+        for (const auto &row : tuples) {
+            for (const auto &[c, cs] : row) {
+                oracle_->map_coords(c, cs.data(), cs.size(), [&](Coord, uint64_t seq, Coord local) {
+                    sum_b += seq * 31 + local;
+                });
+            }
+        }
+    }
+    const double per_coord_b = timer.elapsed() * 1e9 / (double(coords) * reps);
+    EXPECT_EQ(sum_a, sum_b);
+    std::cerr << rows.size() << " rows, " << coords << " coordinates: map_single_coord "
+              << per_coord_a << " ns a coordinate, map_coords " << per_coord_b
+              << " ns (x" << per_coord_a / per_coord_b << ")" << std::endl;
 }
 
 } // namespace

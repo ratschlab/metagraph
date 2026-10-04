@@ -74,8 +74,11 @@ constexpr const char *kTraverseAlgorithmVersion = "traverse-0.2";
 // level). 2: attempts and the client-gone stop; 3: not_after_ms, per-graph identity and
 // GET /traverse/capabilities?graph=, GET /capabilities, algorithm_version in the
 // capabilities, attempts.hard_cap_ms (allowance_ms an integer), deadline_check and the
-// chunked deadlines, compression_level and the delivery reserve
-constexpr int kTraverseFeatureLevel = 3;
+// chunked deadlines, compression_level and the delivery reserve; 4 (the efficiency pass): the
+// server's maxima of the budgets (the probe's max_memory_mb / max_work_units, clamped like the
+// time cap), the row-diff path cache (the probe's decode_cache) and the delivery reserve's
+// calibrated starting estimates (delivery_reserve.calibration)
+constexpr int kTraverseFeatureLevel = 4;
 
 /**
  * What identifies the index a response was computed on (DESIGN-traverse-graphlet.md
@@ -274,10 +277,17 @@ struct TraverseLimits {
     size_t max_seeds = 0;          // cap on |request.seeds|
     uint64_t max_seed_bp = 0;      // cap on the length of one seed
     size_t max_seed_labels = 0;    // cap on strategy.labels.max_seed_labels
+    // the maxima of the request's budgets (R16; 0 = off): a larger budget is lowered to it,
+    // an omitted one set to it, both echoed in strategy.clamped
+    uint64_t max_memory_mb = 0;    // of strategy.bounds.max_memory_mb
+    uint64_t max_work_units = 0;   // of strategy.bounds.max_work_units
     // Not a cap: the chunked deadlines (spec §6.8, Config::traverse_chunk_target_ms) — an
     // annotation read a deadline may fall into is decoded in chunks of about this many ms, the
     // deadline checked between them; 0: one piece per read, as before
     double chunk_target_ms = 0;
+    // Not a cap: the bound of the request's row-diff path cache (LabelOracle::path_cache,
+    // Config::traverse_path_cache_mb); 0: off, every read decodes its rows' whole paths
+    uint64_t path_cache_bytes = 0;
 };
 
 // The results of a /traverse response written as text, one per seed, as each was built

@@ -903,6 +903,17 @@ Json::Value AttemptRegistry::capabilities_json() const {
     reserve["rate_window"] = uint_value(kRateWindow);
     reserve["margin"] = kReserveMargin;
     reserve["stop_ms"] = ms_json(settings_.delivery_stop_ms);
+    // where the configured starting estimates come from (feature level 4, the efficiency pass)
+    reserve["calibration"] = "starting estimates, replaced by this server's measurements: "
+        "account_per_text_byte just below the smallest ratios measured on real responses (JSON "
+        "details 33.5 to 1,344, graphlet 58.4 and more; 20 and 40 before feature level 4, which "
+        "cut a server's first large attempt per detail early, e.g. an SRA tree at 2.0 s of 35 s); "
+        "stop_ms = chunk_target_ms + 950 (950 ms for the heads between two readings of the clock "
+        "and the stopped seed's finalisation: 352 ms measured on a quiet SRA server, 1,001 ms on "
+        "a loaded one, 1,699 ms once; + 200 before feature level 4; a longer one measured "
+        "replaces it), the rest of a finalisation that grows with the result "
+        "being covered by the margin while it runs faster than 4 x build_mbps; compress_mbps "
+        "and build_mbps conservative (measured 460-670 and 13.6-51 MB/s on SRA at level 1)";
     reserve["measured_stop_ms"] = m.stop_ms > 0 ? ms_json(m.stop_ms) : Json::Value();
     reserve["rule"] = "reserve_ms = margin x ((T + E) / (compress x 1000) + E / (build x 1000)) "
         "+ stop, rates in MB/s: T the exact bytes of the text of the seeds finished so far (each "

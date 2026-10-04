@@ -709,9 +709,11 @@ int run_server(Config *config) {
     attempt_settings.content_timeout_s = kContentTimeoutS;
     attempt_settings.delivery_compress_mbps = config->traverse_delivery_compress_mbps;
     attempt_settings.delivery_build_mbps = config->traverse_delivery_build_mbps;
-    // until measured, the walk is taken to end at most a chunk of a read and 200 ms (the heads
-    // between two readings of the clock, the stopped seed's finalisation) after its walk-until
-    attempt_settings.delivery_stop_ms = static_cast<double>(config->traverse_chunk_target_ms) + 200;
+    // until measured longer, the walk is taken to end at most a chunk of a read and 950 ms (the
+    // heads between two readings of the clock, the stopped seed's finalisation) after its
+    // walk-until (calibrated in the efficiency pass: 352-1,001 ms measured on SRA, 1,699 once
+    // under load; 200 assumed before)
+    attempt_settings.delivery_stop_ms = static_cast<double>(config->traverse_chunk_target_ms) + 950;
     AttemptRegistry attempts(attempt_settings);
     logger->info("[Server] Traverse attempts: server_instance {}, allowance {} ms, {}",
                  attempts.server_instance(), attempt_settings.allowance_ms,
@@ -873,7 +875,10 @@ int run_server(Config *config) {
                 limits.max_seeds = config->traverse_max_seeds;
                 limits.max_seed_bp = config->traverse_max_seed_bp;
                 limits.max_seed_labels = config->traverse_max_seed_labels;
+                limits.max_memory_mb = config->traverse_max_memory_mb;
+                limits.max_work_units = config->traverse_max_work_units;
                 limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
+                limits.path_cache_bytes = config->traverse_path_cache_mb << 20;
                 const IndexIdentity identity = identity_of(index);
                 return process_traverse_request(json, index, config->index_release, limits,
                                                 &identity, attempt.get(), &texts);
@@ -1017,6 +1022,10 @@ int run_server(Config *config) {
         budgets.append("max_memory_mb");
         budgets.append("max_work_units");
         caps["budgets"] = budgets;
+        // the server's maxima of those budgets (feature level 4, R16; 0: off): a larger
+        // budget is lowered to it and an omitted one set to it, echoed in strategy.clamped
+        caps["max_memory_mb"] = static_cast<Json::UInt64>(config->traverse_max_memory_mb);
+        caps["max_work_units"] = static_cast<Json::UInt64>(config->traverse_max_work_units);
         caps["work_check_interval"]
             = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
         // Work is deterministic LOGICAL work, not measured decode effort (review of stage 3,
@@ -1036,6 +1045,23 @@ int run_server(Config *config) {
             "is read before every head and at least every work_check_interval units; the "
             "physical decode counters are in timing";
         caps["memory_bound"] = "soft";
+        // the row-diff path cache of the reads (feature level 4, the efficiency pass)
+        Json::Value decode_cache;
+        decode_cache["path_cache_mb"] = static_cast<Json::UInt64>(config->traverse_path_cache_mb);
+        decode_cache["rule"] = "on a row-diff annotation the rows a /traverse request's reads "
+            "reconstruct (the requested rows, the rows on their row-diff paths and the anchors "
+            "read) are kept in a cache of at most path_cache_mb MiB, so that a later read's "
+            "row-diff path stops at a cached row instead of decoding to its anchor again (in two "
+            "generations: the older is dropped when the current one fills half the bound). What a "
+            "read returns, the work units charged (each row with its whole row-diff path) and "
+            "the memory admissions (each row by the demand of its whole path) do not depend on "
+            "it; the decode time and the physical counters in timing do. Without a memory budget "
+            "the cache is the request's, kept from seed to seed; under bounds.max_memory_mb it is "
+            "each seed's, off during the seed phase and an annotate root's read, then within what "
+            "the label cache leaves of its allotment (min(budget / 4, 64 MiB), held by the "
+            "account), and the lookahead's reads are admitted as without it (each also charges "
+            "what the cache spared it). 0: off";
+        caps["decode_cache"] = std::move(decode_cache);
         // which walk a response gives (every /traverse response names it too)
         caps["algorithm_version"] = kTraverseAlgorithmVersion;
         // the ledger-managed attempts (requests with attempt_id): how they are named,

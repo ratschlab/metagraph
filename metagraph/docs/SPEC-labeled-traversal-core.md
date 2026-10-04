@@ -103,8 +103,11 @@ walks.
 
 - `bounds.time_budget_ms` is **rejected** (400 naming the field): `/resolve` enforces no deadline
   yet, and accepting one would promise what nothing enforces; budgets for `/resolve` arrive with
-  stage 3b (`DESIGN-traverse-graphlet.md` §21). Bound the work with `bounds.max_query_bp` and
-  `discover.max_labels`.
+  stage 3b (`DESIGN-traverse-graphlet.md` §21). Bound the work with `bounds.max_query_bp`: every
+  in-graph k-mer's annotation row is read, so the k-mers read are the work. `discover.max_labels`
+  caps the labels profiled and returned, not the rows read (a discovery reads every k-mer's whole
+  row whatever it keeps); the 400's hint named it as a work bound before the efficiency pass and
+  now says this.
 - Exactly one of `labels` (explicit, ≥ 1; column or header names) or `discover` must be present
   (both is a 400): the example discovers; with explicit labels it would carry
   `"labels": ["573", "NZ_STEQ01000045.1"]` in place of `discover`.
@@ -128,7 +131,13 @@ Let L = |sequence|, k = graph k, k-mer starts i ∈ [0, L−k+1).
 - **Discovery**: labels are collected from full rows (column kind) or row tuples (header kind) of all in-graph
   k-mers. If more than `max_labels` distinct labels occur, the top `max_labels` by supported k-mer count are kept
   (tie: column id, then seq_id) and `labels_truncated: {kept, total, min_kept_kmers, max_dropped_kmers,
-  dropped_full_length}` is reported.
+  dropped_full_length}` is reported. *(Efficiency pass, the same answers byte for byte: the rows are decoded
+  once — the support profile takes its hits from the discovery's rows (tuple rows when the profile needs
+  coordinates: header labels or `trace`; their columns are those of the whole rows) instead of decoding every row
+  again, which made a column discover cost 1.6–2.1 times the profile of explicit labels on refseq33m —, the
+  counts go into one flat hash table instead of a `std::map` node per label (0.8–1.7 µs a pair, 1.83 s for a
+  header discover on 23S), and a header label's coordinates are mapped by their runs (§8.2), each sequence of a
+  column counted once per k-mer.)*
 - **Seed candidates:** every maximal support run of each label with length ≥ `min_block_kmers`; labels with an
   identical run `[a, b)` are grouped. Candidate = `{kmer_interval, bp_interval, labels}`. Order: longer first,
   then more labels, then smaller `a`. Disconnected supported blocks of one label are separate candidates.
@@ -684,7 +693,9 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   or not a head then consumes it: a level cut mid-way decoded its later rows all the same, and charging only
   consumed rows hid that decoding from the budget and from `used`. A row the lookahead decoded ahead is charged
   when a level's fetch returns it from the cache; a row the lookahead decoded that no fetch asks for (at most
-  `batch_kmers` per head of a level) is not charged; a row evicted and fetched again is charged again.
+  `min(batch_kmers, the radius left)` per head of a level, §8.3) is not charged; a row evicted and fetched again is
+  charged again. The row-diff path cache (§8.4) changes none of this: a row is charged its whole row-diff path
+  whatever the decode shared or cached.
   **The work bound is stated with its number, not as a fixed maximum**: the walk compares the work budget after
   every charge (each fetch call, a derivation's scan, each priced target, each edge-reuse probe, each
   enumeration); the previous comparison passed, so a stop exceeds the budget by at most what was charged since,
@@ -794,8 +805,11 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     as compact text once it is built and assembles the response from those texts — byte for byte the text of
     the whole tree, which is freed seed by seed), E the text the seed being walked is estimated to write (its
     modelled account, published at every level's end, / the account per text byte of the requested detail),
-    with the configured values `account_per_text_byte` (20 for the JSON details, 40 for a graphlet; the
-    account/text ratio of real responses ranged from 34.5 to 88 for `full` and from 58.4 up for `graphlet`),
+    with the configured values `account_per_text_byte` (30 for the JSON details, 50 for a graphlet — *calibrated
+    in the efficiency pass, feature level 4*: just below the smallest account/text ratios measured on real
+    responses, 33.5 (UHGG `full`) to 1,344 (SRA `summary`; 37.2 the smallest SRA JSON ratio) and 58.4 and more for
+    a graphlet; the 20 and 40 before cut a server's first large attempt per detail early, an SRA `tree` at 2.0 s of
+    its 35 s walk-until, 43.6 MB of 402 MB, and an SRA `tree` at 11.0 s on a fresh server in this pass),
     `compress_mbps` (`--traverse-delivery-compress-mbps`, default 50) and `build_mbps`
     (`--traverse-delivery-build-mbps`, default 10) until the server has measured its own: then, for each, the
     slowest rate — or for the detail the smallest ratio — of its last 16 measurements on `/traverse` responses
@@ -807,8 +821,14 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     that vary between responses, and `stop_ms` the time from the walk-until to the walk's end — the walk stops
     at its first poll after the walk-until (after a chunk of an annotation read, or the heads between two
     readings of the clock), then finalises the stopped seed: `delivery_reserve.stop_ms`
-    (`--traverse-chunk-target-ms` + 200), or the longest such time the server measured over its last 16
-    attempts that walked past their walk-until when longer (`measured_stop_ms`). Without the margin and the stop
+    (`--traverse-chunk-target-ms` + 950; + 200 before feature level 4: SRA attempts stopped 352 ms after their
+    walk-until on a quiet fresh server in the efficiency pass and 1,001 ms on a loaded one, once 1,699 ms under
+    load in pass 5 on a 400 MB result — a finalisation that grows with the result is covered by the 1.25 margin as
+    long as it runs faster than 4 × `build_mbps`, about 235 MB/s for that result against 40 MB/s needed), or the longest such time the server
+    measured over its last 16 attempts that walked past their walk-until when longer (`measured_stop_ms`). Both
+    capabilities routes state where these starting estimates come from (`delivery_reserve.calibration`, feature
+    level 4); only the walk-until of attempts (`usage.bound.walk_until_ms`, and where a reserve stops a walk) can
+    differ from the previous build's. Without the margin and the stop
     time a response the model fitted exactly was a 503 about half the time (review of pass 5, F3: a walk that
     stopped 124 ms after its walk-until left the delivery 1,277 ms of the 1,401 ms reserved, 98 ms short).
     `usage.bound.walk_until_ms` states, when the walk-until stopped the walk, the walk-until in force then;
@@ -860,7 +880,11 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   splitting costs a few small chunks per read near its deadline and nothing far from it. Chunked are a level's fetch, the
   lookahead, a seed's validation — by the attempt only: a seed's own time budget never stops its validation
   (the deadline is never checked at depth 0, and a seed validated past its budget still delivers its result
-  complete to 0 bp) — and a derivation's window. A chunked read **returns exactly what one read returns**: its
+  complete to 0 bp) — and a derivation's window. The lookahead is paced by the seed's time budget at every
+  depth, depth 0 included, its chains' graph steps stop at it, and it is skipped once the budget has passed
+  *(efficiency pass)*: run() reads that budget before depth 1 and a head's checkpoint before the other arm's next
+  head, so a lookahead read past it is never consumed (before, a chain's steps and the roots' lookahead read ran
+  in full: 2.2 s on a 250 ms budget on refseq33m, 1.3 s of it graph steps of 1,000-node chains). A chunked read **returns exactly what one read returns**: its
   counting (`annotation.rows_requested`, the cache hits), its cache's eviction and its result are decided once
   for the whole read and only the decoding is split (a budget-aware read admits every key against its
   standalone demand, so its runs may be cut anywhere), so a request that no deadline stops is byte-identical
@@ -1176,7 +1200,7 @@ is rejected instead (§5).
 | `greedy_losses` | arm | an exclusion re-ran the derivation with priced switches under a finite branch limit | `branching.max_label_branches` | re-minimisation rounds after the first |
 | `trace_record_boundaries` | seed | `support: trace` with column labels | `labels.seed_label_kind` (`limit: "column"`) | column labels in the dictionary |
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
-| `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, or a budget raised from zero (the walk ran under it) | the clamped field | the requested value (`limit` is the effective one) |
+| `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, a budget raised from zero (the walk ran under it), or a memory or work budget at the server's maximum (§10, R16) that stopped its walk or failed the seed | the clamped field | the requested value (`limit` is the effective one) |
 | `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: something is always held beyond the admitted account. **(i) On an annotation whose reads are budget-aware** (§6.8; `ResourceAccount::decode_charged`) the reads are charged inside the decoder, and the statement names only what is still uncharged: a level's key and successor lists and its fetched rows until its heads are processed, the seed phase's intersection and hits, the dictionary a failed seed's depth-0 state built, a failed result's echo of `seed_id` (named in the effect, review of the stage-2 recheck, design answer 5), an index-wide header lookup that the first request needing it builds (not observed: charging it would make a result depend on the server's history), and the label dictionary's first table (about 1.5 KB per request) with the transient copy while its list grows (not observed). **(ii) Other formats**: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of `seed_id`, are held before they can be charged. Neither is a hard request-wide memory bound (§6.8). In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account, MiB rounded up (0: none), observed wherever it is held and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Observed once a level's key and successor lists are built, after every call of a level's fetch (with the call's raw rows in (ii)) and at a refused read (with the rows read before it), at **every head admission** (the account the head needs with the level's lists and fetched rows beside it), after the roots' rows and the lookahead's warming, and over the seed phase's rows and intersection (after each sub-batch is read and again once it is consumed; each fetch call of the label validation before its charge, which can fail the seed; under `trace` the validation's peak — the hits, every label's live coordinate set and both arms' boundary coordinates — before anything can fail the seed, review of the stage-2 recheck, P2). In (ii) the decoder's own transient buffers are not counted (the materialised rows are). Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
 | `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode) | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
 
@@ -1857,12 +1881,44 @@ Header labels always use `tuples`. Never `get_column`, never `AnnotationBuffer`.
 `annotation key → interned hit set` bounded by `max_steps`. T1 asserts `direct = rd_direct = rows = tuples`
 agreement where several apply.
 
+**Coordinates through `CoordToHeader`** *(efficiency pass)*: the coordinates of one sequence of a column occupy a
+contiguous range, so a tuple row's coordinates of a column (sorted) are mapped by the runs they form
+(`LabelOracle::map_coords`): once two coordinates in a row fell into one sequence or adjacent ones, a coordinate in
+the range of the previous one's sequence maps by a subtraction (its last coordinate: one select,
+`CoordToHeader::last_coord`), one in the next sequence by one select, any other as `map_single_coord` maps it (a
+rank and a select); lists of fewer than 8 coordinates are mapped by `map_single_coord`. The header label of a
+sequence is looked up once per run. The recorder (annotate), which needs only the sequences, maps one coordinate
+per sequence (`CoordToHeader::sequence_range`: a rank and two selects, one select fewer than before) and skips the
+rest of its run; a header discovery counts a sequence once per k-mer from the run mapper. The same `(seq_id,
+local)` per coordinate as `map_single_coord`, so the same hits, lists and `timing.coords_mapped` for the same rows
+(one per coordinate mapped; one per sequence for the recorder; the lookahead's radius cap, §8.3, maps fewer
+rows). Measured on a column of 2,000 sequences
+(`LabelOracleCoordRuns.DISABLED_Benchmark`): runs of 7 coordinates in one sequence (rRNA operons) at 22 ns a
+coordinate against 42–46 by `map_single_coord`, one coordinate in each of consecutive sequences (a single-copy gene)
+at 32–35 against 48, scattered ones at 40–42 against 39–42; on the mini refseq rows (2–6 coordinates a column)
+unchanged. A per-coordinate rank and select were 3–7% of a refseq33m request, the remaining per-row cost once
+selected-label decoding (3c) shrinks the decode.
+
 ### 8.3 Batching along unbranched runs
 
 Walk structurally up to `batch_kmers` nodes while each node has exactly one non-`'$'` successor; map and fetch
 labels for the chunk in one call; then apply the recurrence node by node and truncate at the first node where
 the path ends (also at a cap, §6.8). At a structural branch, fetch all successors in one call. Unverified nodes
-are never emitted. Results do not depend on `batch_kmers` (T23).
+are never emitted. Results do not depend on `batch_kmers` (T23). *(Efficiency pass:)* a chain stops at the
+radius — at most `min(batch_kmers, max_extension_bp − d − 1)` nodes from a level at depth d: a head at the radius
+is ended, not expanded, so neither its successors nor the rows beyond it are ever asked for (before, a chain ran
+`batch_kmers` nodes whatever the radius left: 1,047 rows read for 32 consumed on refseq33m) —, and the lookahead
+is skipped once the seed's deadline has passed and paced by it at every depth, depth 0 included (§6.8, chunked
+deadlines: no later level runs then, so nothing it would read can be consumed). Only physical work changes
+— `timing`, including its counters `rows_fetched`, `tuple_rows_fetched`, `coords_mapped` and `cache_hits`, which
+count the lookahead's reads (on the mini_refseq set 250 of 588 responses: `mini_batch3__batch_refuse`
+`tuple_rows_fetched` 428 → 370, `coords_mapped` 430 → 372; `rows_fetched` in 321 of the 396 UHGG responses with
+timing on) — and two counters of the `annotation` block that count lookahead work: **`direct_reads`** (on an
+annotation read by single cells, `access_path: direct` — a column or BRWT annotation with at most 16 named column
+labels —, the lookahead's reads are single-cell reads too, so a chain that ran past the radius made reads no walk
+consumed: e.g. 568 → 520 on the `merge` CLI fixture; the row-diff indexes read rows and are unaffected), and
+`keys_mapped` where an unbudgeted lookahead outgrew its 1,000,000 entries and its clearing counted the keys (none
+of 2,184 real requests on row-diff indexes changed).
 
 ### 8.4 Graph handle, caches, threading
 
@@ -1877,6 +1933,62 @@ The reverse header index (header → `(column, seq_id)`, for resolving a header 
 `CoordToHeader` itself: built on its first lookup, shared by every request on the loaded index, and freed with
 it. It is never a process-wide cache keyed by the object's address: an object made later at a freed address
 could be answered from another's index, which no partial fingerprint of the headers can rule out.
+
+**The row-diff path cache** *(efficiency pass; feature level 4)*. On a row-diff annotation every read of a
+`/traverse` request — the default reads and the budget-aware ones (§6.8), a level's fetch, the lookahead, a
+derivation's window, a validation — keeps the rows it reconstructs (the requested rows, every row on their row-diff
+paths, the anchors read) in a cache of at most `--traverse-path-cache-mb` MiB (default 128, 0 = off; the CLI takes
+the same flag), so that a later read's row-diff path stops at a cached row instead of decoding to its anchor
+again. On refseq33m a fetch of one warm 23S k-mer cost one whole path decode (66–86 ms) and each further row of
+the same path 2.1 ms, so a walk fetching a few keys per level paid 27–41 ms a row against 4.6 ms read in one call;
+locally, warm, the same binary with the cache off and on, the cache cut the annotation fetch time of the real
+requests 3.1-fold on UHGG (198 requests; elapsed 2.0-fold) and 3.05-fold on SRA (201; elapsed 1.65-fold) at the
+default `batch_kmers`, 12.9-fold (UHGG; elapsed 6.9-fold) and 7.2-fold (the SRA 16S cells; elapsed 3.05-fold) at
+`batch_kmers: 1`, 2.3- to 2.8-fold under memory budgets of 256 and 8 MiB and a work budget of 10⁶ units (UHGG);
+on a 16S walk with five named UHGG columns (radius 1,000, 3,572 rows) fetch calls of 1, 3 and 30 k-mers took
+0.202, 0.116 and 0.077 ms a row without the cache and 0.029, 0.028 and 0.023 with it (7.1-, 4.2- and 3.4-fold).
+A row's content does not
+depend on how it was reached, so **what a read returns never depends on the cache**, nor does anything a budget
+charges or admits: a budget-aware read whose path stops at a cached row takes the row's path aggregates from the
+cache (`PathAggregates`: the whole path's length, entries, stored bytes, scratch and reconstruction peak), so every
+row's `RowCost` — its work (8 per dependency row, 1 per entry) and its standalone demand — is that of its whole path,
+the cache only shortening the decoding (and the transient charges of a call; a row read alone never needs more
+than without the cache, so where a fetch stops is unchanged). The cache is bounded in bytes (each row as its exact
+copy plus 640 B for its share of the tables) in two generations: rows go to the current one, which becomes the
+older one when it fills half the bound (the older one is dropped then); a hit in the older one moves the row to
+the current one; a generation dropped frees its table (a cleared hash map keeps its bucket array, which after
+many narrow rows held up to 74.7 MiB of heap for 63.9 MiB accounted at a 64 MiB bound; review of the efficiency
+pass: 62.6 MiB now), and each generation's count moves with its table at a rotation (so that a trim to a shrunk
+shared bound sees the older generation too). Without a memory budget it is the request's, kept from seed to seed (only physical work depends on it).
+**Under `bounds.max_memory_mb`** it is each seed's: empty and off until the depth-0 state is admitted — the seed
+phase (derivation, validation) and an annotate root's read decode as before, so that what their refusals state is
+as before too (a root read alone refused states a lower bound, a root whose standalone demand did not fit states
+that demand; with the cache on, the left root's path could hold the right root's row and turn the one into the
+other: review of the efficiency pass) —, then within what the label cache leaves of the label cache's allotment
+(`min(budget / 4, 64 MiB)`, held by the account): the path cache is trimmed before the label cache grows and
+re-reads the room at every insert, so that both stay within the allotment while the label cache evicts exactly as
+before — no stop, admission, result counter or soft overshoot changes —, and emptied when the seed ends. **The
+lookahead's reads under a memory budget** (§8.3) are admitted as without the cache: the lookahead reads ahead until
+a run does not fit, and a run cut short by cached rows holds less, so with the cache it read rows no level asked
+for (UHGG 16S, annotate mode, 8 MiB: 75k rows warmed against 52–55k, 13–27% more instructions than without the
+cache). Each of its reads therefore also charges, from its trace until its stored rows are read, what decoding the
+rows the cache spared it would have held — per anchor (paths to one anchor share their tail) the rows of its
+longest cached path beyond the cached row, in the trace's containers and per-visit arrays, and that path's stored
+rows (`RowDiffCache::admit_as_uncached`): exact for a chain, more than the union where paths of one anchor join
+another read's (the lookahead then reads less than without the cache), less where cached paths branch. Measured
+warm against the previous build (and the same build with the cache off), instructions: the 198 UHGG requests at
+8 MiB 37.8 G against 71.4 (69.7), `uhgg_16s__annotate_merge` among them 2.35 against 3.48 (13–17% more than the
+previous build before this rule), the 15 UHGG 16S cells at 6, 10, 12 and 16 MiB 4.7, 6.7, 5.1 and 7.9 against
+9.4, 16.0, 12.8 and 12.0, the 201 SRA requests at 8 MiB 76.3 against 106.6 (105.5) and the 147 mini_refseq ones
+under 4 MiB 17.1 against 19.5 (19.4); no request 5% above the previous build, every body identical. Stated in the
+probe as `decode_cache: {path_cache_mb, rule}`.
+`annotation_fetch_ms` and the elapsed times are what shrinks; the physical counters in `timing` count the rows the
+reads return, and under a memory budget the cache can change how many that is (`rows_fetched`,
+`tuple_rows_fetched`, `cache_hits`, `coords_mapped`): the lookahead's reads stop about where they stopped without
+it, not exactly, and a level read the cache lets through in one piece decodes the rows after a refused row of the
+piece (§6.8: a stop's position does not depend on it). Without a memory budget they are the same with and without
+the cache. With several traversals at once each holds its own cache (up to `path_cache_mb` each without a memory
+budget).
 
 Under a memory budget the label caches get a fixed allotment of it (§5) and **evict wholesale** when they exceed
 it, as without one (a walk moves forward, so recency is not worth tracking). A row evicted and needed again is
@@ -1953,7 +2065,8 @@ the server.
     `index_meta_fp`, below); `/traverse` responses also carry `algorithm_version` at the top level.
   - **`GET /traverse/capabilities`** (the probe; per graph in multi-graph mode, below): all of the above for its
     index, plus the server maxima (`max_time_ms`, `max_seeds`, `max_seed_bp`, `max_seed_labels`,
-    `max_query_bp`), the request budgets it accepts (`budgets: ["max_memory_mb", "max_work_units"]`),
+    `max_query_bp`; from feature level 4 also `max_memory_mb` and `max_work_units`, the server's maxima of the
+    budgets, 0 when off, below), the request budgets it accepts (`budgets: ["max_memory_mb", "max_work_units"]`),
     `work_check_interval` (`W` of §6.8, in work units), `work_bound` (what `bounds.max_work_units` counts and how
     far a work stop can exceed it, §6.8: deterministic logical work, not measured decode effort, with its weights
     — the dependency weighting of a budget-aware row included —; what was charged since the previous comparison,
@@ -1964,7 +2077,8 @@ the server.
     what is held beyond the admitted account is still soft, §7.0 `memory_bound_soft`: no hard request-wide memory
     bound), `attempts` (below), `content_encodings` (`["gzip", "deflate"]`) and, from feature level 3,
     `algorithm_version`, `compression_level` (the zlib level of the traversal routes' compressed bodies) and
-    `deadline_check` (below); in multi-graph mode also `graph` and `graph_path`, the pair it describes.
+    `deadline_check` (below), from feature level 4 `decode_cache: {path_cache_mb, rule}` (the row-diff path cache
+    of the reads, §8.4); in multi-graph mode also `graph` and `graph_path`, the pair it describes.
   - **`GET /capabilities`** (feature level 3; the owner's server-wide document, `DESIGN-traverse-graphlet.md`
     §21), small and index-free, answered while a single index still loads (`ready: false`; the routes that read
     the index answer 503 then, the cancel and state routes do not):
@@ -2003,7 +2117,18 @@ the server.
     and `GET /traverse/capabilities?graph=`; `GET /capabilities`; `algorithm_version` in the capabilities;
     `attempts.hard_cap_ms` and `attempts.allowance_ms` as an integer; `deadline_check`, the chunked deadlines and
     `usage.observed_max_uninterruptible_ms`; `compression_level` and the delivery reserve
-    (`attempts.delivery_reserve`).
+    (`attempts.delivery_reserve`). **4** (the efficiency pass): the server's maxima of the budgets
+    (`--traverse-max-memory-mb`, `--traverse-max-work-units`; the probe's `max_memory_mb` and `max_work_units`;
+    the clamps below), the row-diff path cache (`--traverse-path-cache-mb`; the probe's `decode_cache`, §8.4) and
+    the delivery reserve's calibrated starting estimates (`attempts.delivery_reserve.calibration`; ratios 30 and
+    50, `stop_ms` = `chunk_target_ms` + 950). Feature level 4 changes no response of a request without budgets
+    beyond the `feature_level` digit, `annotation.direct_reads` on a direct-access annotation whose lookahead ran
+    past the radius (§8.3), the `timing` block's values — its times, and its physical counters `rows_fetched`,
+    `tuple_rows_fetched`, `coords_mapped` and `cache_hits`, which count the lookahead's reads the radius cap
+    removed (§8.3) — and an attempt's walk-until (the reserve's estimates): the lookahead's radius cap, the single
+    decode of a discovery, the coordinate runs and the path cache change only physical work (checked against the
+    previous build, T51); the same holds for budgeted requests while the budgets' maxima are unset, where the
+    path cache can also change those counters (§8.4).
   - **The index identity** (`DESIGN-traverse-graphlet.md` §3.1), also in every graphlet's `H` record:
     - `index_ns`: a name for humans and routing, not identity (`[A-Za-z0-9._-]+`): `--index-name NAME` for a single
       index, the graph list's fifth column per (graph, annotation) pair; `null` when unset. A manifest's own
@@ -2079,7 +2204,24 @@ the server.
 - Caps: `--traverse-max-time-ms` (default 30 000), `--traverse-max-seeds` (64), `--traverse-max-seed-bp`
   (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
   unlimited for each. A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
-  `max_seed_bp` are refusals (400), not clamps. The traverse caps are non-zero by DEFAULT because a request may
+  `max_seed_bp` are refusals (400), not clamps. **The budgets' maxima** *(feature level 4; R16, the owner's
+  decision)*: `--traverse-max-memory-mb` (an integer in [0, 1 048 576]) and `--traverse-max-work-units` (an integer
+  in [0, 2⁵³ − 1]), both 0 = off by default — a budget changes how a walk stops, so a deployment that did not
+  choose one keeps the results it always gave. Set, a request's larger `bounds.max_memory_mb` /
+  `bounds.max_work_units` is lowered to the maximum and an omitted one (no budget: unbounded) **set** to it, both
+  echoed in `strategy.clamped` — `{"field": "bounds.max_memory_mb", "requested": 8192 | "unlimited", "effective":
+  4096}` (`"unlimited"` for an omitted budget: how a knob spells no limit, which the graphlet's K and Q records
+  hold, unlike null) — and in `strategy.bounds`; a smaller budget is kept, unclamped. Every request on such a
+  server therefore runs under the budget the operator chose (and reads the annotation by the budget-aware path,
+  §6.8). A seed such a budget stopped — its walk, or *(review of the efficiency pass)* its seed phase or depth-0
+  state, failing the seed — states a `server_clamp` limitation for it (`limit` the maximum, `observed` what the
+  request gave; "the request gave no budget and the server set its maximum, which this seed ran into; a request
+  cannot raise it further", or that it was lowered); its `resource_stop.requested` is what the request gave, its
+  `actions` offer no `raise_memory_budget` / `raise_work_budget`, and the knob's `walk_domain` entries (an arm's,
+  or a failed seed's) carry `server_limit` (the maximum, as a `derivation`'s and `seed_labels`' do) and say "the
+  knob is at the server's maximum (server_limit), which a request cannot raise" where they would say "raise the
+  knob". A budget the request gave below the maximum keeps its lever. The probe states the maxima (`max_memory_mb`,
+  `max_work_units`). The CLI applies none. The traverse caps are non-zero by DEFAULT because a request may
   name no labels at all: the server then chooses the permitted set, so the request's own bounds no longer describe
   the work it asks for, and an unconfigured deployment must not be the unlimited one. `--traverse-max-time-ms` is
   also the only bound on the derivation phase, so when a request has a derived seed a `bounds.time_budget_ms` of 0
@@ -2097,9 +2239,10 @@ the server.
   (`content_timeout_s` × 1000 − 1000 = 899 000: the bound never exceeds it), `content_timeout_s` (900),
   `client_check_ms` (100), `clock_skew_allowance_ms` (`--traverse-clock-skew-ms`, default 2000: what a ledger adds
   to `not_after_ms`, §5; the server's own check adds nothing), the `bound` and `not_after` rules (text) and
-  `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}`, `margin`
-  (1.25), `stop_ms` (the configured time from the walk-until to the walk's end: `--traverse-chunk-target-ms` +
-  200), `measured_text_bytes`, `rate_window`, `measured_compress_mbps`, `measured_build_mbps`,
+  `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}` (30 and 50),
+  `margin` (1.25), `stop_ms` (the configured time from the walk-until to the walk's end:
+  `--traverse-chunk-target-ms` + 950), `calibration` (feature level 4: the measurements the starting estimates
+  come from, text), `measured_text_bytes`, `rate_window`, `measured_compress_mbps`, `measured_build_mbps`,
   `measured_account_per_text_byte: {summary, tree, full, graphlet}` and `measured_stop_ms` — the slowest rate,
   the smallest ratio and the longest stop time of the last `rate_window` this server measured, null until it has
   measured one — and its `rule`, §6.8). **Number types**: `allowance_ms`, `hard_cap_ms`,
@@ -2280,6 +2423,7 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T48 | pass 5: chunked deadlines | `LabelOraclePacing.*` (paced reads answer as one read on the direct, rows, tuples and budget-aware paths, recorder included, with evictions, in one-row chunks; an interrupted read changes nothing and states its decoded work); `WalkerDeadlineChunks.*` (a 100 ms budget held within a chunk where the whole read overran by 150+ ms, the same `complete_to_bp`; no stop: the same result; the attempt reaches a validation and a level's read within a chunk when its walk-until is near, and after the read when it is far; a derivation's window; review of pass 5: `FarDeadlineReadsAreOnePiece` — rows that share a per-call cost, as row-diff rows share their paths, read whole far from the deadline: the same calls, result and time — and `SplitReadsStartSmall` — a read whose rows are ten times slower than earlier reads' starts with a small chunk); `LabelOraclePacing.PacerSizesChunksByTime` (one piece far from the deadline, the first chunk at most 8 rows, growth and rest rules); `MiniRefSeq.PacedReadsAreByteIdentical` (12 requests, budgets included); `TestTraverseWideIndex` (budgets of 50–200 ms kept within a chunk + 150 ms on the fan-out index; the unpaced server overruns; review of pass 5: the same index on `row_diff` and `row_diff_brwt` — walks no deadline stops keep their bytes in the unchunked time, budgets of 50 and 200 ms kept with and without a memory budget — and the integer flags refused when negative, fractional, above 2⁵³ − 1 or malformed) | §6.8 |
 | T49 | pass 5: delivery | `GraphletServer.AssembledResponseIsByteIdentical` (per-seed texts assembled = the whole tree's text, every detail, a failed seed, usage); `GraphletAttempt.DeliveryReserveMovesTheWalkUntil` (with the 1.25 margin, the configured and the measured stop time, and `usage.bound.walk_until_ms` the walk-until in force when it stopped the walk); `test_api_bodies_are_the_cli_output_at_every_encoding`; `test_wide_index_delivery_reserve_stops_the_walk`; the byte-identity harness against the previous build (1,380 real requests at chunks of 50 ms, 588 of them at 1 ms, 588 from a three-column graph list, 804 SRA requests) | §6.8, §10.3 |
 | T50 | pass 5: `standalone_text` and the reduced `J` | `test_traverse_standalone.py`: byte-equal to `dump(from_response(…), envelope=True)` on every fixture result, `usage` reduced to the totals and this seed's `per_seed`, `save()` and the store write the same bytes, reserved names refused | §7.5.2 |
+| T51 | the efficiency pass (feature level 4) | `RowDiffPathCache.*` (the cached default decode returns the default decode's rows call after call, under bounds that keep everything, evict often and keep nothing, and a shared bound that shrinks; the budget-aware decode with the cache gives every row the costs of its whole path and at most the held bytes, a row read alone at most its peak without the cache and within its demand, and refuses below its peak; the generations; a dropped generation frees its table, `DroppedGenerationsReleaseTheirTables`, and the counts follow the tables at a rotation and under a shrinking shared bound; the lookahead's reads admitted as without the cache, `LookaheadAdmittedAsWithoutTheCache`), `LabelOraclePathCache.SameAnswersAndCounters` (query and recorder, budgeted and not, every counter, the shared bound), `MiniRefSeq.PathCacheKeepsTheResponse` (96 responses byte-equal with and without the cache: constrain/annotate, memory budgets at their stops, work budgets, `batch_kmers` 1 and 64, an evicting cache, one-row chunks), `MiniRefSeq.PathCacheKeepsRootRefusals` (an annotate seed whose right root's read the seed_id's length moves across its refusal under 1 MiB: every response byte-equal with and without the cache, the refusals of a read alone among them), `MiniRefSeq.ServerBudgetMaxima` (also a seed failed in its seed phase by the work maximum and at an annotate root by the memory maximum: server_clamp, `requested`, no raise action, `server_limit`; a seed failed by the request's own budget keeps its lever), `CoordToHeader.SequenceRangeAgreesWithMapSingleCoord`, `LabelOracleCoordRuns.SameAsMapSingleCoord` (and the `DISABLED_` measurements); `test_row_diff_path_cache_keeps_the_bytes`, `test_server_budget_maxima`, `test_api_server_capabilities`; the byte-identity harness against the previous build (unbudgeted: 588 mini_refseq — also from a three-column graph list and with chunks of 1 ms —, 792 UHGG and 804 SRA `/traverse` requests, 688 `/resolve` requests; budgeted: the 588 mini_refseq requests under 4 MiB and under 300,000 work units, the 792 UHGG ones under 16 MiB; differences only in attempts' `walk_until_ms` and in walks the previous build's cold first touch cut by their time budget), and with the cache on and off (201 SRA and 198 UHGG requests at the default `batch_kmers`, at 1, the UHGG ones under 256 and 8 MiB and 10⁶ work units, 147 mini_refseq requests without and under 4 MiB) | §4.2, §6.8, §8.2–8.4, §10.3 |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 

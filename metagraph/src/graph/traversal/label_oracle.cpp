@@ -202,6 +202,59 @@ std::pair<uint64_t, Coord> LabelOracle::map_coord(Column column, Coord coord) co
     return coord_to_header_->map_single_coord(column, coord);
 }
 
+LabelOracle::CoordRuns::CoordRuns(const annot::CoordToHeader &cth, Column column, size_t count)
+      : cth_(cth), column_(column),
+        num_sequences_(column < cth.num_columns() ? cth.num_sequences(column) : 0),
+        short_(count < 8) {}
+
+std::pair<uint64_t, Coord> LabelOracle::CoordRuns::map(Coord coord) {
+    if (short_)
+        return cth_.map_single_coord(column_, coord);
+    if (ranges_ && have_) {
+        if (!last_known_) {
+            last_ = cth_.last_coord(column_, seq_);
+            last_known_ = true;
+        }
+        if (coord >= first_ && coord <= last_)
+            return { seq_, coord - first_ };
+        if (coord > last_ && seq_ + 1 < num_sequences_) {
+            // the next sequence: one select tells (a single-copy gene in consecutive genomes)
+            const Coord next_last = cth_.last_coord(column_, seq_ + 1);
+            if (coord <= next_last) {
+                ++seq_;
+                first_ = last_ + 1;
+                last_ = next_last;
+                return { seq_, coord - first_ };
+            }
+        }
+    }
+    // as map_coord: a rank and a select; the ranges are used from here on when this
+    // coordinate is in the previous one's sequence or the next one (a run)
+    const auto [seq_id, local] = cth_.map_single_coord(column_, coord);
+    streak_ = have_ && (seq_id == seq_ || seq_id == seq_ + 1) ? streak_ + 1 : 0;
+    ranges_ = streak_ >= 1;
+    have_ = true;
+    last_known_ = false;
+    seq_ = seq_id;
+    first_ = coord - local;
+    return { seq_id, local };
+}
+
+LabelOracle::CoordRuns LabelOracle::coord_runs(Column column, size_t count) const {
+    assert(coord_to_header_);
+    return CoordRuns(*coord_to_header_, column, count);
+}
+
+LabelOracle::SeqRange LabelOracle::sequence_range(Column column, Coord coord) const {
+    assert(coord_to_header_);
+    const auto range = coord_to_header_->sequence_range(column, coord);
+    SeqRange r;
+    r.seq_id = range.seq_id;
+    r.first = range.first;
+    r.last = range.last;
+    return r;
+}
+
 uint64_t LabelOracle::num_kmers_in_sequence(Column column, uint64_t seq_id) const {
     assert(coord_to_header_);
     return coord_to_header_->num_kmers_in_sequence(column, seq_id);
@@ -268,12 +321,18 @@ void DecodePacer::record(size_t rows, double ms) {
     ms_per_row = std::max(ms_per_row, ms / static_cast<double>(rows));
 }
 
+bool LabelOracle::path_cached() const {
+    return path_cache_.enabled() && rd_ && rd_->supports_path_cache();
+}
+
 std::vector<BinaryMatrix::SetBitPositions>
 LabelOracle::get_rows(const std::vector<Row> &rows) const {
     if (test_read_hook)
         test_read_hook(rows.size());
     Timer timer;
-    auto result = matrix_->get_rows(rows);
+    // the same rows either way (row_diff_cache.hpp); the cache only shortens the paths
+    auto result = path_cached() ? rd_->get_rows_cached(rows, path_cache_)
+                                : matrix_->get_rows(rows);
     counters_.rows_fetched += rows.size();
     counters_.fetch_seconds += timer.elapsed();
     return result;
@@ -286,7 +345,8 @@ LabelOracle::get_row_tuples(const std::vector<Row> &rows) const {
     if (test_read_hook)
         test_read_hook(rows.size());
     Timer timer;
-    auto result = tuples_->get_row_tuples(rows);
+    auto result = path_cached() ? rd_->get_row_tuples_cached(rows, path_cache_)
+                                : tuples_->get_row_tuples(rows);
     counters_.tuple_rows_fetched += rows.size();
     counters_.fetch_seconds += timer.elapsed();
     return result;
@@ -312,7 +372,8 @@ DecodeStatus LabelOracle::get_rows(const std::vector<Row> &rows, DecodeBudget &b
     if (test_read_hook)
         test_read_hook(rows.size());
     Timer timer;
-    const DecodeStatus status = rd_->decode_rows(rows, budget, out, costs, held);
+    const DecodeStatus status = rd_->decode_rows(rows, budget, out, costs, held,
+                                                 path_cache_.enabled() ? &path_cache_ : nullptr);
     // physical counters (timing): the rows a decode returned, and the time of every decode,
     // a refused one's included — also when the fetch that asked is refused afterwards
     if (status == DecodeStatus::OK)
@@ -330,7 +391,9 @@ DecodeStatus LabelOracle::get_row_tuples(const std::vector<Row> &rows, DecodeBud
     if (test_read_hook)
         test_read_hook(rows.size());
     Timer timer;
-    const DecodeStatus status = rd_->decode_row_tuples(rows, budget, out, costs, held);
+    const DecodeStatus status = rd_->decode_row_tuples(rows, budget, out, costs, held,
+                                                       path_cache_.enabled() ? &path_cache_
+                                                                             : nullptr);
     if (status == DecodeStatus::OK)
         counters_.tuple_rows_fetched += rows.size();
     counters_.fetch_seconds += timer.elapsed();
@@ -437,23 +500,40 @@ void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits
         }
         if (!header_columns_.count(c))
             continue;
-        for (Coord coord : coords) {
-            auto [seq_id, local] = oracle_.map_coord(c, coord);
-            auto lt = header_labels_.find(std::make_pair(c, seq_id));
-            if (lt == header_labels_.end())
-                continue;
-            auto [pos, inserted] = slot.try_emplace(lt->second, hits->size());
+        // one label lookup per sequence run, not per coordinate (map_coords' ranges)
+        uint64_t run_seq = std::numeric_limits<uint64_t>::max();
+        const LabelId *run_label = nullptr;
+        oracle_.map_coords(c, coords.data(), coords.size(),
+                           [&, column = c](Coord, uint64_t seq_id, Coord local) {
+            if (seq_id != run_seq) {
+                run_seq = seq_id;
+                auto lt = header_labels_.find(std::make_pair(column, seq_id));
+                run_label = lt == header_labels_.end() ? nullptr : &lt->second;
+            }
+            if (!run_label)
+                return;
+            auto [pos, inserted] = slot.try_emplace(*run_label, hits->size());
             if (inserted)
-                hits->push_back(Hit{ lt->second, {} });
+                hits->push_back(Hit{ *run_label, {} });
             if (with_coords_)
                 (*hits)[pos->second].coords.push_back(local);
-        }
+        });
     }
     for (Hit &hit : *hits) {
         std::sort(hit.coords.begin(), hit.coords.end());
     }
     std::sort(hits->begin(), hits->end(),
               [](const Hit &a, const Hit &b) { return a.label < b.label; });
+}
+
+// The estimate a cache entry's bytes are compared by (the byte bound): slot, vector, hits
+// and coordinates
+static uint64_t hits_cache_bytes(const LabelQuery::NodeHits &hits) {
+    uint64_t bytes = 64 + hits.size() * sizeof(LabelQuery::Hit);
+    for (const LabelQuery::Hit &h : hits) {
+        bytes += h.coords.size() * sizeof(Coord);
+    }
+    return bytes;
 }
 
 void LabelQuery::fetch_uncached(const node_index *keys, size_t n) {
@@ -515,13 +595,14 @@ void LabelQuery::fetch_uncached(const node_index *keys, size_t n) {
     // Always insert: a silent no-op here would make the caller's cache_.at() throw.
     // The caller evicts before fetching when the cache would overflow, so the cache can
     // exceed max_cache_size_ only by the working set of a single call.
+    // the path cache shares the label cache's bound under a memory budget (make_room)
+    uint64_t adding = 0;
     for (size_t i = 0; i < n; ++i) {
-        // the estimate the byte bound compares: slot, vector, hits and coordinates
-        uint64_t bytes = 64 + result[i].size() * sizeof(Hit);
-        for (const Hit &h : result[i]) {
-            bytes += h.coords.size() * sizeof(Coord);
-        }
-        cache_bytes_ += bytes;
+        adding += hits_cache_bytes(result[i]);
+    }
+    oracle_.make_room(adding);
+    for (size_t i = 0; i < n; ++i) {
+        cache_bytes_ += hits_cache_bytes(result[i]);
         cache_[keys[i]] = std::move(result[i]);
     }
 }
@@ -708,6 +789,39 @@ const LabelQuery::NodeHits& LabelQuery::fetch(node_index key) {
     return cache_.at(key);
 }
 
+void LabelQuery::prime(const std::vector<node_index> &keys,
+                       const std::vector<BinaryMatrix::SetBitPositions> &rows) {
+    assert(keys.size() == rows.size());
+    if (path_ == Path::TUPLES)
+        throw std::logic_error("LabelQuery::prime: this query reads tuple rows");
+    for (size_t i = 0; i < keys.size(); ++i) {
+        if (keys[i] == npos || cache_.count(keys[i]))
+            continue;
+        // the hits of the ROWS path; DIRECT reads the same cells one by one
+        NodeHits hits;
+        hits_from_row(rows[i], &hits);
+        oracle_.make_room(hits_cache_bytes(hits));
+        cache_bytes_ += hits_cache_bytes(hits);
+        cache_[keys[i]] = std::move(hits);
+    }
+}
+
+void LabelQuery::prime(const std::vector<node_index> &keys,
+                       const std::vector<MultiIntMatrix::RowTuples> &rows) {
+    assert(keys.size() == rows.size());
+    if (path_ != Path::TUPLES)
+        throw std::logic_error("LabelQuery::prime: this query reads whole rows");
+    for (size_t i = 0; i < keys.size(); ++i) {
+        if (keys[i] == npos || cache_.count(keys[i]))
+            continue;
+        NodeHits hits;
+        hits_from_tuples(rows[i], &hits);
+        oracle_.make_room(hits_cache_bytes(hits));
+        cache_bytes_ += hits_cache_bytes(hits);
+        cache_[keys[i]] = std::move(hits);
+    }
+}
+
 
 /********************** LabelQuery: the budget-aware path *********************/
 
@@ -774,15 +888,22 @@ bool LabelQuery::hits_budgeted(const MultiIntMatrix::RowTuples &row, DecodeBudge
             touch(it->second, with_coords_ ? coords.size() : 0);
         if (!header_columns_.count(c))
             continue;
-        for (Coord coord : coords) {
-            auto [seq_id, local] = oracle_.map_coord(c, coord);
-            auto lt = header_labels_.find(std::make_pair(c, seq_id));
-            if (lt == header_labels_.end())
-                continue;
-            touch(lt->second, with_coords_ ? 1 : 0);
+        // one label lookup per sequence run, not per coordinate (as hits_from_tuples)
+        uint64_t run_seq = std::numeric_limits<uint64_t>::max();
+        const LabelId *run_label = nullptr;
+        oracle_.map_coords(c, coords.data(), coords.size(),
+                           [&, column = c](Coord, uint64_t seq_id, Coord local) {
+            if (seq_id != run_seq) {
+                run_seq = seq_id;
+                auto lt = header_labels_.find(std::make_pair(column, seq_id));
+                run_label = lt == header_labels_.end() ? nullptr : &lt->second;
+            }
+            if (!run_label)
+                return;
+            touch(*run_label, with_coords_ ? 1 : 0);
             if (with_coords_)
-                mapped.emplace_back(lt->second, local);
-        }
+                mapped.emplace_back(*run_label, local);
+        });
     }
     std::sort(touched_.begin(), touched_.end());
     uint64_t hits_bytes = buffer_bytes(touched_.size(), sizeof(Hit));
@@ -912,7 +1033,10 @@ void LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits
         clear_cache();
         if (all > max_cache_bytes_ || all_count > max_cache_size_)
             return;
+        fresh = all;
     }
+    // the path cache shares the label cache's bound under a memory budget (make_room)
+    oracle_.make_room(fresh);
     for (size_t i = 0; i < n; ++i) {
         if (keys[i] != npos && !cache_.count(keys[i])) {
             cache_[keys[i]] = hits[i];
@@ -1236,10 +1360,12 @@ void LabelRecorder::fetch_uncached(const node_index *keys, size_t n) {
                 coords.assign(tuple.begin(), tuple.end());
                 std::sort(coords.begin(), coords.end());
                 for (auto it = coords.begin(); it != coords.end(); ) {
-                    const auto [seq_id, local] = oracle_.map_coord(c, *it);
-                    all.emplace_back(c, seq_id);
-                    const Coord end = *it - local + oracle_.num_kmers_in_sequence(c, seq_id);
-                    it = std::lower_bound(it, coords.end(), end);
+                    // the sequence with its range at once (one rank/select fewer than a
+                    // mapping and the sequence's length), counted as the mapping it was
+                    const auto range = oracle_.sequence_range(c, *it);
+                    oracle_.counters().coords_mapped++;
+                    all.emplace_back(c, range.seq_id);
+                    it = std::lower_bound(it, coords.end(), range.last + 1);
                 }
             }
             std::sort(all.begin(), all.end());
@@ -1249,6 +1375,12 @@ void LabelRecorder::fetch_uncached(const node_index *keys, size_t n) {
             r.kept.assign(all.begin(), all.begin() + std::min(all.size(), cap_));
         }
     }
+    // the path cache shares the label cache's bound under a memory budget (make_room)
+    uint64_t adding = 0;
+    for (size_t i = 0; i < n; ++i) {
+        adding += 64 + result[i].kept.size() * sizeof(Key);
+    }
+    oracle_.make_room(adding);
     for (size_t i = 0; i < n; ++i) {
         // a row costs at least one slot even when nothing is on it
         cached_keys_ += std::max<size_t>(1, result[i].kept.size());
@@ -1484,10 +1616,11 @@ bool LabelRecorder::raw_budgeted(const MultiIntMatrix::RowTuples &row, DecodeBud
         coords.assign(tuple.begin(), tuple.end());
         std::sort(coords.begin(), coords.end());
         for (auto it = coords.begin(); it != coords.end(); ) {
-            const auto [seq_id, local] = oracle_.map_coord(c, *it);
-            all.emplace_back(c, seq_id);
-            const Coord end = *it - local + oracle_.num_kmers_in_sequence(c, seq_id);
-            it = std::lower_bound(it, coords.end(), end);
+            // as fetch_uncached
+            const auto range = oracle_.sequence_range(c, *it);
+            oracle_.counters().coords_mapped++;
+            all.emplace_back(c, range.seq_id);
+            it = std::lower_bound(it, coords.end(), range.last + 1);
         }
     }
     std::sort(all.begin(), all.end());
@@ -1569,6 +1702,8 @@ DecodeStatus LabelRecorder::decode_run(const node_index *keys, size_t n, DecodeB
 }
 
 void LabelRecorder::cache_raw(node_index key, RawRow &&raw, const KeyCost &cost) {
+    // the path cache shares the label cache's bound under a memory budget (make_room)
+    oracle_.make_room(kCacheEntryBytes + kCostEntryBytes + raw_bytes(raw));
     cached_keys_ += std::max<size_t>(1, raw.kept.size());
     cache_bytes_ += kCacheEntryBytes + kCostEntryBytes + raw_bytes(raw);
     cache_[key] = std::move(raw);

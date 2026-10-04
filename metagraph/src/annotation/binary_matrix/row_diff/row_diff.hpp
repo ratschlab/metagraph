@@ -9,6 +9,7 @@
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
@@ -106,20 +107,56 @@ class IRowDiff {
      * has no single-row descent); nothing was charged. On OK the output vectors' previous
      * contents are replaced (and were never the budget's).
      */
+    //
+    // |cache| (optional): the request's path cache (row_diff_cache.hpp), as for
+    // get_rows_cached(): a path also stops at a cached row whose path aggregates are known,
+    // which then gives the costs of its whole path, so that every RowCost — and what the
+    // caller admits and charges by it — is the same with and without the cache; only the
+    // decoding (and the charges of its transient buffers) shrinks. A cached row is copied
+    // into the call, charged as its copy; every row the call reconstructs is cached with its
+    // aggregates within the cache's own bound, which is not this budget's (the caller's
+    // allotment): also by a call that is refused afterwards (the rows are the same either way).
+    // With the cache's admit_as_uncached set, the call also charges, from its trace until its
+    // stored rows are read, what decoding the rows the cache spared it would have held: per
+    // anchor the rows of its longest cached path beyond the cached row (in the trace's
+    // containers and per-visit arrays) and that path's stored rows — so that a read that reads
+    // ahead until a run does not fit (the lookahead) reads about what it read without the cache.
     virtual bool supports_budgeted_decode() const { return false; }
     virtual DecodeStatus decode_rows(const std::vector<BinaryMatrix::Row> &rows,
                                      DecodeBudget &budget,
                                      std::vector<BinaryMatrix::SetBitPositions> *out,
                                      std::vector<RowCost> *costs,
-                                     std::vector<uint64_t> *held) const {
+                                     std::vector<uint64_t> *held,
+                                     RowDiffPathCache *cache = nullptr) const {
         return DecodeStatus::UNSUPPORTED;
     }
     virtual DecodeStatus decode_row_tuples(const std::vector<BinaryMatrix::Row> &rows,
                                            DecodeBudget &budget,
                                            std::vector<MultiIntMatrix::RowTuples> *out,
                                            std::vector<RowCost> *costs,
-                                           std::vector<uint64_t> *held) const {
+                                           std::vector<uint64_t> *held,
+                                           RowDiffPathCache *cache = nullptr) const {
         return DecodeStatus::UNSUPPORTED;
+    }
+
+    /**
+     * The default decode with the request's path cache (row_diff_cache.hpp; the efficiency
+     * pass): the rows get_rows() / get_row_tuples() return, serial. Each row-diff path
+     * stops at an anchor, at a row visited before in the call (as get_rd_ids), or at a row
+     * |cache| holds, whose full row then starts the reconstruction as an anchor's stored row
+     * does; every row the call reconstructs — the requested rows, the rows on their paths and
+     * the anchors read — is cached within the cache's bound. Unsupported (supports_path_cache
+     * false): std::logic_error.
+     */
+    virtual bool supports_path_cache() const { return false; }
+    virtual std::vector<BinaryMatrix::SetBitPositions>
+    get_rows_cached(const std::vector<BinaryMatrix::Row> &rows, RowDiffPathCache &cache) const {
+        throw std::logic_error("this annotation has no row-diff path cache");
+    }
+    virtual std::vector<MultiIntMatrix::RowTuples>
+    get_row_tuples_cached(const std::vector<BinaryMatrix::Row> &rows,
+                          RowDiffPathCache &cache) const {
+        throw std::logic_error("this annotation has no row-diff path cache");
     }
     // the buffers of a successful call's three output vectors for |n| rows
     template <class RowT>
@@ -137,7 +174,8 @@ class IRowDiff {
     DecodeStatus decode_budgeted(const std::vector<BinaryMatrix::Row> &rows,
                                  DecodeBudget &budget, RowFetcher<RowT> &fetcher,
                                  std::vector<RowT> *out, std::vector<RowCost> *costs,
-                                 std::vector<uint64_t> *held) const;
+                                 std::vector<uint64_t> *held,
+                                 RowDiffCache<RowT> *cache = nullptr) const;
 
     // get row-diff paths starting at |row_ids|
     // Returns: (rd_ids, rd_paths_trunc, times_traversed, groups)
@@ -153,6 +191,13 @@ class IRowDiff {
     template <class F, class G, class H, class Callback>
     void call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_rd_rows, G add_diff,
                    H decode_diffs, Callback call_row, size_t num_threads) const;
+
+    // call_rows() with one thread and the path cache (get_rows_cached): |call_row| receives
+    // each requested row as an rvalue
+    template <class RowT, class F, class G, class H, class Callback>
+    void call_rows_cached(const std::vector<BinaryMatrix::Row> &row_ids,
+                          RowDiffCache<RowT> &cache, F call_rd_rows, G add_diff,
+                          H decode_diffs, Callback call_row) const;
 
     const graph::DeBruijnGraph *graph_ = nullptr;
     anchor_bv_type anchor_;
@@ -227,7 +272,13 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     bool supports_budgeted_decode() const override { return HasRowColumns<BaseMatrix>::value; }
     DecodeStatus decode_rows(const std::vector<Row> &rows, DecodeBudget &budget,
                              std::vector<SetBitPositions> *out, std::vector<RowCost> *costs,
-                             std::vector<uint64_t> *held) const override;
+                             std::vector<uint64_t> *held,
+                             RowDiffPathCache *cache = nullptr) const override;
+
+    // the default decode with the path cache (IRowDiff), over any index matrix
+    bool supports_path_cache() const override { return true; }
+    std::vector<SetBitPositions> get_rows_cached(const std::vector<Row> &rows,
+                                                 RowDiffPathCache &cache) const override;
 
   private:
     static void add_diff(const SetBitPositions &diff, SetBitPositions *row);
@@ -274,13 +325,28 @@ template <class BaseMatrix>
 DecodeStatus RowDiff<BaseMatrix>::decode_rows(const std::vector<Row> &rows, DecodeBudget &budget,
                                               std::vector<SetBitPositions> *out,
                                               std::vector<RowCost> *costs,
-                                              std::vector<uint64_t> *held) const {
+                                              std::vector<uint64_t> *held,
+                                              RowDiffPathCache *cache) const {
     if constexpr(HasRowColumns<BaseMatrix>::value) {
         BudgetedRowFetcher<BaseMatrix> fetcher(diffs_);
-        return decode_budgeted<SetBitPositions>(rows, budget, fetcher, out, costs, held);
+        return decode_budgeted<SetBitPositions>(rows, budget, fetcher, out, costs, held,
+                                                cache ? &cache->rows : nullptr);
     } else {
         return DecodeStatus::UNSUPPORTED;
     }
+}
+
+template <class BaseMatrix>
+std::vector<BinaryMatrix::SetBitPositions>
+RowDiff<BaseMatrix>::get_rows_cached(const std::vector<Row> &row_ids,
+                                     RowDiffPathCache &cache) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+    call_rows_cached<SetBitPositions>(row_ids, cache.rows,
+        [this](const std::vector<Row> &rd_ids) { return diffs_.get_rows(rd_ids, 1); },
+        add_diff, [](SetBitPositions *) {},
+        [&](size_t i, SetBitPositions &&row) { rows[i] = std::move(row); }
+    );
+    return rows;
 }
 
 
@@ -387,6 +453,122 @@ void IRowDiff::call_rows(const std::vector<BinaryMatrix::Row> &row_ids, F call_r
 
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
     assert(std::all_of(rd_rows.begin(), rd_rows.end(), [](const auto &v) { return v.empty(); }));
+}
+
+template <class RowT, class F, class G, class H, class Callback>
+void IRowDiff::call_rows_cached(const std::vector<BinaryMatrix::Row> &row_ids,
+                                RowDiffCache<RowT> &cache, F call_rd_rows, G add_diff,
+                                H decode_diffs, Callback call_row) const {
+    assert(graph_ && "graph must be loaded");
+    assert(anchor_.size() == graph_->max_index() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
+    using Row = BinaryMatrix::Row;
+    using node_index = graph::DeBruijnGraph::node_index;
+
+    const size_t n = row_ids.size();
+    if (!n)
+        return;
+    cache.trim(cache.limit());
+
+    // ---- trace the paths (as get_rd_ids with one thread): each stops at a row visited
+    // before in this call, at a cached row (looked up first: a cached anchor is not read
+    // again) or at an anchor
+    VectorSet<Row> visited;
+    std::vector<uint8_t> cached;       // per visit: its full row is in |cache|
+    std::vector<uint32_t> steps;       // the paths' visits, path by path
+    std::vector<size_t> start(n + 1);
+    for (size_t i = 0; i < n; ++i) {
+        start[i] = steps.size();
+        node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row_ids[i]);
+        while (true) {
+            assert(graph_->in_graph(node));
+            const Row row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
+            auto [it, is_new] = visited.emplace(row);
+            steps.push_back(it - visited.begin());
+            if (!is_new)
+                break;
+            cached.push_back(cache.find(row, false) != nullptr);
+            if (cached.back() || anchor_[row])
+                break;
+            node = row_diff_successor(*graph_, node, fork_succ_);
+        }
+    }
+    start[n] = steps.size();
+    const auto &rows = visited.values_container();
+    const size_t num_visits = rows.size();
+
+    // ---- the stored rows of the visits not cached, read in one call in ascending row order
+    // (as call_rows reads them), and the cached full rows, copied
+    std::vector<uint32_t> order;
+    order.reserve(num_visits);
+    for (uint32_t v = 0; v < num_visits; ++v) {
+        if (!cached[v])
+            order.push_back(v);
+    }
+    std::sort(order.begin(), order.end(),
+              [&](uint32_t a, uint32_t b) { return rows[a] < rows[b]; });
+    std::vector<Row> rd_ids(order.size());
+    for (size_t j = 0; j < order.size(); ++j) {
+        rd_ids[j] = rows[order[j]];
+    }
+    std::vector<RowT> slot(num_visits);
+    {
+        auto stored = call_rd_rows(rd_ids);
+        assert(stored.size() == order.size());
+        for (size_t j = 0; j < order.size(); ++j) {
+            RowT &row = slot[order[j]];
+            row = std::move(stored[j]);
+            decode_diffs(&row);
+            std::sort(row.begin(), row.end(), utils::LessFirst());
+        }
+    }
+    std::vector<uint8_t> known(num_visits, 0);   // its full row is cached or reconstructed
+    for (uint32_t v = 0; v < num_visits; ++v) {
+        if (cached[v]) {
+            const auto *entry = cache.find(rows[v], false);
+            assert(entry);
+            slot[v] = entry->row;
+            known[v] = 1;
+            cache.hits++;
+        }
+    }
+    std::vector<uint32_t> times(num_visits, 0);
+    for (uint32_t v : steps) {
+        times[v]++;
+    }
+
+    // ---- reconstruct in the requested order (as call_rows with one group), caching every
+    // full row the call learns: the anchors read and each row on a path
+    for (size_t i = 0; i < n; ++i) {
+        const uint32_t *path = steps.data() + start[i];
+        const uint32_t *path_end = steps.data() + start[i + 1];
+        const uint32_t last = path_end[-1];
+        RowT result;
+        if (--times[last]) {
+            result = slot[last];
+        } else {
+            result = std::move(slot[last]);
+            RowT().swap(slot[last]);
+        }
+        if (!known[last]) {
+            // an anchor read in this call: its stored row is its full row
+            cache.insert(rows[last], result);
+            known[last] = 1;
+        }
+        for (const uint32_t *p = path_end - 1; p != path; ) {
+            const uint32_t y = *--p;
+            add_diff(slot[y], &result);
+            cache.insert(rows[y], result);
+            known[y] = 1;
+            if (--times[y]) {
+                slot[y] = result;
+            } else {
+                RowT().swap(slot[y]);
+            }
+        }
+        call_row(i, std::move(result));
+    }
+    assert(std::all_of(times.begin(), times.end(), [](uint32_t t) { return !t; }));
 }
 
 template <class BaseMatrix>

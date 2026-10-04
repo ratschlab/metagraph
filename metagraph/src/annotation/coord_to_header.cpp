@@ -142,6 +142,35 @@ CoordToHeader::map_single_coord(Column col, uint64_t coord) const {
     return { header, local_coord };
 }
 
+CoordToHeader::SequenceRange
+CoordToHeader::sequence_range(Column col, uint64_t coord) const {
+    if (col >= num_columns()) {
+        throw std::out_of_range(fmt::format("Column {} out of range "
+                "(CoordToHeader has {} columns)", col, num_columns()));
+    }
+    const auto &offsets = coord_offsets_[col];
+    if (coord >= offsets.size()) {
+        throw std::out_of_range(fmt::format("Coordinate {} for column {} out of range "
+                "(CoordToHeader has {} coordinates for that column)", coord, col, offsets.size()));
+    }
+    // as map_single_coord: a set bit marks the last coordinate of each sequence
+    const size_t header = coord ? offsets.rank1(coord - 1) : 0;
+    const uint64_t first = header ? offsets.select1(header) + 1 : 0;
+    return { header, first, offsets.select1(header + 1) };
+}
+
+uint64_t CoordToHeader::last_coord(Column col, size_t seq_id) const {
+    if (col >= num_columns()) {
+        throw std::out_of_range(fmt::format("Column {} out of range "
+                "(CoordToHeader has {} columns)", col, num_columns()));
+    }
+    if (seq_id >= num_sequences(col)) {
+        throw std::out_of_range(fmt::format("Sequence id {} out of range for column {} "
+                "({} sequences)", seq_id, col, num_sequences(col)));
+    }
+    return coord_offsets_[col].select1(seq_id + 1);
+}
+
 uint64_t CoordToHeader::num_kmers_in_sequence(Column col, size_t seq_id) const {
     if (col >= num_columns()) {
         throw std::out_of_range(fmt::format("Column {} out of range "

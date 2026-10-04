@@ -120,6 +120,13 @@ class Config {
     uint64_t traverse_max_seed_bp = 100'000;
     size_t traverse_max_seed_labels = 10'000;
     uint64_t resolve_max_query_bp = 0;
+    // The server's maxima of a request's budgets (bounds.max_memory_mb, bounds.max_work_units;
+    // owner decision R16): 0 = off (a request's budgets as given, an omitted one none). Set,
+    // a larger budget is lowered to it and an omitted one set to it, echoed as clamped like
+    // the time cap. Off by default: a budget changes how a walk stops, so a deployment that
+    // did not choose one keeps the results it always gave
+    uint64_t traverse_max_memory_mb = 0;
+    uint64_t traverse_max_work_units = 0;
     // Ledger-managed /traverse attempts (requests with attempt_id, traverse_attempts.hpp):
     // the allowance added to n_seeds x the per-seed time budget in the duration bound the
     // server enforces, and how long (and how many) finished attempts stay queryable
@@ -133,6 +140,10 @@ class Config {
     // a deadline (the reads are decoded in chunks sized from the observed per-row time, the
     // deadline checked between them); 0: one piece per read, as before (ms)
     uint64_t traverse_chunk_target_ms = 50;
+    // the bound of a /traverse request's row-diff path cache (MiB; the rows its reads
+    // reconstruct, kept so that a later read's row-diff path stops at a cached row): within
+    // it without a memory budget, within the label cache's allotment under one; 0 = off
+    uint64_t traverse_path_cache_mb = 128;
     // the zlib level of the traversal routes' compressed bodies (the other routes keep 9):
     // measured on real responses, level 1 writes 3-4 times faster than 9 at 1.8 times the
     // bytes, and the time to build a response is what a delivery window bounds

@@ -1834,6 +1834,11 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertIn('indivisible charge', caps['work_bound'])
         self.assertIn('between two comparisons', caps['work_bound'])
         self.assertEqual('soft', caps['memory_bound'])
+        # feature level 4: the server's maxima of the budgets (off unless configured) and the
+        # row-diff path cache of the reads (128 MiB by default)
+        self.assertEqual((0, 0), (caps['max_memory_mb'], caps['max_work_units']))
+        self.assertEqual(128, caps['decode_cache']['path_cache_mb'])
+        self.assertIn('do not depend on it', caps['decode_cache']['rule'])
 
     def test_api_enforces_server_caps(self):
         caps = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities').json()
@@ -2268,7 +2273,7 @@ class TestTraverseAPI(TestTraverseBase):
 
     def test_api_server_capabilities(self):
         """Pass 5, W3/W4: GET /capabilities, the server-wide document: routes and features,
-        feature_level 3, algorithm_version (as every response's), mode single, no graph list,
+        feature_level 4 (3 in pass 5), algorithm_version (as every response's), mode single, no graph list,
         the attempts block (as the probe's) and how deadlines are checked; the number types
         a ledger compares are integers."""
         url = f'http://{self.host}:{self.port}'
@@ -2280,7 +2285,7 @@ class TestTraverseAPI(TestTraverseBase):
                           'content_encodings', 'deadline_check', 'feature_level', 'features',
                           'graphs', 'mode', 'ready', 'release', 'routes', 'schema_version',
                           'server_instance'}, set(c))
-        self.assertEqual((3, 'single', None, True, 1),
+        self.assertEqual((4, 'single', None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['ready'],
                           c['schema_version']))
         self.assertEqual(['search', 'align', 'resolve', 'traverse', 'attempts'], c['features'])
@@ -2295,13 +2300,13 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(probe['attempts']['server_instance'], c['server_instance'])
         self.assertEqual(probe['deadline_check'], c['deadline_check'])
         self.assertEqual(probe['algorithm_version'], c['algorithm_version'])
-        self.assertEqual(3, probe['feature_level'])
+        self.assertEqual(4, probe['feature_level'])
         self.assertEqual(1, c['compression_level'])
         self.assertEqual(1, probe['compression_level'])
         out = self._post('traverse', {'seeds': [{'sequence': self.element}],
                                       'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
         self.assertEqual(c['algorithm_version'], out['algorithm_version'])
-        self.assertEqual(3, out['capabilities']['feature_level'])
+        self.assertEqual(4, out['capabilities']['feature_level'])
         att = c['attempts']
         for key in ('allowance_ms', 'hard_cap_ms', 'clock_skew_allowance_ms', 'retention_s',
                     'retention_count', 'content_timeout_s', 'client_check_ms'):
@@ -2312,11 +2317,13 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual({'compress_mbps', 'build_mbps', 'account_per_text_byte',
                           'measured_text_bytes', 'measured_compress_mbps', 'measured_build_mbps',
                           'measured_account_per_text_byte', 'rate_window', 'rule', 'margin',
-                          'stop_ms', 'measured_stop_ms'}, set(reserve))
-        # the reserve's margin and the walk's stop time (review of pass 5, F3)
+                          'stop_ms', 'measured_stop_ms', 'calibration'}, set(reserve))
+        # the reserve's margin and the walk's stop time (review of pass 5, F3), calibrated in
+        # the efficiency pass (feature level 4): + 950 ms (+ 200 before), ratios 30 / 50
         self.assertEqual(1.25, reserve['margin'])
         self.assertIs(type(reserve['stop_ms']), int)
-        self.assertEqual(c['deadline_check']['chunk_target_ms'] + 200, reserve['stop_ms'])
+        self.assertEqual(c['deadline_check']['chunk_target_ms'] + 950, reserve['stop_ms'])
+        self.assertEqual({'json': 30, 'graphlet': 50}, reserve['account_per_text_byte'])
         self.assertEqual({'summary', 'tree', 'full', 'graphlet'},
                          set(reserve['measured_account_per_text_byte']))
         self.assertEqual((50, 10, 16, 1 << 20),
@@ -2661,7 +2668,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         ret = self._caps('?graph=A')
         self.assertEqual(200, ret.status_code, ret.text)
         caps = ret.json()
-        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 3),
+        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 4),
                          (caps['graph'], caps['graph_path'], caps['index_ns'],
                           caps['index_fp'], caps['feature_level']))
         for key in ('attempts', 'deadline_check', 'budgets', 'algorithm_version',
@@ -2928,6 +2935,140 @@ class TestTraverseWideIndex(TestingBase):
                     # (the unchunked time, the better of two, with room for a loaded machine)
                     self.assertLessEqual(min(times['paced']), 1.5 * min(times['whole']) + 300,
                                          (anno_type, mode, times))
+
+    def test_row_diff_path_cache_keeps_the_bytes(self):
+        """The efficiency pass, the row-diff path cache: the rows a request's reads reconstruct
+        are kept, so that a later read's row-diff path stops at a cached row instead of decoding
+        to its anchor again (feature level 4: the probe's decode_cache). The responses are byte
+        for byte those without the cache (--traverse-path-cache-mb 0) — constrain and annotate,
+        no budget, memory budgets (a large one, and one that stops the walk), a work budget —
+        on both row-diff annotations."""
+        for anno_type, ext in (('row_diff', 8), ('row_diff_brwt', 100)):
+            index = self.variants[anno_type]
+            with self._server('--traverse-path-cache-mb', '0', index=index) as off, \
+                    self._server(index=index) as on:
+                caps = requests.get(on.url + '/traverse/capabilities').json()
+                self.assertEqual(128, caps['decode_cache']['path_cache_mb'])
+                self.assertEqual(0, requests.get(off.url + '/traverse/capabilities')
+                                 .json()['decode_cache']['path_cache_mb'])
+                stops = 0
+                for mode in ('constrain', 'annotate'):
+                    for extra in ({}, {'max_memory_mb': 4096}, {'max_memory_mb': 1},
+                                  {'max_work_units': 200000}):
+                        req = self._request(mode, 60000)
+                        req['strategy']['bounds']['max_extension_bp'] = ext
+                        req['strategy']['bounds'].update(extra)
+                        req['strategy']['output']['timing'] = False
+                        a = off.post('traverse', req)
+                        b = on.post('traverse', req)
+                        what = (anno_type, mode, extra)
+                        self.assertEqual(200, a.status_code, a.text[:500])
+                        self.assertEqual(200, b.status_code, b.text[:500])
+                        self.assertEqual(a.text, b.text, what)
+                        stops += '"resource_stop"' in a.text
+                self.assertGreater(stops, 0, anno_type)
+
+    def test_server_budget_maxima(self):
+        """R16 (the owner's decision; feature level 4): --traverse-max-memory-mb and
+        --traverse-max-work-units, off (0) by default. Set, a request's larger budget is
+        lowered to the maximum and an omitted one set to it, echoed in strategy.clamped (an
+        omitted one as requested "unlimited") and strategy.bounds; a smaller one is kept. A
+        seed the clamped budget stopped states a server_clamp limitation, and its stop what the
+        request asked for; the graphlet holds both. The probe states the maxima."""
+        with self._server('--traverse-max-memory-mb', '4096',
+                          '--traverse-max-work-units', '5000') as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()
+            self.assertEqual((4096, 5000), (caps['max_memory_mb'], caps['max_work_units']))
+            req = self._request('constrain', 60000)
+            req['strategy']['output']['timing'] = False
+            ret = server.post('traverse', req)
+            self.assertEqual(200, ret.status_code, ret.text[:500])
+            out = ret.json()
+            clamped = {c['field']: c for c in out['strategy']['clamped']}
+            self.assertEqual({'field': 'bounds.max_memory_mb', 'requested': 'unlimited',
+                              'effective': 4096}, clamped['bounds.max_memory_mb'])
+            self.assertEqual({'field': 'bounds.max_work_units', 'requested': 'unlimited',
+                              'effective': 5000}, clamped['bounds.max_work_units'])
+            self.assertEqual((4096, 5000), (out['strategy']['bounds']['max_memory_mb'],
+                                            out['strategy']['bounds']['max_work_units']))
+            result = out['results'][0]
+            self.assertEqual(('work', 'unlimited', 5000),
+                             (result['resource_stop']['resource'],
+                              result['resource_stop']['requested'],
+                              result['resource_stop']['effective']))
+            clamps = [l for l in result['limitations'] if l['kind'] == 'server_clamp']
+            self.assertEqual([('bounds.max_work_units', 5000, 'unlimited')],
+                             [(l['knob'], l['limit'], l['observed']) for l in clamps])
+            self.assertIn('gave no budget', clamps[0]['effect'])
+            # a request cannot raise it: no action raising it, and the arm's walk_domain states
+            # the maximum (review of the efficiency pass, finding 2)
+            self.assertNotIn('raise_work_budget', result['resource_stop']['actions'])
+            domains = [l for arm in result['arms'].values() for l in arm.get('limitations', [])
+                       if l['kind'] == 'walk_domain' and l['knob'] == 'bounds.max_work_units']
+            self.assertTrue(domains)
+            for l in domains:
+                self.assertEqual(5000, l['server_limit'])
+                self.assertNotIn('raise the knob', l['effect'])
+            # the graphlet's K and Q records hold them
+            req['strategy']['output']['detail'] = 'graphlet'
+            text = server.post('traverse', req).json()['results'][0]['graphlet']
+            # (K values: i:<integer>, u for unlimited)
+            self.assertIn('server_clamp bounds.max_work_units i:5000 u ', text)
+            self.assertRegex(text, r'(?m)^Q locus work \S+ u i:5000 ')
+            # larger: lowered; smaller: kept
+            req['strategy']['output']['detail'] = 'summary'
+            req['strategy']['bounds'].update({'max_memory_mb': 8192, 'max_work_units': 10 ** 9})
+            out = server.post('traverse', req).json()
+            clamped = {c['field']: c for c in out['strategy']['clamped']}
+            self.assertEqual((8192, 4096), (clamped['bounds.max_memory_mb']['requested'],
+                                            clamped['bounds.max_memory_mb']['effective']))
+            self.assertEqual((10 ** 9, 5000), (clamped['bounds.max_work_units']['requested'],
+                                               clamped['bounds.max_work_units']['effective']))
+            req['strategy']['bounds'].update({'max_memory_mb': 100, 'max_work_units': 4000})
+            out = server.post('traverse', req).json()
+            self.assertEqual([], [c for c in out['strategy']['clamped']
+                                  if c['field'] in ('bounds.max_memory_mb',
+                                                    'bounds.max_work_units')])
+            self.assertEqual((100, 4000), (out['strategy']['bounds']['max_memory_mb'],
+                                           out['strategy']['bounds']['max_work_units']))
+        # Review of the efficiency pass, finding 2: a seed the server's maximum fails before any
+        # walk states it as a walked one does — the server_clamp, the stop's `requested`, no
+        # action raising the budget, and a walk_domain with server_limit saying that a request
+        # cannot raise it: here at its depth-0 state (1,024 derived labels under 1 MiB; a seed
+        # phase that runs out of work units is MiniRefSeq.ServerBudgetMaxima's: this seed's
+        # 31,992 units stay below the interval at which the seed phase is compared)
+        for flags, resource, field, maximum in (
+                (('--traverse-max-memory-mb', '1'), 'memory', 'bounds.max_memory_mb', 1),):
+            with self._server(*flags) as server:
+                req = self._request('constrain', 60000)
+                req['strategy']['output']['timing'] = False
+                ret = server.post('traverse', req)
+                self.assertEqual(200, ret.status_code, ret.text[:500])
+                result = ret.json()['results'][0]
+                self.assertEqual('failed', result['outcome']['walks'], result.get('error'))
+                stop = result['resource_stop']
+                self.assertEqual((resource, 'unlimited', maximum),
+                                 (stop['resource'], stop['requested'], stop['effective']))
+                self.assertEqual([], [a for a in stop['actions'] if a.startswith('raise_')])
+                mine = [l for l in result['limitations'] if l['knob'] == field]
+                self.assertEqual([('unlimited', maximum)],
+                                 [(l['observed'], l['limit']) for l in mine
+                                  if l['kind'] == 'server_clamp'])
+                domains = [l for l in mine if l['kind'] == 'walk_domain']
+                self.assertEqual(1, len(domains), mine)
+                self.assertEqual(maximum, domains[0]['server_limit'])
+                self.assertNotIn('raise the knob', domains[0]['effect'])
+                self.assertIn("the server's maximum", domains[0]['effect'])
+        for flag, value in (('--traverse-max-memory-mb', '1048577'),
+                            ('--traverse-max-memory-mb', '-1'),
+                            ('--traverse-max-work-units', '1.5'),
+                            ('--traverse-path-cache-mb', '-1')):
+            res = subprocess.run(shlex.split(METAGRAPH) + [
+                'server_query', '-i', self.graph, '-a', self.anno, flag, value,
+                '--port', str(_free_port()), '--address', '127.0.0.1'],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+            self.assertNotEqual(0, res.returncode, (flag, value))
+            self.assertIn(flag, res.stdout.decode(), (flag, value))
 
     def test_flags_stated_as_integers_are_validated(self):
         """Review of pass 5: --traverse-clock-skew-ms and --traverse-chunk-target-ms were read

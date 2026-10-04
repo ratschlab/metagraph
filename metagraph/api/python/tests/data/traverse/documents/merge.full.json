@@ -14,7 +14,7 @@
    "graphlet"
   ],
   "direct_access": true,
-  "feature_level": 3,
+  "feature_level": 4,
   "graphlet_format": 1,
   "has_coord_to_header": true,
   "has_coordinates": true,
@@ -37,7 +37,7 @@
   {
    "annotation": {
     "access_path": "direct",
-    "direct_reads": 568,
+    "direct_reads": 520,
     "keys_mapped": 148,
     "rows_requested": 148
    },

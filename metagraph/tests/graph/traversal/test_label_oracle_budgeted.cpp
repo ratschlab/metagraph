@@ -177,6 +177,96 @@ TEST(LabelOracleBudgetedQuery, SameHitsAsTheUnbudgetedFetch) {
     }
 }
 
+// The efficiency pass, the row-diff path cache (LabelOracle::path_cache): the reads of an
+// oracle with the cache answer every fetch, budgeted and not, query and recorder, exactly as
+// an oracle without it — the hits and lists, the costs (each key's whole path), what a
+// budgeted call holds, and every counter (requests, cache hits, rows fetched, mappings) —
+// and the paths stop at cached rows. With a shared bound (make_room), the path cache keeps
+// within what the label cache leaves of it.
+TEST(LabelOraclePathCache, SameAnswersAndCounters) {
+    auto same_counters = [](const LabelOracle::Counters &a, const LabelOracle::Counters &b) {
+        return a.keys_mapped == b.keys_mapped && a.rows_requested == b.rows_requested
+            && a.cache_hits == b.cache_hits && a.rows_fetched == b.rows_fetched
+            && a.tuple_rows_fetched == b.tuple_rows_fetched
+            && a.direct_reads == b.direct_reads && a.coords_mapped == b.coords_mapped;
+    };
+    for (bool coordinates : { false, true }) {
+        Fixture fx(coordinates);
+        for (const auto &[names, with_coords] : label_sets(coordinates)) {
+            for (bool shared : { false, true }) {
+                LabelOracle without(*fx.anno, fx.cth.get());
+                LabelOracle with(*fx.anno, fx.cth.get());
+                with.set_path_cache_max(uint64_t(1) << 20);
+                ASSERT_TRUE(with.path_cached());
+                LabelQuery q0(without, refs(without, names), with_coords);
+                LabelQuery q1(with, refs(with, names), with_coords);
+                LabelQuery b0(without, refs(without, names), with_coords);
+                LabelQuery b1(with, refs(with, names), with_coords);
+                b0.set_max_cache_bytes(1 << 16);
+                b1.set_max_cache_bytes(1 << 16);
+                if (shared) {
+                    // the walker's sharing under a memory budget: the path cache within what
+                    // the budgeted query's cache leaves of 64 KiB
+                    with.path_cache().set_bound(1 << 16, [&]() {
+                        return b1.cache_bytes() < (1 << 16) ? (1 << 16) - b1.cache_bytes() : 0;
+                    });
+                }
+                size_t calls = 0;
+                fx.batches(without);     // keys_mapped alike
+                for (const auto &batch : fx.batches(with)) {
+                    ASSERT_EQ(q0.fetch(batch), q1.fetch(batch)) << names[0];
+                    std::vector<LabelQuery::NodeHits> h0, h1;
+                    std::vector<KeyCost> c0, c1;
+                    h0.reserve(batch.size()); h1.reserve(batch.size());
+                    c0.reserve(batch.size()); c1.reserve(batch.size());
+                    DecodeBudget d0, d1;
+                    size_t r0 = 0, r1 = 0;
+                    ASSERT_TRUE(b0.fetch(batch.data(), batch.size(), d0, &h0, &c0, &r0));
+                    ASSERT_TRUE(b1.fetch(batch.data(), batch.size(), d1, &h1, &c1, &r1));
+                    ASSERT_EQ(h0, h1);
+                    for (size_t i = 0; i < batch.size(); ++i) {
+                        EXPECT_EQ(c0[i].demand, c1[i].demand) << names[0] << " call " << calls;
+                        EXPECT_EQ(c0[i].dependency_units, c1[i].dependency_units);
+                    }
+                    EXPECT_EQ(d0.held(), d1.held());
+                    if (shared) {
+                        EXPECT_LE(with.path_cache().bytes() + b1.cache_bytes(),
+                                  std::max<uint64_t>(1 << 16, b1.cache_bytes()));
+                    }
+                    calls++;
+                }
+                EXPECT_TRUE(same_counters(without.counters(), with.counters())) << names[0];
+                EXPECT_GT(with.path_cache().hits(), 0u) << names[0];
+            }
+        }
+        // annotate: the recorder's lists and names
+        for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
+            if (kind == LabelKind::HEADER && !coordinates)
+                continue;
+            LabelOracle without(*fx.anno, fx.cth.get());
+            LabelOracle with(*fx.anno, fx.cth.get());
+            with.set_path_cache_max(uint64_t(1) << 20);
+            LabelRecorder r0(without, kind, 3), r1(with, kind, 3);
+            fx.batches(without);     // keys_mapped alike
+            for (const auto &batch : fx.batches(with)) {
+                const auto l0 = r0.fetch(batch);
+                const auto l1 = r1.fetch(batch);
+                ASSERT_EQ(l0.size(), l1.size());
+                for (size_t i = 0; i < l0.size(); ++i) {
+                    EXPECT_EQ(l0[i].labels, l1[i].labels);
+                    EXPECT_EQ(l0[i].total, l1[i].total);
+                }
+            }
+            ASSERT_EQ(r0.labels().size(), r1.labels().size());
+            for (size_t i = 0; i < r0.labels().size(); ++i) {
+                EXPECT_EQ(r0.labels()[i].name, r1.labels()[i].name);
+            }
+            EXPECT_TRUE(same_counters(without.counters(), with.counters()));
+            EXPECT_GT(with.path_cache().hits(), 0u);
+        }
+    }
+}
+
 // Q2, Q4: a key is admitted exactly when its demand fits what the call has left, cached or
 // not; a refusal returns nothing and leaves the cache and the counters as they were
 TEST(LabelOracleBudgetedQuery, AdmitsExactlyAndRefusesWhole) {

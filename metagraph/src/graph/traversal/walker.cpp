@@ -546,7 +546,8 @@ class Walker {
             regime_(oracle.regime()), canonical_(oracle.canonical()),
             nfc_(oracle.node_first_cache()),
             trace_(strategy.support == Support::TRACE),
-            annotate_(strategy.label_mode == LabelMode::ANNOTATE) {}
+            annotate_(strategy.label_mode == LabelMode::ANNOTATE),
+            path_cache_scope_(oracle, strategy.max_memory_bytes > 0) {}
 
     SeedResult run();
 
@@ -717,6 +718,8 @@ class Walker {
 
     // ---- budgets (DESIGN-traverse-graphlet.md §14)
     void init_budgets();
+    // under a memory budget: the seed's row-diff path cache from depth 1 on (PathCacheScope)
+    void enable_path_cache();
     uint64_t accounted() const { return base_ + committed_ + reserved_; }
     void note_peak() { peak_ = std::max(peak_, accounted()); }
     // a head's own memory, its stop and its merge reservations (see Item::reserve)
@@ -864,6 +867,34 @@ class Walker {
     // query's or recorder's cache), its delivery apart: held before the depth-0 admission
     uint64_t dictionary_held() const;
 
+    /**
+     * The row-diff path cache (LabelOracle::path_cache, the efficiency pass) during this
+     * seed. Without a memory budget it is the request's, within the request's bound, kept
+     * from seed to seed (only physical work depends on it). Under a memory budget it is the
+     * seed's: empty and off until the depth-0 state is admitted (the seed phase and the
+     * annotate roots decode as before the efficiency pass, so that what their refusals state
+     * is as before too), then within what the label cache leaves of its allotment
+     * (enable_path_cache: the allotment is in the account, and the label cache stays as it
+     * was), emptied when the seed ends. The scope restores the request's bound when the seed
+     * ends.
+     */
+    struct PathCacheScope {
+        PathCacheScope(LabelOracle &oracle, bool memory_budget)
+              : oracle(oracle), memory_budget(memory_budget) {
+            if (memory_budget) {
+                oracle.path_cache().set_bound(0);
+                oracle.path_cache().clear();
+            }
+        }
+        ~PathCacheScope() {
+            if (memory_budget)
+                oracle.path_cache().clear();
+            oracle.path_cache().set_bound(oracle.path_cache_max());
+        }
+        LabelOracle &oracle;
+        const bool memory_budget;
+    };
+
     LabelOracle &oracle_;
     const DeBruijnGraph &graph_;
     const Seed &seed_;
@@ -882,6 +913,7 @@ class Walker {
     const NodeFirstCache *nfc_;
     const bool trace_;
     const bool annotate_;
+    PathCacheScope path_cache_scope_;
 
     Timer timer_;
     SeedResult result_;
@@ -1724,10 +1756,10 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 for (const auto &[c, coords] : tuples[r]) {
                     if (skip(first, c))
                         continue;
-                    for (Coord coord : coords) {
-                        auto [seq_id, local] = oracle_.map_coord(c, coord);
-                        flat.emplace_back(Key{ c, seq_id }, local);
-                    }
+                    oracle_.map_coords(c, coords.data(), coords.size(),
+                                       [&, column = c](Coord, uint64_t seq_id, Coord local) {
+                        flat.emplace_back(Key{ column, seq_id }, local);
+                    });
                 }
                 std::sort(flat.begin(), flat.end());
                 for (const auto &[key, local] : flat) {
@@ -3026,6 +3058,29 @@ void Walker::init_budgets() {
     note_peak();
 }
 
+void Walker::enable_path_cache() {
+    if (!mem_limit_ || !oracle_.path_cache_max())
+        return;
+    // The row-diff path cache shares the label cache's allotment: it holds what the label
+    // cache leaves of it (re-read at every insert, and trimmed before the label cache grows:
+    // LabelOracle::make_room), so that both stay within the allotment the account holds, the
+    // label cache evicts as it always did and nothing admitted or observed changes (the
+    // lookahead's reads, physical work, are admitted as without the cache: prefetch).
+    // Only from here, after both roots were read: a refused annotate root states whether its
+    // read alone was refused (a lower bound) or its standalone demand did not fit, and with
+    // the cache on, the left root's path could hold the right root's row, whose read then
+    // completes where it alone would have been refused — a DEMAND statement where the seed
+    // without the cache states a DECODE one (review of the efficiency pass). The levels
+    // state only what holds either way (read_trip), so from depth 1 on the cache changes
+    // nothing they state
+    oracle_.path_cache().set_bound(std::min(oracle_.path_cache_max(), cache_allotment_),
+                                   [this]() {
+        const uint64_t label = query_ ? query_->cache_bytes()
+                             : recorder_ ? recorder_->cache_bytes() : 0;
+        return label < cache_allotment_ ? cache_allotment_ - label : 0;
+    });
+}
+
 uint64_t Walker::label_bytes(LabelId id, const LabelRef &label) const {
     // a seed label's name is written twice by detail full (label_dict and seed.labels),
     // an extra or recorded label's once: the serialiser layer knows, and prices the escaping
@@ -3798,6 +3853,13 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
                       const std::vector<std::vector<Succ>> &succs) {
     if (!strategy_.batch_kmers)
         return;
+    // Past the seed's deadline no later level runs (run() reads the same clock before the
+    // next depth, a head's checkpoint before the other arm's next head), so nothing the
+    // lookahead would read can be consumed: its graph steps and reads are skipped. Before
+    // the efficiency pass the lookahead ran in full there (2.2 s on a 250 ms budget on
+    // refseq33m); only timing and the physical counters can tell the difference
+    if (time_exceeded())
+        return;
     std::vector<node_index> warm_keys;
     std::vector<node_index> chain_curs;      // nodes whose successors were enumerated
     std::vector<Lookahead> chain_entries;    // their lookahead entries
@@ -3810,13 +3872,32 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
         node_index cur = succs[i][0].node;
         if (arm.lookahead.count(cur))
             continue;
+        // The chain stops at the radius: its n-th node (n from 0, the item's successor at
+        // ext_bp + 1 + n) is enumerated and its single successor's row warmed only when that
+        // node is below the radius — a head at the radius is ended, not expanded, so its
+        // successors are never asked for. Before the efficiency pass the chain ran
+        // batch_kmers nodes whatever the radius left (1,047 rows read for 32 consumed on
+        // refseq33m); what changes is physical work (timing) and the counters of lookahead
+        // work: annotation.direct_reads (a direct-access annotation's lookahead reads single
+        // cells), and keys_mapped where the unbudgeted lookahead outgrew kMaxLookahead and
+        // its clearing counted the keys
+        const uint64_t radius = strategy_.max_extension_bp;
+        const uint64_t room = items[i].ext_bp + 1 < radius ? radius - items[i].ext_bp - 1 : 0;
+        const size_t chain_max = std::min<uint64_t>(strategy_.batch_kmers, room);
+        if (!chain_max)
+            continue;
         succ_kmer(arm.arm, items[i].kmer, succs[i][0].ch, &kmer);
         chain_curs.clear();
         chain_entries.clear();
         chain_nodes.clear();
         window.clear();
-        for (size_t n = 0; n < strategy_.batch_kmers; ++n) {
+        for (size_t n = 0; n < chain_max; ++n) {
             if (n > 0 && arm.lookahead.count(cur))
+                break;
+            // the graph steps of a chain are not free either (about 0.65 ms a first-touch node
+            // on refseq33m, 1,000 per chain at batch_kmers 1000): a chain stops at the seed's
+            // deadline, as its read does (the entries it made are kept; nothing depends on them)
+            if (n > 0 && time_exceeded())
                 break;
             Lookahead la;
             la.succs = enumerate(arm, cur, kmer);
@@ -3875,13 +3956,31 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
     if (!warm_keys.empty()) {
         // Under a deadline the lookahead's read is paced too; a deadline that stops it ends
         // the warming silently, and the next head's checkpoint, which reads the same deadline,
-        // stops the walk there, where the whole read would have: nothing depends on the cache
-        ReadPacing *pace = pacing(depth_ > 0 ? Deadline::WALK : Deadline::NONE);
+        // stops the walk there, where the whole read would have: nothing depends on the cache.
+        // Also at depth 0, where no head checks the deadline: run() reads it before depth 1,
+        // so the roots' lookahead read past it was never consumed (the efficiency pass)
+        ReadPacing *pace = pacing(Deadline::WALK);
         if (decode_charged_) {
             // within what is left beside the level's rows; a read that does not fit ends the
             // warming silently (budget-aware results never depend on what is cached)
             annot::matrix::DecodeBudget budget = decode_budget(DecodeCharge::WARM, arm.arm,
                                                                allowance());
+            // Under a memory budget the lookahead reads until a run does not fit, and with the
+            // path cache a run holds less: it reads as if the cache were not there (its rows
+            // the cache spared charged; RowDiffCache::admit_as_uncached), so that the cache does
+            // not make it read rows no level asks for (review of the efficiency pass)
+            struct AdmitAsUncached {
+                AdmitAsUncached(LabelOracle &oracle, bool on) : oracle(oracle), on(on) {
+                    if (on)
+                        oracle.path_cache().set_admit_as_uncached(true);
+                }
+                ~AdmitAsUncached() {
+                    if (on)
+                        oracle.path_cache().set_admit_as_uncached(false);
+                }
+                LabelOracle &oracle;
+                const bool on;
+            } admit { oracle_, mem_limit_ > 0 };
             if (annotate_) {
                 recorder_->warm(warm_keys, budget, pace);
             } else {
@@ -5677,6 +5776,7 @@ SeedResult Walker::run() {
     // soft overshoot (review of stage 2, finding 3).
     if (mem_limit_ && accounted() > mem_limit_)
         fail_depth0(accounted());
+    enable_path_cache();
 
     uint64_t depth = 0;
     while (!seed_stopped_) {

@@ -660,4 +660,364 @@ TEST(RowDiffBudgetedDecode, ModelBoundsTheAllocator) {
 #endif
 }
 
+// ---- The row-diff path cache (row_diff_cache.hpp; the efficiency pass)
+
+template <class RowT>
+std::vector<RowT> cached_rows(const Annotation &a, const std::vector<Row> &rows,
+                              RowDiffPathCache &cache) {
+    if constexpr(std::is_same_v<RowT, SetBits>) {
+        return a.rd->get_rows_cached(rows, cache);
+    } else {
+        return a.rd->get_row_tuples_cached(rows, cache);
+    }
+}
+
+// The batches of a walk: consecutive rows along the graph in both directions, then the
+// batches() mix, so that later paths meet the rows earlier calls reconstructed
+std::vector<std::vector<Row>> walk_batches(const Annotation &a, uint32_t seed) {
+    std::vector<std::vector<Row>> out;
+    const std::vector<Row> valid = rows_of(a);
+    for (size_t from = 0; from + 4 < valid.size(); from += 37) {
+        for (size_t i = from; i < from + 4; ++i) {
+            out.push_back({ valid[i] });
+            out.push_back({ valid[i + 1], valid[i] });
+        }
+    }
+    for (auto &b : batches(a, seed)) {
+        out.push_back(std::move(b));
+    }
+    return out;
+}
+
+// P1: the default decode with the cache returns the rows of the default decode, call after
+// call, under bounds that keep everything, evict often, and keep nothing; the cache stays
+// within its bound (and a shared room) and paths stop at cached rows
+template <class RowT>
+void check_cached_rows(const Annotation &a) {
+    for (uint64_t bound : { uint64_t(64) << 20, uint64_t(24) << 10, uint64_t(1) }) {
+        RowDiffPathCache cache;
+        uint64_t room = std::numeric_limits<uint64_t>::max();
+        cache.set_bound(bound, [&]() { return room; });
+        size_t calls = 0;
+        for (const auto &rows : walk_batches(a, 5)) {
+            // a shared bound that shrinks and grows (LabelOracle::make_room)
+            room = calls % 7 == 3 ? bound / 3 : std::numeric_limits<uint64_t>::max();
+            EXPECT_EQ(reference<RowT>(a, rows), cached_rows<RowT>(a, rows, cache))
+                << a.name << " bound " << bound << " call " << calls;
+            EXPECT_LE(cache.bytes(), std::min(bound, room)) << a.name << " call " << calls;
+            calls++;
+        }
+        if (bound > (uint64_t(1) << 20)) {
+            EXPECT_GT(cache.hits(), calls / 2) << a.name;
+        } else if (bound == 1) {
+            EXPECT_EQ(0u, cache.hits()) << a.name;
+            EXPECT_EQ(0u, cache.bytes());
+        }
+    }
+}
+
+TEST(RowDiffPathCache, CachedDecodeEqualsTheDefaultDecode) {
+    for (const Annotation &a : annotations()) {
+        ASSERT_TRUE(a.rd->supports_path_cache()) << a.name;
+        check_cached_rows<SetBits>(a);
+        if (a.tuples)
+            check_cached_rows<RowTuples>(a);
+    }
+}
+
+// P2: the budget-aware decode with the cache returns the same rows with the same costs and
+// held bytes as without it, call after call (the costs of a path cut at a cached row are its
+// whole path's: what is admitted and charged does not depend on the cache) and at most the
+// held bytes; a row decoded alone stays within its demand and its peak without the cache; rows the default decode cached (no path aggregates) are not
+// used by it until it reconstructed them itself; and it refuses as the decode without the
+// cache does when not even its own (smaller) decode fits
+template <class RowT>
+void check_budgeted_with_cache(const Annotation &a) {
+    for (bool warm_by_default : { false, true }) {
+        RowDiffPathCache cache;
+        cache.set_bound(uint64_t(64) << 20);
+        size_t calls = 0;
+        for (const auto &rows : walk_batches(a, 9)) {
+            if (warm_by_default && calls % 3 == 0)
+                cached_rows<RowT>(a, rows, cache);     // entries without aggregates
+            DecodeBudget plain_budget, cached_budget;
+            std::vector<RowT> plain_out, cached_out;
+            std::vector<RowCost> plain_costs, cached_costs;
+            std::vector<uint64_t> plain_held, cached_held;
+            ASSERT_EQ(DecodeStatus::OK, decode<RowT>(a, rows, plain_budget, &plain_out,
+                                                     &plain_costs, &plain_held));
+            DecodeStatus status;
+            if constexpr(std::is_same_v<RowT, SetBits>) {
+                status = a.rd->decode_rows(rows, cached_budget, &cached_out, &cached_costs,
+                                           &cached_held, &cache);
+            } else {
+                status = a.rd->decode_row_tuples(rows, cached_budget, &cached_out,
+                                                 &cached_costs, &cached_held, &cache);
+            }
+            ASSERT_EQ(DecodeStatus::OK, status) << a.name;
+            EXPECT_EQ(plain_out, cached_out) << a.name << " call " << calls;
+            ASSERT_EQ(plain_costs.size(), cached_costs.size());
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_TRUE(same_costs(plain_costs[i], cached_costs[i]))
+                    << a.name << " call " << calls << " row " << rows[i] << ": demand "
+                    << cached_costs[i].demand << " without the cache " << plain_costs[i].demand;
+            }
+            // a returned row continued from a cached row's exact copy holds at most what it
+            // holds reconstructed along its whole path (what is admitted is its demand)
+            ASSERT_EQ(plain_held.size(), cached_held.size());
+            for (size_t i = 0; i < rows.size(); ++i) {
+                EXPECT_LE(cached_held[i], plain_held[i]) << a.name << " row " << rows[i];
+            }
+            EXPECT_LE(cached_budget.held(), plain_budget.held()) << a.name;
+            // A row read alone holds at most what it holds decoded to its anchor (several rows
+            // can hold more at once: the copies of the cached rows their paths stop at, where
+            // the decode to the anchors held their small diffs; charged all the same, and a
+            // run that does not fit is retried in halves, down to single rows)
+            if (rows.size() == 1) {
+                EXPECT_LE(cached_budget.peak(), plain_budget.peak()) << a.name << " call " << calls;
+                EXPECT_LE(cached_budget.peak(), cached_costs[0].demand) << a.name;
+            }
+            calls++;
+        }
+        EXPECT_GT(cache.hits(), calls / 2) << a.name;
+    }
+    // a budget the cached decode does not fit refuses it whole: nothing returned, the budget
+    // as on entry (both decodes on copies of one cache state: the first caches what it reads)
+    RowDiffPathCache cache;
+    cache.set_bound(uint64_t(64) << 20);
+    const std::vector<Row> valid = rows_of(a);
+    size_t refused = 0;
+    for (size_t vi = 0; vi + 1 < valid.size(); vi += 11) {
+        std::vector<RowT> out;
+        std::vector<RowCost> costs;
+        std::vector<uint64_t> held;
+        DecodeBudget probe;
+        RowDiffPathCache probe_cache = cache, less_cache = cache;
+        DecodeStatus status;
+        if constexpr(std::is_same_v<RowT, SetBits>) {
+            status = a.rd->decode_rows({ valid[vi] }, probe, &out, &costs, &held, &probe_cache);
+        } else {
+            status = a.rd->decode_row_tuples({ valid[vi] }, probe, &out, &costs, &held,
+                                             &probe_cache);
+        }
+        ASSERT_EQ(DecodeStatus::OK, status);
+        if (probe.peak()) {
+            DecodeBudget less(probe.peak() - 1);
+            std::vector<RowT> sentinel(1);
+            std::vector<RowCost> c;
+            std::vector<uint64_t> h;
+            if constexpr(std::is_same_v<RowT, SetBits>) {
+                status = a.rd->decode_rows({ valid[vi] }, less, &sentinel, &c, &h, &less_cache);
+            } else {
+                status = a.rd->decode_row_tuples({ valid[vi] }, less, &sentinel, &c, &h,
+                                                 &less_cache);
+            }
+            EXPECT_EQ(DecodeStatus::REFUSED, status) << a.name << " row " << valid[vi];
+            EXPECT_EQ(1u, sentinel.size());
+            EXPECT_EQ(0u, less.held());
+            refused++;
+        }
+        // the cache warms along the rows (the next rows' paths meet these)
+        cache = probe_cache;
+    }
+    EXPECT_GT(refused, 5u) << a.name;
+}
+
+TEST(RowDiffPathCache, BudgetedCostsDoNotDependOnTheCache) {
+    for (const Annotation &a : annotations()) {
+        check_budgeted_with_cache<SetBits>(a);
+        if (a.tuples)
+            check_budgeted_with_cache<RowTuples>(a);
+    }
+}
+
+// P3: the cache's own bookkeeping: two generations within the bound, a hit in the older one
+// moves the row to the current one, a row larger than half the bound is not kept, the
+// aggregates are added to a row cached without them, trim() and clear()
+TEST(RowDiffPathCache, Generations) {
+    using Cache = RowDiffCache<SetBits>;
+    Cache cache;
+    EXPECT_FALSE(cache.enabled());
+    cache.insert(1, SetBits{ 1, 2, 3 });
+    EXPECT_EQ(0u, cache.size());     // off: nothing kept
+    const uint64_t entry = Cache::kEntryBytes + row_copy_bytes(SetBits{ 1, 2, 3 });
+    cache.set_bound(8 * entry);
+    for (Row r = 0; r < 4; ++r) {
+        cache.insert(r, SetBits{ 1, 2, 3 });
+    }
+    EXPECT_EQ(4u, cache.size());
+    EXPECT_EQ(4 * entry, cache.bytes());
+    cache.insert(4, SetBits{ 1, 2, 3 });     // the current generation is full: rotated
+    EXPECT_EQ(5u, cache.size());
+    // the counts move with their tables (review of the fixes: a rotation that dropped the
+    // current generation's count with the older table counted 1 entry of the 5 held)
+    EXPECT_EQ(5 * entry, cache.bytes());
+    ASSERT_TRUE(cache.find(0, false));       // moved to the current generation
+    EXPECT_EQ(5 * entry, cache.bytes());
+    for (Row r = 5; r < 8; ++r) {
+        cache.insert(r, SetBits{ 1, 2, 3 });
+    }
+    EXPECT_LE(cache.bytes(), 8 * entry);
+    EXPECT_EQ(cache.size() * entry, cache.bytes());
+    EXPECT_TRUE(cache.find(0, false));       // kept by the move
+    EXPECT_FALSE(cache.find(1, false));      // dropped with the older generation
+    EXPECT_FALSE(cache.find(0, true));       // no aggregates
+    PathAggregates agg;
+    agg.length = 3;
+    cache.insert(0, SetBits{ 1, 2, 3 }, &agg);
+    ASSERT_TRUE(cache.find(0, true));
+    EXPECT_EQ(3u, cache.find(0, true)->path.length);
+    SetBits wide(4 * entry / sizeof(Column));
+    std::iota(wide.begin(), wide.end(), 0);
+    cache.insert(100, wide);
+    EXPECT_FALSE(cache.find(100, false));    // more than half the bound
+    cache.trim(entry);
+    EXPECT_LE(cache.bytes(), entry);
+    EXPECT_EQ(cache.size() * entry, cache.bytes());
+    cache.clear();
+    EXPECT_EQ(0u, cache.size());
+    EXPECT_EQ(0u, cache.bytes());
+
+    // A shared bound that shrinks (LabelOracle::make_room trims to it) keeps what both
+    // generations hold within it: with the older generation's count lost at its rotation, the
+    // trim saw 3 of the 7 entries held and kept all 7 beside a label cache that had grown
+    uint64_t room = 8 * entry;
+    cache.set_bound(8 * entry, [&room]() { return room; });
+    for (Row r = 0; r < 7; ++r) {
+        cache.insert(r, SetBits{ 1, 2, 3 });
+    }
+    EXPECT_EQ(7u, cache.size());
+    EXPECT_EQ(7 * entry, cache.bytes());
+    room = 4 * entry;
+    cache.trim(cache.limit());
+    EXPECT_LE(cache.size() * entry, 4 * entry);
+    EXPECT_EQ(cache.size() * entry, cache.bytes());
+    cache.insert(7, SetBits{ 1, 2, 3 });
+    EXPECT_LE(cache.size() * entry, 4 * entry);
+    EXPECT_EQ(cache.size() * entry, cache.bytes());
+}
+
+// Review of the efficiency pass, finding 4: a generation dropped releases its table. A cleared
+// hopscotch map keeps its bucket array, sized for the most entries it held, so after many
+// narrow rows a few wide ones held the narrow phase's arrays beside their bound (74.7 MiB of
+// heap for 63.9 MiB accounted at a 64 MiB bound); the tables now hold no more than the share
+// of the entries the bound counts (kEntryBytes), and trim() and clear() free them
+TEST(RowDiffPathCache, DroppedGenerationsReleaseTheirTables) {
+    using Cache = RowDiffCache<SetBits>;
+    // a bucket: its key and entry, and the neighbourhood bitmap
+    const uint64_t bucket = sizeof(std::pair<Row, Cache::Entry>) + sizeof(uint64_t);
+    Cache cache;
+    cache.set_bound(uint64_t(4) << 20);
+    // narrow rows: thousands of entries a generation, rotated many times
+    for (Row r = 0; r < 100000; ++r) {
+        cache.insert(r, SetBits{ 1 });
+    }
+    const size_t narrow = cache.bucket_count();
+    EXPECT_LE(narrow * bucket, cache.size() * Cache::kEntryBytes);
+    // wide rows: a few hundred a generation
+    SetBits wide(1000);
+    std::iota(wide.begin(), wide.end(), 0);
+    for (Row r = 200000; r < 202000; ++r) {
+        cache.insert(r, wide);
+    }
+    EXPECT_GT(cache.size(), 100u);
+    EXPECT_LE(cache.bytes(), uint64_t(4) << 20);
+    EXPECT_LE(cache.bucket_count() * bucket, cache.size() * Cache::kEntryBytes)
+        << cache.bucket_count() << " buckets for " << cache.size() << " entries";
+    EXPECT_LT(cache.bucket_count() * 4, narrow);
+    cache.trim(0);
+    EXPECT_EQ(0u, cache.bucket_count());
+    cache.insert(1, SetBits{ 1 });
+    EXPECT_GT(cache.bucket_count(), 0u);
+    cache.clear();
+    EXPECT_EQ(0u, cache.bucket_count());
+}
+
+// Review of the efficiency pass, finding 5: with the cache a budget-aware read holds less (its
+// paths are cut at cached rows), so the lookahead under a memory budget, which reads ahead
+// until a run does not fit, read more with the cache than without it (UHGG 16S, annotate mode,
+// 8 MiB: 75k rows warmed against 52-55k, 13-27% more instructions). Admitted as without the
+// cache (admit_as_uncached), a read also charges, until its stored rows are read, the rows
+// beyond the cached rows of its paths — per anchor its longest cached path's — and their
+// stored rows: a row read alone holds then what decoding it to its anchor held at that point
+// (that decode's peak, less at most its scratch and its reconstruction's peak beyond the
+// stored rows). Its rows, costs and held bytes are those of the read without the mode
+template <class RowT>
+void check_admitted_as_uncached(const Annotation &a) {
+    RowDiffPathCache cache;
+    cache.set_bound(uint64_t(64) << 20);
+    // every row cached with its aggregates
+    for (const auto &rows : walk_batches(a, 3)) {
+        DecodeBudget budget;
+        std::vector<RowT> out;
+        std::vector<RowCost> costs;
+        std::vector<uint64_t> held;
+        if constexpr(std::is_same_v<RowT, SetBits>) {
+            ASSERT_EQ(DecodeStatus::OK, a.rd->decode_rows(rows, budget, &out, &costs, &held, &cache));
+        } else {
+            ASSERT_EQ(DecodeStatus::OK, a.rd->decode_row_tuples(rows, budget, &out, &costs, &held,
+                                                                &cache));
+        }
+    }
+    auto &typed = [&]() -> RowDiffCache<RowT>& {
+        if constexpr(std::is_same_v<RowT, SetBits>) {
+            return cache.rows;
+        } else {
+            return cache.tuples;
+        }
+    }();
+    size_t spared = 0;
+    for (Row row : rows_of(a)) {
+        const auto *entry = typed.find(row, true);
+        if (!entry || entry->path.length < 2)
+            continue;
+        const PathAggregates path = entry->path;
+        DecodeBudget plain_budget, cut_budget, admitted_budget;
+        std::vector<RowT> plain_out, cut_out, admitted_out;
+        std::vector<RowCost> plain_costs, cut_costs, admitted_costs;
+        std::vector<uint64_t> plain_held, cut_held, admitted_held;
+        ASSERT_EQ(DecodeStatus::OK, decode<RowT>(a, { row }, plain_budget, &plain_out,
+                                                 &plain_costs, &plain_held));
+        for (bool admit : { false, true }) {
+            cache.set_admit_as_uncached(admit);
+            DecodeBudget &budget = admit ? admitted_budget : cut_budget;
+            auto *out = admit ? &admitted_out : &cut_out;
+            auto *costs = admit ? &admitted_costs : &cut_costs;
+            auto *held = admit ? &admitted_held : &cut_held;
+            if constexpr(std::is_same_v<RowT, SetBits>) {
+                ASSERT_EQ(DecodeStatus::OK, a.rd->decode_rows({ row }, budget, out, costs, held,
+                                                              &cache));
+            } else {
+                ASSERT_EQ(DecodeStatus::OK, a.rd->decode_row_tuples({ row }, budget, out, costs,
+                                                                    held, &cache));
+            }
+        }
+        cache.set_admit_as_uncached(false);
+        EXPECT_EQ(plain_out, admitted_out) << a.name;
+        EXPECT_TRUE(same_costs(plain_costs[0], admitted_costs[0])) << a.name << " row " << row;
+        EXPECT_EQ(cut_held, admitted_held) << a.name;
+        // the spared rows charged: at least their stored rows beside the cached row's copy, and
+        // within what the decode to the anchor held at most, its demand
+        EXPECT_GE(admitted_budget.peak(), cut_budget.peak() + path.path_stored) << a.name;
+        EXPECT_LE(admitted_budget.peak(), plain_costs[0].demand + plain_costs[0].demand / 2)
+            << a.name << " row " << row;
+        EXPECT_GE(admitted_budget.peak() + path.recon_peak + path.full
+                      + 64 * (path.max_scratch + 1) + 4096,
+                  plain_budget.peak()) << a.name << " row " << row;
+        spared++;
+    }
+    EXPECT_GT(spared, 10u) << a.name;
+}
+
+TEST(RowDiffPathCache, LookaheadAdmittedAsWithoutTheCache) {
+    for (const Annotation &a : annotations()) {
+        // a coordinate annotation caches its tuple rows, from which its rows are made too
+        if (a.tuples) {
+            check_admitted_as_uncached<RowTuples>(a);
+        } else {
+            check_admitted_as_uncached<SetBits>(a);
+        }
+    }
+}
+
 } // namespace

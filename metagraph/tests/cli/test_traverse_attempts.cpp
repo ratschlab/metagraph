@@ -48,6 +48,10 @@ AttemptSettings settings_with(FakeClock *clock, uint64_t retention_s = 60,
     s.retention_count = retention_count;
     s.client_check_ms = 0;
     s.poll_stride = 1;
+    // a stop time below the floor (allowance / 2), so that the bounds these tests compute are
+    // the floor's unless a test sets the reserve's parts (the default, 1000 since the
+    // efficiency pass's calibration, would exceed this allowance's floor)
+    s.delivery_stop_ms = 250;
     if (clock)
         s.clock = clock->fn();
     return s;
@@ -389,6 +393,10 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     s.delivery_compress_mbps = 50;     // 50,000 bytes per ms
     s.delivery_build_mbps = 5;         // 5,000 bytes per ms
     s.delivery_stop_ms = 100;
+    // the ratios this arithmetic is written for (the defaults are 30 and 50 since the
+    // efficiency pass's calibration)
+    s.account_per_text_byte_json = 20;
+    s.account_per_text_byte_graphlet = 40;
     auto reserve = [](double model, double stop = 100) { return 1.25 * model + stop; };
     AttemptRegistry registry(s);
     auto a = attempt_of(registry, "reserve");
@@ -498,6 +506,12 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     EXPECT_EQ(5, r["build_mbps"].asDouble());
     EXPECT_EQ(20, r["account_per_text_byte"]["json"].asDouble());
     EXPECT_EQ(40, r["account_per_text_byte"]["graphlet"].asDouble());
+    EXPECT_NE(std::string::npos, r["calibration"].asString().find("starting estimates"));
+    // the calibrated starting estimates (the efficiency pass; 20, 40 and 250 before)
+    const AttemptSettings defaults;
+    EXPECT_EQ(30, defaults.account_per_text_byte_json);
+    EXPECT_EQ(50, defaults.account_per_text_byte_graphlet);
+    EXPECT_EQ(1000, defaults.delivery_stop_ms);
     EXPECT_EQ(1.25, r["margin"].asDouble());
     EXPECT_TRUE(r["stop_ms"].isIntegral());
     EXPECT_EQ(100u, r["stop_ms"].asUInt64());

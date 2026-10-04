@@ -4,6 +4,7 @@
 #include "row_diff.hpp"
 
 #include <algorithm>
+#include <tuple>
 #include <iterator>
 
 #include "graph/annotated_dbg.hpp"
@@ -244,7 +245,49 @@ struct Visit {
     uint64_t max_scratch = 0;   // the most scratch entries a row of its path took
     uint64_t recon_peak = 0;    // the most the reconstruction of its row holds beyond them
     uint64_t full = 0;          // bytes charged for its reconstructed row
+    // The anchor its path ends at (bits 0-62) and whether its full row comes from the path
+    // cache, with the above (bit 63), in one word: the size of a Visit is in every row's
+    // demand (ChargedBuffer<Visit>::peak_for), so it must stay what the model had (below)
+    uint64_t anchor_cached = 0;
+
+    static constexpr uint64_t kCached = uint64_t(1) << 63;
+    bool cached() const { return anchor_cached & kCached; }
+    Row anchor() const { return anchor_cached & ~kCached; }
+    void set_cached() { anchor_cached |= kCached; }
+    void set_anchor(Row anchor) {
+        assert(!(anchor & kCached));
+        anchor_cached = (anchor_cached & kCached) | anchor;
+    }
 };
+// 88 bytes before the efficiency pass, 96 now: the same bytes in the model at every capacity
+// a ChargedBuffer takes (16 * 2^k elements: 1,408 * 2^k and 1,536 * 2^k bytes share jemalloc's
+// size class, alloc_bytes()). A larger Visit would change every row's demand, and with it the
+// budgeted responses (review of the efficiency pass: 104 bytes moved a stated demand by 768)
+static_assert(sizeof(Visit) <= 96, "a larger Visit changes the demand of every row");
+
+// a visit's aggregates, as the path cache keeps them (and back)
+PathAggregates aggregates_of(const Visit &visit) {
+    PathAggregates a;
+    a.entries = visit.entries;
+    a.length = visit.length;
+    a.dep_entries = visit.dep_entries;
+    a.path_stored = visit.path_stored;
+    a.max_scratch = visit.max_scratch;
+    a.recon_peak = visit.recon_peak;
+    a.full = visit.full;
+    a.anchor = visit.anchor();
+    return a;
+}
+void set_aggregates(const PathAggregates &a, Visit *visit) {
+    visit->entries = a.entries;
+    visit->length = a.length;
+    visit->dep_entries = a.dep_entries;
+    visit->path_stored = a.path_stored;
+    visit->max_scratch = a.max_scratch;
+    visit->recon_peak = a.recon_peak;
+    visit->full = a.full;
+    visit->set_anchor(a.anchor);
+}
 
 } // namespace
 
@@ -252,7 +295,8 @@ template <class RowT>
 DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudget &budget,
                                        RowFetcher<RowT> &fetcher, std::vector<RowT> *out,
                                        std::vector<RowCost> *costs,
-                                       std::vector<uint64_t> *held) const {
+                                       std::vector<uint64_t> *held,
+                                       RowDiffCache<RowT> *cache) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == graph_->max_index() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->max_index() + 1);
@@ -281,10 +325,13 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
     std::vector<uint32_t> start(n + 1);
 
     // ---- trace the row-diff paths (as get_rd_ids with one thread): each path stops at an
-    // anchor or at a row visited before, whose reconstruction precedes it
+    // anchor, at a row visited before, whose reconstruction precedes it, or at a row the path
+    // cache holds with its aggregates, which stand for the rest of its path
     VisitIndex index;
     ChargedBuffer<Visit> visits;
     ChargedBuffer<uint32_t> steps;
+    if (cache)
+        cache->trim(cache->limit());
     for (size_t i = 0; i < n; ++i) {
         start[i] = steps.data.size();
         node_index node = graph::AnnotatedSequenceGraph::anno_to_graph_index(rows[i]);
@@ -298,18 +345,70 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
                 if (!visits.reserve_one(budget) || !index.insert(row, v, budget))
                     return refuse();
                 visits.data.push_back(Visit{ row });
+                if (cache) {
+                    if (const auto *entry = cache->find(row, true)) {
+                        set_aggregates(entry->path, &visits.data[v]);
+                        visits.data[v].set_cached();
+                    }
+                }
             }
             if (!steps.reserve_one(budget))
                 return refuse();
             steps.data.push_back(v);
             visits.data[v].times++;
-            if (!is_new || anchor_[row])
+            if (!is_new || visits.data[v].cached() || anchor_[row])
                 break;
             node = row_diff_successor(*graph_, node, fork_succ_);
         }
     }
     start[n] = steps.data.size();
     const size_t num_visits = visits.data.size();
+
+    // ---- a read admitted as without the cache (RowDiffCache::admit_as_uncached: the
+    // lookahead under a memory budget) holds, until its stored rows are read, also what the
+    // decode to the anchors would have held for the rows the cache spared: the trace's
+    // containers and per-visit arrays grown by them and their stored rows. Paths to one
+    // anchor share their tail (a row has one row-diff successor), so the rows beyond the
+    // cached rows of one anchor are counted as its longest cached path's: exact for a chain;
+    // more than that decode held where the tail is also a path of this call that the cache
+    // did not cut (counted twice: admitted less readily than without the cache), less where
+    // cached paths of one anchor branch (more readily). On UHGG 16S, annotate mode, 8 MiB,
+    // the lookahead warmed 35.6k rows so, 52-55k without the cache, 75k with it uncharged
+    uint64_t unspared = 0;
+    if (cache && cache->admit_as_uncached) {
+        std::vector<std::tuple<Row, uint32_t, uint64_t>> spared;
+        for (const Visit &visit : visits.data) {
+            if (visit.cached())
+                spared.emplace_back(visit.anchor(), visit.length, visit.path_stored);
+        }
+        if (!spared.empty()) {
+            std::sort(spared.begin(), spared.end());
+            uint64_t extra = 0, stored = 0;
+            for (size_t i = 0; i < spared.size(); ) {
+                size_t j = i;
+                uint32_t length = 0;
+                uint64_t bytes = 0;
+                for (; j < spared.size() && std::get<0>(spared[j]) == std::get<0>(spared[i]); ++j) {
+                    length = std::max(length, std::get<1>(spared[j]));
+                    bytes = std::max(bytes, std::get<2>(spared[j]));
+                }
+                extra += length - 1;
+                stored += bytes;
+                i = j;
+            }
+            auto beyond = [](uint64_t peak, uint64_t charged) {
+                return peak > charged ? peak - charged : 0;
+            };
+            unspared = beyond(VisitIndex::peak_for(num_visits + extra), index.charged())
+                     + beyond(ChargedBuffer<Visit>::peak_for(num_visits + extra), visits.charged())
+                     + beyond(ChargedBuffer<uint32_t>::peak_for(steps.data.size() + extra),
+                              steps.charged())
+                     + buffer_bytes(extra, sizeof(RowT)) + buffer_bytes(extra, sizeof(uint32_t))
+                     + stored;
+            if (!budget.charge(unspared))
+                return refuse();
+        }
+    }
 
     // ---- read every stored row, in ascending row order: the order in which the index
     // matrix's descent is as fast as a batched read (a random order is twice as slow)
@@ -327,6 +426,19 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
     });
     for (uint32_t v : order) {
         Visit &visit = visits.data[v];
+        if (visit.cached()) {
+            // the cached full row, charged as its copy (its aggregates came with it); the
+            // trace's lookups only moved entries within the cache, so it is still there
+            const auto *entry = cache->find(visit.row, true);
+            assert(entry);
+            const uint64_t bytes = copy_bytes(entry->row);
+            if (!budget.charge(bytes))
+                return refuse();
+            slot[v] = entry->row;
+            visit.slot_bytes = bytes;
+            cache->hits++;
+            continue;
+        }
         if (!fetcher.fetch(visit.row, &slot[v], &visit.stored, budget))
             return refuse();
         visit.slot_bytes = visit.stored;
@@ -334,6 +446,8 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
         visit.scratch = fetcher.scratch_entries(slot[v]);
     }
 
+    // the paths' rows the cache spared, as admitted (above), are not held from here on
+    budget.release(unspared);
     // ---- reconstruct in the requested order (as call_rows with one group); a stored row
     // is freed once its last path has used it, a row a later path ends at is kept whole
     auto take = [&](Visit &visit, RowT &from, RowT *row, uint64_t *row_bytes) {
@@ -365,6 +479,11 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             last.max_scratch = last.scratch;
             last.recon_peak = last.stored;
             last.full = last.stored;
+            last.set_anchor(last.row);
+            if (cache) {
+                const PathAggregates agg = aggregates_of(last);
+                cache->insert(last.row, slot[end], &agg);
+            }
         }
         RowT result;
         uint64_t result_bytes = 0;
@@ -400,6 +519,12 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             // decoded alone but an exact-size copy when the path continued from a row shared
             // earlier in the call — the demand must not depend on the batch (review F4)
             visit.full = changes ? result_bytes : next.full;
+            visit.set_anchor(next.anchor());
+            if (cache) {
+                // outside this budget: the cache keeps within its own bound (the caller's)
+                const PathAggregates agg = aggregates_of(visit);
+                cache->insert(visit.row, result, &agg);
+            }
             // the stored diff is used up; a row a later path ends at keeps the full row
             budget.release(visit.slot_bytes);
             visit.slot_bytes = 0;
@@ -465,11 +590,13 @@ IRowDiff::decode_budgeted<SetBitPositions>(const std::vector<Row> &, DecodeBudge
                                            RowFetcher<SetBitPositions> &,
                                            std::vector<SetBitPositions> *,
                                            std::vector<RowCost> *,
-                                           std::vector<uint64_t> *) const;
+                                           std::vector<uint64_t> *,
+                                           RowDiffCache<SetBitPositions> *) const;
 template DecodeStatus
 IRowDiff::decode_budgeted<RowTuples>(const std::vector<Row> &, DecodeBudget &,
                                      RowFetcher<RowTuples> &, std::vector<RowTuples> *,
-                                     std::vector<RowCost> *, std::vector<uint64_t> *) const;
+                                     std::vector<RowCost> *, std::vector<uint64_t> *,
+                                     RowDiffCache<RowTuples> *) const;
 
 } // namespace matrix
 } // namespace annot

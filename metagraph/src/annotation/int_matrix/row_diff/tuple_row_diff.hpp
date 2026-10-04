@@ -61,10 +61,20 @@ class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix
     bool supports_budgeted_decode() const override { return HasRowTuples<BaseMatrix>::value; }
     DecodeStatus decode_rows(const std::vector<Row> &rows, DecodeBudget &budget,
                              std::vector<SetBitPositions> *out, std::vector<RowCost> *costs,
-                             std::vector<uint64_t> *held) const override;
+                             std::vector<uint64_t> *held,
+                             RowDiffPathCache *cache = nullptr) const override;
     DecodeStatus decode_row_tuples(const std::vector<Row> &rows, DecodeBudget &budget,
                                    std::vector<RowTuples> *out, std::vector<RowCost> *costs,
-                                   std::vector<uint64_t> *held) const override;
+                                   std::vector<uint64_t> *held,
+                                   RowDiffPathCache *cache = nullptr) const override;
+
+    // the default decode with the path cache (IRowDiff): the cache holds full tuple rows,
+    // from which get_rows_cached() keeps the columns, as get_rows() does
+    bool supports_path_cache() const override { return true; }
+    std::vector<SetBitPositions> get_rows_cached(const std::vector<Row> &rows,
+                                                 RowDiffPathCache &cache) const override;
+    std::vector<RowTuples> get_row_tuples_cached(const std::vector<Row> &rows,
+                                                 RowDiffPathCache &cache) const override;
 
   private:
     static void decode_diffs(RowTuples *diffs);
@@ -105,10 +115,12 @@ DecodeStatus TupleRowDiff<BaseMatrix>::decode_row_tuples(const std::vector<Row> 
                                                          DecodeBudget &budget,
                                                          std::vector<RowTuples> *out,
                                                          std::vector<RowCost> *costs,
-                                                         std::vector<uint64_t> *held) const {
+                                                         std::vector<uint64_t> *held,
+                                                         RowDiffPathCache *cache) const {
     if constexpr(HasRowTuples<BaseMatrix>::value) {
         BudgetedTupleFetcher<BaseMatrix> fetcher(diffs_);
-        return decode_budgeted<RowTuples>(rows, budget, fetcher, out, costs, held);
+        return decode_budgeted<RowTuples>(rows, budget, fetcher, out, costs, held,
+                                          cache ? &cache->tuples : nullptr);
     } else {
         return DecodeStatus::UNSUPPORTED;
     }
@@ -119,14 +131,15 @@ DecodeStatus TupleRowDiff<BaseMatrix>::decode_rows(const std::vector<Row> &rows,
                                                    DecodeBudget &budget,
                                                    std::vector<SetBitPositions> *out,
                                                    std::vector<RowCost> *costs,
-                                                   std::vector<uint64_t> *held) const {
+                                                   std::vector<uint64_t> *held,
+                                                   RowDiffPathCache *cache) const {
     if constexpr(HasRowTuples<BaseMatrix>::value) {
         const uint64_t at_entry = budget.held();
         std::vector<RowTuples> tuples;
         std::vector<RowCost> row_costs;
         std::vector<uint64_t> tuples_held;
         const DecodeStatus status = decode_row_tuples(rows, budget, &tuples, &row_costs,
-                                                      &tuples_held);
+                                                      &tuples_held, cache);
         if (status != DecodeStatus::OK)
             return status;
         // the columns replace the tuples row by row, as get_rows() converts them; a row's
@@ -160,6 +173,32 @@ DecodeStatus TupleRowDiff<BaseMatrix>::decode_rows(const std::vector<Row> &rows,
     }
 }
 
+
+template <class BaseMatrix>
+std::vector<BinaryMatrix::SetBitPositions>
+TupleRowDiff<BaseMatrix>::get_rows_cached(const std::vector<Row> &row_ids,
+                                          RowDiffPathCache &cache) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+    call_rows_cached<RowTuples>(row_ids, cache.tuples,
+        [this](const std::vector<Row> &rd_ids) { return diffs_.get_row_tuples(rd_ids, 1); },
+        add_diff, decode_diffs,
+        [&](size_t i, RowTuples &&row) { rows[i] = utils::get_firsts<SetBitPositions>(row); }
+    );
+    return rows;
+}
+
+template <class BaseMatrix>
+std::vector<MultiIntMatrix::RowTuples>
+TupleRowDiff<BaseMatrix>::get_row_tuples_cached(const std::vector<Row> &row_ids,
+                                                RowDiffPathCache &cache) const {
+    std::vector<RowTuples> rows(row_ids.size());
+    call_rows_cached<RowTuples>(row_ids, cache.tuples,
+        [this](const std::vector<Row> &rd_ids) { return diffs_.get_row_tuples(rd_ids, 1); },
+        add_diff, decode_diffs,
+        [&](size_t i, RowTuples &&row) { rows[i] = std::move(row); }
+    );
+    return rows;
+}
 
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) const {

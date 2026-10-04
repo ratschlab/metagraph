@@ -510,11 +510,15 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
         Strict b(s.raw("bounds"), "request.bounds");
         req.max_query_bp = b.uint("max_query_bp", 1'000'000, 1);
         // resolve has no cooperative deadline yet, so accepting one would promise
-        // something nothing enforces
+        // something nothing enforces. The hint names what bounds the work: the k-mers read.
+        // It used to name discover.max_labels too, which caps the labels returned, while a
+        // discovery reads every k-mer's whole row whatever it keeps (the efficiency pass)
         if (b.has("time_budget_ms")) {
             throw InvalidRequest("request.bounds.time_budget_ms: not supported for resolve "
                                  "(no deadline is enforced); bound the work with "
-                                 "max_query_bp and discover.max_labels instead");
+                                 "bounds.max_query_bp instead (every k-mer's annotation row "
+                                 "is read; discover.max_labels caps the labels returned, "
+                                 "not the rows read)");
         }
     }
     if (s.has("select")) {
@@ -709,6 +713,11 @@ static Json::Value limitation(const char *kind, const std::string &knob, Json::V
     j["effect"] = effect;
     return j;
 }
+
+// What a walk_domain of a budget at the server's maximum (R16; state_budget_clamp) says in
+// place of "raise the knob"
+static const char *const kAtServerMaximum
+    = "; the knob is at the server's maximum (server_limit), which a request cannot raise";
 
 // A stop requested from outside the walk (AttemptControl): the attempt was cancelled or
 // reached the duration bound the server enforces for it. No budget of the request ran out,
@@ -1907,7 +1916,8 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     // What the server offers beyond the base contract, monotonic: a client states a feature as
     // "feature_level >= n" (fields are only ever added; SPEC §10.3 lists each level). 2: attempts
     // (attempt_id/budget_id/locus_id, usage, POST /traverse/cancel, GET /traverse/attempt/{id},
-    // the enforced attempt bound) and the stop when the client is gone; 3: kTraverseFeatureLevel.
+    // the enforced attempt bound) and the stop when the client is gone; 3: pass 5; 4:
+    // kTraverseFeatureLevel.
     // In the probe and in every response, so that a client reading only responses states it too.
     c["feature_level"] = kTraverseFeatureLevel;
     c["k"] = uint_json(oracle.get_k());
@@ -3883,6 +3893,76 @@ static LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::st
     return LabelChangeCost::forbid();
 }
 
+// The strategy.clamped entry of the server's maximum (R16) of the budget a stop ran into —
+// bounds.max_memory_mb for a memory stop, bounds.max_work_units for a work stop — or null: the
+// budget was the request's own (a smaller one is kept), or the stop is no budget's
+static const Json::Value* budget_clamp(const Json::Value &clamped, ResourceStop::Resource resource) {
+    const char *field = resource == ResourceStop::MEMORY ? "bounds.max_memory_mb"
+                      : resource == ResourceStop::WORK ? "bounds.max_work_units" : nullptr;
+    if (!field)
+        return nullptr;
+    for (const Json::Value &c : clamped) {
+        if (c["field"].asString() == field)
+            return &c;
+    }
+    return nullptr;
+}
+
+// What a seed stopped by a budget at the server's maximum (R16) states, walked or failed in its
+// seed phase alike (review of the efficiency pass: a failed seed stated none of it and told the
+// agent to raise the knob): the server_clamp limitation; the stop's `requested`, what the request
+// asked for ("unlimited": it gave no budget); no action raising the budget, and the knob's
+// walk_domain entries carry server_limit (as a derivation's and seed_labels' do) and say that a
+// request cannot raise it — an arm's "; raise the knob" is replaced by that statement, a failed
+// seed's effect is written with it (budget_failed_seed_to_json)
+static void state_budget_clamp(Json::Value *rj, const Json::Value &c) {
+    const std::string field = c["field"].asString();
+    Json::Value &lims = (*rj)["limitations"];
+    if (rj->isMember("resource_stop")) {
+        Json::Value &q = (*rj)["resource_stop"];
+        q["requested"] = c["requested"];
+        const char *raise = field == "bounds.max_memory_mb" ? "raise_memory_budget"
+                                                            : "raise_work_budget";
+        Json::Value actions(Json::arrayValue);
+        for (const Json::Value &a : q["actions"]) {
+            if (a.asString() != raise)
+                actions.append(a);
+        }
+        q["actions"] = std::move(actions);
+    }
+    static const std::string kRaise = "; raise the knob";
+    auto at_max = [&](Json::Value &l) {
+        if (l["kind"].asString() != "walk_domain" || l["knob"].asString() != field)
+            return;
+        l["server_limit"] = c["effective"];
+        std::string effect = l["effect"].asString();
+        if (effect.size() >= kRaise.size()
+                && effect.compare(effect.size() - kRaise.size(), kRaise.size(), kRaise) == 0) {
+            effect.resize(effect.size() - kRaise.size());
+            l["effect"] = effect + kAtServerMaximum;
+        }
+    };
+    for (Json::Value &l : lims) {
+        at_max(l);
+    }
+    // (looked up, not indexed: indexing would add the member to an arm that has none)
+    if (rj->isMember("arms")) {
+        for (const char *arm : { "left", "right" }) {
+            if ((*rj)["arms"].isMember(arm) && (*rj)["arms"][arm].isMember("limitations")) {
+                for (Json::Value &l : (*rj)["arms"][arm]["limitations"]) {
+                    at_max(l);
+                }
+            }
+        }
+    }
+    lims.append(limitation("server_clamp", field, c["effective"], c["requested"],
+                           c["requested"].isString()
+                             ? "the request gave no budget and the server set its maximum, which "
+                               "this seed ran into; a request cannot raise it further"
+                             : "the server lowered the requested value to its maximum and this "
+                               "seed ran into it; a request cannot raise it further"));
+}
+
 // The request-level clamps (strategy.clamped) that bound THIS seed's result, added to
 // its `limitations` as kind server_clamp: a request cannot raise past them, so the agent
 // must know which ones it ran into — a lowered derived-set cap that cut the derived set,
@@ -3893,7 +3973,9 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
     Json::Value &lims = (*rj)["limitations"];
     for (const Json::Value &c : clamped) {
         const std::string field = c["field"].asString();
-        const bool lowered = c["effective"].asDouble() < c["requested"].asDouble();
+        // ("unlimited": an omitted budget the server set to its maximum)
+        const bool lowered = c["requested"].isNumeric()
+                && c["effective"].asDouble() < c["requested"].asDouble();
         bool affected = false;
         if (field == "labels.max_seed_labels") {
             affected = r.labels_dropped > 0;
@@ -3910,6 +3992,14 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
             if (rj->isMember("resource_stop")
                     && (*rj)["resource_stop"]["resource"].asString() == "time")
                 (*rj)["resource_stop"]["requested"] = c["requested"];
+        } else if (field == "bounds.max_memory_mb" || field == "bounds.max_work_units") {
+            // the server's maximum of a budget (R16) bound this seed when the budget stopped
+            // its walk (state_budget_clamp)
+            const ResourceStop::Resource resource = field == "bounds.max_memory_mb"
+                ? ResourceStop::MEMORY : ResourceStop::WORK;
+            if (r.resource_stop && r.resource_stop->resource == resource)
+                state_budget_clamp(rj, c);
+            continue;
         }
         if (!affected)
             continue;
@@ -4178,8 +4268,12 @@ static Json::Value unrepresentable_seed_to_json(const Seed &seed, const SeedResu
 // no record, field or token is new. The other seeds of the request are traversed;
 // nothing per label is delivered.
 static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudgetError &e,
-                                              const Strategy &st) {
+                                              const Strategy &st, const Json::Value &clamped) {
     const ResourceStop &q = e.stop();
+    // the budget at the server's maximum (R16), which a request cannot raise: its lever is
+    // not offered (state_budget_clamp states the rest)
+    const Json::Value *clamp = q.injected ? nullptr : budget_clamp(clamped, q.resource);
+    const bool at_max = clamp != nullptr;
     Json::Value rj;
     Json::Value sj;
     sj["seed_id"] = seed.seed_id;
@@ -4218,13 +4312,15 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
                                                     "raising the knob to it may still fail: unread "
                                                     "roots, labels or later state may need more"
                                                   : "")
-                                 + "); raise the knob or start from a more selective seed"
+                                 + (at_max ? "); start from a more selective seed"
+                                           : "); raise the knob or start from a more selective seed")
                                  + (root && q.label_bytes
                                          && q.demand - q.used
                                                 <= static_cast<double>(q.left + q.label_bytes)
                                      ? "; detail graphlet or a lower labels.max_labels_per_node "
                                        "shrinks the other root's state it competes with"
-                                     : "")));
+                                     : "")
+                                 + (at_max ? kAtServerMaximum : "")));
     } else if (q.resource == ResourceStop::MEMORY) {
         lims.append(limitation("walk_domain", "bounds.max_memory_mb",
                                uint_json(st.max_memory_bytes >> 20),
@@ -4240,9 +4336,10 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
                                                   "built once the budget was reached; raising the "
                                                   "knob to it may still fail: unread roots, labels "
                                                   "or later state may need more" : "")
-                               + "); raise the knob, "
-                               "use detail graphlet, or start from fewer labels (fewer permitted; "
-                               "in annotate mode a lower labels.max_labels_per_node)"));
+                               + (at_max ? "); " : "); raise the knob, ")
+                               + "use detail graphlet, or start from fewer labels (fewer permitted; "
+                                 "in annotate mode a lower labels.max_labels_per_node)"
+                               + (at_max ? kAtServerMaximum : "")));
     } else if (is_external_stop(q)) {
         // stopped from outside in its seed phase: no result exists to deliver, and no budget
         // of the request is to blame (the knob names the attempt)
@@ -4257,10 +4354,12 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
     } else {
         lims.append(limitation("walk_domain", "bounds.max_work_units", uint_json(st.max_work_units),
                                uint_json(static_cast<uint64_t>(q.used)),
-                               "the work budget ran out while the seed was read (validated "
-                               "against its labels, or its permitted set derived: one annotation "
-                               "row per seed k-mer), so no traversal was made (observed: the work "
-                               "units spent); raise the knob or shorten the seed"));
+                               std::string("the work budget ran out while the seed was read "
+                               "(validated against its labels, or its permitted set derived: one "
+                               "annotation row per seed k-mer), so no traversal was made (observed: "
+                               "the work units spent); ")
+                               + (at_max ? std::string("shorten the seed") + kAtServerMaximum
+                                         : std::string("raise the knob or shorten the seed"))));
     }
     // every response under a memory budget states it (§7.0), with what this result's echo
     // of the request holds beyond the budget (failed_soft)
@@ -4270,8 +4369,10 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
         lims.append(memory_bound_soft(st, account));
     }
     rj["limitations"] = std::move(lims);
-    rj["outcome"] = outcome_of(rj, true);
     rj["resource_stop"] = resource_stop_json(q, st, &e);
+    if (clamp)
+        state_budget_clamp(&rj, *clamp);
+    rj["outcome"] = outcome_of(rj, true);
     return rj;
 }
 
@@ -4425,6 +4526,29 @@ Json::Value process_traverse_request(const Json::Value &json,
               uint_json(limits.max_seed_labels));
         req.strategy.max_seed_labels = limits.max_seed_labels;
     }
+    // The server's maxima of the budgets (R16): a larger budget is lowered to the maximum and
+    // an omitted one (none: unbounded) set to it, echoed with `requested` "unlimited" (how a
+    // knob spells no limit, which the graphlet's K and Q records can hold, unlike null), so
+    // that no request on such a server runs without the bound the operator chose
+    if (limits.max_memory_mb) {
+        const uint64_t requested_mb = req.strategy.max_memory_bytes >> 20;
+        if (!req.strategy.max_memory_bytes || requested_mb > limits.max_memory_mb) {
+            clamp("bounds.max_memory_mb",
+                  req.strategy.max_memory_bytes ? uint_json(requested_mb)
+                                                : Json::Value("unlimited"),
+                  uint_json(limits.max_memory_mb));
+            req.strategy.max_memory_bytes = limits.max_memory_mb << 20;
+        }
+    }
+    if (limits.max_work_units) {
+        if (!req.strategy.max_work_units || req.strategy.max_work_units > limits.max_work_units) {
+            clamp("bounds.max_work_units",
+                  req.strategy.max_work_units ? uint_json(req.strategy.max_work_units)
+                                              : Json::Value("unlimited"),
+                  uint_json(limits.max_work_units));
+            req.strategy.max_work_units = limits.max_work_units;
+        }
+    }
     // the attempt's duration bound: n_seeds x the effective per-seed time budget (after the
     // server's clamp) plus the server's allowance, under the HTTP server's cap
     if (attempt) {
@@ -4442,6 +4566,9 @@ Json::Value process_traverse_request(const Json::Value &json,
     // the chunked deadlines (spec §6.8): every annotation read of this request is decoded in
     // pieces of about this duration under a deadline, the deadline checked between them
     oracle.pacer().target_ms = limits.chunk_target_ms;
+    // the row-diff path cache of this request's reads (the walker bounds it per seed under a
+    // memory budget): what a read returns does not depend on it, the decoding work does
+    oracle.set_path_cache_max(limits.path_cache_bytes);
     // checked here, where k is known: a continuation shorter than k is not a valid seed,
     // so the promise that continuations are resubmittable (§7.1) would not hold
     const uint64_t k = oracle.get_k();
@@ -4686,7 +4813,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             // derivation, since the budget is per seed and the other seeds may fit (or the
             // attempt stopped it in its seed phase)
             walked("failed", resource_name(e.stop().resource), true, refused_of(e.stop()));
-            Json::Value failed = budget_failed_seed_to_json(seed, e, req.strategy);
+            Json::Value failed = budget_failed_seed_to_json(seed, e, req.strategy, clamped);
             const std::string outcome = failed["outcome"]["walks"].asString();
             append(std::move(failed), 0);
             delivered(outcome);
@@ -4830,6 +4957,7 @@ int traverse_graph(Config *config) {
             // operator-run: no caps; the reads are chunked under a deadline as on the server
             TraverseLimits limits;
             limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
+            limits.path_cache_bytes = config->traverse_path_cache_mb << 20;
             Json::Value out = config->traverse_resolve
                 ? process_resolve_request(json, *anno_graph, config->index_release, 0, &identity)
                 : process_traverse_request(json, *anno_graph, config->index_release, limits,

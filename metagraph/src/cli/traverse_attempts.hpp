@@ -105,19 +105,27 @@ struct AttemptSettings {
     // compressed and its results' text built — the latter replaced by the slowest rate measured
     // on the attempt's own seeds of at least kMeasuredTextBytes — and how many bytes of the
     // walker's modelled account one byte of a seed's text is at most taken for (the model
-    // prices every delivered byte several times over: measured at 34.5 and more for JSON, 58.4
-    // and more for a graphlet on real responses)
+    // prices every delivered byte several times over). The ratios are starting estimates just
+    // below the smallest measured on real responses — 33.5 (UHGG full) to 1,344 (SRA summary)
+    // for the JSON details, 58.4 and more for a graphlet (pass 5) —, which a server replaces
+    // by its own measurements: before the efficiency pass 20 and 40 cut a server's first
+    // large attempt per detail early (an SRA tree at 2.0 s of 35 s, 43.6 MB of 402 MB)
     double delivery_compress_mbps = 50;
     double delivery_build_mbps = 10;
-    double account_per_text_byte_json = 20;
-    double account_per_text_byte_graphlet = 40;
+    double account_per_text_byte_json = 30;
+    double account_per_text_byte_graphlet = 50;
     // The walk does not stop at its walk-until but at the first poll after it — after a chunk
     // of an annotation read, the heads between two readings of the clock — and its stopped
     // seed is finalised before its text is built: the time from the walk-until to the walk's
-    // end assumed until the server measured its own (ms; the server sets chunk_target_ms + 200;
-    // review of pass 5, F3: a walk stopped 124 ms after its walk-until left its delivery that
-    // much short of the reserve, 503)
-    double delivery_stop_ms = 250;
+    // end assumed until the server measured a longer one (ms; the server sets chunk_target_ms
+    // + 950; review of pass 5, F3: a walk stopped 124 ms after its walk-until left its delivery
+    // that much short of the reserve, 503). Calibrated in the efficiency pass: SRA attempts
+    // stopped 352 ms after their walk-until on a quiet fresh server, 1,001 ms on a loaded one
+    // (1,699 ms once in pass 5, under load, on a 400 MB result), against the 250 assumed
+    // before: the middle one is assumed, a longer one measured replaces it; a finalisation
+    // that grows with the result is covered by the reserve's margin as long as it runs faster
+    // than 4 x build_mbps (about 235 MB/s for that 400 MB result, against 40 MB/s needed)
+    double delivery_stop_ms = 1000;
 };
 
 // The delivery model's rates and ratios vary between responses: the reserve keeps this much

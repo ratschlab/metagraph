@@ -63,6 +63,20 @@ class CoordToHeader {
     // global_coord -> (seq_id, local_coord)
     std::pair<size_t, uint64_t> map_single_coord(Column col, uint64_t coord) const;
 
+    // The sequence a global coordinate of a column falls in, with the first and last global
+    // coordinates of that sequence: every coordinate c in [first, last] maps to (seq_id,
+    // c - first), so a caller walking sorted coordinates maps a whole sequence's run for
+    // the cost of one map_single_coord. Throws as map_single_coord does.
+    struct SequenceRange {
+        size_t seq_id;
+        uint64_t first;
+        uint64_t last;
+    };
+    SequenceRange sequence_range(Column col, uint64_t coord) const;
+    // The last global coordinate of a sequence (one select; its first is the previous
+    // sequence's last + 1). Throws as num_kmers_in_sequence does.
+    uint64_t last_coord(Column col, size_t seq_id) const;
+
     /**
      * Batch variant of `map_single_coord` that replaces each global coord
      * in `rows_tuples` with a packed `(seq_id, local_coord)` pair

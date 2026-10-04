@@ -14,6 +14,7 @@
 
 #include "traversal_types.hpp"
 #include "annotation/binary_matrix/base/decode_budget.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 
 
@@ -163,6 +164,62 @@ class LabelOracle {
     const std::string& header_name(Column column, uint64_t seq_id) const;
     // (seq_id, local coordinate) of a column coordinate. Requires a CoordToHeader.
     std::pair<uint64_t, Coord> map_coord(Column column, Coord coord) const;
+    // The sequence of a column coordinate with its first and last column coordinates
+    // (CoordToHeader::sequence_range). Counts no mapping. Requires a CoordToHeader.
+    struct SeqRange {
+        uint64_t seq_id = 0;
+        Coord first = 1;      // empty until set
+        Coord last = 0;
+    };
+    SeqRange sequence_range(Column column, Coord coord) const;
+    /**
+     * map_coord of the coordinates of one column, one after another, by the runs they form
+     * (the efficiency pass; the same (seq_id, local) as map_coord). The coordinates of one
+     * sequence occupy a contiguous range, so in a tuple row's sorted coordinates a sequence
+     * that holds several (rRNA operons: 7 copies in a genome) costs one rank and two selects
+     * instead of a rank and a select each, and a coordinate in the sequence after the
+     * previous one's (a single-copy gene in consecutive genomes) one select. The ranges are
+     * only used once two coordinates in a row fell into one or adjacent sequences, and only
+     * for lists of 8 coordinates or more: scattered coordinates and short lists
+     * are mapped as map_coord maps them, at its cost (LabelOracleCoordRuns.DISABLED_Benchmark,
+     * 2,000 sequences: runs of 7 at 22 ns a coordinate against 42-46 for map_coord, single
+     * copies in consecutive sequences at 32-35 ns against 48, scattered ones at 40-42 against
+     * 39-42; ranges used unconditionally were 1.3-1.5 times slower than map_coord there).
+     */
+    class CoordRuns {
+      public:
+        // |count|: how many coordinates will be mapped (a list of fewer than 8 is mapped as
+        // map_coord maps it: it does not repay finding its runs — the mini refseq rows' 2-6
+        // a column were 10-25% slower by the runs)
+        CoordRuns(const annot::CoordToHeader &cth, Column column, size_t count);
+        std::pair<uint64_t, Coord> map(Coord coord);
+      private:
+        const annot::CoordToHeader &cth_;
+        const Column column_;
+        const uint64_t num_sequences_;
+        const bool short_;          // a short list: no ranges
+        bool ranges_ = false;       // runs were seen: use the sequence ranges
+        uint32_t streak_ = 0;       // coordinates in a row in the same or the next sequence
+        bool have_ = false;         // |seq_| and |first_| hold the previous coordinate's
+        bool last_known_ = false;   // |last_| holds its sequence's last coordinate
+        uint64_t seq_ = 0;
+        Coord first_ = 0;
+        Coord last_ = 0;
+    };
+    // map_coord of every coordinate in coords[0, n) of |column|, in order, passed to
+    // f(coord, seq_id, local), by CoordRuns (counted as n mappings, as before)
+    // (no buffer: the budget-aware reads charge every buffer they hold)
+    template <class F>
+    void map_coords(Column column, const Coord *coords, size_t n, const F &f) const {
+        CoordRuns runs = coord_runs(column, n);
+        for (size_t i = 0; i < n; ++i) {
+            const auto [seq_id, local] = runs.map(coords[i]);
+            f(coords[i], seq_id, local);
+        }
+        counters_.coords_mapped += n;
+    }
+    // the run mapper of |count| coordinates of |column|. Requires a CoordToHeader.
+    CoordRuns coord_runs(Column column, size_t count) const;
     // number of k-mers in the indexed sequence. Requires a CoordToHeader.
     uint64_t num_kmers_in_sequence(Column column, uint64_t seq_id) const;
     // Resolve a label name: a column name first, then a header. Throws
@@ -199,6 +256,34 @@ class LabelOracle {
     Counters& counters() const { return counters_; }
     // the request's read pacing and measurement (the oracle is per request)
     DecodePacer& pacer() const { return pacer_; }
+
+    /**
+     * The row-diff path cache (row_diff_cache.hpp; the efficiency pass): on a row-diff
+     * annotation every read above — the default and the budget-aware ones — keeps the rows
+     * it reconstructs (the requested rows and the rows on their row-diff paths), so that a
+     * later read's path stops at a cached row instead of decoding to its anchor again. What
+     * a read returns, and every RowCost (the work and memory a budget-aware read is charged
+     * and admitted by: its whole path), do not depend on it; the decoding work does. Off
+     * until set_path_cache_max() (the request's bound, --traverse-path-cache-mb): the walker
+     * uses it within that bound, and under a memory budget within what the label cache
+     * leaves of its allotment (Walker; a seed's own then, emptied when the seed starts).
+     */
+    void set_path_cache_max(uint64_t bytes) const {
+        path_cache_max_ = bytes;
+        path_cache_.set_bound(bytes);
+    }
+    uint64_t path_cache_max() const { return path_cache_max_; }
+    annot::matrix::RowDiffPathCache& path_cache() const { return path_cache_; }
+    // whether the reads use the path cache: a row-diff annotation with it, and a bound set
+    bool path_cached() const;
+    // Before a cache sharing the path cache's bound (a label cache under a memory budget)
+    // grows by |bytes|: the path cache is trimmed to what then remains of the bound
+    void make_room(uint64_t bytes) const {
+        if (!path_cache_.enabled())
+            return;
+        const uint64_t limit = path_cache_.limit();
+        path_cache_.trim(limit > bytes ? limit - bytes : 0);
+    }
     // Tests: called with the row count at every annotation read of this oracle (the default
     // and the budget-aware ones), before the read — to make the reads of a small index slow
     std::function<void(size_t rows)> test_read_hook;
@@ -221,6 +306,8 @@ class LabelOracle {
 
     mutable Counters counters_;
     mutable DecodePacer pacer_;
+    mutable uint64_t path_cache_max_ = 0;
+    mutable annot::matrix::RowDiffPathCache path_cache_;
 };
 
 /**
@@ -325,6 +412,16 @@ class LabelQuery {
                                 ReadPacing *pacing = nullptr);
     // Hits for one annotation key.
     const NodeHits& fetch(node_index key);
+    // Cache the hits of |keys| (npos and cached keys skipped) from rows the caller decoded
+    // already — whole rows (|rows|[i] the row of keys[i], ROWS or DIRECT access) or tuple
+    // rows (TUPLES access) —, built as a fetch builds them, so that a later fetch of the
+    // keys returns from the cache without decoding them again (/resolve discovery). Counts
+    // no request, cache hit or fetched row; ignores the cache bounds (the caller's working
+    // set, as one call's).
+    void prime(const std::vector<node_index> &keys,
+               const std::vector<annot::matrix::BinaryMatrix::SetBitPositions> &rows);
+    void prime(const std::vector<node_index> &keys,
+               const std::vector<annot::matrix::MultiIntMatrix::RowTuples> &rows);
     // Fetch the misses among |keys| into the cache without materialising hits.
     // Counts the rows reconstructed but no requests or cache hits (lookahead work
     // must not change the per-request counters); evicts the cache when it would

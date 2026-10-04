@@ -393,6 +393,12 @@ Config::Config(int argc, char *argv[]) {
             traverse_max_seed_labels = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--resolve-max-query-bp")) {
             resolve_max_query_bp = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--traverse-max-memory-mb")) {
+            exact_ms(argv[i], get_value(i), &traverse_max_memory_mb);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-max-work-units")) {
+            exact_ms(argv[i], get_value(i), &traverse_max_work_units);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-attempt-allowance-ms")) {
             uint64_t ms = 0;
             exact_ms(argv[i], get_value(i), &ms);
@@ -403,6 +409,9 @@ Config::Config(int argc, char *argv[]) {
             i++;
         } else if (!strcmp(argv[i], "--traverse-chunk-target-ms")) {
             exact_ms(argv[i], get_value(i), &traverse_chunk_target_ms);
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-path-cache-mb")) {
+            exact_ms(argv[i], get_value(i), &traverse_path_cache_mb);
             i++;
         } else if (!strcmp(argv[i], "--traverse-compression-level")) {
             traverse_compression_level = atoi(get_value(i++));
@@ -675,6 +684,16 @@ Config::Config(int argc, char *argv[]) {
         }
     }
 
+    // a request's bounds.max_memory_mb is at most 1,048,576 (1 TiB): a larger maximum could
+    // not be echoed as a budget a request may give
+    if (traverse_path_cache_mb > 1'048'576) {
+        std::cerr << "Error: --traverse-path-cache-mb must be in [0, 1048576]" << std::endl;
+        print_usage_and_exit = true;
+    }
+    if (traverse_max_memory_mb > 1'048'576) {
+        std::cerr << "Error: --traverse-max-memory-mb must be in [0, 1048576]" << std::endl;
+        print_usage_and_exit = true;
+    }
     if (traverse_compression_level < 1 || traverse_compression_level > 9) {
         std::cerr << "Error: --traverse-compression-level must be in [1, 9]" << std::endl;
         print_usage_and_exit = true;
@@ -1528,6 +1547,7 @@ if (advanced) {
             fprintf(stderr, "\t   --index-name [STR]\t\tname of the index in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE]\tmanifest of the index bundle (files with size and sha256); its digest is the index identity []\n");
             fprintf(stderr, "\t   --traverse-chunk-target-ms [INT]\tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");
+            fprintf(stderr, "\t   --traverse-path-cache-mb [INT]\tbound of a request's row-diff path cache (decoded rows kept so that later reads stop their row-diff paths at them), within the label cache's allotment under a memory budget; 0 = off [128]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
             fprintf(stderr, "\n");
@@ -1562,11 +1582,14 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-seed-bp [INT] \t\tcap on the length of a /traverse seed, 0 = unlimited [100000]\n");
             fprintf(stderr, "\t   --traverse-max-seed-labels [INT] \tcap on labels DERIVED from a seed, 0 = unlimited [10000]\n");
             fprintf(stderr, "\t   --resolve-max-query-bp [INT] \t\tcap on the /resolve query length, 0 = unlimited [0]\n");
+            fprintf(stderr, "\t   --traverse-max-memory-mb [INT] \tmaximum of bounds.max_memory_mb per /traverse seed: a larger one is lowered to it, an omitted one set to it; 0 = off [0]\n");
+            fprintf(stderr, "\t   --traverse-max-work-units [INT] \tmaximum of bounds.max_work_units per /traverse seed, likewise; 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-attempt-allowance-ms [INT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long [3600]\n");
             fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tand at most this many (oldest dropped first) [10000]\n");
             fprintf(stderr, "\t   --traverse-clock-skew-ms [INT] \tclock skew a ledger adds to not_after_ms, stated in the capabilities [2000]\n");
             fprintf(stderr, "\t   --traverse-chunk-target-ms [INT] \tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");
+            fprintf(stderr, "\t   --traverse-path-cache-mb [INT] \tbound of a /traverse request's row-diff path cache (decoded rows kept so that later reads stop their row-diff paths at them), within the label cache's allotment under a memory budget; 0 = off [128]\n");
             fprintf(stderr, "\t   --traverse-compression-level [INT] \tzlib level (1-9) of the traversal routes' compressed bodies; the other routes use 9 [1]\n");
             fprintf(stderr, "\t   --traverse-delivery-compress-mbps [FLOAT] \tcompression rate the delivery reserve of an attempt assumes [50]\n");
             fprintf(stderr, "\t   --traverse-delivery-build-mbps [FLOAT] \tresponse-building rate it assumes until the attempt measures its own [10]\n");

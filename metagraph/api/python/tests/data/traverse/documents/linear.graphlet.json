@@ -14,7 +14,7 @@
    "graphlet"
   ],
   "direct_access": true,
-  "feature_level": 3,
+  "feature_level": 4,
   "graphlet_format": 1,
   "has_coord_to_header": true,
   "has_coordinates": true,

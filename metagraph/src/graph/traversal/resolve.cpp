@@ -6,7 +6,6 @@
 #include <numeric>
 
 #include <tsl/hopscotch_map.h>
-#include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
@@ -18,6 +17,8 @@ namespace graph {
 namespace traversal {
 
 using mtg::common::logger;
+using annot::matrix::BinaryMatrix;
+using annot::matrix::MultiIntMatrix;
 
 uint64_t fnv1a64(std::string_view data, uint64_t hash) {
     for (unsigned char c : data) {
@@ -139,6 +140,15 @@ SupportProfile resolve_support(LabelOracle &oracle,
 
     // ---- which labels to profile
     std::vector<LabelRef> refs;
+    const bool with_coords = options.support == Support::TRACE;
+    // Discovery decodes the rows of the present k-mers once: the profile pass below takes its
+    // hits from them (LabelQuery::prime) instead of decoding every row again, which made a
+    // column discover cost 1.6-2.1 times the profile of explicit labels (refseq33m, the
+    // efficiency pass). Tuple rows when the profile needs coordinates (header labels, trace),
+    // whose columns are those of the whole rows (TupleRowDiff::get_rows keeps the tuple rows'
+    // columns; a coordinate matrix sets a column's bit exactly where it has coordinates)
+    std::vector<BinaryMatrix::SetBitPositions> plain;
+    std::vector<MultiIntMatrix::RowTuples> tuples;
     if (!options.labels.empty()) {
         for (const auto &name : options.labels) {
             refs.push_back(oracle.resolve_label(name));
@@ -153,32 +163,56 @@ SupportProfile resolve_support(LabelOracle &oracle,
         for (node_index key : present_keys) {
             rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
         }
-        // (column, seq_id or 0) -> supported k-mers
-        std::map<std::pair<Column, uint64_t>, uint64_t> counts;
+        // (column, seq_id or 0) -> supported k-mers, in one flat hash table: a std::map node
+        // per label took 0.8-1.7 us a pair, 1.83 s for a header discover on 23S (refseq33m)
+        tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash> counts;
         if (options.discover_kind == LabelKind::COLUMN) {
-            for (const auto &row : oracle.get_rows(rows)) {
-                for (Column c : row) {
-                    counts[{ c, 0 }]++;
+            if (with_coords) {
+                tuples = oracle.get_row_tuples(rows);
+                for (const auto &row : tuples) {
+                    for (const auto &entry : row) {
+                        counts[{ entry.first, 0 }]++;
+                    }
+                }
+            } else {
+                plain = oracle.get_rows(rows);
+                for (const auto &row : plain) {
+                    for (Column c : row) {
+                        counts[{ c, 0 }]++;
+                    }
                 }
             }
         } else {
-            tsl::hopscotch_set<uint64_t> seen;
-            for (const auto &row : oracle.get_row_tuples(rows)) {
+            tuples = oracle.get_row_tuples(rows);
+            std::vector<Coord> sorted;
+            for (const auto &row : tuples) {
                 for (const auto &[c, coords] : row) {
-                    seen.clear();
-                    for (Coord coord : coords) {
-                        uint64_t seq_id = oracle.map_coord(c, coord).first;
-                        if (seen.insert(seq_id).second)
-                            counts[{ c, seq_id }]++;
+                    // each sequence of the column counted once per k-mer: on sorted
+                    // coordinates its coordinates are adjacent, and the run mapper
+                    // (LabelOracle::map_coords) maps a sequence's run for one rank/select
+                    const Coord *data = coords.data();
+                    if (!std::is_sorted(coords.begin(), coords.end())) {
+                        sorted.assign(coords.begin(), coords.end());
+                        std::sort(sorted.begin(), sorted.end());
+                        data = sorted.data();
                     }
+                    uint64_t previous = std::numeric_limits<uint64_t>::max();
+                    oracle.map_coords(c, data, coords.size(),
+                                      [&, column = c](Coord, uint64_t seq_id, Coord) {
+                        if (seq_id != previous)
+                            counts[{ column, seq_id }]++;
+                        previous = seq_id;
+                    });
                 }
             }
         }
         checkpoint();
         std::vector<std::pair<std::pair<Column, uint64_t>, uint64_t>> ranked(counts.begin(), counts.end());
-        // more k-mers first; ties by column id, then seq_id
-        std::stable_sort(ranked.begin(), ranked.end(),
-                         [](const auto &a, const auto &b) { return a.second > b.second; });
+        tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash>().swap(counts);
+        // more k-mers first; ties by column id, then seq_id (the order the std::map gave)
+        std::sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) {
+            return a.second != b.second ? a.second > b.second : a.first < b.first;
+        });
         if (ranked.size() > options.discover_max_labels) {
             LabelTruncation trunc;
             trunc.total = ranked.size();
@@ -213,9 +247,17 @@ SupportProfile resolve_support(LabelOracle &oracle,
         return profile;
 
     // ---- support per k-mer
-    const bool with_coords = options.support == Support::TRACE;
     LabelQuery query_labels(oracle, refs, with_coords);
     checkpoint();
+    // a discovery's rows give the hits (the query reads tuple rows exactly when the
+    // discovery decoded them: header labels or trace)
+    if (!tuples.empty()) {
+        query_labels.prime(present_keys, tuples);
+    } else if (!plain.empty()) {
+        query_labels.prime(present_keys, plain);
+    }
+    std::vector<MultiIntMatrix::RowTuples>().swap(tuples);
+    std::vector<BinaryMatrix::SetBitPositions>().swap(plain);
     auto hits = query_labels.fetch(keys);
     checkpoint();
 

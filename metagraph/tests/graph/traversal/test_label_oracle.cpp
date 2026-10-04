@@ -1,6 +1,8 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <chrono>
+#include <numeric>
 #include <random>
 
 #include "tests/test_helpers.hpp"
@@ -531,6 +533,130 @@ TEST(LabelOracleHeaderIndex, IsBoundToItsCoordToHeader) {
     EXPECT_EQ(3u, copy.find_header("Z")->second);
     EXPECT_EQ(1u, copy.num_header_index_builds());
     EXPECT_EQ(1u, cth.num_header_index_builds());
+}
+
+// The efficiency pass, C4: the run mapper (LabelOracle::CoordRuns) gives map_single_coord's
+// (seq_id, local) for every coordinate of a column — sorted and unsorted, runs within one
+// sequence, consecutive sequences, scattered ones, sequence boundaries, the last sequence
+struct CoordColumn {
+    std::vector<uint64_t> lengths;
+    std::vector<uint64_t> starts;
+    std::unique_ptr<annot::CoordToHeader> cth;
+};
+
+CoordColumn coord_column(size_t num_seqs, uint64_t min_len, uint64_t spread, uint64_t seed) {
+    std::mt19937_64 rng(seed);
+    CoordColumn col;
+    std::vector<std::string> names(num_seqs);
+    for (size_t i = 0; i < num_seqs; ++i) {
+        names[i] = "s" + std::to_string(i);
+        col.lengths.push_back(min_len + (spread ? rng() % spread : 0));
+        col.starts.push_back(i ? col.starts.back() + col.lengths[i - 1] : 0);
+    }
+    std::vector<uint64_t> lengths = col.lengths;
+    col.cth = std::make_unique<annot::CoordToHeader>(
+            std::vector<std::vector<std::string>>{ names },
+            std::vector<std::vector<uint64_t>>{ lengths });
+    return col;
+}
+
+// the coordinates of the patterns of a tuple row: |kind| 0 one per sequence in consecutive
+// sequences, 1 runs of 7 in every third sequence, 2 one in scattered sequences
+std::vector<uint64_t> coord_pattern(const CoordColumn &col, int kind, std::mt19937_64 &rng) {
+    std::vector<uint64_t> coords;
+    for (size_t i = 0; i < col.lengths.size(); ++i) {
+        if (kind == 0 && i % 10 != 9) {
+            coords.push_back(col.starts[i] + rng() % col.lengths[i]);
+        } else if (kind == 1 && i % 3 == 0) {
+            for (int j = 0; j < 7; ++j) {
+                coords.push_back(col.starts[i] + rng() % col.lengths[i]);
+            }
+        } else if (kind == 2 && rng() % 20 == 0) {
+            coords.push_back(col.starts[i] + rng() % col.lengths[i]);
+        }
+    }
+    std::sort(coords.begin(), coords.end());
+    return coords;
+}
+
+TEST(LabelOracleCoordRuns, SameAsMapSingleCoord) {
+    std::mt19937_64 rng(7);
+    for (uint64_t min_len : { 1, 3, 50 }) {
+        const CoordColumn col = coord_column(300, min_len, min_len * 2, min_len);
+        std::vector<std::vector<uint64_t>> lists;
+        for (int kind : { 0, 1, 2 }) {
+            lists.push_back(coord_pattern(col, kind, rng));
+        }
+        // every coordinate, both ends of every sequence, an unsorted list, a repeated one
+        std::vector<uint64_t> all(col.cth->num_kmers(0));
+        std::iota(all.begin(), all.end(), 0);
+        lists.push_back(all);
+        std::vector<uint64_t> ends;
+        for (size_t i = 0; i < col.lengths.size(); ++i) {
+            ends.push_back(col.starts[i]);
+            ends.push_back(col.starts[i] + col.lengths[i] - 1);
+        }
+        lists.push_back(ends);
+        std::vector<uint64_t> shuffled = lists[1];
+        std::shuffle(shuffled.begin(), shuffled.end(), rng);
+        lists.push_back(shuffled);
+        lists.push_back({ 5, 5, 5, 0, 0, all.back(), all.back() });
+        for (const auto &coords : lists) {
+            for (size_t count : { coords.size(), size_t(1) }) {
+                LabelOracle::CoordRuns runs(*col.cth, 0, count);
+                for (uint64_t c : coords) {
+                    ASSERT_EQ(col.cth->map_single_coord(0, c), runs.map(c)) << min_len << " " << c;
+                }
+            }
+        }
+        LabelOracle::CoordRuns runs(*col.cth, 0, all.size());
+        EXPECT_THROW(runs.map(all.size()), std::out_of_range);
+    }
+}
+
+// A measurement (--gtest_also_run_disabled_tests), on a column of 2,000 sequences of 100,000
+// to 300,000 k-mers: map_single_coord per coordinate, the sequence ranges used always, and
+// the run mapper, for the three patterns
+TEST(LabelOracleCoordRuns, DISABLED_Benchmark) {
+    std::mt19937_64 rng(1);
+    const CoordColumn col = coord_column(2000, 100'000, 200'000, 1);
+    for (int kind : { 0, 1, 2 }) {
+        const std::vector<uint64_t> coords = coord_pattern(col, kind, rng);
+        const int reps = 2000;
+        uint64_t sums[3] = { 0, 0, 0 };
+        double ns[3];
+        for (int method = 0; method < 3; ++method) {
+            const auto t0 = std::chrono::steady_clock::now();
+            for (int rep = 0; rep < reps; ++rep) {
+                if (method == 0) {
+                    for (uint64_t c : coords) {
+                        const auto [seq, local] = col.cth->map_single_coord(0, c);
+                        sums[0] += seq + local;
+                    }
+                } else if (method == 1) {
+                    annot::CoordToHeader::SequenceRange range { 0, 1, 0 };
+                    for (uint64_t c : coords) {
+                        if (c < range.first || c > range.last)
+                            range = col.cth->sequence_range(0, c);
+                        sums[1] += range.seq_id + (c - range.first);
+                    }
+                } else {
+                    LabelOracle::CoordRuns runs(*col.cth, 0, coords.size());
+                    for (uint64_t c : coords) {
+                        const auto [seq, local] = runs.map(c);
+                        sums[2] += seq + local;
+                    }
+                }
+            }
+            ns[method] = std::chrono::duration<double, std::nano>(
+                    std::chrono::steady_clock::now() - t0).count() / (double(coords.size()) * reps);
+        }
+        EXPECT_EQ(sums[0], sums[1]);
+        EXPECT_EQ(sums[0], sums[2]);
+        std::cerr << "pattern " << kind << " (" << coords.size() << " coordinates): map_single_coord "
+                  << ns[0] << " ns, sequence ranges " << ns[1] << " ns, run mapper " << ns[2]
+                  << " ns a coordinate" << std::endl;
+    }
 }
 
 } // namespace
