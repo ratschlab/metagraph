@@ -1187,11 +1187,16 @@ Views
 
 ``subgraph(selectors, arm=None, mode='any'|'all')`` returns a ``GraphletView``: the
 segments and walks that carry the selected labels, with the backing graphlet's original
-ids (nothing is renumbered). It answers ``walks()``, ``claims()``, ``to_fasta()`` and
-``summary()`` for the selected labels, and its completeness is the backing
-``complete_to_bp`` *qualified "for the selected labels"*. ``save()`` writes the
-unchanged backing body plus the view's selectors in the ``J`` line; ``load()`` returns
-the view again.
+ids (nothing is renumbered). A view needs at least one label (``None`` or ``[]`` is a
+``BadSelector``). It answers ``walks()``, ``claims()``, ``to_fasta()`` and
+``summary()`` for the selected labels -- ``walks(top=k)`` ranks the view's walks and
+then keeps ``k`` of them -- and its completeness is the backing ``complete_to_bp``
+*qualified "for the selected labels"*. Its ``of`` names the backing body (the digest of
+its text, or the ``of=`` the caller gives, such as a store handle: then the body is not
+dumped for its digest). ``save()`` writes the unchanged backing body plus the view's
+selectors in the ``J`` line; ``load()`` returns the view again, and refuses a saved view
+that names no label (``GraphletFormatError``) rather than reading it as every label or
+none.
 
 .. graphlet-example: views
 
@@ -1657,8 +1662,12 @@ answers as on a fresh model.
   ``comparable: 'unknown'``, ``equal: None``, no difference lists and ``local_stop``,
   because a list from a half-keyed side would be a false difference.
   ``ops.compare_cost(a, b, mode=...)`` estimates the charge beforehand: ``at_least`` (the
-  structural phases, certain once both sides are keyed) and ``estimate``, with the
-  phases whose size depends on the answer named in ``unpriced``.
+  structural phases, certain once both sides are keyed: never above what the completed
+  comparison charges, for every mode, ``arm=`` and ``labels=``) and ``estimate``, with
+  the phases whose size depends on the answer named in ``unpriced``.
+* A budgeted call is admitted before the derived caches it reads are built (the arm's
+  paths, indexes, price lists): a call stopped at any charge point -- a zero budget
+  included -- leaves behind only derivations it was charged for.
 * **Exports and saves** (``to_json()``, ``to_fasta()``, ``to_gfa()``, ``dump()``,
   ``save()``) return no text and write no file when they stop: never a partial export.
 * **Parsing** (``parse()``, ``from_response()``, ``load()``): a body whose line count
@@ -1734,8 +1743,21 @@ digits):
 * entries expire ``ttl_disk_s`` after their last use (``sweep()`` applies the TTLs);
   an expired entry leaves a tombstone with its request, so ``UnknownHandle.replayable``
   tells a caller that the retrieval can be run again. ``free(handle)`` deletes for good;
-* ``save(handle, path)`` / ``load(path)`` move entries through ``.mgt`` files, and
-  ``list()`` describes the entries;
+* ``save(handle, path)`` / ``load(path)`` move entries through ``.mgt`` files
+  (``load_graphlet(path)`` also returns the model it parsed, kept or not), and
+  ``list()`` describes the entries. ``request_of(g, graph=..., graph_path=...)`` keeps
+  the graph of a multi-graph server in the replay request (else the envelope's, when
+  the server echoed it); a request without one is valid on a single-graph server only;
+* the disk TTL counts from the last use also across restarts (the entry file is
+  rewritten once its recorded use lags by a tenth of the TTL). Processes may share a
+  spool: a body is deleted only when no entry file names it any more, a handle another
+  process stored is read from its entry file on first use (by ``get``, ``free``, ``in``
+  and ``list()``, which lists the spool's entries), one another process freed or
+  expired answers as unknown, and an expiry re-reads the entry file's last use first.
+  An entry whose body is missing expires (``UnknownHandle``, replayable when it kept a
+  request), also when its body is copied without a parse (``body_text``,
+  ``standalone_text``, ``save_body``); an entry file of another library version is read
+  for the fields this one knows;
 * with ``parse_limits=LocalLimits(...)`` every parse the store runs (``put``, a parse on
   demand, ``load``) has a fresh budget of those limits. A body whose parse stops is not
   lost: ``put`` stores it after the checks that need no parse (``graphlet_bytes``,
@@ -1811,10 +1833,12 @@ The contract:
 * labels leave as ``{name, ref}``, never as ids; label arguments are tagged selectors or
   a string unique as a ref or a name;
 * every local answer carries the ``evidence`` block above;
-* every result fits ``max_bytes`` (2 KB by default; ``graphlet_sequence`` has its own
+* every result fits ``max_bytes`` (2 KB by default, 64 bytes to 16 MiB when given;
+  ``graphlet_sequence`` has its own
   16 KB ceiling, stated in its result, and ``traverse_capabilities`` a 16 KB default, so
   that the server's description of itself comes whole; an explicit ``max_bytes`` still
-  holds). List tools page: they return ``total`` and an
+  holds). List tools page, a page filled in time linear in its rows: they return
+  ``total`` and an
   opaque ``next_cursor`` bound to the handle, the tool and its arguments, which stays
   valid across a restart while the handle does. A single row too large for a page comes
   alone with ``row_truncated`` and the cut fields named; an answer that cannot fit at

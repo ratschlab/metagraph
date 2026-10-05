@@ -806,10 +806,15 @@ def _attach_j(g, j):
     results = j.get('results')
     if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
         raise GraphletFormatError(2, 'J: results[] reduced to this seed\'s summary')
-    # a body-only view is saved with an empty envelope: read it back as none
-    g.seed_summary = results[0] or None
-    g.envelope = {k: v for k, v in j.items()
-                  if k not in ('results', 'view', 'derived_from')} or None
+    env = {k: v for k, v in j.items() if k not in ('results', 'view', 'derived_from')}
+    # a body-only view or derived graphlet is saved with an empty envelope and summary:
+    # read back as none. Any other J line keeps what it holds, an empty side included --
+    # read as none, it lost the other side and dump() dropped the J line (VPC-05: a
+    # round trip that was not stable)
+    body_only = not results[0] and not env and (j.get('view') is not None
+                                                or j.get('derived_from') is not None)
+    g.seed_summary = None if body_only else results[0]
+    g.envelope = None if body_only else env
     g.view = j.get('view')
     g.derived_from = j.get('derived_from')
 
@@ -1210,16 +1215,33 @@ def is_canonical(text):
 
 # ======================================================================= envelope
 
+def _transport_count(result, key):
+    """result[key] (graphlet_bytes, graphlet_lines) as an int, None when absent. Anything
+    else is a GraphletFormatError: a str, None or list compared unequal and then failed
+    the '%d' of the message with a TypeError, and True passed as 1 (VPC-01)."""
+    if key not in result:
+        return None
+    v = result[key]
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise GraphletFormatError(0, '%s is not an integer: %r' % (key, v))
+    return v
+
+
 def _check_transport(body, result):
-    """The body against its summary's byte and line counts (a body cut in transport)."""
-    if 'graphlet_bytes' in result:
-        n = len(utf8_bytes(body))
-        if n != result['graphlet_bytes']:
+    """The body against its summary's byte and line counts (a body cut in transport),
+    the cheap checks before any parse: the one copy of them (from_response() repeated
+    them inline, with the line count after the parse: VPC-02)."""
+    want = _transport_count(result, 'graphlet_bytes')
+    if want is not None:
+        # an ASCII body's bytes are its characters: no encoded copy to count them
+        n = len(body) if body.isascii() else len(utf8_bytes(body))
+        if n != want:
             raise GraphletFormatError(0, 'the body has %d bytes, graphlet_bytes says %d '
-                                      '(truncated in transport)' % (n, result['graphlet_bytes']))
-    if 'graphlet_lines' in result and body.count('\n') != result['graphlet_lines']:
+                                      '(truncated in transport)' % (n, want))
+    want = _transport_count(result, 'graphlet_lines')
+    if want is not None and body.count('\n') != want:
         raise GraphletFormatError(0, 'graphlet_lines says %d, the body has %d'
-                                  % (result['graphlet_lines'], body.count('\n')))
+                                  % (want, body.count('\n')))
 
 
 def from_response(result, response, *, budget=None):
@@ -1243,15 +1265,8 @@ def from_response(result, response, *, budget=None):
 
 
 def _from_response_checked(result, response, body, b):
-    if 'graphlet_bytes' in result:
-        n = len(utf8_bytes(body))
-        if n != result['graphlet_bytes']:
-            raise GraphletFormatError(0, 'the body has %d bytes, graphlet_bytes says %d '
-                                      '(truncated in transport)' % (n, result['graphlet_bytes']))
+    _check_transport(body, result)
     g = parse(body, budget=b)
-    if 'graphlet_lines' in result and body.count('\n') != result['graphlet_lines']:
-        raise GraphletFormatError(0, 'graphlet_lines says %d, the body has %d'
-                                  % (result['graphlet_lines'], body.count('\n')))
     g.seed_summary = {k: v for k, v in result.items() if k != 'graphlet'}
     g.envelope = {k: v for k, v in response.items() if k != 'results'}
     return g
@@ -1285,8 +1300,9 @@ def standalone_text(body, result, response):
         seed_index = parse_int(head[11])
     except CodecError as e:
         raise GraphletFormatError(1, 'H seed_index: %s' % e) from None
-    rest = body[first + 1:]
-    if rest.startswith('J '):
+    # tested in place: a slice of the rest of the body only to read its first two
+    # characters copied the whole body once more, held until the splice (VPC-03)
+    if body.startswith('J ', first + 1):
         raise ValueError('the body already carries a J line: a saved file, not a server body')
     last = body.rfind('\n', 0, len(body) - 1) + 1
     z = body[last:-1].split(' ')

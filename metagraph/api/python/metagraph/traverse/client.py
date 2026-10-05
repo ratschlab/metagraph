@@ -311,6 +311,18 @@ class TraverseResponse:
         return self.envelope.get('usage')
 
 
+def _decoded(data, encoding, status):
+    """_decode_body(), a body its Content-Encoding does not decode (a truncated gzip or
+    deflate stream) a TraverseError of the answer's status: zlib.error and EOFError are no
+    error a caller of the client expects, and gzip's BadGzipFile, an OSError, read as a
+    transport failure (backend_unreachable in the tools)."""
+    try:
+        return _decode_body(data, encoding)
+    except (zlib.error, EOFError, OSError) as e:
+        raise TraverseError(status, 'the response body could not be decoded (Content-Encoding '
+                            '%s: %s)' % (encoding, type(e).__name__)) from None
+
+
 def _decode_body(data, encoding):
     encoding = (encoding or '').strip().lower()
     if encoding == 'gzip':
@@ -364,26 +376,40 @@ class TraverseClient:
             data = resp.content
             # requests decodes Content-Encoding itself; a raw double does not
             if getattr(resp, 'raw_encoded', False):
-                data = _decode_body(data, hdrs.get('content-encoding'))
+                data = _decoded(data, hdrs.get('content-encoding'), status)
         else:
             req = urllib.request.Request(url, data=body, headers=headers, method=method)
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as r:
                     status = r.status
                     hdrs = {k.lower(): v for k, v in r.headers.items()}
-                    data = _decode_body(r.read(), hdrs.get('content-encoding'))
+                    raw = r.read()
+                data = _decoded(raw, hdrs.get('content-encoding'), status)
             except urllib.error.HTTPError as e:
                 status = e.code
                 hdrs = {k.lower(): v for k, v in (e.headers or {}).items()}
                 try:
-                    data = _decode_body(e.read() or b'', hdrs.get('content-encoding'))
+                    raw = e.read() or b''
                 finally:
                     e.close()
-        text = data.decode('utf-8') if isinstance(data, (bytes, bytearray)) else data
-        try:
-            out = json.loads(text) if text else {}
-        except ValueError:
-            out = None
+                data = _decoded(raw, hdrs.get('content-encoding'), status)
+        out = None
+        if isinstance(data, (bytes, bytearray)):
+            try:
+                text = data.decode('utf-8')
+            except UnicodeDecodeError:
+                # not UTF-8, so no JSON answer: an error page is still classified by its
+                # status below, a 2xx is 'not JSON' -- never a bare UnicodeDecodeError, which
+                # no caller expects from a server's answer (VMD-07)
+                text = data.decode('utf-8', 'replace')
+                data = None
+        else:
+            text = data
+        if data is not None:
+            try:
+                out = json.loads(text) if text else {}
+            except ValueError:
+                out = None
         if isinstance(out, dict) and self._server_doc and path != '/capabilities':
             self._check_instance(out)
         if status in answers and isinstance(out, dict):

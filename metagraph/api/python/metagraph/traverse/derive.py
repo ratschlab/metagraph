@@ -14,7 +14,8 @@ from ._codec import RESOURCE_CODES, REASON
 from .model import EndLabel, Path, Split
 
 __all__ = [
-    'entry_base', 'rule_entry', 'rule_end', 'rule_partition', 'runs_by_segment',
+    'entry_base', 'rule_entry', 'rule_end', 'label_changes', 'rule_partition',
+    'runs_by_segment',
     'runs_by_label', 'label_runs', 'partition_sets', 'merge_parts',
     'leaves', 'paths', 'path_of_leaf', 'chain', 'splits', 'split_branches',
     'label_end_events', 'reconverge_events', 'end_labels', 'labels_at_end',
@@ -68,15 +69,14 @@ def rule_partition(parents):
     return [array('I') for _ in parents]
 
 
-def rule_end(mode, seg, entry, presence, runs_here, runs):
-    """G.end '*' (v2, chronological). Constrain: from the entry set apply, in increasing
-    position (ties: ends before switch-ins), every run end anchored here with
-    to_bp < from_bp + length_bp (remove its label) and every switch event here (add its
-    target). Runs ending at the segment's last node are still alive there
-    (walker.cpp:2580). v1's set formula lost a label that re-entered after ending
-    (A -> B -> A inside one segment). Annotate: the last P set, or the entry set."""
-    if mode != 'constrain':
-        return list(presence[-1].labels) if presence else list(entry)
+def label_changes(seg, runs_here, runs):
+    """Constrain: the label changes inside segment |seg| as (position, 0 = a run end | 1 = a
+    switch-in, label) in the chronological order of the G.end rule (ties: ends before
+    switch-ins): every run anchored here (|runs_here|, ids into |runs|) ending before the
+    segment's last node, and every switch event. A run ending at to_bp is absent from base
+    to_bp on; a switch-in is present from at_bp. The one statement of the normative
+    tie-break: rule_end() and the displayed support (ops) both read it (VMD-08: two
+    verbatim copies)."""
     end_bp = seg.from_bp + seg.length_bp
     ops = []
     for r in runs_here:
@@ -86,9 +86,22 @@ def rule_end(mode, seg, entry, presence, runs_here, runs):
     for ev in seg.events:
         if ev.type == 'switch':
             ops.append((ev.at_bp, 1, ev.to_label))
+    ops.sort(key=lambda o: (o[0], o[1]))
+    return ops
+
+
+def rule_end(mode, seg, entry, presence, runs_here, runs):
+    """G.end '*' (v2, chronological). Constrain: from the entry set apply, in increasing
+    position (ties: ends before switch-ins), every run end anchored here with
+    to_bp < from_bp + length_bp (remove its label) and every switch event here (add its
+    target). Runs ending at the segment's last node are still alive there
+    (walker.cpp:2580). v1's set formula lost a label that re-entered after ending
+    (A -> B -> A inside one segment). Annotate: the last P set, or the entry set."""
+    if mode != 'constrain':
+        return list(presence[-1].labels) if presence else list(entry)
+    ops = label_changes(seg, runs_here, runs)
     if not ops:
         return list(entry)
-    ops.sort(key=lambda o: (o[0], o[1]))
     s = set(entry)
     for _, kind, label in ops:
         if kind == 0:

@@ -544,9 +544,9 @@ class Graphlet:
         return ops.next_requests(self, arm, leaves, bp, reduce_budget, reset_branches,
                                  **overrides)
 
-    def subgraph(self, selectors, arm=None, mode='any', *, budget=None):
+    def subgraph(self, selectors, arm=None, mode='any', *, budget=None, of=None):
         from . import ops
-        return ops.subgraph(self, selectors, arm, mode, budget=budget)
+        return ops.subgraph(self, selectors, arm, mode, budget=budget, of=of)
 
     def to_fasta(self, arm=None, leaves=None, with_seed=True, orientation='natural',
                  width=None, *, budget=None):

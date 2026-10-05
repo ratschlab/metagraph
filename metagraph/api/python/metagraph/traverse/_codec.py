@@ -161,6 +161,10 @@ def encode_ranges(ids):
     for i in ids:
         if prev is not None and i <= prev:
             raise CodecError('RANGES ids not strictly ascending: %s after %s' % (tok(i), tok(prev)))
+        if i < 0 or i > MAX_U64:
+            # every id, not only the last run's start: a list mixing negative and other
+            # ids was written ('-5,3') and refused by decode_ranges() (VPC-04)
+            raise CodecError('RANGES id %s outside [0, 2^64)' % tok(i))
         if start is None:
             start = i
         elif i != prev + 1:
@@ -169,8 +173,6 @@ def encode_ranges(ids):
         prev = i
     if start is None:
         return '.'
-    if start is not None and start < 0:
-        raise CodecError('negative id')
     out.append(str(start) if start == prev else '%d-%d' % (start, prev))
     return ','.join(out)
 

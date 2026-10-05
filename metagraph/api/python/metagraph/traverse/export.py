@@ -507,6 +507,15 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None):
     sides = [g.arm(arm).side] if arm is not None else [s for s in ARM_SIDES if s in g.arms]
     for side in sides:
         a = g.arms[side]
+        if leaves is not None and not len(leaves):
+            # no walk chosen: nothing to resolve, so the arm's paths are not built -- they
+            # were, uncharged, and a refused export (stopped at its join) left them behind
+            # (the review of the level 4-5 fixes, finding 2)
+            continue
+        if bud is not None and a.segments:
+            # admitted before the walks are resolved: the arm's paths (a Path per walk)
+            # are built only once charged, so a refused export leaves none behind
+            derive.uses(bud, g, a, 'leaves', 'paths', 'end_labels')
         paths = derive.paths(a)
         chosen = paths if leaves is None else [paths[ops.path_id(a, x)] for x in leaves]
         if not chosen:
@@ -517,7 +526,6 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None):
         if not a.segments or a.segments[0].walk is None:
             raise ValueError(derive.NO_BASES)
         if bud is not None:
-            derive.uses(bud, g, a, 'leaves', 'paths', 'end_labels')
             if leaves is None:
                 # every walk: the spelling's bound is the arm's structural totals, streamed
                 # (the records charge each walk's bases as they are written)

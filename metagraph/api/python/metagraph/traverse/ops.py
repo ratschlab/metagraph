@@ -46,9 +46,9 @@ import sys
 
 from . import budget as _B
 from . import derive
-from ._codec import REASON, RESOURCE_CODES, UNLIMITED
+from ._codec import REASON, RESOURCE_CODES, UNLIMITED, GraphletFormatError
 from .budget import (
-    DICT_KEY, INT, LIST, LIST_ITEM, SET, SET_ITEM, STR, TUPLE, W_ELEM, W_ROW, W_STEP,
+    DICT, DICT_KEY, INT, LIST, LIST_ITEM, SET, SET_ITEM, STR, TUPLE, W_ELEM, W_ROW, W_STEP,
     LocalBudgetExceeded, Partial, dict_bytes, list_bytes, record_bytes, set_bytes, sort_work,
 )
 from .model import (
@@ -111,7 +111,12 @@ def _uses_g(b, g, *names):
     n = len(g.labels)
     for name in names:
         if name == 'label_index':
-            b.uses((id(g), name), 4 * n, 2 * dict_bytes(n) + n * (2 * TUPLE + STR + 16))
+            # two dicts at CPython's fill (up to 48 bytes a key after a resize), a 1-tuple
+            # per key and the ref string Label.ref makes for each (measured: 200-260 bytes
+            # a label; dict_bytes() models a dict at 16 bytes a key and left the index at
+            # 0.7x its size)
+            b.uses((id(g), name), 4 * n,
+                   2 * (DICT + 48 * n) + n * (2 * (TUPLE + 8) + STR + 24))
         elif name == 'name_counts':
             b.uses((id(g), name), 2 * n, dict_bytes(n) + n * INT)
         elif name == 'label_summary':
@@ -193,7 +198,7 @@ __all__ = [
     'label_walks', 'routes', 'support_profile', 'support_changes', 'label_summary',
     'splits', 'continuation', 'next_request', 'next_requests', 'resubmittable_names',
     'subgraph',
-    'GraphletView', 'view_from_saved',
+    'GraphletView', 'view_from_saved', 'view_from_spec',
     'compare', 'compare_cost', 'index_identity', 'memory_bytes', 'cache_bytes',
     'cache_signature',
     'summary', 'evidence_block',
@@ -239,6 +244,10 @@ def label(g, selector):
                           '%r' % (selector,))
     (key, value), = selector.items()
     if key == 'id':
+        if isinstance(value, bool):
+            # a bool is an int to Python: {'id': True} selected label 1, where a bare bool
+            # is refused (VOP1-02)
+            raise BadSelector('a label id is an int, not %r' % (value,))
         if not isinstance(value, int) or not 0 <= value < len(g.labels):
             raise UnknownLabel('no label id %r' % (value,))
         return g.labels[value]
@@ -289,13 +298,34 @@ def _label_index(g):
     names may repeat (annotate mode: two headers of one name), so each maps to a tuple."""
     got = g.cache.get('label_index')
     if got is None:
-        by_ref, by_name = {}, {}
-        for l in g.labels:
-            by_ref.setdefault(l.ref, []).append(l.id)
-            by_name.setdefault(l.name, []).append(l.id)
-        got = g.cache['label_index'] = ({k: tuple(v) for k, v in by_ref.items()},
-                                        {k: tuple(v) for k, v in by_name.items()})
+        got = g.cache['label_index'] = (_ids_by((l.ref, l.id) for l in g.labels),
+                                        _ids_by((l.name, l.id) for l in g.labels))
     return got
+
+
+def _ids_by(pairs):
+    """{key: (ids in order)} of (key, id) pairs, keys in first-seen order. Built as the
+    final tuples (a list per key only for a key seen twice): a list per key turned into
+    tuples in a second dict held both dicts, every list and every tuple at once -- 2.5-2.9x
+    the index, what a lookup by name charged for it (the review of the level-5 batch: a
+    prefix_subset comparison peaked above its account)."""
+    out = {}
+    dup = None
+    for k, i in pairs:
+        got = out.get(k)
+        if got is None:
+            out[k] = (i,)
+            continue
+        if dup is None:
+            dup = {}
+        more = dup.get(k)
+        if more is None:
+            more = dup[k] = list(got)
+        more.append(i)
+    if dup:
+        for k, v in dup.items():
+            out[k] = tuple(v)
+    return out
 
 
 def labels_matching(g, selectors):
@@ -337,11 +367,15 @@ def spell(g, arm, leaf, orientation='natural', with_seed=False, *, budget=None):
     so position |seed| + i holds outward base i on both arms. budget= (stage L): the
     spelling is charged as one step at its price (the walk's chain and bases)."""
     arm = g.arm(arm)
-    seg = leaf_segment(arm, leaf) if not isinstance(leaf, Path) else leaf.leaf
     b = _B.resolve(budget)
-    if b is not None:
+    if b is None:
+        seg = leaf_segment(arm, leaf) if not isinstance(leaf, Path) else leaf.leaf
+    else:
         with b.scope('spell', ('select_walks',)):
+            # admitted before the walk is resolved: resolving a path id builds the arm's
+            # paths (a Path per walk), which a refused call must not leave behind
             derive.uses(b, g, arm, 'leaves', 'paths')
+            seg = leaf_segment(arm, leaf) if not isinstance(leaf, Path) else leaf.leaf
             n = arm.segments[seg].end_bp + len(g.seed.sequence)
             d = arm.segments[seg].depth + 1
             b.charge(W_ROW + W_STEP * d + (n >> 8), list_bytes(d) + 3 * (STR + n))
@@ -368,20 +402,9 @@ def _chain_bases(arm, seg_id, lo, hi):
 # ------------------------------------------------------------------ alive sets
 
 def _segment_ops(arm, s):
-    """Constrain: the label changes inside segment |s| as (position, 0 = a run end | 1 = a
-    switch-in, label) in the chronological order of the G.end rule (ties: ends first). A
-    run ending at to_bp is absent from base to_bp on; a switch-in is present from at_bp."""
-    rbs = derive.runs_by_segment(arm)
-    ops = []
-    for r in rbs[s.id]:
-        run = arm.runs[r]
-        if run.to_bp < s.end_bp:
-            ops.append((run.to_bp, 0, run.label))
-    for ev in s.events:
-        if ev.type == 'switch':
-            ops.append((ev.at_bp, 1, ev.to_label))
-    ops.sort(key=lambda o: (o[0], o[1]))
-    return ops
+    """Constrain: the label changes inside segment |s| in the order of the G.end rule
+    (derive.label_changes())."""
+    return derive.label_changes(s, derive.runs_by_segment(arm)[s.id], arm.runs)
 
 
 def alive_at(g, arm, seg, pos):
@@ -445,9 +468,14 @@ def _alive_prices(b, g, arm):
 def _alive_pieces(arm, s):
     """Constrain: the alive sets inside one segment as [(from, to, frozenset)] (not
     merged; nothing for a zero-length segment)."""
-    out = []
+    return list(_iter_alive_pieces(arm, s))
+
+
+def _iter_alive_pieces(arm, s):
+    """_alive_pieces() one piece at a time: a comparison's cut reads them in order and
+    stops at the cut, holding one piece's set instead of every piece's."""
     if s.length_bp == 0:
-        return out
+        return
     ops = _segment_ops(arm, s)
     cur = set(s.entry)
     pos = s.from_bp
@@ -461,9 +489,8 @@ def _alive_pieces(arm, s):
             i += 1
         nxt = ops[i][0] if i < len(ops) else s.end_bp
         nxt = min(max(nxt, pos + 1), s.end_bp)
-        out.append((pos, nxt, frozenset(cur)))
+        yield pos, nxt, frozenset(cur)
         pos = nxt
-    return out
 
 
 def _presence_profile(arm, leaf_seg, b=None, g=None):
@@ -1072,11 +1099,13 @@ def _ranked_walks(g, a, by, wanted, route_consistent, min_bp, b=None):
     """[(path, labels_full, alive ids, min loss)] in walks() order; nothing is spelled."""
     if by not in _WALK_KEYS:
         raise ValueError("by is 'support', 'length', 'loss' or 'id'")
-    ps = derive.paths(a)
+    ps = None
     ranked = []
     try:
         if b is not None:
-            _rank_keys_charge(b, g, a, ps, min_bp)
+            _rank_keys_charge(b, g, a, min_bp)
+        # built once admitted: a refused call leaves no paths behind
+        ps = derive.paths(a)
         for p in ps:
             if p.length_bp < min_bp:
                 continue
@@ -1091,15 +1120,26 @@ def _ranked_walks(g, a, by, wanted, route_consistent, min_bp, b=None):
         if b is not None and by != 'id':
             b.charge(sort_work(len(ranked)))
     except LocalBudgetExceeded as e:
-        raise e.restate(phase='rank', ranked=len(ranked), of=len(ps))
+        raise e.restate(phase='rank', ranked=len(ranked), of=_n_walks(a))
     ranked.sort(key=_WALK_KEYS[by])
     return ranked
 
 
-def _rank_keys_charge(b, g, a, ps, min_bp):
+def _n_walks(a):
+    """The arm's walk count without building its paths (a stop states it: the stop may
+    come before the paths are admitted)."""
+    got = a.cache.get('leaves')
+    if got is not None:
+        return len(got)
+    return sum([1 for s in a.segments if s.leaf is not None])
+
+
+def _rank_keys_charge(b, g, a, min_bp):
     """What ranking charges before it reads a key: its setup (cold price) and every walk's
-    keys (a ranking has no partial answer), in blocks."""
+    keys (a ranking has no partial answer), in blocks. The paths are read once their
+    setup is admitted."""
     pw, pm = _rank_setup(b, g, a)
+    ps = derive.paths(a)
     b.phase = 'rank'
     for i in range(0, len(ps), 1024):
         block = [p.id for p in ps[i:i + 1024] if p.length_bp >= min_bp]
@@ -1119,15 +1159,14 @@ def _rank_walks_replay(g, arm, by, labels, min_bp, n, b):
     a = g.arm(arm)
     with b.scope('rank_walks', _RANK_LEVERS):
         _label_ids_b(g, labels, b)
-        ps = derive.paths(a)
         got = 0
         try:
-            _rank_keys_charge(b, g, a, ps, min_bp)
+            _rank_keys_charge(b, g, a, min_bp)
             got = n
             if by != 'id':
                 b.charge(sort_work(n))
         except LocalBudgetExceeded as e:
-            raise e.restate(phase='rank', ranked=got, of=len(ps))
+            raise e.restate(phase='rank', ranked=got, of=_n_walks(a))
         b.charge(n, list_bytes(n))
 
 
@@ -1190,8 +1229,9 @@ def walks_at(g, arm, path_ids, with_claims=False, *, budget=None, resume=None):
 
 
 def _walks_at(g, a, path_ids, with_claims, b, out=None):
-    ps = derive.paths(a)
+    # the setup admitted before the paths are built (a refused call leaves none)
     price = _rank_setup(b, g, a) if b is not None else None
+    ps = derive.paths(a)
     rows = []
     for pid in path_ids:
         p = ps[path_id(a, pid)]
@@ -1456,8 +1496,9 @@ def _annotate_routes_price(b, g, a, l):
     """Charge _annotate_routes() of label |l| (every witness route of its ends, the sort
     by displayed walk); -> the route depths. The ends are read from the union-rule
     derivation, charged first."""
+    # first_paths is built from path_of_leaf: charged with it (it was built uncharged)
     derive.uses(b, g, a, 'annotate_route_ends', 'first_paths', 'leaves', 'paths',
-                'route_depth')
+                'path_of_leaf', 'route_depth')
     rd = derive.route_depth(a)
     es = _annotate_route_ends(a)[1].get(l, ())
     b.charge(W_ELEM * len(es) + sum(5 * W_STEP * rd[s] for s, _ in es) + sort_work(len(es)),
@@ -1619,11 +1660,13 @@ def _support_out(g, b, runs, exact_of):
 
 def _support_profile(g, arm, leaf, kind, b):
     a = g.arm(arm)
-    seg_id = leaf_segment(a, leaf)
     if b is not None:
+        # admitted before the walk is resolved (its path id builds the arm's paths)
         derive.uses(b, g, a, 'leaves', 'paths')
         if g.mode == 'constrain':
             derive.uses(b, g, a, 'segment_ops')
+    seg_id = leaf_segment(a, leaf)
+    if b is not None:
         b.charge(W_STEP * (a.segments[seg_id].depth + 1),
                  list_bytes(a.segments[seg_id].depth + 1))
         b.phase = 'profile'
@@ -1684,6 +1727,10 @@ _CHANGE_BYTES = record_bytes(Change) + 2 * LIST + 200
 
 def _support_changes(g, arm, leaf, b):
     a = g.arm(arm)
+    if b is not None:
+        # admitted before the walk is resolved (its path id builds the arm's paths): the
+        # profile below charges the same derivations first, once per call
+        derive.uses(b, g, a, 'leaves', 'paths')
     seg_id = leaf_segment(a, leaf)
     chain = derive.chain(a, seg_id)
     segs = a.segments
@@ -1920,6 +1967,11 @@ _CONT_BYTES = record_bytes(Continuation) + 2 * LIST + 200
 
 def _continuation(g, arm, leaf, b):
     a = g.arm(arm)
+    if b is not None:
+        # admitted before the walk is resolved (its path id builds the arm's paths): a
+        # refused call leaves no derived cache behind
+        derive.uses(b, g, a, 'leaves', 'paths', 'end_labels')
+        _uses_g(b, g, 'name_counts')
     seg_id = leaf_segment(a, leaf)
     seg = a.segments[seg_id]
     c = seg.leaf.continuation if seg.leaf else None
@@ -1928,8 +1980,6 @@ def _continuation(g, arm, leaf, b):
                          'semantic reason, not at the radius or a cap)'
                          % (path_id(a, leaf), a.side))
     if b is not None:
-        derive.uses(b, g, a, 'leaves', 'paths', 'end_labels')
-        _uses_g(b, g, 'name_counts')
         n = seg.end_bp + len(g.seed.sequence)
         k = len(c.labels)
         b.charge(W_ROW + W_STEP * (seg.depth + 1) + (n >> 8) + 4 * k
@@ -2064,34 +2114,6 @@ def _check_change_cost(change_cost):
     return change_cost
 
 
-def _switch_cost(change_cost, src, dst):
-    """cost(src -> dst) by label NAME under the request's change_cost, as the server
-    prices a switch (forbid: +inf; constant: value; table: the last entry for the pair,
-    else its default, 'forbid' = +inf; a label to itself costs 0). None for a model the
-    library does not know: reachability cannot be decided then. A malformed field of a
-    model it knows is a ValueError naming the field (a caller's override; the tool layer
-    answers bad_argument), never an exception of another kind: the whole cost is checked
-    first (_check_change_cost)."""
-    _check_change_cost(change_cost)
-    if src == dst:
-        return 0.0
-    model = (change_cost or {}).get('model', 'forbid')
-    if model == 'forbid':
-        return math.inf
-    if model == 'constant':
-        return float(change_cost['value'])
-    if model == 'table':
-        got = None
-        for e in change_cost.get('entries') or ():
-            if e[0] == src and e[1] == dst:
-                got = float(e[2])
-        if got is not None:
-            return got
-        d = change_cost.get('default', 'forbid')
-        return math.inf if d == 'forbid' else float(d)
-    return None
-
-
 def _section(strategy, *path):
     """The strategy section at |path| as a dict ({} when absent). The rebuild of a
     continuation reads the merged sections as objects; one that a caller's override made
@@ -2118,8 +2140,10 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     seed label (the stage-2 recheck's design answer: A -> B = 1, B -> C = 1 under a budget
     of 2 left C out). A chain passes only through names of |sources| and |targets|: the
     labels the request names; a name of |sinks| (also a target) ends a chain but never
-    continues one. Prices as _switch_cost does (a table's last entry for a pair
-    wins, else its default; a label to itself costs 0); None for a model the library does
+    continues one. Prices a switch as the server does (forbid: none reachable; constant:
+    its value; table: a table's last entry for a pair wins, else its default, 'forbid'
+    none; a label to itself costs 0; the one pricing of the library -- a second copy for one
+    pair, _switch_cost, was never called: VOP1-04); None for a model the library does
     not know. A malformed field of a model it knows is a ValueError naming it, raised
     before any entry is used (_check_change_cost)."""
     # every field is checked before an endpoint enters a set or a cost the arithmetic
@@ -2698,11 +2722,18 @@ class GraphletView:
             raise ValueError("mode is 'any' or 'all'")
         self.backing = backing
         if b is not None:
+            # charged first: resolving names builds the name index
             _label_ids_b(backing, selectors, b)
-        self.selectors = _jsonable_selectors(backing, selectors)
+        labs = labels_matching(backing, selectors)
+        if not labs:
+            # a view of no labels: None crashed with a TypeError, and [] in mode 'all'
+            # selected every segment (an empty set is a subset of every one) -- VOP2-07
+            raise BadSelector('a view needs at least one label selector, not %r'
+                              % (selectors,))
+        self.selectors = [{'ref': l.ref} for l in labs]
         self.mode = mode
         self.arm_side = None if arm is None else backing.arm(arm).side
-        self.labels = labels_matching(backing, selectors)
+        self.labels = labs
         if of:
             self.of = of
         else:
@@ -2719,7 +2750,7 @@ class GraphletView:
         for side, a in backing.arms.items():
             if self.arm_side is not None and side != self.arm_side:
                 continue
-            keep = set()
+            hits = []
             rbs = derive.runs_by_segment(a)
             if b is not None:
                 derive.uses(b, backing, a, 'leaves', 'paths', 'end_labels')
@@ -2739,9 +2770,18 @@ class GraphletView:
                     b.release(set_bytes(n))
                 if (mode == 'any' and hit) or (mode == 'all' and hit == ids):
                     if b is not None:
+                        # (the price of the hit's chain, as when each was walked: the pass
+                        # below is cheaper, the account unchanged)
                         b.charge(2 * W_STEP * (s.depth + 1), list_bytes(s.depth + 1))
                         b.release(list_bytes(s.depth + 1))
-                    keep.update(derive.chain(a, s.id))
+                    hits.append(s.id)
+            # the union of the hits' first-parent chains in one pass from the last segment
+            # (a parent's id is below its child's): walking each hit's chain to the root
+            # was quadratic on a comb (VOP2-05)
+            keep = set(hits)
+            for s in reversed(a.segments):
+                if s.id in keep and s.parents:
+                    keep.add(s.parents[0])
             if b is not None:
                 ps = derive.paths(a)
                 b.charge(sort_work(len(keep)) + W_ELEM * len(ps),
@@ -2762,10 +2802,39 @@ class GraphletView:
     def arms(self):
         return list(self.segments)
 
-    def walks(self, arm, *, budget=None, **kw):
+    def walks(self, arm, *, top=None, by='support', labels=None, route_consistent=True,
+              min_bp=0, budget=None, resume=None):
+        """walks() of the backing graphlet restricted to the view's walks, in the same
+        order: the view's walks are ranked, then cut to |top| -- cutting the backing arm's
+        ranking to |top| first returned the view's walks among the arm's top ones, fewer
+        than the view has, or none (VOP2-01). Only the walks returned are built. budget=:
+        as walks() -- by='id' stops with the whole walks made so far and a resume token,
+        a ranked list with no partial."""
         a = self.backing.arm(arm)
+        if resume is not None and by != 'id':
+            raise ValueError("resume= continues walks(by='id') only: a ranked list is never "
+                             "partial")
         keep = set(self.path_ids.get(a.side, ()))
-        return [w for w in self.backing.walks(a, budget=budget, **kw) if w.path_id in keep]
+        b = _B.resolve(budget)
+        if b is None:
+            return walks_at(self.backing, a, self._ranked(a, keep, top, by, labels,
+                                                          route_consistent, min_bp, None),
+                            with_claims=True, resume=resume)
+        with b.scope('walks', ('rank_id', 'select_walks', 'narrow_labels', 'narrow_arm')):
+            ids = self._ranked(a, keep, top, by, labels, route_consistent, min_bp, b)
+            try:
+                return walks_at(self.backing, a, ids, with_claims=True, budget=b,
+                                resume=resume)
+            except LocalBudgetExceeded as e:
+                if by != 'id':
+                    e.partial = None     # a ranked list never returns a partial (walks())
+                raise
+
+    def _ranked(self, a, keep, top, by, labels, route_consistent, min_bp, b):
+        ids = [i for i in rank_walks(self.backing, a, by=by, labels=labels,
+                                     route_consistent=route_consistent, min_bp=min_bp,
+                                     budget=b) if i in keep]
+        return ids if top is None else ids[:top]
 
     def claims(self, arm=None, at_most_bp=None, strict=True, *, budget=None, resume=None):
         if arm is None and self.arm_side is not None:
@@ -2826,24 +2895,31 @@ class GraphletView:
         return parser.save(self._with_view(), path, budget=budget)
 
 
-def _jsonable_selectors(g, selectors):
-    out = []
-    for lab in labels_matching(g, selectors):
-        out.append({'ref': lab.ref})
-    return out
+def subgraph(g, selectors, arm=None, mode='any', *, budget=None, of=None):
+    """GraphletView(g, selectors, arm, mode). |of|: the view's backing identity when the
+    caller has one (a store handle): without it the backing body is dumped and hashed
+    for its digest (VOP2-04)."""
+    return GraphletView(g, selectors, arm, mode, of, budget=budget)
 
 
-def subgraph(g, selectors, arm=None, mode='any', *, budget=None):
-    return GraphletView(g, selectors, arm, mode, budget=budget)
+def view_from_spec(backing, spec, *, budget=None):
+    """The GraphletView a saved J `view` spec (or a store entry's) describes over
+    |backing|: the one restoration of a spec (parser.load() and GraphletStore.view() had
+    a copy each, already apart: VOP2-09). A spec that is no object, or names no label,
+    is a GraphletFormatError -- never a view of every label or of none."""
+    if not isinstance(spec, dict) or not spec.get('selectors'):
+        raise GraphletFormatError(2, 'J: a saved view names no label selectors: %r'
+                                  % (spec,))
+    return GraphletView(backing, spec['selectors'], spec.get('arm'), spec.get('mode', 'any'),
+                        spec.get('of'), budget=budget)
 
 
 def view_from_saved(g, *, budget=None):
+    """The view a loaded file saved (parser.load()): its graphlet becomes the backing,
+    its own view cleared."""
     spec = g.view
-    backing = g
-    backing.view = None
-    sels = spec.get('selectors') or []
-    return GraphletView(backing, sels, spec.get('arm'), spec.get('mode', 'any'),
-                        spec.get('of'), budget=budget)
+    g.view = None
+    return view_from_spec(g, spec, budget=budget)
 
 
 # ------------------------------------------------------------------ comparison
@@ -2986,7 +3062,27 @@ def _stopped_comparison(a, b, mode, state, e):
                       local_stop=st.as_dict())
 
 
+def _compare_sides(a, b, arm):
+    """The arms a comparison reads -> (sides, the reason there are none). An explicit arm
+    is resolved on |a| and must be one |b| retrieved too: it was looked up on |b| as a
+    KeyError (VOP2-02)."""
+    if arm is not None:
+        side = a.arm(arm).side
+        if side not in b.arms:
+            return [], 'the %s arm was not retrieved in b' % side
+        return [side], None
+    sides = [s for s in ARM_SIDES if s in a.arms and s in b.arms]
+    return sides, None if sides else 'no arm in common'
+
+
+_COMPARE_MODES = ('claims', 'walks', 'labels', 'prefix_subset')
+
+
 def _compare(a, b, arm, labels, mode, cb, state):
+    # the mode before anything is answered: an incomparable pair echoed a mode that a
+    # comparable one refused (VOP2-08)
+    if mode not in _COMPARE_MODES:
+        raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
     if cb is not None:
         cb.charge(W_ELEM * (2 * len(a.labels) + 2 * len(b.labels)),
                   dict_bytes(len(a.labels) + len(b.labels))
@@ -2996,10 +3092,12 @@ def _compare(a, b, arm, labels, mode, cb, state):
     if comparable is False:
         return Comparison(False, reason, None, None, [], [], notes, mode=mode,
                           support=(a.support, b.support), strategies=strategies)
-    sides = [a.arm(arm).side] if arm is not None else \
-        [s for s in ARM_SIDES if s in a.arms and s in b.arms]
+    sides, none = _compare_sides(a, b, arm)
     if not sides:
-        return Comparison(False, 'no arm in common', None, None, [], [], notes, mode=mode)
+        # the support kinds and strategies of both sides, as every other answer states
+        # them (VOP2-08: the defaults, ('kmer', 'kmer'), were stated for any pair)
+        return Comparison(False, none, None, None, [], [], notes, mode=mode,
+                          support=(a.support, b.support), strategies=strategies)
     scopes = (a.arms[sides[0]].scope, b.arms[sides[0]].scope)
     depth = min(min(a.arms[s].complete_to_bp, b.arms[s].complete_to_bp) for s in sides)
     state.update(depth=depth, scopes=scopes, notes=notes)
@@ -3025,8 +3123,6 @@ def _compare(a, b, arm, labels, mode, cb, state):
             notes.append('%s arm of a: histories were united at merges' % s)
     if a.support != b.support:
         notes.append('support kinds differ (%s vs %s)' % (a.support, b.support))
-    if mode not in ('claims', 'walks', 'labels', 'prefix_subset'):
-        raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
     if cb is not None and labels is not None:
         _uses_g(cb, a, 'label_index')
         _uses_g(cb, b, 'label_index')
@@ -3188,7 +3284,7 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     |unpriced|. exact: compare() stops before keying (incomparable indexes, no arm in
     common, a side without bases in a mode keyed by bases), so at_least is all it
     charges. Cost: one pass over each arm's segments and runs (its structural sizes)."""
-    if mode not in ('claims', 'walks', 'labels', 'prefix_subset'):
+    if mode not in _COMPARE_MODES:
         raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
     t = _Tally()
     t.charge(_B.W_CALL + W_ELEM * (2 * len(a.labels) + 2 * len(b.labels)),
@@ -3206,8 +3302,7 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     comparable, _, _ = _comparability(a, b)
     if comparable is False:
         return result(True)
-    sides = [a.arm(arm).side] if arm is not None else \
-        [s for s in ARM_SIDES if s in a.arms and s in b.arms]
+    sides, _ = _compare_sides(a, b, arm)
     if not sides:
         return result(True)
     depth = min(min(a.arms[s].complete_to_bp, b.arms[s].complete_to_bp) for s in sides)
@@ -3253,8 +3348,12 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                         + cuts * n0 * dict_bytes(2)
             if mode == 'labels':
                 n = _clipped_summary_price(t, g, arm_)
-                est_w += sort_work(n) + (2 + W_ROW) * n
-                est_m += list_bytes(n) + n * dict_bytes(5)
+                # the keys: compare() charges the labels the clipped summary holds, which
+                # n (the most it can hold) bounds from above -- an estimate, not at_least
+                # (charged into at_least, it exceeded a comparison with labels=)
+                est_w += W_ELEM * 2 * n + sort_work(n) + (2 + W_ROW) * n
+                est_m += n * (TUPLE + 2 * STR + 24 + DICT_KEY) + list_bytes(n) \
+                    + n * dict_bytes(5)
         phases['keys:' + tag] = t.work - w0
     if mode == 'prefix_subset':
         unpriced.append('omissions')
@@ -3277,8 +3376,11 @@ def _price_restricted_claims(t, g, side, depth):
                 'first_paths', 'annotate_route_ends')
     w, m = derive.price(a, 'annotate_route_ends', len(g.labels), g.mode)
     t.uses((id(a), 'route_ends_at', depth), w, m)
-    # the ends of the whole DAG stand in for those of the DAG restricted to the depth
-    ends = _annotate_route_ends(a)[1]
+    # the ends of the DAG restricted to the depth, as compare() keys them: the whole DAG's
+    # ends stood in for them and priced every end beyond the depth too, so at_least
+    # exceeded what the comparison charged (the review of levels 4-5: comb 1 vs comb 100,
+    # 9,197 lwu advertised against 7,963 charged)
+    ends = _annotate_route_ends_at(a, depth)
     md = derive.merge_depth(a)
     n = sum(len(v) for v in ends.values())
     t.charge(sort_work(len(ends)) + n * (W_ROW + 2)
@@ -3292,8 +3394,10 @@ def _price_cuts(t, g, side, depth):
     -> the distinct cuts."""
     a = g.arms[side]
     segs = a.segments
-    derive.uses(t, g, a, 'leaves', 'paths', 'cut_cost')
+    derive.uses(t, g, a, 'leaves', 'paths', 'cut_cost',
+                *(('segment_ops',) if g.mode == 'constrain' else ()))
     cost = derive.cut_cost(a, g.mode)
+    held = _cut_transient(t, g, a)
     n0 = len(segs[0].entry) if segs else 0
     t.charge(W_ELEM * len(segs))
     cut_bytes = TUPLE + LIST + dict_bytes(n0) + set_bytes(n0) + STR
@@ -3309,7 +3413,9 @@ def _price_cuts(t, g, side, depth):
                 k = segs[k].parents[0]
         if (k, m) not in seen:
             seen.add((k, m))
-            t.charge(W_ELEM + (0 if k is None else cost[k]), cut_bytes + m)
+            tr = 0 if k is None else held[k]
+            t.charge(W_ELEM + (0 if k is None else cost[k]), cut_bytes + m + tr)
+            t.release(tr)
         t.charge(W_ELEM, TUPLE + 3 * LIST_ITEM)
     return len(seen)
 
@@ -3325,7 +3431,6 @@ def _clipped_summary_price(t, g, arm):
                  + ((2 * z['presence_ids'] + 2 * z['entry_ids']) >> 2),
                  list_bytes(z['segments']) + z['segments'] * SET
                  + z['entry_ids'] * SET_ITEM + n * (dict_bytes(2) + 2 * INT))
-    t.charge(W_ELEM * 2 * n, n * (TUPLE + 2 * STR + 24 + DICT_KEY))
     return n
 
 
@@ -3466,11 +3571,37 @@ def _charge_chain_tree(cb, arm, segs):
 
 
 def _segment_support(g, arm, s):
-    """The displayed support inside one segment as [(from, to, frozenset of ids)]:
-    the alive sets (constrain) or the recorded P sets (annotate)."""
+    """The displayed support inside one segment as (from, to, frozenset of ids), in order
+    and one at a time: the alive sets (constrain) or the recorded P sets (annotate)."""
     if g.mode == 'constrain':
-        return _alive_pieces(arm, s)
-    return [(p.from_bp, p.to_bp, frozenset(p.labels)) for p in s.presence]
+        return _iter_alive_pieces(arm, s)
+    return ((p.from_bp, p.to_bp, frozenset(p.labels)) for p in s.presence)
+
+
+def _cut_transient(cb, g, a):
+    """seg -> the bytes a cut ending in the first-parent subtree's chain through |seg|
+    holds for one segment of that chain while _cut_info() reads it (the most over the
+    chain root -> seg): constrain, the segment's label changes as tuples, their sort keys
+    and list, the running set and one piece's set; annotate, one P run's set. Released
+    once the cut is made: a cut read a whole segment's pieces at once uncharged (on the
+    hairpin pair with 977 runs ending in one segment, 2.7x the cut's charge)."""
+    def prices():
+        segs = a.segments
+        out = []
+        if g.mode == 'constrain':
+            ops_ = derive.segment_ops(a)
+            for s in segs:
+                k = ops_[s.id]
+                own = k * (2 * TUPLE + 40 + LIST_ITEM) + list_bytes(k) \
+                    + 2 * set_bytes(len(s.entry) + k)
+                out.append(max(out[s.parents[0]], own) if s.parents else own)
+        else:
+            for s in segs:
+                own = TUPLE + 24 + set_bytes(max((len(p.labels) for p in s.presence),
+                                                 default=0))
+                out.append(max(out[s.parents[0]], own) if s.parents else own)
+        return out
+    return derive.price_list(cb, g, a, 'cut_transient', prices)
 
 
 def _cut_info(g, arm, anchor, m):
@@ -3485,7 +3616,13 @@ def _cut_info(g, arm, anchor, m):
     if anchor is None:
         return ('' if not segs or segs[0].walk is not None else None, frozenset(entry), have)
     parts = []
-    inter = None
+    # annotate: the P runs cover the nodes entered by steps from_bp + 1.. only, so the
+    # seed boundary's set (the root's entry) is intersected in first, as every other
+    # annotate reading does (_displayed_presence, the route ends, label_summary): from
+    # the first P run on, a label absent at the boundary counted as supporting [0, m)
+    # (VOP2-03). Constrain: the first piece is the root's entry with the switch-ins at
+    # its first base applied already -- seeding it would drop those.
+    inter = None if g.mode == 'constrain' else frozenset(entry)
     for sid in derive.chain(arm, anchor):
         s = segs[sid]
         if s.walk is None:
@@ -3529,8 +3666,11 @@ def _cuts(g, side, depth, memo, cb=None):
     infos = {}
     out = []
     if cb is not None:
-        derive.uses(cb, g, a, 'leaves', 'paths', 'cut_cost')
+        # cut_cost reads segment_ops (constrain): charged with it (it was built uncharged)
+        derive.uses(cb, g, a, 'leaves', 'paths', 'cut_cost',
+                    *(('segment_ops',) if g.mode == 'constrain' else ()))
         cost = derive.cut_cost(a, g.mode)
+        held = _cut_transient(cb, g, a)
         n0 = len(segs[0].entry) if segs else 0
         cb.charge(W_ELEM * len(segs))
         cut_bytes = TUPLE + LIST + dict_bytes(n0) + set_bytes(n0) + STR
@@ -3551,8 +3691,11 @@ def _cuts(g, side, depth, memo, cb=None):
         info = infos.get((k, m))
         if info is None:
             if cb is not None:
-                cb.charge(W_ELEM + (0 if k is None else cost[k]), cut_bytes + m)
+                tr = 0 if k is None else held[k]
+                cb.charge(W_ELEM + (0 if k is None else cost[k]), cut_bytes + m + tr)
             info = infos[(k, m)] = _cut_info(g, a, k, m)
+            if cb is not None:
+                cb.release(tr)
         if cb is not None:
             cb.charge(W_ELEM, TUPLE + 3 * LIST_ITEM)
         out.append((leaf, m, info))
@@ -4170,8 +4313,13 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
                 if c.kind != 'merged']
         if rows and cb is not None:
             _charge_spellings(cb, arm, {c.segment for c in rows})
+            # per row its (prefix, claim, arm) and the prefix; per (arm, label) key its
+            # tuple, its dict slot and its list (a label per row on a wide arm: the key's
+            # share was missing, 0.8x the rows' traced bytes)
+            keys = len({c.label.ref for c in rows})
             cb.charge(W_ELEM * 2 * len(rows),
-                      len(rows) * (TUPLE + 2 * LIST_ITEM + STR) + sum(c.to_bp for c in rows))
+                      len(rows) * (TUPLE + 2 * LIST_ITEM + STR) + sum(c.to_bp for c in rows)
+                      + keys * (TUPLE + 2 * DICT_KEY + LIST + 4 * LIST_ITEM))
         # every walk of |a| holds bases here (the caller compares no side without them),
         # so a missing spelling raises as _walk_prefix() would; the prefixes are kept in
         # the rows' order, which decides the longest match among equals below
@@ -4201,6 +4349,9 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
         ev_to = arm.evidence_complete_to_bp
         if best is None:
             if cb is not None:
+                # the refusal is looked up by the label's id: a's name/ref index (it was
+                # built uncharged, the level-5 batch's under-accounted cross pair)
+                _uses_g(cb, a, 'label_index')
                 # a's recorded refusals and the divergence of every restricted walk of a
                 # (a base at a time); the trees of their chains once per comparison
                 if cb.first((id(arm), 'refusal_spellings')):

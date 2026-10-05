@@ -182,9 +182,6 @@ class TestFinding7MalformedContinuationCosts(unittest.TestCase):
                 self.assertTrue(str(e.exception).startswith('labels.change_cost')
                                 or str(e.exception).startswith('strategy.labels.change_cost'),
                                 str(e.exception))
-                if isinstance(cost, dict):
-                    with self.assertRaises(ValueError):
-                        ops._switch_cost(cost, 'A', 'B')
 
     def test_a_constant_without_its_value(self):
         # (an override {'model': 'constant'} merges with the retrieval's value: valid)

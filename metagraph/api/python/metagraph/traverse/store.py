@@ -27,9 +27,18 @@ queries build have grown (refresh(): on every access, and after every MCP tool c
 so that max_ram_mb bounds the heap the resident models hold. The disk keeps an
 entry for ttl_disk_s after its last use, and a tombstone for ttl_tomb_s after its
 expiry. The clock is injectable.
+
+Processes sharing a spool each keep their own RAM and index of the entries; the spool
+stays consistent between them (the code review of 2026-10-05, VMD-02): a body is deleted
+only when no entry file names it any more, a handle another process stored is read from
+its entry file on first use (get, free, `in`; list() lists the spool's entries), one
+another process freed or expired answers as unknown (as an expired, replayable one where
+its tombstone keeps a request), and an expiry re-reads the entry file's last use first. A
+body missing from the spool expires its entry, on a parse and on a copy without one.
 """
 
 import collections
+import dataclasses
 import hashlib
 import json
 import os
@@ -99,6 +108,9 @@ class Entry:
     # checked without one); True once a parse of it completed
     parsed: bool = True
     store: Any = field(default=None, repr=False, compare=False)
+    # the bound standalone_text() charges its J line by (_j_bound()): set whenever the
+    # entry is written or read, never stored in its file
+    j_bound: int = field(default=0, repr=False, compare=False)
 
     @property
     def graphlet(self):
@@ -113,6 +125,37 @@ class Entry:
         if not self.parsed:
             out['parsed'] = False
         return out
+
+
+# the fields an entry file may carry (the Entry dataclass without its store); a file of
+# another version keeps what this one knows (VMD-03: an unknown key, such as 'parsed' read
+# by an older library, made the whole store fail to open)
+_ENTRY_FIELDS = frozenset(f.name for f in dataclasses.fields(Entry)) - {'store', 'j_bound'}
+_ENTRY_REQUIRED = frozenset(f.name for f in dataclasses.fields(Entry)
+                            if f.default is dataclasses.MISSING
+                            and f.default_factory is dataclasses.MISSING)
+
+# what the J line adds to its sources besides their own text (at most): the keys it puts
+# them under, with their punctuation
+_J_KEYS = len(',"results":[],"view":,"derived_from":')
+
+
+def _j_bound(e):
+    """An upper bound, in UTF-8 bytes, of the J line standalone_text() writes for |e|
+    (0 when it writes none): the line's sources -- the envelope, the seed summary, the
+    view and derived_from -- as JSON with the spaces the line leaves out, plus the keys
+    it puts them under. A function of what the entry holds only, so that the same export
+    of the same entry is charged the same on every run (budgets are deterministic). The
+    bound was the entry file's size, which also holds the created and accessed times:
+    their printed length follows the clock (1791204329.5 against 1791204329.6234567),
+    and a memory limit stopped one run of an export while an identical run answered
+    (the review of the level 4-5 fixes, finding 1)."""
+    if not (e.envelope or e.seed_summary or e.view is not None
+            or e.derived_from is not None):
+        return 0
+    text = json.dumps([e.envelope, e.seed_summary, e.view, e.derived_from],
+                      ensure_ascii=False)
+    return _J_KEYS + (len(text) if text.isascii() else len(text.encode('utf-8')))
 
 
 def set_delivery(g, delivery):
@@ -214,6 +257,10 @@ class GraphletStore:
                 except (OSError, ValueError):
                     continue
                 self._entries[e.handle] = e
+                # the accessed time the entry file holds: the disk TTL's staleness test
+                # reads it (VMD-01: unseeded, a handle used more often than every tenth
+                # of the TTL never had its use written, and expired after a restart)
+                self._persisted[e.handle] = e.accessed
 
     # ---------------------------------------------------------------- paths
 
@@ -227,9 +274,19 @@ class GraphletStore:
         return os.path.join(self.spool_dir, 'tombstones', handle + '.json')
 
     def _read_entry(self, path):
+        """An entry file -> Entry; ValueError for a file that is no entry (not an object,
+        a required field missing), which the callers skip. Keys this version does not
+        know are left out, not fatal."""
         with open(path, 'r', encoding='utf-8') as f:
             j = json.load(f)
-        return Entry(store=self, **j)
+        if not isinstance(j, dict):
+            raise ValueError('an entry file holds an object, not %s' % type(j).__name__)
+        missing = _ENTRY_REQUIRED - set(j)
+        if missing:
+            raise ValueError('the entry lacks %s' % ', '.join(sorted(missing)))
+        e = Entry(store=self, **{k: v for k, v in j.items() if k in _ENTRY_FIELDS})
+        e.j_bound = _j_bound(e)
+        return e
 
     def _write_entry(self, e):
         j = {k: getattr(e, k) for k in ('handle', 'request', 'index', 'envelope',
@@ -238,8 +295,11 @@ class GraphletStore:
                                         'parent')}
         if not e.parsed:
             j['parsed'] = False             # written only when false: older entries read True
+        e.j_bound = _j_bound(e)
         _write_atomic(self._entry_path(e.handle),
                       json.dumps(j, sort_keys=True, ensure_ascii=False).encode('utf-8'))
+        # what the file now says: get() rewrites it once this lags by a tenth of the TTL
+        self._persisted[e.handle] = e.accessed
 
     # ---------------------------------------------------------------- put
 
@@ -416,21 +476,72 @@ class GraphletStore:
     # ---------------------------------------------------------------- get
 
     def get(self, handle):
-        e = self._entries.get(handle) if isinstance(handle, str) else None
+        e = self._live(handle)
         if e is None:
             raise self._unknown(handle)
         now = self.clock()
-        if now - e.accessed > self.ttl_disk_s:
+        if now - e.accessed > self.ttl_disk_s and not self._fresher_on_disk(e, now):
             self._expire(handle)
             raise self._unknown(handle)
         # the disk TTL counts from the last use, also across restarts: the entry file is
         # rewritten when its stored time lags by a tenth of the TTL (not on every read)
-        stale = now - self._persisted.get(handle, e.accessed) > self.ttl_disk_s / 10
+        stale = now - self._persisted.setdefault(handle, e.accessed) > self.ttl_disk_s / 10
         e.accessed = now
         if stale:
             self._write_entry(e)
-            self._persisted[handle] = now
         return e
+
+    def _live(self, handle):
+        """The entry of |handle| as the spool holds it now, or None: one this store
+        knows whose file is still there, else one another process sharing the spool
+        stored after this store was opened (_adopt()). One this store knows whose file is
+        gone -- freed or expired by another process -- is dropped: its tombstone (if any)
+        answers, never a listed handle whose body may be gone (VMD-02). get(), free(),
+        `in` and list() all see the spool so (free() and `in` read only this process's
+        index before: a handle another process stored was unknown to them until a get()
+        adopted it -- the review of the level 4-5 fixes, finding 5)."""
+        e = self._entries.get(handle) if isinstance(handle, str) else None
+        if e is None:
+            return self._adopt(handle)
+        if not os.path.exists(self._entry_path(handle)):
+            self._forget(handle)
+            return None
+        return e
+
+    def _forget(self, handle):
+        """Drop |handle| from this process's index and RAM (its files are not touched)."""
+        self._entries.pop(handle, None)
+        self._drop_ram(handle)
+        self._persisted.pop(handle, None)
+
+    def _adopt(self, handle):
+        """An entry another process sharing the spool stored after this store was opened
+        (read from its file), or None."""
+        if not isinstance(handle, str) or not _HANDLE_RE.match(handle):
+            return None
+        try:
+            e = self._read_entry(self._entry_path(handle))
+        except (OSError, ValueError, TypeError):
+            return None
+        if e.handle != handle:
+            return None
+        self._entries[handle] = e
+        self._persisted[handle] = e.accessed
+        return e
+
+    def _fresher_on_disk(self, e, now):
+        """Whether the entry file records a use within the disk TTL that this process
+        has not seen (another process sharing the spool used the handle): then its time
+        is taken, and the entry is not expired on this process's stale view (VMD-02)."""
+        try:
+            on_disk = self._read_entry(self._entry_path(e.handle)).accessed
+        except (OSError, ValueError, TypeError):
+            return False
+        if not isinstance(on_disk, (int, float)) or now - on_disk > self.ttl_disk_s:
+            return False
+        e.accessed = max(e.accessed, on_disk)
+        self._persisted[e.handle] = on_disk
+        return True
 
     def _unknown(self, handle):
         if not isinstance(handle, str) or not _HANDLE_RE.match(handle):
@@ -438,9 +549,14 @@ class GraphletStore:
         try:
             with open(self._tomb_path(handle), 'r', encoding='utf-8') as f:
                 tomb = json.load(f)
-            return UnknownHandle(handle, True, tomb.get('request'), tomb.get('index'))
         except (OSError, ValueError):
             return UnknownHandle(handle)
+        if not isinstance(tomb, dict):
+            return UnknownHandle(handle)          # not a tombstone this store wrote
+        # replayable only with a request to replay (an entry loaded from a file without
+        # one has none: the hint would offer a replay that is then refused, VMD-04)
+        request = tomb.get('request')
+        return UnknownHandle(handle, bool(request), request, tomb.get('index'))
 
     def graphlet(self, handle, *, parse_budget=None):
         """The entry's parsed graphlet: the resident model, or a parse of its body (under
@@ -457,15 +573,25 @@ class GraphletStore:
             return got[0]
         if got is not None:
             self._drop_ram(handle)
-        with open(self._body_path(e.digest), 'r', encoding='utf-8', newline='') as f:
-            body = f.read()
+        try:
+            with open(self._body_path(e.digest), 'r', encoding='utf-8', newline='') as f:
+                body = f.read()
+        except FileNotFoundError:
+            # the body is gone (removed outside this store): the entry is expired, so the
+            # handle answers as an expired one -- replayable from its request -- instead
+            # of failing on every use while it stays listed (VMD-04)
+            self._expire(handle)
+            raise self._unknown(handle) from None
         g = self._parsing(lambda b: parse(body, budget=b), self._parse_budget(parse_budget))
         if not e.parsed:
             # the body now passed a whole parse: it is a graphlet like any other
             e.parsed = True
             self._write_entry(e)
-        g.envelope = e.envelope or None
-        g.seed_summary = e.seed_summary or None
+        # an entry stores {} for none: a graphlet had an envelope when either side holds
+        # something (the rule of a J line, parser._attach_j: VPC-05)
+        has_env = bool(e.envelope) or bool(e.seed_summary)
+        g.envelope = e.envelope if has_env else None
+        g.seed_summary = e.seed_summary if has_env else None
         g.view = e.view
         g.derived_from = e.derived_from
         if e.delivery is not None:
@@ -476,11 +602,11 @@ class GraphletStore:
     def view(self, handle, *, parse_budget=None):
         """The entry's graphlet, or the GraphletView it stores."""
         g = self.graphlet(handle, parse_budget=parse_budget)
-        if g.view:
-            from .ops import GraphletView
-            spec = g.view
-            return GraphletView(g, spec.get('selectors') or [], spec.get('arm'),
-                                spec.get('mode', 'any'), spec.get('of'))
+        if g.view is not None:
+            # the same restoration and the same presence test as parser.load(): the model
+            # is the shared resident one, so its view stays set (VOP2-09)
+            from .ops import view_from_spec
+            return view_from_spec(g, g.view)
         return g
 
     def _remember(self, handle, g, now):
@@ -536,10 +662,10 @@ class GraphletStore:
     def free(self, handle):
         """Delete the entry (and its body when no other entry holds it). Freed entries
         are not replayable: the caller asked for them to go."""
-        e = self._entries.pop(handle, None) if isinstance(handle, str) else None
+        e = self._live(handle)
         if e is None:
             raise self._unknown(handle)
-        self._drop_ram(handle)
+        self._forget(handle)
         try:
             os.unlink(self._entry_path(handle))
         except OSError:
@@ -547,15 +673,40 @@ class GraphletStore:
         self._gc_body(e.digest)
 
     def _gc_body(self, digest):
-        if not any(x.digest == digest for x in self._entries.values()):
+        if any(x.digest == digest for x in self._entries.values()):
+            return
+        if self._digest_on_disk(digest):
+            return
+        try:
+            os.unlink(self._body_path(digest))
+        except OSError:
+            pass
+
+    def _digest_on_disk(self, digest):
+        """Whether an entry file this store has not loaded (another process's, sharing the
+        spool) holds body |digest|: bodies are shared by digest, so freeing one entry
+        deleted the body under another process's entry (VMD-02)."""
+        entries = os.path.join(self.spool_dir, 'entries')
+        try:
+            names = os.listdir(entries)
+        except OSError:
+            return False
+        for name in names:
+            if not name.endswith('.json') or name[:-len('.json')] in self._entries:
+                continue
             try:
-                os.unlink(self._body_path(digest))
-            except OSError:
-                pass
+                with open(os.path.join(entries, name), 'r', encoding='utf-8') as f:
+                    j = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(j, dict) and j.get('digest') == digest:
+                return True
+        return False
 
     def _expire(self, handle):
         e = self._entries.pop(handle)
         self._drop_ram(handle)
+        self._persisted.pop(handle, None)
         tomb = {'handle': handle, 'request': e.request, 'index': e.index,
                 'expired': self.clock()}
         _write_atomic(self._tomb_path(handle), json.dumps(tomb).encode('utf-8'))
@@ -573,7 +724,8 @@ class GraphletStore:
         ram = [h for h, (_, _, used) in self._ram.items() if now - used > self.ttl_ram_s]
         for h in ram:
             self._drop_ram(h)
-        expired = [h for h, e in self._entries.items() if now - e.accessed > self.ttl_disk_s]
+        expired = [h for h, e in self._entries.items() if now - e.accessed > self.ttl_disk_s
+                   and not self._fresher_on_disk(e, now)]
         for h in expired:
             self._expire(h)
         removed = []
@@ -624,6 +776,19 @@ class GraphletStore:
             return f.read()
 
     def list(self):
+        """The spool's entries, oldest first: with those another process sharing the
+        spool stored, without those another process removed (_live())."""
+        try:
+            names = {n[:-len('.json')] for n in os.listdir(os.path.join(self.spool_dir,
+                                                                        'entries'))
+                     if n.endswith('.json')}
+        except OSError:
+            names = None
+        if names is not None:
+            for h in [h for h in self._entries if h not in names]:
+                self._forget(h)
+            for h in sorted(names.difference(self._entries)):
+                self._adopt(h)
         return [e.meta() for e in sorted(self._entries.values(), key=lambda x: x.created)]
 
     def save(self, handle, path):
@@ -639,7 +804,16 @@ class GraphletStore:
         # (128 KiB from Python 3.14) beside the bytes and the text, which no account of
         # standalone_text() charged (graphlet_export(format=mgt) peaked above its account on
         # 27 of 34 retrievals). Decoded as the text file did with newline='': the same text
-        with open(self._body_path(e.digest), 'rb', buffering=0) as f:
+        try:
+            f = open(self._body_path(e.digest), 'rb', buffering=0)
+        except FileNotFoundError:
+            # the body is gone: the entry expires, as on a parse (graphlet()) -- the copy
+            # without a parse (graphlet_save, graphlet_export(format=mgt) under local
+            # limits) answered io_error and left the entry listed (the review of the level
+            # 4-5 fixes, finding 4: VMD-04 held on the parse path only)
+            self._expire(handle)
+            raise self._unknown(handle) from None
+        with f:
             return f.read().decode('utf-8')
 
     def standalone_text(self, handle, *, budget=None):
@@ -653,17 +827,24 @@ class GraphletStore:
         is charged."""
         e = self.get(handle)
         b = _B.resolve(budget)
+        has_env = bool(e.seed_summary) or bool(e.envelope)
         if b is not None:
             b.charge(e.bytes >> 8, 3 * (e.bytes + 49))
+            if has_env or e.view is not None or e.derived_from is not None:
+                # the J line, not in e.bytes: its text, its copy in the answer and the JSON
+                # encoder's pieces (a list of chunks up to Python 3.11), by the bound
+                # _j_bound() takes from the entry -- uncharged, an export of a small
+                # retrieval peaked above its account under 3.11
+                jb = e.j_bound
+                b.charge(jb >> 8, 4 * (jb + 49))
         body = self.body_text(handle)
         head = _check_frame(body)
         first = body.find('\n')
-        rest = body[first + 1:]
-        if rest.startswith('J '):
+        if body.startswith('J ', first + 1):
             raise ValueError('the stored body carries a J line')
+        rest = body[first + 1:]
         if e.delivery is not None:
             rest = _with_delivery(rest, e.delivery)
-        has_env = bool(e.seed_summary) and bool(e.envelope)
         last = body.rfind('\n', 0, len(body) - 1) + 1
         lines = parse_int(body[last:-1].split(' ')[1])
         if not (has_env or e.view is not None or e.derived_from is not None):
@@ -692,22 +873,42 @@ class GraphletStore:
         _write_atomic(os.path.abspath(path), data)
         return len(data)
 
-    def load(self, path, request=None, *, parse_budget=None):
+    def load(self, path, request=None, *, parse_budget=None, graph=None, graph_path=None):
         """A saved .mgt file -> a new handle (its J line restores envelope and view).
         Under parse limits (or |parse_budget|) a parse that stops raises and stores
-        nothing: the file is left as it is."""
+        nothing: the file is left as it is. |graph|, |graph_path|: the graph of a
+        multi-graph server the graphlet was retrieved from, kept in the replay request
+        (request_of())."""
+        return self.load_graphlet(path, request, parse_budget=parse_budget, graph=graph,
+                                  graph_path=graph_path)[0]
+
+    def load_graphlet(self, path, request=None, *, parse_budget=None, graph=None,
+                      graph_path=None):
+        """load() -> (the new handle, the graphlet the load parsed). The model is the one
+        a resident entry holds; returned also when the store does not keep it in RAM
+        (max_ram_mb), so that a caller needs no second parse of what it just loaded -- a
+        parse on demand runs under the store's parse limits, which may refuse what the
+        load's own budget admitted (the review of levels 4-5: graphlet_load lost the
+        handle of an entry it had stored)."""
         with open(path, 'r', encoding='utf-8', newline='') as f:
             text = f.read()
         g = self._parsing(lambda b: parse(text, budget=b), self._parse_budget(parse_budget))
-        return self.put_graphlet(g, request if request is not None else
-                                 self.request_of(g))
+        h = self.put_graphlet(g, request if request is not None else
+                              self.request_of(g, graph=graph, graph_path=graph_path))
+        return h, g
 
     @staticmethod
-    def request_of(g):
+    def request_of(g, *, graph=None, graph_path=None):
         """The replayable request of a graphlet with an envelope: its seed as validated
         (sequence, the seed labels by name) and the normalized strategy. None when there
         is none -- also when the seed labels' names cannot be verified to resolve back
-        to them (ops.resubmittable_names): a replay must not run under other labels."""
+        to them (ops.resubmittable_names): a replay must not run under other labels.
+
+        |graph|, |graph_path| (else the envelope's, where the server echoed them): the
+        graph a multi-graph server ran it on, kept so that a replay runs on that graph
+        (VMD-06: the request carried neither, and a multi-graph server refuses it or a
+        client's other graph answers). A request without them is valid on a
+        single-graph server only."""
         if not g.has_envelope:
             return None
         seed = {'sequence': g.seed.sequence}
@@ -727,12 +928,16 @@ class GraphletStore:
         req = {'seeds': [seed], 'strategy': strategy}
         if g.envelope.get('release'):
             req['release'] = g.envelope['release']
+        graph = graph or g.envelope.get('graph')
+        graph_path = graph_path or g.envelope.get('graph_path')
+        if graph:
+            req['graph'] = graph
+        if graph_path:
+            req['graph_path'] = graph_path
         return req
 
     def __contains__(self, handle):
-        if not isinstance(handle, str):
-            return False
-        return handle in self._entries
+        return self._live(handle) is not None
 
     def j_of(self, handle):
         return j_object(self.graphlet(handle))
