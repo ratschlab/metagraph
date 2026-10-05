@@ -3233,7 +3233,9 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                 steps = sum(segs[r.segment].depth + 1 for r in arm_.runs) \
                     if g.mode == 'constrain' else n_rows * 4
                 est_w += 2 * W_STEP * steps + (bp >> 8) + 3 * W_ELEM * n_rows + bp // 128
-                est_m += 2 * n_rows * (STR + TUPLE + LIST + 48 + 2 * STR) + 4 * bp
+                # the claims' prefixes (2x their bases, as charged) and their spelling
+                # streamed (derive.walk_iter_bytes(): the kept prefixes, at most the bases)
+                est_m += 2 * n_rows * (STR + TUPLE + LIST + 48 + 2 * STR) + 3 * bp
                 if mode == 'claims':
                     est_w += sort_work(n_rows) + 2 * n_rows + W_ROW * n_rows
                     est_m += 2 * list_bytes(n_rows) + n_rows * (dict_bytes(6) + dict_bytes(2))
@@ -3395,36 +3397,72 @@ def _claim_keys(g, sides, depth, sel, inexact=None, cb=None):
             cb.charge(W_ELEM * 3 * len(rows) + sum(c.to_bp for c in rows) // 128,
                       len(rows) * (TUPLE + 48 + 2 * STR + 2 * DICT_KEY + 16)
                       + 2 * sum(c.to_bp for c in rows))
-        spelled = _spellings(a, {c.segment for c in rows})
-        for c in rows:
-            w = spelled.get(c.segment)
-            prefix = None if w is None else _natural(side, w[:c.to_bp])
+        prefixes = _claim_prefixes(a, rows, natural=True)
+        for c, prefix in zip(rows, prefixes):
             key = (side, c.label.ref, c.evidence_from if c.evidence_from is not None else -1,
                    prefix, c.to_bp)
             out[key] = 'open' if _open_at(c, depth) else c.end_class
     return out
 
 
+def _claim_prefixes(arm, rows, strict=False, natural=False):
+    """[the walking-order bases [0, to_bp) of each row's segment chain] for the claims
+    |rows|, in their order (|natural|: in natural orientation, _natural()): each segment
+    spelled once as derive.walk_iter() reaches it and dropped once its rows are cut from
+    it, so the prefixes are held and not every spelling with them (holding them all, and
+    the batch's prefixes, made compare() peak 4x higher on a comb than spelling claim by
+    claim had). Without bases (or with bases on some segments only): all None, a key
+    without a prefix, or with |strict| (a side that must carry them) the ValueError
+    walk_bases() raises."""
+    flip = natural and arm.side == 'left'
+    out = [None] * len(rows)
+    at = {}
+    for i, c in enumerate(rows):
+        at.setdefault(c.segment, []).append(i)
+    try:
+        for s, _, w in derive.walk_iter(arm, set(at), chains=False, check_first=False):
+            if w is None:
+                if strict:
+                    raise ValueError(derive.NO_BASES)
+                continue
+            for i in at[s]:
+                out[i] = w[:rows[i].to_bp][::-1] if flip else w[:rows[i].to_bp]
+    except ValueError:
+        # bases on some segments only, raised at the first chain without them: the
+        # prefixes cut before it are dropped with |out|, so no key carries part of a side
+        if strict:
+            raise
+        return [None] * len(rows)
+    return out
+
+
 def _charge_spellings(cb, arm, segs):
-    """Charge derive.walk_batch() of |segs| at its bound: every target's chain and
-    bases, and the kept prefixes (at most as many bytes again)."""
+    """Charge derive.walk_iter() of |segs|, its bases streamed to a consumer that keeps
+    none of them: the chains' steps (work) and derive.walk_iter_bytes(). Before the
+    spellings were streamed this charged every target's chain and bases and the kept
+    prefixes (2x the bases and 2 list slots per chain step), which was what walk_batch()
+    held."""
+    sg = arm.segments
+    cb.charge(len(segs))
+    steps = sum(sg[x].depth + 1 for x in segs)
+    bp = sum(sg[x].end_bp for x in segs)
+    big = max([sg[x].end_bp for x in segs], default=0)
+    cb.charge(2 * W_STEP * steps + (bp >> 8),
+              derive.walk_iter_bytes(len(segs), bp, min(steps, len(sg)), big))
+
+
+def _charge_chain_tree(cb, arm, segs):
+    """Charge a tree of the chains of |segs| (_refusal_tree(), _restricted_tree()): the
+    chains' steps, priced as their spelling was (the work model is unchanged), and per
+    segment of their union its children slot, its offset and the set that collects it --
+    no bases (the spellings these trees replaced were charged as _charge_spellings())."""
     sg = arm.segments
     cb.charge(len(segs))
     steps = sum(sg[x].depth + 1 for x in segs)
     bp = sum(sg[x].end_bp for x in segs)
     cb.charge(2 * W_STEP * steps + (bp >> 8),
-              2 * len(segs) * (STR + TUPLE + LIST) + 2 * bp + 2 * LIST_ITEM * steps)
-
-
-def _spellings(arm, segs):
-    """{seg: walking-order bases root -> its end} for |segs|, their common prefixes spelled
-    once (derive.walk_batch); {} when the retrieval carries no bases (where walk_bases()
-    raises, the keyers' answer for a missing spelling)."""
-    try:
-        got = derive.walk_batch(arm, segs, chains=False)
-    except ValueError:
-        return {}
-    return {s: w for s, (_, w) in got.items() if w is not None}
+              min(steps, len(sg)) * (SET_ITEM + 2 * DICT_KEY + INT + LIST_ITEM)
+              + len(segs) * LIST_ITEM)
 
 
 def _segment_support(g, arm, s):
@@ -3936,29 +3974,43 @@ def _recorded_refusal(g, arm, seq, ref, memo=None):
     where walk |seq| (walking order) leaves g's trie: a V refusal (quorum, split limit), a
     blocked successor or a skipped hairpin, on a segment whose chain spells seq up to
     the branch and for the base seq has there. None when nothing was recorded. |memo|:
-    the comparison's, where the spellings of the event segments are kept (one omission
-    after another asks for the same ones)."""
+    the comparison's, where the event segments' chains are kept as a tree (one omission
+    after another asks about the same ones).
+
+    The chains are not spelled: seq is followed down them (_refusal_tree()), and an event
+    at |at| on a segment is on seq's path when the segment's chain matches seq up to |at|.
+    Keeping every event segment's spelling for the comparison held, on a comb with an event
+    at each split, about as much as the walks' whole text."""
     ids = _label_index(g)[0].get(ref)
     if not ids:
         return None
     lid = ids[0]
-    key = ('refusal_spellings', id(g), arm.side)
-    spelled = None if memo is None else memo.get(key)
-    if spelled is None:
-        spelled = _spellings(arm, {be.segment for be in arm.branch_events}
-                             | {s.id for s in arm.segments for ev in s.events
-                                if ev.type == 'blocked'
-                                or (ev.type == 'hairpin' and not ev.followed)})
+    key = ('refusal_tree', id(g), arm.side)
+    tree = None if memo is None else memo.get(key)
+    if tree is None:
+        tree = _refusal_tree(arm)
         if memo is not None:
-            memo[key] = spelled
+            memo[key] = tree
+    if tree is False:
+        # an event segment's chain lacks bases: no spelling matches seq (a retrieval without
+        # bases is not compared by its walks)
+        return None
+    kids, offs, roots = tree
+    segs = arm.segments
+    matched = _follow(segs, kids, roots, seq, len(seq))
 
     def on_chain(seg, at):
+        # the chain's bases [0, at) are seq's, and the chain reaches at
         if at >= len(seq):
             return False
-        w = spelled.get(seg)
-        if w is None:
+        off = offs[seg]
+        if off + len(segs[seg].walk) < at:
             return False
-        return len(w) >= at and w[:at] == seq[:at]
+        if at >= off:
+            # seq was followed into seg exactly when its chain before seg is seq's
+            return matched.get(seg, -1) >= at
+        w = derive.walk_bases(arm, seg)          # an event before its segment: not seen
+        return w[:at] == seq[:at]
 
     for be in arm.branch_events:
         if not on_chain(be.segment, be.at_bp):
@@ -3974,35 +4026,113 @@ def _recorded_refusal(g, arm, seq, ref, memo=None):
     return None
 
 
+def _refusal_tree(arm):
+    """({segment: its first-parent children}, {segment: the length of its chain's bases
+    before it}, [roots]) over the chains of the segments _recorded_refusal() reads (branch
+    events, blocked successors, skipped hairpins), or False when one of those chains has a
+    segment without bases."""
+    segs = arm.segments
+    on = set()
+    for x in ({be.segment for be in arm.branch_events}
+              | {s.id for s in segs for ev in s.events
+                 if ev.type == 'blocked' or (ev.type == 'hairpin' and not ev.followed)}):
+        while x not in on:
+            on.add(x)
+            if segs[x].walk is None:
+                return False
+            p = segs[x].parents
+            if not p:
+                break
+            x = p[0]
+    kids, offs, roots = {}, {}, []
+    for x in sorted(on):                 # parents first
+        p = segs[x].parents
+        if p:
+            q = p[0]
+            offs[x] = offs[q] + len(segs[q].walk)
+            kids.setdefault(q, []).append(x)
+        else:
+            offs[x] = 0
+            roots.append(x)
+    return kids, offs, roots
+
+
+def _follow(segs, kids, roots, seq, lim):
+    """{segment: the length of seq's prefix its chain spells, its own bases included} for
+    every segment of the tree (kids, roots) whose chain BEFORE it is seq's (bases [0,
+    lim)): seq followed down the tree, a segment's bases compared only where its parent
+    matched in full."""
+    out = {}
+    stack = [(r, 0) for r in roots]
+    while stack:
+        s, off = stack.pop()
+        n = _match_len(segs[s].walk, seq, off, lim)
+        out[s] = off + n
+        if n == len(segs[s].walk) and off + n < lim:
+            stack.extend((c, off + n) for c in kids.get(s, ()))
+    return out
+
+
+def _match_len(w, seq, off, lim):
+    """How many leading bases of |w| equal seq[off:], at most lim - off."""
+    hi = max(0, min(len(w), lim - off))
+    if w[:hi] == seq[off:off + hi]:
+        return hi
+    n = 0
+    while w[n] == seq[off + n]:
+        n += 1
+    return n
+
+
 def _divergence(arm, seq, depth, memo=None):
     """The length of the longest prefix of |seq| (walking order) that some walk of the
     arm's DAG restricted to [0, depth) spells: where seq leaves the arm's trie there.
-    |memo|: the comparison's, where the restricted walks' spellings are kept."""
-    key = ('divergence_spellings', id(arm), depth)
-    walks = None if memo is None else memo.get(key)
-    if walks is None:
-        leaves_ = restricted_leaves(arm, depth)
-        try:
-            got = derive.walk_batch(arm, leaves_)
-            walks = [got[leaf][1] for leaf in leaves_]
-        except ValueError:
-            walks = [None] * len(leaves_)
-        if None in walks:
-            walks = [None]
+    |memo|: the comparison's, where the restricted walks' first-parent tree is kept.
+
+    The walks are not spelled: seq is followed down the first-parent tree of the
+    restricted walks (_restricted_tree()), a segment's bases compared where its chain so
+    far matches, and the deepest match is the longest common prefix with some walk cut at
+    the depth. Keeping every restricted walk's spelling for the comparison (one omission
+    after another asks again) held the whole arm's text spelled out -- on a comb as much
+    as to_fasta() writes -- and spelling them per omission was quadratic in time."""
+    key = ('divergence_tree', id(arm), depth)
+    tree = None if memo is None else memo.get(key)
+    if tree is None:
+        tree = _restricted_tree(arm, depth)
         if memo is not None:
-            memo[key] = walks
-    best = 0
-    for w in walks:
-        if w is None:
-            return None
-        w = w[:depth]
-        n = 0
-        for x, y in zip(w, seq):
-            if x != y:
-                break
-            n += 1
-        best = max(best, n)
-    return best
+            memo[key] = tree
+    if tree is False:
+        return None
+    kids, roots = tree
+    # the deepest match: every walk below a followed segment spells its matched prefix
+    return max(_follow(arm.segments, kids, roots, seq, min(depth, len(seq))).values(),
+               default=0)
+
+
+def _restricted_tree(arm, depth):
+    """({segment: its first-parent children whose subtrees hold a walk of the DAG
+    restricted to [0, depth)}, [such roots]) -- the tree _divergence() follows a sequence
+    down, the restricted leaves' chains and nothing else -- or False when one of those
+    chains has a segment without bases (the walks cannot be spelled: no divergence)."""
+    segs = arm.segments
+    on = set(restricted_leaves(arm, depth))
+    # parents come first (segment ids), so one pass from the last segment marks every
+    # chain of a restricted leaf
+    for s in reversed(segs):
+        if s.id in on and s.parents:
+            on.add(s.parents[0])
+    kids = {}
+    roots = []
+    for s in segs:
+        if s.id not in on:
+            continue
+        if s.walk is None:
+            return False
+        if s.parents:
+            kids.setdefault(s.parents[0], []).append(s.id)
+        else:
+            roots.append(s.id)
+    return kids, roots
 
 
 def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, state=None):
@@ -4038,21 +4168,15 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
         arm = a.arms[side]
         rows = [c for c in _restricted_claims(a, side, depth, inexact, cb)
                 if c.kind != 'merged']
-        spelled = None
         if rows and cb is not None:
             _charge_spellings(cb, arm, {c.segment for c in rows})
             cb.charge(W_ELEM * 2 * len(rows),
                       len(rows) * (TUPLE + 2 * LIST_ITEM + STR) + sum(c.to_bp for c in rows))
-        if rows:
-            # every walk of |a| holds bases here (the caller compares no side without
-            # them), so a missing spelling raises as _walk_prefix() would
-            spelled = {s: w for s, (_, w) in
-                       derive.walk_batch(arm, {c.segment for c in rows}).items()}
-        for c in rows:
-            w = spelled[c.segment]
-            if w is None:
-                raise ValueError(derive.NO_BASES)
-            prefix = w[:c.to_bp]
+        # every walk of |a| holds bases here (the caller compares no side without them),
+        # so a missing spelling raises as _walk_prefix() would; the prefixes are kept in
+        # the rows' order, which decides the longest match among equals below
+        prefixes = _claim_prefixes(arm, rows, strict=True) if rows else []
+        for c, prefix in zip(rows, prefixes):
             a_claims.setdefault((side, c.label.ref), []).append((prefix, c, arm))
     if cb is not None:
         cb.phase = 'omissions'
@@ -4078,12 +4202,12 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
         if best is None:
             if cb is not None:
                 # a's recorded refusals and the divergence of every restricted walk of a
-                # (a base at a time); their spellings once per comparison
+                # (a base at a time); the trees of their chains once per comparison
                 if cb.first((id(arm), 'refusal_spellings')):
-                    _charge_spellings(cb, arm, {be.segment for be in arm.branch_events}
-                                      | {x.id for x in arm.segments if x.events})
+                    _charge_chain_tree(cb, arm, {be.segment for be in arm.branch_events}
+                                       | {x.id for x in arm.segments if x.events})
                 if cb.first((id(arm), 'divergence_spellings', depth)):
-                    _charge_spellings(cb, arm, restricted_leaves(arm, depth))
+                    _charge_chain_tree(cb, arm, restricted_leaves(arm, depth))
                 cb.charge(2 * n_refusal[side]
                           + n_leaves[side] * (1 + (min(depth, len(seq)) >> 1)))
             # the label went on along another successor in a: the reason, when there

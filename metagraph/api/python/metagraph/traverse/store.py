@@ -43,8 +43,8 @@ from typing import Any, Optional
 from . import budget as _B
 from ._codec import CodecError, GraphletFormatError, parse_int
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
-from .parser import (_check_transport, dump, from_response, j_object, parse, seed_envelope,
-                     utf8_bytes)
+from .parser import (_check_transport, _write_all, dump, from_response, j_object, parse,
+                     seed_envelope, utf8_bytes)
 
 __all__ = ['GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded']
 
@@ -168,8 +168,8 @@ def _write_atomic(path, data):
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(prefix='.tmp-', dir=d)
     try:
-        with os.fdopen(fd, 'wb') as f:
-            f.write(data)
+        # one write, without the 128 KiB buffer a buffered file holds (parser._write_all())
+        _write_all(fd, data)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -635,8 +635,12 @@ class GraphletStore:
     def body_text(self, handle):
         """The stored body, as received (no parse)."""
         e = self.get(handle)
-        with open(self._body_path(e.digest), 'r', encoding='utf-8', newline='') as f:
-            return f.read()
+        # read at once without a buffer: a buffered text file holds io.DEFAULT_BUFFER_SIZE
+        # (128 KiB from Python 3.14) beside the bytes and the text, which no account of
+        # standalone_text() charged (graphlet_export(format=mgt) peaked above its account on
+        # 27 of 34 retrievals). Decoded as the text file did with newline='': the same text
+        with open(self._body_path(e.digest), 'rb', buffering=0) as f:
+            return f.read().decode('utf-8')
 
     def standalone_text(self, handle, *, budget=None):
         """The entry's standalone .mgt text -- H, the entry's J line, the body -- built
@@ -677,7 +681,14 @@ class GraphletStore:
 
     def save_body(self, handle, path, *, budget=None):
         """standalone_text() written atomically to |path| (no parse) -> bytes written."""
-        data = self.standalone_text(handle, budget=budget).encode('utf-8')
+        text = self.standalone_text(handle, budget=budget)
+        b = _B.resolve(budget)
+        if b is not None:
+            # its UTF-8 bytes, made beside it, as graphlet_export(format=mgt) charges them
+            # (mcp_tools._write_text_charged()): left out, graphlet_save peaked above its
+            # account on 28 of 34 retrievals even once the buffers were gone
+            b.charge(0, 2 * (len(text) + 49))
+        data = text.encode('utf-8')
         _write_atomic(os.path.abspath(path), data)
         return len(data)
 

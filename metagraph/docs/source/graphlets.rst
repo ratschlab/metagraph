@@ -190,6 +190,119 @@ registered, no usage).
    client.attempt('a-18')['reason']      # 'cancelled'
    client.traverse(seeds, strategy, attempt_id='a-19', not_after_ms=now_ms + 60_000)
 
+**Feature level 5: releasing capacity on a tombstone.** A ledger that gives an attempt's
+capacity back before the attempt finished must know that no copy of the request can
+still start: a cancel can overtake its own request (queued, on the wire, half
+uploaded), and a delayed copy can reach a server that was restarted in the meantime and
+holds no tombstones. Two request fields close both gaps, and the capabilities'
+``release_rule`` says when a release is safe:
+
+* ``cancel(attempt_id, wait_ms=None, not_after_ms=None)``: ``not_after_ms`` is the
+  ``not_after_ms`` of the request being cancelled. A tombstone is then held until no
+  copy of that request can start -- this server's clock past ``not_after_ms`` plus its
+  ``clock_skew_allowance_ms`` --, within the server's ``tombstone_max_s``, and every
+  tombstone answer states it.
+* ``traverse(..., attempt_id=..., expect_server_instance=...)`` (with ``attempt_id``
+  only): the ``server_instance`` the attempt is meant for, a string or ``'auto'`` (the
+  client fills in the server's own, ``client.server_instance()``, read from
+  ``GET /capabilities`` and kept for that server process). A process with another
+  instance refuses the request before anything runs: ``InstanceMismatch`` (409, with
+  ``expect_server_instance`` and ``server_instance``).
+
+Both fields are sent only to a server that states ``feature_level`` 5 or more, read from
+``GET /capabilities`` (``client.server_feature_level()``; or pass ``feature_level=`` to
+the client) and never for a request without them: a server below level 5 refuses the
+fields with a 400, and a 400 to a request with ``attempt_id`` has already used that id
+up. Below level 5 a cancel goes out without ``not_after_ms`` (it still stops the attempt)
+and ``'auto'`` is left out; an explicit instance raises ``UnsupportedFeature`` (a
+``ValueError``) before anything is sent.
+
+What the client read is kept per server process. It is read again after an answer names
+another ``server_instance`` (the server restarted at the same address), after an
+``InstanceMismatch``, and after a 400 that refuses ``not_after_ms`` or
+``expect_server_instance`` as an unknown field (an older binary now answers there). A
+cancel refused that way is sent again at once without ``not_after_ms``: the 400 stopped
+nothing. A request with ``expect_server_instance`` that is the first to reach a replaced
+process cannot be saved: an older binary uses its ``attempt_id`` up with that 400, so a
+ledger that rolls servers back calls ``client.refresh_capabilities()`` first.
+
+What went out is stated: ``response.sent`` and the ``.sent`` of any exception
+``traverse()`` raises once the request is built (a ``TraverseError``, and a transport
+error such as a timeout or a reset connection, the unanswered attempt a ledger must
+cancel) are an ``AttemptSent(attempt_id, not_after_ms, expect_server_instance)``;
+``AttemptSent.of(request)`` reads one from a request you built, and a cancel's answer
+carries the body it sent (``answer.sent``).
+
+The answers are typed. ``cancel()`` and ``attempt()`` return an ``AttemptAnswer``: the
+server's JSON (a ``dict``, as before) with its HTTP ``status``, ``state``,
+``tombstone``, the 429's ``reason`` (``tombstones_full``: the server holds its maximum,
+``answer.retryable``; ``no_suppression``: it keeps no tombstones) and ``suppression``, a
+``Suppression(suppressed_until_ms, not_after_ms, covers_admission,
+covers_admission_reason)`` on every tombstone answer of a level-5 server
+(``covers_admission`` true: no copy of that request can start on this
+``server_instance``; else the reason, ``no_not_after_ms`` or ``beyond_tombstone_max``).
+A request refused because its ``attempt_id`` is held raises ``AttemptConflict`` (409:
+running, retained, held after it finished, or tombstoned -- ``tombstoned``, with the
+``suppression`` judged against the refused request's own ``not_after_ms``; the refusal
+extends the tombstone), and ``AttemptExpired`` states ``not_after_ms``,
+``server_time_ms`` and ``server_instance``.
+
+``release_verdict(answer, sent, *, now_ms=None, clock_skew_allowance_ms=None,
+bound_ms=None, attempts=None)`` applies the ``release_rule`` exactly and returns a
+``ReleaseVerdict`` (``release``, ``early``, ``code``, ``why``, ``assumptions``; true as a
+``bool`` when ``release``). ``attempts`` is the capabilities' attempts block; it supplies
+``clock_skew_allowance_ms`` and, as the bound, ``hard_cap_ms`` when they are not given:
+
+* **early** (``code: 'tombstone'``) only on a 404 with ``tombstone: true`` and
+  ``covers_admission: true`` (a cancel's or ``GET /traverse/attempt``'s) from the
+  ``server_instance`` the attempt was sent to with ``expect_server_instance``, judged
+  against exactly the ``not_after_ms`` it was sent with. An attempt sent without either
+  field is never released early on a tombstone.
+* otherwise on a **finished** state (``code: 'finished'``: the response, an error that
+  carries the attempt's ``usage``, a cancel's or ``attempt()``'s ``state: finished``),
+  or once the ledger's clock (``now_ms``) passes ``not_after_ms +
+  clock_skew_allowance_ms + bound_ms`` (``code: 'clock'``).
+* a finished release is the rule's either way, but the server holds a finished id
+  against a replay only for an attempt sent with ``not_after_ms``, until
+  ``not_after_ms + clock_skew_allowance_ms`` and at most ``tombstone_max_s`` after the
+  finish, on that process. Where the release instead assumes that no copy of the request
+  arrives later, ``assumptions`` names why: ``sent_without_not_after_ms``,
+  ``no_retention`` (``retention_s`` 0), ``beyond_tombstone_max``,
+  ``sent_without_expect_server_instance`` (a copy reaching a restarted process). The two
+  about the server are judged only when ``attempts`` is given. When the clock has passed
+  as well, the ``clock`` release is returned, which assumes none of them.
+* nothing else releases, and ``code`` names the first condition not met:
+  ``not_tombstoned`` (a 429), ``stopping`` / ``running``, ``no_tombstone``,
+  ``sent_without_not_after_ms``, ``sent_without_expect_server_instance``,
+  ``no_suppression_stated`` (a server below level 5), ``covers_admission_false``,
+  ``other_server_instance``, ``other_not_after_ms``, ``answer_for_other_attempt``,
+  ``not_a_release_answer`` (a 409 -- held, tombstoned, expired, ``instance_mismatch``
+  -- or an error before the attempt was registered), ``no_answer``.
+
+.. code-block:: python
+
+   from metagraph.traverse import AttemptConflict, AttemptSent, release_verdict
+
+   naf = now_ms + 60_000
+   request = client.build_request(seeds, strategy, attempt_id='a-20', not_after_ms=naf,
+                                  expect_server_instance='auto')
+   sent = AttemptSent.of(request)        # what the ledger records before it sends
+   # ... the request is on its way (traverse_raw(request) elsewhere) and does not answer
+   answer = client.cancel('a-20', not_after_ms=naf)
+   verdict = release_verdict(answer, sent)
+   verdict.release, verdict.early, verdict.code   # True, True, 'tombstone' (it never arrived)
+   try:
+       client.traverse_raw(request)      # the delayed request arrives after the cancel
+   except AttemptConflict as e:
+       e.tombstoned, e.suppression.covers_admission            # True, True
+   other = AttemptSent('a-21', naf, sent.expect_server_instance)
+   release_verdict(client.cancel('a-21'), other).why   # cancelled without not_after_ms
+   # 'covers_admission is false (no_not_after_ms)'
+   done = client.traverse(seeds, strategy, attempt_id='a-22', not_after_ms=naf)
+   verdict = release_verdict(done, done.sent,
+                             attempts=client.server_capabilities()['attempts'])
+   verdict.code, verdict.assumptions   # 'finished', ('sent_without_expect_server_instance',)
+
 From the text alone
 ^^^^^^^^^^^^^^^^^^^
 
@@ -664,9 +777,12 @@ their own, which are off by default: called without one, ``compare()``, ``routes
 the exports (``to_fasta()``, ``to_gfa()``, ``to_json()``) run locally with no work or
 allocation budget, their time and peak memory follow the size of the graphlet (a
 comparison reads both DAGs up to its depth, an export spells every chosen walk), and
-nothing interrupts them. With ``budget=`` every local operation either completes or stops
-and says so (`Local budgets`_). A tool's ``max_bytes`` bounds the bytes it returns, not
-the computation behind them.
+nothing interrupts them. The exports and the comparison spell their walks as a stream --
+each walk built from the prefixes it shares with the walks still to come and dropped
+once its record or key is made -- so an export's peak is about twice its text (its
+records and the joined text), not every spelling at once. With ``budget=`` every local
+operation either completes or stops and says so (`Local budgets`_). A tool's
+``max_bytes`` bounds the bytes it returns, not the computation behind them.
 
 .. note::
 

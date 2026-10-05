@@ -81,6 +81,7 @@ import contextvars
 import hashlib
 import hmac
 import inspect
+import io
 import json
 import os
 import tempfile
@@ -96,7 +97,7 @@ from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, UnknownLabel,
     UnverifiableLabelName,
 )
-from .parser import utf8_bytes
+from .parser import _write_all, utf8_bytes
 from .store import StoreLimitExceeded, UnknownHandle
 
 __all__ = ['GraphletTools', 'ToolError', 'ToolLimits', 'TOOL_CLASS', 'tool_names',
@@ -2216,21 +2217,28 @@ def _stop_of(d):
     return _B.LocalStop(**{k: v for k, v in d.items() if k != 'scope'})
 
 
+# json.dump() writes many small pieces, so its file is buffered -- with a buffer of a
+# stated size, which is charged: an unstated one follows the file system's block size (at
+# least 128 KiB from Python 3.14), and left out of the account it put
+# graphlet_export(format=json) above its account on 16 of 28 retrievals
+_JSON_BUFFER = io.DEFAULT_BUFFER_SIZE
+
+
 def _atomic_open(path):
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(prefix='.export-', dir=d)
-    return os.fdopen(fd, 'wb'), tmp
+    return os.fdopen(fd, 'wb', buffering=_JSON_BUFFER), tmp
 
 
 def _write_text_charged(path, text, b):
     """Write |text| to |path| through a temporary file renamed on completion, charged
-    (its encoding and its bytes) before it is written: a stop writes no file (L4)."""
+    (its encoding and its bytes) before it is written: a stop writes no file (L4). Written
+    without a buffer (parser._write_all()), which the charge leaves out."""
     b.charge(len(text) >> 8, 2 * (len(text) + 49))
     data = text.encode('utf-8')
-    f, tmp = _atomic_open(path)
+    fd, tmp = tempfile.mkstemp(prefix='.export-', dir=os.path.dirname(path))
     try:
-        with f:
-            f.write(data)
+        _write_all(fd, data)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -2262,6 +2270,7 @@ class _ChargedWriter:
 def _write_json_charged(path, obj, b):
     """json.dumps(obj, ensure_ascii=False) written to |path| as it is encoded (the same
     text), through a temporary file renamed on completion: a stop writes no file."""
+    b.charge(0, _JSON_BUFFER + 512)            # the file's buffer and its objects
     f, tmp = _atomic_open(path)
     try:
         with f:

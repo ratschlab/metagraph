@@ -11,12 +11,16 @@ revisit `length_bp`/`same_distance`, label_dict[].column/seq_id.
 Resources: without a budget (the default) the exports run with no work or allocation
 budget. Their output is as large as the graphlet makes it (to_fasta() spells every chosen
 walk's whole chain: quadratic in the walk on a comb-shaped trie); an MCP tool's max_bytes
-bounds the bytes RETURNED, not this computation or its peak allocation. With budget=
+bounds the bytes RETURNED, not this computation or its peak allocation. Their peak is
+about twice their text: the walks are spelled as a stream (derive.walk_iter()), each
+dropped once its record is written, and the final line feed is joined with the records
+rather than added to the joined text (a copy of all of it). With budget=
 (stage L, budget.py) an export either completes or raises LocalBudgetExceeded: never a
 partial text (L4), and save() writes no file; the stop says how many records were done.
 """
 
 import json
+from operator import lt as _lt
 
 from . import budget as _B
 from . import derive
@@ -205,14 +209,22 @@ def _arm_json(g, arm, bud=None, done=None):
                    and arm.segments[p.leaf].leaf.continuation.sequence is None
                    and arm.segments[p.leaf].leaf.continuation.n > 0] if sequences else []
     if bud is not None:
+        # the paths' chains (the output's lists) and the chains the stream keeps for them
+        # (at most as many slots again), and the continuations' walks streamed
         steps = sum(arm.segments[p.leaf].depth + 1 for p in ps)
         bp = sum(arm.segments[x].end_bp for x in cont_leaves)
+        big = max([arm.segments[x].end_bp for x in cont_leaves], default=0)
         bud.charge(2 * W_STEP * steps + (bp >> 8),
-                 2 * LIST_ITEM * steps + len(ps) * (LIST + 64) + 2 * bp)
-    chains = derive.walk_batch(arm, [p.leaf for p in ps], spell=False)
-    spelled = {}
-    if cont_leaves:
-        spelled = derive.walk_batch(arm, cont_leaves, chains=False)
+                   LIST_ITEM * steps + len(ps) * LIST
+                   + derive.walk_iter_bytes(len(ps), 0, len(arm.segments), 0, steps)
+                   + derive.walk_iter_bytes(len(cont_leaves), bp, len(arm.segments), big))
+    # the continuations' sequences (their last n bases) as the stream spells their walks,
+    # each walk dropped once its continuation is cut from it; the chains below are the
+    # output's own lists, built as the paths are written
+    conts = {leaf: derive.continuation_sequence(g, arm, leaf, w)
+             for leaf, _, w in derive.walk_iter(arm, cont_leaves, chains=False,
+                                                check_first=False)}
+    chains = derive.walk_iter(arm, [p.leaf for p in ps], spell=False)
     if bud is not None:
         def path_prices():
             rbs = derive.runs_by_segment(arm)
@@ -228,14 +240,14 @@ def _arm_json(g, arm, bud=None, done=None):
         pw, pm = derive.price_list(bud, g, arm, 'json_path_prices', path_prices)
         for _ in _blocks(bud, pw, pm, done):
             pass
-    for p in ps:
+    for p, (_, chain_, _) in zip(ps, chains):
         seg = arm.segments[p.leaf]
         ends = derive.end_labels(arm, p.leaf)
         reasons = {}
         for e in ends:
             name = arm.runs[e.run].reason
             reasons[name] = reasons.get(name, 0) + 1
-        pj = {'id': p.id, 'segments': chains[p.leaf][0], 'length_bp': p.length_bp,
+        pj = {'id': p.id, 'segments': chain_, 'length_bp': p.length_bp,
               'end_reasons': reasons}
         if seg.leaf.path_reason is not None:
             pj['path_reason'] = REASON[seg.leaf.path_reason]
@@ -244,10 +256,9 @@ def _arm_json(g, arm, bud=None, done=None):
                              'run': e.run, 'route_bp': e.route_bp} for e in ends]
         cont = seg.leaf.continuation
         if cont is not None:
-            got = spelled.get(p.leaf)
             pj['continuation'] = {
-                'sequence': derive.continuation_sequence(g, arm, p.leaf,
-                                                         None if got is None else got[1]),
+                'sequence': conts[p.leaf] if p.leaf in conts
+                else derive.continuation_sequence(g, arm, p.leaf),
                 'labels': list(cont.labels), 'loss_used': cont.loss_used,
                 'branches_used': cont.branches_used}
         paths.append(pj)
@@ -439,6 +450,56 @@ def to_fasta(g, arm=None, leaves=None, with_seed=True, orientation='natural', wi
             raise e.restate(records=done[0])
 
 
+def _fasta_record(g, side, a, p, w, orientation, with_seed, width):
+    """(header, bases) of walk |p| whose walking-order bases |w| are spelled."""
+    seg = a.segments[p.leaf]
+    reason = (REASON[seg.leaf.path_reason] if seg.leaf.path_reason
+              else ','.join(sorted({a.runs[e.run].reason
+                                    for e in derive.end_labels(a, p.leaf)})) or '.')
+    n = len(derive.end_labels(a, p.leaf)) if g.mode == 'constrain' else len(seg.end)
+    return ('>%s_%d length_bp=%d reason=%s labels=%d seed=%s' % (
+        side, p.id, p.length_bp, reason, n, 'yes' if with_seed else 'no'),
+        _wrap(_oriented(g, side, w, orientation, with_seed), width))
+
+
+def _fasta_records(g, side, a, chosen, orientation, with_seed, width, out, ordered=False):
+    """Append the records of |chosen| (in its order) to |out|, each spelled as the stream
+    of derive.walk_iter() reaches it and dropped once written: the text and one walk's
+    bases are held, not every chosen walk's (holding them all, and the batch's prefixes,
+    made to_fasta() peak at 10x its text on a comb, 3.1x before the batch). |ordered|:
+    |chosen| is known to be in leaf order (every walk)."""
+    order = [p.leaf for p in chosen]
+    # a missing base raised part-way leaves records in |out| that the raise discards with
+    # it: no read of the chains first (derive.walk_iter())
+    stream = derive.walk_iter(a, order, chains=False, check_first=False)
+    if ordered or all(map(_lt, order, order[1:])):
+        # every walk, or leaves given in segment order: the stream's own order. The record
+        # is _fasta_record() written out: a call per record made small exports 20 % slower
+        segs = a.segments
+        constrain = g.mode == 'constrain'
+        seed = 'yes' if with_seed else 'no'
+        for p, (_, _, w) in zip(chosen, stream):
+            seg = segs[p.leaf]
+            reason = (REASON[seg.leaf.path_reason] if seg.leaf.path_reason
+                      else ','.join(sorted({a.runs[e.run].reason
+                                            for e in derive.end_labels(a, p.leaf)})) or '.')
+            n = len(derive.end_labels(a, p.leaf)) if constrain else len(seg.end)
+            out.append('>%s_%d length_bp=%d reason=%s labels=%d seed=%s' % (
+                side, p.id, p.length_bp, reason, n, seed))
+            out.append(_wrap(_oriented(g, side, w, orientation, with_seed), width))
+        return
+    # leaves in another order or repeated: each record into its slot
+    at = {}
+    for i, leaf in enumerate(order):
+        at.setdefault(leaf, []).append(i)
+    first = len(out)
+    out.extend([None] * (2 * len(chosen)))
+    for leaf, _, w in stream:
+        for i in at[leaf]:
+            out[first + 2 * i], out[first + 2 * i + 1] = _fasta_record(
+                g, side, a, chosen[i], w, orientation, with_seed, width)
+
+
 def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None):
     from . import ops
     out = []
@@ -452,18 +513,18 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None):
             continue
         if orientation not in ('natural', 'walk'):
             raise ValueError("orientation is 'natural' or 'walk'")
-        # every chosen walk's bases at once, their common prefixes spelled once
+        # the chosen walks' bases, their common prefixes spelled once (_fasta_records)
         if not a.segments or a.segments[0].walk is None:
             raise ValueError(derive.NO_BASES)
         if bud is not None:
             derive.uses(bud, g, a, 'leaves', 'paths', 'end_labels')
             if leaves is None:
-                # every walk: the spelling's bound is the arm's structural totals
+                # every walk: the spelling's bound is the arm's structural totals, streamed
+                # (the records charge each walk's bases as they are written)
                 z = derive.arm_sizes(a)
                 bud.charge(len(chosen))
                 bud.charge(2 * W_STEP * z['leaf_depth'] + (z['walk_bp'] >> 8),
-                           2 * len(chosen) * (STR + 40 + 56) + 2 * z['walk_bp']
-                           + 2 * 9 * z['leaf_depth'])
+                           derive.walk_iter_bytes(len(chosen), z['walk_bp'], z['segments']))
             else:
                 ops._charge_spellings(bud, a, {p.leaf for p in chosen})
             bud.phase = 'records'
@@ -486,24 +547,19 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None):
             if not width:
                 # the seed in each record (its bases spelled once more per record)
                 bud.charge(len(chosen) * (seed_n >> 8), 3 * len(chosen) * (seed_n + 1))
-        spelled = derive.walk_batch(a, [p.leaf for p in chosen], chains=False)
         if bud is not None:
             for _ in _blocks(bud, pw, pm, done, len(chosen)):
                 pass
-        for p in chosen:
-            seq = _oriented(g, side, spelled[p.leaf][1], orientation, with_seed)
-            seg = a.segments[p.leaf]
-            reason = (REASON[seg.leaf.path_reason] if seg.leaf.path_reason
-                      else ','.join(sorted({a.runs[e.run].reason
-                                            for e in derive.end_labels(a, p.leaf)})) or '.')
-            n = len(derive.end_labels(a, p.leaf)) if g.mode == 'constrain' else len(seg.end)
-            out.append('>%s_%d length_bp=%d reason=%s labels=%d seed=%s' % (
-                side, p.id, p.length_bp, reason, n, 'yes' if with_seed else 'no'))
-            out.append(_wrap(seq, width))
+        _fasta_records(g, side, a, chosen, orientation, with_seed, width, out,
+                       ordered=leaves is None)
     if bud is not None:
         bud.phase = 'join'
-        bud.charge(total >> 8, 2 * (STR + total))
-    return '\n'.join(out) + ('\n' if out else '')
+        bud.charge(total >> 8, STR + total)
+    if out:
+        # the final line feed joined with the rest: adding it to the joined text copied the
+        # whole text once more at the peak
+        out.append('')
+    return '\n'.join(out)
 
 
 # ----------------------------------------------------------------------- GFA
@@ -629,16 +685,23 @@ def _to_gfa(g, with_seed, bud, done=None):
                 links.append('L\t%s\t+\t%s\t+\t%dM' % (a, b, k1))
         ps = derive.paths(arm)
         if bud is not None:
+            # the chains streamed, each dropped once its P line is built
             steps = derive.arm_sizes(arm)['leaf_depth']
-            bud.charge(2 * W_STEP * steps, 2 * LIST_ITEM * steps + len(ps) * (LIST + 64))
-        chains = derive.walk_batch(arm, [p.leaf for p in ps], spell=False)
+            big = max([segs[p.leaf].depth + 1 for p in ps], default=0)
+            bud.charge(2 * W_STEP * steps,
+                       derive.walk_iter_bytes(len(ps), 0, len(segs), 0, steps)
+                       + list_bytes(big))
+        # each walk's chain as the stream reaches it (paths are in leaf order, the
+        # stream's), dropped once its P line is written: holding every chain at once (8
+        # bytes per segment of each) made to_gfa() peak 1.3x higher than chain by chain
+        chains = derive.walk_iter(arm, [p.leaf for p in ps], spell=False)
         if bud is not None:
             pw, pm, tt = _gfa_path_prices(bud, g, arm)
             total += tt
             for _ in _blocks(bud, pw, pm, done):
                 pass
-        for p in ps:
-            names = [_seg_name(side, x) + '+' for x in chains[p.leaf][0]]
+        for p, (_, chain_, _) in zip(ps, chains):
+            names = [_seg_name(side, x) + '+' for x in chain_]
             if side == 'left':
                 names.reverse()
             if with_seed:
@@ -654,6 +717,10 @@ def _to_gfa(g, with_seed, bud, done=None):
                 ','.join(refs) or '.', reason))
     if bud is not None:
         bud.phase = 'join'
-        bud.charge(total >> 8, 2 * (STR + total) + list_bytes(len(lines) + len(links)
-                                                          + len(paths)))
-    return '\n'.join(lines + links + paths) + '\n'
+        bud.charge(total >> 8, STR + total + list_bytes(len(lines) + len(links) + len(paths)))
+    # one list and the final line feed joined with the rest (adding it to the joined text
+    # copied the whole text once more at the peak)
+    lines.extend(links)
+    lines.extend(paths)
+    lines.append('')
+    return '\n'.join(lines)

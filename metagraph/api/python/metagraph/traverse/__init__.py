@@ -34,8 +34,10 @@ from .parser import (FORMAT_VERSION, dump, from_response, is_canonical, load, pa
 from .ops import GraphletView
 from .budget import (LocalBudget, LocalBudgetExceeded, LocalLimits, LocalStop, Partial,
                      local_budget)
-from .client import (AttemptAtBound, AttemptExpired, ServerInitializing, TraverseClient,
-                     TraverseError, TraverseResponse)
+from .client import (AttemptAnswer, AttemptAtBound, AttemptConflict, AttemptExpired,
+                     AttemptSent, InstanceMismatch, ReleaseVerdict, ServerInitializing,
+                     Suppression, TraverseClient, TraverseError, TraverseResponse,
+                     UnsupportedFeature, release_verdict)
 from .store import Entry, GraphletStore, StoreLimitExceeded, UnknownHandle
 
 __all__ = [
@@ -47,7 +49,9 @@ __all__ = [
     'UnknownLabel', 'BadSelector', 'IncompleteRecording', 'IncompatibleContinuations',
     'UNLIMITED',
     'TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
-    'AttemptAtBound', 'AttemptExpired', 'GraphletStore', 'Entry', 'UnknownHandle',
+    'AttemptAtBound', 'AttemptExpired', 'AttemptConflict', 'InstanceMismatch',
+    'UnsupportedFeature', 'AttemptAnswer', 'AttemptSent', 'Suppression', 'ReleaseVerdict',
+    'release_verdict', 'GraphletStore', 'Entry', 'UnknownHandle',
     'StoreLimitExceeded',
     'LocalBudget', 'LocalLimits', 'LocalStop', 'LocalBudgetExceeded', 'Partial',
     'local_budget',

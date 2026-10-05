@@ -1009,9 +1009,12 @@ def _dump(g, envelope, b, done=None):
         done[0] = len(out)
         b.charge(0, pending[0])
         b.phase = 'join'
-        b.charge(done[1] >> 8, 2 * (STR + done[1] + 16))
+        b.charge(done[1] >> 8, STR + done[1] + 16)
     out.append('Z %d' % n)
-    return '\n'.join(out) + '\n'
+    # the final line feed joined with the rest: adding it to the joined text copied the
+    # whole text once more at the peak
+    out.append('')
+    return '\n'.join(out)
 
 
 def _dump_arm(g, arm, w, bud=None):
@@ -1312,6 +1315,7 @@ def save(g, path, *, budget=None):
         with b.scope('save', ('export_mgt',)):
             text = dump(g, envelope=True, budget=b)
             b.phase = 'write'
+            # the text's UTF-8 bytes, written without a buffer (_write_text)
             b.charge(len(text) >> 8, 2 * (len(text) + 33))
             return _write_text(text, path)
     text = dump(g, envelope=True)
@@ -1319,11 +1323,11 @@ def save(g, path, *, budget=None):
 
 
 def _write_text(text, path):
+    data = text.encode('utf-8')
     d = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(prefix='.mgt-', dir=d)
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8', newline='') as f:
-            f.write(text)
+        _write_all(fd, data)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -1331,7 +1335,23 @@ def _write_text(text, path):
         except OSError:
             pass
         raise
-    return len(text.encode('utf-8'))
+    return len(data)
+
+
+def _write_all(fd, data):
+    """Write the bytes |data| in full to the file descriptor |fd| and close it -- without a
+    buffer: they go out in one write, and a buffered file holds io.DEFAULT_BUFFER_SIZE (128
+    KiB from Python 3.14, more on a file system with larger blocks) that the stage-L account
+    of a save did not charge, which put it below the traced peak on bodies of 10-40 KB (the
+    review of pass 5's memory changes)."""
+    with os.fdopen(fd, 'wb', buffering=0) as f:
+        view = memoryview(data)
+        while view:
+            # a raw write may write less than it was given
+            n = f.write(view)
+            if not n:
+                raise OSError('%s accepted none of %d bytes' % (f.name, len(view)))
+            view = view[n:]
 
 
 def load(path, *, budget=None):

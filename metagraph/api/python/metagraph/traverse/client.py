@@ -16,22 +16,166 @@ stage 4): `attempt_id` (unique per server process while it runs or is retained),
 `budget_id` and `locus_id` echoed. Every response to it carries a `usage` block
 (TraverseResponse.usage), the server enforces a duration bound on it (usage.bound), and it
 can be cancelled (cancel()) and its state read (attempt()) by id, also from another client.
+
+Feature level 5 (SPEC §5, §10.3): a cancel names the cancelled request's `not_after_ms`,
+so the tombstone it leaves is held until no copy of that request can start
+(`covers_admission`); a request names the `server_instance` it is meant for
+(`expect_server_instance`), so a copy that reaches a restarted process is refused (409
+`instance_mismatch`); and the capabilities' `release_rule` says when a ledger may give an
+attempt's capacity back -- release_verdict() applies it to an answer. Both fields are sent
+only to a server that states `feature_level` >= 5 (read from GET /capabilities, or given to
+the client): a server below it refuses them with a 400, and a 400 to a request with
+attempt_id has already used that id up.
+
+What GET /capabilities states is kept per server PROCESS: it is forgotten when an answer
+names another server_instance than the one read (a restart at the same address), on a 409
+instance_mismatch, and on a 400 that refuses a level-5 field as unknown (an older binary
+now answers there: the level read is no longer the process's). A cancel refused that way
+is sent again without not_after_ms, since that 400 stopped nothing. A request with
+expect_server_instance that is the first to reach a replaced process cannot be saved that
+way: an older binary uses its attempt_id up with the 400 (and a level-5 one refuses it,
+409 instance_mismatch, without using it up).
 """
 
 import copy
+import datetime
 import gzip
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
-           'AttemptAtBound', 'AttemptExpired', 'ACCEPT_ENCODING']
+           'AttemptAtBound', 'AttemptExpired', 'AttemptConflict', 'InstanceMismatch',
+           'UnsupportedFeature', 'AttemptAnswer', 'AttemptSent', 'Suppression',
+           'ReleaseVerdict', 'release_verdict', 'ACCEPT_ENCODING', 'SUPPRESSION_LEVEL']
 
 ACCEPT_ENCODING = 'gzip, deflate'
+# the feature level of the tombstone's suppression (a cancel with not_after_ms,
+# covers_admission) and of expect_server_instance (SPEC §10.3)
+SUPPRESSION_LEVEL = 5
+# A server refuses a field it does not know with a 400 naming it ("request: unknown field
+# 'not_after_ms'", server.cpp and traverse.cpp). For the fields the client sends by the
+# server's level, that 400 says the level the client kept is not the process's any more.
+_UNKNOWN_FIELD = re.compile(r"unknown field '([^']*)'")
+_LEVELLED_FIELDS = frozenset(('not_after_ms', 'expect_server_instance'))
+
+
+def _unknown_field(status, message):
+    """The field a 400's |message| refuses as unknown, else None."""
+    if status != 400 or not isinstance(message, str):
+        return None
+    m = _UNKNOWN_FIELD.search(message)
+    return m.group(1) if m else None
+
+
+@dataclass(frozen=True)
+class Suppression:
+    """What a tombstone answer states (feature level 5): |suppressed_until_ms| the hold's
+    last millisecond on the server's wall clock (inclusive, Unix epoch ms), |not_after_ms|
+    the one it was judged against (None: none was), |covers_admission| whether no copy of
+    that request can start on this server_instance, and when not,
+    |covers_admission_reason| (`no_not_after_ms` | `beyond_tombstone_max`)."""
+    suppressed_until_ms: int
+    not_after_ms: Optional[int]
+    covers_admission: bool
+    covers_admission_reason: Optional[str] = None
+
+    @classmethod
+    def of(cls, body):
+        """The suppression a tombstone answer (or a 409's `attempt`) states; None where it
+        states none (no tombstone, or a server below feature level 5)."""
+        if not isinstance(body, dict) or body.get('suppressed_until_ms') is None:
+            return None
+        return cls(body['suppressed_until_ms'], body.get('not_after_ms'),
+                   body.get('covers_admission') is True, body.get('covers_admission_reason'))
+
+
+@dataclass(frozen=True)
+class AttemptSent:
+    """The attempt fields of a request as it was SENT -- what the release rule is applied to:
+    a field the client did not send (expect_server_instance to a server below feature level
+    5) is None here, whatever was asked for."""
+    attempt_id: str
+    not_after_ms: Optional[int] = None
+    expect_server_instance: Optional[str] = None
+
+    @classmethod
+    def of(cls, request):
+        """From a request dict (build_request()'s); None without attempt_id."""
+        if isinstance(request, cls) or request is None:
+            return request
+        if request.get('attempt_id') is None:
+            return None
+        return cls(request['attempt_id'], request.get('not_after_ms'),
+                   request.get('expect_server_instance'))
+
+
+class AttemptAnswer(dict):
+    """The JSON answer of POST /traverse/cancel or GET /traverse/attempt (a dict, as before),
+    with its HTTP |status|, the |route| (`cancel` | `attempt`) and, for a cancel, the body
+    |sent| (whether not_after_ms went out with it). The typed reading:"""
+
+    def __init__(self, body, status, route, sent=None):
+        super().__init__(body)
+        self.status = status
+        self.route = route
+        self.sent = sent
+
+    @property
+    def attempt_id(self):
+        return self.get('attempt_id')
+
+    @property
+    def server_instance(self):
+        return self.get('server_instance')
+
+    @property
+    def state(self):
+        """running | stopping | finished | unknown."""
+        return self.get('state')
+
+    @property
+    def cancelled(self):
+        return self.get('cancelled')
+
+    @property
+    def tombstone(self):
+        """True: the id is tombstoned (a 404); False: a cancel that was NOT tombstoned (a
+        429); None: the answer says neither."""
+        return self.get('tombstone')
+
+    @property
+    def reason(self):
+        """A 429's reason: `tombstones_full` (retry the cancel later) or `no_suppression` (the
+        server keeps no tombstones: a request with the id arriving later runs). For an attempt
+        state, why it finished."""
+        return self.get('reason')
+
+    @property
+    def attempt(self):
+        """The attempt's state: a cancel's `attempt` object, GET's answer itself (200)."""
+        if self.route == 'attempt':
+            return dict(self) if self.status == 200 else None
+        return self.get('attempt')
+
+    @property
+    def suppression(self):
+        """The tombstone's Suppression (feature level 5), or None."""
+        return Suppression.of(self)
+
+    @property
+    def finished(self):
+        return self.get('state') == 'finished'
+
+    @property
+    def retryable(self):
+        """A 429 that a later cancel may turn into a tombstone (tombstones_full)."""
+        return self.status == 429 and self.get('reason') == 'tombstones_full'
 
 
 class TraverseError(RuntimeError):
@@ -45,6 +189,8 @@ class TraverseError(RuntimeError):
         self.message = message
         self.body = body
         self.usage = body.get('usage') if isinstance(body, dict) else None
+        # traverse(): the attempt fields as sent (AttemptSent), for release_verdict()
+        self.sent = None
         super().__init__('HTTP %s: %s' % (status, message))
 
 
@@ -69,8 +215,80 @@ class AttemptExpired(TraverseError):
     """409 with `state: "expired"`: the request's not_after_ms had passed on the server's
     clock when its handler started, so it was NOT started — nothing ran, nothing was
     registered (no usage; GET /traverse/attempt answers 404 for its id). The body states
-    `not_after_ms` and the server's `server_time_ms`. Told apart from the other 409 (an
-    attempt_id that is running, retained or tombstoned: `attempt` in the body) by its state."""
+    `not_after_ms` and the server's `server_time_ms` (|not_after_ms|, |server_time_ms|,
+    |server_instance|). Told apart from the other 409s (an attempt_id that is running,
+    retained or tombstoned: AttemptConflict; another server_instance: InstanceMismatch) by its
+    state."""
+
+    @property
+    def not_after_ms(self):
+        return self.body.get('not_after_ms')
+
+    @property
+    def server_time_ms(self):
+        return self.body.get('server_time_ms')
+
+    @property
+    def server_instance(self):
+        return self.body.get('server_instance')
+
+
+class AttemptConflict(TraverseError):
+    """409 with `attempt`: the attempt_id is running, retained, held after it finished, or
+    tombstoned by a cancel on this server, so the request was refused and nothing ran (no
+    usage). |attempt| is that id's state; |tombstoned|: a cancel named the id first (state
+    unknown, `tombstone: true`), and then |suppression| states the hold (feature level 5),
+    judged against this request's own not_after_ms -- the refusal extended it. Not a release
+    answer (release_verdict(): read the id's state, or cancel it)."""
+
+    @property
+    def attempt(self):
+        return self.body.get('attempt') or {}
+
+    @property
+    def state(self):
+        return self.attempt.get('state')
+
+    @property
+    def tombstoned(self):
+        return self.attempt.get('tombstone') is True
+
+    @property
+    def suppression(self):
+        return Suppression.of(self.attempt)
+
+    @property
+    def server_instance(self):
+        return self.attempt.get('server_instance')
+
+
+class InstanceMismatch(TraverseError):
+    """409 with `state: "instance_mismatch"` (feature level 5): the request named another
+    |expect_server_instance| than the process's |server_instance| (it restarted, or the
+    request reached another server), so it was refused before anything ran or was
+    registered. The client forgets the server_instance it had read, so that
+    expect_server_instance='auto' reads the new one."""
+
+    @property
+    def expect_server_instance(self):
+        return self.body.get('expect_server_instance')
+
+    @property
+    def server_instance(self):
+        return self.body.get('server_instance')
+
+
+class UnsupportedFeature(ValueError):
+    """Raised before sending: the request asks for a field the server does not state (its
+    |feature_level| is below |needed|). Nothing was sent -- a server below the level refuses
+    the field with a 400, which for a request with attempt_id would use the id up."""
+
+    def __init__(self, feature, feature_level, needed):
+        self.feature = feature
+        self.feature_level = feature_level
+        self.needed = needed
+        super().__init__('%s needs a server at feature_level >= %d; this one states %s'
+                         % (feature, needed, feature_level))
 
 
 @dataclass
@@ -82,6 +300,8 @@ class TraverseResponse:
     # deepen(): what the continuation request could not carry exactly (NextRequest.notes:
     # a loss budget conservative for some labels, a switch target left out, ...)
     notes: List[str] = field(default_factory=list)
+    # traverse(): the attempt fields as sent (AttemptSent; None without attempt_id)
+    sent: Optional[AttemptSent] = None
 
     @property
     def usage(self):
@@ -105,7 +325,14 @@ def _decode_body(data, encoding):
 
 class TraverseClient:
     def __init__(self, host, port, api_path=None, *, session=None, timeout=900, release=None,
-                 scheme='http', graph=None):
+                 scheme='http', graph=None, feature_level=None):
+        """|feature_level|: the server's, when the caller knows it; else it is read from GET
+        /capabilities the first time a feature-level-5 field is to be sent (and never for a
+        request without one, so the requests of earlier levels go out as they always did).
+        Once GET /capabilities has been read (expect_server_instance='auto' reads it for the
+        instance) the level it states wins over the given one, and a given level of 5 or
+        more is dropped when the server refuses a level-5 field as unknown: either is the
+        process's own statement."""
         self.host = host
         self.port = port
         self.base = '%s://%s:%s' % (scheme, host, port)
@@ -115,12 +342,15 @@ class TraverseClient:
         self.timeout = timeout
         self.release = release
         self.graph = graph
+        self.feature_level = feature_level
+        self._server_doc = None
 
     # ---------------------------------------------------------------- transport
 
-    def _request(self, method, path, payload=None, answers=()):
+    def _request(self, method, path, payload=None, answers=(), with_status=False):
         """|answers|: non-2xx statuses whose JSON body is an answer, returned rather than
-        raised (cancel and attempt: 404 states that nothing runs under the id)."""
+        raised (cancel and attempt: 404 states that nothing runs under the id).
+        |with_status|: -> (HTTP status, body)."""
         url = self.base + path
         body = None if payload is None else json.dumps(payload).encode('utf-8')
         headers = {'Accept-Encoding': ACCEPT_ENCODING}
@@ -154,10 +384,20 @@ class TraverseClient:
             out = json.loads(text) if text else {}
         except ValueError:
             out = None
+        if isinstance(out, dict) and self._server_doc and path != '/capabilities':
+            self._check_instance(out)
         if status in answers and isinstance(out, dict):
-            return out
+            return (status, out) if with_status else out
         if not 200 <= status < 300:
             message = out.get('error') if isinstance(out, dict) else (text or '')[:500]
+            refused = _unknown_field(status, message)
+            if refused in _LEVELLED_FIELDS and isinstance(payload, dict) and refused in payload:
+                # a field sent by the server's level is unknown to the process answering:
+                # an older binary replaced the one whose level the client kept (a rollback
+                # at the same address; it cannot answer instance_mismatch). Kept, the level
+                # would send the field again: a cancel that never stops anything, an 'auto'
+                # request that uses its attempt_id up every time
+                self._forget_level()
             if status == 503:
                 # Two 503s mean opposite things to a ledger: a loading index (Retry-After, no
                 # usage: nothing registered) and an attempt stopped at its bound (usage, no
@@ -168,12 +408,87 @@ class TraverseClient:
                     raise AttemptAtBound(status, message, out)
                 raise ServerInitializing(status, message, out,
                                          int(retry) if retry and retry.isdigit() else None)
-            if status == 409 and isinstance(out, dict) and out.get('state') == 'expired':
-                raise AttemptExpired(status, message, out)
+            if status == 409 and isinstance(out, dict):
+                # three refusals, none of which ran anything: told apart by the body
+                if out.get('state') == 'expired':
+                    raise AttemptExpired(status, message, out)
+                if out.get('state') == 'instance_mismatch':
+                    # the process this client knew is gone: read its successor's instance
+                    # before an 'auto' request names it again
+                    self._server_doc = None
+                    raise InstanceMismatch(status, message, out)
+                if 'attempt' in out:
+                    raise AttemptConflict(status, message, out)
             raise TraverseError(status, message, out)
         if out is None:
             raise TraverseError(status, 'the response is not JSON', text[:500])
-        return out
+        return (status, out) if with_status else out
+
+    # ---------------------------------------------------------------- feature level
+
+    def _server(self, refresh=False):
+        if self._server_doc is None or refresh:
+            self._server_doc = self.server_capabilities()
+        return self._server_doc
+
+    def _check_instance(self, out):
+        """Forget the kept GET /capabilities when an answer names another server_instance:
+        the process was restarted (or replaced by another binary) at the same address, and
+        its instance and maybe its level are not the ones read. Every answer about an
+        attempt names its process (a cancel's, a state's, a usage block, a 409's attempt),
+        so a restart is noticed before the next 'auto' request names the old instance."""
+        known = (self._server_doc.get('attempts') or {}).get('server_instance')
+        if known is None:
+            return
+        inst = out.get('server_instance')
+        if inst is None:
+            for key in ('usage', 'attempt'):
+                sub = out.get(key)
+                if isinstance(sub, dict) and sub.get('server_instance') is not None:
+                    inst = sub['server_instance']
+                    break
+        if inst is not None and inst != known:
+            self._server_doc = None
+
+    def _forget_level(self):
+        self._server_doc = None
+        if self.feature_level is not None and self.feature_level >= SUPPRESSION_LEVEL:
+            self.feature_level = None
+
+    def server_feature_level(self, refresh=False):
+        """The server's feature_level: GET /capabilities' once read, else the one given to
+        the client, else GET /capabilities' read now (|refresh| reads it again). Kept per
+        server process: forgotten when an answer names another server_instance, on an
+        InstanceMismatch and when the server refuses a level-5 field as unknown (see the
+        module's docstring). A server without that route (before feature level 1) is 0."""
+        if not refresh:
+            if self._server_doc is not None:
+                return int(self._server_doc.get('feature_level') or 0)
+            if self.feature_level is not None:
+                return self.feature_level
+        try:
+            doc = self._server(refresh=True)
+        except TraverseError as e:
+            if e.status != 404:
+                raise
+            self._server_doc = doc = {}         # kept: no route is the answer
+        return int(doc.get('feature_level') or 0)
+
+    def server_instance(self, refresh=False):
+        """The server process's `server_instance` (16 hex, new at every start) from GET
+        /capabilities' attempts block, read once and kept for that process (forgotten as
+        server_feature_level() is, or read again with |refresh|); None where the server
+        states none."""
+        return ((self._server(refresh) or {}).get('attempts') or {}).get('server_instance')
+
+    def refresh_capabilities(self):
+        """Read GET /capabilities again (a restarted server: a new server_instance, maybe
+        another feature level)."""
+        return self._server(refresh=True)
+
+    def _level(self, needed):
+        level = self.server_feature_level()
+        return level, level >= needed
 
     # ---------------------------------------------------------------- routes
 
@@ -213,29 +528,67 @@ class TraverseClient:
     def traverse_raw(self, request):
         return self._request('POST', '/traverse', request)
 
-    def cancel(self, attempt_id, wait_ms=None):
-        """POST /traverse/cancel: the server's answer as a dict — `cancelled: True` and
-        `state` stopping (or finished, within |wait_ms|) when the attempt was asked to stop;
-        `cancelled: False` with `state` finished or unknown (HTTP 404) when nothing runs
-        under the id. An unknown id is tombstoned (`tombstone: True`) for the server's
-        retention_s: a request arriving later with it is refused (409), so such a 404 from
-        the same `server_instance` means it will not run there within that time. When the
-        server holds its maximum of tombstones the id is NOT tombstoned (HTTP 429,
-        `tombstone: False`): nothing is promised, and the cancel can be retried."""
+    def cancel(self, attempt_id, wait_ms=None, not_after_ms=None):
+        """POST /traverse/cancel -> AttemptAnswer (the server's answer, a dict, with its HTTP
+        status): `cancelled: True` and `state` stopping (or finished, within |wait_ms|) when
+        the attempt was asked to stop; `cancelled: False` with `state` finished or unknown
+        (HTTP 404) when nothing runs under the id. An unknown id is tombstoned (`tombstone:
+        True`): a request arriving later with it is refused (409, AttemptConflict) and never
+        runs there while the tombstone is held. When the server holds its maximum of
+        tombstones (429, reason `tombstones_full`) or keeps none (429, `no_suppression`) the
+        id is NOT tombstoned: nothing is promised.
+
+        |not_after_ms| (feature level 5): the not_after_ms of the request being cancelled.
+        The tombstone is then held until no copy of that request can start, within the
+        server's tombstone_max_s, and the answer states so (`suppression`: covers_admission);
+        release_verdict() says whether the attempt's capacity may be released on it. Sent
+        only to a server at feature level 5 or above: to an older one the cancel goes out
+        without it (the cancel still stops the attempt; |sent| shows what went out, and the
+        answer states no suppression, which release_verdict() never releases on). A process
+        that refuses it as unknown although the level read was 5 (an older binary now
+        answers at the address) gets the cancel again without it, once."""
         payload = {'attempt_id': attempt_id}
         if wait_ms is not None:
             payload['wait_ms'] = wait_ms
-        return self._request('POST', '/traverse/cancel', payload, answers=(404, 429))
+        if not_after_ms is not None and self._level(SUPPRESSION_LEVEL)[1]:
+            payload['not_after_ms'] = not_after_ms
+        try:
+            status, out = self._request('POST', '/traverse/cancel', payload,
+                                        answers=(404, 429), with_status=True)
+        except TraverseError as e:
+            if 'not_after_ms' not in payload or \
+                    _unknown_field(e.status, e.message) != 'not_after_ms':
+                raise
+            # the 400 refused the cancel before it was read: nothing was stopped and nothing
+            # tombstoned, so sending it again is safe, and stopping the attempt is the
+            # cancel's first job (the request it cancels would otherwise run). _request has
+            # forgotten the level that let not_after_ms out
+            payload = {k: v for k, v in payload.items() if k != 'not_after_ms'}
+            status, out = self._request('POST', '/traverse/cancel', payload,
+                                        answers=(404, 429), with_status=True)
+        return AttemptAnswer(out, status, 'cancel', payload)
 
     def attempt(self, attempt_id):
-        """GET /traverse/attempt/{attempt_id}: the attempt's state (running | stopping |
-        finished, the reason, when it stopped, the response written, its usage), or
-        `state: unknown` (HTTP 404) once it is no longer retained."""
-        return self._request('GET', '/traverse/attempt/' + attempt_id, answers=(404,))
+        """GET /traverse/attempt/{attempt_id} -> AttemptAnswer: the attempt's state (running |
+        stopping | finished, the reason, when it stopped, the response written, its usage), or
+        `state: unknown` (HTTP 404) once it is no longer retained -- for a tombstoned id with
+        `tombstone: True` and, at feature level 5, its suppression (reading it does not extend
+        it)."""
+        status, out = self._request('GET', '/traverse/attempt/' + attempt_id, answers=(404,),
+                                    with_status=True)
+        return AttemptAnswer(out, status, 'attempt')
 
     def build_request(self, seeds, strategy=None, *, detail='graphlet', timing=True,
                       graph=None, attempt_id=None, budget_id=None, locus_id=None,
-                      not_after_ms=None):
+                      not_after_ms=None, expect_server_instance=None):
+        """The /traverse request (a dict). |expect_server_instance| (with |attempt_id| only,
+        feature level 5): the server_instance the attempt is meant for -- a string, or 'auto'
+        for the server's own (server_instance(), kept for that process). An explicit one to
+        a server below feature level 5 raises UnsupportedFeature (nothing is sent: that
+        server would refuse the field with a 400 that uses the attempt_id up); 'auto' is
+        then left out. Either way AttemptSent.of(request) states what is sent."""
+        if expect_server_instance is not None and attempt_id is None:
+            raise ValueError('expect_server_instance is sent with attempt_id only')
         norm = []
         for s in seeds:
             norm.append({'sequence': s} if isinstance(s, str) else dict(s))
@@ -253,22 +606,55 @@ class TraverseClient:
                            ('locus_id', locus_id), ('not_after_ms', not_after_ms)):
             if value is not None:
                 req[key] = value
+        if expect_server_instance is not None:
+            level, ok = self._level(SUPPRESSION_LEVEL)
+            if expect_server_instance == 'auto':
+                instance = self.server_instance() if ok else None
+                # reading the instance read the level the process states, which wins over
+                # a level given to the client
+                if instance is not None and self._level(SUPPRESSION_LEVEL)[1]:
+                    req['expect_server_instance'] = instance
+            elif not ok:
+                raise UnsupportedFeature('expect_server_instance', level, SUPPRESSION_LEVEL)
+            else:
+                req['expect_server_instance'] = expect_server_instance
         return req
 
     def traverse(self, seeds, strategy=None, *, detail='graphlet', timing=True, graph=None,
-                 attempt_id=None, budget_id=None, locus_id=None, not_after_ms=None):
+                 attempt_id=None, budget_id=None, locus_id=None, not_after_ms=None,
+                 expect_server_instance=None):
         """-> TraverseResponse(envelope, graphlets, errors). A seed whose permitted set
         could not be derived is an error result ({seed, error}), not an exception: the
         other seeds' graphlets are still returned (so is a seed an attempt never started,
         cancelled or past its bound: resource_stop phase not_started). A request error is
         raised (TraverseError; with attempt_id its usage is in the error's .usage), an
-        attempt whose response was stopped at its bound raises AttemptAtBound, and a request
+        attempt whose response was stopped at its bound raises AttemptAtBound, a request
         whose |not_after_ms| (Unix epoch ms) had passed on the server's clock raises
-        AttemptExpired (not started)."""
+        AttemptExpired (not started), an attempt_id the server holds (running, retained, held
+        or tombstoned) AttemptConflict, and an |expect_server_instance| (build_request())
+        that is not the server's InstanceMismatch. The response's .sent, and the .sent of
+        any exception raised once the request was built (a TraverseError, and a transport
+        error too: a timeout, a reset connection), state the attempt fields as sent (for
+        release_verdict()); an error raised while building it (UnsupportedFeature) sent
+        nothing."""
         req = self.build_request(seeds, strategy, detail=detail, timing=timing, graph=graph,
                                  attempt_id=attempt_id, budget_id=budget_id, locus_id=locus_id,
-                                 not_after_ms=not_after_ms)
-        return self.response(self.traverse_raw(req))
+                                 not_after_ms=not_after_ms,
+                                 expect_server_instance=expect_server_instance)
+        sent = AttemptSent.of(req)
+        try:
+            resp = self.response(self.traverse_raw(req))
+        except Exception as e:
+            # an unanswered attempt (the socket timed out, the connection was reset) is the
+            # one a ledger must cancel and judge with release_verdict(), and with 'auto' only
+            # the client knows whether an instance went out
+            try:
+                e.sent = sent
+            except (AttributeError, TypeError):     # an exception type without attributes
+                pass
+            raise
+        resp.sent = sent
+        return resp
 
     @staticmethod
     def response(out):
@@ -296,3 +682,230 @@ class TraverseClient:
         out = self.response(self.traverse_raw(req))
         out.notes = list(getattr(req, 'notes', ()))
         return out
+
+
+# ------------------------------------------------------------------ the release rule
+
+@dataclass(frozen=True)
+class ReleaseVerdict:
+    """release_verdict()'s answer: |release| whether the attempt's capacity may be given back
+    now, |early| whether that is before the attempt finished (on a tombstone), |code| a token
+    for the condition that decided (released: `tombstone`, `finished`, `clock`; not:
+    the condition not met, see release_verdict()) and |why| that condition in words. True
+    as a bool exactly when |release|.
+
+    |assumptions|: for a `finished` release, the rule's assumptions it rests on instead of
+    the server holding the id against a copy of the request (empty: the server holds it
+    until no copy can start) -- `sent_without_not_after_ms`, `no_retention`,
+    `beyond_tombstone_max`, `sent_without_expect_server_instance` (see release_verdict()).
+    The release is the rule's either way; a ledger that must not see a request run twice
+    reads them."""
+    release: bool
+    early: bool
+    code: str
+    why: str
+    assumptions: Tuple[str, ...] = ()
+
+    def __bool__(self):
+        return self.release
+
+
+def _hold(code, why):
+    return ReleaseVerdict(False, False, code, why)
+
+
+_EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+
+
+def _epoch_ms(stamp):
+    """An attempt state's time ("2026-10-05T04:33:14.159Z") as Unix epoch ms, else None."""
+    if not isinstance(stamp, str):
+        return None
+    try:
+        t = datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=datetime.timezone.utc)
+    return (t - _EPOCH) // datetime.timedelta(milliseconds=1)
+
+
+def _finish_ms(state):
+    """When the attempt a state or usage block describes finished: finished_at, else
+    stopped_at (the response is written after it), else received_at -- never later than the
+    finish, so a hold judged from it is never longer than the server's."""
+    if not isinstance(state, dict):
+        return None
+    for key in ('finished_at', 'stopped_at', 'received_at'):
+        ms = _epoch_ms(state.get(key))
+        if ms is not None:
+            return ms
+    return None
+
+
+def _finished(why, sent, state, attempts, skew):
+    """A `finished` release, with the assumptions it rests on. The rule holds a finished
+    attempt's id against a replay only for one sent with not_after_ms, until not_after_ms +
+    clock_skew_allowance_ms and at most tombstone_max_s after it finished, on that process;
+    otherwise "a finished state assumes that no copy of the request arrives after the
+    attempt left retention" -- and a process that keeps nothing (retention_s 0) or a
+    restarted one (no expect_server_instance to refuse the copy) runs that copy again."""
+    tokens, notes = [], []
+    if sent.not_after_ms is None:
+        tokens.append('sent_without_not_after_ms')
+        notes.append('sent without not_after_ms, the id is held for the retention only: '
+                     'no copy of the request arrives after the attempt left retention')
+    if attempts:
+        if attempts.get('retention_s') == 0:
+            tokens.append('no_retention')
+            notes.append('this server keeps no finished attempt (retention_s 0): no copy of '
+                         'the request arrives later (one would run again)')
+        elif sent.not_after_ms is not None and attempts.get('tombstone_max_s') is not None:
+            finish = _finish_ms(state)
+            hold = None if finish is None else finish + 1000 * attempts['tombstone_max_s']
+            if hold is None or sent.not_after_ms + (skew or 0) > hold:
+                tokens.append('beyond_tombstone_max')
+                notes.append('not_after_ms + clock_skew_allowance_ms lies beyond '
+                             'tombstone_max_s after the finish%s, so the id is not held '
+                             'until then: no copy of the request arrives after it was dropped'
+                             % ('' if finish is not None else ' (the finish is not stated)'))
+    if sent.expect_server_instance is None:
+        tokens.append('sent_without_expect_server_instance')
+        notes.append('sent without expect_server_instance: no copy reaches a restarted '
+                     'process, which holds nothing of the attempt and would run it')
+    if tokens:
+        why += '; assumed: ' + '; '.join(notes)
+    return ReleaseVerdict(True, False, 'finished', why, tuple(tokens))
+
+
+def release_verdict(answer, sent, *, now_ms=None, clock_skew_allowance_ms=None,
+                    bound_ms=None, attempts=None):
+    """The capabilities' `release_rule` (feature level 5, SPEC §10.3) applied to one answer
+    about the attempt |sent| (AttemptSent, or the request dict as sent) -> ReleaseVerdict.
+
+    A ledger may release an attempt's capacity BEFORE it finished only on a 404 with
+    `tombstone: true` and `covers_admission: true` (a cancel's, or GET /traverse/attempt's)
+    from the same server_instance, for an attempt it sent with exactly that not_after_ms and
+    with expect_server_instance equal to that server_instance (code `tombstone`, early). It
+    releases otherwise only on a finished state -- GET /traverse/attempt's or a cancel's
+    (`state: finished`, 200 or 404) or the response (a TraverseResponse, or an error that
+    carries the attempt's usage: it ran) -- (code `finished`), or once its own clock passes
+    not_after_ms + clock_skew_allowance_ms + bound_ms (code `clock`: give |now_ms|, the
+    ledger's Unix epoch ms, and the two allowances -- the capabilities' attempts block and
+    the attempt's bound, usage.bound_ms or at most hard_cap_ms; |answer| may then be None).
+
+    A `finished` release states in |assumptions| what it rests on where the server does not
+    hold the id against a replay: `sent_without_not_after_ms`, `no_retention` (the server's
+    retention_s is 0), `beyond_tombstone_max` (not_after_ms + clock_skew_allowance_ms later
+    than tombstone_max_s after the finish) and `sent_without_expect_server_instance` (a copy
+    reaching a restarted process). The two about the server are judged only with
+    |attempts|, the capabilities' attempts block (or the whole GET /capabilities document),
+    which also gives clock_skew_allowance_ms and, as the bound, hard_cap_ms when they are
+    not given. Where the clock has passed too, the `clock` release (which assumes none of
+    them) is returned instead.
+
+    Not released, with the first condition not met: `answer_for_other_attempt`, `running` /
+    `stopping` (a cancel's 200 with state stopping releases nothing), `not_tombstoned` (429:
+    the answer's reason, tombstones_full or no_suppression, is in |why|), `no_tombstone`,
+    `sent_without_not_after_ms`, `sent_without_expect_server_instance` (an attempt sent
+    without either is never released early on a tombstone), `no_suppression_stated` (a
+    server below feature level 5), `covers_admission_false` (its reason in |why|),
+    `other_server_instance`, `other_not_after_ms`, `not_a_release_answer` (a 409 --
+    duplicate, tombstoned, expired or instance_mismatch --, or an error before the attempt
+    was registered: none is in the rule's list), `no_answer`."""
+    sent = AttemptSent.of(sent)
+    if sent is None:
+        raise ValueError('release_verdict() is about an attempt: |sent| has no attempt_id')
+    if isinstance(attempts, dict) and isinstance(attempts.get('attempts'), dict):
+        attempts = attempts['attempts']
+    if attempts:
+        if clock_skew_allowance_ms is None:
+            clock_skew_allowance_ms = attempts.get('clock_skew_allowance_ms')
+        if bound_ms is None:
+            bound_ms = attempts.get('hard_cap_ms')
+    verdict = _answer_verdict(answer, sent, attempts, clock_skew_allowance_ms)
+    if (verdict.release and not verdict.assumptions) or now_ms is None:
+        return verdict
+    if sent.not_after_ms is None or clock_skew_allowance_ms is None or bound_ms is None:
+        return verdict
+    limit = sent.not_after_ms + clock_skew_allowance_ms + bound_ms
+    if now_ms > limit:
+        return ReleaseVerdict(True, False, 'clock',
+                              "the ledger's clock (%d) has passed not_after_ms + "
+                              "clock_skew_allowance_ms + bound_ms (%d): the attempt cannot "
+                              "start any more and has reached its bound" % (now_ms, limit))
+    return verdict
+
+
+def _answer_verdict(answer, sent, attempts=None, skew=None):
+    if answer is None:
+        return _hold('no_answer', 'no answer: only the clock releases it')
+    if isinstance(answer, TraverseResponse):
+        usage = answer.usage
+        if not usage or usage.get('attempt_id') != sent.attempt_id:
+            return _hold('answer_for_other_attempt',
+                         'the response carries no usage of attempt %r' % sent.attempt_id)
+        return _finished('the response: the attempt finished', sent, usage, attempts, skew)
+    if isinstance(answer, TraverseError):
+        if isinstance(answer, (AttemptExpired, InstanceMismatch, AttemptConflict)):
+            return _hold('not_a_release_answer',
+                         'a 409 (%s) is not in the release rule: nothing ran for this '
+                         'request, but an earlier copy may run or be running; read GET '
+                         '/traverse/attempt, cancel the id, or wait for the clock'
+                         % (answer.body or {}).get('state', 'attempt_id held'))
+        usage = answer.usage
+        if usage and usage.get('attempt_id') == sent.attempt_id:
+            return _finished('the response (HTTP %s with the attempt\'s usage): the attempt '
+                             'ran and finished' % answer.status, sent, usage, attempts, skew)
+        return _hold('not_a_release_answer',
+                     'HTTP %s without the attempt\'s usage is not in the release rule'
+                     % answer.status)
+    if not isinstance(answer, AttemptAnswer):
+        raise TypeError('release_verdict() reads an AttemptAnswer (cancel(), attempt()), a '
+                        'TraverseResponse or a TraverseError, not %s' % type(answer).__name__)
+    if answer.attempt_id is not None and answer.attempt_id != sent.attempt_id:
+        return _hold('answer_for_other_attempt', 'the answer is about attempt %r, not %r'
+                     % (answer.attempt_id, sent.attempt_id))
+    if answer.status == 429:
+        return _hold('not_tombstoned',
+                     'a 429 releases nothing: the id was not tombstoned (%s)'
+                     % (answer.reason or 'no reason stated'))
+    if answer.state == 'finished':
+        state = answer.get('attempt') if answer.route == 'cancel' else None
+        state = state if isinstance(state, dict) else dict(answer)
+        return _finished('a finished state (%s %s)' % (answer.route, answer.status), sent,
+                         state, attempts, skew)
+    if answer.state in ('running', 'stopping'):
+        return _hold(answer.state, 'the attempt is %s: release on its finished state'
+                     % answer.state)
+    if answer.status != 404 or answer.tombstone is not True:
+        return _hold('no_tombstone', 'no tombstone (HTTP %s, tombstone %r): nothing is '
+                     'promised about a later copy' % (answer.status, answer.tombstone))
+    if sent.not_after_ms is None:
+        return _hold('sent_without_not_after_ms', 'the attempt was sent without not_after_ms: '
+                     'never released early on a tombstone')
+    if sent.expect_server_instance is None:
+        return _hold('sent_without_expect_server_instance',
+                     'the attempt was sent without expect_server_instance: a copy reaching a '
+                     'restarted process would run there, so it is never released early on a '
+                     'tombstone')
+    sup = answer.suppression
+    if sup is None:
+        return _hold('no_suppression_stated',
+                     'the tombstone states no suppression (covers_admission): a server below '
+                     'feature level 5 holds it for its retention only')
+    if not sup.covers_admission:
+        return _hold('covers_admission_false', 'covers_admission is false (%s)'
+                     % (sup.covers_admission_reason or 'no reason stated'))
+    if answer.server_instance != sent.expect_server_instance:
+        return _hold('other_server_instance',
+                     'the tombstone is server_instance %r\'s; the attempt was sent to %r'
+                     % (answer.server_instance, sent.expect_server_instance))
+    if sup.not_after_ms != sent.not_after_ms:
+        return _hold('other_not_after_ms',
+                     'the tombstone was judged against not_after_ms %r; the attempt was sent '
+                     'with %r' % (sup.not_after_ms, sent.not_after_ms))
+    return ReleaseVerdict(True, True, 'tombstone',
+                          'a 404 with tombstone and covers_admission from server_instance %s '
+                          'for not_after_ms %d: no copy of the attempt can start there'
+                          % (answer.server_instance, sent.not_after_ms))

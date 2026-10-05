@@ -19,7 +19,8 @@ __all__ = [
     'leaves', 'paths', 'path_of_leaf', 'chain', 'splits', 'split_branches',
     'label_end_events', 'reconverge_events', 'end_labels', 'labels_at_end',
     'label_summary', 'needed_budgets', 'continuation_sequence', 'walk_bases',
-    'walk_batch', 'natural_flank', 'evidence', 'lineage_label_at', 'merge_above',
+    'walk_batch', 'walk_iter', 'walk_iter_bytes', 'natural_flank', 'evidence',
+    'lineage_label_at', 'merge_above',
     'run_leaves', 'check_rules',
 ]
 
@@ -489,28 +490,124 @@ def walk_batch(arm, targets, spell=True, chains=True):
     memory follow the output. Spelling each target's chain on its own re-reads every
     shared segment, which made spelling all walks quadratic in their shared depth; a
     prefix kept at every segment of a deep chain would be quadratic in memory instead.
-    For one target this is chain() and walk_bases()."""
+    For one target this is chain() and walk_bases(). The dict holds every target's
+    spelling at once: a caller that uses each spelling once and drops it (an export, a
+    comparison's keys) iterates walk_iter() instead."""
+    # built in full before it is returned: a missing base never leaves part of the dict, so
+    # the stream need not read the chains for it first
+    return {t: (c, w) for t, c, w in walk_iter(arm, targets, spell, chains, check_first=False)}
+
+
+def walk_iter(arm, targets, spell=True, chains=True, *, check_first=True):
+    """walk_batch() as a stream: an iterator of (seg, chain, bases) per target, in
+    increasing segment id (walk_batch()'s order), each built when it is reached (a few
+    targets are built at once, see below). Only the prefixes a target
+    still to come is spelled from are held: a kept prefix is dropped once the last of the
+    chains parting at its segment has been spelled from it, so on a comb (the walker's
+    segment ids put each spine segment just before its two children) a few prefixes are
+    held at a time, not one per spine segment -- the batch's prefixes and the dict of
+    every spelling made to_fasta() peak at 10x its text on a comb of 1-bp segments,
+    against 3.1x when each walk was spelled on its own (the search service's report at
+    dcc0cebd). A consumer that keeps no spelling holds O(depth) of them.
+
+    A model with bases on some segments only raises its ValueError before the first
+    target is yielded (for a few targets: from this call), as walk_batch() does, so a
+    caller that answers that error for the whole call never sees part of the targets.
+    Target by target that costs a read of the
+    targets' chains first (the batch finds it while it collects their union): a consumer
+    that drops what it was given when the error comes passes |check_first|=False and gets
+    the error at the first target without bases instead, at no extra cost (every caller in
+    this library does: the exports, compare()'s keys, walk_batch())."""
     segs = arm.segments
     if isinstance(targets, (list, tuple, set, frozenset)) and len(targets) <= _FEW_WALKS:
         # a few walks (a small export, walks(top=2)): chain() and walk_bases() in one loop
         # each, without the bound and the batch's set and dict, which made small exports
         # 25-60 % slower than walk_bases() had (P10). Target by target costs at most k times
         # the deepest chain, the batch at least three Python steps per segment of it, so for
-        # k <= 3 targets it is never the slower choice
+        # k <= 3 targets it is never the slower choice. Built here and handed out as an
+        # iterator over them, not by a generator: its frame cost a one-walk to_fasta() a
+        # tenth of its time (0.4 of 4 us). A missing base raises before any target is given
         if not targets:
-            return {}
+            return iter(())
         has_bases = spell and segs[0].walk is not None
         if len(targets) == 1:
             for t in targets:
-                return {t: _walk_one(segs, t, has_bases, chains)}
-        return {t: _walk_one(segs, t, has_bases, chains) for t in sorted(set(targets))}
+                return iter(((t,) + _walk_one(segs, t, has_bases, chains),))
+        return iter([(t,) + _walk_one(segs, t, has_bases, chains)
+                     for t in sorted(set(targets))])
+    return _walk_stream(segs, targets, spell, chains, check_first)
+
+
+def _walk_stream(segs, targets, spell, chains, check_first):
+    """walk_iter() of more than a few targets, as a generator."""
     tset = set(targets)
     if not tset:
-        return {}
+        return
     has_bases = spell and bool(segs) and segs[0].walk is not None
-    one = _walk_each(segs, tset, has_bases, chains)
-    if one is not None:
-        return one
+    # target by target while that costs less -- each target's chain walked on its own --,
+    # else as a batch, where finding the shared prefixes pays off. Finding them (a set and
+    # a dict over the chains' union, a sort) made a few short walks 2-4x slower to spell
+    # than walk_bases() had (to_fasta(), to_gfa() and walks(top=5) on the small and the
+    # 1,000-label fixtures, P10). The total is read from the segments' depths before any
+    # walk (no work is spent on a walk that is then redone); a depth the model does not
+    # keep (a hand-built model's 0) only changes the choice, never the answer: with chains
+    # the walk itself is counted by the chains' lengths (without chains by the depths),
+    # and past _EACH_STEPS times the arm's segments the targets not yet given are spelled
+    # as a batch. Written out here rather than in a generator of its own: a generator
+    # level per target cost what a small export's own work does (to_gfa() of a 6-walk
+    # retrieval 10 % slower)
+    budget = _EACH_STEPS * len(segs)
+    if sum([segs[t].depth for t in tset]) + len(tset) > budget:
+        yield from _batch_stream(segs, tset, has_bases, chains)
+        return
+    if has_bases and check_first:
+        # bases on some segments only (a hand-built model; a parsed one has them on all or
+        # none) raise before the first target: the targets' chains are read once for it,
+        # never the whole arm (reading every segment cost a few shallow walks of an
+        # 8,000-segment arm 50x their own time, the review of the streamed spelling)
+        _check_bases(segs, tset)
+    order = sorted(tset)
+    for i, t in enumerate(order):
+        c, w = _walk_one(segs, t, has_bases, chains)
+        yield t, c, w
+        budget -= len(c) if chains else segs[t].depth + 1
+        if budget < 0:
+            yield from _batch_stream(segs, set(order[i + 1:]), has_bases, chains)
+            return
+
+
+def walk_iter_bytes(n_targets, bp, union, big=0, chain_steps=0):
+    """The stage-L memory account of walk_iter() (a bound of what it holds at once) for
+    |n_targets| targets with |bp| bases in all, |big| the longest, over a union of |union|
+    chain segments: the union's set and children counts; the kept prefixes -- at most |bp|,
+    since the prefixes held at once wait each for its own pending segment, and no two of
+    those lie on one chain, so each prefix is at most the bases of distinct targets below
+    it -- each in a kept entry (at most two per target: targets and partings); and the
+    spelling being given, with the pieces it is joined from. With chains, |chain_steps|
+    (the targets' chain lengths) bounds the kept chains the same way. The consumer's own
+    use of what it is given (a record, a key) is charged by the consumer."""
+    from .budget import DICT_KEY, INT, LIST, LIST_ITEM, SET_ITEM, STR
+    return (union * (SET_ITEM + DICT_KEY + INT)
+            + 2 * n_targets * (LIST + 3 * LIST_ITEM + STR + DICT_KEY)
+            + bp + 2 * (STR + big) + LIST_ITEM * chain_steps)
+
+
+# Spelling target by target costs about one Python step per chain segment, the batch about
+# three per segment of the chains' union plus C-level copies of the shared prefixes:
+# measured on the 57 benchmark graphlets, target by target was 0.24-0.62x the batch's time
+# up to 5 chain steps per segment and 1.5x at 14 (5.2x at 73, to_fasta() of a 2,213-segment
+# beam arm), so the crossover is near 9 steps per segment of the union. The arm's segment
+# count stands in for the union (at least as large, so the choice errs toward the batch
+# only when the union is small, where both are cheap).
+_EACH_STEPS = 8
+_FEW_WALKS = 3
+
+
+def _batch_stream(segs, tset, has_bases, chains=True):
+    """The batch of walk_iter(): the union of the targets' chains, a prefix kept where they
+    part, each kept prefix dropped after its last dependent (see walk_iter())."""
+    if not tset:
+        return
     # the union of the targets' chains, and per segment how many of its first-parent
     # children lie in it
     inu = set()
@@ -519,14 +616,23 @@ def walk_batch(arm, targets, spell=True, chains=True):
         s = t
         while s not in inu:
             inu.add(s)
-            p = segs[s].parents
+            seg = segs[s]
+            # a segment without bases raises here, before the first target is yielded:
+            # every segment spelled below lies in this union
+            if has_bases and seg.walk is None:
+                raise ValueError(NO_BASES)
+            p = seg.parents
             if not p:
                 break
             q = p[0]
             kids[q] = kids.get(q, 0) + 1
             s = q
-    keep = {}          # where chains part: seg -> (chain, bases)
-    out = {}
+    # where chains part: seg -> [chain (None without |chains|), bases, the chains still to
+    # be spelled from it]. Each first-parent child of a kept segment in the union leads to
+    # exactly one later segment spelled from it (the first one taken below: segments that
+    # are neither targets nor partings have one child in the union), so its count is its
+    # number of children in the union, and it is dropped when that reaches 0
+    keep = {}
     for s in sorted(x for x in inu if x in tset or kids.get(x, 0) >= 2):
         ids = []
         x = s
@@ -544,53 +650,40 @@ def walk_batch(arm, targets, spell=True, chains=True):
         bases = None
         if has_bases:
             parts = [segs[i].walk for i in ids]
-            if None in parts:
-                raise ValueError(NO_BASES)
             bases = ''.join(parts) if base is None else base[1] + ''.join(parts)
-        chain_ = ids if base is None else base[0] + ids
+        # the chain only for a caller that reads it: kept at every parting it is 8 bytes
+        # per segment, which on a comb of 1-bp segments was 8x the spelling it came with
+        chain_ = None if not chains else ids if base is None else base[0] + ids
+        if base is not None:
+            base[2] -= 1
+            if not base[2]:
+                del keep[x]
         n = kids.get(s, 0)
-        target = s in tset
-        if n >= 2 or (target and n):
-            keep[s] = (chain_, bases)
-            if target:
-                out[s] = (list(chain_) if chains else None, bases)
-        elif target:
-            out[s] = (chain_ if chains else None, bases)
-    return out
+        if n:
+            # a parting, or a target that others go on below: kept for them
+            keep[s] = [chain_, bases, n]
+            if s in tset:
+                # its own list: the kept one is read by the chains below it
+                yield s, (list(chain_) if chains else None), bases
+        elif s in tset:
+            yield s, chain_, bases
 
 
-# Spelling target by target costs about one Python step per chain segment, the batch about
-# three per segment of the chains' union plus C-level copies of the shared prefixes:
-# measured on the 57 benchmark graphlets, target by target was 0.24-0.62x the batch's time
-# up to 5 chain steps per segment and 1.5x at 14 (5.2x at 73, to_fasta() of a 2,213-segment
-# beam arm), so the crossover is near 9 steps per segment of the union. The arm's segment
-# count stands in for the union (at least as large, so the choice errs toward the batch
-# only when the union is small, where both are cheap).
-_EACH_STEPS = 8
-_FEW_WALKS = 3
-
-
-def _walk_each(segs, tset, has_bases, chains=True):
-    """walk_batch() target by target, while that costs less: each target's chain walked on
-    its own, (chain, bases) as walk_batch() gives them, in its order -- or None where the
-    chains' total length exceeds _EACH_STEPS times the arm's segments, where finding the
-    shared prefixes pays off. Finding them (a set and a dict over the chains' union, a
-    sort) made a few short walks 2-4x slower to spell than walk_bases() had (to_fasta(),
-    to_gfa() and walks(top=5) on the small and the 1,000-label fixtures, P10). The total
-    is read from the segments' depths before any walk (no work is spent on a walk that is
-    then redone); a depth the model does not keep (a hand-built model's 0) only changes
-    the choice, never the answer, and with chains the walk itself stops at the same bound
-    (counted by the chains' lengths; without chains by the depths)."""
-    budget = _EACH_STEPS * len(segs)
-    if sum([segs[t].depth for t in tset]) + len(tset) > budget:
-        return None
-    out = {}
-    for t in sorted(tset):
-        got = out[t] = _walk_one(segs, t, has_bases, chains)
-        budget -= len(got[0]) if chains else segs[t].depth + 1
-        if budget < 0:
-            return None
-    return out
+def _check_bases(segs, targets):
+    """walk_bases()'s ValueError when a segment on the chain of one of |targets| has no
+    bases, each segment of their union read once."""
+    seen = set()
+    for t in targets:
+        s = t
+        while s not in seen:
+            seen.add(s)
+            seg = segs[s]
+            if seg.walk is None:
+                raise ValueError(NO_BASES)
+            p = seg.parents
+            if not p:
+                break
+            s = p[0]
 
 
 def _walk_one(segs, t, has_bases, chains=True):
