@@ -779,6 +779,12 @@ struct Reader {
         for (const auto &l : dict) j["label_dict"].append(l);
         j["annotation"] = summary["annotation"];
         if (summary.isMember("duplicate")) j["duplicate"] = summary["duplicate"];
+        // record coordinates are no part of the body (MGT v1 is frozen, §18): the envelope
+        // carries them, the same block in every detail
+        for (const char *key : { "coordinates", "coordinates_reason" }) {
+            if (summary.isMember(key))
+                j[key] = summary[key];
+        }
         std::vector<std::array<Json::Value, 2>> ls(dict.size());
         for (const auto &[side, arm] : arms) {
             const std::string name = side == 'l' ? "left" : "right";
@@ -1437,6 +1443,23 @@ TEST(Graphlet, ReaderRebuildsTheFullResult) {
         check_request(*anno, request_for({ { P, {} } }, R"({"labels": {"mode": "annotate"},
                                                            "bounds": {"max_extension_bp": 40}})"),
                       "names annotate", &coverage);
+    }
+    // record coordinates (opt-in, §18): the envelope carries the block (or null with its
+    // reason) in every detail, and a cut list adds its K record to the body — the reader
+    // rebuilds the full result from the two, the block copied from the summary
+    {
+        const std::string S = random_seq(30, 131), P = random_seq(20, 132), Q = random_seq(20, 133);
+        auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                11, { S + P + S + Q, S + P }, { "C", "D" }, DeBruijnGraph::BASIC, true, { 0, 0 });
+        for (const std::string cap : { "16", "1", "\"unlimited\"" }) {
+            check_request(*anno, request_for({ { S, { "C", "D" } } },
+                                             R"({"support": "trace", "branching": {"on_reconverge": "keep",
+                                                 "max_label_branches": 2}, "output": {"coordinates": true,
+                                                 "max_coordinate_occurrences": )" + cap + "}}"),
+                          "coordinates, cap " + cap, &coverage);
+        }
+        check_request(*anno, request_for({ { S, {} } }, R"({"output": {"coordinates": true}})"),
+                      "coordinates under support kmer", &coverage);
     }
     // not vacuous: every record kind and every end token the walker can produce today
     for (const char *kind : { "H", "S", "L", "O", "Q", "K", "A", "B", "V", "G", "P", "E", "T", "C", "R", "Z",
@@ -2658,6 +2681,10 @@ void check_widths(const Json::Value &v, size_t level, const std::string &key,
         const size_t n = v.asString().size();
         if (key == "effect") {
             EXPECT_LE(n, 640u) << what;
+        } else if (key == "knob") {
+            // a knob's name, the longest output.max_coordinate_occurrences (33): still a short
+            // string's buffer (at most 35 characters in 48 B) and a member's text of 80 B
+            EXPECT_LE(n, 35u) << what << " " << v.asString();
         } else if (key == "message") {
             EXPECT_LE(n, 1024u) << what;
         } else if (!kPriced.count(key)) {
@@ -2841,6 +2868,20 @@ uint64_t modelled_delivery(const SeedResult &r, const DeliveryCosts &d) {
         }
         m += arm.growth.size() * d.bin;
     }
+    // record coordinates (opt-in): their entries and the occurrences listed
+    if (r.coordinates_recorded) {
+        for (const SeedCoordinates &sc : r.seed_coordinates) {
+            m += d.coordinate_seed + sc.starts.size() * d.occurrence;
+        }
+        for (const ArmResult &arm : r.arms) {
+            for (const RunCoordinates &rc : arm.run_coordinates) {
+                m += d.coordinate_run + rc.ends.size() * d.occurrence;
+            }
+        }
+    }
+    // a set derived from part of the seed states its derivation (D3)
+    if (r.derivation_partial)
+        m += d.extra_limitation;
     return m;
 }
 
@@ -3811,11 +3852,14 @@ TEST(Stage2ReviewRecheck, FailedDerivationsStateTheSoftBound) {
         r["strategy"] = parse_json(std::string(R"({"bounds": {)") + bounds
                                    + R"(}, "output": {"detail": "graphlet", "timing": false}})");
         const Json::Value res = process_traverse_request(r, *anno, "")["results"][0];
-        ASSERT_EQ("failed", res["outcome"]["walks"].asString()) << bounds;
-        const Json::Value *d = limitation_of(res["limitations"], "derivation");
-        ASSERT_TRUE(d) << bounds;
         const bool budget = std::string(bounds).find("max_memory_mb") != std::string::npos;
         const bool time = std::string(bounds).find("time_budget_ms") != std::string::npos;
+        // a time budget spent after the first k-mer delivers the set derived so far (D3): X's
+        // k-mers carry A alone, which the whole seed (no carrier) would exclude — walks partial,
+        // label evidence qualified (overstated); otherwise no carrier fails the seed
+        ASSERT_EQ(time ? "partial" : "failed", res["outcome"]["walks"].asString()) << bounds;
+        const Json::Value *d = limitation_of(res["limitations"], "derivation");
+        ASSERT_TRUE(d) << bounds;
         EXPECT_EQ(time ? "time_budget" : "no_carrier", (*d)["cause"].asString()) << bounds;
         const Json::Value *soft = limitation_of(res["limitations"], "memory_bound_soft");
         EXPECT_EQ(budget, soft != nullptr) << bounds;
@@ -3824,7 +3868,8 @@ TEST(Stage2ReviewRecheck, FailedDerivationsStateTheSoftBound) {
             EXPECT_TRUE((*soft)["observed"].isUInt64()) << bounds;
         }
         // memory_bound_soft is in no outcome class
-        EXPECT_EQ("complete", res["outcome"]["label_evidence"].asString()) << bounds;
+        EXPECT_EQ(time ? "qualified" : "complete", res["outcome"]["label_evidence"].asString())
+            << bounds;
     }
 }
 
@@ -6028,4 +6073,504 @@ TEST(GraphletAttempt, UsageStatesWhatFailedResultsHold) {
     EXPECT_TRUE(pu["memory"]["held_bound_bytes"].isNull());
     EXPECT_TRUE(pu["memory"]["soft_excess_bytes"].isNull());
     EXPECT_TRUE(pu["per_seed"][0]["refused_bytes"].isNull());
+}
+
+
+// ---------------------------------------------------------------- record coordinates (§18)
+
+namespace {
+
+// The opt-out response from an opt-in one: without the two echo fields, each result's block
+// (or null and reason), the `coordinates` limitation and, in a graphlet, the one K record of
+// kind coordinates (the Z count, graphlet_lines and graphlet_bytes adjusted). |k_records|
+// counts the K records removed
+Json::Value strip_coordinates(Json::Value out, size_t *k_records = nullptr) {
+    Json::Value &o = out["strategy"]["output"];
+    o.removeMember("coordinates");
+    o.removeMember("max_coordinate_occurrences");
+    for (Json::Value &r : out["results"]) {
+        r.removeMember("coordinates");
+        r.removeMember("coordinates_reason");
+        Json::Value kept(Json::arrayValue);
+        for (const Json::Value &l : r["limitations"]) {
+            if (l["kind"].asString() != "coordinates")
+                kept.append(l);
+        }
+        r["limitations"] = kept;
+        if (!r.isMember("graphlet"))
+            continue;
+        std::vector<std::string> lines = split_on(r["graphlet"].asString(), '\n');
+        std::string text;
+        size_t removed = 0;
+        for (const std::string &line : lines) {
+            if (line.rfind("K * coordinates ", 0) == 0) {
+                removed++;
+                continue;
+            }
+            if (line.empty())
+                continue;
+            text += line.rfind("Z ", 0) == 0 ? "Z " + std::to_string(u(line.substr(2)) - removed)
+                                             : line;
+            text += '\n';
+        }
+        r["graphlet"] = text;
+        r["graphlet_bytes"] = Json::UInt64(text.size());
+        r["graphlet_lines"] = Json::UInt64(r["graphlet_lines"].asUInt64() - removed);
+        if (k_records)
+            *k_records += removed;
+    }
+    return out;
+}
+
+// a column-label coordinate index: S twice in C (S·P·S·Q), once in D (S·P); a stretch no label
+// carries whole (M·N in E, N·O in G)
+struct CoordIndex {
+    std::string S, P, Q, M, N, O;
+    std::shared_ptr<graph::AnnotatedDBG> anno;
+    CoordIndex() {
+        for (uint32_t t = 0; ; ++t) {
+            S = random_seq(30, 2101 + t); P = random_seq(25, 2201 + t); Q = random_seq(25, 2301 + t);
+            if (P[0] != Q[0])
+                break;
+        }
+        M = random_seq(25, 2401); N = random_seq(25, 2402); O = random_seq(25, 2403);
+        anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                11, { S + P + S + Q, S + P, M + N, N + O }, { "C", "D", "E", "G" },
+                DeBruijnGraph::BASIC, true, { 0, 0, 0, 0 });
+    }
+    // no label carries it whole: a failed derivation
+    std::string orphan() const { return M.substr(10) + N + O.substr(0, 10); }
+};
+
+const char *const kTrace = R"({"support": "trace", "branching": {"on_reconverge": "keep",
+                                  "max_label_branches": 2}, "bounds": {"max_extension_bp": 60}})";
+
+Json::Value with_coordinates(Json::Value request, Json::Value cap = Json::Value()) {
+    request["strategy"]["output"]["coordinates"] = true;
+    if (!cap.isNull())
+        request["strategy"]["output"]["max_coordinate_occurrences"] = cap;
+    return request;
+}
+
+} // namespace
+
+// The cap is refused without coordinates: true (it would change nothing: §7.0, decision C-N6),
+// accepted with it as an integer of at least 1 or "unlimited" (default 16), and inert under
+// support kmer (C-N7)
+TEST(GraphletCoordinates, CapWithoutCoordinatesIsRefused) {
+    auto parse = [](const std::string &output, const std::string &support = "trace") {
+        return parse_traverse_request(parse_json(
+                R"({"seeds": [{"sequence": "ACGTACGTACGTACGT"}], "strategy": {"support": ")"
+                + support + R"(", "branching": {"on_reconverge": "keep"}, "output": )" + output + "}}"));
+    };
+    auto refused = [&](const std::string &output, const std::string &says) {
+        try {
+            parse(output);
+            ADD_FAILURE() << output << " was accepted";
+        } catch (const InvalidRequest &e) {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find(says)) << output << ": " << e.what();
+            EXPECT_NE(std::string::npos,
+                      std::string(e.what()).find("strategy.output.max_coordinate_occurrences")
+                      + std::string(e.what()).find("strategy.output.coordinates") + 1)
+                << e.what();
+        }
+    };
+    refused(R"({"max_coordinate_occurrences": 4})", "only with output.coordinates true");
+    refused(R"({"coordinates": false, "max_coordinate_occurrences": "unlimited"})",
+            "only with output.coordinates true");
+    // 0 and a number above the maximum state the same whole range, "unlimited" included: [0, ...]
+    // misstated it, and a client following it was refused again (review of W1, finding 4)
+    const std::string range = "out of range [1, " + std::to_string(Strategy::kUnlimited - 1)
+                            + "] (or \"unlimited\")";
+    refused(R"({"coordinates": true, "max_coordinate_occurrences": 0})", range);
+    refused(R"({"coordinates": true, "max_coordinate_occurrences": 18446744073709551615})", range);
+    refused(R"({"coordinates": true, "max_coordinate_occurrences": "many"})",
+            "expected an integer or \"unlimited\"");
+    refused(R"({"coordinates": true, "max_coordinate_occurrences": -1})", "non-negative");
+    refused(R"({"coordinates": "yes"})", "expected a boolean");
+    EXPECT_FALSE(parse(R"({})").strategy.coordinates);
+    EXPECT_FALSE(parse(R"({"coordinates": false})").strategy.coordinates);
+    const TraverseRequest def = parse(R"({"coordinates": true})");
+    EXPECT_TRUE(def.strategy.coordinates);
+    EXPECT_EQ(16u, def.strategy.max_coordinate_occurrences);
+    EXPECT_EQ(Strategy::kUnlimited,
+              parse(R"({"coordinates": true, "max_coordinate_occurrences": "unlimited"})")
+                  .strategy.max_coordinate_occurrences);
+    EXPECT_EQ(1u, parse(R"({"coordinates": true, "max_coordinate_occurrences": 1})")
+                      .strategy.max_coordinate_occurrences);
+    // inert under support kmer, accepted: a request that switches its support stays valid
+    EXPECT_EQ(3u, parse(R"({"coordinates": true, "max_coordinate_occurrences": 3})", "kmer")
+                      .strategy.max_coordinate_occurrences);
+}
+
+// Without coordinates nothing is added (decision C1): no echo field, no block, no reason. With
+// them the echo carries both fields (the cap's default included), and is resubmittable: the
+// echoed strategy gives the same response
+TEST(GraphletCoordinates, EchoOnlyWhenRequestedAndResubmittable) {
+    const CoordIndex ix;
+    const Json::Value plain = request_of({ seed_of(ix.S, { "C", "D" }) }, kTrace, "full");
+    const Json::Value off = process_traverse_request(plain, *ix.anno, "");
+    EXPECT_FALSE(off["strategy"]["output"].isMember("coordinates"));
+    EXPECT_FALSE(off["strategy"]["output"].isMember("max_coordinate_occurrences"));
+    EXPECT_FALSE(off["results"][0].isMember("coordinates"));
+    EXPECT_FALSE(off["results"][0].isMember("coordinates_reason"));
+    const Json::Value on = process_traverse_request(with_coordinates(plain), *ix.anno, "");
+    EXPECT_TRUE(on["strategy"]["output"]["coordinates"].asBool());
+    EXPECT_EQ(16u, on["strategy"]["output"]["max_coordinate_occurrences"].asUInt64());
+    EXPECT_TRUE(on["results"][0]["coordinates"].isObject());
+    Json::Value again = plain;
+    again["strategy"] = on["strategy"];
+    again["strategy"].removeMember("clamped");
+    EXPECT_EQ(compact_json(on), compact_json(process_traverse_request(again, *ix.anno, "")));
+    const Json::Value unlimited = process_traverse_request(
+            with_coordinates(plain, "unlimited"), *ix.anno, "");
+    EXPECT_EQ("unlimited", unlimited["strategy"]["output"]["max_coordinate_occurrences"].asString());
+    EXPECT_EQ("unlimited", unlimited["results"][0]["coordinates"]["max_occurrences"].asString());
+}
+
+// coordinates: null with the reason, in the order of §18.1: the index's ("index has no
+// coordinates"), the support's ("support kmer", annotate mode included), then "no traversal"
+// for a seed without a walk — a failed derivation, a seed a budget does not hold, a refused
+// non-UTF-8 dictionary, a seed never started — and "partial derivation" for a trace seed whose
+// permitted set was derived from part of it (D3)
+TEST(GraphletCoordinates, NullReasons) {
+    const CoordIndex ix;
+    auto reason = [](const Json::Value &result) {
+        EXPECT_TRUE(result.isMember("coordinates")) << compact_json(result);
+        EXPECT_TRUE(result["coordinates"].isNull()) << compact_json(result);
+        return result["coordinates_reason"].asString();
+    };
+    for (const char *detail : { "full", "graphlet" }) {
+        // support kmer, and annotate mode: whatever the seed
+        Json::Value r = with_coordinates(request_of({ seed_of(ix.S), seed_of(ix.orphan()) },
+                                                    R"({"bounds": {"max_extension_bp": 30}})", detail));
+        Json::Value out = process_traverse_request(r, *ix.anno, "");
+        EXPECT_EQ("support kmer", reason(out["results"][0])) << detail;
+        EXPECT_EQ("support kmer", reason(out["results"][1])) << detail;   // failed too
+        r["strategy"]["labels"]["mode"] = "annotate";
+        r["strategy"]["branching"]["on_reconverge"] = "keep";
+        out = process_traverse_request(r, *ix.anno, "");
+        EXPECT_EQ("support kmer", reason(out["results"][0])) << detail;
+        // trace: a walked seed has the block, a failed derivation none
+        r = with_coordinates(request_of({ seed_of(ix.S), seed_of(ix.orphan()) }, kTrace, detail));
+        out = process_traverse_request(r, *ix.anno, "");
+        EXPECT_TRUE(out["results"][0]["coordinates"].isObject()) << detail;
+        EXPECT_FALSE(out["results"][0].isMember("coordinates_reason")) << detail;
+        EXPECT_EQ("failed", out["results"][1]["outcome"]["walks"].asString());
+        EXPECT_EQ("no traversal", reason(out["results"][1])) << detail;
+        // a budget that does not hold the seed (its depth-0 state at 1 MiB in detail full,
+        // with 64 labels)
+        // ... and the time budget spent after the derivation's first k-mer (D3): under trace
+        // its set is not followed over the seed, no occurrences are known
+        TraverseLimits late;
+        late.max_time_ms = 1e-9;
+        r = with_coordinates(request_of({ seed_of(ix.S) }, kTrace, detail));
+        out = process_traverse_request(r, *ix.anno, "", late);
+        EXPECT_EQ("partial", out["results"][0]["outcome"]["walks"].asString()) << detail;
+        EXPECT_EQ("partial derivation", reason(out["results"][0])) << detail;
+    }
+    // the index's reason comes first, under every support and mode
+    auto plain = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            11, { ix.S + ix.P + ix.S + ix.Q, ix.S + ix.P, ix.M + ix.N, ix.N + ix.O },
+            { "C", "D", "E", "G" }, DeBruijnGraph::BASIC);
+    for (const char *strategy : { R"({"bounds": {"max_extension_bp": 30}})",
+                                  R"({"labels": {"mode": "annotate"}, "bounds": {"max_extension_bp": 30}})" }) {
+        const Json::Value out = process_traverse_request(
+                with_coordinates(request_of({ seed_of(ix.S), seed_of(ix.orphan()) }, strategy)),
+                *plain, "");
+        EXPECT_EQ("index has no coordinates", reason(out["results"][0])) << strategy;
+        EXPECT_EQ("index has no coordinates", reason(out["results"][1])) << strategy;
+    }
+    // a seed the memory budget does not hold: 200 labels at the seed's depth-0 state
+    {
+        const std::string X = random_seq(30, 2501), Y = random_seq(30, 2502);
+        std::vector<std::string> seqs, labels;
+        for (size_t i = 0; i < 200; ++i) {
+            seqs.push_back(X + Y);
+            labels.push_back("L" + std::to_string(i));
+        }
+        auto wide = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                11, seqs, labels, DeBruijnGraph::BASIC, true, std::vector<uint64_t>(200, 0));
+        Json::Value r = with_coordinates(request_of({ seed_of(X) }, kTrace, "full"));
+        r["strategy"]["bounds"]["max_memory_mb"] = 1;
+        const Json::Value out = process_traverse_request(r, *wide, "");
+        ASSERT_TRUE(out["results"][0].isMember("error")) << compact_json(out["results"][0]);
+        EXPECT_EQ("memory", out["results"][0]["resource_stop"]["resource"].asString());
+        EXPECT_EQ("no traversal", reason(out["results"][0]));
+        // the depth-0 state holds the seed's and the roots' coordinates: dropping them helps
+        std::set<std::string> actions;
+        for (const Json::Value &a : out["results"][0]["resource_stop"]["actions"]) actions.insert(a.asString());
+        EXPECT_TRUE(actions.count("drop_coordinates")) << compact_json(out["results"][0]["resource_stop"]);
+    }
+    // a refused dictionary (a name that is not UTF-8)
+    {
+        const std::string R = random_seq(40, 2601), T = random_seq(30, 2602);
+        auto bad = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                11, { R + T }, { "bad\xFF" }, DeBruijnGraph::BASIC, true, { 0 });
+        const Json::Value out = process_traverse_request(
+                with_coordinates(request_of({ seed_of(R) }, kTrace, "full")), *bad, "");
+        EXPECT_EQ("unrepresentable_label_name", out["results"][0]["limitations"][0]["cause"].asString());
+        EXPECT_EQ("no traversal", reason(out["results"][0]));
+    }
+    // seeds never started (the attempt cancelled between seeds)
+    {
+        const Json::Value one = with_coordinates(request_of({ seed_of(ix.S, { "C" }) }, kTrace));
+        CancelAtPoll single(std::numeric_limits<uint64_t>::max());
+        process_traverse_request(one, *ix.anno, "", {}, nullptr, single.attempt.get());
+        Json::Value two = one;
+        two["seeds"].append(one["seeds"][0]);
+        CancelAtPoll cancel(single.calls + 1);
+        const Json::Value out = process_traverse_request(two, *ix.anno, "", {}, nullptr,
+                                                         cancel.attempt.get());
+        ASSERT_EQ(2u, out["results"].size());
+        EXPECT_TRUE(out["results"][0]["coordinates"].isObject());
+        EXPECT_EQ("not_started", out["results"][1]["resource_stop"]["phase"].asString());
+        EXPECT_EQ("no traversal", reason(out["results"][1]));
+    }
+}
+
+// One block in every detail (the envelope carries it; the graphlet's summary too)
+TEST(GraphletCoordinates, SameBlockInEveryDetail) {
+    const CoordIndex ix;
+    for (const Json::Value &cap : { Json::Value(1), Json::Value(16), Json::Value("unlimited") }) {
+        std::string block;
+        for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
+            const Json::Value out = process_traverse_request(
+                    with_coordinates(request_of({ seed_of(ix.S, { "C", "D" }) }, kTrace, detail), cap),
+                    *ix.anno, "");
+            const Json::Value &c = out["results"][0]["coordinates"];
+            ASSERT_TRUE(c.isObject()) << detail;
+            if (block.empty()) {
+                block = compact_json(c);
+            } else {
+                EXPECT_EQ(block, compact_json(c)) << detail << " cap " << compact_json(cap);
+            }
+        }
+        EXPECT_NE(std::string::npos, block.find("\"kind\":\"column\""));
+    }
+}
+
+// The MGT body changes only where a list was cut, by one K record of kind coordinates (C12's free
+// token, extra field lists_cut), which the reader keeps; otherwise it is byte-identical to the
+// opt-out body. Stripped of the block, its reason, the limitation and the echo, an opt-in response
+// is the opt-out response, in every detail
+TEST(GraphletCoordinates, KRecordOnlyWhenCutAndStrippedEqualsOptOut) {
+    const CoordIndex ix;
+    for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
+        for (const std::string &strategy : { std::string(kTrace),
+                                             std::string(R"({"bounds": {"max_extension_bp": 30}})") }) {
+            const Json::Value plain = request_of({ seed_of(ix.S, { "C", "D" }),
+                                                   seed_of(ix.orphan()) }, strategy, detail);
+            const std::string off = compact_json(process_traverse_request(plain, *ix.anno, ""));
+            for (const Json::Value &cap : { Json::Value(1), Json::Value(16), Json::Value("unlimited") }) {
+                const Json::Value on = process_traverse_request(with_coordinates(plain, cap), *ix.anno, "");
+                size_t k_records = 0;
+                EXPECT_EQ(off, compact_json(strip_coordinates(on, &k_records)))
+                    << detail << " " << strategy << " cap " << compact_json(cap);
+                const Json::Value &first = on["results"][0];
+                const bool cut = first.isMember("coordinates") && first["coordinates"].isObject()
+                              && !first["coordinates"]["complete"].asBool();
+                const Json::Value *lim = limitation_of(first["limitations"], "coordinates");
+                // S occurs twice in C: only a cap of 1 cuts (the seed's list and C's root runs)
+                const bool expect_cut = strategy == kTrace && cap == Json::Value(1);
+                EXPECT_EQ(expect_cut, cut) << detail << " cap " << compact_json(cap);
+                EXPECT_EQ(expect_cut, lim != nullptr) << detail;
+                EXPECT_EQ(expect_cut && std::string(detail) == "graphlet" ? 1u : 0u, k_records);
+                if (lim) {
+                    EXPECT_EQ("output.max_coordinate_occurrences", (*lim)["knob"].asString());
+                    EXPECT_EQ(1u, (*lim)["limit"].asUInt64());
+                    EXPECT_EQ(2u, (*lim)["observed"].asUInt64());       // the largest true count
+                    EXPECT_GE((*lim)["lists_cut"].asUInt64(), 1u);
+                    // in no outcome class (decision C2): the outcome is the opt-out's (the
+                    // stripped response above equals it, outcome included)
+                    if (std::string(detail) == "graphlet") {
+                        const std::string text = first["graphlet"].asString();
+                        const size_t at = text.find("\nK * coordinates output.max_coordinate_occurrences i:1 i:2 * lists_cut=i:");
+                        EXPECT_NE(std::string::npos, at) << text;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The delivery model bounds the block too (DeliveryCostsBoundTheOutput's check): many occurrences
+// with "unlimited", positions of 20 digits, every detail; the walker charges at least the model
+namespace {
+
+std::shared_ptr<graph::AnnotatedDBG> repeat_coordinate_index(const std::string &S, uint64_t start) {
+    std::string rec;
+    for (size_t i = 0; i < 40; ++i) {
+        rec += S + random_seq(12, 2700 + i);
+    }
+    return test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            11, { rec, S + random_seq(30, 2799) }, { "F", "H" }, DeBruijnGraph::BASIC, true,
+            { start, start });
+}
+
+} // namespace
+
+TEST(GraphletCoordinates, DeliveryCostsBoundTheBlock) {
+    const std::string S = random_seq(30, 2700);
+    size_t checked = 0;
+    for (uint64_t start : { uint64_t(0), uint64_t(10'000'000'000'000'000'000ull) }) {
+        auto anno = repeat_coordinate_index(S, start);
+        LabelOracle oracle(*anno);
+        for (size_t cap : { size_t(16), Strategy::kUnlimited }) {
+            for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
+                const std::string what = std::string(detail) + " cap " + std::to_string(cap)
+                                       + " start " + std::to_string(start);
+                Strategy st = strategy_of(kTrace);
+                st.coordinates = true;
+                st.max_coordinate_occurrences = cap;
+                st.delivery = delivery_costs(detail, st.sequences, kMgtFloatWidth,
+                                             CoordinatesOutput::BLOCK);
+                const SeedResult r = traverse_seed(oracle, seed_of(S, { "F", "H" }), st,
+                                                   LabelChangeCost::forbid());
+                ASSERT_TRUE(r.coordinates_recorded) << what;
+                const DeliveryCosts &d = st.delivery;
+                const uint64_t model = modelled_delivery(r, d);
+                Json::Value j = seed_result_to_json(r, st, detail, false);
+                ASSERT_TRUE(j["coordinates"].isObject()) << what;
+                uint64_t before = 0;
+                if (std::string(detail) == "graphlet") {
+                    const std::string text = graphlet_text(r, seed_of(S, { "F", "H" }), st,
+                                                           context_of(oracle), j);
+                    uint64_t index = 0;
+                    for (const ArmResult &arm : r.arms) {
+                        index += 40 * arm.segments.size() + 8 * arm.runs.size();
+                        for (const Segment &s : arm.segments) {
+                            for (const Event &ev : s.events) index += 96 * (ev.type == EventType::LABEL_END);
+                        }
+                    }
+                    before = 3 * text.size() + index + json_tree_bytes(j);
+                    j["graphlet"] = text;
+                }
+                check_widths(j, 2, "", what);
+                EXPECT_LE(j["limitations"].size(), 6u) << what;
+                const uint64_t actual = delivery_peak(j, before);
+                EXPECT_LE(actual, model) << what;
+                EXPECT_LE(model, r.account.memory_final) << what;
+                EXPECT_EQ(40u, r.seed_coordinates[0].total) << what;
+                checked++;
+            }
+        }
+    }
+    EXPECT_EQ(16u, checked);
+}
+
+// A memory stop of a request asking for coordinates offers drop_coordinates (C12): the recorded
+// ones are part of the account (4-20 times a run's own cost), and so is the null form with its
+// reason where none can be recorded (support kmer), which moved such stops shallower with no
+// lever naming the cause (review of W1, finding 2); dropping them is then a stop no shallower.
+// Without coordinates it is not offered
+TEST(GraphletCoordinates, MemoryStopOffersDropCoordinates) {
+    const std::string S = random_seq(30, 2800);
+    std::vector<std::string> seqs, labels;
+    std::vector<uint64_t> starts;
+    uint64_t at = 0;
+    for (size_t i = 0; i < 128; ++i) {
+        seqs.push_back(S + random_seq(200, 2900 + i));
+        labels.push_back("F");
+        starts.push_back(at);
+        at += seqs.back().size() - 11 + 1;
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            11, seqs, labels, DeBruijnGraph::BASIC, true, starts);
+    size_t offered[2] = { 0, 0 };
+    for (uint64_t mb : { 1, 2, 3, 4 }) {
+        for (bool trace : { true, false }) {
+            Json::Value r = request_of({ seed_of(S, { "F" }) },
+                                       trace ? R"({"support": "trace", "direction": "right",
+                                                   "branching": {"on_reconverge": "keep",
+                                                                 "max_label_branches": "unlimited",
+                                                                 "max_splits_per_path": "unlimited"},
+                                                   "bounds": {"max_extension_bp": 300}})"
+                                             : R"({"direction": "right",
+                                                   "branching": {"on_reconverge": "keep",
+                                                                 "max_label_branches": "unlimited",
+                                                                 "max_splits_per_path": "unlimited"},
+                                                   "bounds": {"max_extension_bp": 300}})", "full");
+            r["strategy"]["bounds"]["max_memory_mb"] = Json::UInt64(mb);
+            uint64_t depth[2] = { 0, 0 };
+            for (bool coordinates : { true, false }) {
+                const Json::Value res = process_traverse_request(
+                        coordinates ? with_coordinates(r) : r, *anno, "")["results"][0];
+                depth[coordinates] = res["arms"]["right"]["complete_to_bp"].asUInt64();
+                const Json::Value &q = res["resource_stop"];
+                if (!q.isObject() || q["resource"].asString() != "memory")
+                    continue;
+                std::set<std::string> actions;
+                for (const Json::Value &a : q["actions"]) actions.insert(a.asString());
+                EXPECT_EQ(coordinates, actions.count("drop_coordinates") == 1)
+                    << mb << " MiB trace " << trace << " coordinates " << coordinates;
+                offered[trace] += actions.count("drop_coordinates");
+                if (coordinates && !trace) {
+                    // inert: the null form and its reason are what the opt-in adds
+                    EXPECT_TRUE(res["coordinates"].isNull()) << mb;
+                    EXPECT_EQ("support kmer", res["coordinates_reason"].asString()) << mb;
+                }
+            }
+            // the lever holds: without coordinates the walk stops no shallower
+            EXPECT_GE(depth[false], depth[true]) << mb << " MiB trace " << trace;
+        }
+    }
+    EXPECT_GT(offered[true], 0u);
+    EXPECT_GT(offered[false], 0u);
+}
+
+// D3: a seed delivered with the set derived from part of it states a `derivation` limitation the
+// fixed part does not hold; the walker charges it (DeliveryCosts::extra_limitation) and the model
+// still bounds what the serialisers hold, in every detail, with and without a memory budget
+TEST(Graphlet, PartialDerivationIsPricedAndBound) {
+    size_t checked = 0;
+    for (BudgetCase c : budget_cases()) {
+        // the seed's labels derived (forbid cost, no extra labels: a derived set is then valid)
+        if (c.st.label_mode == LabelMode::ANNOTATE || c.cost.finite() || !c.st.extra.empty())
+            continue;
+        c.seed.labels.clear();
+        LabelOracle oracle(*c.anno);
+        // at least two k-mers: after the last one the derivation is complete, not partial
+        if (c.seed.sequence.size() < oracle.get_k() + 1)
+            continue;
+        for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
+            for (uint64_t mb : { uint64_t(0), uint64_t(64) }) {
+                const std::string what = c.name + " " + detail + " " + std::to_string(mb) + " MiB";
+                Strategy st = c.st;
+                st.time_budget_ms = 1e-9;            // spent after the first k-mer (read whole)
+                st.max_memory_bytes = mb << 20;
+                st.delivery = delivery_costs(detail, st.sequences);
+                const SeedResult r = run_case(c, st);
+                ASSERT_TRUE(r.derivation_partial) << what;
+                const uint64_t model = modelled_delivery(r, st.delivery);
+                Json::Value j = seed_result_to_json(r, st, detail, false);
+                ASSERT_EQ("derivation", j["limitations"][0]["kind"].asString()) << what;
+                EXPECT_EQ("qualified", j["outcome"]["label_evidence"].asString()) << what;
+                uint64_t before = 0;
+                if (std::string(detail) == "graphlet") {
+                    const std::string text = graphlet_text(r, c.seed, st, context_of(oracle), j);
+                    EXPECT_NE(std::string::npos, text.find("\nK * derivation bounds.time_budget_ms "))
+                        << what;
+                    // the record's extra fields are a failed derivation's (cause, server_limit):
+                    // n is the S record's num_kmers (review of W1, finding 5)
+                    EXPECT_NE(std::string::npos, text.find(" * cause=s:time_budget ")) << what;
+                    EXPECT_EQ(std::string::npos, text.find("num_kmers=")) << what;
+                    EXPECT_NE(std::string::npos, text.find("\nO p c q i\n")) << what;
+                    before = 3 * text.size() + json_tree_bytes(j);
+                    j["graphlet"] = text;
+                }
+                check_widths(j, 2, "", what);
+                // what the serialisers hold is within the model and within what the walker
+                // charged. (This test's model counts a continuation label as a whole end label
+                // more, which delivery_costs prices within the end label's own (its member for
+                // end_reasons): at a walk censored at depth 0 no reservation's slack covers that
+                // overcount, so the model is compared with the output, not with the charge)
+                const uint64_t actual = delivery_peak(j, before);
+                EXPECT_LE(actual, model) << what;
+                EXPECT_LE(actual, r.account.memory_final) << what;
+                checked++;
+            }
+        }
+    }
+    EXPECT_GT(checked, 0u);
 }

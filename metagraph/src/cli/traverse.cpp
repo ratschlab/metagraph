@@ -158,8 +158,12 @@ Json::Value labels_json(const std::vector<LabelId> &labels) {
 // A limit that may also be "unlimited" (Strategy::kUnlimited). |def| is the value for
 // an omitted field; a mode in which the knob has no meaning passes |only_unlimited|,
 // and a number is then rejected rather than accepted and ignored.
+// |min| > 0: a knob 0 means nothing for. Every number out of [min, max] is then refused with
+// that whole range, "unlimited" included, so that a client following the refusal is not
+// refused again: [0, max] misstated it, and 0 had a refusal of its own (review of W1,
+// finding 4). With |min| 0 the knob's refusals are the ones it always had.
 size_t limit_or_unlimited(Strict &s, const std::string &k, size_t def, size_t max,
-                          const char *only_unlimited) {
+                          const char *only_unlimited, size_t min = 0) {
     if (!s.has(k))
         return def;
     const Json::Value &v = s.raw(k);
@@ -172,7 +176,13 @@ size_t limit_or_unlimited(Strict &s, const std::string &k, size_t def, size_t ma
         throw InvalidRequest(s.child_path(k) + ": " + only_unlimited
                              + "; set it to \"unlimited\" or omit it");
     }
-    return s.uint(k, def, 0, max);
+    // a non-negative integer, as Strict::uint takes it (anything else is its refusal)
+    if (min && v.isIntegral() && !(v.isInt64() && v.asInt64() < 0)
+            && (v.asUInt64() < min || v.asUInt64() > max)) {
+        throw InvalidRequest(s.child_path(k) + ": out of range [" + std::to_string(min) + ", "
+                             + std::to_string(max) + "] (or \"unlimited\")");
+    }
+    return s.uint(k, def, min, max);
 }
 
 Json::Value limit_json(size_t x) {
@@ -437,6 +447,24 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
             // shorter than k could not be resubmitted as a seed
             st.continuation_bp = o.uint("continuation_bp", 1000, 0);
             req.timing = o.boolean("timing", true);
+            // Record coordinates (DESIGN-traverse-graphlet.md §18; opt-in, decision C1). The cap
+            // is refused without coordinates: true, where it would change nothing (§7.0's rule
+            // for knobs, decision C-N6), and accepted with it whatever the support — under
+            // support kmer it is inert, and the result says why no coordinates are reported
+            // (C-N7), so that a request switching its support stays valid
+            st.coordinates = o.boolean("coordinates", false);
+            if (o.has("max_coordinate_occurrences")) {
+                if (!st.coordinates) {
+                    throw InvalidRequest("strategy.output.max_coordinate_occurrences: only with "
+                                         "output.coordinates true, where it bounds the occurrence "
+                                         "lists; without it, it would change nothing: omit it "
+                                         "or set output.coordinates to true");
+                }
+                // 0 would record no occurrence while asking for them: refused with the range
+                st.max_coordinate_occurrences = limit_or_unlimited(
+                        o, "max_coordinate_occurrences", 16,
+                        std::numeric_limits<size_t>::max() - 1, nullptr, 1);
+            }
         }
         if (t.has("annotation")) {
             Strict a(t.raw("annotation"), "strategy.annotation");
@@ -650,6 +678,12 @@ Json::Value strategy_to_json(const Strategy &st, const CostSpec &cost, const std
     o["profile_bin_bp"] = uint_json(st.profile_bin_bp);
     o["max_branch_events"] = limit_json(st.max_branch_events);
     o["continuation_bp"] = uint_json(st.continuation_bp);
+    // echoed only when asked for (decision C1), with the cap, default included, so that the
+    // echo is the whole request; the echo of a request without them stays what it was
+    if (st.coordinates) {
+        o["coordinates"] = true;
+        o["max_coordinate_occurrences"] = limit_json(st.max_coordinate_occurrences);
+    }
     j["output"] = std::move(o);
     Json::Value a;
     a["batch_kmers"] = uint_json(st.batch_kmers);
@@ -986,7 +1020,10 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
 //   label_evidence      lower_bound: evidence may be missing or understated — label_lists,
 //                       inexact_counts, seed_labels, switch_sources, greedy_losses;
 //                       qualified: something reported may be overstated —
-//                       trace_record_boundaries; qualified wins when both apply
+//                       trace_record_boundaries, and a walked result's derivation (its
+//                       permitted set derived from part of the seed, D3); qualified wins when
+//                       both apply. The coordinates limitation (a cut occurrence list) is in
+//                       no class (decision C2, provisional): its block states complete: false
 //   delivery            inline (the whole result is in this response); spooled / paged
 //                       are reserved for the graphlet delivery path
 static Json::Value outcome_of(const Json::Value &result, bool failed) {
@@ -999,7 +1036,10 @@ static Json::Value outcome_of(const Json::Value &result, bool failed) {
             cut |= kind == "branch_events";
             lower |= kind == "label_lists" || kind == "inexact_counts" || kind == "seed_labels"
                   || kind == "switch_sources" || kind == "greedy_losses";
-            qualified |= kind == "trace_record_boundaries";
+            // a walked result's derivation limitation: its permitted set was derived from part
+            // of the seed (D3), a superset of the whole seed's carriers. A failed seed's states
+            // why there is no result at all and qualifies nothing (as before)
+            qualified |= kind == "trace_record_boundaries" || (kind == "derivation" && !failed);
         }
     };
     classify(result["limitations"]);
@@ -1399,6 +1439,14 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                     actions.append("use_graphlet");
                     if (st.sequences)
                         actions.append("drop_sequences");
+                    // Wherever coordinates were asked for, the output's coordinate part is in the
+                    // account: the recorded block (a run's coordinates can cost 4-20 times the
+                    // run itself) or the null form with its reason, which no request can avoid
+                    // but by dropping them (an index without coordinates, support kmer: about
+                    // 1.6 KB a seed, enough to move a stop). The action of decision C12, offered
+                    // for both (review of W1, finding 2)
+                    if (st.coordinates)
+                        actions.append("drop_coordinates");
                 }
             }
             if (q.injected) {
@@ -1647,6 +1695,129 @@ static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &
                         "budget by them (observed: the excess seen, MiB, rounded up)");
 }
 
+// One occurrence, the half-open base interval [start, end) in record (header labels) or column
+// (column labels) coordinates
+static Json::Value occurrence_json(uint64_t start, uint64_t end) {
+    Json::Value j(Json::arrayValue);
+    j.append(uint_json(start));
+    j.append(uint_json(end));
+    return j;
+}
+
+/**
+ * The `coordinates` block of a seed whose coordinates were recorded (DESIGN-traverse-graphlet.md
+ * §18.2, owner decisions C1-C12, revision 1 of the coordinates plan), the same in every detail:
+ * the kind (record: every label a header, positions within its record; column: every label a
+ * column, positions global in its column; mixed: each label's kind says which, C3), k, the cap,
+ * whether every list is whole; per seed label its occurrences of the seed; per requested arm one
+ * entry per run, in R order, with the occurrences of the run's own bases [from_bp, to_bp) — from
+ * a chain's k-mer coordinate c at the run's last node and the run's length L: [c + k - L, c + k)
+ * on the right arm, [c, c + L) on the left — the true count where the list was cut, the chains
+ * that ended before the last node (C5), and lower_bound where the run's chains are a lower bound
+ * (a switch into a label whose own lineage was live). A cut list is stated by the `coordinates`
+ * limitation appended to |lims| (no outcome class, C2); lower-bound runs by the block alone.
+ * A column's coordinates number its k-mers (record i's k-mer j is offset_i + j), so a column
+ * interval numbers base p of record i as offset_i + p: record i's last k - 1 bases share their
+ * numbers with record i + 1's first k - 1, and an interval touching them is attributed to one
+ * record only with the record lengths (deferred, C10). The contract and the docs state it
+ * (review of W1, finding 6), beside trace_record_boundaries (a column's trace can run across
+ * two records whose coordinates are adjacent).
+ * delivery_tick() per entry and occurrence: a large block is built under the attempt's check.
+ */
+static Json::Value coordinates_json(const SeedResult &r, const Strategy &st, Json::Value *lims) {
+    const uint64_t k = r.k;
+    size_t headers = 0, columns = 0;
+    for (const LabelRef &l : r.label_dict) {
+        (l.kind == LabelKind::HEADER ? headers : columns)++;
+    }
+    Json::Value block;
+    block["kind"] = !columns ? "record" : !headers ? "column" : "mixed";
+    block["k"] = uint_json(k);
+    block["max_occurrences"] = limit_json(st.max_coordinate_occurrences);
+    size_t lists_cut = 0, runs_lower_bound = 0;
+    uint64_t largest_cut = 0;
+    // the true count beside a cut list, never a silent cut
+    auto state_total = [&](Json::Value *entry, uint64_t total, size_t listed) {
+        if (total > listed) {
+            (*entry)["occurrences_total"] = uint_json(total);
+            lists_cut++;
+            largest_cut = std::max<uint64_t>(largest_cut, total);
+        }
+    };
+    Json::Value seed(Json::arrayValue);
+    for (size_t l = 0; l < r.seed_coordinates.size(); ++l) {
+        const SeedCoordinates &sc = r.seed_coordinates[l];
+        Json::Value e;
+        e["label"] = static_cast<Json::UInt>(l);
+        Json::Value occurrences(Json::arrayValue);
+        for (Coord c : sc.starts) {
+            occurrences.append(occurrence_json(c, c + r.length_bp));
+            delivery_tick();
+        }
+        e["occurrences"] = std::move(occurrences);
+        state_total(&e, sc.total, sc.starts.size());
+        seed.append(std::move(e));
+        delivery_tick();
+    }
+    block["seed"] = std::move(seed);
+    Json::Value arms(Json::objectValue);
+    for (Arm side : { Arm::LEFT, Arm::RIGHT }) {
+        const ArmResult &a = r.arms[static_cast<size_t>(side)];
+        if (!a.requested)
+            continue;
+        assert(a.run_coordinates.size() == a.runs.size());
+        Json::Value list(Json::arrayValue);
+        for (size_t i = 0; i < a.runs.size() && i < a.run_coordinates.size(); ++i) {
+            const LabelRun &run = a.runs[i];
+            const RunCoordinates &rc = a.run_coordinates[i];
+            const uint64_t length = run.to_bp - run.from_bp;
+            Json::Value e;
+            e["run"] = static_cast<Json::UInt64>(i);
+            e["label"] = run.label;
+            e["from_bp"] = uint_json(run.from_bp);
+            e["to_bp"] = uint_json(run.to_bp);
+            Json::Value occurrences(Json::arrayValue);
+            for (Coord c : rc.ends) {
+                // a chain carries the run's whole length: on the right arm its k-mer at the last
+                // node ends at c + k, the run's own bases end there
+                assert(side == Arm::LEFT || c + k >= length);
+                occurrences.append(side == Arm::RIGHT ? occurrence_json(c + k - length, c + k)
+                                                      : occurrence_json(c, c + length));
+                delivery_tick();
+            }
+            e["occurrences"] = std::move(occurrences);
+            state_total(&e, rc.total, rc.ends.size());
+            if (rc.chains_ended)
+                e["chains_ended"] = uint_json(rc.chains_ended);
+            if (rc.lower_bound) {
+                e["lower_bound"] = true;
+                runs_lower_bound++;
+            }
+            list.append(std::move(e));
+            delivery_tick();
+        }
+        arms[to_string(side)] = std::move(list);
+    }
+    block["arms"] = std::move(arms);
+    // false iff some list was cut or some run's occurrences are a lower bound
+    block["complete"] = !lists_cut && !runs_lower_bound;
+    if (runs_lower_bound)
+        block["runs_lower_bound"] = uint_json(runs_lower_bound);
+    if (lists_cut) {
+        Json::Value l = limitation("coordinates", "output.max_coordinate_occurrences",
+                                   limit_json(st.max_coordinate_occurrences),
+                                   uint_json(largest_cut),
+                                   std::to_string(lists_cut) + " occurrence list(s) (seed labels "
+                                   "and runs) are cut at the cap to their first occurrences by "
+                                   "start; each states its true count (occurrences_total; "
+                                   "observed: the largest): raise the knob or set it to "
+                                   "\"unlimited\"");
+        l["lists_cut"] = uint_json(lists_cut);
+        lims->append(std::move(l));
+    }
+    return block;
+}
+
 Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const std::string &detail, bool timing) {
     const bool graphlet = detail == "graphlet";
     const ResourceStop *stop = stated_stop(r, st);
@@ -1696,13 +1867,50 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
     // the caps that limited the seed itself (§7.0); process_traverse_request adds the
     // server clamps this seed ran into
     Json::Value lims(Json::arrayValue);
+    if (r.derivation_partial) {
+        // The time budget ran out while the permitted set was derived, after part of the seed
+        // (decision D3): the set of the k-mers read is a superset of the whole seed's carriers,
+        // so a label here may not carry the whole seed — label evidence qualified (outcome_of) —
+        // and the walk stopped at the seed. Observed: the k-mers read, of num_kmers
+        const uint64_t read = r.derivation_partial->kmers_read;
+        Json::Value d = limitation(
+                "derivation", "bounds.time_budget_ms", Json::Value(st.time_budget_ms),
+                uint_json(read),
+                "the time budget ran out while deriving the permitted set from the seed, after "
+                + std::to_string(read) + " of " + std::to_string(r.num_kmers) + " k-mers: the "
+                "labels carrying the k-mers read were taken, a superset of those carrying the "
+                "whole seed (a label the whole seed would exclude may be among them"
+                + (st.support == Support::TRACE ? ", and none was checked for one coordinate-"
+                                                  "consecutive occurrence of the seed"
+                                                : "")
+                + "), and the walk stopped at the seed (complete_to_bp 0): raise the budget, "
+                  "shorten the seed, or name the labels explicitly");
+        // the fields a failed derivation's limitation has (n is the seed's num_kmers, in the
+        // seed object and the S record): no field the contract does not already know
+        d["cause"] = to_string(SeedDerivationError::TIME_BUDGET);
+        lims.append(std::move(d));
+    }
     if (r.labels_dropped) {
+        // A set derived from part of the seed (D3) is a superset of the whole seed's carriers:
+        // the cap cut it in index order, so what it dropped need not carry the whole seed and
+        // what it kept may not either — the true carriers may be among either. No walk is
+        // missing for them (the walk stopped at the seed); the levers are the cap, the time
+        // budget and an explicit list (review of W1, finding 1)
         lims.append(limitation("seed_labels", "labels.max_seed_labels", uint_json(st.max_seed_labels),
                                uint_json(r.labels_supporting_total),
-                               std::to_string(r.labels_dropped) + " label(s) carrying the whole seed "
-                               "were not taken (labels_dropped_digest identifies them): walks only they "
-                               "carry are missing; raise the knob, or traverse the complement with an "
-                               "explicit list"));
+                               r.derivation_partial
+                               ? std::to_string(r.labels_dropped) + " of the "
+                                 + std::to_string(r.labels_supporting_total) + " label(s) carrying "
+                                 "the k-mers read were not taken (labels_dropped_digest identifies "
+                                 "them): the set derived from part of the seed is a superset of the "
+                                 "labels carrying the whole seed, so the ones dropped may include "
+                                 "labels carrying the whole seed and the ones kept labels it would "
+                                 "exclude; raise the knob or the time budget, or name the labels "
+                                 "explicitly"
+                               : std::to_string(r.labels_dropped) + " label(s) carrying the whole seed "
+                                 "were not taken (labels_dropped_digest identifies them): walks only they "
+                                 "carry are missing; raise the knob, or traverse the complement with an "
+                                 "explicit list"));
     }
     if (st.support == Support::TRACE) {
         size_t columns = 0;
@@ -1723,6 +1931,18 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
         // decode of a level's annotation rows happens before it can be charged (stage 3),
         // so the bound is soft until then, and every response under it says so
         lims.append(memory_bound_soft(st, r.account));
+    }
+    if (st.coordinates) {
+        // asked for (decision C1): the block where they were recorded, otherwise null with the
+        // reason (§18.1); without the request nothing, so that every output is as before
+        if (r.coordinates_recorded) {
+            j["coordinates"] = coordinates_json(r, st, &lims);
+        } else {
+            assert(r.coordinates_reason);
+            j["coordinates"] = Json::Value();
+            j["coordinates_reason"] = r.coordinates_reason ? r.coordinates_reason
+                                                           : kCoordinatesNoTraversal;
+        }
     }
     j["limitations"] = std::move(lims);
     j["label_mode"] = to_string(st.label_mode);
@@ -3934,10 +4154,13 @@ uint64_t mgt_float_width(const Strategy &st, const LabelChangeCost &cost,
  * a result can state: at most 5 at the seed level (seed_labels, trace_record_boundaries,
  * memory_bound_soft, two server_clamp) and 8 per arm (a stopping cap and a beam's
  * walk_domain, branch_events, label_lists, switch_sources, inexact_counts, scope,
- * greedy_losses), each with an effect of at most 640 bytes. A path chain costs only where
+ * greedy_losses), each with an effect of at most 640 bytes; with recorded coordinates one more
+ * (a cut list's `coordinates`), and a permitted set derived from part of the seed states its
+ * `derivation`, which the walker charges where it applies (DeliveryCosts::extra_limitation). A path chain costs only where
  * JSON spells it (tree, full).
  */
-DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t float_width) {
+DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t float_width,
+                             CoordinatesOutput coordinates) {
     DeliveryCosts d;
     // the characters every float can take beyond the 24 the record bounds below assume
     const uint64_t wide = float_width > kMgtFloatWidth ? float_width - kMgtFloatWidth : 0;
@@ -3968,6 +4191,25 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
     auto json_name = [](std::string_view name, uint64_t copies) {
         return copies * (name.size() + kLongString + kTextCopies * (json_escaped_size(name) + 2));
     };
+    // Record coordinates (§18.2; opt-in, so nothing here without them), JSON in every detail
+    // (a graphlet's in its summary). Fixed: the block's member, its object and 7 members (kind,
+    // k, max_occurrences, complete, runs_lower_bound, seed, arms), the seed list, the arms
+    // object with 2 members and their lists, 2 short strings, and the two echo members of
+    // strategy.output (charged per seed) — which bounds the null form with its reason (2
+    // members, a short string) — and, where a block can be recorded, one limitation more (a cut
+    // list's). A run's entry: an element, its object, 8 members and its occurrence list; a seed
+    // label's: an element, its object, 3 members and its list; an occurrence: an element, its
+    // pair's array and two elements (numbers of at most 20 digits, the 48 B an element's text
+    // takes). A seed-level limitation beyond the fixed part's (D3's derivation): one more
+    if (coordinates != CoordinatesOutput::NONE) {
+        d.coordinate_run = kElement + kMap + 8 * kMember + kMap;
+        d.coordinate_seed = kElement + kMap + 3 * kMember + kMap;
+        d.occurrence = 3 * kElement + kMap;
+    }
+    const uint64_t coordinate_fixed = coordinates == CoordinatesOutput::BLOCK
+        ? 12 * kMember + 5 * kMap + 3 * kShort + kLimitationJson
+        : coordinates == CoordinatesOutput::REASON ? 4 * kMember + kShort : 0;
+    d.extra_limitation = kLimitationJson;
     if (detail == "graphlet") {
         constexpr uint64_t kCopies = 4;    // p + 3E per record byte (E = p, see above)
         constexpr uint64_t kLine = 3;      // the escaped line break of a record, three times
@@ -3985,6 +4227,11 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
         const uint64_t fixed_floats = 4 + 2 + 2 * kLimitations;
         d.fixed = kDeflate + kEnvelope + kLimitations * kLimitationJson
                 + kCopies * (kRecords + fixed_floats * wide) + 16 * kLine;
+        // a limitation more also writes its K record (240 B of fields with its effect, its
+        // limit and observed floats)
+        const uint64_t k_record = kCopies * (240 + kEffect + 2 * wide) + kLine;
+        d.fixed += coordinate_fixed + (coordinates == CoordinatesOutput::BLOCK ? k_record : 0);
+        d.extra_limitation += k_record;
         // L <c|h> <column> <seq_id> <prefix_len> <suffix>: 38 B without the name
         d.label = record(40);
         // G: parents (the first), from_bp, length_bp, the set codes and entry_total, split,
@@ -4024,7 +4271,7 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
         return d;
     }
     const bool segments = detail != "summary";
-    d.fixed = kDeflate + kEnvelopeJson + kLimitations * kLimitationJson;
+    d.fixed = kDeflate + kEnvelopeJson + kLimitations * kLimitationJson + coordinate_fixed;
     // label_dict: element, object, 4 members, its kind; label_summary: element, object,
     // "label" and per arm a member with an object of 4 members and the runs list; a seed
     // label's element in seed.labels
@@ -4193,6 +4440,12 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
             for (const ArmResult &a : r.arms) {
                 affected |= a.requested && ended_by(a, EndReason::TIME_BUDGET);
             }
+            // a set derived from part of the seed (D3) names the clamped knob too, with the
+            // server's value, as a failed derivation's entry does (failed_seed_to_json)
+            for (Json::Value &l : lims) {
+                if (l["kind"].asString() == "derivation" && l["knob"].asString() == field)
+                    l["server_limit"] = c["effective"];
+            }
             // a time stop states what the request asked for beside what bound it
             if (rj->isMember("resource_stop")
                     && (*rj)["resource_stop"]["resource"].asString() == "time")
@@ -4246,6 +4499,17 @@ static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t obser
     return std::max(observed, held > st.max_memory_bytes ? held - st.max_memory_bytes : 0);
 }
 
+// A failed, refused or never started seed of a request that asked for coordinates (decision C1)
+// states that it has none, and why: |reason| is computed once per request — the index's or the
+// support's when either rules them out whatever the seed, otherwise "no traversal" (§18.1).
+// Null: not asked for, nothing is added, so that such a result is as before
+static void state_no_coordinates(Json::Value *rj, const char *reason) {
+    if (!reason)
+        return;
+    (*rj)["coordinates"] = Json::Value();
+    (*rj)["coordinates_reason"] = reason;
+}
+
 // The result of a seed whose permitted set could not be DERIVED (§6.1 step 4): no arms,
 // `outcome.walks: failed`, the message as `error`, and the cause as a `derivation` limitation
 // naming the request field that would get past it (§7.0) — so that an agent acts on the
@@ -4253,7 +4517,7 @@ static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t obser
 // clamped that knob: raising it beyond the server's value does nothing.
 static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationError &e,
                                        const Strategy &st, const Json::Value &clamped,
-                                       bool decode_charged) {
+                                       bool decode_charged, const char *coordinates_reason) {
     auto server_limit = [&](const std::string &knob, Json::Value *l) {
         for (const Json::Value &c : clamped) {
             if (c["field"].asString() == knob)
@@ -4359,6 +4623,7 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
     // no walk was made, so nothing was cut on the other axes — except the carriers a cap
     // cut before the trace check (seed_labels), whose evidence is then missing
     rj["outcome"] = outcome_of(rj, true);
+    state_no_coordinates(&rj, coordinates_reason);
     return rj;
 }
 
@@ -4374,7 +4639,8 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
 // sequence id). The knob is the one that avoids recording the label where one exists.
 // Returns a null value when every name is valid.
 static Json::Value unrepresentable_seed_to_json(const Seed &seed, const SeedResult &r,
-                                                const Strategy &st) {
+                                                const Strategy &st,
+                                                const char *coordinates_reason) {
     size_t bad = 0;
     std::optional<size_t> first_dict;       // index into label_dict
     std::optional<size_t> first_dropped;    // index into dropped_labels
@@ -4454,6 +4720,8 @@ static Json::Value unrepresentable_seed_to_json(const Seed &seed, const SeedResu
     lims.append(std::move(d));
     rj["limitations"] = std::move(lims);
     rj["outcome"] = outcome_of(rj, true);
+    // nothing of the walk is delivered, its coordinates neither
+    state_no_coordinates(&rj, coordinates_reason);
     return rj;
 }
 
@@ -4473,7 +4741,8 @@ static Json::Value unrepresentable_seed_to_json(const Seed &seed, const SeedResu
 // no record, field or token is new. The other seeds of the request are traversed;
 // nothing per label is delivered.
 static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudgetError &e,
-                                              const Strategy &st, const Json::Value &clamped) {
+                                              const Strategy &st, const Json::Value &clamped,
+                                              const char *coordinates_reason) {
     const ResourceStop &q = e.stop();
     // the budget at the server's maximum (R16), which a request cannot raise: its lever is
     // not offered (state_budget_clamp states the rest)
@@ -4578,6 +4847,7 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
     if (clamp)
         state_budget_clamp(&rj, *clamp);
     rj["outcome"] = outcome_of(rj, true);
+    state_no_coordinates(&rj, coordinates_reason);
     return rj;
 }
 
@@ -4601,7 +4871,7 @@ static const char* resource_name(ResourceStop::Resource resource) {
 // read, and no budget of the request ran out. Only free tokens take new values (MGT v1).
 static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop, double bound_ms,
                                             double elapsed_ms, const Strategy &st,
-                                            bool decode_charged) {
+                                            bool decode_charged, const char *coordinates_reason) {
     ResourceStop q;
     q.resource = stop == ExternalStop::CANCELLED ? ResourceStop::CANCELLED
                                                  : ResourceStop::ATTEMPT_DEADLINE;
@@ -4652,6 +4922,7 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
                  + std::to_string(limit) + " ms): the seed is failed, nothing of it was read; no "
                    "budget of the request ran out: a new attempt can traverse it";
     rj["resource_stop"] = std::move(j);
+    state_no_coordinates(&rj, coordinates_reason);
     return rj;
 }
 
@@ -4759,15 +5030,28 @@ Json::Value process_traverse_request(const Json::Value &json,
     if (attempt) {
         attempt->set_bound(req.seeds.size(), req.strategy.time_budget_ms,
                            req.strategy.max_memory_bytes);
-        attempt->set_delivery_detail(req.detail);
+        attempt->set_delivery_detail(req.detail, req.strategy.coordinates);
     }
 
+    LabelOracle oracle(anno_graph);
+    // Record coordinates (opt-in): the reason every seed of the request reports none when the
+    // index or the support rules them out, otherwise the one a seed without a traversal states
+    // (failed, refused, not started; §18.1); null when not asked for. And what they cost the
+    // output: none, the null form, or the block where they can be recorded
+    const char *const coordinates_ruled_out
+        = coordinates_reason(req.strategy, oracle.has_coordinates());
+    const char *const no_coordinates = !req.strategy.coordinates ? nullptr
+                                     : coordinates_ruled_out ? coordinates_ruled_out
+                                                             : kCoordinatesNoTraversal;
+    const CoordinatesOutput coordinates_output
+        = !req.strategy.coordinates ? CoordinatesOutput::NONE
+        : coordinates_ruled_out ? CoordinatesOutput::REASON : CoordinatesOutput::BLOCK;
     // what the requested output costs per object, for the memory budget (§14); re-priced per
     // seed where its floats can be wider (mgt_float_width)
-    req.strategy.delivery = delivery_costs(req.detail, req.strategy.sequences);
+    req.strategy.delivery = delivery_costs(req.detail, req.strategy.sequences, kMgtFloatWidth,
+                                           coordinates_output);
     uint64_t priced_width = kMgtFloatWidth;
 
-    LabelOracle oracle(anno_graph);
     // the chunked deadlines (spec §6.8): every annotation read of this request is decoded in
     // pieces of about this duration under a deadline, the deadline checked between them
     oracle.pacer().target_ms = limits.chunk_target_ms;
@@ -4848,8 +5132,14 @@ Json::Value process_traverse_request(const Json::Value &json,
         // poll that reads the clock and the client (the stop flag alone is read elsewhere)
         control.ms_left = [attempt]() { return attempt->ms_left(); };
         control.poll_now = [attempt]() { return attempt->poll(/* force */ true); };
-        // the walked seed's account, from which its output is estimated (the delivery reserve)
-        control.progress = [attempt](uint64_t account) { attempt->progress(account); };
+        // the walked seed's account, from which its output is estimated (the delivery reserve).
+        // Its recorded coordinates' part (|coordinates|, opt-in) is estimated with the walk's
+        // own ratio for now, which understates their text: an occurrence's account is ~43
+        // times its text, the rest of the output's 115-129 times (C3 splits it). The ratio an
+        // attempt with coordinates measures stays its own, out of the server's (set above)
+        control.progress = [attempt](uint64_t account, uint64_t /* coordinates */) {
+            attempt->progress(account);
+        };
     }
     DeliveryScope delivery(attempt);
     // A seed's result as the response holds it: in the tree, or (|texts|, the server) written
@@ -4895,7 +5185,7 @@ Json::Value process_traverse_request(const Json::Value &json,
                 for (size_t j = i; j < req.seeds.size(); ++j) {
                     append(not_started_seed_to_json(req.seeds[j], stop, attempt->bound_ms(),
                                                     attempt->elapsed_ms(), req.strategy,
-                                                    decode_charged), 0);
+                                                    decode_charged, no_coordinates), 0);
                     // its usage is what its result states and holds (review of the stage-4
                     // backend, F1: a never started seed stated a soft excess its usage did not)
                     SeedUsage usage;
@@ -4953,7 +5243,8 @@ Json::Value process_traverse_request(const Json::Value &json,
         const uint64_t float_width = mgt_float_width(req.strategy, cost, requested_time_ms,
                                                      limits.max_time_ms);
         if (float_width != priced_width) {
-            req.strategy.delivery = delivery_costs(req.detail, req.strategy.sequences, float_width);
+            req.strategy.delivery = delivery_costs(req.detail, req.strategy.sequences, float_width,
+                                                   coordinates_output);
             priced_width = float_width;
         }
         try {
@@ -4976,7 +5267,18 @@ Json::Value process_traverse_request(const Json::Value &json,
             // that label. The seed is refused instead (in both modes; checked after the
             // walk, since an annotate dictionary is complete only then), like a failed
             // derivation; the writers' own refusals stay as the backstop.
-            Json::Value refused = unrepresentable_seed_to_json(seed, r, req.strategy);
+            Json::Value refused = unrepresentable_seed_to_json(seed, r, req.strategy,
+                                                               no_coordinates);
+            if (!refused.isNull() && r.derivation_partial) {
+                // A partial set (D3) is delivered as a walk or not at all (Walker::run): such a
+                // name among labels the whole seed may exclude fails the seed as before D3, with
+                // the time budget that cut its derivation (the handler below states it)
+                SeedDerivationError e = derivation_out_of_time(
+                        r.derivation_partial->kmers_read, r.num_kmers, req.strategy.time_budget_ms,
+                        r.derivation_partial->elapsed_ms);
+                e.set_soft_overshoot(r.account.soft_overshoot);
+                throw e;
+            }
             if (!refused.isNull()) {
                 if (req.strategy.max_memory_bytes) {
                     // every response under a memory budget states it (§7.0), with what
@@ -5023,7 +5325,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             // discarding a 100-seed batch because seed 57 spans a recombination point.
             walked("failed", e.cause() == SeedDerivationError::TIME_BUDGET ? "time" : "", true);
             Json::Value failed = failed_seed_to_json(seed, e, req.strategy, clamped,
-                                                     oracle.decode_charged());
+                                                     oracle.decode_charged(), no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
             append(std::move(failed), 0);
             delivered(outcome);
@@ -5034,7 +5336,8 @@ Json::Value process_traverse_request(const Json::Value &json,
             // derivation, since the budget is per seed and the other seeds may fit (or the
             // attempt stopped it in its seed phase)
             walked("failed", resource_name(e.stop().resource), true, refused_of(e.stop()));
-            Json::Value failed = budget_failed_seed_to_json(seed, e, req.strategy, clamped);
+            Json::Value failed = budget_failed_seed_to_json(seed, e, req.strategy, clamped,
+                                                            no_coordinates);
             const std::string outcome = failed["outcome"]["walks"].asString();
             append(std::move(failed), 0);
             delivered(outcome);

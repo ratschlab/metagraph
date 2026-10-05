@@ -2701,16 +2701,28 @@ TEST(WalkerDerive, DerivationHonoursTheTimeBudget) {
             kK, f.seqs(), f.labels(), DeBruijnGraph::BASIC);
     Strategy st;
     st.time_budget_ms = 1e-9;    // spent by the time the first seed k-mer is consumed
-    EXPECT_THROW(run(*anno, f.R, {}, st), SeedDerivationError);
-    try {
-        run(*anno, f.R, {}, st);
-        FAIL() << "expected the derivation to stop at the time budget";
-    } catch (const SeedDerivationError &e) {
-        EXPECT_NE(nullptr, std::strstr(e.what(), "time budget")) << e.what();
-        EXPECT_EQ(SeedDerivationError::TIME_BUDGET, e.cause());
-        EXPECT_EQ(1e-9, e.limit());
-        EXPECT_GT(e.observed(), e.limit());   // the elapsed milliseconds
+    // D3 (the owner's decision of 2026-10-04): one k-mer was read, so the seed is delivered
+    // with the set derived from it — here {A, B}, the labels of the cheapest row of the first
+    // window — and the walk is the seed itself, stopped by the time budget at depth 0
+    const SeedResult partial = run(*anno, f.R, {}, st);
+    ASSERT_TRUE(partial.derivation_partial);
+    EXPECT_EQ(1u, partial.derivation_partial->kmers_read);
+    EXPECT_GT(partial.derivation_partial->elapsed_ms, 1e-9);
+    EXPECT_TRUE(partial.labels_from_seed);
+    EXPECT_EQ(2u, partial.num_seed_labels);
+    for (const ArmResult &arm : partial.arms) {
+        EXPECT_EQ(ArmResult::TRUNCATED, arm.status);
+        EXPECT_EQ(0u, arm.complete_to_bp);
+        ASSERT_TRUE(arm.cap_trigger);
+        EXPECT_EQ(EndReason::TIME_BUDGET, arm.cap_trigger->reason);
+        EXPECT_EQ(0u, arm.steps);
+        ASSERT_EQ(1u, arm.paths.size());
+        EXPECT_EQ(EndReason::TIME_BUDGET, arm.paths[0].path_reason);
     }
+    ASSERT_TRUE(partial.resource_stop);
+    EXPECT_EQ(ResourceStop::TIME, partial.resource_stop->resource);
+    EXPECT_EQ(0u, partial.resource_stop->at_bp);
+    EXPECT_EQ("time_budget", partial.deadline.stopped_by);
 
     // An explicit list reads only its own columns, so the budget stops the WALK instead
     // of rejecting the seed: the same budget must not turn a named request into an error.
@@ -3799,7 +3811,9 @@ TEST(Walker, FailedDerivationIsAStatedOutcome) {
     EXPECT_EQ(2u, refused["limitations"][0]["observed"].asUInt64());
     EXPECT_EQ(1u, refused["limitations"][0]["server_limit"].asUInt64());
 
-    // the time budget runs out during the derivation; the server lowered it, so the
+    // the time budget runs out during the derivation, after its first k-mer (D3): the seed is
+    // delivered with the set derived from that k-mer, a superset of the whole seed's carriers
+    // (label evidence qualified), stopped at the seed; the server lowered the budget, so the
     // entry carries the server's value as well
     limits = cli::TraverseLimits();
     limits.max_time_ms = 1e-9;
@@ -3807,13 +3821,26 @@ TEST(Walker, FailedDerivationIsAStatedOutcome) {
             request({ X }, R"({"direction": "right", "bounds": {"time_budget_ms": 60000}})"),
             *anno, "", limits);
     const Json::Value &late = out["results"][0];
-    EXPECT_EQ("failed", late["outcome"]["walks"].asString());
-    ASSERT_EQ(std::vector<std::string>{ "derivation" }, kinds_of(late["limitations"]));
-    EXPECT_EQ("time_budget", late["limitations"][0]["cause"].asString());
-    EXPECT_EQ("bounds.time_budget_ms", late["limitations"][0]["knob"].asString());
-    EXPECT_EQ(1e-9, late["limitations"][0]["limit"].asDouble());
-    EXPECT_GT(late["limitations"][0]["observed"].asDouble(), 1e-9);
-    EXPECT_EQ(1e-9, late["limitations"][0]["server_limit"].asDouble());
+    EXPECT_EQ("partial/complete/qualified/inline", outcome_of(late));
+    EXPECT_FALSE(late.isMember("error"));
+    EXPECT_EQ("truncated", late["arms"]["right"]["status"].asString());
+    EXPECT_EQ(0u, late["arms"]["right"]["complete_to_bp"].asUInt64());
+    EXPECT_EQ((std::vector<std::string>{ "derivation", "server_clamp" }),
+              kinds_of(late["limitations"]));
+    const Json::Value &partial = late["limitations"][0];
+    EXPECT_EQ("time_budget", partial["cause"].asString());
+    EXPECT_EQ("bounds.time_budget_ms", partial["knob"].asString());
+    EXPECT_EQ(1e-9, partial["limit"].asDouble());
+    EXPECT_EQ(1u, partial["observed"].asUInt64());               // the k-mers read
+    // n is the seed's own num_kmers: the limitation has a failed derivation's fields only
+    EXPECT_FALSE(partial.isMember("num_kmers"));
+    EXPECT_EQ(X.size() - kK + 1, late["seed"]["num_kmers"].asUInt64());
+    EXPECT_EQ(1e-9, partial["server_limit"].asDouble());
+    EXPECT_NE(std::string::npos, partial["effect"].asString().find("after 1 of 20 k-mers"))
+        << partial["effect"].asString();
+    // the set of the k-mer read: A and B carry X
+    EXPECT_EQ(2u, late["seed"]["labels"].size());
+    EXPECT_TRUE(late["seed"]["labels_from_seed"].asBool());
 }
 
 // Knobs that would be accepted and then do nothing are refused (spec §7.0): the tip and
@@ -4389,13 +4416,20 @@ TEST(WalkerDeadlineChunks, DerivationWindowIsPaced) {
         Seed seed;
         seed.sequence = fan.seed;
         try {
-            traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
-            ADD_FAILURE() << "the derivation was not stopped";
+            const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+            // read whole, the window's first k-mer was consumed before the clock was read:
+            // the set of that k-mer is delivered (D3), the walk stopped at the seed
+            EXPECT_EQ(0.0, target) << "a paced window stopped before its first k-mer";
+            ASSERT_TRUE(r.derivation_partial);
+            EXPECT_EQ(1u, r.derivation_partial->kmers_read);
+            EXPECT_EQ(0u, r.arms[kRight].complete_to_bp);
         } catch (const SeedDerivationError &e) {
+            // paced, the window was stopped before any k-mer was consumed: nothing was
+            // derived, and the seed fails as before (D3: j = 0)
+            EXPECT_GT(target, 0.0) << e.what();
             EXPECT_EQ(SeedDerivationError::TIME_BUDGET, e.cause());
-            if (target > 0)
-                EXPECT_NE(std::string::npos, std::string(e.what()).find("after 0 of "))
-                    << e.what();
+            EXPECT_NE(std::string::npos, std::string(e.what()).find("after 0 of "))
+                << e.what();
         }
         const double ms = clock.now();
         if (target > 0) {
@@ -4405,6 +4439,938 @@ TEST(WalkerDeadlineChunks, DerivationWindowIsPaced) {
             EXPECT_GE(ms, 60 - 1e-6);      // 30 rows (the seed's k-mers) at 2 ms, read whole
         }
     }
+}
+
+
+// ---------------------------------------------------------------- record coordinates (§18)
+
+namespace {
+
+// The occurrences of the record coordinates (DESIGN-traverse-graphlet.md §18, owner decisions
+// C1-C12) are checked by brute force against the records the fixtures index: every occurrence
+// of a run must be the run's own bases in its label's record, every seed occurrence the seed,
+// and the true counts the occurrences of the chain's string in the record(s) — the seed and
+// the walk for a seed-entered run, the k-mer entered by the switch to the last node for a
+// switch-entered one — exactly, or at least where the run is marked a lower bound.
+
+// a label's records: (text, coordinate of its first k-mer in the label's coordinate space:
+// 0 for a header label's own record, the record's start in the column for a column label)
+using LabelRecords = std::vector<std::pair<std::string, uint64_t>>;
+
+std::vector<uint64_t> starts_of(const std::string &hay, const std::string &needle) {
+    std::vector<uint64_t> out;
+    for (size_t i = hay.find(needle); i != std::string::npos; i = hay.find(needle, i + 1)) {
+        out.push_back(i);
+    }
+    return out;
+}
+
+// the bases [s, e) of a label's coordinate space, "" when no record holds them whole
+std::string bases_of(const LabelRecords &records, uint64_t s, uint64_t e) {
+    for (const auto &[text, start] : records) {
+        if (s >= start && e - start <= text.size())
+            return text.substr(s - start, e - s);
+    }
+    return "";
+}
+
+size_t count_in(const LabelRecords &records, const std::string &needle) {
+    size_t n = 0;
+    for (const auto &rec : records) {
+        n += starts_of(rec.first, needle).size();
+    }
+    return n;
+}
+
+// the flank up to the end of segment |seg| through first parents, natural orientation
+std::string flank_to(const ArmResult &arm, size_t seg) {
+    std::vector<size_t> chain;
+    for (size_t s = seg; ; s = arm.segments[s].parents[0]) {
+        chain.push_back(s);
+        if (arm.segments[s].parents.empty())
+            break;
+    }
+    std::string out;
+    if (arm.arm == Arm::RIGHT) {
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) out += arm.segments[*it].sequence;
+    } else {
+        for (size_t s : chain) out += arm.segments[s].sequence;
+    }
+    return out;
+}
+
+// §18.2's interval of a chain whose k-mer coordinate at the run's last node is |c|
+std::pair<uint64_t, uint64_t> interval_of(Arm arm, Coord c, uint64_t length, size_t k) {
+    return arm == Arm::RIGHT ? std::make_pair(c + k - length, c + k)
+                             : std::make_pair(c, c + length);
+}
+
+struct CoordCheck {
+    size_t runs = 0, occurrences = 0, lower_bound = 0, strictly_lower = 0, chains_ended = 0,
+           cut = 0, zero_length = 0, seed_occurrences = 0;
+};
+
+// every recorded coordinate of |r| against |records| (per label id)
+CoordCheck check_coordinates(const SeedResult &r, const std::string &seed,
+                             const std::vector<LabelRecords> &records, size_t k,
+                             const std::string &what) {
+    CoordCheck c;
+    EXPECT_TRUE(r.coordinates_recorded) << what;
+    EXPECT_EQ(nullptr, r.coordinates_reason) << what;
+    EXPECT_EQ(k, r.k);
+    EXPECT_EQ(r.num_seed_labels, r.seed_coordinates.size()) << what;
+    for (size_t l = 0; l < r.seed_coordinates.size(); ++l) {
+        const SeedCoordinates &sc = r.seed_coordinates[l];
+        EXPECT_TRUE(std::is_sorted(sc.starts.begin(), sc.starts.end())) << what;
+        EXPECT_EQ(count_in(records[l], seed), sc.total) << what << " seed label " << l;
+        EXPECT_LE(sc.starts.size(), sc.total) << what;
+        for (Coord s : sc.starts) {
+            EXPECT_EQ(seed, bases_of(records[l], s, s + seed.size())) << what << " seed label " << l;
+            c.seed_occurrences++;
+        }
+    }
+    for (const ArmResult &arm : r.arms) {
+        if (!arm.requested)
+            continue;
+        EXPECT_EQ(arm.runs.size(), arm.run_coordinates.size()) << what;
+        if (arm.runs.size() != arm.run_coordinates.size())
+            continue;
+        for (size_t i = 0; i < arm.runs.size(); ++i) {
+            const LabelRun &run = arm.runs[i];
+            const RunCoordinates &rc = arm.run_coordinates[i];
+            const std::string at = what + " " + to_string(arm.arm) + " run " + std::to_string(i);
+            EXPECT_TRUE(run.ended) << at;
+            const uint64_t length = run.to_bp - run.from_bp;
+            const std::string flank = flank_to(arm, run.segment);
+            const size_t n = flank.size();
+            std::string own, chain;
+            if (arm.arm == Arm::RIGHT) {
+                own = flank.substr(run.from_bp, length);
+                const std::string full = seed + flank;
+                chain = !run.entered_by_switch
+                    ? full.substr(0, seed.size() + run.to_bp)
+                    : full.substr(seed.size() + run.from_bp + 1 - k, length + k - 1);
+            } else {
+                own = flank.substr(n - run.to_bp, length);
+                const std::string full = flank + seed;
+                chain = !run.entered_by_switch ? full.substr(n - run.to_bp)
+                                               : full.substr(n - run.to_bp, length + k - 1);
+            }
+            EXPECT_TRUE(std::is_sorted(rc.ends.begin(), rc.ends.end())) << at;
+            EXPECT_LE(rc.ends.size(), rc.total) << at;
+            for (Coord e : rc.ends) {
+                const auto [s, t] = interval_of(arm.arm, e, length, k);
+                EXPECT_EQ(length, t - s) << at;
+                EXPECT_EQ(own, bases_of(records[run.label], s, t)) << at << " [" << s << ", " << t << ")";
+                c.occurrences++;
+            }
+            const size_t truth = count_in(records[run.label], chain);
+            if (rc.lower_bound) {
+                EXPECT_TRUE(run.entered_by_switch) << at;
+                EXPECT_LE(rc.total, truth) << at;
+                c.lower_bound++;
+                c.strictly_lower += rc.total < truth;
+            } else {
+                EXPECT_EQ(truth, rc.total) << at << " " << (run.entered_by_switch ? "switch" : "seed");
+            }
+            c.runs++;
+            c.chains_ended += rc.chains_ended > 0;
+            c.cut += rc.total > rc.ends.size();
+            c.zero_length += length == 0;
+        }
+    }
+    return c;
+}
+
+// T6 with k-mer coordinates (revision 10 of the coordinates plan): A on W·R·X, B on R·X·Y,
+// seed R; header labels recA, recB (a CoordToHeader, one record per column), or the columns
+// A and B whose records start at |starts| in their column's coordinates
+struct CoordFixture {
+    LabelEndFixture f;
+    std::unique_ptr<AnnotatedDBG> anno;
+    std::unique_ptr<annot::CoordToHeader> cth;
+    std::vector<LabelRecords> records;   // per label of the request, in request order
+    explicit CoordFixture(bool headers, std::vector<uint64_t> starts = { 0, 0 }) {
+        const auto seqs = f.seqs();
+        anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, seqs, f.labels(), DeBruijnGraph::BASIC, true, starts);
+        if (headers) {
+            std::vector<std::vector<std::string>> names { { "recA" }, { "recB" } };
+            std::vector<std::vector<uint64_t>> kmers { { seqs[0].size() - kK + 1 },
+                                                       { seqs[1].size() - kK + 1 } };
+            cth = std::make_unique<annot::CoordToHeader>(std::move(names), std::move(kmers));
+        }
+        for (size_t i = 0; i < seqs.size(); ++i) {
+            records.push_back({ { seqs[i], headers ? 0 : starts[i] } });
+        }
+    }
+    std::vector<std::string> labels() const {
+        return cth ? std::vector<std::string>{ "recA", "recB" } : f.labels();
+    }
+    SeedResult run(Strategy st, std::vector<std::string> labels = {}) const {
+        LabelOracle oracle(*anno, cth.get());
+        Seed seed;
+        seed.sequence = f.R;
+        seed.labels = labels.empty() ? this->labels() : labels;
+        return traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    }
+};
+
+Strategy trace_strategy() {
+    Strategy st;
+    st.support = Support::TRACE;
+    st.merge_reconverge = false;      // trace evidence cannot survive a merge
+    st.coordinates = true;
+    return st;
+}
+
+} // namespace
+
+// Revision 10: T6 under trace with coordinates, both arms, header and column labels: every run's
+// occurrences are exactly its own bases in its record ([c + k - L, c + k) on the right arm,
+// [c, c + L) on the left), the seed's occurrences the seed; the column version reports global
+// column positions (the records start at 1000 and 5000 in their columns)
+TEST(WalkerCoordinates, ExactIntervalsBothArms) {
+    for (bool headers : { true, false }) {
+        const CoordFixture fx(headers, headers ? std::vector<uint64_t>{ 0, 0 }
+                                               : std::vector<uint64_t>{ 1000, 5000 });
+        const SeedResult r = fx.run(trace_strategy());
+        const std::string what = headers ? "header labels" : "column labels";
+        ASSERT_EQ(2u, r.num_seed_labels) << what;
+        EXPECT_EQ(headers ? LabelKind::HEADER : LabelKind::COLUMN, r.label_dict[0].kind);
+        const CoordCheck c = check_coordinates(r, fx.f.R, fx.records, kK, what);
+        EXPECT_EQ(4u, c.runs) << what;
+        EXPECT_EQ(4u, c.occurrences) << what;        // B's left run's is empty, still listed
+        EXPECT_EQ(1u, c.zero_length) << what;
+        EXPECT_EQ(0u, c.lower_bound + c.chains_ended + c.cut) << what;
+        // the exact values: R at [20, 80) of A's record and [0, 60) of B's
+        const uint64_t a = headers ? 0 : 1000, b = headers ? 0 : 5000;
+        EXPECT_EQ(std::vector<Coord>{ a + 20 }, r.seed_coordinates[0].starts);
+        EXPECT_EQ(std::vector<Coord>{ b + 0 }, r.seed_coordinates[1].starts);
+        const ArmResult &right = r.arms[kRight], &left = r.arms[kLeft];
+        ASSERT_EQ(2u, right.runs.size());
+        // right: A ends after X (25 bp, [80, 105) of its record), B after X·Y ([60, 115))
+        EXPECT_EQ(25u, right.runs[0].to_bp);
+        ASSERT_EQ(1u, right.run_coordinates[0].ends.size());
+        EXPECT_EQ(std::make_pair(a + 80, a + 105),
+                  interval_of(Arm::RIGHT, right.run_coordinates[0].ends[0], 25, kK));
+        EXPECT_EQ(55u, right.runs[1].to_bp);
+        EXPECT_EQ(std::make_pair(b + 60, b + 115),
+                  interval_of(Arm::RIGHT, right.run_coordinates[1].ends[0], 55, kK));
+        // left: A walks W ([0, 20)); B ends at the seed boundary: L = 0 gives the empty
+        // interval at the seed's first base, [0, 0) of its record
+        ASSERT_EQ(2u, left.runs.size());
+        EXPECT_EQ(std::make_pair(a + 0, a + 20),
+                  interval_of(Arm::LEFT, left.run_coordinates[0].ends[0], 20, kK));
+        EXPECT_EQ(0u, left.runs[1].to_bp);
+        ASSERT_EQ(1u, left.run_coordinates[1].ends.size());
+        EXPECT_EQ(std::make_pair(b + 0, b + 0),
+                  interval_of(Arm::LEFT, left.run_coordinates[1].ends[0], 0, kK));
+        // the walk itself is the one without coordinates
+        Strategy off = trace_strategy();
+        off.coordinates = false;
+        const SeedResult plain = fx.run(off);
+        EXPECT_EQ(serialize(plain), serialize(r)) << what;
+        EXPECT_FALSE(plain.coordinates_recorded);
+        EXPECT_TRUE(plain.arms[kRight].run_coordinates.empty());
+        EXPECT_TRUE(plain.seed_coordinates.empty());
+        EXPECT_EQ(0u, plain.account.coordinates);
+        EXPECT_GT(r.account.coordinates, 0u);
+    }
+}
+
+// A zero-length run on the right arm: a record that ends with the seed gives the empty
+// interval at the seed's end, [c + k, c + k)
+TEST(WalkerCoordinates, ZeroLengthRunIsEmptyAtTheSeedBoundary) {
+    const auto b = clean_blocks({ 20, 50, 30 }, 7);
+    const std::string &W = b[0], &S = b[1], &X = b[2];
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { W + S, S + X }, { "A", "B" }, DeBruijnGraph::BASIC, true, { 0, 0 });
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "A", "B" };
+    const SeedResult r = traverse_seed(oracle, seed, trace_strategy(), LabelChangeCost::forbid());
+    const CoordCheck c = check_coordinates(r, S, { { { W + S, 0 } }, { { S + X, 0 } } }, kK, "zero");
+    EXPECT_EQ(2u, c.zero_length);           // A on the right, B on the left
+    const ArmResult &right = r.arms[kRight];
+    ASSERT_EQ(0u, right.runs[0].to_bp);
+    ASSERT_EQ(1u, right.run_coordinates[0].ends.size());
+    EXPECT_EQ(std::make_pair(uint64_t(70), uint64_t(70)),
+              interval_of(Arm::RIGHT, right.run_coordinates[0].ends[0], 0, kK));
+}
+
+// Two copies of the seed in one record, continuing differently: under the branch limit 0 the
+// label is ambiguous and its root run ends at the seed with both copies; with a limit of 2 it
+// splits, each child carrying one copy (the parent's chains partitioned, none ended), the
+// second child's run a clone of the prefix
+TEST(WalkerCoordinates, TwoCopiesPartitionAtASplit) {
+    std::vector<std::string> b;
+    for (uint32_t seed = 31; ; ++seed) {
+        b = clean_blocks({ 40, 30, 30, 20 }, seed);
+        if (b[1][0] != b[2][0])
+            break;
+    }
+    const std::string &S = b[0], &P = b[1], &Q = b[2], &G = b[3];
+    const std::string rec = S + P + G + S + Q;
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { rec }, { "F" }, DeBruijnGraph::BASIC, true, { 0 });
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "F" };
+    Strategy st = trace_strategy();
+    st.direction = Strategy::RIGHT;
+    const std::vector<LabelRecords> records { { { rec, 0 } } };
+    // limit 0: the run ends at the fork (branch) with the seed's two copies
+    st.max_label_branches = 0;
+    SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    check_coordinates(r, S, records, kK, "limit 0");
+    EXPECT_EQ((std::vector<Coord>{ 0, 90 }), r.seed_coordinates[0].starts);   // S·P·G·S·Q
+    ASSERT_EQ(1u, r.arms[kRight].runs.size());
+    EXPECT_EQ(EndReason::BRANCH, r.arms[kRight].runs[0].end_reason);
+    EXPECT_EQ(2u, r.arms[kRight].run_coordinates[0].total);
+    // limit 2: one copy per child
+    st.max_label_branches = 2;
+    r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    const CoordCheck c = check_coordinates(r, S, records, kK, "limit 2");
+    const ArmResult &arm = r.arms[kRight];
+    ASSERT_EQ(1u, arm.splits.size());
+    ASSERT_EQ(2u, arm.runs.size());
+    EXPECT_EQ(1u, arm.run_coordinates[0].total);
+    EXPECT_EQ(1u, arm.run_coordinates[1].total);
+    EXPECT_EQ(0u, c.chains_ended);
+    // the two children's starts are the parent's two copies
+    std::set<uint64_t> starts;
+    for (size_t i = 0; i < 2; ++i) {
+        starts.insert(interval_of(Arm::RIGHT, arm.run_coordinates[i].ends[0],
+                                  arm.runs[i].to_bp - arm.runs[i].from_bp, kK).first);
+    }
+    EXPECT_EQ((std::set<uint64_t>{ 40, 130 }), starts);
+}
+
+// A record holding the seed 20 times: the seed's list and the root runs' lists are cut at the
+// cap to their first occurrences by start, each stating its true count; "unlimited" lists all
+TEST(WalkerCoordinates, CapCutsAndStatesTheTotal) {
+    const auto b = clean_blocks({ 40, 20 }, 53);
+    const std::string &S = b[0];
+    std::string rec;
+    for (size_t i = 0; i < 20; ++i) {
+        rec += S + random_seq(15, 600 + i);
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { rec }, { "F" }, DeBruijnGraph::BASIC, true, { 0 });
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "F" };
+    for (size_t cap : { size_t(1), size_t(16), Strategy::kUnlimited }) {
+        Strategy st = trace_strategy();
+        st.max_coordinate_occurrences = cap;
+        const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        check_coordinates(r, S, { { { rec, 0 } } }, kK, "cap " + std::to_string(cap));
+        const SeedCoordinates &sc = r.seed_coordinates[0];
+        EXPECT_EQ(20u, sc.total);
+        EXPECT_EQ(std::min<size_t>(cap, 20), sc.starts.size());
+        const std::vector<uint64_t> all = starts_of(rec, S);
+        EXPECT_EQ(std::vector<Coord>(all.begin(), all.begin() + sc.starts.size()), sc.starts);
+        for (const ArmResult &arm : r.arms) {
+            for (const RunCoordinates &rc : arm.run_coordinates) {
+                EXPECT_EQ(std::min<uint64_t>(cap, rc.total), rc.ends.size());
+            }
+        }
+        // the account charges min(chains, cap) occurrences per list: a larger cap costs more
+        if (cap == 1)
+            EXPECT_GT(r.account.coordinates, 0u);
+    }
+    // the C++ API refuses a cap of 0
+    Strategy zero = trace_strategy();
+    zero.max_coordinate_occurrences = 0;
+    EXPECT_THROW(traverse_seed(oracle, seed, zero, LabelChangeCost::forbid()), std::invalid_argument);
+}
+
+// Column labels report global column positions, and a column's trace can run across the
+// boundary of two records whose coordinates are adjacent (trace_record_boundaries states it):
+// F holds S·X then X'·Y, where X' is X's last k - 1 bases, so the walk from S runs through X
+// into Y on consecutive column coordinates
+TEST(WalkerCoordinates, ColumnLabelsAreGlobal) {
+    const auto b = clean_blocks({ 40, 30, 30 }, 61);
+    const std::string &S = b[0], &X = b[1], &Y = b[2];
+    const std::string r1 = S + X, r2 = X.substr(X.size() - (kK - 1)) + Y;
+    const uint64_t n1 = r1.size() - kK + 1;
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { r1, r2 }, { "F", "F" }, DeBruijnGraph::BASIC, true, { 0, n1 });
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "F" };
+    Strategy st = trace_strategy();
+    st.direction = Strategy::RIGHT;
+    const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    const ArmResult &arm = r.arms[kRight];
+    ASSERT_EQ(1u, arm.runs.size());
+    EXPECT_EQ(X.size() + Y.size(), arm.runs[0].to_bp);
+    ASSERT_EQ(1u, arm.run_coordinates[0].ends.size());
+    // the run's bases end at Y's end: the last k-mer of r2 has column coordinate n1 + |r2| - k
+    const auto [s, e] = interval_of(Arm::RIGHT, arm.run_coordinates[0].ends[0], arm.runs[0].to_bp, kK);
+    EXPECT_EQ(n1 + r2.size(), e);
+    EXPECT_EQ(e - s, X.size() + Y.size());
+    EXPECT_LT(s, n1);                        // it begins in r1's coordinates
+}
+
+// A column's coordinates number k-mers (record i's k-mer j is offset_i + j, offset_i the k-mers
+// of the records before it), so a column interval numbers base p of record i as offset_i + p:
+// record i's last k - 1 bases share their numbers with record i + 1's first k - 1. The contract
+// states it (review of W1, finding 6): such an interval is attributed to a record only with the
+// record lengths (C10). Two unrelated records in one column; the seed's right arm runs to r1's
+// end, and its interval ends k - 1 numbers into r2's
+TEST(WalkerCoordinates, ColumnIntervalsShareNumbersAtRecordEnds) {
+    const auto b = clean_blocks({ 40, 30, 50 }, 67);
+    const std::string &S = b[0], &X = b[1], &Z = b[2];
+    const std::string r1 = S + X, r2 = Z;
+    const uint64_t n1 = r1.size() - kK + 1;
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { r1, r2 }, { "F", "F" }, DeBruijnGraph::BASIC, true, { 0, n1 });
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "F" };
+    Strategy st = trace_strategy();
+    st.direction = Strategy::RIGHT;
+    const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    const ArmResult &arm = r.arms[kRight];
+    ASSERT_EQ(1u, arm.runs.size());
+    EXPECT_EQ(X.size(), arm.runs[0].to_bp);
+    ASSERT_EQ(1u, arm.run_coordinates[0].ends.size());
+    EXPECT_EQ(n1 - 1, arm.run_coordinates[0].ends[0]);        // r1's last k-mer
+    const auto [s, e] = interval_of(Arm::RIGHT, arm.run_coordinates[0].ends[0], arm.runs[0].to_bp, kK);
+    EXPECT_EQ(r1.size(), e);                                  // r1's end, as offset_1 + |r1|
+    EXPECT_EQ(n1 + kK - 1, e);                                // = r2's offset + k - 1
+    EXPECT_LT(s, n1);
+    // the seed's own interval starts at r1's first k-mer
+    ASSERT_EQ(1u, r.seed_coordinates.size());
+    EXPECT_EQ(std::vector<uint64_t>{ 0 },
+              std::vector<uint64_t>(r.seed_coordinates[0].starts.begin(),
+                                    r.seed_coordinates[0].starts.end()));
+}
+
+// chains_ended (C5, decision C-N1): a copy of the seed that stops before the run's last node
+// (its record ends) while another copy goes on is counted, not listed; a clone made at a later
+// split inherits the count of the prefix it shares
+TEST(WalkerCoordinates, ChainsEndedCountsCopiesThatStopAndClonesInheritIt) {
+    std::vector<std::string> b;
+    for (uint32_t seed = 71; ; ++seed) {
+        b = clean_blocks({ 40, 30, 30, 30, 15, 15 }, seed);
+        if (b[2][0] != b[3][0])
+            break;
+    }
+    const std::string &S = b[0], &M = b[1], &P = b[2], &Q = b[3], &G1 = b[4], &G2 = b[5];
+    // three copies of S·M[...]: the third ends 5 bases into M (the record's end), the first
+    // two fork after M into P and Q
+    const std::string rec = S + M + P + G1 + S + M + Q + G2 + S + M.substr(0, 5);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { rec }, { "F" }, DeBruijnGraph::BASIC, true, { 0 });
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "F" };
+    Strategy st = trace_strategy();
+    st.direction = Strategy::RIGHT;
+    st.max_label_branches = 2;
+    const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    check_coordinates(r, S, { { { rec, 0 } } }, kK, "chains ended");
+    EXPECT_EQ(3u, r.seed_coordinates[0].total);
+    const ArmResult &arm = r.arms[kRight];
+    ASSERT_EQ(1u, arm.splits.size());
+    ASSERT_EQ(2u, arm.runs.size());
+    for (size_t i = 0; i < 2; ++i) {
+        EXPECT_EQ(1u, arm.run_coordinates[i].total) << i;
+        EXPECT_EQ(1u, arm.run_coordinates[i].chains_ended) << i;   // the third copy
+    }
+    // without the split (limit 0: ambiguous at the fork) the run ends at M's end with its two
+    // copies, the third counted as ended
+    st.max_label_branches = 0;
+    const SeedResult limited = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+    check_coordinates(limited, S, { { { rec, 0 } } }, kK, "chains ended, limit 0");
+    ASSERT_EQ(1u, limited.arms[kRight].runs.size());
+    EXPECT_EQ(2u, limited.arms[kRight].run_coordinates[0].total);
+    EXPECT_EQ(1u, limited.arms[kRight].run_coordinates[0].chains_ended);
+}
+
+// Switch-entered runs (revision 1, decision C-N2 a). Seed labels X (on S·U) and Y (on S alone),
+// extra B, a table cost Y→B 1, X→B 0.5, default forbid, loss budget 2. Y is lost at the first
+// step and switches into B (cost 1): a switch into a label nobody carried carries B's own chains
+// from the switch node on, exactly. At the end of U, X is lost and switches into B at 0.5 — less
+// than B's loss 1 — while B's own lineage is live: that run carries only B's chains continuing
+// from before, and B's second record holds the switch node's k-mer as a chain of its own start,
+// so the run is a lower bound (its true count is 2, it lists 1), marked; the walk is unchanged
+TEST(WalkerCoordinates, SwitchEnteredRunsAndLowerBounds) {
+    std::vector<std::string> b;
+    for (uint32_t seed = 81; ; ++seed) {
+        b = clean_blocks({ 40, 30, 30, 15, 15 }, seed);
+        const std::string &U = b[1];
+        // the predecessors of the switch node differ in B's two records (W2 vs U's base)
+        if (b[4].back() != U[U.size() - kK])
+            break;
+    }
+    const std::string &S = b[0], &U = b[1], &V = b[2], &Z = b[3], &W = b[4];
+    const std::string sx = S + U, sy = S;
+    const std::string b1 = Z + S.substr(S.size() - (kK - 1)) + U + V;
+    const std::string b2 = W + U.substr(U.size() - (kK - 1)) + V;
+    const uint64_t nb1 = b1.size() - kK + 1;
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { sx, sy, b1, b2 }, { "X", "Y", "B", "B" }, DeBruijnGraph::BASIC, true,
+            { 0, 0, 0, nb1 });
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "X", "Y" };
+    Strategy st = trace_strategy();
+    st.direction = Strategy::RIGHT;
+    st.extra = { "B" };
+    st.loss_budget = 2;
+    const LabelChangeCost cost = LabelChangeCost::table({ { { 1, 2 }, 1.0 }, { { 0, 2 }, 0.5 } },
+                                                        kInfiniteLoss);
+    const SeedResult r = traverse_seed(oracle, seed, st, cost);
+    const std::vector<LabelRecords> records { { { sx, 0 } }, { { sy, 0 } },
+                                              { { b1, 0 }, { b2, nb1 } } };
+    const CoordCheck c = check_coordinates(r, S, records, kK, "switches");
+    const ArmResult &arm = r.arms[kRight];
+    size_t fresh = 0, lower = 0;
+    for (size_t i = 0; i < arm.runs.size(); ++i) {
+        if (!arm.runs[i].entered_by_switch)
+            continue;
+        EXPECT_EQ(2u, arm.runs[i].label);
+        if (arm.run_coordinates[i].lower_bound) {
+            lower++;
+            EXPECT_EQ(0u, arm.runs[i].from_label);     // X
+            EXPECT_EQ(1u, arm.run_coordinates[i].total);
+        } else {
+            fresh++;
+            EXPECT_EQ(1u, arm.runs[i].from_label);     // Y
+        }
+    }
+    EXPECT_EQ(1u, fresh);
+    EXPECT_EQ(1u, lower);
+    EXPECT_EQ(1u, c.lower_bound);
+    EXPECT_EQ(1u, c.strictly_lower);
+    // marking changes nothing of the walk
+    Strategy off = st;
+    off.coordinates = false;
+    EXPECT_EQ(serialize(traverse_seed(oracle, seed, off, cost)), serialize(r));
+}
+
+// No work is charged for coordinates (they were charged with their rows), and nothing of the
+// walk depends on them: the same result, counters and work, with and without; a derived set
+// records what the explicit list records
+TEST(WalkerCoordinates, WorkAndWalkAreIndependentOfCoordinates) {
+    const CoordFixture fx(true);
+    Strategy on = trace_strategy();
+    Strategy off = on;
+    off.coordinates = false;
+    for (uint64_t work : { uint64_t(0), uint64_t(1'000'000) }) {
+        on.max_work_units = off.max_work_units = work;
+        const SeedResult a = fx.run(on), b = fx.run(off);
+        EXPECT_EQ(serialize(b), serialize(a));
+        EXPECT_EQ(b.account.work_used, a.account.work_used);
+        EXPECT_EQ(b.account.work_seed, a.account.work_seed);
+        for (size_t i = 0; i < 2; ++i) {
+            EXPECT_EQ(b.arms[i].work_units, a.arms[i].work_units);
+        }
+        // the coordinates are part of the memory account, and only of it
+        EXPECT_EQ(b.account.memory_final + a.account.coordinates, a.account.memory_final);
+    }
+    // derived (header labels, the CoordToHeader's) = the explicit list
+    LabelOracle oracle(*fx.anno, fx.cth.get());
+    Seed seed;
+    seed.sequence = fx.f.R;
+    const SeedResult derived = traverse_seed(oracle, seed, on, LabelChangeCost::forbid());
+    const SeedResult named = fx.run(on);
+    ASSERT_EQ(named.num_seed_labels, derived.num_seed_labels);
+    for (size_t l = 0; l < named.num_seed_labels; ++l) {
+        EXPECT_EQ(named.seed_coordinates[l].starts, derived.seed_coordinates[l].starts);
+    }
+    for (size_t a = 0; a < 2; ++a) {
+        ASSERT_EQ(named.arms[a].run_coordinates.size(), derived.arms[a].run_coordinates.size());
+        for (size_t i = 0; i < named.arms[a].run_coordinates.size(); ++i) {
+            EXPECT_EQ(named.arms[a].run_coordinates[i].ends, derived.arms[a].run_coordinates[i].ends);
+        }
+    }
+}
+
+namespace {
+
+// Many records sharing a seed, each with a tail of its own: a trace walk of many runs, wide
+// enough that a memory budget of a few MiB stops it
+std::unique_ptr<AnnotatedDBG> fan_with_coordinates(const std::string &seed, size_t records,
+                                                   size_t tail, std::vector<std::string> *seqs) {
+    std::vector<std::string> labels;
+    std::vector<uint64_t> starts;
+    uint64_t at = 0;
+    for (size_t i = 0; i < records; ++i) {
+        seqs->push_back(seed + random_seq(tail, 9000 + i));
+        labels.push_back("F");
+        starts.push_back(at);
+        at += seqs->back().size() - kK + 1;
+    }
+    return build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, *seqs, labels, DeBruijnGraph::BASIC, true, starts);
+}
+
+} // namespace
+
+// Coordinates are charged where a run is created, so under a memory budget a request with them
+// stops no deeper than one without — at every budget of a sweep — and both stops leave every
+// recorded run consistent with the records
+TEST(WalkerCoordinates, MemoryStopNoDeeperWithCoordinates) {
+    const std::string S = clean_block(40, 97);
+    std::vector<std::string> seqs;
+    auto anno = fan_with_coordinates(S, 128, 200, &seqs);
+    std::vector<LabelRecords> records(1);
+    uint64_t at = 0;
+    for (const auto &s : seqs) {
+        records[0].emplace_back(s, at);
+        at += s.size() - kK + 1;
+    }
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "F" };
+    size_t shallower = 0, stopped = 0;
+    for (uint64_t mb = 1; mb <= 8; ++mb) {
+        Strategy on = trace_strategy();
+        on.direction = Strategy::RIGHT;
+        on.max_label_branches = Strategy::kUnlimited;
+        on.max_splits_per_path = Strategy::kUnlimited;
+        on.max_memory_bytes = mb << 20;
+        on.delivery = cli::delivery_costs("full", true, cli::kMgtFloatWidth,
+                                          cli::CoordinatesOutput::BLOCK);
+        Strategy off = on;
+        off.coordinates = false;
+        off.delivery = cli::delivery_costs("full", true);
+        const SeedResult a = traverse_seed(oracle, seed, on, LabelChangeCost::forbid());
+        const SeedResult b = traverse_seed(oracle, seed, off, LabelChangeCost::forbid());
+        const ArmResult &x = a.arms[kRight], &y = b.arms[kRight];
+        EXPECT_LE(x.complete_to_bp, y.complete_to_bp) << mb << " MiB";
+        shallower += x.complete_to_bp < y.complete_to_bp;
+        stopped += a.resource_stop.has_value();
+        if (a.resource_stop)
+            EXPECT_EQ(ResourceStop::MEMORY, a.resource_stop->resource);
+        check_coordinates(a, S, records, kK, std::to_string(mb) + " MiB");
+        EXPECT_LE(a.account.memory_peak, on.max_memory_bytes);
+    }
+    EXPECT_GT(stopped, 0u) << "the sweep never reached a memory stop";
+    EXPECT_GT(shallower, 0u) << "the coordinates never cost a level";
+}
+
+// An attempt stopped mid-walk (cancelled at a poll) ends every run through end_run with the
+// chains it had: the recorded result is consistent with the records at every stop point
+TEST(WalkerCoordinates, AttemptStopsEndEveryRunWithItsChains) {
+    const std::string S = clean_block(40, 98);
+    std::vector<std::string> seqs;
+    auto anno = fan_with_coordinates(S, 32, 80, &seqs);
+    std::vector<LabelRecords> records(1);
+    uint64_t at = 0;
+    for (const auto &s : seqs) {
+        records[0].emplace_back(s, at);
+        at += s.size() - kK + 1;
+    }
+    Strategy st = trace_strategy();
+    st.direction = Strategy::RIGHT;
+    st.max_label_branches = Strategy::kUnlimited;
+    st.max_splits_per_path = Strategy::kUnlimited;
+    size_t stopped = 0;
+    for (size_t polls : { 1, 3, 10, 40, 200 }) {
+        size_t seen = 0;
+        AttemptControl control;
+        control.poll = [&]() { return ++seen > polls ? ExternalStop::CANCELLED : ExternalStop::NONE; };
+        control.elapsed_ms = []() { return 1.0; };
+        control.bound_ms = 1000;
+        LabelOracle oracle(*anno);
+        Seed seed;
+        seed.sequence = S;
+        seed.labels = { "F" };
+        try {
+            const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "",
+                                               nullptr, &control);
+            stopped += r.resource_stop && r.resource_stop->resource == ResourceStop::CANCELLED;
+            check_coordinates(r, S, records, kK, "stop after " + std::to_string(polls) + " polls");
+        } catch (const SeedBudgetError &e) {
+            // stopped in the seed phase: no result, nothing recorded
+            EXPECT_EQ(ResourceStop::CANCELLED, e.stop().resource);
+        }
+    }
+    EXPECT_GT(stopped, 0u);
+}
+
+// The allocation-denial fixtures of §14 with coordinates: a head refused at every admission of
+// a walk with switches and splits (the switch fixture, the two-copy split) leaves the runs, the
+// side table and the paths consistent — every run ended through end_run with the chains it had,
+// every recorded interval still the run's bases in its record
+TEST(WalkerCoordinates, DenialAroundSwitchesAndSplitsKeepsTheSideTable) {
+    std::vector<std::string> b;
+    for (uint32_t seed = 81; ; ++seed) {
+        b = clean_blocks({ 40, 30, 30, 15, 15 }, seed);
+        if (b[4].back() != b[1][b[1].size() - kK])
+            break;
+    }
+    const std::string &S = b[0], &U = b[1], &V = b[2], &Z = b[3], &W = b[4];
+    const std::string sx = S + U, sy = S;
+    const std::string b1 = Z + S.substr(S.size() - (kK - 1)) + U + V;
+    const std::string b2 = W + U.substr(U.size() - (kK - 1)) + V;
+    const uint64_t nb1 = b1.size() - kK + 1;
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { sx, sy, b1, b2 }, { "X", "Y", "B", "B" }, DeBruijnGraph::BASIC, true,
+            { 0, 0, 0, nb1 });
+    const std::vector<LabelRecords> records { { { sx, 0 } }, { { sy, 0 } },
+                                              { { b1, 0 }, { b2, nb1 } } };
+    LabelOracle oracle(*anno);
+    Seed seed;
+    seed.sequence = S;
+    seed.labels = { "X", "Y" };
+    Strategy st = trace_strategy();
+    st.extra = { "B" };
+    st.loss_budget = 2;
+    const LabelChangeCost cost = LabelChangeCost::table({ { { 1, 2 }, 1.0 }, { { 0, 2 }, 0.5 } },
+                                                        kInfiniteLoss);
+    size_t admissions = 0;
+    {
+        WalkerHooks count;
+        count.deny = [&](const Admission&) { admissions++; return false; };
+        traverse_seed(oracle, seed, st, cost, "", &count);
+    }
+    ASSERT_GT(admissions, 10u);
+    size_t denied = 0;
+    for (uint64_t n = 0; n < admissions; ++n) {
+        WalkerHooks deny;
+        deny.deny = [n](const Admission &a) { return a.ordinal == n; };
+        const SeedResult r = traverse_seed(oracle, seed, st, cost, "", &deny);
+        ASSERT_TRUE(r.resource_stop) << n;
+        EXPECT_TRUE(r.resource_stop->injected) << n;
+        check_coordinates(r, S, records, kK, "denied admission " + std::to_string(n));
+        for (const ArmResult &arm : r.arms) {
+            check_invariants(arm, st);
+        }
+        denied++;
+    }
+    EXPECT_EQ(admissions, denied);
+}
+
+// D3 (the owner's decision of 2026-10-04): a derived seed whose time budget runs out after j of
+// its n k-mers delivers the set derived from those j — on a virtual clock, deterministically:
+// the first window (64 rows) and then one row per window (batch_kmers 1) at 1 ms a row, under a
+// budget of 70 ms, read 70 k-mers. C carries the seed's first 70 k-mers only: the whole seed
+// derives {A}, the partial derivation {A, C} — a superset, stated — and the walk stops at the
+// seed. Under trace the set is taken as derived (no coordinate continuity checked, no step taken)
+// and reports no coordinates ("partial derivation"); a budget spent before the first k-mer still
+// fails the seed (DerivationWindowIsPaced)
+TEST(WalkerDerive, PartialDerivationDeliversTheSetOfTheKmersRead) {
+    const auto b = clean_blocks({ 120, 30 }, 113);
+    const std::string &S = b[0];     // 110 k-mers
+    const std::string A = S + b[1], C = S.substr(0, 70 + kK - 1);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { A, C }, { "A", "C" }, DeBruijnGraph::BASIC, true, { 0, 0 });
+    for (bool trace : { false, true }) {
+        VirtualClock clock;
+        LabelOracle oracle(*anno);
+        oracle.pacer().test_clock_ms = clock.fn();
+        oracle.test_read_hook = slow_rows(clock, 1000);
+        Seed seed;
+        seed.sequence = S;
+        Strategy st;
+        st.batch_kmers = 1;
+        st.time_budget_ms = 70;
+        st.seed_label_kind = LabelKind::COLUMN;
+        st.coordinates = true;
+        if (trace) {
+            st.support = Support::TRACE;
+            st.merge_reconverge = false;
+        }
+        const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
+        const std::string what = trace ? "trace" : "kmer";
+        ASSERT_TRUE(r.derivation_partial) << what;
+        EXPECT_EQ(70u, r.derivation_partial->kmers_read) << what;
+        EXPECT_GE(r.derivation_partial->elapsed_ms, 70.0) << what;
+        ASSERT_EQ(2u, r.num_seed_labels) << what;
+        EXPECT_EQ("A", r.label_dict[0].name);
+        EXPECT_EQ("C", r.label_dict[1].name);     // the whole seed would exclude it
+        EXPECT_EQ(2u, r.labels_supporting_total);
+        for (const ArmResult &arm : r.arms) {
+            EXPECT_EQ(0u, arm.complete_to_bp) << what;
+            EXPECT_EQ(0u, arm.steps) << what;
+            EXPECT_EQ(ArmResult::TRUNCATED, arm.status) << what;
+            EXPECT_TRUE(arm.run_coordinates.empty()) << what;
+        }
+        EXPECT_FALSE(r.coordinates_recorded);
+        EXPECT_STREQ(trace ? kCoordinatesPartialDerivation : kCoordinatesSupportKmer,
+                     r.coordinates_reason) << what;
+        ASSERT_TRUE(r.resource_stop);
+        EXPECT_EQ(ResourceStop::TIME, r.resource_stop->resource);
+        // the whole seed, unhurried, derives {A}
+        Strategy whole = st;
+        whole.time_budget_ms = 600000;
+        LabelOracle fresh(*anno);
+        const SeedResult all = traverse_seed(fresh, seed, whole, LabelChangeCost::forbid());
+        EXPECT_FALSE(all.derivation_partial);
+        ASSERT_EQ(1u, all.num_seed_labels) << what;
+        EXPECT_EQ("A", all.label_dict[0].name);
+    }
+}
+
+// Review of W1, finding 1: the checks after the derivation were written for the whole seed's
+// carriers. Handed the superset of a partial derivation (D3) they stated falsehoods — "2 labels
+// carry the seed" under `exhaustive` with max_seed_labels 1, where 1 does — or refused over a
+// label the whole seed excludes, dropping the time budget's cause the base stated. A partial set
+// is delivered as a walk or not at all: whatever fails the seed after it fails it as before D3,
+// with the time budget (after 70 of 110 k-mers), whatever the check — `exhaustive` over the cap,
+// an extra label the superset duplicates, an ambiguous derived header, a depth-0 state the
+// memory budget does not hold. The same requests with an unhurried budget walk with {A}
+TEST(WalkerDerive, PartialSetThatWouldFailTheSeedFailsAsBefore) {
+    const auto b = clean_blocks({ 120, 30 }, 113);
+    const std::string &S = b[0];     // 110 k-mers
+    const std::string A = S + b[1], C = S.substr(0, 70 + kK - 1);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { A, C }, { "A", "C" }, DeBruijnGraph::BASIC, true, { 0, 0 });
+    // one record per column, both named ACC: the superset's two headers share a name, A's alone
+    // resolves back to A (its column is the first holding ACC)
+    const auto &encoder = anno->get_annotator().get_label_encoder();
+    ASSERT_LT(encoder.encode("A"), encoder.encode("C"));
+    std::vector<std::vector<std::string>> headers(2);
+    std::vector<std::vector<uint64_t>> num_kmers(2);
+    headers[encoder.encode("A")] = { "ACC" };
+    num_kmers[encoder.encode("A")] = { A.size() - kK + 1 };
+    headers[encoder.encode("C")] = { "ACC" };
+    num_kmers[encoder.encode("C")] = { C.size() - kK + 1 };
+    annot::CoordToHeader cth(std::move(headers), std::move(num_kmers));
+
+    Seed seed;
+    seed.sequence = S;
+    Strategy base;
+    base.batch_kmers = 1;
+    base.time_budget_ms = 70;
+    base.seed_label_kind = LabelKind::COLUMN;
+    struct Case {
+        std::string name;
+        Strategy st;
+        LabelChangeCost cost;
+        bool header = false;
+    };
+    std::vector<Case> cases;
+    {
+        // the base refused {A, C} as "2 labels carry the seed and max_seed_labels is 1"
+        Strategy st = base;
+        st.exhaustive = true;
+        st.merge_reconverge = false;
+        st.max_label_branches = Strategy::kUnlimited;
+        st.max_splits_per_path = Strategy::kUnlimited;
+        st.max_seed_labels = 1;
+        cases.push_back({ "exhaustive over the cap", st, LabelChangeCost::forbid() });
+    }
+    {
+        // "Extra label 'C' duplicates a seed label": a 400 for the whole request
+        Strategy st = base;
+        st.extra = { "C" };
+        st.loss_budget = 1;
+        cases.push_back({ "extra label in the superset", st, LabelChangeCost::constant(0.5) });
+    }
+    {
+        // "the sequence header 'ACC' occurs in more than one annotation column"
+        Strategy st = base;
+        st.seed_label_kind = LabelKind::HEADER;
+        cases.push_back({ "ambiguous header", st, LabelChangeCost::forbid(), true });
+    }
+    {
+        // the depth-0 state alone exceeds the memory budget (fail_depth0)
+        Strategy st = base;
+        st.max_memory_bytes = 1 << 20;
+        st.delivery.fixed = 4 << 20;
+        cases.push_back({ "depth-0 memory", st, LabelChangeCost::forbid() });
+    }
+    for (const Case &c : cases) {
+        VirtualClock clock;
+        LabelOracle oracle(*anno, c.header ? &cth : nullptr);
+        oracle.pacer().test_clock_ms = clock.fn();
+        oracle.test_read_hook = slow_rows(clock, 1000);
+        try {
+            traverse_seed(oracle, seed, c.st, c.cost);
+            ADD_FAILURE() << c.name << ": the seed was delivered";
+        } catch (const SeedDerivationError &e) {
+            EXPECT_EQ(SeedDerivationError::TIME_BUDGET, e.cause()) << c.name << ": " << e.what();
+            EXPECT_EQ("The time budget (bounds.time_budget_ms) ran out while deriving the permitted "
+                      "set from the seed, after 70 of 110 k-mers; name the labels explicitly or "
+                      "shorten the seed", std::string(e.what())) << c.name;
+            EXPECT_EQ(70.0, e.limit()) << c.name;
+            EXPECT_GE(e.observed(), 70.0) << c.name;
+        } catch (const std::exception &e) {
+            ADD_FAILURE() << c.name << ": " << e.what();
+        }
+        // unhurried, the whole seed derives {A}: every case but the memory one walks
+        Strategy whole = c.st;
+        whole.time_budget_ms = 600000;
+        LabelOracle fresh(*anno, c.header ? &cth : nullptr);
+        if (c.st.max_memory_bytes) {
+            EXPECT_THROW(traverse_seed(fresh, seed, whole, c.cost), SeedBudgetError) << c.name;
+            continue;
+        }
+        const SeedResult all = traverse_seed(fresh, seed, whole, c.cost);
+        EXPECT_FALSE(all.derivation_partial) << c.name;
+        ASSERT_EQ(1u, all.num_seed_labels) << c.name;
+        EXPECT_EQ(c.header ? "ACC" : "A", all.label_dict[0].name) << c.name;
+    }
+
+    // Without `exhaustive` the cap cuts the superset and the seed is delivered: what it dropped
+    // need not carry the whole seed and what it kept may not either, which the seed_labels
+    // limitation says (not "carrying the whole seed ... walks only they carry are missing")
+    Strategy cut = base;
+    cut.max_seed_labels = 1;
+    VirtualClock clock;
+    LabelOracle oracle(*anno);
+    oracle.pacer().test_clock_ms = clock.fn();
+    oracle.test_read_hook = slow_rows(clock, 1000);
+    const SeedResult r = traverse_seed(oracle, seed, cut, LabelChangeCost::forbid());
+    ASSERT_TRUE(r.derivation_partial);
+    EXPECT_EQ(70u, r.derivation_partial->kmers_read);
+    ASSERT_EQ(1u, r.num_seed_labels);
+    EXPECT_EQ(1u, r.labels_dropped);
+    EXPECT_EQ(2u, r.labels_supporting_total);
+    const Json::Value j = cli::seed_result_to_json(r, cut, "full", false);
+    EXPECT_EQ((std::vector<std::string>{ "derivation", "seed_labels" }), kinds_of(j["limitations"]));
+    const std::string effect = j["limitations"][1]["effect"].asString();
+    EXPECT_EQ("1 of the 2 label(s) carrying the k-mers read were not taken (labels_dropped_digest "
+              "identifies them): the set derived from part of the seed is a superset of the labels "
+              "carrying the whole seed, so the ones dropped may include labels carrying the whole "
+              "seed and the ones kept labels it would exclude; raise the knob or the time budget, "
+              "or name the labels explicitly", effect);
+    EXPECT_EQ(std::string::npos, effect.find("walks only they carry"));
+    EXPECT_EQ("qualified", j["outcome"]["label_evidence"].asString());
+}
+
+// The same at the request (review of W1, finding 1): a label name no output carries (not UTF-8)
+// in the superset of a partial derivation fails the seed with the time budget, as before D3, not
+// as a name the whole seed's set does not even hold. Unhurried, the whole seed walks with {A}
+TEST(Walker, PartialSetWithAnUnrepresentableNameFailsAsBefore) {
+    const auto b = clean_blocks({ 120, 30 }, 113);
+    const std::string &S = b[0];     // 110 k-mers
+    const std::string A = S + b[1], P = S.substr(0, 70 + kK - 1);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { A, P }, { "A", "bad\xFF" }, DeBruijnGraph::BASIC);
+    Json::Value r;
+    r["seeds"][0]["sequence"] = S;
+    r["strategy"] = parse_json(R"({"direction": "right", "bounds": {"max_extension_bp": 10}})");
+    cli::TraverseLimits limits;
+    limits.max_time_ms = 1e-9;     // spent after the first k-mer (the first window read whole)
+    const Json::Value res = cli::process_traverse_request(r, *anno, "", limits)["results"][0];
+    EXPECT_EQ("failed", res["outcome"]["walks"].asString());
+    EXPECT_EQ("The time budget (bounds.time_budget_ms) ran out while deriving the permitted set "
+              "from the seed, after 1 of 110 k-mers; name the labels explicitly or shorten the "
+              "seed", res["error"].asString());
+    ASSERT_EQ("derivation", res["limitations"][0]["kind"].asString());
+    EXPECT_EQ("time_budget", res["limitations"][0]["cause"].asString());
+    EXPECT_EQ(1e-9, res["limitations"][0]["server_limit"].asDouble());
+    const Json::Value whole = cli::process_traverse_request(r, *anno, "", cli::TraverseLimits())["results"][0];
+    EXPECT_FALSE(whole.isMember("error")) << whole["error"].asString();
+    ASSERT_EQ(1u, whole["seed"]["labels"].size());
+    EXPECT_EQ("A", whole["seed"]["labels"][0].asString());
 }
 
 } // namespace

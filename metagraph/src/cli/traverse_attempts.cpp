@@ -291,6 +291,11 @@ double Attempt::own_account_per_text_byte() const {
     return own_ratio_;
 }
 
+double Attempt::pooled_account_per_text_byte() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return coordinates_ ? 0 : own_ratio_;
+}
+
 double Attempt::own_stop_ms() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return own_stop_ms_;
@@ -303,9 +308,10 @@ void Attempt::update_walk_until_locked() {
                                                         enforced() ? reserve_ms() : 0.0));
 }
 
-void Attempt::set_delivery_detail(const std::string &detail) {
+void Attempt::set_delivery_detail(const std::string &detail, bool coordinates) {
     std::lock_guard<std::mutex> lock(mutex_);
     detail_ = detail;
+    coordinates_ = coordinates;
     configured_ratio_ = detail == "graphlet" ? settings_.account_per_text_byte_graphlet
                                              : settings_.account_per_text_byte_json;
     auto it = server_.account_per_text_byte.find(detail);

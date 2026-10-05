@@ -126,12 +126,12 @@ class TestTraverseBase(TestingBase):
         return fp
 
     @classmethod
-    def _traverse(cls, request, resolve=False):
-        """Run the CLI on one request dict and return the parsed JSON."""
+    def _traverse(cls, request, resolve=False, flags=''):
+        """Run the CLI on one request dict (|flags|: more CLI flags) and return the parsed JSON."""
         path = cls.tempdir.name + '/request.json'
         with open(path, 'w') as f:
             json.dump(request, f)
-        cmd = (f'{METAGRAPH} traverse {"--resolve" if resolve else ""} '
+        cmd = (f'{METAGRAPH} traverse {"--resolve" if resolve else ""} {flags} '
                f'-i {cls.graph} -a {cls.anno} {path}')
         res = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out = res.stdout.decode()
@@ -882,6 +882,171 @@ class TestTraverseCLI(TestTraverseBase):
         # evidence of the carrier the cap left out are missing, and both axes say so
         self.assertEqual(('partial', 'complete', 'lower_bound', 'inline'), self._outcome_axes(result))
 
+
+    # ---------------------------------------------------------------- record coordinates
+
+    def _check_positions(self, result, seed):
+        """Every coordinates interval of |result| against the source records (header labels:
+        positions within the record): the bases at [s, e) are the run's own spelled bases
+        (natural orientation, both arms), a seed occurrence the seed; returns the number of
+        intervals checked."""
+        block = result['coordinates']
+        names = self._names(result)
+        k = block['k']
+        checked = 0
+        for e in block['seed']:
+            record = self.records[names[e['label']]]
+            for s, t in e['occurrences']:
+                self.assertEqual(seed, record[s:t])
+                checked += 1
+        for side, entries in block['arms'].items():
+            arm = result['arms'][side]
+            segments = {g['id']: g for g in arm['segments']}
+            self.assertEqual(len(arm['runs']), len(entries))
+            for i, (entry, run) in enumerate(zip(entries, arm['runs'])):
+                self.assertEqual((i, run['label'], run['from_bp'], run['to_bp']),
+                                 (entry['run'], entry['label'], entry['from_bp'], entry['to_bp']))
+                chain = []
+                sid = run['segment']
+                while True:
+                    chain.append(sid)
+                    if not segments[sid]['parents']:
+                        break
+                    sid = segments[sid]['parents'][0]
+                if side == 'right':
+                    flank = ''.join(segments[x]['sequence'] for x in reversed(chain))
+                    own = flank[run['from_bp']:run['to_bp']]
+                else:
+                    flank = ''.join(segments[x]['sequence'] for x in chain)
+                    own = flank[len(flank) - run['to_bp']:len(flank) - run['from_bp']]
+                record = self.records[names[run['label']]]
+                for s, t in entry['occurrences']:
+                    self.assertEqual(t - s, run['to_bp'] - run['from_bp'])
+                    self.assertEqual(own, record[s:t], (side, i, s, t))
+                    checked += 1
+        self.assertEqual(k, K)
+        return checked
+
+    def test_traverse_record_coordinates(self):
+        """Record coordinates (DESIGN §18; opt-in): under support trace every seed result
+        carries the block — the seed's occurrences per label and per run the record interval
+        of its own bases — which the source records confirm; elsewhere null with the reason;
+        without the request nothing is added. The cap needs coordinates: true."""
+        seed = self.element
+        base = {'seeds': [{'sequence': seed}],
+                'strategy': {'support': 'trace', 'branching': {'on_reconverge': 'keep',
+                                                               'max_label_branches': 2},
+                             'bounds': {'max_extension_bp': BLOCK}}}
+        plain, rc = self._traverse(base)
+        self.assertEqual(0, rc, plain.get('error'))
+        self.assertNotIn('coordinates', plain['results'][0])
+        self.assertNotIn('coordinates', plain['strategy']['output'])
+        req = copy.deepcopy(base)
+        req['strategy']['output'] = {'coordinates': True}
+        out, rc = self._traverse(req)
+        self.assertEqual(0, rc, out.get('error'))
+        self.assertEqual((True, 16), (out['strategy']['output']['coordinates'],
+                                      out['strategy']['output']['max_coordinate_occurrences']))
+        result = out['results'][0]
+        block = result['coordinates']
+        self.assertEqual(('record', K, 16, True),
+                         (block['kind'], block['k'], block['max_occurrences'], block['complete']))
+        self.assertEqual(3, len(block['seed']))       # acc1, acc2, acc3 carry the element
+        self.assertGreater(self._check_positions(result, seed), 6)
+        # stripped of what it adds, the response is the opt-out one
+        stripped = copy.deepcopy(out)
+        del stripped['strategy']['output']['coordinates']
+        del stripped['strategy']['output']['max_coordinate_occurrences']
+        del stripped['results'][0]['coordinates']
+        for r in (stripped, plain):
+            r.pop('timing', None)
+            for x in r['results']:
+                x.pop('timing', None)
+        self.assertEqual(plain, stripped)
+        # support kmer: null, with the reason; the cap is inert there
+        kmer = copy.deepcopy(req)
+        kmer['strategy']['support'] = 'kmer'
+        kmer['strategy']['output']['max_coordinate_occurrences'] = 1
+        out, rc = self._traverse(kmer)
+        self.assertEqual(0, rc, out.get('error'))
+        self.assertIsNone(out['results'][0]['coordinates'])
+        self.assertEqual('support kmer', out['results'][0]['coordinates_reason'])
+        # the cap without coordinates: true is refused, naming the field
+        bad = copy.deepcopy(base)
+        bad['strategy']['output'] = {'max_coordinate_occurrences': 4}
+        out, rc = self._traverse(bad)
+        self.assertNotEqual(0, rc)
+        self.assertIn('strategy.output.max_coordinate_occurrences', out['error'])
+
+    def test_traverse_partial_derivation_states_its_set(self):
+        """D3 (the owner's decision of 2026-10-04): a derived seed whose time budget runs out
+        after part of its derivation is delivered with the set derived from the k-mers read —
+        a superset of the whole seed's carriers, so its label evidence is qualified — and a
+        `derivation` limitation saying how much was read; the walk stops at the seed. Read in
+        one piece (--traverse-chunk-target-ms 0), the derivation's first window is read whole
+        and its first k-mer consumed before the clock is read; paced in chunks (the default),
+        a budget spent before the first chunk reads nothing and fails the seed, as before."""
+        request = {'seeds': [{'sequence': self.element}],
+                   'strategy': {'direction': 'right',
+                                'bounds': {'max_extension_bp': 10, 'time_budget_ms': 1e-9}}}
+        out, rc = self._traverse(request)
+        self.assertEqual(0, rc, out.get('error'))
+        failed = out['results'][0]
+        self.assertEqual('failed', failed['outcome']['walks'])
+        self.assertIn('after 0 of', failed['error'])
+        out, rc = self._traverse(request, flags='--traverse-chunk-target-ms 0')
+        self.assertEqual(0, rc, out.get('error'))
+        result = out['results'][0]
+        self.assertNotIn('error', result)
+        self.assertEqual(('partial', 'complete', 'qualified', 'inline'), self._outcome_axes(result))
+        d = result['limitations'][0]
+        self.assertEqual(('derivation', 'time_budget', 'bounds.time_budget_ms'),
+                         (d['kind'], d['cause'], d['knob']))
+        self.assertEqual(1, d['observed'])
+        # n is the seed's num_kmers: the limitation has a failed derivation's fields only
+        self.assertNotIn('num_kmers', d)
+        self.assertEqual(len(self.element) - K + 1, result['seed']['num_kmers'])
+        self.assertIn('after 1 of %d k-mers' % (len(self.element) - K + 1), d['effect'])
+        self.assertTrue(result['seed']['labels_from_seed'])
+        self.assertEqual(0, result['arms']['right']['complete_to_bp'])
+        self.assertEqual('truncated', result['arms']['right']['status'])
+
+        # Review of W1, finding 1: acc1 and acc2 carry the k-mer read first (in left1), acc1
+        # alone the whole seed. Under `exhaustive` with max_seed_labels 1 the superset is not
+        # refused as "2 labels carry the seed": the seed fails with the time budget, as before
+        # D3. Without it the cap cuts the superset, stated as one. Unhurried: acc1, walked
+        seed = self.left1 + self.element + self.right1
+        n = len(seed) - K + 1
+        request = {'seeds': [{'sequence': seed}],
+                   'strategy': {'exhaustive': True, 'direction': 'right',
+                                'labels': {'max_seed_labels': 1},
+                                'bounds': {'max_extension_bp': 10, 'time_budget_ms': 1e-9}}}
+        out, rc = self._traverse(request, flags='--traverse-chunk-target-ms 0')
+        self.assertEqual(0, rc, out.get('error'))
+        failed = out['results'][0]
+        self.assertEqual('failed', failed['outcome']['walks'])
+        self.assertEqual('The time budget (bounds.time_budget_ms) ran out while deriving the '
+                         'permitted set from the seed, after 1 of %d k-mers; name the labels '
+                         'explicitly or shorten the seed' % n, failed['error'])
+        self.assertEqual(('derivation', 'time_budget'),
+                         (failed['limitations'][0]['kind'], failed['limitations'][0]['cause']))
+        del request['strategy']['exhaustive']
+        out, rc = self._traverse(request, flags='--traverse-chunk-target-ms 0')
+        self.assertEqual(0, rc, out.get('error'))
+        cut = out['results'][0]
+        self.assertNotIn('error', cut)
+        self.assertEqual((2, 1), (cut['seed']['labels_supporting_total'],
+                                  cut['seed']['labels_dropped']))
+        effect = [l for l in cut['limitations'] if l['kind'] == 'seed_labels'][0]['effect']
+        self.assertTrue(effect.startswith('1 of the 2 label(s) carrying the k-mers read'), effect)
+        request['strategy']['exhaustive'] = True
+        request['strategy']['bounds']['time_budget_ms'] = 30000
+        out, rc = self._traverse(request, flags='--traverse-chunk-target-ms 0')
+        self.assertEqual(0, rc, out.get('error'))
+        whole = out['results'][0]
+        self.assertNotIn('error', whole)
+        self.assertEqual(['acc1'], whole['seed']['labels'])
+        self.assertEqual(1, whole['seed']['labels_supporting_total'])
 
 class TestTraverseGraphlet(TestTraverseBase):
     """`output.detail: graphlet` through the CLI and the library (DESIGN-traverse-graphlet.md
@@ -2252,6 +2417,72 @@ class TestTraverseAPI(TestTraverseBase):
                                  stderr=subprocess.PIPE)
             self.assertEqual(0, res.returncode, res.stderr.decode()[-500:])
             self.assertEqual(bodies['gzip'], res.stdout.rstrip(b'\n'), detail)
+
+    def test_api_coordinates(self):
+        """Record coordinates over HTTP: the body is the CLI's (every encoding), the cap needs
+        coordinates: true (400), and a memory stop of a trace walk with coordinates offers
+        drop_coordinates."""
+        url = f'http://{self.host}:{self.port}'
+        for detail in ('full', 'graphlet'):
+            req = {'seeds': [{'sequence': self.element},
+                             {'sequence': self.left2 + self.element + self.right2}],
+                   'strategy': {'support': 'trace',
+                                'branching': {'on_reconverge': 'keep', 'max_label_branches': 2},
+                                'bounds': {'max_extension_bp': BLOCK},
+                                'output': {'detail': detail, 'timing': False,
+                                           'coordinates': True,
+                                           'max_coordinate_occurrences': 'unlimited'}}}
+            ret = requests.post(url + '/traverse', data=json.dumps(req),
+                                headers={'Accept-Encoding': 'gzip'}, stream=True)
+            self.assertEqual(200, ret.status_code)
+            body = ret.raw.read(decode_content=True)
+            out = json.loads(body)
+            self.assertTrue(out['results'][0]['coordinates']['complete'])
+            self.assertIsNone(out['results'][1]['coordinates'])
+            self.assertEqual('no traversal', out['results'][1]['coordinates_reason'])
+            path = os.path.join(self.tempdir.name, f'coords_{detail}.json')
+            with open(path, 'w') as f:
+                json.dump(req, f)
+            res = subprocess.run([METAGRAPH, 'traverse', '--json', '-i', self.graph, '-a',
+                                  self.anno, '--index-name', 'tiny', '--index-manifest',
+                                  self.manifest, path], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            self.assertEqual(0, res.returncode, res.stderr.decode()[-500:])
+            self.assertEqual(body, res.stdout.rstrip(b'\n'), detail)
+        ret = self._post('traverse', {'seeds': [{'sequence': self.element}],
+                                      'strategy': {'output': {'max_coordinate_occurrences': 3}}})
+        self.assertEqual(400, ret.status_code)
+        self.assertIn('max_coordinate_occurrences', ret.json()['error'])
+        # 0 and a number above the maximum state the whole range (review of W1, finding 4)
+        for cap in (0, 18446744073709551615):
+            ret = self._post('traverse', {'seeds': [{'sequence': self.element}],
+                                          'strategy': {'output': {'coordinates': True,
+                                                                  'max_coordinate_occurrences': cap}}})
+            self.assertEqual(400, ret.status_code)
+            self.assertIn('strategy.output.max_coordinate_occurrences: out of range '
+                          '[1, 18446744073709551614] (or "unlimited")', ret.json()['error'])
+        # a memory stop, with and without coordinates: offered wherever they were asked for,
+        # also where only their null form is (support kmer; review of W1, finding 2)
+        offered = {}
+        for support in ('trace', 'kmer'):
+            for coordinates in (True, False):
+                req = {'seeds': [{'sequence': self.element}],
+                       'strategy': {'support': support,
+                                    'branching': {'on_reconverge': 'keep', 'max_label_branches': 2},
+                                    'bounds': {'max_extension_bp': BLOCK, 'max_memory_mb': 1},
+                                    'output': {'coordinates': coordinates}}}
+                ret = self._post('traverse', req)
+                self.assertEqual(200, ret.status_code, ret.text)
+                result = ret.json()['results'][0]
+                q = result.get('resource_stop')
+                self.assertIsNotNone(q, 'no memory stop at 1 MiB (%s)' % support)
+                self.assertEqual('memory', q['resource'])
+                offered[support, coordinates] = 'drop_coordinates' in q['actions']
+                if coordinates and support == 'kmer':
+                    self.assertIsNone(result['coordinates'])
+                    self.assertEqual('support kmer', result['coordinates_reason'])
+        self.assertEqual({('trace', True): True, ('trace', False): False,
+                          ('kmer', True): True, ('kmer', False): False}, offered)
 
     def test_api_spec_resolve_example_is_accepted(self):
         """Review of pass 5: SPEC §4.1's resolve request example set both labels and discover,

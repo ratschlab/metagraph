@@ -1531,4 +1531,444 @@ TEST_F(MiniRefSeq, DISABLED_CoordMappingBenchmark) {
               << " ns (x" << per_coord_a / per_coord_b << ")" << std::endl;
 }
 
+
+// ---------------------------------------------------------------- record coordinates (§18)
+
+namespace {
+
+// The source records: by accession (header labels: positions within the record) and, per
+// column (a taxid: its FASTA file's name), in file order (column labels: record i's k-mer j has
+// the column coordinate offset_i + j, offset_i the k-mers of the records before it)
+struct SourceRecords {
+    std::map<std::string, std::string> by_accession;
+    std::map<std::string, std::vector<std::pair<std::string, uint64_t>>> by_column;
+};
+
+SourceRecords read_records(size_t k) {
+    SourceRecords out;
+    for (const auto &entry : std::filesystem::directory_iterator(kIndexDir + "/fasta")) {
+        if (entry.path().extension() != ".fa")
+            continue;
+        const std::string column = entry.path().stem().string();
+        std::ifstream in(entry.path());
+        std::string line, name, seq;
+        std::vector<std::pair<std::string, std::string>> records;
+        auto flush = [&]() {
+            if (!name.empty())
+                records.emplace_back(name, seq);
+        };
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            if (!line.empty() && line[0] == '>') {
+                flush();
+                name = line.substr(1, line.find_first_of(" \t") - 1);
+                seq.clear();
+            } else {
+                for (char &c : line) c = std::toupper(static_cast<unsigned char>(c));
+                seq += line;
+            }
+        }
+        flush();
+        uint64_t offset = 0;
+        for (const auto &[acc, text] : records) {
+            out.by_accession[acc] = text;
+            out.by_column[column].emplace_back(text, offset);
+            offset += text.size() >= k ? text.size() - k + 1 : 0;
+        }
+    }
+    return out;
+}
+
+size_t overlapping_count(const std::string &hay, const std::string &needle) {
+    size_t n = 0;
+    for (size_t i = hay.find(needle); i != std::string::npos; i = hay.find(needle, i + 1)) {
+        n++;
+    }
+    return n;
+}
+
+struct PositionalCheck {
+    size_t runs = 0, occurrences = 0, seed_lists = 0, lower_bound = 0, strictly_lower = 0,
+           switch_runs = 0, cut = 0, crossing = 0;
+};
+
+// The positional oracle (DESIGN §18.3): every reported interval's bases in the source record are
+// the run's own spelled bases (the seed for a seed occurrence), in natural orientation on both
+// arms; the true count is the number of occurrences of the chain's string — the seed and the
+// walk for a seed-entered run, the switch node's k-mer to the last node for a switch-entered one —
+// exactly, and at least where the run is marked a lower bound
+void check_positions(const SeedResult &r, const std::string &seed, const SourceRecords &src,
+                     PositionalCheck *c, const std::string &what) {
+    ASSERT_TRUE(r.coordinates_recorded) << what;
+    const size_t k = r.k;
+    auto records_of = [&](LabelId l) {
+        const LabelRef &ref = r.label_dict[l];
+        if (ref.kind == LabelKind::HEADER)
+            return std::vector<std::pair<std::string, uint64_t>>{ { src.by_accession.at(ref.name), 0 } };
+        return src.by_column.at(ref.name);
+    };
+    auto bases = [&](LabelId l, uint64_t s, uint64_t e) -> std::string {
+        for (const auto &[text, start] : records_of(l)) {
+            if (s >= start && e - start <= text.size())
+                return text.substr(s - start, e - s);
+        }
+        return "";
+    };
+    auto count = [&](LabelId l, const std::string &needle) {
+        size_t n = 0;
+        for (const auto &rec : records_of(l)) n += overlapping_count(rec.first, needle);
+        return n;
+    };
+    for (size_t l = 0; l < r.seed_coordinates.size(); ++l) {
+        const SeedCoordinates &sc = r.seed_coordinates[l];
+        EXPECT_EQ(count(l, seed), sc.total) << what << " seed list of " << r.label_dict[l].name;
+        for (Coord s : sc.starts) {
+            const std::string b = bases(l, s, s + seed.size());
+            if (b.empty()) {
+                c->crossing++;
+                continue;
+            }
+            EXPECT_EQ(seed, b) << what;
+        }
+        c->seed_lists++;
+    }
+    for (const ArmResult &arm : r.arms) {
+        if (!arm.requested)
+            continue;
+        ASSERT_EQ(arm.runs.size(), arm.run_coordinates.size()) << what;
+        for (size_t i = 0; i < arm.runs.size(); ++i) {
+            const LabelRun &run = arm.runs[i];
+            const RunCoordinates &rc = arm.run_coordinates[i];
+            const std::string at = what + " " + to_string(arm.arm) + " run " + std::to_string(i);
+            std::vector<size_t> chain;
+            for (size_t s = run.segment; ; s = arm.segments[s].parents[0]) {
+                chain.push_back(s);
+                if (arm.segments[s].parents.empty())
+                    break;
+            }
+            std::string flank;
+            if (arm.arm == Arm::RIGHT) {
+                for (auto it = chain.rbegin(); it != chain.rend(); ++it) flank += arm.segments[*it].sequence;
+            } else {
+                for (size_t s : chain) flank += arm.segments[s].sequence;
+            }
+            const uint64_t length = run.to_bp - run.from_bp, n = flank.size();
+            std::string own, string;
+            if (arm.arm == Arm::RIGHT) {
+                own = flank.substr(run.from_bp, length);
+                const std::string full = seed + flank;
+                string = run.entered_by_switch ? full.substr(seed.size() + run.from_bp + 1 - k, length + k - 1)
+                                               : full.substr(0, seed.size() + run.to_bp);
+            } else {
+                own = flank.substr(n - run.to_bp, length);
+                const std::string full = flank + seed;
+                string = run.entered_by_switch ? full.substr(n - run.to_bp, length + k - 1)
+                                               : full.substr(n - run.to_bp);
+            }
+            for (Coord e : rc.ends) {
+                const uint64_t s = arm.arm == Arm::RIGHT ? e + k - length : e;
+                const std::string b = bases(run.label, s, s + length);
+                if (b.empty()) {
+                    c->crossing++;
+                    continue;
+                }
+                EXPECT_EQ(own, b) << at << " [" << s << ", " << s + length << ")";
+                c->occurrences++;
+            }
+            const size_t truth = count(run.label, string);
+            if (rc.lower_bound) {
+                EXPECT_LE(rc.total, truth) << at;
+                c->lower_bound++;
+                c->strictly_lower += rc.total < truth;
+            } else {
+                EXPECT_EQ(truth, rc.total) << at << (run.entered_by_switch ? " switch" : " seed");
+            }
+            c->runs++;
+            c->switch_runs += run.entered_by_switch;
+            c->cut += rc.total > rc.ends.size();
+        }
+    }
+}
+
+} // namespace
+
+// The positional oracle on the real index (C2; plan revision 1's switch cells): the whole blaNDM
+// gene to 1,000 bp and a six-copy repeat window of NZ_CP030345.1 (150 bp), under the branch limit
+// 0, 2 and the exhaustive preset, switch cells (a constant cost of 0.5 and 1 within a loss budget
+// of 2, limits 0 and 2), caps 1, 16 and "unlimited", header labels and column (taxid) labels
+TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
+    const SourceRecords src = read_records(31);
+    ASSERT_EQ(42u, src.by_accession.size());
+    const std::string repeat = "CAAAGTTAGCGATGAGGCAGCCTTTTGTCTTATTCAAAGGCCTTACATTTCAAAAACTCTGCTTACC"
+                               "AGGCGCATTTCGCCCAGGGGATCACCATAATAAAATGCTGAGGCCTGGCCTTTGCGTAGTGCACGCAT"
+                               "CACCTCAATACCTTT";
+    ASSERT_EQ(150u, repeat.size());
+    ASSERT_NE(std::string::npos, src.by_accession.at("NZ_CP030345.1").find(repeat));
+    struct Cell {
+        std::string name;
+        std::string seed;
+        std::function<void(Strategy*, LabelChangeCost*)> set;
+    };
+    std::vector<Cell> cells;
+    for (const auto &[name, seed] : { std::make_pair(std::string("ndm1"), query_),
+                                      std::make_pair(std::string("repeat"), repeat) }) {
+        cells.push_back({ name + " limit 0", seed, [](Strategy*, LabelChangeCost*) {} });
+        cells.push_back({ name + " limit 2", seed, [](Strategy *st, LabelChangeCost*) {
+            st->max_label_branches = 2;
+        } });
+        cells.push_back({ name + " exhaustive", seed, [](Strategy *st, LabelChangeCost*) {
+            st->exhaustive = true;
+            st->max_label_branches = Strategy::kUnlimited;
+            st->max_splits_per_path = Strategy::kUnlimited;
+            st->max_extension_bp = 600;
+        } });
+        for (double c : { 0.5, 1.0 }) {
+            for (size_t limit : { size_t(0), size_t(2) }) {
+                cells.push_back({ name + " switch " + std::to_string(c) + " limit " + std::to_string(limit),
+                                  seed, [c, limit](Strategy *st, LabelChangeCost *cost) {
+                    *cost = LabelChangeCost::constant(c);
+                    st->loss_budget = 2;
+                    st->max_label_branches = limit;
+                } });
+            }
+        }
+    }
+    cells.push_back({ "repeat column labels", repeat, [](Strategy *st, LabelChangeCost*) {
+        st->seed_label_kind = LabelKind::COLUMN;
+        st->max_label_branches = 2;
+    } });
+    PositionalCheck total;
+    for (const Cell &cell : cells) {
+        for (size_t cap : { size_t(1), size_t(16), Strategy::kUnlimited }) {
+            Strategy st;
+            st.support = Support::TRACE;
+            st.merge_reconverge = false;
+            st.max_extension_bp = 1000;
+            st.coordinates = true;
+            st.max_coordinate_occurrences = cap;
+            LabelChangeCost cost = LabelChangeCost::forbid();
+            cell.set(&st, &cost);
+            Seed seed;
+            seed.sequence = cell.seed;
+            const SeedResult r = traverse_seed(*oracle_, seed, st, cost);
+            check_positions(r, cell.seed, src, &total, cell.name + " cap " + std::to_string(cap));
+        }
+    }
+    std::cerr << total.runs << " runs (" << total.switch_runs << " switch-entered, "
+              << total.lower_bound << " lower bounds, " << total.strictly_lower << " strictly), "
+              << total.occurrences << " occurrences, " << total.seed_lists << " seed lists, "
+              << total.cut << " lists cut, " << total.crossing << " across records" << std::endl;
+    EXPECT_GT(total.runs, 1000u);
+    EXPECT_GT(total.switch_runs, 0u);
+    EXPECT_GT(total.lower_bound, 0u);       // the switch cells mark some
+    EXPECT_GT(total.cut, 0u);               // the repeat's six copies at cap 1
+    EXPECT_EQ(0u, total.crossing);
+}
+
+// Opt-in responses (trace, coordinates) are the same whatever the row-diff path cache holds,
+// the reads' chunking and annotation.batch_kmers, unbudgeted and at their budget stops (memory
+// and work): coordinates are read from the rows the walk reads, which none of these change
+TEST_F(MiniRefSeq, CoordinatesKeepTheResponseUnderThePathCache) {
+    const std::string seed = query_.substr(0, 120);
+    size_t compared = 0, stopped = 0;
+    for (int budget = 0; budget < 6; ++budget) {
+        std::string reference;
+        for (int batch : { 64, 1 }) {
+            Json::Value r;
+            r["seeds"][0]["sequence"] = seed;
+            Json::Value &st = r["strategy"];
+            st["support"] = "trace";
+            st["branching"]["on_reconverge"] = "keep";
+            st["branching"]["max_label_branches"] = 2;
+            st["bounds"]["max_extension_bp"] = 400;
+            st["bounds"]["time_budget_ms"] = 600000;
+            st["annotation"]["batch_kmers"] = batch;
+            st["output"]["detail"] = budget % 2 ? "graphlet" : "full";
+            st["output"]["timing"] = false;
+            st["output"]["coordinates"] = true;
+            st["output"]["max_coordinate_occurrences"] = budget % 3 == 0 ? Json::Value(1) : Json::Value(16);
+            switch (budget) {
+                case 1: st["bounds"]["max_memory_mb"] = 2; break;
+                case 2: st["bounds"]["max_memory_mb"] = 4; break;
+                case 3: st["bounds"]["max_memory_mb"] = 16; break;
+                case 4: st["bounds"]["max_work_units"] = 20000; break;
+                case 5: st["bounds"]["max_work_units"] = 200000; break;
+                default: break;
+            }
+            for (uint64_t bytes : { uint64_t(0), uint64_t(64) << 10, uint64_t(128) << 20 }) {
+                for (double chunk : { 0.0, 1e-9, 1.0, 50.0 }) {
+                    mtg::cli::TraverseLimits limits;
+                    limits.path_cache_bytes = bytes;
+                    limits.chunk_target_ms = chunk;
+                    Json::Value out = mtg::cli::process_traverse_request(r, *anno_graph_, "", limits);
+                    // the echo states the batch: compared without it
+                    out["strategy"]["annotation"].removeMember("batch_kmers");
+                    const std::string text = mtg::cli::json_text(out, true);
+                    ASSERT_NE(std::string::npos, text.find("\"coordinates\":{")) << budget;
+                    if (reference.empty()) {
+                        reference = text;
+                        stopped += text.find("\"resource_stop\"") != std::string::npos;
+                    } else {
+                        EXPECT_EQ(reference, text) << "budget " << budget << " batch " << batch
+                                                   << " cache " << bytes << " chunk " << chunk;
+                    }
+                    compared++;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(144u, compared);
+    EXPECT_GT(stopped, 0u);
+}
+
+// D3 on the real index: a derived seed whose time budget runs out during its derivation. On a
+// virtual clock (1 ms a row; the first window of 64 rows, then one row per window): j = 70 of the
+// seed's k-mers are read, and the seed is delivered with their set — partial, label evidence
+// qualified, a derivation limitation stating j of n — stopped at the seed. On the real clock, a
+// staging-like budget of 1 ms: either that, with j >= 1, or (nothing read) the failure as before
+TEST_F(MiniRefSeq, PartialDerivationOnTheRealIndex) {
+    const std::string seed = query_.substr(0, 400);    // 370 k-mers
+    {
+        LabelOracle oracle(*anno_graph_);
+        auto clock = std::make_shared<double>(0);
+        oracle.pacer().test_clock_ms = [clock]() { return *clock; };
+        oracle.test_read_hook = [clock](size_t rows) { *clock += static_cast<double>(rows); };
+        Strategy st;
+        st.batch_kmers = 1;
+        st.time_budget_ms = 70;
+        Seed s;
+        s.sequence = seed;
+        const SeedResult r = traverse_seed(oracle, s, st, LabelChangeCost::forbid());
+        ASSERT_TRUE(r.derivation_partial);
+        EXPECT_EQ(70u, r.derivation_partial->kmers_read);
+        EXPECT_EQ(0u, r.arms[0].complete_to_bp);
+        EXPECT_EQ(0u, r.arms[1].complete_to_bp);
+        // the set of the first 70 k-mers holds every carrier of the whole seed
+        Strategy whole;
+        LabelOracle fresh(*anno_graph_);
+        const SeedResult all = traverse_seed(fresh, s, whole, LabelChangeCost::forbid());
+        std::set<std::string> partial_set, all_set;
+        for (size_t l = 0; l < r.num_seed_labels; ++l) partial_set.insert(r.label_dict[l].name);
+        for (size_t l = 0; l < all.num_seed_labels; ++l) all_set.insert(all.label_dict[l].name);
+        EXPECT_TRUE(std::includes(partial_set.begin(), partial_set.end(),
+                                  all_set.begin(), all_set.end()));
+        const Json::Value j = mtg::cli::seed_result_to_json(r, st, "full", false);
+        EXPECT_EQ("partial", j["outcome"]["walks"].asString());
+        EXPECT_EQ("qualified", j["outcome"]["label_evidence"].asString());
+        const Json::Value &d = j["limitations"][0];
+        EXPECT_EQ("derivation", d["kind"].asString());
+        EXPECT_EQ("time_budget", d["cause"].asString());
+        EXPECT_EQ(70u, d["observed"].asUInt64());
+        // n is the seed's num_kmers (and in the effect): no field beyond a failed derivation's
+        EXPECT_FALSE(d.isMember("num_kmers"));
+        EXPECT_EQ(370u, j["seed"]["num_kmers"].asUInt64());
+        EXPECT_NE(std::string::npos, d["effect"].asString().find("after 70 of 370 k-mers"));
+    }
+    size_t partial = 0, failed = 0, derived = 0;
+    for (int i = 0; i < 5; ++i) {
+        for (double chunk : { 0.0, 1.0 }) {
+            Json::Value r;
+            r["seeds"][0]["sequence"] = seed;
+            r["strategy"]["bounds"]["time_budget_ms"] = 1;
+            r["strategy"]["output"]["timing"] = false;
+            mtg::cli::TraverseLimits limits;
+            limits.chunk_target_ms = chunk;
+            const Json::Value res = mtg::cli::process_traverse_request(r, *anno_graph_, "", limits)["results"][0];
+            const std::string walks = res["outcome"]["walks"].asString();
+            const Json::Value *d = nullptr;
+            for (const Json::Value &l : res["limitations"]) {
+                if (l["kind"].asString() == "derivation")
+                    d = &l;
+            }
+            if (walks == "failed") {
+                // nothing read before the budget ran out: the failure as before
+                failed++;
+                ASSERT_TRUE(d);
+                EXPECT_EQ("time_budget", (*d)["cause"].asString());
+                EXPECT_NE(std::string::npos, res["error"].asString().find("after 0 of 370"))
+                    << res["error"].asString();
+            } else if (d) {
+                // part of the seed read: its set, stated (D3)
+                partial++;
+                EXPECT_EQ("partial", walks);
+                EXPECT_EQ("time_budget", (*d)["cause"].asString());
+                EXPECT_EQ("qualified", res["outcome"]["label_evidence"].asString());
+                EXPECT_GE((*d)["observed"].asUInt64(), 1u);
+                EXPECT_LT((*d)["observed"].asUInt64(), 370u);
+                EXPECT_FALSE(d->isMember("num_kmers"));
+                EXPECT_EQ(370u, res["seed"]["num_kmers"].asUInt64());
+                EXPECT_EQ(0u, res["arms"]["right"]["complete_to_bp"].asUInt64());
+            } else {
+                // the whole seed read within the millisecond (warm rows): the walk's own
+                // deadline stops it, as for any seed
+                derived++;
+                EXPECT_EQ("partial", walks);
+                EXPECT_NE("qualified", res["outcome"]["label_evidence"].asString());
+            }
+        }
+    }
+    std::cerr << partial << " partial derivations, " << failed << " failed (nothing read), "
+              << derived << " derived whole, of 10" << std::endl;
+    EXPECT_EQ(10u, partial + failed + derived);
+}
+
+// Review of W1, finding 1, on the real index: 300 bp before blaNDM and its first 100 bp
+// (NZ_CP030345.1, 370 k-mers): five taxid columns carry the k-mer read first, one the whole seed.
+// The time budget spent after that k-mer (1e-6 ms, unpaced): under `exhaustive` with
+// max_seed_labels 1 the seed fails with the time budget, as before D3 — not "5 labels carry the
+// seed and max_seed_labels is 1", which named the wrong lever and dropped the cause. Without it
+// the cap cuts the superset, which the seed_labels limitation states as a superset. Unhurried,
+// both walk with the one carrier
+TEST_F(MiniRefSeq, PartialSupersetIsNotRefusedAsTheWholeSeeds) {
+    const SourceRecords src = read_records(31);
+    const std::string &rec = src.by_accession.at("NZ_CP030345.1");
+    const size_t gene = rec.find(query_.substr(0, 100));
+    ASSERT_NE(std::string::npos, gene);
+    ASSERT_GE(gene, 300u);
+    const std::string seed = rec.substr(gene - 300, 400);
+    auto request = [&](bool exhaustive, double budget_ms) {
+        Json::Value r;
+        r["seeds"][0]["sequence"] = seed;
+        Json::Value &st = r["strategy"];
+        st["exhaustive"] = exhaustive;
+        st["labels"]["seed_label_kind"] = "column";
+        st["labels"]["max_seed_labels"] = 1;
+        st["bounds"]["time_budget_ms"] = budget_ms;
+        st["bounds"]["max_extension_bp"] = 100;
+        st["output"]["timing"] = false;
+        return mtg::cli::process_traverse_request(r, *anno_graph_, "",
+                                                  mtg::cli::TraverseLimits())["results"][0];
+    };
+    const Json::Value refused = request(true, 1e-6);
+    EXPECT_EQ("failed", refused["outcome"]["walks"].asString());
+    EXPECT_EQ("The time budget (bounds.time_budget_ms) ran out while deriving the permitted set "
+              "from the seed, after 1 of 370 k-mers; name the labels explicitly or shorten the "
+              "seed", refused["error"].asString());
+    ASSERT_EQ(1u, refused["limitations"].size());
+    EXPECT_EQ("derivation", refused["limitations"][0]["kind"].asString());
+    EXPECT_EQ("time_budget", refused["limitations"][0]["cause"].asString());
+    EXPECT_EQ("bounds.time_budget_ms", refused["limitations"][0]["knob"].asString());
+
+    const Json::Value cut = request(false, 1e-6);
+    EXPECT_FALSE(cut.isMember("error"));
+    EXPECT_EQ("qualified", cut["outcome"]["label_evidence"].asString());
+    EXPECT_EQ(5u, cut["seed"]["labels_supporting_total"].asUInt64());
+    EXPECT_EQ(4u, cut["seed"]["labels_dropped"].asUInt64());
+    std::string effect;
+    for (const Json::Value &l : cut["limitations"]) {
+        if (l["kind"].asString() == "seed_labels")
+            effect = l["effect"].asString();
+    }
+    EXPECT_EQ(0u, effect.find("4 of the 5 label(s) carrying the k-mers read were not taken")) << effect;
+    EXPECT_EQ(std::string::npos, effect.find("walks only they carry")) << effect;
+
+    for (bool exhaustive : { true, false }) {
+        const Json::Value whole = request(exhaustive, 30000);
+        EXPECT_FALSE(whole.isMember("error")) << exhaustive;
+        EXPECT_EQ(1u, whole["seed"]["labels_supporting_total"].asUInt64()) << exhaustive;
+        EXPECT_EQ(0u, whole["seed"]["labels_dropped"].asUInt64()) << exhaustive;
+    }
+}
+
 } // namespace

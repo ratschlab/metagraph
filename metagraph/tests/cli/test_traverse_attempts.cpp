@@ -644,6 +644,45 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     EXPECT_NEAR(reserve(1e6 / 404e3 + 1e6 / 104e3, 300), g->reserve_ms(), 1e-6);
 }
 
+// Review of W1, finding 3: an attempt whose output carries record coordinates measures a smaller
+// account per text byte (an occurrence's account is about a third of the rest's per byte of
+// text). Pooled, it would lower the estimate of every later attempt without them, whose
+// walk-until would then depend on whether such a request came first. It serves the attempt
+// itself (its own reserve: the smaller ratio, the more text estimated) and stays out of the
+// server's measurements, which the server feeds with pooled_account_per_text_byte
+TEST(GraphletAttempt, CoordinatesRatioStaysTheAttemptsOwn) {
+    FakeClock clock;
+    AttemptRegistry registry(settings_with(&clock));
+    auto deliver = [&](const std::string &id, bool coordinates, double ratio) {
+        auto a = attempt_of(registry, id);
+        a->set_measured(registry.measured());
+        a->set_delivery_detail("full", coordinates);
+        a->set_bound(1, 30'000);
+        a->note_delivered(2'000'000, 1.0, static_cast<uint64_t>(ratio * 2'000'000));
+        EXPECT_EQ(ratio, a->own_account_per_text_byte()) << id;
+        EXPECT_EQ(coordinates ? 0.0 : ratio, a->pooled_account_per_text_byte()) << id;
+        // as the server does once the response is written (server.cpp, on_written)
+        registry.note_account_per_text_byte(a->delivery_detail(), a->pooled_account_per_text_byte());
+        return a;
+    };
+    deliver("with1", true, 40);
+    EXPECT_EQ(0u, registry.measured().account_per_text_byte.count("full"));
+    deliver("without", false, 100);
+    deliver("with2", true, 30);
+    EXPECT_EQ(100.0, registry.measured().account_per_text_byte.at("full"));
+    // an attempt with coordinates reads the server's ratio and its own, the smaller: 30 here
+    auto own = deliver("with3", true, 30);
+    own->progress(30 * 40'000'000ull);
+    auto plain = attempt_of(registry, "plain");
+    plain->set_measured(registry.measured());
+    plain->set_delivery_detail("full");
+    plain->set_bound(1, 30'000);
+    plain->progress(30 * 40'000'000ull);
+    // the same account: the attempt with coordinates estimates 40 MB of text, the one without
+    // 12 MB (at the server's 100), the reserve of which is the smaller
+    EXPECT_LT(plain->reserve_ms(), own->reserve_ms());
+}
+
 TEST(GraphletAttemptRegistry, AnIdRunsOnce) {
     FakeClock clock;
     AttemptRegistry registry(settings_with(&clock, 60));

@@ -229,12 +229,20 @@ constexpr uint64_t kMgtFloatWidth = 24;
 uint64_t mgt_float_width(const graph::traversal::Strategy &st,
                          const graph::traversal::LabelChangeCost &cost,
                          double requested_time_ms = 0, double max_time_ms = 0);
+// What a result's record coordinates (Strategy::coordinates, DESIGN-traverse-graphlet.md §18)
+// add to its output: nothing (not asked for), `coordinates: null` with its reason (asked for
+// and ruled out by the index or the support), or the block, where they can be recorded (or
+// the null form, which it bounds)
+enum class CoordinatesOutput { NONE, REASON, BLOCK };
 // What one object of a result costs to deliver in |detail| (per object, bytes; upper
 // bounds): the output part of the memory budget's model (DESIGN-traverse-graphlet.md §14),
 // which process_traverse_request sets as Strategy::delivery, with every MGT float priced at
-// |float_width| characters (mgt_float_width)
+// |float_width| characters (mgt_float_width); |coordinates|: the coordinates' share, nothing
+// (and every other price as before) without them
 graph::traversal::DeliveryCosts delivery_costs(const std::string &detail, bool sequences,
-                                               uint64_t float_width = kMgtFloatWidth);
+                                               uint64_t float_width = kMgtFloatWidth,
+                                               CoordinatesOutput coordinates
+                                                   = CoordinatesOutput::NONE);
 // the length the JSON writers here give |s| inside a JSON string, quotes excluded: what
 // delivery_costs prices a name's text by
 uint64_t json_escaped_size(std::string_view s);

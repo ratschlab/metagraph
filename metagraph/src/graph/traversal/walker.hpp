@@ -45,7 +45,11 @@ class SeedDerivationError : public std::invalid_argument {
         // the narrowest of the first 64 k-mers has more annotation entries than the
         // derivation materialises: |limit| that bound, |observed| its entries
         TOO_WIDE,
-        // bounds.time_budget_ms ran out: |limit| the budget, |observed| the elapsed ms
+        // bounds.time_budget_ms ran out before the first seed k-mer was consumed: |limit| the
+        // budget, |observed| the elapsed ms. Once one was, the seed is delivered with the set
+        // derived from the k-mers read instead (SeedResult::derivation_partial, decision D3) —
+        // unless that set would then fail the seed, which then fails with this, as before D3
+        // (derivation_out_of_time)
         TIME_BUDGET,
         // a derived header name is not resubmittable as an explicit label: |subject|
         AMBIGUOUS_HEADER,
@@ -90,6 +94,16 @@ class SeedDerivationError : public std::invalid_argument {
     uint64_t soft_overshoot_ = 0;
 };
 const char* to_string(SeedDerivationError::Cause cause);
+
+// The failure of a derived seed whose time budget (|budget_ms|) ran out after |kmers_read| of
+// its |num_kmers| k-mers, |elapsed_ms| into the seed: every such seed's before decision D3,
+// and still the one of a seed that read none, or whose partial set cannot be delivered — a
+// check written for the whole seed's carriers refuses their superset (`exhaustive` over
+// max_seed_labels, an ambiguous derived header, an extra label it duplicates, a label name no
+// output carries), or a budget does not hold its depth-0 state. Their statements would be false
+// or overstated about a set the whole seed may narrow; this one is true (review of W1, finding 1)
+SeedDerivationError derivation_out_of_time(uint64_t kmers_read, uint64_t num_kmers,
+                                           double budget_ms, double elapsed_ms);
 
 /**
  * Cost of switching the supporting label along a path (spec §9). Labels are
@@ -195,6 +209,16 @@ struct DeliveryCosts {
     uint64_t bin = 0;
     uint64_t dropped = 0;            // per dropped seed label (its record or object), name apart
     uint64_t dropped_run = 0;        // per k-mer presence run of a dropped seed label
+    // Record coordinates (Strategy::coordinates; DESIGN-traverse-graphlet.md §18): a run's
+    // entry of the coordinates block, a seed label's entry, and one occurrence of either list.
+    // Charged only when coordinates are recorded, so that nothing else's account changes
+    uint64_t coordinate_run = 0;
+    uint64_t coordinate_seed = 0;
+    uint64_t occurrence = 0;
+    // A seed-level limitation beyond the ones |fixed| holds, charged where a result states one
+    // (the derivation limitation of a permitted set derived from part of the seed: Walker,
+    // SeedResult::derivation_partial)
+    uint64_t extra_limitation = 0;
     /**
      * What delivering one name costs, in every copy the serialisers hold at once: label
      * names, dropped labels' names and the request's seed_id are the one input whose
@@ -325,6 +349,15 @@ struct Strategy {
     // at least k, or the continuation would be shorter than a k-mer and not valid
     // traverse input (traverse_seed() refuses 1 .. k - 1)
     uint64_t continuation_bp = 1000;
+    // Record coordinates (DESIGN-traverse-graphlet.md §18, owner decisions C1-C12; opt-in, C1):
+    // where each run's sequence and each seed label's seed lies in its label's record (header
+    // labels) or column (column labels), recorded only under support trace on an index with
+    // k-mer coordinates — everywhere else coordinates_reason says why none are (§18.1). Off (the
+    // default), nothing is recorded or charged: every result and every budgeted stop is the same
+    // as without the feature. A list keeps the first |max_coordinate_occurrences| occurrences by
+    // start (kUnlimited: all; at least 1) and states its true count (RunCoordinates::total).
+    bool coordinates = false;
+    size_t max_coordinate_occurrences = 16;
 
     // annotation
     size_t batch_kmers = 64;
@@ -440,6 +473,11 @@ struct Segment {
     std::vector<LabelSetRun> label_sets;
 };
 
+// NOTE: sizeof(LabelRun) is part of the memory model (Walker::init_budgets charges every run
+// twice its size), as are those of the walker's Entry and Item: a field added here changes
+// every budgeted account, and with it where every budgeted request stops, whether or not it
+// asks for the field. Per-run output that only some requests ask for lives in a side table
+// beside |runs| (ArmResult::run_coordinates), charged only when recorded.
 struct LabelRun {
     LabelId label = 0;
     uint64_t from_bp = 0;
@@ -475,6 +513,44 @@ struct LabelRun {
     // no trace in the output; the leaf records them only for labels alive at a leaf.
     uint32_t branches = 0;
     double loss = 0;
+};
+
+/**
+ * Record coordinates of one run (Strategy::coordinates; DESIGN-traverse-graphlet.md §18.2):
+ * ArmResult::run_coordinates[i] belongs to ArmResult::runs[i]. An occurrence is a coordinate
+ * chain of the run's label live at the run's last node — one copy of the run's sequence in the
+ * label's record (header label) or column (column label), followed k-mer by k-mer: chains only
+ * continue or die along a run, and a split hands each chain to at most one child, since a
+ * coordinate is one k-mer. |ends| holds such a chain's k-mer coordinate at that last node; the
+ * occurrence's interval follows from the run's length L = to_bp - from_bp and k: [c + k - L,
+ * c + k) on the right arm, [c, c + L) on the left (the run's own bases; L = 0 is the empty
+ * interval at the seed boundary).
+ */
+struct RunCoordinates {
+    // the first max_coordinate_occurrences chains' coordinates, ascending (so the intervals'
+    // starts ascend on both arms)
+    std::vector<Coord> ends;
+    // the chains live at the last node: the run's true occurrence count (> |ends| when cut)
+    uint64_t total = 0;
+    // Chains that were live on the run's lineage and continued on no followed path of it
+    // before its last node (C5, decision C-N1): a record end, a successor not followed
+    // (blocked, a quorum, the branch limit), or a continuation taken over by a switch. Chains
+    // partitioned among the children of a split are not ended (each follows one child); a
+    // clone made at a split inherits the count of the prefix it shares.
+    uint64_t chains_ended = 0;
+    // The run was entered by a switch into a label whose own lineage was still live at the
+    // switch (revision 1 of the coordinates plan, decision C-N2 option a): its entry kept only
+    // the label's chains that continue from before the switch, so chains of the label that
+    // start at the switch node are missing — |total| is a lower bound. Stated per run and by
+    // the block (complete: false); the walk itself is unchanged.
+    bool lower_bound = false;
+};
+
+// Record coordinates of one seed label: its occurrences of the whole seed, each the chain's
+// coordinate at the first seed k-mer (the interval [c, c + |seed|)); SeedResult::seed_coordinates
+struct SeedCoordinates {
+    std::vector<Coord> starts;       // the first max_coordinate_occurrences, ascending
+    uint64_t total = 0;              // the label's chains over the whole seed
 };
 
 struct LabelEnd {
@@ -643,6 +719,10 @@ struct ArmResult {
     std::vector<Split> splits;
     std::vector<PathResult> paths;
     std::vector<LabelRun> runs;
+    // Record coordinates (SeedResult::coordinates_recorded): one entry per run, parallel to
+    // |runs|; empty otherwise. A side table, not a field of LabelRun, whose size the memory
+    // model charges for every run of every request (see LabelRun)
+    std::vector<RunCoordinates> run_coordinates;
     std::vector<GrowthBin> growth;
     // The first Strategy::max_branch_events branch events in processing order, of
     // branch_events_total. Levels are synchronous, so an arm produces its events in
@@ -834,6 +914,11 @@ struct ResourceAccount {
     // nor counted. Both false without a budget.
     bool decode_charged = false;
     bool row_diff_uncounted = false;
+    // the part of the modelled memory that is the recorded coordinates (Strategy::coordinates:
+    // the seed's and the runs' entries and occurrences, as charged at their creation); 0
+    // without them. Their text per account byte differs from the rest of the output's, which
+    // the server's delivery reserve has to tell apart
+    uint64_t coordinates = 0;
 };
 
 // A seed's deadline record (R8; timing only): its longest uninterruptible piece, and, when a
@@ -877,7 +962,50 @@ struct SeedResult {
     const char *access_path = "";
     std::optional<ResourceStop> resource_stop;
     ResourceAccount account;
+
+    // ---- record coordinates (Strategy::coordinates; DESIGN-traverse-graphlet.md §18)
+    // Recorded: |seed_coordinates| and both requested arms' run_coordinates hold them.
+    // Otherwise, when the strategy asked for them, |coordinates_reason| says why none are
+    // (coordinates_reason() before the walk; kCoordinatesPartialDerivation after a derivation
+    // the time budget stopped). Both empty when they were not asked for.
+    bool coordinates_recorded = false;
+    const char *coordinates_reason = nullptr;
+    std::vector<SeedCoordinates> seed_coordinates;   // per seed label (id < num_seed_labels)
+    // the graph's k: what turns a chain's k-mer coordinate into the interval of a run's bases
+    size_t k = 0;
+
+    // The permitted set was derived from the first |kmers_read| of the seed's num_kmers k-mers
+    // only: the seed's time budget ran out during the derivation (the owner's decision D3,
+    // 2026-10-04). Such a set is the intersection over fewer rows, a superset of the labels
+    // carrying the whole seed, so it may hold labels the whole seed would exclude: the result
+    // states a `derivation` limitation and its label evidence is qualified (overstated). The
+    // walk is the seed itself — stopped by the time budget at depth 0 (complete_to_bp 0) —
+    // since the budget is spent. A derivation stopped before its first k-mer still fails the
+    // seed (SeedDerivationError::TIME_BUDGET), as before, and so does one whose partial set
+    // would fail the seed in any other way (derivation_out_of_time): a result carrying this is
+    // always a walked one.
+    struct PartialDerivation {
+        uint64_t kmers_read = 0;
+        double elapsed_ms = 0;
+    };
+    std::optional<PartialDerivation> derivation_partial;
 };
+
+// Why a seed reports no coordinates (SeedResult::coordinates_reason and the JSON's
+// coordinates_reason), §18.1: the index has no k-mer coordinates; the support is k-mer
+// presence (also in annotate mode, which refuses trace), where a stretch can be stitched from
+// several occurrences; the seed was not traversed (failed, refused, not started); or its
+// permitted set was derived from part of the seed, so no label's occurrences of the whole seed
+// are known (D3, under support trace)
+constexpr const char *kCoordinatesNoIndex = "index has no coordinates";
+constexpr const char *kCoordinatesSupportKmer = "support kmer";
+constexpr const char *kCoordinatesNoTraversal = "no traversal";
+constexpr const char *kCoordinatesPartialDerivation = "partial derivation";
+
+// The reason a seed of |strategy| reports no coordinates whatever happens to it, checked in
+// the order of §18.1 (the index's, then the support's); nullptr: they are not requested, or
+// a walked seed records them
+const char* coordinates_reason(const Strategy &strategy, bool index_has_coordinates);
 
 /**
  * A request budget (DESIGN-traverse-graphlet.md §14) does not hold the seed itself: the work
@@ -920,8 +1048,10 @@ class SeedBudgetError : public std::runtime_error {
  * max_switch_sources under a TABLE cost (a cut source list can leave a target label
  * unentered and so prune a label-consistent walk); annotate mode with label machinery
  * (extra labels, a loss budget, a switch cost, a branch limit, a quorum, trace
- * support). Throws std::invalid_argument naming the knob and the value the preset or
- * mode requires. traverse_seed() calls it; the JSON layer calls it after filling the
+ * support), or a cap of 0 on the recorded coordinates' lists (coordinates asked for under
+ * k-mer support or in annotate mode are not refused: such a result says why it reports none,
+ * coordinates_reason()). Throws std::invalid_argument naming the knob and the value the preset
+ * or mode requires. traverse_seed() calls it; the JSON layer calls it after filling the
  * preset's values in for omitted knobs.
  */
 void validate_strategy(const Strategy &strategy, const LabelChangeCost &cost);
@@ -1009,6 +1139,8 @@ struct AttemptMeter {
     uint64_t memory_final = 0;       // what the result holds when the walk ended
     uint64_t soft_excess = 0;        // ResourceAccount::soft_overshoot (0 without a budget)
     bool walked = false;             // the walker ran (false: the strategy was refused first)
+    // the part of the account that is recorded coordinates (ResourceAccount::coordinates)
+    uint64_t memory_coordinates = 0;
 };
 
 /**
@@ -1033,9 +1165,10 @@ struct AttemptControl {
     std::function<double()> ms_left;
     std::function<ExternalStop()> poll_now;
     // the walk's modelled account (bytes, the memory model's, computed with or without a
-    // budget) at every level's end: what the caller estimates the seed's output from (the
-    // server's delivery reserve)
-    std::function<void(uint64_t account)> progress;
+    // budget) at every level's end, and the part of it that is recorded coordinates (0 without
+    // them): what the caller estimates the seed's output from (the server's delivery reserve),
+    // whose text per account byte differs between the two parts
+    std::function<void(uint64_t account, uint64_t coordinates)> progress;
 };
 
 struct WalkerHooks {

@@ -264,8 +264,11 @@ class Attempt {
     // walk's end (delivery_stop_ms, or this server's measured stop latency). The handler's
     // thread: each moves the walk-until.
     // |detail|: the requested output.detail (its account per text byte: measured on this
-    // server, else the configured one for JSON or for a graphlet)
-    void set_delivery_detail(const std::string &detail);
+    // server, else the configured one for JSON or for a graphlet). |coordinates|: the request
+    // asked for record coordinates (output.coordinates), whose account per text byte is not
+    // the other outputs' (an occurrence's is about a third of theirs): its own measurement
+    // serves this attempt but is not offered to the server's (pooled_account_per_text_byte)
+    void set_delivery_detail(const std::string &detail, bool coordinates = false);
     const std::string& delivery_detail() const { return detail_; }
     // the seed being walked holds |account| modelled bytes (at every level's end)
     void progress(uint64_t account);
@@ -281,6 +284,12 @@ class Attempt {
     double own_build_mbps() const;
     double own_account_per_text_byte() const;
     double own_stop_ms() const;
+    // what this attempt adds to the server's measured account per text byte of its detail: its
+    // own ratio, unless its output carries coordinates — their ratio would lower the estimate
+    // every later attempt without them uses, so that their walk-until would depend on whether
+    // a request with coordinates came first (review of W1, finding 3; the split of the
+    // coordinate share is C3's). 0: nothing
+    double pooled_account_per_text_byte() const;
     // the reserve now (ms)
     double reserve_ms() const;
 
@@ -397,6 +406,7 @@ class Attempt {
     double max_delivery_gap_ms_ = 0;                  // note_delivery_gap_ms
     // the delivery reserve's state (the handler's thread; written under |mutex_|)
     std::string detail_;
+    bool coordinates_ = false;                        // the output carries coordinates
     double configured_ratio_ = 20;                    // the configured account per text byte
     double server_ratio_ = 0;                         // measured on this server (0: none)
     double own_ratio_ = 0;                            // measured on this attempt (0: none)

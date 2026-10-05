@@ -58,6 +58,17 @@ const char* to_string(SeedDerivationError::Cause cause) {
     return "unknown";
 }
 
+SeedDerivationError derivation_out_of_time(uint64_t kmers_read, uint64_t num_kmers,
+                                           double budget_ms, double elapsed_ms) {
+    // the text every such failure had before D3, so that a seed whose partial set is not
+    // delivered fails exactly as it did
+    return SeedDerivationError(SeedDerivationError::TIME_BUDGET,
+            "The time budget (bounds.time_budget_ms) ran out while deriving the permitted set "
+            "from the seed, after " + std::to_string(kmers_read) + " of "
+            + std::to_string(num_kmers) + " k-mers; name the labels explicitly or shorten the seed",
+            budget_ms, elapsed_ms);
+}
+
 
 namespace {
 
@@ -204,8 +215,13 @@ struct Succ {
 
 // A permitted label at a successor (A(v) of the spec)
 struct Target {
-    LabelId label;
+    LabelId label = 0;
     SmallVector<Coord> coords;
+    // trace support: |coords| are only the label's chains that continue from the head (its
+    // lineage was live there), and some of its coordinates at the successor were left out —
+    // chains that would START at the successor. A run a switch enters with these coordinates
+    // is then a lower bound (RunCoordinates::lower_bound); scratch, so no part of the model
+    bool chains_filtered = false;
 };
 
 // A successor under evaluation (scratch, reused across steps)
@@ -427,6 +443,9 @@ struct HeadPlan {
     size_t bins_needed = 0;
     // what the commit will create, checked against it in debug builds
     size_t new_segments = 0, new_runs = 0, new_events = 0;
+    // the part of |committed| that is recorded coordinates (the new runs' entries and their
+    // occurrences), added to the walk's coordinate account when the plan is committed
+    uint64_t coordinates = 0;
 
     void clear() {
         followed.clear();
@@ -437,6 +456,7 @@ struct HeadPlan {
         sources.clear();
         reminimisations = 0;
         committed = 0;
+        coordinates = 0;
         child_reserve.clear();
         child_merge_reserve.clear();
         bins_needed = 0;
@@ -463,6 +483,9 @@ struct CostModel {
              cont_base = 0, split = 0, split_branch = 0, bevent = 0, bevent_entry = 0,
              refusal = 0, presence_run = 0, bin = 0, item = 0, entry = 0, coord = 0,
              present = 0, label = 0, label_name = 0, merge_parent = 0;
+    // recorded coordinates (Strategy::coordinates): a run's side-table entry, a seed label's,
+    // and one occurrence of either list
+    uint64_t coord_run = 0, coord_seed = 0, occurrence = 0;
 };
 
 // the labels of refusal (ch, cause) of |plan|, created when first needed; a step has a
@@ -659,9 +682,22 @@ class Walker {
         return { e.loss, e.branches, ref.column, ref.seq_id };
     }
     // |split|: the state is one child's of a split, whose runs already continued by an
-    // earlier child (taken_run()) are cloned so that every run belongs to exactly one path
+    // earlier child (taken_run()) are cloned so that every run belongs to exactly one path.
+    // |targets|: the successor's (Cand::targets), which tell a switch-entered run whose
+    // coordinates are a lower bound (Target::chains_filtered)
     void commit_entries(ArmState &arm, const Item &item, size_t target_segment,
-                        State &state, uint64_t at, bool split);
+                        State &state, uint64_t at, bool split,
+                        const std::vector<Target> &targets);
+    // Record coordinates (Strategy::coordinates): what a recorded entry of a run (|seed|:
+    // of a seed label) with |chains| occurrences costs the account — its side-table entry and
+    // at most the cap's occurrences, at the chains it has when it is CREATED, an upper bound,
+    // since chains only end along a run. 0 when coordinates are not recorded
+    uint64_t coord_bytes(size_t chains, bool seed) const {
+        if (!record_coords_)
+            return 0;
+        return (seed ? m_.coord_seed : m_.coord_run)
+             + std::min<uint64_t>(chains, coord_cap_) * m_.occurrence;
+    }
     // The runs continued by the children of one split so far, as stamps indexed by run id:
     // O(1) per entry. A scan of the runs taken so far made a split O(|σ|²), once in its
     // plan and once in its commit — on a 2,876-label locus most of the walk's time, with
@@ -757,6 +793,14 @@ class Walker {
     void charge_seed(uint64_t units);
     std::vector<LabelQuery::NodeHits> fetch_seed_hits(LabelQuery &query,
                                                       const std::vector<node_index> &keys);
+    // The seed phase, before the first level: the permitted set validated (or derived), the
+    // dictionary, the budgets and both arms' roots built, and the depth-0 state admitted.
+    // Throws what fails the seed (run() turns it into the time budget's failure after a
+    // partial derivation)
+    void seed_phase();
+    // the failure of a seed whose partial set (D3) is not delivered: the time budget's, as
+    // before D3, with what the seed phase was seen to hold beyond a memory budget
+    SeedDerivationError partial_derivation_failure() const;
     // a budget does not hold the seed itself: throws SeedBudgetError
     [[noreturn]] void fail_seed(ResourceStop::Resource resource, double used, double demand,
                                 const std::string &what, const char *phase = "traversal",
@@ -927,6 +971,15 @@ class Walker {
     std::unique_ptr<LabelRecorder> recorder_;   // annotate mode
     // trace support: live coordinates of each kept seed label at the arm boundaries
     std::vector<SmallVector<Coord>> boundary_coords_[2];
+    // Record coordinates (Strategy::coordinates, DESIGN-traverse-graphlet.md §18): recorded
+    // (trace support on an index with coordinates, and a permitted set read from the whole
+    // seed), the cap on a list, and the part of the account they are (their entries and
+    // occurrences as charged when created; ResourceAccount::coordinates). No work is charged
+    // for them: every coordinate was charged one unit with the row that carried it, and work
+    // must not depend on what the output asks for (stage 2, finding 5)
+    bool record_coords_ = false;
+    size_t coord_cap_ = 16;
+    uint64_t coord_account_ = 0;
 
     std::array<uint8_t, 256> code_ {};
     size_t bits_ = 2;
@@ -1117,6 +1170,13 @@ void Walker::validate_seed() {
     bool all_supported = false;
     if (seed_.labels.empty()) {
         all_supported = derive_seed_labels(keys, &seed_refs, &hits);
+        if (result_.derivation_partial && record_coords_) {
+            // a set derived from part of the seed (D3) was not followed over the whole seed:
+            // no label's occurrences of the seed are known (under trace its continuity was not
+            // checked either), and the walk stops at depth 0
+            record_coords_ = false;
+            result_.coordinates_reason = kCoordinatesPartialDerivation;
+        }
     } else {
         for (const auto &name : seed_.labels) {
             for (const auto &other : seed_refs) {
@@ -1184,6 +1244,16 @@ void Walker::validate_seed() {
                 left.reserve(live[l].size());
                 for (Coord c : live[l]) {
                     left.push_back(c - (keys.size() - 1));
+                }
+                if (record_coords_) {
+                    // the label's occurrences of the whole seed (§18.2): its chains over every
+                    // seed k-mer, each at the first k-mer, ascending as the chains are; charged
+                    // with the depth-0 state (init_budgets)
+                    SeedCoordinates sc;
+                    sc.total = left.size();
+                    sc.starts.assign(left.begin(),
+                                     left.begin() + std::min<size_t>(left.size(), coord_cap_));
+                    result_.seed_coordinates.push_back(std::move(sc));
                 }
                 // moved, not copied: each copy held the label's whole coordinate set once more
                 boundary_coords_[static_cast<size_t>(Arm::RIGHT)].push_back(std::move(right));
@@ -1468,6 +1538,19 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     auto out_of_time = [&]() {
         return budget_ms > 0 && elapsed_ms() >= budget_ms;
     };
+    // The budget ran out after j >= 1 of the seed's k-mers were consumed (the owner's decision
+    // D3, 2026-10-04): the derivation ends with the set derived from those j k-mers — the
+    // intersection over fewer rows, a superset of the whole seed's carriers — and the seed is
+    // delivered with it, stated (SeedResult::derivation_partial), instead of failing: the
+    // labels carrying the part read are what a caller can name next. Set by the seed's own
+    // time budget only, and it ends the window loop below (a stop of the attempt still fails
+    // the seed, and work and memory stops are where they were); before the first k-mer
+    // nothing is derived and the seed fails as before. The checks after the loop were written
+    // for the whole seed's carriers and see the superset: one that refuses it ("N labels carry
+    // the seed" under `exhaustive`, an ambiguous header) would state something false about the
+    // whole seed, so run() turns every failure after a partial derivation back into the time
+    // budget's, as before D3 (derivation_out_of_time)
+    bool partial = false;
     // The candidate set of the FIRST k-mer consumed is a whole annotation row: no
     // intersection has narrowed it yet. A seed of exactly k bases never gets an
     // intersection at all, so its "derived" set would BE that row — on a wide index
@@ -1546,15 +1629,14 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         // window found too_wide) and ends the derivation as the next k-mer's check would have:
         // time_budget after the k-mers consumed so far, or the attempt's stop failing the seed
         ReadPacing *pace = pacing(Deadline::DERIVATION);
+        // Returns true when the set of the k-mers consumed before the window is delivered (D3:
+        // the window's rows were read in part and not consumed)
         auto interrupted = [&](uint64_t units) {
             seed_work_ += units;
             if (paced_by_time_) {
-                throw SeedDerivationError(SeedDerivationError::TIME_BUDGET,
-                        "The time budget (bounds.time_budget_ms) ran out while deriving the "
-                        "permitted set from the seed, after " + std::to_string(done.size())
-                        + " of " + std::to_string(keys.size()) + " k-mers; name the labels "
-                          "explicitly or shorten the seed",
-                        budget_ms, elapsed_ms());
+                if (!done.empty())
+                    return true;
+                throw derivation_out_of_time(0, keys.size(), budget_ms, elapsed_ms());
             }
             seed_external_stop();
             throw std::logic_error("a paced read of the derivation stopped without a stop");
@@ -1574,8 +1656,10 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             FetchRefusal r;
             const size_t read = with_coords ? read_window(distinct, budget, &tuples, &costs, &r, pace)
                                             : read_window(distinct, budget, &plain, &costs, &r, pace);
-            if (pace && pace->interrupted)
-                interrupted(pace->units);
+            if (pace && pace->interrupted && interrupted(pace->units)) {
+                partial = true;
+                break;
+            }
             if (read < distinct.size()) {
                 size_t kmer = begin;
                 while (rows[kmer - begin] != distinct[read]) {
@@ -1629,7 +1713,10 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         for (const auto &row : tuples) {
                             units += window_row_units(row);
                         }
-                        interrupted(units);
+                        if (interrupted(units)) {
+                            partial = true;
+                            break;
+                        }
                     }
                     piece = pacer.next(piece, pace->ms_left(), previous, previous_ms);
                 }
@@ -1664,6 +1751,9 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 at += piece;
             }
         }
+        // a paced read stopped by the time budget after k-mers were consumed: their set (D3)
+        if (partial)
+            break;
         // The sub-batch's decoded rows and the running intersection are held before any
         // account exists, the largest scratch of a derived seed: observed as the soft excess,
         // which a seed failed here states too (finding 8) — after the read, and again once
@@ -1879,18 +1969,25 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 oracle_.pacer().note_piece(mapped ? "coord_mapping" : "derivation_step",
                                            step.elapsed_ms(), 1, mapped);
             }
-            // per k-mer, like the deadline: the window was charged when it was read
+            // per k-mer, like the deadline: the window was charged when it was read. At least
+            // this k-mer was consumed, so the set derived so far is delivered (D3); after the
+            // last one the derivation is complete and the walk's own deadline takes over
             seed_external_stop();
-            if (out_of_time()) {
-                throw SeedDerivationError(SeedDerivationError::TIME_BUDGET,
-                        "The time budget (bounds.time_budget_ms) ran out while deriving the "
-                        "permitted set from the seed, after " + std::to_string(done.size())
-                        + " of " + std::to_string(keys.size()) + " k-mers; name the labels "
-                          "explicitly or shorten the seed",
-                        budget_ms, elapsed_ms());
+            if (out_of_time() && done.size() < keys.size()) {
+                partial = true;
+                break;
             }
         }
+        if (partial)
+            break;
         observe();
+    }
+    if (partial) {
+        assert(!done.empty() && !live.empty());
+        SeedResult::PartialDerivation read;
+        read.kmers_read = done.size();
+        read.elapsed_ms = elapsed_ms();
+        result_.derivation_partial = read;
     }
 
     result_.labels_from_seed = true;
@@ -1988,11 +2085,14 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         refs->push_back(std::move(ref));
     }
     hits->clear();
-    if (!trace_) {
+    if (!trace_ || result_.derivation_partial) {
         // Every derived label supports every k-mer by construction and there are no
         // coordinates to carry over, so the per-label validation needs no hit matrix at
         // all: materialising one would be |live| x |keys| Hit objects (32 B each) saying
-        // nothing but that. The caller is told so instead.
+        // nothing but that. The caller is told so instead. A set derived from part of the
+        // seed (D3) is taken as derived: under trace its coordinate continuity over the seed
+        // cannot be checked without the rows not read, the walk stops at depth 0 with no step
+        // taken, and the result states that the set is overstated (label evidence qualified)
         return true;
     }
     // the hits of this pass in the shape the per-label validation expects: only the
@@ -2232,6 +2332,7 @@ void Walker::fail_seed(ResourceStop::Resource resource, double used, double dema
     account.largest_charge = largest_charge_;
     account.decode_charged = decode_charged_;
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
+    account.coordinates = coord_account_;
     const size_t labels = annotate_ ? (recorder_ ? recorder_->labels().size() : 0)
                                     : result_.label_dict.size();
     throw SeedBudgetError(what, q, account, !annotate_ && seed_.labels.empty(), labels);
@@ -2399,6 +2500,11 @@ void Walker::init_arm(ArmState &arm) {
                                annotate_ ? root.present_total : root.state.size());
     for (Entry &e : root.state) {
         e.run = new_run(arm, e.label, 0, false, 0, 0, UINT32_MAX);
+        // its recorded coordinates at the seed's chains (at most what it ends with), admitted
+        // with the depth-0 state like the run itself
+        const uint64_t coords = coord_bytes(e.coords.size(), false);
+        committed_ += coords;
+        coord_account_ += coords;
     }
     arm.first_arrival.emplace(root.node, std::make_pair(root.segment, uint64_t(0)));
     // the root segment, its runs and its first arrival, and the root head's
@@ -2584,6 +2690,10 @@ uint32_t Walker::new_run(ArmState &arm, LabelId label, uint64_t from_bp, bool by
     run.switch_cost = cost;
     run.prev_run = prev;
     arm.result.runs.push_back(run);
+    // the side table of recorded coordinates grows in lockstep (filled when the run ends)
+    if (record_coords_)
+        arm.result.run_coordinates.emplace_back();
+    assert(!record_coords_ || arm.result.run_coordinates.size() == arm.result.runs.size());
     return arm.result.runs.size() - 1;
 }
 
@@ -2687,6 +2797,16 @@ void Walker::end_run(ArmState &arm, const Entry &e, uint64_t at, EndReason reaso
     run.branches = e.branches;
     run.loss = e.loss;
     bin(arm, at).label_ends[static_cast<size_t>(reason)]++;
+    if (record_coords_) {
+        // Every trace run ends here (finish_path asserts it; trace refuses merging): its
+        // occurrences are the chains live at its last node, ascending, the first ones up to the
+        // cap — constant work per run under it, and with "unlimited" at most the coordinates
+        // already charged as work with the row of that node
+        RunCoordinates &rc = arm.result.run_coordinates[e.run];
+        rc.total = e.coords.size();
+        rc.ends.assign(e.coords.begin(),
+                       e.coords.begin() + std::min<size_t>(e.coords.size(), coord_cap_));
+    }
 }
 
 void Walker::end_label(ArmState &arm, const Item &item, const Entry &e, EndReason reason,
@@ -2983,12 +3103,24 @@ void Walker::derive(ArmState &arm, const State &sigma, const std::vector<Target>
 }
 
 void Walker::commit_entries(ArmState &arm, const Item &item, size_t target_segment,
-                            State &state, uint64_t at, bool split) {
+                            State &state, uint64_t at, bool split,
+                            const std::vector<Target> &targets) {
     for (Entry &e : state) {
         if (e.switched) {
             const Entry *src = find_entry(item.state, e.from);
             assert(src);
             e.run = new_run(arm, e.label, at, true, e.from, e.switch_cost, src->run);
+            if (record_coords_) {
+                // A switch into a label whose own lineage was live at the head carries only
+                // that lineage's continuing chains (process_item), so chains of the label that
+                // start here are missing whenever some were left out: the run's occurrences are
+                // a lower bound, stated (revision 1, decision C-N2 a). The walk is unchanged
+                auto t = std::lower_bound(targets.begin(), targets.end(), e.label,
+                                          [](const Target &x, LabelId l) { return x.label < l; });
+                assert(t != targets.end() && t->label == e.label);
+                arm.result.run_coordinates[e.run].lower_bound
+                    = t != targets.end() && t->label == e.label && t->chains_filtered;
+            }
             Event ev;
             ev.at_bp = at;
             ev.type = EventType::SWITCH;
@@ -2998,8 +3130,16 @@ void Walker::commit_entries(ArmState &arm, const Item &item, size_t target_segme
             push_event(arm, target_segment, std::move(ev));
         } else if (split && taken_run(e.run)) {
             LabelRun src = arm.result.runs[e.run];
+            // the prefix the clone shares: its ended chains and whether it is a lower bound
+            // (copied before new_run, which may reallocate the side table)
+            const uint64_t ended = record_coords_ ? arm.result.run_coordinates[e.run].chains_ended : 0;
+            const bool lower = record_coords_ && arm.result.run_coordinates[e.run].lower_bound;
             e.run = new_run(arm, src.label, src.from_bp, src.entered_by_switch,
                             src.from_label, src.switch_cost, src.prev_run);
+            if (record_coords_) {
+                arm.result.run_coordinates[e.run].chains_ended = ended;
+                arm.result.run_coordinates[e.run].lower_bound = lower;
+            }
             // the clone is the same lineage on the other child: where a merge routed it
             // in from a later parent, its displayed evidence starts at that merge too
             // (§7.1: route_bp 0 would claim the whole displayed flank). Every later merge
@@ -3055,6 +3195,12 @@ void Walker::init_budgets() {
     // query's or recorder's copy), its delivery priced by name (label_bytes)
     m_.label = 2 * sizeof(LabelRef) + 2 * 2 * sizeof(LabelArmSummary) + 96 + d.label;
     m_.label_name = 2;
+    // recorded coordinates (Strategy::coordinates): a run's side-table entry and a seed label's
+    // (doubled like any vector element), an occurrence's coordinate (its |ends| or |starts|
+    // element), each with its delivery in the requested detail
+    m_.coord_run = 2 * sizeof(RunCoordinates) + d.coordinate_run;
+    m_.coord_seed = 2 * sizeof(SeedCoordinates) + d.coordinate_seed;
+    m_.occurrence = 2 * sizeof(Coord) + d.occurrence;
 
     mem_limit_ = strategy_.max_memory_bytes;
     budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
@@ -3086,7 +3232,18 @@ void Walker::init_budgets() {
         if (recorder_)
             recorder_->set_max_cache_bytes(cache_allotment_);
     }
+    // the derivation limitation a permitted set derived from part of the seed states (D3):
+    // a record the fixed part does not hold
+    if (result_.derivation_partial)
+        base_ += d.extra_limitation;
     fixed_base_ = base_;
+    // the seed labels' recorded occurrences of the seed belong to the depth-0 state, admitted
+    // with it (a budget too small for them fails the seed like any depth-0 state)
+    for (const SeedCoordinates &sc : result_.seed_coordinates) {
+        const uint64_t bytes = coord_bytes(sc.total, true);
+        base_ += bytes;
+        coord_account_ += bytes;
+    }
     charge_dictionary();
     note_peak();
 }
@@ -3180,6 +3337,7 @@ void Walker::plan_child(const State &state, size_t present, uint64_t ext, uint32
 
 void Walker::settle(ArmState &arm, uint64_t held) {
     committed_ += plan_.committed;
+    coord_account_ += plan_.coordinates;
     reserved_ += plan_.reserved();
     assert(reserved_ >= held);
     reserved_ -= held;
@@ -3389,6 +3547,7 @@ void Walker::write_meter() const noexcept {
     m.memory_final = accounted();
     m.soft_excess = overshoot_;
     m.walked = true;
+    m.memory_coordinates = coord_account_;
 }
 
 EndReason Walker::note_stop(const ArmState &arm, const Item *head,
@@ -4529,9 +4688,10 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     arm.frontier.swap(arm.next);
     if (hooks_ && hooks_->level)
         hooks_->level(arm.arm, depth, accounted());
-    // what the walk will deliver grows with its account: the caller keeps time back for it
+    // what the walk will deliver grows with its account: the caller keeps time back for it,
+    // the recorded coordinates' part told apart (their text per account byte is another)
     if (control_ && control_->progress)
-        control_->progress(accounted());
+        control_->progress(accounted(), coord_account_);
 }
 
 std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
@@ -4580,7 +4740,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         succ_kmer(side, item.kmer, succs[i].ch, &c.kmer);
         for (const auto &h : hits[i]) {
             sc.touch(h.label);
-            Target t { h.label, {} };
+            Target t;
+            t.label = h.label;
             if (trace_) {
                 const Entry *e = find_entry(item.state, h.label);
                 if (e) {
@@ -4599,6 +4760,9 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
                         sc.trace_broken[h.label] = 1;
                         continue;
                     }
+                    // the label's coordinates here that start a chain rather than continue one
+                    // (a switch that enters the label with |t.coords| misses them)
+                    t.chains_filtered = t.coords.size() < h.coords.size();
                 } else {
                     t.coords.assign(h.coords.begin(), h.coords.end());
                 }
@@ -4825,6 +4989,13 @@ void Walker::plan_cost(const ArmState &arm, const Item &item) {
     }
     cost += nf * (m_.step + m_.base);
     plan_bins(arm, at + 1);
+    // a new run's recorded coordinates, charged once, at its creation, for the chains it
+    // starts with (at most what it ends with); no work is charged for them (Walker members)
+    auto coordinates = [&](const Entry &e) {
+        const uint64_t bytes = coord_bytes(e.coords.size(), false);
+        cost += bytes;
+        plan.coordinates += bytes;
+    };
     if (nf == 1) {
         const Cand &c = *plan.followed[0];
         for (const Entry &e : c.state) {
@@ -4832,6 +5003,7 @@ void Walker::plan_cost(const ArmState &arm, const Item &item) {
                 cost += m_.run + m_.event;
                 plan.new_runs++;
                 plan.new_events++;
+                coordinates(e);
             }
         }
         if (would_revisit(arm, c.succ->node, at + 1, item.revisiting)) {
@@ -4855,9 +5027,11 @@ void Walker::plan_cost(const ArmState &arm, const Item &item) {
                 cost += m_.run + m_.event;
                 plan.new_runs++;
                 plan.new_events++;
+                coordinates(e);
             } else if (taken_run(e.run)) {
                 cost += m_.run;     // commit_entries clones a run continued twice
                 plan.new_runs++;
+                coordinates(e);
             }
         }
         if (would_revisit(arm, c->succ->node, at + 1, false)) {
@@ -5159,9 +5333,34 @@ void Walker::commit_item(ArmState &arm, Item &item, const std::vector<Succ> &suc
     // ---- steps
     account_steps(arm, at, nf);
 
+    if (record_coords_) {
+        // C5 (decision C-N1): a lineage that goes on under its own run keeps, of its chains,
+        // those continuing on a followed child as the same run; the others end here, before the
+        // run's last node (a record end, a successor not followed, a switch taking the
+        // continuation over). A chain continues on at most one child (a coordinate is one
+        // k-mer), so the difference is exact, and chains split among the children of a split
+        // are not ended. Counted before commit_entries, so that a clone made for a later child
+        // inherits the count of the prefix it shares
+        for (const Entry &src : item.state) {
+            uint64_t continuing = 0;
+            bool stays = false;
+            for (const Cand *c : plan.followed) {
+                const Entry *e = find_entry(c->state, src.label);
+                if (e && !e->switched && e->run == src.run) {
+                    continuing += e->coords.size();
+                    stays = true;
+                }
+            }
+            if (stays) {
+                assert(continuing <= src.coords.size());
+                arm.result.run_coordinates[src.run].chains_ended += src.coords.size() - continuing;
+            }
+        }
+    }
+
     if (nf == 1) {
         Cand &c = *plan.followed[0];
-        commit_entries(arm, item, item.segment, c.state, at, false);
+        commit_entries(arm, item, item.segment, c.state, at, false, c.targets);
         arm.walk_seq[item.segment].push_back(c.succ->ch);
         arm.result.segments[item.segment].length_bp++;
         record_edge(arm, item.segment, c);
@@ -5202,7 +5401,7 @@ void Walker::commit_item(ArmState &arm, Item &item, const std::vector<Succ> &suc
         br.labels_distinct = child_labels.size();
         br.labels = bounded(arm, child_labels, child_labels.size());
         split.branches.push_back(std::move(br));
-        commit_entries(arm, item, child, c.state, at, true);
+        commit_entries(arm, item, child, c.state, at, true, c.targets);
         arm.walk_seq[child].push_back(c.succ->ch);
         arm.result.segments[child].length_bp = 1;
         record_edge(arm, child, c);
@@ -5770,30 +5969,7 @@ void Walker::summarize_annotate() {
     }
 }
 
-SeedResult Walker::run() {
-    // A continuation is offered as the seed of the next request (§7.1), and a seed
-    // shorter than k is refused: 1 .. k - 1 would hand out continuations that cannot be
-    // resubmitted. 0 is "no continuation sequence" and stays allowed.
-    if (strategy_.continuation_bp > 0 && strategy_.continuation_bp < k_) {
-        throw std::invalid_argument(
-                "output.continuation_bp " + std::to_string(strategy_.continuation_bp)
-                + " is shorter than k = " + std::to_string(k_) + ": a continuation must be "
-                  "valid traverse input; use 0 (no continuation sequence) or at least k");
-    }
-    // what the walk consumed reaches the caller however it ends: a result, a failed seed or
-    // an exception (a ledger reconciles the attempt against it)
-    struct Metered {
-        const Walker &walker;
-        ~Metered() { walker.write_meter(); }
-    } metered { *this };
-    // this seed's deadline record (the pacer is the request's)
-    oracle_.pacer().longest = UninterruptiblePiece();
-    // the seed phase observes what it holds against the memory budget (observe_seed_scratch)
-    mem_limit_ = strategy_.max_memory_bytes;
-    budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
-    // under a request budget the annotation is read by the budget-aware decode path when the
-    // index has it (stage 3 of DESIGN-traverse-graphlet.md §14.1), from the seed phase on
-    decode_charged_ = budgeted_ && oracle_.decode_charged();
+void Walker::seed_phase() {
     {
         // the seed phase's time and its reads' (timing): before them nothing else looks at
         // the clock, and a slow one is otherwise visible only as elapsed time no counter
@@ -5861,7 +6037,89 @@ SeedResult Walker::run() {
     // soft overshoot (review of stage 2, finding 3).
     if (mem_limit_ && accounted() > mem_limit_)
         fail_depth0(accounted());
+}
+
+SeedDerivationError Walker::partial_derivation_failure() const {
+    assert(result_.derivation_partial);
+    // the k-mers read and the time when the budget stopped the derivation: what the failure
+    // stated before D3, at that same check
+    SeedDerivationError e = derivation_out_of_time(result_.derivation_partial->kmers_read,
+                                                   result_.num_kmers, strategy_.time_budget_ms,
+                                                   result_.derivation_partial->elapsed_ms);
+    e.set_soft_overshoot(overshoot_);
+    return e;
+}
+
+SeedResult Walker::run() {
+    // A continuation is offered as the seed of the next request (§7.1), and a seed
+    // shorter than k is refused: 1 .. k - 1 would hand out continuations that cannot be
+    // resubmitted. 0 is "no continuation sequence" and stays allowed.
+    if (strategy_.continuation_bp > 0 && strategy_.continuation_bp < k_) {
+        throw std::invalid_argument(
+                "output.continuation_bp " + std::to_string(strategy_.continuation_bp)
+                + " is shorter than k = " + std::to_string(k_) + ": a continuation must be "
+                  "valid traverse input; use 0 (no continuation sequence) or at least k");
+    }
+    // what the walk consumed reaches the caller however it ends: a result, a failed seed or
+    // an exception (a ledger reconciles the attempt against it)
+    struct Metered {
+        const Walker &walker;
+        ~Metered() { walker.write_meter(); }
+    } metered { *this };
+    // this seed's deadline record (the pacer is the request's)
+    oracle_.pacer().longest = UninterruptiblePiece();
+    // the seed phase observes what it holds against the memory budget (observe_seed_scratch)
+    mem_limit_ = strategy_.max_memory_bytes;
+    budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
+    // under a request budget the annotation is read by the budget-aware decode path when the
+    // index has it (stage 3 of DESIGN-traverse-graphlet.md §14.1), from the seed phase on
+    decode_charged_ = budgeted_ && oracle_.decode_charged();
+    // record coordinates (§18.1): only under support trace on an index with coordinates —
+    // validate_seed refuses trace without them, and drops the recording for a set derived from
+    // part of the seed; every other request says why none are
+    result_.k = k_;
+    result_.coordinates_reason = coordinates_reason(strategy_, oracle_.has_coordinates());
+    record_coords_ = strategy_.coordinates && !result_.coordinates_reason;
+    coord_cap_ = strategy_.max_coordinate_occurrences;
+    // D3's partial set is delivered as a walked result or not at all: whatever fails the seed
+    // after it — a check written for the whole seed's carriers refusing their superset
+    // (`exhaustive` over max_seed_labels: "N labels carry the seed"; an ambiguous or
+    // non-resubmittable header; an extra label it duplicates), or a budget its depth-0 state
+    // does not fit — fails it as before D3, with the time budget that cut the derivation. That
+    // statement is true and names the first lever; the others would be false or overstated
+    // about a set the whole seed may narrow (review of W1, finding 1). SeedDerivationError is
+    // an invalid_argument, and so is a refused request, which the time budget preempted too
+    try {
+        seed_phase();
+    } catch (const std::invalid_argument &) {
+        if (result_.derivation_partial)
+            throw partial_derivation_failure();
+        throw;
+    } catch (const SeedBudgetError &) {
+        if (result_.derivation_partial)
+            throw partial_derivation_failure();
+        throw;
+    }
     enable_path_cache();
+
+    if (result_.derivation_partial) {
+        // The permitted set was derived from part of the seed (D3): the seed's time budget is
+        // spent, so the walk is the seed itself — every root censored by the time budget at
+        // depth 0, as the deadline censors a level (complete_to_bp 0) — with no step taken,
+        // which under trace could not be taken anyway (no coordinates were carried)
+        depth_ = 0;
+        for (const ArmState &arm : arms_) {
+            if (!arm.frontier.empty()) {
+                note_stop(arm, &arm.frontier.front(), ResourceStop::TIME, elapsed_ms());
+                break;
+            }
+        }
+        cap_demand_ = elapsed_ms();
+        for (ArmState &arm : arms_) {
+            stop_frontier(arm, EndReason::TIME_BUDGET);
+        }
+        seed_stopped_ = true;
+    }
 
     uint64_t depth = 0;
     while (!seed_stopped_) {
@@ -5930,6 +6188,8 @@ SeedResult Walker::run() {
     account.largest_charge = largest_charge_;
     account.decode_charged = decode_charged_;
     account.row_diff_uncounted = budgeted_ && !decode_charged_ && oracle_.row_diff();
+    account.coordinates = coord_account_;
+    result_.coordinates_recorded = record_coords_;
     // before the arms' results move into the seed's
     write_meter();
     if (annotate_) {
@@ -6051,9 +6311,25 @@ std::vector<double> switch_reach(const LabelChangeCost &cost, size_t n, size_t s
 }
 
 
+const char* coordinates_reason(const Strategy &st, bool index_has_coordinates) {
+    if (!st.coordinates)
+        return nullptr;
+    if (!index_has_coordinates)
+        return kCoordinatesNoIndex;
+    // k-mer presence (annotate mode included: it refuses trace): a stretch can be stitched
+    // from several occurrences, so no single position is honest (§18.1)
+    if (st.support != Support::TRACE || st.label_mode == LabelMode::ANNOTATE)
+        return kCoordinatesSupportKmer;
+    return nullptr;
+}
+
 void validate_strategy(const Strategy &st, const LabelChangeCost &cost) {
     if (st.loss_budget < 0)
         throw std::invalid_argument("Negative loss budget");
+    // a list of no occurrence would state every occurrence as cut; with coordinates under
+    // support kmer (or annotate) the knob is inert and the result says why (§18.1), not refused
+    if (!st.max_coordinate_occurrences)
+        throw std::invalid_argument("output.max_coordinate_occurrences must be at least 1");
     if (st.min_successor_fraction < 0 || st.min_successor_fraction > 1)
         throw std::invalid_argument("min_successor_fraction must be in [0, 1]");
     if (!st.max_live_paths)

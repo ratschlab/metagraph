@@ -839,12 +839,13 @@ int run_server(Config *config) {
         };
         control.on_written = [&](int status, std::optional<size_t> bytes) {
             // the longest single annotation read of any /traverse (deadline_check), and the
-            // slowest build rate measured on its large seeds (the delivery reserve)
+            // slowest build rate and smallest account per text byte measured on its large seeds
+            // (the delivery reserve; the latter not from an output with coordinates)
             attempts.note_uninterruptible(attempt->max_read_ms());
             attempts.note_uninterruptible(attempt->max_delivery_gap_ms());
             attempts.note_build_rate(attempt->own_build_mbps());
             attempts.note_account_per_text_byte(attempt->delivery_detail(),
-                                                attempt->own_account_per_text_byte());
+                                                attempt->pooled_account_per_text_byte());
             attempts.note_stop_latency(attempt->own_stop_ms());
             if (!registered) {
                 if (!status) {
