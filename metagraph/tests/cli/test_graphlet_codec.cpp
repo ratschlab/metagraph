@@ -716,10 +716,13 @@ struct Reader {
                     EXPECT_NE(unite(s.via), s.entry_set) << "G.entry explicit where * holds";
                 }
             }
-            if (s.partition != "*")
+            if (s.partition != "*") {
                 EXPECT_FALSE(annotate || s.parents.size() < 2) << "G.partition explicit where * holds";
+            }
             s.total = s.entry_total == "*" ? s.entry_set.size() : u(s.entry_total);
-            if (s.entry_total != "*") EXPECT_NE(s.total, s.entry_set.size());
+            if (s.entry_total != "*") {
+                EXPECT_NE(s.total, s.entry_set.size());
+            }
             std::vector<uint64_t> previous = s.entry_set;
             for (const auto &p : s.presence) {
                 std::vector<uint64_t> set = decode_setexpr(p[4], &previous);
@@ -844,7 +847,9 @@ struct Reader {
             splits += s.split != "*";
             merges += s.parents.size() > 1;
             bases += s.length;
-            if (!sequences_absent) EXPECT_EQ(s.length, bases_of(s).size());
+            if (!sequences_absent) {
+                EXPECT_EQ(s.length, bases_of(s).size());
+            }
         }
         EXPECT_EQ(u(a[14]), segs.size());
         EXPECT_EQ(u(a[15]), arm.runs.size());
@@ -1657,7 +1662,9 @@ TEST(Graphlet, IndexIdentity) {
         }
         return write(name, compact(m));
     };
-    for (const std::string &other : { "a2.annodbg", "other.dbg", "g2.orhashdbg" }) {
+    // const char *: a std::string reference would bind to a temporary per element
+    // (GCC's -Wrange-loop-construct)
+    for (const char *other : { "a2.annodbg", "other.dbg", "g2.orhashdbg" }) {
         try {
             index_manifest_fingerprint(listing("m9.json", { other }), { graph, anno });
             ADD_FAILURE() << "a manifest listing " << other << " was accepted";
@@ -2934,18 +2941,21 @@ TEST(Graphlet, DeliveryCostsBoundTheOutput) {
                 // the records whose floats the model widens keep to the widths it assumes
                 const uint64_t extra = width - kMgtFloatWidth;
                 for (const std::string &line : split_on(text.substr(0, text.size() - 1), '\n')) {
-                    if (line[0] == 'R')
+                    if (line[0] == 'R') {
                         EXPECT_LE(line.size(), 172 + 3 * extra) << what << ": " << line.substr(0, 80);
-                    if (line.rfind("E ", 0) == 0 && line.find(" s ") != std::string::npos)
+                    }
+                    if (line.rfind("E ", 0) == 0 && line.find(" s ") != std::string::npos) {
                         EXPECT_LE(line.size(), 64 + extra) << what << ": " << line.substr(0, 80);
+                    }
                     if (line[0] == 'A' || line[0] == 'Q' || line[0] == 'K') {
                         for (const std::string &field : split_on(line, ' ')) {
                             for (const std::string &part : split_on(field, ',')) {
                                 const size_t colon = part.find(':');
                                 const std::string number = colon == std::string::npos
                                     ? part : part.substr(colon + 1);
-                                if (number.size() > 24 && number.find_first_not_of("0123456789.") == std::string::npos)
+                                if (number.size() > 24 && number.find_first_not_of("0123456789.") == std::string::npos) {
                                     EXPECT_LE(number.size(), width) << what << ": " << line.substr(0, 80);
+                                }
                             }
                         }
                     }
@@ -2969,8 +2979,9 @@ TEST(Graphlet, DeliveryCostsBoundTheOutput) {
             // allows, which most of its floats need not reach (not a useful model there,
             // only a bound)
             const uint64_t factor = std::string(detail) == "graphlet" ? 10 : 6;
-            if (width == kMgtFloatWidth)
+            if (width == kMgtFloatWidth) {
                 EXPECT_LE(model, factor * actual) << what << ": the model is not useful";
+            }
             checked++;
             names += c.name.rfind("names", 0) == 0;
         }
@@ -4839,8 +4850,9 @@ TEST(GraphletStage3Review, ExcessAtAStopIsObserved) {
                 continue;
             stops++;
             const ResourceStop &q = *r.resource_stop;
-            if (q.cause == ResourceStop::LEVEL_LISTS)
+            if (q.cause == ResourceStop::LEVEL_LISTS) {
                 EXPECT_STREQ("traversal", q.phase) << c.name << " " << memory;
+            }
             if (q.used > q.limit) {
                 over++;
                 EXPECT_GE(static_cast<double>(r.account.soft_overshoot), q.used - q.limit)
@@ -5244,8 +5256,9 @@ TEST(GraphletStage2Recheck, FloatWidthBoundsEveryFloat) {
                 const double lo = std::log10(c), hi = std::log10(budget + c);
                 const double x = std::pow(10.0, lo + (hi - lo) * (gen() % 100000) / 100000.0)
                                * (1 + 1e-16 * (gen() % 7));
-                if (x >= c && x <= budget + c)
+                if (x >= c && x <= budget + c) {
                     EXPECT_GE(width, encode_float(x).size()) << x;
+                }
             }
         }
     }
@@ -5256,8 +5269,9 @@ TEST(GraphletStage2Recheck, FloatWidthBoundsEveryFloat) {
         EXPECT_GE(width, encode_float(t).size()) << t;
         // an elapsed time at least the budget, measured in ns ticks
         for (double elapsed : { t * 1.0000000000000002, t * 1.2345678901234567 }) {
-            if (elapsed < 1e17)
+            if (elapsed < 1e17) {
                 EXPECT_GE(width, encode_float(elapsed).size()) << elapsed;
+            }
         }
     }
     // a usual request: 24, the model's widths unchanged
@@ -5340,10 +5354,12 @@ TEST(GraphletStage2Recheck, LowerBoundsAreNoPromiseAndFitTheirWidths) {
     // annotate roots whose labels do not fit (depth-0 lower bounds), over budgets
     const NamesCase c = names_case();
     for (uint64_t mb : { 1, 2, 3, 5 }) {
-        for (const std::string &direction : { "right", "both" }) {
+        // const char *: a std::string reference would bind to a temporary per element
+        // (GCC's -Wrange-loop-construct)
+        for (const char *direction : { "right", "both" }) {
             const std::string seed = c.P.substr(c.v + 1 - 9, 20);
             inspect(names_request(c, seed, direction, mb, 1000)["results"][0],
-                    "names " + direction + " " + std::to_string(mb));
+                    std::string("names ") + direction + " " + std::to_string(mb));
         }
     }
     // level reads and level lists on row-diff budget cases (arm-level lower bounds)
@@ -5703,8 +5719,9 @@ TEST(GraphletAttempt, UnstartedSeedsAreFailedWithTheStop) {
             EXPECT_EQ("attempt_id", r["limitations"][0]["knob"].asString()) << what;
             // every response under a memory budget states it (§7.0)
             EXPECT_EQ(budgeted ? 2u : 1u, r["limitations"].size()) << what;
-            if (budgeted)
+            if (budgeted) {
                 EXPECT_EQ("memory_bound_soft", r["limitations"][1]["kind"].asString()) << what;
+            }
         }
         const Json::Value &u = out["usage"];
         EXPECT_EQ("cancelled", u["reason"].asString());

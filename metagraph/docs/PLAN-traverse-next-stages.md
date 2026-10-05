@@ -3,6 +3,13 @@
 **Date:** 2026-10-04. **Base:** f667d775 (feature_level 4, deployed on staging) plus the level-5 fix batch
 (R1–R10, P7–P10), which is still running and must be committed first.
 **Status:** plan only. No repository file was changed.
+**Revised 2026-10-05** after the external review of levels 4–5 (pinned at dcc0cebd), its plan correction —
+plan revisions for you to confirm, no code (DESIGN §25): §2.2 revision 2 (reconstruction work: the lazy-shift
+argument withdrawn, diff-first reconstruction with its merge work charged, the merge-weighted charge as the
+fallback, new tests), the price in revision 1, the 64-column crossover marked provisional (the sweep's
+dimensions), decision X-R3 and a new question 3c-N10; `max_uninterruptible_ms` stays null after level 8 (3c-N5)
+in every text of this plan; the DESIGN numbering of §3.5 moves up by one (the review's notes are §25). Each place
+is marked *(revised after the review of levels 4–5)*.
 
 **Sources**
 - The three stage plans:
@@ -211,7 +218,7 @@ Invariants that every stage keeps:
 | C4 | Real-index tests: `MiniRefSeq.CoordinatesAgainstTheSourceRecords`, now with switch cells (cost 0.5 and 1, loss_budget 2, limit 0 and 2; `next/coords-plan/swreq_*`), and the path-cache equality test; M1 at the cells' stop points; M2 on the dedicated fixture; gcc:12 | Committed with the measurement table and the D4 and D5 data | 5–6.5 |
 | C5 | Python library (in parallel with C3–C4 once C2 is frozen): `coords.py`, subclasses, parser, ops with `with_coords` gating, export, client auto-on, cap stripping, MCP, stage-L charges | Golden gate unchanged; full Python suite green | 8–9 |
 | C6 | Real suite (`trace_coords`, repeat seeds, column cell, positional oracle, conformance, offline snapshots), CLI fixtures, `bench_traverse.py --coordinates` | Committed | 3–4 |
-| C7 | Docs: SPEC §5, §7.0, §7.1, §7.5 (freeze sentence), §10.3, §11.3, §13; DESIGN §14.1 amendment, §25 and v5.8; graphlets.rst | Committed | 2–2.5 |
+| C7 | Docs: SPEC §5, §7.0, §7.1, §7.5 (freeze sentence), §10.3, §11.3, §13; DESIGN §14.1 amendment, §26 and v5.8; graphlets.rst | Committed | 2–2.5 |
 | C8 | Adversarial review with three lenses (guarantees and byte identity; budgets, reserve and determinism; library, stage L and MCP), fixes, final verify | Ready for your review request | 4–5 |
 
 **Tests and verification**
@@ -285,6 +292,12 @@ Invariants that every stage keeps:
 - A projection cache sits next to the level-4 full-row cache.
 - A seed in selected mode never touches the full-row cache.
 - The crossover is deterministic: 64 distinct columns, set by `--traverse-selected-max-columns` (R4). It never depends on timing or cache state.
+  *(Revised after the review of levels 4–5:)* 64 is **provisional**, a starting point and not a threshold. M1's
+  sweep decides the default over the dimensions that move the crossover — selected-coordinate density (the
+  windowed coordinates per selected column), headers per column, path length (short, about D, beyond D) and
+  cold and full caches — and whatever rule it picks stays a deterministic function of the request and the index
+  (never of timing or cache state). The full-decoder escape hatch stays: `decode: "full"` per request, and
+  `--traverse-selected-max-columns 0` per server.
 - A new knob `strategy.annotation.decode`: auto | full | selected, echoed only when given. "selected" where unsupported is a 400.
 - `access_path` is unchanged (R2). The mode goes into timing and capabilities.
 - The price goes into the existing `RowCost` fields, so admission code stays unchanged.
@@ -296,14 +309,53 @@ Invariants that every stage keeps:
      - 1 per rank of the canonical pruned descent, **counted only below a nonzero root rank** (an empty stored row costs 0, as in the full price);
      - 1 per stored selected tuple;
      - 1 per stored coordinate in the canonical window, cancelled ones included.
+   - Plus the reconstruction's merge term *(revised after the review of levels 4–5; revision 2)*: per selected
+     column, Δ_w × ⌈log2 k⌉ — Δ_w the coordinates of the path's diffs in the canonical window (down to the first
+     clear marker), k the number of those diffs with a nonempty windowed list (the term is 0 when k ≤ 1). Δ_w is
+     a count of coordinates, not the slack D of revision 3.
    - Plus a bounded deep term.
    - A measured price-ratio table (selected/full) is published for mini, UHGG, SRA and the wide fixture.
    - The claim that "budgeted requests get a lower price" is dropped. It is replaced by an acceptance criterion: no index class loses more than 10% median budgeted reach against level 6.
-2. **Shift work is bounded.**
-   - The decoder shifts lazily. Values stay in the anchor's frame with a per-row offset, are trimmed by binary search, and are merged only at non-empty diffs.
-   - Per-step work is then bounded by the windowed stored coordinates that the price already counts.
-   - Test: a long path of empty diffs under a large anchor tuple stays within the stated bound.
-   - Fallback if lazy shifting proves impractical: a second path aggregate Σ canon(x) × depth(x), added to the price.
+2. **Reconstruction work is bounded, and charged** *(revised after the review of levels 4–5; replaces "shift work is bounded")*.
+   - **Withdrawn:** "the decoder shifts lazily, so per-step work is bounded by the windowed stored coordinates the
+     price already counts". Lazy shifting avoids re-adjusting inherited coordinates; it does not avoid re-scanning
+     them. An ordinary merge at each nonempty diff copies the whole inherited window into the next row. The
+     reviewer's case: a 256-row path, an anchor with 100,000 selected in-window coordinates and 255 nonempty
+     singleton diffs — vector merges emit about 25.5 million coordinates (255 × 100,000) while the price counts
+     100,255. The path is below the deep-term threshold D, and the empty-diff test misses it (an empty diff
+     merges nothing).
+   - **Adopted: diff-first reconstruction.** Composition is linear until a clear marker: row(r₀) = Sᴸ⁻¹(anchor)
+     ⊕ ⊕ᵢ Sⁱ⁺¹(dᵢ) column by column (S the shift, ⊕ the symmetric difference of `add_diff`), and a clear marker
+     at row rᵢ cuts the column there (only the diffs above it count, not the anchor). So, per selected column,
+     the decoder collects the windowed sublists of the path's diffs — from the reconstructed row down to the
+     first clear marker, or to the anchor — as views with an integer offset (no copy, no shift), merges the
+     diffs' lists among themselves first (balanced pairwise, a pair of equal values cancelling: ⊕ is parity),
+     and only then merges that result **once** with the anchor's windowed list (when no clear marker cut the
+     column). Work per reconstructed row and column: at most |A_w| + Δ_w × (1 + ⌈log2 k⌉) coordinates, Δ_w and k
+     as in revision 1 (the windowed diff coordinates collected and their nonempty lists). In the reviewer's case
+     Δ_w = k = 255 and ⌈log2 255⌉ = 8: the merge term is 255 × 8 = 2,040, and the work bound and the price's
+     coordinate terms are both 100,000 + 255 + 2,040 = 102,295 (its per-row, rank and tuple terms come on top, as
+     the 100,255 above counts coordinates only).
+   - **Charged:** the price above adds Δ_w × ⌈log2 k⌉ to the coordinates it already counts (|A_w| + Δ_w). Both are
+     known from the stored sizes the trace reads before anything is reconstructed, so admission is unchanged
+     in shape; the term does not depend on the cache or the batch (a row is priced by its whole path, as at level 4).
+   - **Cuts and the cache.** A path cut at a cached projection P merges P once with the diffs above it; |P_w| ≤
+     |A_w| + Δ_w below the cut, so the work stays within the uncut price. Rows materialised only for the
+     projection cache (its retention rule) are the cache's physical work, outside the price as at level 4; each
+     costs at most one path price, and at most n × (successors + 3) + s / checkpoint of them are kept per call
+     (the rule's bound). Stated in the capabilities' `selected_decode.price` and `decode_cache.rule` texts.
+   - **Fallback, if diff-first proves impractical:** a deterministic merge-weighted charge — per nonempty windowed
+     diff dᵢ on the path, |A_w| + Σ_{j deeper than i, above the first clear} |d_j,w| + |dᵢ,w|, the work of ordinary
+     merges — computed from the stored sizes, cache- and batch-independent, and large on such paths (≈ 25.5 M
+     in the reviewer's case), which is then the price stated. Choosing it is decision 3c-N10.
+   - **Tests** (3c.2): `LongEmptyPathWorkWithinPrice` (kept) and `SparseNonemptyDiffsWithinPrice`: paths of
+     64 and 255 rows (below D = 256) and of 300 and 600 rows (above D); anchor windows of 10³ and 10⁵
+     coordinates; nonempty singleton diffs at every row, every fourth row, clustered next to the anchor and next to
+     the reconstructed row; clear markers near the top, the middle and the anchor; the projection cache off, at
+     1 MiB and at 128 MiB, cold and warm (paths cut at cached projections at several depths); batches of 1, 7
+     and 64 rows. Each checks the hits against the full decode, the coordinates the decoder scans (an
+     instrumented counter) ≤ the price with the cache off and ≤ the price plus the stated cache share with it on,
+     and the price identical across every cache and batch variation.
 3. **The slack D is not a path bound.**
    - The builder bounds row-diff paths only to about twice `max_path_length`.
    - Proposal: D = 256, stated in capabilities as a slack, not a path bound.
@@ -361,9 +413,9 @@ Invariants that every stage keeps:
 |---|---|---|---|
 | 3c.0 | Rebase onto level 6; read R6's header-range outcome and R10's final cache API; add permitted-range filtering for full reads if R6 did not; measure max path lengths | Byte identity; `coords_mapped` lower (timing only); path-length table | 2–3 |
 | 3c.1 | Library primitives, not used yet: `BRWT::prune` and `probe`, `ColumnMajor::probe`, `TupleCSCMatrix::tuple_extent` and `column_values`, `Selection` | `BRWTProbeColumns`, `ColumnMajorProbeColumns` and `TupleRowDiffWindow` pass; no behaviour change | 5–6 |
-| 3c.2 | Decoder, not wired: trace, dmax, valid stops, σ, lazy shift, reconstruction, price (X-R3), bounded deep term, demand, refusal, projection cache with the shared bound, `admit_as_uncached` mirror, static_asserts | `RowDiffSelectedDecode.*` green, including the denial sweep, jemalloc, the long-empty-path bound and batch/cache independence; mini_refseq exhaustive check passes at library level (expected 966,495 checks, 0 mismatches) | 14–17 |
+| 3c.2 | Decoder, not wired: trace, dmax, valid stops, σ, lazy shift, diff-first reconstruction, price (X-R3, with the merge term), bounded deep term, demand, refusal, projection cache with the shared bound, `admit_as_uncached` mirror, static_asserts | `RowDiffSelectedDecode.*` green, including the denial sweep, jemalloc, the long-empty-path bound, the sparse nonempty-diff bound below and above D (with cache variations) and batch/cache independence; mini_refseq exhaustive check passes at library level (expected 966,495 checks, 0 mismatches) | 14–17 |
 | 3c.3 | Wiring: LabelOracle and LabelQuery modes, walker, timing per query, stop actions with the lever rule, knob and flag, probe-only capabilities, `Decode::FULL` at resolve.cpp, level 7 | `LabelOracleSelected`, `WalkerSelectedDecode`, `MiniRefSeqSelected.WalksIdentical` and `TestTraverseSelectedDecode` pass; identity run: ≥ 1,000 unbudgeted requests identical; budgeted differences only in the listed classes; opt-out tests | 10–12 |
-| 3c.4 | Docs (SPEC §6.8, §7.0, §8.2, §8.4, §10.3, §11.3, §13; DESIGN §26, v5.9), Python parity tests, bench `selected` suite | Python suite green; old baselines still read | 4–5 |
+| 3c.4 | Docs (SPEC §6.8, §7.0, §8.2, §8.4, §10.3, §11.3, §13; DESIGN §27, v5.9), Python parity tests, bench `selected` suite | Python suite green; old baselines still read | 4–5 |
 | 3c.6 | Measurements M1–M3 and the price table; adversarial review with four lenses (exactness; budgets and determinism; cache and R10; statements); fixes; gcc:12 | Ready for your review request | 10–12 |
 
 The synthetic index builds (WT-16S, WT-Ecoli, WT-long, each under 5 GB) take 3–6 h of wall time. They run in the background during 3c.1–3c.2, at low priority.
@@ -372,6 +424,7 @@ The synthetic index builds (WT-16S, WT-Ecoli, WT-long, each under 5 GB) take 3�
 - Unit and real-index tests as in the stage plan (`RowDiffSelectedDecode.*`, `TupleRowDiffWindow.*`, `LabelOracleSelected.*`, `MiniRefSeqSelected.*`, `WalkerSelectedDecode.*`), plus:
   - `ProjectionCacheSharesOneBound`;
   - `LongEmptyPathWorkWithinPrice`;
+  - `SparseNonemptyDiffsWithinPrice` (revision 2: below and above D, with cache variations);
   - `DeepTermBoundedByWholeTuples`;
   - `OptOutLeverMatchesLevel6` (decode full, max_columns 0, budgeted).
 - **The coordinates gate is part of 3c's gate:**
@@ -387,7 +440,7 @@ The synthetic index builds (WT-16S, WT-Ecoli, WT-long, each under 5 GB) take 3�
 
 | | Where | What |
 |---|---|---|
-| M1 | Synthetic wide tuple indexes | ms per row, selected vs full (alone, batch 64, in a walk; cache on and off); crossover sweep 1–1024 columns and 1/16/256 headers per column; demand vs jemalloc peak; price ratio |
+| M1 | Synthetic wide tuple indexes | ms per row, selected vs full (alone, batch 64, in a walk; cache on and off); crossover sweep 1–1024 columns × 1/16/256 headers per column × selected-coordinate density × path length (short, about D, beyond D) × cold and full cache *(revised after the review of levels 4–5)*; demand vs jemalloc peak; price ratio; scanned coordinates vs the price (revision 2) |
 | M2 | mini_refseq | Exhaustive correctness; ≤ 10% slower on narrow rows; price ratio |
 | M3 | Local UHGG and SRA | rd_direct byte identity and A/B/A elapsed; price ratio (decides 3c-N1 for binary indexes) |
 | M5 | Staging after deploy (you) | Warm named and trace walks on ec_rplJ, ec_23S_dV, pa_gyrB and ndm1 at ≥ 10× lower ms per row; first touch with page faults; `selected` suite; crossover probes |
@@ -409,7 +462,7 @@ The synthetic index builds (WT-16S, WT-Ecoli, WT-long, each under 5 GB) take 3�
 | 3 | high | The price can exceed level 5 on sparse-diff indexes | Revision 1; decision X-R3; ratio table; integration assertion limited to the wide fixture |
 | 4 | medium | `selected_decode` in every response breaks byte identity | Revision 4 |
 | 5 | medium | D = 128 is not a path bound; the deep term is unbounded | Revision 3; decision 3c-N9 |
-| 6 | medium | Shift work is not counted | Revision 2 |
+| 6 | medium | Shift work is not counted | Revision 2 (revised after the review of levels 4–5: merge work too) |
 | 7 | medium | D8 would reroute almost every full read | Separate increment in 3c-ii, behind its own flag, default off; `decode: "full"` stays on the level-6 path (decision 3c-N8) |
 | 8 | low-med | Cache bound is per member | Revision 6 |
 | 9 | low-med | Validation vs walk selections | Revision 7 (subset reuse rejected, reason given) |
@@ -459,7 +512,7 @@ The synthetic index builds (WT-16S, WT-Ecoli, WT-long, each under 5 GB) take 3�
 |---|---|---|---|
 | 3c.5a | INTERRUPTED at every site; polls in the decoders and in hit building; poll-ordinal sweep test across fetch, warm, recorder, derivation window and validation | No sweep point yields a DECODE or DEMAND refusal; the walk stops where a stop between chunks would; ops between polls ≤ 4096 on a wide fixture, hit building included; byte identity far from the deadline | 8–10 |
 | 3c.5b | D8 routing behind the flag; A/B/A on walks, annotate, budgets.derived, lookahead and batch, on UHGG, SRA, mini and the wide fixture | Flag-on is no slower than level 7 beyond noise, or it stays off and this is stated | 4–6 |
-| 3c.5c | `deadline_check` fields and text, docs (DESIGN §27, v5.10), review, verify, gcc:12 | Ready for your review request | 3–4 |
+| 3c.5c | `deadline_check` fields and text, docs (DESIGN §28, v5.10), review, verify, gcc:12 | Ready for your review request | 3–4 |
 
 **Measurements:**
 - local: ops between polls; A/B/A overhead;
@@ -643,7 +696,7 @@ The synthetic index builds (WT-16S, WT-Ecoli, WT-long, each under 5 GB) take 3�
 |---|---|---|---|
 | 3b.3 | Library formats (annotation code only), with polls, sweeps and the B3 measurement; in a worktree, may start during 3b.2 | Disassembly identity of the default decode functions; runtime ratio 0.98–1.02; jemalloc bounds on macOS and in Docker; gcc:12 | 13–17 |
 | 3b.4 | Integration: `reader_`, the `decode_charged_` rule (B4), budgeted DIRECT, statements, `column_coord` fixtures, new format builders and probes | Unbudgeted and work-only identity; budgeted diff classified; `work_stop` fixture identical | 9–12 |
-| 3b.5 | Capabilities, docs (DESIGN §29, v5.12), final gates | Ready for your review request | 3–5 |
+| 3b.5 | Capabilities, docs (DESIGN §30, v5.12), final gates | Ready for your review request | 3–5 |
 
 **Risks**
 - Fixture churn on `column_coord`.
@@ -685,7 +738,7 @@ The synthetic index builds (WT-16S, WT-Ecoli, WT-long, each under 5 GB) take 3�
 | R4 walk-order chunk grouping | Coordinates must be identical; add opt-in requests to its identity test | Selected reads inherit it; extend its decoder-count test | Budgeted DIRECT and /resolve first-occurrence order build on it |
 | R5 delivery checkpoints | Block built with `delivery_tick()` per element | 3c-ii rebases on its `deadline_check` text | /resolve responses use the same writer |
 | R6 efficiency audit | Add opt-in requests to its cache/batch/chunk matrix | Its header-range outcome decides 3c.0; matrix extended to selected reads | Its /resolve rewrite is the base of `ProfileBuilder`; matrix extended to budgeted /resolve and (c) |
-| R7 SPEC, DESIGN §24 | DESIGN §25 | §26 (core), §27 (checkpoints) | §28 (3b-1), §29 (3b-2) |
+| R7 SPEC, DESIGN §24 | DESIGN §26 | §27 (core), §28 (checkpoints) | §29 (3b-1), §30 (3b-2) |
 | R8 per-seed overrun record | Merge in the timing block of `seed_result_to_json` | Record gains the read mode; 3c-ii shortens pieces | /resolve timing reuses the longest-piece kinds |
 | R9(a) injected clock | — | Reused for checkpoint tests | Template for /resolve time-stop tests |
 | R9(b) per-detail ratios | The reserve split builds on `ratio_locked` and `set_delivery_detail` | — | — |
@@ -741,12 +794,14 @@ The synthetic index builds (WT-16S, WT-Ecoli, WT-long, each under 5 GB) take 3�
 - Strict sequencing removes conflicts. Each stage starts from the previous stage's commit.
 - **DESIGN numbering is fixed now:**
   - §24 (v5.7) fix batch;
-  - §25 (v5.8) coordinates;
-  - §26 (v5.9) 3c-core;
-  - §27 (v5.10) 3c-ii;
-  - §28 (v5.11) 3b-1;
-  - §29 (v5.12) 3b-2.
-- The stage plans each claimed §25. This numbering resolves that.
+  - §25 the review of levels 4–5 (notes, 2026-10-05; no version of its own: level 5 is kept);
+  - §26 (v5.8) coordinates;
+  - §27 (v5.9) 3c-core;
+  - §28 (v5.10) 3c-ii;
+  - §29 (v5.11) 3b-1;
+  - §30 (v5.12) 3b-2.
+- The stage plans each claimed §25. This numbering resolves that. *(Revised after the review of levels 4–5: its
+  notes took §25, so every stage's section moved up by one; the versions are unchanged.)*
 
 ### 3.6 Shared gates (they grow per stage)
 - The byte-identity harness (`p6/cpp/byteid3.py`) gains one mode per stage:
@@ -803,13 +858,14 @@ The IDs keep the stage plans' numbers. A missing number (3c-N2; 3b-N3, N4, N5, N
 | ID | Question | Options | Recommendation |
 |---|---|---|---|
 | 3c-N1 | Default on, and the knob | (a) on (`decode: auto`) with opt-outs per request and per server; (b) opt-in; (c) on for tuple row-diff, binary rd_direct opt-in until M3 passes | **(c)**, using the new knob `strategy.annotation.decode` |
-| 3c-N3 | Crossover | (a) R4 literal, 64 distinct columns; (b) also skip indexes with ≤ max_columns columns in total; (c) a cost estimate | **(a)**; tune from the sweep and staging data |
+| 3c-N3 | Crossover | (a) R4 literal, 64 distinct columns; (b) also skip indexes with ≤ max_columns columns in total; (c) a cost estimate | **(a)**, provisional; the M1 sweep (selected-coordinate density, headers per column, path length, cold and full cache) and staging data set the default; the rule stays deterministic and `decode: "full"` stays the escape hatch *(revised after the review of levels 4–5)* |
 | 3c-N4 | rd_direct echo | `access_path` stays "rows" | Yes |
-| 3c-N5 | What to advertise after checkpoints | (a) `max_uninterruptible_ms` null, `max_uninterruptible_ops` only for checkpointed paths; (b) a finite ms value per server; (c) a finite ms value with `--traverse-assume-resident` | **(a)**; (c) later if staging measures the tail (refseq33m is not resident) |
+| 3c-N5 | What to advertise after checkpoints | (a) `max_uninterruptible_ms` null, `max_uninterruptible_ops` only for checkpointed paths; (b) a finite ms value per server; (c) a finite ms value with `--traverse-assume-resident` | **(a)**: `max_uninterruptible_ms` stays null after level 8 — checkpoints bound index operations, while page faults and scheduling leave the time open; (c) later only if staging measures the tail (refseq33m is not resident). The review request's "so `max_uninterruptible_ms` can become finite" is superseded *(review of levels 4–5)* |
 | 3c-N6 | Projection cache in the seed phase without a memory budget | On / off | On; the benefit is conditional on equal selections |
 | 3c-N7 | /resolve explicit labels | (a) 3c keeps `Decode::FULL`, 3b-1 turns selected on; (b) 3c turns it on for unbudgeted /resolve | **(a)** |
 | 3c-N8 | Routing paced full reads through `decode_budgeted` | Separate flag, default off, enabled after A/B/A on every suite | Adopt |
 | 3c-N9 | Slack D | 128; 256; measured | **256**, stated as a slack, with the bounded deep term |
+| 3c-N10 | Reconstruction charge *(new, review of levels 4–5)* | (a) diff-first reconstruction, + Δ_w × ⌈log2 k⌉ in the price (per selected column: Δ_w the path's windowed diff coordinates down to the first clear marker, k its nonempty windowed diff lists; Δ_w is not the slack D; 2,040 in the reviewer's case, whose coordinate terms then total 102,295); (b) ordinary merges with the merge-weighted charge; (c) (a) for selected reads and, separately, the same question for full reads (level 4's full decode merges whole rows the same way; its price counts stored entries and never claimed to bound reconstruction work) | **(a)**, (b) only if (a) proves impractical; (c) is a separate decision after M1 measures full reads on such paths |
 
 **Stage 3b**
 
@@ -834,7 +890,7 @@ The IDs keep the stage plans' numbers. A missing number (3c-N2; 3b-N3, N4, N5, N
 | **X-18.2** | DESIGN §18.2: "Runs entered by a switch carry the new label's own coordinates from their start" | Amend: except when the label's own lineage is still live; such runs are lower bounds, marked per C-N2 | The walker keeps only continuing chains there. Making it exact costs extra tracking (C-N2 b) | Amend, with the stated exception |
 | **X-C8** | C8: the library requests coordinates for trace when supported | Under a request memory budget, auto-on only if the D4 gate passes (depth at the stop within 10%); otherwise off, and the tool result says how to ask | A run's coordinate account is 4–20× the run's own; budgeted fetches would stop much shallower on taxid columns | Adopt the gate |
 | **X-C12** | C12 adds the K kind `coordinates`; DESIGN §14.1 and SPEC §7.5 freeze limitation kinds | Amend both texts: limitation kinds are an open `[a-z_]` token set that readers keep (precedent `memory_bound_soft`) | Keeps the frozen-contract text consistent with C12; no wire change | Adopt |
-| **X-R3** | R3: 8 per dependency row, 1 per BRWT probe, 1 per selected coordinate | Probes counted only below a nonzero root rank; tuple lookups counted; selected coordinates = stored coordinates in the canonical window, cancelled ones included; a bounded deep term; lazy shifting so the price bounds the work | R3 taken literally prices selected reads above full reads on sparse-diff indexes. The review asks to count examined, shifted and cancelled coordinates | Adopt, and publish the measured ratio table |
+| **X-R3** | R3: 8 per dependency row, 1 per BRWT probe, 1 per selected coordinate | Probes counted only below a nonzero root rank; tuple lookups counted; selected coordinates = stored coordinates in the canonical window, cancelled ones included; a bounded deep term; ~~lazy shifting so the price bounds the work~~ diff-first reconstruction with its merge term (Δ_w × ⌈log2 k⌉ per selected column, Δ_w the path's windowed diff coordinates, k their nonempty lists; not the slack D) charged, or the merge-weighted charge (3c-N10) *(revised after the review of levels 4–5: lazy shifting does not bound repeated scans of inherited coordinates)* | R3 taken literally prices selected reads above full reads on sparse-diff indexes. The review asks to count examined, shifted and cancelled coordinates; the review of levels 4–5 showed 25.5 M coordinates merged under a price of 100,255 | Adopt, and publish the measured ratio table |
 | **X-B8a** | B8: /resolve fields "as proposed" | Add `clamped` (time budget only), `outcome.selection` and `resolved.work_units` (consumption on success); drop the planner's `discover.max_labels` clamp | Lets the ledger see consumption without a stop; keeps `--resolve-max-labels` to the scope you asked for | Adopt |
 | **X-B8b** | B8 work formula from the Oct-3 proposal (8 per k-mer, entries and coordinates, dependency rows, "1 per run update") | 8 per in-graph k-mer + entries + coordinates + dependency units (+ the X-R3 terms for selected explicit reads) + a selection reservation per qualifying run; every decoded row is charged in `used`, including rows past x | Traverse's stage-2 F3 rule (charge what is decoded); a deterministic upper bound | Adopt |
 | **X-B10** | B10: "an explicit `select.policy` that stops fails the request" (approved text: "a stop before an explicit interval's end fails the request") | Trigger as approved. Shape: (a) HTTP 200, prefix profile kept, `outcome.selection: "failed"`, no `selection`; (b) an error status | (a) keeps the useful prefix; (b) is the literal reading | **(a)** |

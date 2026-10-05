@@ -1643,7 +1643,10 @@ TYPED_TEST(WalkerTest, SwitchingChain) {
         check_invariants(ra, st);
         ASSERT_EQ(1u, count_events(ra, EventType::SWITCH));
         for (const auto &ev : ra.segments[0].events) {
-            if (ev.type == EventType::SWITCH) EXPECT_EQ(l2 + kK - 1, ev.at_bp);
+            // braced: EXPECT_* expands to an if/else (GCC's -Wdangling-else)
+            if (ev.type == EventType::SWITCH) {
+                EXPECT_EQ(l2 + kK - 1, ev.at_bp);
+            }
         }
         ASSERT_EQ(3u, ra.runs.size());
         EXPECT_EQ(l2 + kK - 1, ra.runs[2].from_bp);
@@ -2384,7 +2387,9 @@ TEST(WalkerCoord, TraceSupport) {
     LabelOracle oracle(*anno, &cth);
     ASSERT_TRUE(oracle.has_coordinates());
 
-    for (const std::string &label : { "acc1", "F" }) {
+    // const char *: a std::string reference would bind to a temporary per element
+    // (GCC's -Wrange-loop-construct)
+    for (const char *label : { "acc1", "F" }) {
         Seed seed;
         seed.sequence = M;
         seed.labels = { label };
@@ -4442,6 +4447,152 @@ TEST(WalkerDeadlineChunks, DerivationWindowIsPaced) {
 }
 
 
+// ---------------------------------------------------------------- the seed phase (review 6)
+
+namespace {
+
+// The reviewer's request of the review of levels 4-5, finding 3: |n| records of one column "F",
+// each the same sequence, under headers sharing a 1,024-character prefix
+struct ManyHeaders {
+    std::string seq = clean_block(20, 6006);
+    std::vector<std::string> names;
+    std::unique_ptr<AnnotatedDBG> anno;
+    std::unique_ptr<annot::CoordToHeader> cth;
+    explicit ManyHeaders(size_t n) {
+        const uint64_t m = seq.size() - kK + 1;
+        std::vector<uint64_t> starts(n);
+        for (size_t i = 0; i < n; ++i) {
+            starts[i] = i * m;
+            std::string tail = std::to_string(i);
+            names.push_back("H" + std::string(1024, 'x') + std::string(6 - tail.size(), '0')
+                            + tail);
+        }
+        anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                kK, std::vector<std::string>(n, seq), std::vector<std::string>(n, "F"),
+                DeBruijnGraph::BASIC, true, starts);
+        cth = std::make_unique<annot::CoordToHeader>(
+                std::vector<std::vector<std::string>>{ names },
+                std::vector<std::vector<uint64_t>>{ std::vector<uint64_t>(n, m) });
+    }
+};
+
+// an oracle on a virtual clock that only resolving a label name advances, by 1 ms a name
+std::unique_ptr<LabelOracle> slow_resolving(const ManyHeaders &f, const VirtualClock &clock) {
+    auto oracle = std::make_unique<LabelOracle>(*f.anno, f.cth.get());
+    oracle->pacer().test_clock_ms = clock.fn();
+    oracle->test_resolve_hook = [ms = clock.ms](const std::string &) { *ms += 1; };
+    return oracle;
+}
+
+} // namespace
+
+// Review of levels 4-5, finding 3: the deadline record covers the whole seed phase. The
+// reviewer's request named 2,500 headers sharing a 1,024-character prefix: a seed phase of 126
+// ms stated a longest piece of 0.297 ms, since resolving the names (3 ms) and their pairwise
+// duplicate check were no piece, nor anything between the reads and the k-mer mappings before
+// the first head. On a virtual clock that only resolving a name advances (1 ms a name), the
+// spans between the other pieces are "setup" pieces, each exactly its names' time: the seed
+// labels' resolution one, the extra labels' another (the validation's read lies between them,
+// so they are not one piece); seed_phase_ms covers the whole phase; and both are flushed when no
+// checkpoint is reached (radius 0) and when the seed fails (a duplicate name, refused after the
+// names before it were resolved)
+TEST(WalkerSeedPhase, SetupPiecesCoverTheSeedPhase) {
+    const size_t n = 2500;
+    const ManyHeaders f(n);
+    for (uint64_t radius : { 5, 0 }) {
+        VirtualClock clock;
+        auto oracle = slow_resolving(f, clock);
+        Seed seed;
+        seed.sequence = f.seq;
+        seed.labels = f.names;
+        Strategy st;
+        st.max_extension_bp = radius;
+        const SeedResult r = traverse_seed(*oracle, seed, st, LabelChangeCost::forbid());
+        EXPECT_EQ(n, r.num_seed_labels);
+        EXPECT_EQ("setup", std::string(r.deadline.longest.kind)) << radius;
+        EXPECT_EQ(double(n), r.deadline.longest.ms) << radius;
+        EXPECT_EQ(0u, r.deadline.longest.rows);
+        EXPECT_EQ(n / 1000., r.annotation_counters.seed_phase_seconds) << radius;
+        EXPECT_EQ(double(n), clock.now());
+    }
+    {
+        // 10 seed labels, then 20 extra labels: two setup pieces, the longer one stated
+        VirtualClock clock;
+        auto oracle = slow_resolving(f, clock);
+        Seed seed;
+        seed.sequence = f.seq;
+        seed.labels.assign(f.names.begin(), f.names.begin() + 10);
+        Strategy st;
+        st.extra.assign(f.names.begin() + 10, f.names.begin() + 30);
+        st.loss_budget = 1;
+        const SeedResult r = traverse_seed(*oracle, seed, st, LabelChangeCost::constant(0.5));
+        EXPECT_EQ(30u, r.label_dict.size());
+        EXPECT_EQ("setup", std::string(r.deadline.longest.kind));
+        EXPECT_EQ(20., r.deadline.longest.ms);
+        EXPECT_EQ(0.030, r.annotation_counters.seed_phase_seconds);
+    }
+    {
+        // a failed seed: its seed phase and its setup piece are stated all the same
+        VirtualClock clock;
+        auto oracle = slow_resolving(f, clock);
+        Seed seed;
+        seed.sequence = f.seq;
+        seed.labels = f.names;
+        seed.labels.push_back(f.names[0]);
+        try {
+            traverse_seed(*oracle, seed, Strategy(), LabelChangeCost::forbid());
+            ADD_FAILURE() << "a duplicate seed label was accepted";
+        } catch (const std::invalid_argument &e) {
+            EXPECT_EQ("Duplicate seed label '" + f.names[0] + "'", std::string(e.what()));
+        }
+        EXPECT_EQ(n / 1000., oracle->counters().seed_phase_seconds);
+        EXPECT_EQ("setup", std::string(oracle->pacer().longest.kind));
+        EXPECT_EQ(double(n), oracle->pacer().longest.ms);
+        EXPECT_FALSE(oracle->pacer().setup_open);
+    }
+}
+
+// The duplicate checks in hash sets (review of levels 4-5, finding 3) refuse what the pairwise
+// scans refused, the first one in the request's order and after resolving the names before it:
+// a duplicate seed name, an unknown name before a later duplicate, an extra label naming a kept
+// seed label's target or an earlier extra label's; a column and a header of that column are
+// different targets
+TEST(WalkerSeedPhase, DuplicateChecksRefuseAsBefore) {
+    const ManyHeaders f(4);
+    LabelOracle oracle(*f.anno, f.cth.get());
+    auto refusal = [&](std::vector<std::string> labels, std::vector<std::string> extra = {}) {
+        Seed seed;
+        seed.sequence = f.seq;
+        seed.labels = std::move(labels);
+        Strategy st;
+        st.extra = std::move(extra);
+        st.loss_budget = 1;
+        try {
+            traverse_seed(oracle, seed, st, LabelChangeCost::constant(0.5));
+        } catch (const std::invalid_argument &e) {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    const auto &h = f.names;
+    EXPECT_EQ("Duplicate seed label '" + h[0] + "'", refusal({ h[0], h[1], h[0] }));
+    EXPECT_EQ("Duplicate seed label '" + h[1] + "'", refusal({ h[0], h[1], h[1], h[0] }));
+    EXPECT_EQ("Label not found in the annotation: 'missing'",
+              refusal({ h[0], "missing", h[0] }));
+    EXPECT_EQ("Duplicate seed label '" + h[0] + "'", refusal({ h[0], h[0], "missing" }));
+    EXPECT_EQ("Extra label '" + h[1] + "' duplicates a seed label",
+              refusal({ h[0], h[1] }, { h[1] }));
+    EXPECT_EQ("Extra label '" + h[2] + "' duplicates a seed label",
+              refusal({ h[0] }, { h[2], h[3], h[2] }));
+    EXPECT_EQ("Label not found in the annotation: 'missing'",
+              refusal({ h[0] }, { "missing", h[0] }));
+    // the column F and its header h[1]: different targets, both kept
+    EXPECT_EQ("", refusal({ h[0] }, { "F", h[1] }));
+    EXPECT_EQ("", refusal({ "F" }, { h[0] }));
+    EXPECT_EQ("Extra label 'F' duplicates a seed label", refusal({ "F", h[0] }, { "F" }));
+}
+
+
 // ---------------------------------------------------------------- record coordinates (§18)
 
 namespace {
@@ -4780,8 +4931,9 @@ TEST(WalkerCoordinates, CapCutsAndStatesTheTotal) {
             }
         }
         // the account charges min(chains, cap) occurrences per list: a larger cap costs more
-        if (cap == 1)
+        if (cap == 1) {
             EXPECT_GT(r.account.coordinates, 0u);
+        }
     }
     // the C++ API refuses a cap of 0
     Strategy zero = trace_strategy();
@@ -5054,8 +5206,9 @@ TEST(WalkerCoordinates, MemoryStopNoDeeperWithCoordinates) {
         EXPECT_LE(x.complete_to_bp, y.complete_to_bp) << mb << " MiB";
         shallower += x.complete_to_bp < y.complete_to_bp;
         stopped += a.resource_stop.has_value();
-        if (a.resource_stop)
+        if (a.resource_stop) {
             EXPECT_EQ(ResourceStop::MEMORY, a.resource_stop->resource);
+        }
         check_coordinates(a, S, records, kK, std::to_string(mb) + " MiB");
         EXPECT_LE(a.account.memory_peak, on.max_memory_bytes);
     }

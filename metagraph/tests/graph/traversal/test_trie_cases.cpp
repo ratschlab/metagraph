@@ -865,8 +865,9 @@ TEST(TrieCasesCaps, SweepAgainstTheCompletenessGuarantee) {
                     if (want != got)
                         break;
                 }
-                if (arm.status != ArmResult::COMPLETE)
+                if (arm.status != ArmResult::COMPLETE) {
                     EXPECT_TRUE(arm.cap_trigger.has_value()) << what;
+                }
             }
             return t;
         };

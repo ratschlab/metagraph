@@ -3,7 +3,9 @@
 // states per row, its refusals, and its byte model against the allocator.
 #include <fstream>
 #include <map>
+#include <memory>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <sstream>
 
@@ -1143,6 +1145,144 @@ TEST(RowDiffPathCache, FlatTupleRowsRoundTrip) {
     stored.store(empty);
     stored.load(&back);
     EXPECT_TRUE(back.empty());
+}
+
+// the probe block of thread_allocated(), escaped so that the compiler cannot elide its
+// allocation (a new/delete pair whose memory is never read may be removed)
+char *volatile allocation_probe = nullptr;
+
+// What the calling thread allocated so far (jemalloc's thread.allocated), or nullopt where
+// jemalloc is not the process allocator (the counter does not move for a 1 MiB block)
+std::optional<uint64_t> thread_allocated() {
+#if USE_JEMALLOC
+    auto read = []() {
+        uint64_t allocated = 0;
+        size_t sz = sizeof(allocated);
+        return mallctl("thread.allocated", &allocated, &sz, nullptr, 0) ? 0 : allocated;
+    };
+    const uint64_t before = read();
+    {
+        std::unique_ptr<char[]> probe(new char[1 << 20]);
+        allocation_probe = probe.get();
+        if (read() < before + (1 << 20))
+            return std::nullopt;
+    }
+    allocation_probe = nullptr;
+    return read();
+#else
+    return std::nullopt;
+#endif
+}
+
+// Review of levels 4-5, finding 1: the cache admits a row before it copies it. The reviewer's
+// probe — a cache bounded at 1 KiB, its shared room 1 KiB too, given a row of 1,048,576
+// columns — allocated 4,210,688 bytes for a copy the cache then refused, its bytes, peak and
+// inserted rows all stating 0. Now a refused row is never copied: nothing is allocated (by
+// jemalloc's counters, where it is the allocator, also at the moment the cache reads its room,
+// where the probe measured), and the refusal is counted (rows_refused); the same for a tuple
+// row of 65,536 columns
+TEST(RowDiffPathCache, ARefusedRowIsNeverCopied) {
+    {
+        const SetBits full(1u << 20, 42);
+        RowDiffCache<SetBits> cache;
+        std::optional<uint64_t> at_room;
+        cache.set_bound(1024, [&]() {
+            at_room = thread_allocated();
+            return uint64_t(1024);
+        });
+        const std::optional<uint64_t> before = thread_allocated();
+        cache.insert(1, full);
+        const std::optional<uint64_t> after = thread_allocated();
+        EXPECT_EQ(0u, cache.bytes());
+        EXPECT_EQ(0u, cache.size());
+        EXPECT_EQ(0u, cache.peak_bytes);
+        EXPECT_EQ(0u, cache.rows_inserted);
+        EXPECT_EQ(0u, cache.bytes_inserted);
+        EXPECT_EQ(1u, cache.rows_refused);
+        EXPECT_FALSE(cache.find(1, false));
+        if (before && after && at_room) {
+            // the measurements' own 1 MiB probe blocks excluded: thread_allocated() adds one
+            // to the counter before it reads it
+            const uint64_t probes = uint64_t(1) << 20;
+            EXPECT_EQ(*before + 2 * probes, *after) << "the insert allocated "
+                                                    << *after - *before - 2 * probes << " B";
+            EXPECT_EQ(*before + probes, *at_room);
+            std::cerr << "refused row of 1,048,576 columns under a 1 KiB bound: "
+                      << *after - *before - 2 * probes << " B allocated" << std::endl;
+        } else {
+            std::cerr << "jemalloc is not the process allocator: the cache's counters only"
+                      << std::endl;
+        }
+    }
+    {
+        RowTuples full;
+        for (Column c = 0; c < (1u << 16); ++c) {
+            full.emplace_back(c, RowTuples::value_type::second_type{ 1, 2, 3 });
+        }
+        RowDiffCache<RowTuples> cache;
+        cache.set_bound(1024);
+        const std::optional<uint64_t> before = thread_allocated();
+        cache.insert(1, full);
+        const std::optional<uint64_t> after = thread_allocated();
+        EXPECT_EQ(0u, cache.bytes());
+        EXPECT_EQ(0u, cache.peak_bytes);
+        EXPECT_EQ(0u, cache.rows_inserted);
+        EXPECT_EQ(1u, cache.rows_refused);
+        // braced: gtest's EXPECT_* expands to an if/else, which GCC's -Wdangling-else rejects
+        if (before && after) {
+            EXPECT_EQ(*before + (uint64_t(1) << 20), *after);
+        }
+        // what a stored copy would hold is stated without making it
+        StoredRow<RowTuples> stored;
+        stored.store(full);
+        EXPECT_EQ(stored.bytes(), StoredRow<RowTuples>::bytes_of(full));
+    }
+}
+
+// ... and a kept row is copied after the evictions that make room for it: a cache holding two
+// rows of 1.5 MiB under a 4 MiB bound copied a third beside them (4.5 MiB held at once) before
+// it dropped the oldest; now the cache's heap never exceeds its bound during an insert (with
+// its tables), measured by jemalloc's peak where it is the allocator, and the peak it states
+// is what it held
+TEST(RowDiffPathCache, AKeptRowIsCopiedWithinTheBound) {
+    const uint64_t bound = uint64_t(4) << 20;
+    SetBits wide(((uint64_t(3) << 19) - 64) / sizeof(Column));
+    std::iota(wide.begin(), wide.end(), 0);
+    const uint64_t b = RowDiffCache<SetBits>::kEntryBytes + row_copy_bytes(wide);
+    ASSERT_LE(2 * b, bound);
+    ASSERT_GT(3 * b, bound);
+    RowDiffCache<SetBits> cache;
+    cache.set_bound(bound);
+    cache.insert(1, wide);
+    cache.insert(2, wide);
+    EXPECT_EQ(2 * b, cache.bytes());
+#if USE_JEMALLOC
+    size_t sz = sizeof(uint64_t);
+    const bool peak_known = !mallctl("thread.peak.reset", nullptr, nullptr, nullptr, 0);
+#else
+    const bool peak_known = false;
+#endif
+    const uint64_t held_before = cache.bytes();
+    // the third: the current generation (row 2) becomes the older one, row 1 is dropped
+    cache.insert(3, wide);
+    uint64_t peak = 0;
+#if USE_JEMALLOC
+    if (peak_known)
+        mallctl("thread.peak.read", &peak, &sz, nullptr, 0);
+#endif
+    EXPECT_EQ(2 * b, cache.bytes());
+    EXPECT_FALSE(cache.find(1, false));
+    EXPECT_EQ(3u, cache.rows_inserted);
+    EXPECT_EQ(0u, cache.rows_refused);
+    EXPECT_EQ(2 * b, cache.peak_bytes);
+    EXPECT_LE(cache.peak_bytes, bound);
+    if (peak_known && thread_allocated()) {
+        // what the cache held before the insert, and the most the insert added to it
+        EXPECT_LE(held_before + peak, bound) << "the insert added up to " << peak << " B";
+        EXPECT_LT(peak, b / 2);
+        std::cerr << "kept row of " << b << " B under a " << bound << " B bound holding "
+                  << held_before << " B: the insert added at most " << peak << " B" << std::endl;
+    }
 }
 
 } // namespace

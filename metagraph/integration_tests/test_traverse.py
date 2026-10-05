@@ -3780,11 +3780,12 @@ class TestTraverseAttempts(TestingBase):
                           'stop in its middle')
 
     class _Server:
-        def __init__(self, test, *flags, threads=4):
-            self.port = _free_port()
+        def __init__(self, test, *flags, threads=4, port=None):
+            # |port|: a restart of an endpoint (the port of a server that was stopped)
+            self.port = port or _free_port()
             self.url = f'http://127.0.0.1:{self.port}'
             self.log_path = f'{test.tempdir.name}/server-{self.port}.log'
-            self.log = open(self.log_path, 'w')
+            self.log = open(self.log_path, 'a')
             self.process = subprocess.Popen(
                 shlex.split(METAGRAPH) + ['server_query', '-i', test.graph, '-a', test.anno,
                                           '--port', str(self.port), '--address', '127.0.0.1',
@@ -4245,6 +4246,58 @@ class TestTraverseAttempts(TestingBase):
         self.assertEqual(1, res.returncode)
         self.assertEqual('instance_mismatch', json.loads(res.stdout)['state'])
 
+    def test_a_finished_state_is_replay_safe_only_when_pinned(self):
+        """Review of levels 4-5, finding 6 (the reviewer's finish-restart-replay probe): a
+        finished attempt's hold lives in its process. Requests finished with not_after_ms 60 s
+        ahead are refused when replayed to the same process after their retention (1 s, the last
+        1), pinned or not; after a restart of the same endpoint, before not_after_ms, the replay
+        sent without expect_server_instance runs again (200, the same work units as the first
+        time), which the release rule now states (a finished state is replay-safe only for a
+        pinned attempt), and the pinned one is refused, 409 instance_mismatch."""
+        flags = ('--traverse-attempt-retention-s', '1', '--traverse-attempt-retention', '1')
+        not_after = int(time.time() * 1000) + 60000
+        with self._Server(self, *flags) as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
+            instance = caps['server_instance']
+            for phrase in ("The hold is this process's, in memory: a restarted process (a new "
+                           "server_instance) holds none",
+                           'replay-safe only as stated next',
+                           'only for an attempt sent with expect_server_instance equal to this '
+                           'server_instance and with not_after_ms',
+                           'A finished state of an attempt sent without expect_server_instance '
+                           'assumes that no copy of the request reaches a restarted process'):
+                self.assertIn(phrase, caps['release_rule'])
+            self.assertIn('a delayed copy of a cancelled or finished request would otherwise run '
+                          'there', caps['instance'])
+            unpinned = self._request(1, radius=5, attempt_id='finished-unpinned',
+                                     not_after_ms=not_after)
+            pinned = self._request(1, radius=5, attempt_id='finished-pinned',
+                                   not_after_ms=not_after, expect_server_instance=instance)
+            first = server.post('traverse', unpinned)
+            self.assertEqual(200, first.status_code, first.text)
+            self.assertEqual(200, server.post('traverse', pinned).status_code)
+            time.sleep(1.1)
+            for req in (unpinned, pinned):
+                held = server.post('traverse', req)
+                self.assertEqual(409, held.status_code, held.text)
+                self.assertEqual('finished', held.json()['attempt']['state'])
+            port = server.port
+        with self._Server(self, *flags, port=port) as server:
+            restarted = requests.get(server.url + '/capabilities').json()['attempts'][
+                'server_instance']
+            self.assertNotEqual(instance, restarted)
+            replay = server.post('traverse', unpinned)
+            self.assertEqual(200, replay.status_code, replay.text)
+            self.assertEqual(restarted, replay.json()['usage']['server_instance'])
+            self.assertEqual(first.json()['usage']['work_units'],
+                             replay.json()['usage']['work_units'])
+            self.assertGreater(replay.json()['usage']['work_units'], 0)
+            refused = server.post('traverse', pinned)
+            self.assertEqual(409, refused.status_code, refused.text)
+            self.assertEqual(('instance_mismatch', instance, restarted),
+                             (refused.json()['state'], refused.json()['expect_server_instance'],
+                              refused.json()['server_instance']))
+
     def test_concurrent_attempts_with_cancels(self):
         """Sixteen attempts at once, half of them cancelled: each response and each state
         agree on what stopped it."""
@@ -4281,6 +4334,103 @@ class TestTraverseAttempts(TestingBase):
                     self.assertEqual('cancelled', usage['reason'], i)
                     result = ret.json()['results'][0]
                     self.assertEqual('cancelled', result['resource_stop']['resource'], i)
+
+
+class TestTraverseSeedPhase(TestingBase):
+    """Review of levels 4-5, finding 3 (the reviewer's deadline probe): a request naming
+    2,500 header labels that share a 1,024-character prefix, all on one 11-mer (k = 11), with
+    timing. The longest uninterruptible piece stated 0.297 ms on a warm server for a seed phase
+    of 126 ms: the pairwise duplicate check of the names (about 120 ms) and the resolution of
+    the names were no piece, nor anything else between the reads and k-mer mappings before the
+    first head. The seed phase is now cut into pieces at its reads and k-mer mappings, the spans
+    between them "setup" pieces, and the pieces cover seed_phase_ms: here (one 11-mer: two k-mer
+    mappings and a read or two of one row) fewer than 16 of them, so the longest is at least a
+    sixteenth of it (before: 0.297 ms of 126 ms, a 425th), and at least the names' resolution,
+    which runs inside one setup span. The duplicate check is a hash set."""
+
+    N = 2500
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tempdir.name
+        rng = random.Random(41)
+        cls.seq = ''.join(rng.choice('ACGT') for _ in range(11))
+        cls.names = ['H' + 'x' * 1024 + f'{i:06d}' for i in range(cls.N)]
+        fa = d + '/x.fa'
+        with open(fa, 'w') as f:
+            f.write(''.join(f'>{name}\n{cls.seq}\n' for name in cls.names))
+        for cmd in (f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 -o {d}/graph {fa}',
+                    f'{METAGRAPH} annotate -p 1 -i {d}/graph.dbg --anno-filename --anno-type '
+                    f'column --coordinates -o {d}/ann {fa}',
+                    f'{METAGRAPH} transform_anno -p 1 --anno-type column_coord --coordinates '
+                    f'-o {d}/ann {d}/ann.column.annodbg',
+                    f'{METAGRAPH} annotate -p 1 -i {d}/graph.dbg --anno-filename '
+                    f'--index-header-coords -o {d}/ann {fa}'):
+            res = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert res.returncode == 0, res.stderr.decode()
+        cls.graph = d + '/graph.dbg'
+        cls.anno = d + '/ann.column_coord.annodbg'
+
+    def _request(self, labels):
+        return {'seeds': [{'sequence': self.seq, 'labels': labels}],
+                'strategy': {'direction': 'right',
+                             'bounds': {'max_extension_bp': 1, 'time_budget_ms': 1},
+                             'output': {'detail': 'summary', 'timing': True}}}
+
+    def _check_seed_phase(self, out, where):
+        (result,) = out['results']
+        self.assertEqual(self.N, result['seed']['labels_supporting_total'], where)
+        t = result['timing']
+        piece = t['deadline']['longest_piece']
+        # every span of the seed phase is a piece: fewer than 16 cover it
+        self.assertGreaterEqual(piece['ms'] * 16 * 1.001 + 0.001, t['seed_phase_ms'],
+                                f'{where}: {piece} for {t}')
+        # the names are resolved inside one setup span
+        self.assertGreaterEqual(piece['ms'] * 1.001 + 0.001, t['label_resolve_ms'],
+                                f'{where}: {piece} for {t}')
+        return t
+
+    def test_the_longest_piece_covers_the_seed_phase(self):
+        path = self.tempdir.name + '/req.json'
+        with open(path, 'w') as f:
+            json.dump(self._request(self.names), f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '--json', '-i', self.graph,
+                                                       '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        cli = self._check_seed_phase(json.loads(res.stdout), 'CLI')
+        port = _free_port()
+        log = open(f'{self.tempdir.name}/server-{port}.log', 'w')
+        server = subprocess.Popen(
+            shlex.split(METAGRAPH) + ['server_query', '-i', self.graph, '-a', self.anno,
+                                      '--address', '127.0.0.1', '--port', str(port), '-p', '4'],
+            stdout=log, stderr=subprocess.STDOUT)
+        url = f'http://127.0.0.1:{port}'
+        try:
+            for _ in range(600):
+                try:
+                    if requests.get(url + '/traverse/capabilities', timeout=2).ok:
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+            # warm (one name, the reviewer's first request), then every name
+            warm = requests.post(url + '/traverse', data=json.dumps(self._request(self.names[-1:])))
+            self.assertEqual(200, warm.status_code, warm.text)
+            ret = requests.post(url + '/traverse', data=json.dumps(self._request(self.names)))
+            self.assertEqual(200, ret.status_code, ret.text)
+            served = self._check_seed_phase(ret.json(), 'server')
+        finally:
+            server.kill()
+            server.wait()
+            log.close()
+        # stated for the record (the reviewer's warm server: seed phase 126.37 ms, longest piece
+        # 0.297 ms)
+        for where, t in (('CLI', cli), ('server', served)):
+            print(f"{where}: seed_phase_ms {t['seed_phase_ms']:.3f}, label_resolve_ms "
+                  f"{t['label_resolve_ms']:.3f}, longest_piece {t['deadline']['longest_piece']}",
+                  file=sys.stderr)
 
 
 if __name__ == '__main__':

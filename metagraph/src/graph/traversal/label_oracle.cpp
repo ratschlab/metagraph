@@ -273,6 +273,8 @@ uint64_t LabelOracle::num_kmers_in_sequence(Column column, uint64_t seq_id) cons
 }
 
 LabelRef LabelOracle::resolve_label(const std::string &name) const {
+    if (test_resolve_hook)
+        test_resolve_hook(name);
     if (auto column = find_column(name)) {
         LabelRef ref;
         ref.kind = LabelKind::COLUMN;
@@ -320,8 +322,26 @@ size_t DecodePacer::next(size_t remaining, double ms_left, size_t previous,
 }
 
 void DecodePacer::note_piece(const char *kind, double ms, uint64_t rows, uint64_t coordinates) {
+    if (setup_open) {
+        // the piece began |ms| before now: the seed phase's processing since the previous piece
+        // ended is a setup piece of its own, and the next one starts where this piece ends
+        const double now = now_ms();
+        const double setup_ms = (now - (ms > 0 ? ms : 0)) - setup_since_ms;
+        if (setup_ms > longest.ms)
+            longest = UninterruptiblePiece{ setup_ms, "setup", 0, 0 };
+        setup_since_ms = now;
+    }
     if (ms > longest.ms)
         longest = UninterruptiblePiece{ ms, kind, rows, coordinates };
+}
+
+void DecodePacer::close_setup(double until_ms) {
+    if (!setup_open)
+        return;
+    setup_open = false;
+    const double setup_ms = until_ms - setup_since_ms;
+    if (setup_ms > longest.ms)
+        longest = UninterruptiblePiece{ setup_ms, "setup", 0, 0 };
 }
 
 void DecodePacer::record(size_t rows, double ms, const char *kind, uint64_t coordinates) {

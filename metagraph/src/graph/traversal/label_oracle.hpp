@@ -62,9 +62,13 @@ namespace traversal {
  * read in one piece), "chunk" (a chunk of a split read), "rest" (the piece that ended a split
  * read), "kmer_mapping" (the seed's k-mers mapped to nodes and keys), "coord_mapping" (a derived
  * seed's k-mer whose coordinates were mapped to headers), "derivation_step" (a derived seed's
- * k-mer otherwise), "head" (the walk between two readings of the clock, reads excluded) and
- * "finalisation" (from the walk's end or stop to its result) — with its rows and the
- * coordinates mapped to headers in it.
+ * k-mer otherwise), "head" (the walk between two readings of the clock, reads excluded; the
+ * last one ends at the walk's stop or end), "setup" (the seed phase's own processing between
+ * its other pieces: validation, resolving label names and their duplicate check, the extra
+ * labels, the depth-0 state — everything up to the walk's first checkpoint that no other piece
+ * covers) and "finalisation" (from the walk's end or stop to its result) — with its rows and
+ * the coordinates mapped to headers in it. The pieces cover the seed's time from its start to
+ * its result (a read inside a head is a piece of its own, which the head excludes).
  */
 struct UninterruptiblePiece {
     double ms = 0;
@@ -103,6 +107,21 @@ struct DecodePacer {
     UninterruptiblePiece longest;
     double read_ms = 0;
     void note_piece(const char *kind, double ms, uint64_t rows = 0, uint64_t coordinates = 0);
+    // The seed phase's own processing (review of levels 4-5, finding 3). While a setup is open
+    // (the walker opens it at a seed's start and closes it at the walk's first checkpoint, or at
+    // its stop or end, or on its way out), every piece noted first notes the time between the end
+    // of the previous piece (|setup_since_ms|, on now_ms()'s clock) and its own start as a "setup"
+    // piece: before, only the seed phase's reads and k-mer mappings were pieces, and a request
+    // naming 2,500 headers with a shared 1,024-character prefix stated a longest piece of 0.297 ms
+    // for a seed phase of 126 ms, almost all of it a duplicate check between two pieces
+    bool setup_open = false;
+    double setup_since_ms = 0;
+    void open_setup(double since_ms) {
+        setup_open = true;
+        setup_since_ms = since_ms;
+    }
+    // the last setup span, from the end of the previous piece to |until_ms|, and the setup closed
+    void close_setup(double until_ms);
     // the coordinates mapped so far (LabelOracle::Counters::coords_mapped; 0 without it), for a
     // piece's coordinates
     const uint64_t *coords_mapped = nullptr;
@@ -358,6 +377,9 @@ class LabelOracle {
     // Tests: called with the row count at every annotation read of this oracle (the default
     // and the budget-aware ones), before the read — to make the reads of a small index slow
     std::function<void(size_t rows)> test_read_hook;
+    // Tests: called with the name at every resolve_label — to make resolving a seed's labels
+    // slow on a virtual clock (the seed phase's setup pieces, review of levels 4-5, finding 3)
+    std::function<void(const std::string &name)> test_resolve_hook;
 
   private:
     const AnnotatedDBG &anno_graph_;

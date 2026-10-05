@@ -371,8 +371,9 @@ TYPED_TEST(LabelOracleCoordTest, HeaderLabelsAndCoordinates) {
                                                : std::vector<LabelId>{ 0, 3 };
         ASSERT_EQ(expected, got) << "s1 k-mer " << i;
         EXPECT_EQ((SmallVector<Coord>{ i }), hits1[i][0].coords);
-        if (shared)
+        if (shared) {
             EXPECT_EQ((SmallVector<Coord>{ pos_in_s3 }), hits1[i][1].coords);
+        }
     }
     EXPECT_GT(oracle.counters().tuple_rows_fetched, 0u);
     EXPECT_GT(oracle.counters().coords_mapped, 0u);

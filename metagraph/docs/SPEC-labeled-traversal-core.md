@@ -362,9 +362,11 @@ to a header).
   request is meant for, a string compared as given. A process whose own `server_instance` is another refuses it
   before anything runs or is registered: **409** `{error, state: "instance_mismatch", expect_server_instance,
   server_instance, attempt_id, budget_id?, locus_id?, not_after_ms?}` (checked first, ahead of a duplicate id and
-  of `not_after_ms`). Tombstones (§10.3, `POST /traverse/cancel`) live in memory, so a restarted process — a new
-  `server_instance` — holds none, and a delayed copy of a cancelled request would otherwise run there; a ledger
-  that releases capacity early on a tombstone (§10.3, the release rule) sends its attempts with this field. Without
+  of `not_after_ms`). Tombstones (§10.3, `POST /traverse/cancel`) and the holds of finished attempts live in
+  memory, so a restarted process — a new `server_instance` — holds none, and a delayed copy of a cancelled or of a
+  finished request would otherwise run there; a ledger that releases capacity early on a tombstone, or on a
+  finished state before `not_after_ms + clock_skew_allowance_ms + bound_ms` (§10.3, the release rule), sends its
+  attempts with this field *(the finished state: review of levels 4–5, finding 6)*. Without
   `attempt_id` it is a 400 naming the field. The CLI, whose instance is its own and random, refuses any value
   (the 409 body on stdout, exit status 1). `/resolve` does not accept it (400, unknown field).
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
@@ -894,7 +896,9 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     pass 5; what it did not walk is stated, as any stop.
     **Stated limits**: one uninterruptible step can run past the bound by its own length: one chunk of an
     annotation read (at least one row; no bound on one row's decode exists before stage 3c, so
-    `deadline_check.max_uninterruptible_ms` is null, and `usage.observed_max_uninterruptible_ms` states the
+    `deadline_check.max_uninterruptible_ms` is null — and it stays null after stage 3c-ii, whose checkpoints bound
+    index operations, not time: page faults and scheduling leave the time open (decision 3c-N5) —, and
+    `usage.observed_max_uninterruptible_ms` states the
     longest single piece the attempt decoded), or a read decoded whole because it was predicted to end well
     before the walk-until, whose rows were more than 64 times slower than any read before (*chunked
     deadlines*, below); the mapping of the seed's k-mers to nodes before its validation,
@@ -944,7 +948,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   work (decoded, though no row was returned; review of the stage-3 fixes, P3: what was decoded is in
   `usage.work_units`): to the level's arm, or to the seed phase (`work_seed`) without a comparison, as a
   window found `too_wide`. One chunk stays uninterruptible: at least one row, and no bound on one row's decode
-  exists before stage 3c (selected-label decoding) — `deadline_check.max_uninterruptible_ms: null`;
+  exists before stage 3c (selected-label decoding) — `deadline_check.max_uninterruptible_ms: null`, which stays
+  null once stage 3c-ii's checkpoints bound the operations of a read (decision 3c-N5);
   `deadline_check.observed_max_uninterruptible_ms` is the longest single piece the server process decoded (a
   whole read far from its deadline included: how late a cancel can be seen), and
   `usage.observed_max_uninterruptible_ms` the attempt's: observations, not bounds. **Stated limits**: a read
@@ -982,16 +987,32 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   `kind` one of `read` (an annotation read in one piece), `chunk`, `rest` (the piece that ended a split read),
   `kmer_mapping` (the seed's k-mers mapped to nodes, then to keys), `coord_mapping` (a derived seed's k-mer whose
   coordinates were mapped to headers), `derivation_step` (a derived seed's k-mer otherwise), `head` (the walk
-  between two readings of the clock, its reads excluded) or `finalisation` (from the walk's stop or end to its
-  result), with its rows and the coordinates mapped to headers in it — and, when a stop ended the walk,
-  `stopped_by` (`time_budget`, `attempt`, `cancelled`, `memory`, `work`) and `stop_after_deadline_ms` (for
+  between two readings of the clock, its reads excluded; the last one ends at the walk's stop or end), `setup`
+  (the seed phase's own processing between its other pieces: validation, resolving the label names and their
+  duplicate check, the extra labels, the depth-0 state — everything before the walk's first checkpoint that no
+  other piece covers) or `finalisation` (from the walk's stop or end to its result), with its rows and the
+  coordinates mapped to headers in it — the pieces cover the seed's time from its start to its result —, and,
+  when a stop ended the walk, `stopped_by` (`time_budget`, `attempt`, `cancelled`, `memory`, `work`) and `stop_after_deadline_ms` (for
   `time_budget` and `attempt`: how long after the seed's budget, or the attempt's walk-until, the walk saw it). A
   read maps its rows' coordinates to headers inside its piece, so the rate a chunk is sized by includes the
   mapping (checked: the staging overrun of a warm tuple walk, 6,136 ms on 5,000, could not say which piece was
-  late; it now can). Beside it, `timing.seed_phase_ms` (the seed's validation or derivation), `seed_fetch_ms` (its
-  reads, also in `annotation_fetch_ms`) and `label_resolve_ms` (resolving its label names), and, on a row-diff
+  late; it now can). Beside it, `timing.seed_phase_ms` (the seed phase: from the seed's start to the walk's first
+  checkpoint, or to its stop or end when it reaches none — the validation or derivation, the extra labels and the
+  depth-0 state, a failed seed's included), `seed_fetch_ms` (its reads, also in `annotation_fetch_ms`) and
+  `label_resolve_ms` (resolving its label names), and, on a row-diff
   annotation with the path cache, `timing.path_cache {hits, stored_rows_read, rows_kept, bytes_kept, peak_bytes}`
-  (§8.4): physical, timing only.
+  (§8.4): physical, timing only. *Review of levels 4–5, finding 3:* a valid request naming 2,500 headers with a
+  shared 1,024-character prefix stated, on a warm server, a seed phase of 126 ms and a longest piece of 0.297 ms:
+  resolving the names (3 ms) and their pairwise duplicate check (quadratic; most of the rest) ran between the
+  validation's k-mer mapping and its read, where no piece was measured, and the first head's checkpoint did not
+  count what came before it. The seed phase is now cut into pieces at its reads, k-mer mappings and derivation
+  steps, the spans between them `setup` pieces, flushed on every way out of the seed (a failed one too);
+  `seed_phase_ms` runs to the first checkpoint (before: the validation or derivation alone; it now also counts
+  the depth-0 state, and `seed_fetch_ms` an annotate root's read); the last `head` piece runs to the walk's stop
+  or end (before: no piece); the duplicate checks of the seed labels and of the extra labels are hash sets (the
+  same refusals, in the request's order). The same request: seed phase 13.9 ms, longest piece 9.8 ms (`setup`:
+  mostly the seed id over the 2,500 names, linear) against 139.1 and 1.28 (`read`) before, from the CLI. Timing
+  only: no untimed byte changes.
 - **Annotation reads under a budget** (stage 3 of `DESIGN-traverse-graphlet.md` §14.1). On an annotation whose
   reads are budget-aware — `RowDiff` over BRWT or ColumnMajor, with or without coordinates
   (`row_diff_brwt`, `row_diff_brwt_coord`, `row_diff`, `row_diff_coord`) — a request with a budget reads its
@@ -2038,7 +2059,12 @@ cache (`PathAggregates`: the whole path's length, entries, stored bytes, scratch
 row's `RowCost` — its work (8 per dependency row, 1 per entry) and its standalone demand — is that of its whole path,
 the cache only shortening the decoding (and the transient charges of a call; a row read alone never needs more
 than without the cache, so where a fetch stops is unchanged). The cache is bounded in bytes (each row as its exact
-copy plus 640 B for its share of the tables) in two generations: rows go to the current one, which becomes the
+copy plus 640 B for its share of the tables) in two generations: a row is **admitted before it is copied** — its
+stored size computed from the row, the shared bound read and the older entries evicted first, so that a row the
+cache refuses (more than half the bound) is never copied and the copy of one it keeps is made within the bound
+*(review of levels 4–5, finding 1: copying first, a cache bounded at 1 KiB allocated 4,210,688 bytes for a row of
+1,048,576 columns and then refused it, its bytes, peak and kept rows all 0; and a cache full of two 1.5 MiB rows
+under 4 MiB held 4.5 MiB while it copied a third)* —; rows go to the current one, which becomes the
 older one when it fills half the bound (the older one is dropped then); a hit in the older one moves the row to
 the current one; a generation dropped frees its table (a cleared hash map keeps its bucket array, which after
 many narrow rows held up to 74.7 MiB of heap for 63.9 MiB accounted at a 64 MiB bound; review of the efficiency
@@ -2214,10 +2240,11 @@ the server.
     `"GET /traverse/capabilities?graph={name}[&graph_path={path}]"`. `server_instance` is the attempts' (below).
   - **`deadline_check`** (both capabilities routes, feature level 3): `chunk_target_ms` (integer,
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
-    (null: no bound on one row's decode exists before stage 3c), `observed_max_uninterruptible_ms` (integer: the
-    longest single piece of annotation decoding of any `/traverse` in this process's lifetime — a chunk, or a read
-    decoded whole far from its deadline — an observation) and `rule` (§6.8, chunked deadlines, as text, with the
-    factors 64 and 4 and the first chunk of 8 rows).
+    (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose
+    checkpoints bound index operations, not time — decision 3c-N5, §6.8), `observed_max_uninterruptible_ms`
+    (integer: the longest single piece of annotation decoding of any `/traverse` in this process's lifetime — a
+    chunk, or a read decoded whole far from its deadline — an observation) and `rule` (§6.8, chunked deadlines, as
+    text, with the factors 64 and 4 and the first chunk of 8 rows).
   - **`feature_level`** — what the server offers beyond the base contract, monotonic and only ever extended, so a
     client states a feature as `feature_level >= n` (`DESIGN-traverse-graphlet.md` §21: each pass that adds
     capabilities fields or routes bumps it by one; `schema_version` stays the request schema version). Absent or
@@ -2258,7 +2285,12 @@ the server.
     physical work (`path_cache`) and the deadline record (`deadline`, §6.8). Feature level 5 changes no response of
     a request without budgets beyond the digit, the `timing` block (new fields; `coords_mapped` counts the
     coordinates a header label's filter examined, as before) and the texts of the capabilities; budgeted requests
-    keep their bytes too (checked against the previous build, T52). The server states 5 from `7cdde4c2`.
+    keep their bytes too (checked against the previous build, T52). The server states 5 from `7cdde4c2`. The fixes
+    of the review of levels 4–5 (T53) keep level 5: they change no request or response field, only the
+    capabilities' `attempts.release_rule` and `attempts.instance` texts (a finished state is replay-safe only for
+    an attempt pinned with `expect_server_instance`, §10.3), the values in `timing` (the deadline record's
+    `setup` pieces and its last `head` piece, `seed_phase_ms` and `seed_fetch_ms` to the first checkpoint, §6.8)
+    and physical work (the path cache admits a row before copying it, §8.4).
   - **`schema_version`** is the one request schema the server accepts: 1, with no compatibility window. A future
     change of the request schema adds `request_schema_versions: [..]` to the capabilities and keeps accepting 1 for
     a stated window; a `schema_version` above 1 without that list means a server whose requests a client written
@@ -2492,18 +2524,30 @@ the server.
     `instance_mismatch`). An attempt sent without `not_after_ms`, or without `expect_server_instance`, is never
     released early on a tombstone. Otherwise it releases only on a finished state (`GET /traverse/attempt`, a
     cancel's 404 or 200 with `state: "finished"`, or the response), or once its own clock passes `not_after_ms +
-    clock_skew_allowance_ms + bound_ms`. **A finished state** promises that the request does not run again here:
-    a finished attempt's id stays refused (409, its state) while it is retained (`retention_s`,
-    `retention_count`) and, for an attempt sent with `not_after_ms`, until this server's clock reads later than
-    `not_after_ms + clock_skew_allowance_ms`, at most `tombstone_max_s` after it finished — past its retention if
-    need be, **held** among the tombstones (on both clocks, as a tombstone; a refused copy with a later
+    clock_skew_allowance_ms + bound_ms`. **A finished state** promises that the request does not run again on this
+    process (and, pinned, anywhere; below): a finished attempt's id stays refused (409, its state) while it is
+    retained (`retention_s`, `retention_count`) and, for an attempt sent with `not_after_ms`, until this server's
+    clock reads later than `not_after_ms + clock_skew_allowance_ms`, at most `tombstone_max_s` after it finished —
+    past its retention if need be, **held** among the tombstones (on both clocks, as a tombstone; a refused copy with a later
     `not_after_ms` extends it within the cap). *(Review of the pass-5 fixes, finding 1: with `retention_s` 1, or
     `retention_count` 1 and one later finish, a replay of a finished request — same `attempt_id`, `not_after_ms`
     and `expect_server_instance` — arrived after the ledger had released on the finished state and ran again.)*
-    A finished state of an attempt sent **without** `not_after_ms`, or with one beyond `tombstone_max_s` of its
-    finish, assumes that no copy of the request arrives after the attempt left retention; with `retention_s` 0
-    nothing is kept, and a finished state assumes that no copy arrives after it. Held attempts are not bounded by
-    `retention_count` (they are never dropped early): their number is at most the finishes within
+    **The hold is the process's, in memory:** a restarted process (a new `server_instance`) holds none, and a copy
+    of the request reaching it runs there unless it was sent with `expect_server_instance` (then 409
+    `instance_mismatch`). So a finished state is **replay-safe** — no copy of the request runs after it, on this
+    process or a restarted one — **only for an attempt sent with `expect_server_instance`** equal to that
+    `server_instance` **and with `not_after_ms`** whose `not_after_ms + clock_skew_allowance_ms` lies within
+    `tombstone_max_s` of the finish: a ledger that releases on a finished state before its clock passes
+    `not_after_ms + clock_skew_allowance_ms + bound_ms` pins the instance, as for a tombstone. *(Review of levels
+    4–5, finding 6: a request finished with `not_after_ms` 60 s ahead, without `expect_server_instance`, replayed
+    after a restart of the same endpoint before then ran again — 200, 170 work units — while the text said a
+    finished request within its hold was never run again; the pinned copy was refused, `instance_mismatch`.)* A
+    finished state of an attempt sent **without** `expect_server_instance` assumes that no copy of the request
+    reaches a restarted process (or another server at the same address) while it could still be admitted there;
+    one sent **without** `not_after_ms`, or with one beyond `tombstone_max_s` of its finish, assumes that no copy of
+    the request arrives after the attempt left retention; with `retention_s` 0 nothing is kept, and a finished
+    state assumes that no copy arrives after it (a pinned copy is still refused by a restarted process). Held
+    attempts are not bounded by `retention_count` (they are never dropped early): their number is at most the finishes within
     `tombstone_max_s`, so `--traverse-attempt-tombstone-max-s` bounds their memory. A 429 and a cancel's 200 with
     `state: "stopping"` release nothing.
     Assumed, not checked: the ledger's clock is within `clock_skew_allowance_ms` of this server's, this server's
@@ -2669,6 +2713,7 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T50 | pass 5: `standalone_text` and the reduced `J` | `test_traverse_standalone.py`: byte-equal to `dump(from_response(…), envelope=True)` on every fixture result, `usage` reduced to the totals and this seed's `per_seed`, `save()` and the store write the same bytes, reserved names refused | §7.5.2 |
 | T51 | the efficiency pass (feature level 4) | `RowDiffPathCache.*` (the cached default decode returns the default decode's rows call after call, under bounds that keep everything, evict often and keep nothing, and a shared bound that shrinks; the budget-aware decode with the cache gives every row the costs of its whole path and at most the held bytes, a row read alone at most its peak without the cache and within its demand, and refuses below its peak; the generations; a dropped generation frees its table, `DroppedGenerationsReleaseTheirTables`, and the counts follow the tables at a rotation and under a shrinking shared bound; the lookahead's reads admitted as without the cache, `LookaheadAdmittedAsWithoutTheCache`), `LabelOraclePathCache.SameAnswersAndCounters` (query and recorder, budgeted and not, every counter, the shared bound), `MiniRefSeq.PathCacheKeepsTheResponse` (96 responses byte-equal with and without the cache: constrain/annotate, memory budgets at their stops, work budgets, `batch_kmers` 1 and 64, an evicting cache, one-row chunks), `MiniRefSeq.PathCacheKeepsRootRefusals` (an annotate seed whose right root's read the seed_id's length moves across its refusal under 1 MiB: every response byte-equal with and without the cache, the refusals of a read alone among them), `MiniRefSeq.ServerBudgetMaxima` (also a seed failed in its seed phase by the work maximum and at an annotate root by the memory maximum: server_clamp, `requested`, no raise action, `server_limit`; a seed failed by the request's own budget keeps its lever), `CoordToHeader.SequenceRangeAgreesWithMapSingleCoord`, `LabelOracleCoordRuns.SameAsMapSingleCoord` (and the `DISABLED_` measurements); `test_row_diff_path_cache_keeps_the_bytes`, `test_server_budget_maxima`, `test_api_server_capabilities`; the byte-identity harness against the previous build (unbudgeted: 588 mini_refseq — also from a three-column graph list and with chunks of 1 ms —, 792 UHGG and 804 SRA `/traverse` requests, 688 `/resolve` requests; budgeted: the 588 mini_refseq requests under 4 MiB and under 300,000 work units, the 792 UHGG ones under 16 MiB; differences only in attempts' `walk_until_ms` and in walks the previous build's cold first touch cut by their time budget), and with the cache on and off (201 SRA and 198 UHGG requests at the default `batch_kmers`, at 1, the UHGG ones under 256 and 8 MiB and 10⁶ work units, 147 mini_refseq requests without and under 4 MiB) | §4.2, §6.8, §8.2–8.4, §10.3 |
 | T52 | the review of pass 5 and R10 (feature level 5) | `GraphletAttemptRegistry.CancelNotAfterMsHoldsTheTombstoneThroughAdmission` (the reviewer's half-upload timeline with retention 1 s on injected clocks: the cancel naming `not_after_ms` holds the tombstone to `not_after_ms + skew`, the repeat at 0.763 s states the same expiry, the copy at 1.177 s is refused, at the expiry the strict check refuses it; without `not_after_ms` `covers_admission` is false and the copy runs), `.TombstonesAreNeverShortenedAndCapped`, `.ARefusedCopyExtendsTheTombstone`, `.TombstonesSurviveWallClockSteps` (forward and backward steps), `.RetentionZeroKeepsNoTombstones`, `.ExpectServerInstanceRefusesAnotherProcess`, `.CapabilitiesStateIntegers` (the release rule's phrases, `cancel_fields`, `tombstone_max_s`, "cannot start subsequently"; what a finished state promises and assumes, the inclusive hold, the 409's own `not_after_ms`); the review of these fixes: `.FinishedAttemptsAreHeldThroughTheirNotAfterMs` (the reviewer's p1 — retention 1 s, the replay at 1.3 s — and p1b — retention_count 1, one later finish — refused until `not_after_ms` + skew inclusive, then expired; held attempts fill the tombstone table; without `not_after_ms` dropped as before; the cap from the finish and a refused copy's extension; retention 0 keeps nothing), `.TombstonesHoldThroughSuppressedUntilInclusive` (skew 0, a copy at the wall clock's `not_after_ms` after the steady hold passed is refused), `.ARefusedCopyIsJudgedByItsOwnNotAfterMs` (no `not_after_ms`: not covered, `no_not_after_ms`, and it runs once re-sent after the hold); `GraphletAttempt.IdsAreValidated` (`expect_server_instance`); `GraphletServer.InventoryTableMatchesTheLoadersTypes` (every annotation type `initialize_annotation` builds is in the inventory's table, row-diff anchors exactly for `RowDiff<ColumnMajor>`, headers exactly for a `MultiIntMatrix`), `.SymlinkedMainFilesDoNotHideTheirSidecars`, `.DeliveryChecksEvery64KiBOfALargeToken` (the reviewer's 16 MiB probe: ≥ size / 64 KiB checks writing and assembling, bytes unchanged, the gap measured); `Graphlet.IndexIdentity` (the `.bloom` and the mask in the inventory, a manifest not covering one refused naming it; entries `a/x.seqs` and `b/x.seqs` refused for their shared base name; a `.seqs` the pair does not load refused); `RowDiffPathCache.RetentionKeepsRowsAndCostsAndBoundsTheCopies` (keep-all, 4/1, 16/8, requested rows only and all-narrow rules: the default and budget-aware decodes' rows and costs unchanged; copies per call ≤ n × (successors + 3) + stored / checkpoint; keep-all copies every reconstructed row; the rule copies fewer), `.FlatTupleRowsRoundTrip`; `LabelOracleBudgeted.LookaheadRunsFollowTheWalk` (the reviewer's pacing probe: warm's decoder charges 31,297 against 161,679 for sorted runs, 28,736 for the walk-ordered runs alone; query and recorder); `MiniRefSeq.PathCacheKeepsTheResponse` (+ three retention rules, 168 comparisons), `.PathCacheWarmSeedIsTheColdSeed` (a seed after a copy of itself equals the seed alone, every budget, batch, chunk and cache capacity), `.DeadlineRecordNamesTheLongestPiece`, `.ResolveDecodesEachRowOnceInBoundedBatches` (the review of these fixes, finding 7: on the query and on one repeating two thirds of it, column and header labels, presence and trace, batches of 1 to 4,096 rows × byte targets 1 B / 20 kB / 64 MiB × 0 / 30 kB / 256 MiB kept (explicit labels keep none) — 384 runs: the profiles equal the reference and the same labels given explicitly, no read beyond its batch, the first 64 rows, each at most twice the one before, every distinct row decoded once when the repeats can be kept and always for explicit labels), `.HeaderHitsFilterRequestedRanges`; `WalkerDeadlineChunks.*` on a virtual clock (exact bounds; the deadline record of a paced stop). Integration `test_retention_settings_are_validated_at_start_up` (the reviewer's negative-retention probe and thirteen more values, the p3 refusals of the review of these fixes among them, refuse to start; the largest accepted are stated), `test_retention_zero_promises_no_suppression`, `test_a_cancel_naming_not_after_ms_covers_a_half_uploaded_request` (the reviewer's upload probe on a raw socket), `test_expect_server_instance_refuses_another_process` (server and CLI), `test_inventory_is_mirrored_by_index_manifest_py` (masked graph with a Bloom filter, row_diff, coordinate annotations with and without `.seqs`, `.coords`, `--no-coord-mapping`, symlinks; the tables equal), `test_symlinked_main_files_do_not_hide_their_sidecars` and `test_a_loaded_bloom_filter_is_part_of_the_identity` (the reviewer's `/tmp/metagraph-pass5-identity` cases, rebuilt); the review of these fixes: `test_a_finished_attempt_is_held_through_its_not_after_ms` (the reviewer's p1 and p1b on a real server: the replay after the ledger's release is a 409; and p4: a copy without `not_after_ms` is not covered), `test_a_manifest_names_one_bundle_and_its_loaded_files` (the reviewer's dup probe — a directory manifest of A/ and B/ refused by single-index servers, the CLI and `--verify`, naming the shared base name — and its C/ and `--no-coord-mapping` cases refused naming the `.seqs`), `test_retention_settings_are_validated_at_start_up` (each refusal names its option's own range). Byte identity against the previous build (f667d775): the unbudgeted and budgeted real requests on mini_refseq and UHGG, decompressed | §5, §6.8, §8.2, §8.4, §10.3 |
+| T53 | the review of levels 4–5 (level 5 kept) | `RowDiffPathCache.ARefusedRowIsNeverCopied` (the reviewer's probe: a 1 KiB bound, its shared room 1 KiB, a row of 1,048,576 columns — no byte allocated by the insert nor at the moment the room is read, by jemalloc's thread counters; bytes, peak and kept rows 0, `rows_refused` 1; a tuple row of 65,536 columns likewise), `.AKeptRowIsCopiedWithinTheBound` (two rows of 1.5 MiB under 4 MiB and a third: the heap the cache holds stays within the bound during the insert, jemalloc's peak; the stated peak is what it held); `WalkerSeedPhase.SetupPiecesCoverTheSeedPhase` (2,500 headers with a 1,024-character prefix on a virtual clock that resolving a name advances by 1 ms: the longest piece is `setup`, exactly 2,500 ms, and `seed_phase_ms` 2,500 ms, at radius 5 and at radius 0 (no checkpoint); 10 seed and 20 extra labels: two setup pieces, 20 ms stated; a duplicate after 2,500 names: the failed seed's phase and piece stated), `.DuplicateChecksRefuseAsBefore` (the hash sets refuse what the scans refused, in the request's order, an unknown name before a later duplicate, extra labels against kept seed labels and earlier extras, a column and its header distinct targets); `GraphletAttemptRegistry.AFinishedStateIsReplaySafeOnlyWhenPinned` (the reviewer's finish-restart-replay probe on two registries: held by its process, the unpinned replay runs at the restarted one, the pinned one is refused `instance_mismatch`; the release rule's new phrases); integration `TestTraverseSeedPhase.test_the_longest_piece_covers_the_seed_phase` (the reviewer's deadline probe, CLI and warm server: the longest piece at least the names' resolution and a sixteenth of `seed_phase_ms`), `TestTraverseAttempts.test_a_finished_state_is_replay_safe_only_when_pinned` (the reviewer's attempt probe on a real server restarted on the same port: 200 with the same work units unpinned, 409 `instance_mismatch` pinned). Untimed bytes against the previous build (7aaee760) | §5, §6.8, §8.4, §10.3 |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 

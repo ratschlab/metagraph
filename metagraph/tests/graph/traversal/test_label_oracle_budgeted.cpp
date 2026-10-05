@@ -318,8 +318,9 @@ TEST(LabelOracleBudgetedQuery, AdmitsExactlyAndRefusesWhole) {
                                            + (cached ? " cached" : " decoded");
                     if (!extra) {
                         EXPECT_TRUE(ok) << what;
-                        if (ok)
+                        if (ok) {
                             EXPECT_EQ(hits[i], h.back()) << what;
+                        }
                     } else {
                         ASSERT_FALSE(ok) << what;
                         EXPECT_EQ(first, refused) << what;

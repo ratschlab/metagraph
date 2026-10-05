@@ -1905,8 +1905,9 @@ TEST(Trie, OracleComparesPerLabelClaimsNotLeaves) {
     ASSERT_EQ(1u, v.expected.count(s_walk));
     EXPECT_EQ((std::set<std::string>{ "S" }), v.expected.at(s_walk));
     for (const auto &[w, ls] : v.expected) {
-        if (w != s_walk)
+        if (w != s_walk) {
             EXPECT_EQ(0u, ls.count("S")) << w;
+        }
     }
     // no leaf carries S: a leaf comparison alone says nothing about where S ends
     for (const auto &[w, ls] : trie::constrained_leaves(A, kRight, kRadius)) {
@@ -2072,8 +2073,9 @@ TEST(Trie, CutListsMakeLiveLabelCountsInexact) {
         // at every level, so every bin with a P head is inexact
         ASSERT_FALSE(arm.growth.empty());
         for (const GrowthBin &b : arm.growth) {
-            if (b.max_live_paths)
+            if (b.max_live_paths) {
                 EXPECT_EQ(exact, b.live_labels_exact) << what << " bin " << b.from_bp;
+            }
         }
         if (exact) {
             EXPECT_EQ(5u, arm.growth.front().max_live_labels) << what;

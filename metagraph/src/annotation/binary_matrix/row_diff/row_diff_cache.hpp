@@ -68,6 +68,11 @@ struct StoredRow<BinaryMatrix::SetBitPositions> {
     void store(const BinaryMatrix::SetBitPositions &full) { row = full; }
     void load(BinaryMatrix::SetBitPositions *out) const { *out = row; }
     uint64_t bytes() const { return row_copy_bytes(row); }
+    // what bytes() is once |full| is stored, computed from |full| without copying it (the
+    // cache admits a row before it copies it)
+    static uint64_t bytes_of(const BinaryMatrix::SetBitPositions &full) {
+        return row_copy_bytes(full);
+    }
 };
 
 template <>
@@ -75,11 +80,25 @@ struct StoredRow<MultiIntMatrix::RowTuples> {
     std::vector<BinaryMatrix::Column> columns;
     std::vector<uint32_t> ends;
     std::vector<uint64_t> coords;
-    void store(const MultiIntMatrix::RowTuples &full) {
+    static uint64_t flat_bytes(uint64_t num_columns, uint64_t num_coords) {
+        return buffer_bytes(num_columns, sizeof(BinaryMatrix::Column))
+             + buffer_bytes(num_columns, sizeof(uint32_t))
+             + buffer_bytes(num_coords, sizeof(uint64_t));
+    }
+    static uint64_t total_coords(const MultiIntMatrix::RowTuples &full) {
         uint64_t total = 0;
         for (const auto &entry : full) {
             total += entry.second.size();
         }
+        return total;
+    }
+    // what bytes() is once |full| is stored (its three buffers at their exact sizes),
+    // computed from |full| without copying it (the cache admits a row before it copies it)
+    static uint64_t bytes_of(const MultiIntMatrix::RowTuples &full) {
+        return flat_bytes(full.size(), total_coords(full));
+    }
+    void store(const MultiIntMatrix::RowTuples &full) {
+        const uint64_t total = total_coords(full);
         assert(total <= std::numeric_limits<uint32_t>::max());
         columns.resize(full.size());
         ends.resize(full.size());
@@ -103,9 +122,8 @@ struct StoredRow<MultiIntMatrix::RowTuples> {
         out->swap(row);
     }
     uint64_t bytes() const {
-        return buffer_bytes(columns.size(), sizeof(BinaryMatrix::Column))
-             + buffer_bytes(ends.size(), sizeof(uint32_t))
-             + buffer_bytes(coords.size(), sizeof(uint64_t));
+        assert(ends.size() == columns.size());
+        return flat_bytes(columns.size(), coords.size());
     }
 };
 
@@ -236,7 +254,13 @@ class RowDiffCache {
     }
 
     // Cache the reconstructed row |full| of |row| at |depth| (with its path aggregates, if
-    // known), within the bound; a row that does not fit even into an empty cache is not kept
+    // known), within the bound; a row that does not fit even into an empty cache is not kept.
+    // Admitted before it is copied (review of levels 4-5, finding 1): its stored size is
+    // computed from |full|, the shared bound read, and the older entries evicted, and only
+    // then is the row copied — so a row the cache refuses is never copied, and the copy of
+    // one it keeps is made within the bound, never beside a cache that is full. Copying first
+    // made a cache bounded at 1 KiB allocate 4.2 MB for a row of 1,048,576 columns and then
+    // refuse it, its bytes, peak and inserted rows all stating 0.
     void insert(Row row, const RowT &full, uint32_t depth = 0,
                 const PathAggregates *path = nullptr) {
         if (!enabled())
@@ -257,15 +281,14 @@ class RowDiffCache {
             }
             return;
         }
-        Entry entry;
-        entry.row.store(full);
-        entry.copy_bytes = row_copy_bytes(full);
-        const uint64_t b = entry.row.bytes() + kEntryBytes;
+        const uint64_t b = StoredRow<RowT>::bytes_of(full) + kEntryBytes;
         const uint64_t bound = limit();
         // a shared bound may have shrunk since the last insert
         trim(bound);
-        if (b > bound / 2)
+        if (b > bound / 2) {
+            rows_refused++;
             return;
+        }
         if (bytes_[0] + b > bound / 2 || bytes() + b > bound) {
             // the current generation becomes the older one, the older one is dropped (the
             // counts move with their tables: a count left behind would let trim() and
@@ -276,6 +299,12 @@ class RowDiffCache {
         }
         if (bytes() + b > bound)
             drop(1);
+        // the copy, now that there is room for it: the cache holds bytes() + b from here on
+        // (the table's growth on the emplace is kEntryBytes's share), which the peak counts
+        Entry entry;
+        entry.row.store(full);
+        assert(entry.row.bytes() + kEntryBytes == b);
+        entry.copy_bytes = row_copy_bytes(full);
         entry.bytes = b;
         entry.depth = depth;
         rows_inserted++;
@@ -310,7 +339,10 @@ class RowDiffCache {
     uint64_t stored_rows_read = 0;
     uint64_t rows_inserted = 0;
     uint64_t bytes_inserted = 0;
-    // the most the cache held at once (bytes(), at the end of an insert)
+    // rows the rule kept that did not fit (more than half the bound): refused before any copy
+    uint64_t rows_refused = 0;
+    // the most the cache held at once (bytes(), at the end of an insert: rows are copied
+    // only after the evictions that make room for them, so no insert holds more)
     uint64_t peak_bytes = 0;
 
     // A budget-aware read with the cache holds less than without it — its paths stop at

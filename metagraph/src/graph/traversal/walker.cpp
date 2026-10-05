@@ -817,6 +817,15 @@ class Walker {
     // otherwise once the interval has passed, §14), and with the deadline a stop from outside
     // the walk (external_stop). Throws BudgetTrip.
     void checkpoint(bool force);
+    // The seed phase as timing states it (review of levels 4-5, finding 3): from the walker's
+    // start to the walk's first checkpoint — validation or derivation, resolving the label
+    // names and their duplicate check, the extra labels, the depth-0 state, everything before
+    // the first head — or, without one, to the walk's stop or end (|until_ms|, on the seed's
+    // clock; negative: now). end_setup() adds its time to seed_phase_seconds and its reads' to
+    // seed_fetch_seconds, notes its last setup piece (DecodePacer::close_setup), and starts the
+    // walk's head pieces there; once only, and on every way out of run() (failures too)
+    void begin_setup();
+    void end_setup(double until_ms = -1);
     // A stop requested from outside the walk (AttemptControl::poll): NONE without a control.
     // A client that is gone throws AttemptAborted here, abandoning the walk.
     ExternalStop external_stop();
@@ -1018,11 +1027,15 @@ class Walker {
     uint64_t compared_at_ = 0;
     uint64_t largest_charge_ = 0;
     // the deadline record (R8, timing): the clock and the reads' total time when checkpoint()
-    // last read the clock (-1: not yet), and the walk's first stop — when (on the seed's clock),
-    // by what, and how long after its deadline
+    // last read the clock or the seed phase ended (end_setup; -1: not yet), and the walk's first
+    // stop — when (on the seed's clock), by what, and how long after its deadline
     double head_clock_ms_ = -1;
     double head_reads_ms_ = 0;
     double stop_ms_ = -1;
+    // the seed phase is open (begin_setup .. end_setup), and the request's read time when it
+    // began (its reads are the seed's seed_fetch_seconds)
+    bool setup_open_ = false;
+    double setup_fetch_before_ = 0;
     uint64_t depth_ = 0;             // the level being processed
     size_t events_written_ = 0;      // events pushed, for the plan's debug check
     // the annotation is read by the budget-aware decode path: a request budget is set and
@@ -1178,11 +1191,17 @@ void Walker::validate_seed() {
             result_.coordinates_reason = kCoordinatesPartialDerivation;
         }
     } else {
+        // Each name once, a duplicate refused before it is resolved and the first one in the
+        // request's order, as before — found in a hash set of the names seen, where every name
+        // was compared with every earlier one: 2,500 headers sharing a 1,024-character prefix
+        // took about 120 ms of a seed phase of 126 ms (review of levels 4-5, finding 3). A
+        // resolved label carries the name it was given (LabelOracle::resolve_label), so this
+        // is the check on the resolved names it replaces
+        tsl::hopscotch_set<std::string_view> named;
+        named.reserve(seed_.labels.size());
         for (const auto &name : seed_.labels) {
-            for (const auto &other : seed_refs) {
-                if (other.name == name)
-                    throw std::invalid_argument("Duplicate seed label '" + name + "'");
-            }
+            if (!named.insert(name).second)
+                throw std::invalid_argument("Duplicate seed label '" + name + "'");
             Timer resolving;
             seed_refs.push_back(oracle_.resolve_label(name));
             oracle_.counters().label_resolve_seconds += resolving.elapsed();
@@ -1318,19 +1337,39 @@ void Walker::validate_seed() {
     result_.seed_id_mismatch = !seed_.seed_id.empty()
                                 && seed_.seed_id != result_.validated_seed_id;
 
-    // ---- extra labels (switch targets)
-    for (size_t i = 0; i < strategy_.extra.size(); ++i) {
-        Timer resolving;
-        LabelRef ref = oracle_.resolve_label(strategy_.extra[i]);
-        oracle_.counters().label_resolve_seconds += resolving.elapsed();
-        for (const auto &other : result_.label_dict) {
-            if (other.same_target(ref)) {
+    // ---- extra labels (switch targets). One naming a target of the dictionary — a kept seed
+    // label or an earlier extra label (LabelRef::same_target: the column, and for a header its
+    // sequence) — is refused, the first in the request's order, as before; the targets are
+    // looked up in a hash set rather than scanned per extra label, which was quadratic too
+    // (the review of levels 4-5, finding 3)
+    if (!strategy_.extra.empty()) {
+        // (column, 1 + seq_id) for a header, (column, 0) for a column: equal iff same_target
+        auto target_of = [](const LabelRef &ref) {
+            return std::make_pair(static_cast<uint64_t>(ref.column),
+                                  ref.kind == LabelKind::HEADER ? ref.seq_id + 1 : 0);
+        };
+        struct PairHash {
+            size_t operator()(const std::pair<uint64_t, uint64_t> &p) const {
+                return std::hash<uint64_t>()(p.first)
+                        ^ (std::hash<uint64_t>()(p.second) * 0x9E3779B97F4A7C15ull);
+            }
+        };
+        tsl::hopscotch_set<std::pair<uint64_t, uint64_t>, PairHash> targets;
+        targets.reserve(result_.label_dict.size() + strategy_.extra.size());
+        for (const auto &ref : result_.label_dict) {
+            targets.insert(target_of(ref));
+        }
+        for (size_t i = 0; i < strategy_.extra.size(); ++i) {
+            Timer resolving;
+            LabelRef ref = oracle_.resolve_label(strategy_.extra[i]);
+            oracle_.counters().label_resolve_seconds += resolving.elapsed();
+            if (!targets.insert(target_of(ref)).second) {
                 throw std::invalid_argument("Extra label '" + strategy_.extra[i]
                                             + "' duplicates a seed label");
             }
+            dict_of_request[seed_refs.size() + i] = result_.label_dict.size();
+            result_.label_dict.push_back(ref);
         }
-        dict_of_request[seed_refs.size() + i] = result_.label_dict.size();
-        result_.label_dict.push_back(ref);
     }
 
     // ---- the cost table is authored over request indices: remap it to dictionary
@@ -3393,7 +3432,31 @@ uint64_t Walker::work_of(const ArmState &arm) const {
          + r.refusal_scans + r.steps + arm.work_extra;
 }
 
+void Walker::begin_setup() {
+    setup_open_ = true;
+    setup_fetch_before_ = oracle_.counters().fetch_seconds;
+    oracle_.pacer().open_setup(start_ms_);
+}
+
+void Walker::end_setup(double until_ms) {
+    if (!setup_open_)
+        return;
+    setup_open_ = false;
+    DecodePacer &pacer = oracle_.pacer();
+    const double until = until_ms >= 0 ? until_ms : elapsed_ms();
+    pacer.close_setup(start_ms_ + until);
+    LabelOracle::Counters &counters = oracle_.counters();
+    counters.seed_phase_seconds += until / 1000;
+    counters.seed_fetch_seconds += counters.fetch_seconds - setup_fetch_before_;
+    // the walk's head pieces start where the seed phase ends
+    head_clock_ms_ = until;
+    head_reads_ms_ = pacer.read_ms;
+}
+
 void Walker::checkpoint(bool force) {
+    // the walk's first checkpoint ends its seed phase (end_setup)
+    if (setup_open_)
+        end_setup();
     const uint64_t used = work_used();
     // The work budget is compared on every call, and every charge of the walk reaches a
     // checkpoint before the next one (a fetch call's rows, a derivation's scan, each target
@@ -5970,29 +6033,15 @@ void Walker::summarize_annotate() {
 }
 
 void Walker::seed_phase() {
-    {
-        // the seed phase's time and its reads' (timing): before them nothing else looks at
-        // the clock, and a slow one is otherwise visible only as elapsed time no counter
-        // explains (R10: 9.3 s of a 1 s budget outside the walk's fetch time)
-        struct SeedPhase {
-            explicit SeedPhase(LabelOracle::Counters &counters)
-                  : counters(counters), fetch_before(counters.fetch_seconds) {}
-            ~SeedPhase() {
-                counters.seed_phase_seconds += timer.elapsed();
-                counters.seed_fetch_seconds += counters.fetch_seconds - fetch_before;
-            }
-            LabelOracle::Counters &counters;
-            const double fetch_before;
-            Timer timer;
-        } phase(oracle_.counters());
-        try {
-            validate_seed();
-        } catch (SeedDerivationError &e) {
-            // a seed failed in its derivation states memory_bound_soft like any other result
-            // under a memory budget, with what the derivation was seen to hold (finding 8)
-            e.set_soft_overshoot(overshoot_);
-            throw;
-        }
+    // (its time and its reads' are stated from begin_setup to end_setup, which run() brackets
+    // it with: the depth-0 state built below belongs to it too)
+    try {
+        validate_seed();
+    } catch (SeedDerivationError &e) {
+        // a seed failed in its derivation states memory_bound_soft like any other result
+        // under a memory budget, with what the derivation was seen to hold (finding 8)
+        e.set_soft_overshoot(overshoot_);
+        throw;
     }
     init_edge_coding();
     if (annotate_) {
@@ -6068,6 +6117,17 @@ SeedResult Walker::run() {
     } metered { *this };
     // this seed's deadline record (the pacer is the request's)
     oracle_.pacer().longest = UninterruptiblePiece();
+    // The seed phase's time and its reads' (timing; R10: 9.3 s of a 1 s budget outside the
+    // walk's fetch time was visible only as elapsed time no counter explained), and its setup
+    // pieces, from the walker's start: closed at the walk's first checkpoint, or at its stop or
+    // end below, or here on the way out of a failed seed (review of levels 4-5, finding 3: the
+    // validation's time was stated, but neither what came after it before the first head nor,
+    // in the deadline record, any of it between the reads and k-mer mappings)
+    begin_setup();
+    struct SetupEnd {
+        Walker &walker;
+        ~SetupEnd() { walker.end_setup(); }
+    } setup_end { *this };
     // the seed phase observes what it holds against the memory budget (observe_seed_scratch)
     mem_limit_ = strategy_.max_memory_bytes;
     budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
@@ -6162,6 +6222,16 @@ SeedResult Walker::run() {
 
     // the finalisation, from the walk's stop (or end) to the result, is one piece
     const double walk_end_ms = stop_ms_ >= 0 ? stop_ms_ : elapsed_ms();
+    if (setup_open_) {
+        // no checkpoint was reached (a radius of 0, a seed whose derivation the time budget cut
+        // (D3), no arm to walk): the seed phase ran to the walk's stop or end
+        end_setup(walk_end_ms);
+    } else if (walk_end_ms > head_clock_ms_) {
+        // the walk after the last reading of the clock, to its stop or end, its reads excluded:
+        // the last head piece, which no checkpoint after it notes
+        oracle_.pacer().note_piece("head", (walk_end_ms - head_clock_ms_)
+                                           - (oracle_.pacer().read_ms - head_reads_ms_));
+    }
     if (annotate_) {
         // the labels met along either arm, in the order first seen
         result_.label_dict = recorder_->labels();

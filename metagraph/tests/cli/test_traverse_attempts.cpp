@@ -1197,6 +1197,79 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
     }
 }
 
+// Review of levels 4-5, finding 6 (the reviewer's finish-restart-replay probe; the restarted
+// process is a second registry, with its own server_instance): a finished attempt's hold is its
+// process's. A request finished with not_after_ms 60 s ahead and replayed within its hold is
+// refused by that process whether pinned or not; after a restart the unpinned replay runs again
+// (on the reviewer's server: 200, 170 work units), which the release rule now states — a finished
+// state is replay-safe only for an attempt sent with expect_server_instance — and the pinned one
+// is refused there, 409 instance_mismatch
+TEST(GraphletAttemptRegistry, AFinishedStateIsReplaySafeOnlyWhenPinned) {
+    FakeClock clock;
+    AttemptRegistry first(settings_with(&clock, 1, 1));
+    const uint64_t not_after = clock.wall_ms() + 60'000;
+    auto sent = [&](AttemptRegistry &registry, const std::string &id,
+                    const std::string &instance) {
+        auto a = attempt_of(registry, id);
+        AttemptIds ids = a->ids();
+        ids.not_after_ms = not_after;
+        ids.expect_server_instance = instance;
+        a->set_ids(ids);
+        return a;
+    };
+    const std::string old_instance = first.server_instance();
+    auto unpinned = sent(first, "finished-unpinned", "");
+    ASSERT_FALSE(first.start(unpinned));
+    first.finish(unpinned, "completed", 200, 1);
+    auto pinned = sent(first, "finished-pinned", old_instance);
+    ASSERT_FALSE(first.start(pinned));
+    first.finish(pinned, "completed", 200, 1);
+    // past retention_s and retention_count: both held by this process through their hold
+    clock.ms = 1'100;
+    for (const auto &[id, instance] : { std::make_pair("finished-unpinned", std::string()),
+                                        std::make_pair("finished-pinned", old_instance) }) {
+        auto replay = first.start(sent(first, id, instance));
+        ASSERT_TRUE(replay) << id;
+        EXPECT_EQ("finished", replay->body["state"].asString()) << id;
+    }
+    // the restart: a new server_instance, no holds
+    AttemptRegistry restarted(settings_with(&clock, 1, 1));
+    ASSERT_NE(old_instance, restarted.server_instance());
+    auto again = sent(restarted, "finished-unpinned", "");
+    EXPECT_FALSE(restarted.start(again));   // it runs again
+    restarted.finish(again, "completed", 200, 1);
+    auto refused = restarted.start(sent(restarted, "finished-pinned", old_instance));
+    ASSERT_TRUE(refused);
+    EXPECT_TRUE(refused->instance_mismatch);
+    EXPECT_EQ("instance_mismatch", refused->body["state"].asString());
+    EXPECT_EQ(404, restarted.state("finished-pinned").first);
+    // what the contract states: the hold is the process's, a finished state is replay-safe only
+    // when pinned, and what an unpinned one assumes
+    const Json::Value caps = restarted.capabilities_json();
+    const std::string rule = caps["release_rule"].asString();
+    for (const char *phrase : { "The hold is this process's, in memory: a restarted process (a "
+                                "new server_instance) holds none",
+                                "replay-safe only as stated next",
+                                "So a finished state is replay-safe",
+                                "only for an attempt sent with expect_server_instance equal to "
+                                "this server_instance and with not_after_ms",
+                                "pins the instance, as for a tombstone",
+                                "A finished state of an attempt sent without "
+                                "expect_server_instance assumes that no copy of the request "
+                                "reaches a restarted process",
+                                // kept from the review of the pass-5 fixes
+                                "A finished attempt's id stays refused (409)",
+                                "assumes that no copy of the request arrives after the attempt "
+                                "left retention" }) {
+        EXPECT_NE(std::string::npos, rule.find(phrase)) << phrase;
+    }
+    EXPECT_NE(std::string::npos, caps["instance"].asString().find(
+            "a delayed copy of a cancelled or finished request would otherwise run there"));
+    AttemptRegistry none(settings_with(&clock, 0));
+    EXPECT_NE(std::string::npos, none.capabilities_json()["release_rule"].asString().find(
+            "a copy sent with expect_server_instance is still refused by a restarted process"));
+}
+
 // Review of the pass-5 fixes, finding 2: with clock_skew_ms 0 a cancel's covers_admission
 // (suppressed_until_ms == not_after_ms) must hold at the instant the wall clock reads
 // not_after_ms, which the strict not_after check still admits — the tombstone is live through

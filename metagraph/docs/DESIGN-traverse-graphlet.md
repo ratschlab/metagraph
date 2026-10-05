@@ -1247,3 +1247,120 @@ confirmed finding is fixed; MGT v1 is unchanged (no record, field or token). The
     beyond 256 MiB decoded again) at about 370 MB instead of 4.8 GB (medians of 5 on a loaded machine). A discovery indexes its column labels by a 4-byte slot per column instead of an accumulator
     per column. Tested: the profiles equal across batch sizes, byte targets and kept bounds, on a query and on one
     repeating two thirds of it, and equal to the same labels given explicitly; no read exceeds its batch.
+
+# 25. The review of levels 4–5 *(review 6, 2026-10-05; level 5 kept)*
+
+An external review of levels 4 and 5 (pinned at `dcc0cebd`, the plan at `c9e05628`) confirmed the four blockers of
+the review of pass 5 fixed and found no index-identity collision, traversal-evidence error or MGT v1
+incompatibility. It found five implementation issues (findings 1–5, all P2), one qualification of the lease
+contract (finding 6) and one design disagreement with the plan (X-R3). Findings 2, 4 and 5 are the library's
+(`metagraph.traverse`) and are fixed by its half of this pass; this section notes the server's (1, 3, 6), the plan
+revisions and a corrected benchmark statement. No request or response field is added and `feature_level` stays
+5: what changes is physical work (finding 1), values in `timing` (finding 3) and two capabilities texts
+(finding 6). Each fix has a regression test made from the reviewer's probe (SPEC T53); untimed responses are
+byte-identical to `7aaee760`.
+
+- **The path cache allocated before admission (finding 1).** `RowDiffCache::insert` copied (or flattened) the
+  whole row, then computed its size, read the shared bound and evicted. A cache bounded at 1 KiB given a row of
+  1,048,576 columns allocated 4,210,688 bytes and refused the row, its bytes, peak and kept rows all 0; a small
+  bound could thus make large, unreported copies over and over, and a full cache held its bound plus the copy
+  (two 1.5 MiB rows under 4 MiB: 4.5 MiB during the insert of a third). Now the stored size is computed from the
+  row (`StoredRow::bytes_of`: one buffer for a binary row, three exact buffers for a flat tuple row — the same
+  value as the stored copy's `bytes()`, asserted), the bound is read and the older entries are evicted first, and
+  the row is copied only when admitted; a refused row is counted (`rows_refused`, internal). The peak the cache
+  states (`timing.path_cache.peak_bytes`) is what it held, insertion included: the copy is made after the
+  evictions that make room for it, so no insert holds more than its end. What is kept, evicted or hit is
+  unchanged (the same size decides). Measured with jemalloc's thread counters on the reviewer's probe: 0 bytes
+  allocated by the refused insert (4,210,688 before); the kept third row adds at most 0 bytes to the cache's
+  3,147,008 B (1,572,864 before, 4,719,872 B held at once under a 4,194,304 B bound).
+- **The deadline record missed the seed phase's setup (finding 3).** A valid request naming 2,500 headers with a
+  shared 1,024-character prefix stated, on a warm server, a seed phase of 126.37 ms, label resolution 3.00 ms, and a
+  longest piece of 0.297 ms: the duplicate check of the names compared each with every earlier one (about 3 GB of
+  `memcmp` on that prefix), neither it nor the resolution was a piece, and the first head's checkpoint did not count
+  what came before it. Now:
+  - the seed phase is cut into pieces wherever another piece (a read or chunk, a k-mer mapping, a derivation step)
+    begins or ends, and every span between two of them is a **`setup`** piece (`DecodePacer::open_setup` /
+    `close_setup`, the walker's `begin_setup` / `end_setup`); the phase ends at the walk's first checkpoint, or
+    at its stop or end when it reaches none (a radius of 0, a D3 seed, no arm), and is flushed on every way out,
+    a failed seed's included;
+  - the walk after its last reading of the clock, to its stop or end, is a last `head` piece (it was no piece:
+    the last head's remainder and the last level's merge and beam), so the pieces cover the seed's time from its
+    start to its result;
+  - `seed_phase_ms` runs from the seed's start to that end (before: the validation or derivation alone), and
+    `seed_fetch_ms` counts the reads in it (an annotate root's read now among them);
+  - the duplicate checks are hash sets in the request's order — the seed labels' by name (a resolved label
+    carries the name it was given), the extra labels' by target (`LabelRef::same_target`: the column, and for a
+    header its sequence) — refusing what the scans refused, the first duplicate in order and after resolving the
+    names before it (tested, including an unknown name before a later duplicate).
+  On the reviewer's request from the CLI: seed phase 13.9 ms against 139.1, elapsed 14.2 against 143.5, longest
+  piece `setup` 9.8 ms against `read` 1.28 ms. The 9.8 ms span left is the seed id over the 2,500 names (their sort
+  and FNV-1a over 2.6 MB, part of its definition), linear in the names' bytes and now stated rather than hidden.
+  `usage.observed_max_uninterruptible_ms` stays the longest decoded piece (reads only, as stated in §6.8 of the
+  SPEC); a setup piece is in the deadline record only. Timing only: no untimed byte changes, the walk's logic
+  is untouched (the pieces are notes; `head_clock_ms_` is set at the seed phase's end instead of at the first
+  checkpoint, which only adds a piece of about 0 ms there).
+- **The finished-state release across a restart (finding 6).** The capabilities required instance pinning for
+  early release on a tombstone but described a finished request within its hold as never run again. The hold
+  lives in the process's memory: a request finished with `not_after_ms` 60 s ahead, without
+  `expect_server_instance`, replayed after a restart of the same endpoint before then ran again (200, 170 work
+  units), while the pinned copy was refused (409 `instance_mismatch`). The texts now say so, as the SPEC's §5 and
+  §10.3: the hold is the process's; a finished state is replay-safe only for an attempt sent with
+  `expect_server_instance` (equal to the instance that finished it) and with `not_after_ms` within
+  `tombstone_max_s` of the finish, so a ledger releasing on a finished state before `not_after_ms + skew +
+  bound_ms` pins the instance, as for a tombstone; an unpinned attempt's finished state assumes that no copy
+  reaches a restarted process (or another server at the same address) while it could still be admitted there.
+  The `instance` text names finished requests beside cancelled ones. The library's `release_verdict` already
+  lists `sent_without_expect_server_instance` among a finished release's assumptions; its recorded answers keep
+  the old texts (they are not compared).
+- **The benchmark statement, corrected.** The review request's table (`REVIEW-REQUEST-traverse-level4-5.md`, not
+  edited) says that walks cut off by their budget "reach about 2× more bases". The reviewer's reanalysis of the
+  saved staging results (A after-pass5 `e7d99e0c`, level 3; B level 4 `f667d775`; 54 requests each, run about 8 h
+  apart) limits that: completed walks with identical work, B/A latency 0.722; **deadline-limited walks, B/A
+  certified reach 1.465** (13 further, 2 the same, 0 less; consumed work 1.441); **the short-budget suite, B/A
+  certified reach 0.251** among the comparable nonzero pairs (1 further, 1 the same, 3 less; work 0.566); completed
+  lookahead, B/A latency 0.093. About 2× holds for some walks (ec_rplJ 2.0–2.45), not in general, and runs hours
+  apart do not separate the code from cache state and host load: the synthetic cache evidence shows the
+  mechanism, the staging attribution is not established. Level 5's start-up (the header index built before
+  readiness) is to be measured on its own.
+- **Plan revisions for the owner** (`PLAN-traverse-next-stages.md`, marked there; not code):
+  - *X-R3's reconstruction bound.* The lazy-shift argument does not bound reconstruction work: lazy shifting
+    avoids re-adjusting inherited coordinates, not re-scanning them, and an ordinary merge at each nonempty diff
+    copies the whole inherited window. A 256-row path with an anchor of 100,000 selected in-window coordinates and
+    255 nonempty singleton diffs emits about 25.5 million coordinates in vector merges while the price counts
+    100,255 — below the deep-term threshold D, and missed by the empty-diff test. Revised (§2.2 revision 2):
+    diff-first reconstruction — per column the path's windowed diffs (down to the first clear marker) merged
+    among themselves first, then once with the anchor's window — with its merge term Δ_w × ⌈log2 k⌉ charged (Δ_w
+    the path's windowed diff coordinates per column, k their nonempty lists; not the slack D): in that case merge
+    term 255 × 8 = 2,040, work bound and the price's coordinate terms 100,000 + 255 + 2,040 = 102,295; or as the
+    fallback a deterministic merge-weighted charge; new tests with sparse nonempty diffs below and above D, with
+    clear markers, and with cache and batch variations; a new question 3c-N10 (and whether the same applies to
+    full reads, whose level-4 price counts stored entries).
+  - *The 64-column crossover* stays provisional: the sweep covers selected-coordinate density, headers per
+    column, path length and cold and full caches; the decision stays deterministic and `decode: "full"` stays.
+  - *`max_uninterruptible_ms` stays null after level 8* (3c-N5): checkpoints bound index operations, page faults
+    and scheduling leave the time open. The review request's "so `max_uninterruptible_ms` can become finite" and
+    §24's "come before a finite `max_uninterruptible_ms` is advertised" are superseded; the SPEC's §6.8 and §10.3
+    say it.
+  - *Numbering*: these notes take §25, so the stages' sections in the plan move up by one (coordinates §26 …
+    3b-2 §30), their versions unchanged.
+- **Noted, not acted on here** (operations, the reviewer's recommendations): eager header indexing stays the
+  default for header-capable servers (an explicit column-only opt-out could save 1–2 GB and start-up work if no
+  header-dependent operation can trigger lazy construction; one-shot CLI invocations deserve their own policy);
+  measure memory pressure (file and anonymous memory, refaults, reclaim, pressure stalls, faults, I/O per request)
+  before raising the container's memory or changing read-ahead, then compare `MADV_RANDOM` against normal advice
+  separately, in serial paced trials that abort on agreed sibling-latency or pressure thresholds.
+- **After the verification of these fixes** (three low findings, all fixed; tests and documents only, no source):
+  - *The GCC 13 gate covers `unit_tests`.* It compiled the 112 `src/` files only, so a gtest assertion under an
+    unbraced `if` in the new `RowDiffPathCache.ARefusedRowIsNeverCopied` passed AppleClang and failed GCC's
+    `-Wdangling-else` (an `EXPECT_*` expands to an if/else). The gate now compiles the 75 `tests/` sources too,
+    with the target's own options as CMake gives them: gtest and gmock as system includes (googletest declares
+    them so), `-Wno-uninitialized` after `-Wall`. It found 22 older sites in this branch's test files (19
+    dangling-else, 3 range-for loops binding `const std::string &` to string literals) in `test_walker`,
+    `test_graphlet_codec`, `test_label_oracle`, `test_label_oracle_budgeted`, `test_trie` and `test_trie_cases`;
+    all are braced or iterate over `const char *`, and no test checks anything different. 112 + 75 files pass.
+  - *SPEC §10.3 agrees with §6.8*: its `deadline_check` text now says `max_uninterruptible_ms` stays null after
+    stage 3c-ii (3c-N5).
+  - *The plan's merge term has its own symbol*: Δ_w × ⌈log2 k⌉ (Δ_w the path's windowed diff coordinates per
+    selected column down to the first clear marker, k their nonempty lists), no longer D, which is the slack of
+    revision 3. In the reviewer's case the merge term is 2,040; the work bound and the price's coordinate terms
+    are 102,295 (corrected above, in the plan's revision 2, 3c-N10 and X-R3).

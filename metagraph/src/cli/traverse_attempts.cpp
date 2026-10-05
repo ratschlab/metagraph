@@ -1133,9 +1133,10 @@ Json::Value AttemptRegistry::capabilities_json() const {
     att["instance"] = "expect_server_instance (with attempt_id): a request naming another "
         "server_instance than this process's is refused before anything runs, 409 {error, "
         "state: \"instance_mismatch\", expect_server_instance, server_instance, the ids given, "
-        "not_after_ms if given}: tombstones live in memory, so a restarted process (a new "
-        "server_instance) has none, and a delayed copy of a cancelled request would otherwise "
-        "run there; a server below feature level 5 refuses the unknown field (400)";
+        "not_after_ms if given}: tombstones and the holds of finished attempts live in memory, "
+        "so a restarted process (a new server_instance) has none, and a delayed copy of a "
+        "cancelled or finished request would otherwise run there; a server below feature level "
+        "5 refuses the unknown field (400)";
     if (settings_.retention_s) {
         att["suppression"] = fmt::format(
             "POST /traverse/cancel of an id no attempt of this process holds tombstones it (404, "
@@ -1176,19 +1177,35 @@ Json::Value AttemptRegistry::capabilities_json() const {
             "no_suppression) and promises nothing; a request with the id arriving later runs";
     }
     // What a finished state promises against a replay of the request (review of the pass-5
-    // fixes, finding 1): the id's hold beyond retention, or, with nothing kept, nothing
+    // fixes, finding 1): the id's hold beyond retention, or, with nothing kept, nothing. The
+    // hold is this process's, in memory, so a restart ends it: only an attempt pinned to the
+    // instance (expect_server_instance) is refused by the restarted process, and the finished
+    // state is replay-safe only for such an attempt — required as for a tombstone, and what an
+    // unpinned one assumes stated (review of levels 4-5, finding 6: an unpinned request finished
+    // with not_after_ms 60 s ahead, replayed after a restart of the same endpoint, ran again, 170
+    // work units, while the text said a finished request within its hold was never run again)
     const std::string finished_hold = settings_.retention_s
         ? "A finished attempt's id stays refused (409) while it is retained (retention_s, "
           "retention_count) and, for an attempt sent with not_after_ms, until this server's "
           "clock reads later than not_after_ms + clock_skew_allowance_ms, at most "
           "tombstone_max_s after it finished (held among the tombstones, on both clocks, and "
           "never dropped early, so beyond retention_count if need be: tombstone_max_s bounds "
-          "how many are held): a replay of a finished request is then never run again when its "
-          "not_after_ms + clock_skew_allowance_ms lies within tombstone_max_s of the finish. A "
-          "finished state of an attempt sent without not_after_ms, or with one further out, "
-          "assumes that no copy of the request arrives after the attempt left retention. "
+          "how many are held). The hold is this process's, in memory: a restarted process (a "
+          "new server_instance) holds none, and a copy of the request reaching it runs there "
+          "unless it was sent with expect_server_instance (then it is refused, 409 "
+          "instance_mismatch). So a finished state is replay-safe — no copy of the request runs "
+          "after it, on this process or a restarted one — only for an attempt sent with "
+          "expect_server_instance equal to this server_instance and with not_after_ms, when "
+          "not_after_ms + clock_skew_allowance_ms lies within tombstone_max_s of the finish: a "
+          "ledger that releases on a finished state before its own clock passes not_after_ms + "
+          "clock_skew_allowance_ms + bound_ms pins the instance, as for a tombstone. A finished "
+          "state of an attempt sent without expect_server_instance assumes that no copy of the "
+          "request reaches a restarted process (or another server at the same address) while it "
+          "could still be admitted there; one sent without not_after_ms, or with one further "
+          "out, assumes that no copy of the request arrives after the attempt left retention. "
         : "retention_s is 0: finished attempts are not kept, so a finished state assumes that "
-          "no copy of the request arrives after it. ";
+          "no copy of the request arrives after it (a copy sent with expect_server_instance is "
+          "still refused by a restarted process). ";
     att["release_rule"] = "A ledger may release an attempt's capacity before it finished only on "
         "a 404 with tombstone: true and covers_admission: true from the same server_instance, "
         "for an attempt it sent with exactly that not_after_ms and with expect_server_instance "
@@ -1196,8 +1213,9 @@ Json::Value AttemptRegistry::capabilities_json() const {
         "then refused, instance_mismatch). An attempt sent without not_after_ms, or without "
         "expect_server_instance, is never released early on a tombstone. Otherwise it releases "
         "only on a finished state (GET /traverse/attempt, a cancel's 404 or 200 with state "
-        "finished, or the response), or once its own clock passes not_after_ms + "
-        "clock_skew_allowance_ms + bound_ms. " + finished_hold + "A 429 and a cancel's 200 with "
+        "finished, or the response; replay-safe only as stated next), or once its own clock "
+        "passes not_after_ms + clock_skew_allowance_ms + bound_ms. " + finished_hold
+        + "A 429 and a cancel's 200 with "
         "state stopping release nothing. Assumed: the ledger's clock is within "
         "clock_skew_allowance_ms of this server's, this server's clock does not step back by "
         "more than that, and nothing between the ledger and the server rewrites a request's "
