@@ -76,12 +76,49 @@ WINDOW OFFSET
 OUTPUT (--out DIR, default bench_out/<label>_<timestamp>)
   results.json   run meta, capabilities, one record per request (wall time, HTTP status, bytes, server timing:
                  elapsed_ms, annotation_fetch_ms, rows_fetched, tuple_rows_fetched, coords_mapped, cache_hits,
-                 serialize_ms; per arm status / complete_to_bp / reach; outcome, limitations; release /
-                 algorithm_version / feature_level; derived: ms per fetched row, budget ratio, bp reached,
-                 bp per second, rows per base; result hashes), suite tables, invariants, read intervals
-  summary.md     tables by suite, the invariant checks, all requests
+                 serialize_ms and any other number the server adds, a nested object's as "name.field" (e.g.
+                 path_cache.hits); per arm status / complete_to_bp / reach / leaves_by_reason / counters; outcome,
+                 limitations; release / algorithm_version / feature_level; an attempt's usage (work_units,
+                 peak_admitted_bytes) when the request was ledger-managed; derived: ms per fetched row, budget
+                 ratio, bp reached, bp per second, rows per base; result hashes), suite tables, invariants, read
+                 intervals. Per seed also:
+                   reach     CERTIFIED reach: bp (complete_to_bp, both arms), walked_bp (counts.max_bp), steps (the
+                             walker's steps: nodes walked), segments, leaves, complete_walks (leaves whose end reason
+                             is the walk's own, not a resource stop: max_steps, max_live_paths, max_paths,
+                             max_output_bp, time_budget, beam_pruned, resource_limit) and stopped_walks, stop (failed,
+                             resource:<memory|work>, the arms' cap reasons, else the walks outcome)
+                   work      CONSUMED work: work_units (the arms' counter, reported under a memory or work budget),
+                             usage_work_units (the attempt's usage), and the logical counters every server reports --
+                             steps, successor_enumerations, annotation rows_requested and keys_mapped; rows_decoded
+                             (rows_fetched + tuple_rows_fetched) is physical
+                   physical  the row-diff path cache: reuse (timing.path_cache.hits, paths cut at a cached row),
+                             stored_rows_read, peak_cache_bytes (timing.path_cache.peak_bytes); None on a server that
+                             reports none, 0 when a server that reports timing.seed_phase_ms omits the object (it is
+                             omitted when all its counters are 0)
+  summary.md     tables by suite, the invariant checks, certified reach and consumed work per seed, all requests
   raw/NNN_<id>.json.gz   {meta, request, response} per request
   progress.jsonl one line per request as it completes
+
+COMPARE (--compare A B; exit code 1 when a deterministic result changed)
+  Each request (each seed of a batch) present in both runs is one pair, classified:
+    completed         both ran to their end. LATENCY is compared, and only on IDENTICAL COMPLETED WORK: the same
+                      result (walks_sha / graphlet_sha; /resolve: the result digest) and the same logical work
+                      counters (steps, successor_enumerations, rows_requested, keys_mapped; /resolve: num_kmers).
+                      A pair whose result or logical work differs is shown in parentheses and left out of the
+                      suite's latency; equal results with different logical work are flagged (the server's
+                      counting changed).
+    deadline-limited  a time budget, deadline or memory / work budget stopped either side. Their elapsed is about
+                      the budget on both sides and hides a gain, so the compare shows CERTIFIED REACH (A/B bp,
+                      bp B/A, steps, complete walks / leaves, the stop) and CONSUMED WORK (work units where the
+                      server reports them, else the annotation rows requested; B/A only in one unit).
+    not compared      an HTTP error on a side, a failed seed outside a deadline, a request that differs.
+  Both tables also show the physical path-cache reuse and peak cache bytes (A and B) where the servers report
+  them. Per suite: the geometric mean of B/A latency over the identical completed pairs (< 1 = B faster) and of
+  B/A certified bp over the deadline-limited pairs (> 1 = B reached further), how many reached further / the
+  same / less, and the geometric mean of B/A consumed work. A results.json written before script version 2
+  (no counters, leaves_by_reason or physical fields: the staging baseline, mini_before) is analysed again in
+  memory from the raw/ directory next to it; without raw/ its stored fields are used (steps and complete walks
+  then show "-"). Nothing is written into either run.
 
 RESULT IDENTITY
   graphlet_sha (whole body), graphlet_sha_noH (without the H line; equal between a batch and its singles),
@@ -92,7 +129,10 @@ RESULT IDENTITY
 
 COMPATIBILITY
   Works with servers without feature_level / attempts (8a98759a) and with newer ones (0a880475+): every field
-  is optional; unknown timing fields are recorded as they come.
+  is optional; unknown timing fields are recorded as they come. The path cache's statistics
+  (timing.path_cache, and timing.seed_phase_ms / seed_fetch_ms / label_resolve_ms beside it) come with the review
+  fixes of pass 5; a renamed reuse or peak field is still found by name (path_cache|dependency ... hits|reuse,
+  ... peak ... bytes). Results of script version 1 are read by --compare (see COMPARE).
 """
 
 import argparse
@@ -119,7 +159,7 @@ try:
 except ImportError:  # pragma: no cover (non-POSIX)
     fcntl = None
 
-SCRIPT_VERSION = 1
+SCRIPT_VERSION = 2
 PLAN_VERSION = 1
 ALL_SUITES = ['caps', 'budgets', 'walks', 'callsize', 'resolve', 'annotate', 'lookahead', 'batch']
 EXTRA_SUITES = ['smoke']
@@ -129,6 +169,18 @@ TIMING_FIELDS = ('elapsed_ms', 'annotation_fetch_ms', 'rows_fetched', 'tuple_row
                  'coords_mapped', 'cache_hits', 'serialize_ms')
 WALK_LINES = set('SXLVGPETCR')
 LOCAL_HOSTS = {'127.0.0.1', 'localhost', '::1'}
+# leaf end reasons that stop an exploration short of its requested domain (the walker's resource
+# stops, _codec.RESOURCE_CODES): a leaf with any other reason is a COMPLETE walk
+RESOURCE_LEAF_REASONS = frozenset(('max_steps', 'max_live_paths', 'max_paths', 'max_output_bp', 'time_budget',
+                                   'beam_pruned', 'resource_limit'))
+# the logical (deterministic) work counters of a seed: equal for equal results on any server build of
+# one algorithm, whatever its caches did; a completed pair is "identical completed work" only when they are
+COMPLETED_WORK_KEYS = ('steps', 'successor_enumerations', 'rows_requested', 'keys_mapped')
+# the row-diff path cache's physical statistics: timing.path_cache {hits, stored_rows_read, rows_kept,
+# bytes_kept, peak_bytes} per seed (omitted when all are 0). Older servers have none; a renamed field is
+# still found by these patterns over the flattened timing names
+PATH_CACHE_REUSE = re.compile(r'^path_cache\.hits$|(path_cache|dependenc)\w*[._](hits|reuse)')
+PATH_CACHE_PEAK = re.compile(r'^path_cache\.peak_bytes$|(path_cache|dependenc)\w*[._]peak\w*bytes')
 
 
 # ============================================================================ small helpers
@@ -697,19 +749,27 @@ def graphlet_hashes(text):
     return sha(text), sha(noh), sha('\n'.join(walk))
 
 
-def analyze_seed_result(res, budget_ms, window, n_seeds, top_elapsed):
+def analyze_seed_result(res, budget_ms, window, n_seeds, top_elapsed, usage_work=None):
     t = res.get('timing') or {}
     timing = {k: _num(t.get(k)) for k in TIMING_FIELDS}
     for k, v in t.items():          # newer servers: any extra numeric timing field
         if k not in timing and _num(v) is not None:
             timing[k] = v
+        elif isinstance(v, dict):   # and the numbers of a nested object (timing.path_cache), as "name.field"
+            for kk, vv in v.items():
+                if _num(vv) is not None:
+                    timing['%s.%s' % (k, kk)] = vv
     arms = {}
     for side, a in (res.get('arms') or {}).items():
         c = a.get('counts') or {}
+        lbr = c.get('leaves_by_reason')
         arms[side] = {'status': a.get('status'), 'complete_to_bp': _num(a.get('complete_to_bp')),
                       'max_bp': _num(c.get('max_bp')), 'bases': _num(c.get('bases')),
                       'leaves': _num(c.get('leaves')), 'segments': _num(c.get('segments')),
-                      'cap_reason': (a.get('cap_trigger') or {}).get('reason')}
+                      'cap_reason': (a.get('cap_trigger') or {}).get('reason'),
+                      'leaves_by_reason': ({k: v for k, v in lbr.items() if _num(v) is not None}
+                                           if isinstance(lbr, dict) else None),
+                      'counters': {k: v for k, v in (a.get('counters') or {}).items() if _num(v) is not None}}
     seed = res.get('seed') or {}
     rs = res.get('resource_stop')
     tb = time_bound(res)
@@ -751,7 +811,83 @@ def analyze_seed_result(res, budget_ms, window, n_seeds, top_elapsed):
         'bp_per_s': div(bp_total, (el or 0) / 1000.0) if el else None,
         'rows_per_base': div(rows, bases) if bases else None,
     }
+    reach_and_work(out, usage_work)
     return out
+
+
+def _arm_total(arms, get):
+    vals = [get(a) for a in arms.values()]
+    vals = [v for v in vals if v is not None]
+    return sum(vals) if vals else None
+
+
+def stop_reason(s):
+    """What ended a seed's exploration, in one word: failed, resource:<r> (a memory / work budget), the arms'
+    cap reasons (time_budget, max_steps, ...), else the walks outcome (complete)."""
+    if s.get('error'):
+        return 'failed'
+    rs = s.get('resource_stop') or {}
+    if rs.get('resource'):
+        return 'resource:%s' % rs['resource']
+    caps = sorted({a.get('cap_reason') for a in (s.get('arms') or {}).values() if a.get('cap_reason')})
+    if caps:
+        return ','.join(caps)
+    return (s.get('outcome') or {}).get('walks') or 'complete'
+
+
+def reach_and_work(s, usage_work=None):
+    """Adds to an analysed seed result (also one read back from an older results.json, whose arms may lack the
+    counters and leaves_by_reason: those numbers are then None):
+      reach     the CERTIFIED reach -- bp (complete_to_bp, both arms), walked_bp (the longest walks, counts.max_bp),
+                steps (walker steps: the nodes walked), segments, leaves, complete_walks (leaves that ended for a
+                reason of the walk's own, not a resource stop) and stopped_walks, stop (stop_reason)
+      work      the CONSUMED work -- work_units (the arms' counter, reported under a memory / work budget),
+                usage_work_units (the attempt's usage, ledger-managed requests), and the logical counters every
+                server reports: steps, successor_enumerations, annotation.rows_requested / keys_mapped; rows_decoded
+                (rows_fetched + tuple_rows_fetched) is physical (lookahead and caches change it)
+      physical  the path cache's reuse (timing.path_cache.hits: paths cut at a cached row), stored_rows_read,
+                peak_cache_bytes; None where the server reports none (absent on a server that reports
+                timing.seed_phase_ms, the same release: 0, since the object is omitted when all counters are 0)"""
+    arms = s.get('arms') or {}
+    d = s.get('derived') or {}
+    known = bool(arms) and all(isinstance(a.get('leaves_by_reason'), dict) for a in arms.values())
+    complete = stopped = None
+    if known:
+        complete = sum(n for a in arms.values() for r, n in a['leaves_by_reason'].items()
+                       if r not in RESOURCE_LEAF_REASONS)
+        stopped = sum(n for a in arms.values() for r, n in a['leaves_by_reason'].items()
+                      if r in RESOURCE_LEAF_REASONS)
+
+    def counter(name):
+        return _arm_total(arms, lambda a: _num((a.get('counters') or {}).get(name)))
+    s['reach'] = {'bp': d.get('bp_total'), 'bp_left': d.get('bp_left'), 'bp_right': d.get('bp_right'),
+                  'walked_bp': _arm_total(arms, lambda a: a.get('max_bp')), 'steps': counter('steps'),
+                  'segments': _arm_total(arms, lambda a: a.get('segments')),
+                  'leaves': _arm_total(arms, lambda a: a.get('leaves')), 'complete_walks': complete,
+                  'stopped_walks': stopped, 'stop': stop_reason(s)}
+    ann = s.get('annotation') or {}
+    s['work'] = {'work_units': counter('work_units'), 'usage_work_units': usage_work,
+                 'steps': counter('steps'), 'successor_enumerations': counter('successor_enumerations'),
+                 'rows_requested': _num(ann.get('rows_requested')), 'keys_mapped': _num(ann.get('keys_mapped')),
+                 'rows_decoded': d.get('rows')}
+    timing = s.get('timing') or {}
+    phys = {'reuse': None, 'stored_rows_read': None, 'peak_cache_bytes': None, 'fields': []}
+    for k, v in timing.items():
+        if v is None:
+            continue
+        if PATH_CACHE_REUSE.search(k) and phys['reuse'] is None:
+            phys['reuse'] = v
+            phys['fields'].append(k)
+        elif PATH_CACHE_PEAK.search(k) and phys['peak_cache_bytes'] is None:
+            phys['peak_cache_bytes'] = v
+            phys['fields'].append(k)
+        elif k == 'path_cache.stored_rows_read':
+            phys['stored_rows_read'] = v
+            phys['fields'].append(k)
+    if phys['reuse'] is None and 'seed_phase_ms' in timing:
+        phys.update(reuse=0, stored_rows_read=0, peak_cache_bytes=0)
+    s['physical'] = phys
+    return s
 
 
 def analyze(meta, request, resp):
@@ -784,8 +920,21 @@ def analyze(meta, request, resp):
         rec['clamped'] = st.get('clamped') or None
         res = resp.get('results') or []
         wins = meta.get('windows') or []
+        u = resp.get('usage')
+        per_seed = [None] * len(res)
+        if isinstance(u, dict):
+            # an attempt's usage (ledger-managed requests): the work its seeds consumed
+            rec['usage'] = {'work_units': _num(u.get('work_units')), 'reason': u.get('reason'),
+                            'elapsed_ms': _num(u.get('elapsed_ms')),
+                            'peak_admitted_bytes': _num((u.get('memory') or {}).get('peak_admitted_bytes'))}
+            for e in u.get('per_seed') or []:
+                i = e.get('index')
+                if isinstance(i, int) and 0 <= i < len(res):
+                    per_seed[i] = _num(e.get('work_units'))
+            if len(res) == 1 and per_seed[0] is None:
+                per_seed[0] = rec['usage']['work_units']
         rec['results'] = [analyze_seed_result(r, budget, wins[i] if i < len(wins) else None, len(res),
-                                              rec['server']['elapsed_ms']) for i, r in enumerate(res)]
+                                              rec['server']['elapsed_ms'], per_seed[i]) for i, r in enumerate(res)]
         if len(res) > 1 and budget:
             rec['batch_budget_ratio'] = div(rec['server']['elapsed_ms'], budget * len(res))
     elif meta['route'] == '/resolve':
@@ -1156,6 +1305,28 @@ def summary_md(results):
 
     rows = []
     for rec in recs:
+        for i, s in enumerate(rec.get('results') or []):
+            if 'reach' not in s:
+                reach_and_work(s)
+            r, w, ph = s['reach'], s['work'], s.get('physical') or {}
+            rows.append([rec['id'] + ('#%d' % i if len(rec['results']) > 1 else ''), r['stop'],
+                         '%s+%s' % (fmt(r['bp_left']), fmt(r['bp_right'])), fmt(r['walked_bp']), fmt(r['steps']),
+                         '%s/%s' % (fmt(r['complete_walks']), fmt(r['leaves'])), fmt(w['work_units']),
+                         fmt(w['usage_work_units']), fmt(w['rows_requested']), fmt(w['rows_decoded']),
+                         fmt(ph.get('reuse')), fmt(ph.get('peak_cache_bytes'))])
+    if rows:
+        L.append('## certified reach and consumed work (per seed)\n')
+        L.append('stop = what ended the exploration; bp = complete_to_bp per arm (certified); walked = the longest '
+                 'walks (counts.max_bp); walks = complete walks (a leaf reason of the walk\'s own, not a resource '
+                 'stop) / leaves; wu = the arms\' work_units (under a budget), usage wu = the attempt\'s usage; rows '
+                 'requested is logical, rows decoded physical; reuse = timing.path_cache.hits, peak cache = '
+                 'timing.path_cache.peak_bytes.\n')
+        L.append(md_table(['id', 'stop', 'bp L+R', 'walked bp', 'steps', 'walks', 'wu', 'usage wu',
+                           'rows requested', 'rows decoded', 'reuse', 'peak cache B'], rows))
+        L.append('')
+
+    rows = []
+    for rec in recs:
         res = rec.get('results') or []
         if res:
             for i, s in enumerate(res):
@@ -1228,33 +1399,96 @@ def keyed(results):
 
 
 def metrics(rec, s):
+    """The numbers --compare reads from one request (and seed): latency, certified reach, consumed work and the
+    physical cache work. A result read from an older results.json gets its reach / work first."""
     if s is not None:
-        d = s['derived']
+        if 'reach' not in s:
+            reach_and_work(s)
+        d, r, w, ph = s['derived'], s['reach'], s['work'], s.get('physical') or {}
         return {'elapsed': d['elapsed_ms'], 'ms_row': d['ms_per_row'], 'bp': d['bp_total'],
-                'ratio': d['budget_ratio'], 'bp_s': d['bp_per_s'], 'rows': d['rows']}
+                'ratio': d['budget_ratio'], 'bp_s': d['bp_per_s'], 'rows': d['rows'], 'time_bound': s.get('time_bound'),
+                'stop': r['stop'], 'steps': r['steps'], 'complete_walks': r['complete_walks'], 'leaves': r['leaves'],
+                'work': work_amount(w), 'logical': {k: w.get(k) for k in COMPLETED_WORK_KEYS},
+                'reuse': ph.get('reuse'), 'peak_cache': ph.get('peak_cache_bytes')}
+    base = {'ms_row': None, 'bp': None, 'ratio': None, 'bp_s': None, 'rows': None, 'time_bound': False,
+            'stop': None, 'steps': None, 'complete_walks': None, 'leaves': None, 'work': (None, None),
+            'logical': {}, 'reuse': None, 'peak_cache': None}
     if rec.get('resolve'):
-        return {'elapsed': rec['resolve']['elapsed_ms'], 'ms_row': rec['resolve']['ms_per_kmer'], 'bp': None,
-                'ratio': None, 'bp_s': None, 'rows': rec['resolve']['num_kmers']}
-    return {'elapsed': (rec.get('server') or {}).get('elapsed_ms'), 'ms_row': None, 'bp': None, 'ratio': None,
-            'bp_s': None, 'rows': None}
+        z = rec['resolve']
+        return dict(base, elapsed=z['elapsed_ms'], ms_row=z['ms_per_kmer'], rows=z['num_kmers'],
+                    logical={'num_kmers': z['num_kmers']})
+    return dict(base, elapsed=(rec.get('server') or {}).get('elapsed_ms'))
+
+
+def work_amount(w):
+    """-> (amount, unit) of a seed's consumed work: work units when the server reported them (a budget's meter or
+    an attempt's usage), else the annotation rows the walk requested (logical, reported by every server)."""
+    if w.get('work_units') is not None:
+        return w['work_units'], 'wu'
+    if w.get('usage_work_units') is not None:
+        return w['usage_work_units'], 'wu'
+    if w.get('rows_requested') is not None:
+        return w['rows_requested'], 'rows'
+    return None, None
+
+
+def _work_cell(x):
+    amount, unit = x
+    return '-' if amount is None else '%s %s' % (fmt(amount), unit)
+
+
+def _logical_diff(la, lb):
+    """'same', '?' (a side does not report them) or the counters that differ, 'name a->b'."""
+    keys = [k for k in la if la.get(k) is not None and lb.get(k) is not None]
+    if not keys:
+        return '?'
+    diff = ['%s %s->%s' % (k, fmt(la[k]), fmt(lb[k])) for k in keys if la[k] != lb[k]]
+    return '; '.join(diff) if diff else 'same'
+
+
+def _pair_class(ra, sa, rb, sb, xa, xb):
+    """completed (both ran to their end: latency is comparable on identical completed work), deadline (a time
+    budget, deadline or resource budget stopped either: compare certified reach and consumed work), or other
+    (an HTTP error on a side, a failed seed, a request that differs)."""
+    if ra.get('http') != 200 or rb.get('http') != 200 or ra.get('request_sha') != rb.get('request_sha'):
+        return 'other'
+    if sa is None and sb is None:
+        return 'completed'          # /resolve: no budget stops it
+    if sa is None or sb is None:
+        return 'other'
+    if xa['time_bound'] or xb['time_bound'] or str(xa['stop']).startswith('resource:') \
+            or str(xb['stop']).startswith('resource:'):
+        return 'deadline'
+    if sa.get('error') or sb.get('error'):
+        return 'other'
+    return 'completed'
 
 
 def compare(path_a, path_b):
-    A, B = load_results(path_a), load_results(path_b)
+    A, B = load_for_compare(path_a), load_for_compare(path_b)
     ka, kb = keyed(A), keyed(B)
     L = []
     ma, mb = A['meta'], B['meta']
     L.append('# Benchmark comparison: %s -> %s\n' % (ma.get('label'), mb.get('label')))
     for tag, m, r in (('A', ma, A), ('B', mb, B)):
         s = r.get('server') or {}
-        L.append('- %s: %s, release `%s`, feature_level %s, panel %s (%s), K=%s, started %s, %s requests' % (
+        L.append('- %s: %s, release `%s`, feature_level %s, panel %s (%s), K=%s, started %s, %s requests%s' % (
             tag, m.get('label'), s.get('release'), s.get('feature_level'), (m.get('panel') or {}).get('name'),
-            (m.get('panel') or {}).get('sha'), m.get('window_offset'), m.get('started'), m.get('requests_sent')))
+            (m.get('panel') or {}).get('sha'), m.get('window_offset'), m.get('started'), m.get('requests_sent'),
+            ' (analysed again from its raw/ responses: an older results.json)' if r.get('_rederived') else ''))
     if ma.get('plan_version') != mb.get('plan_version'):
         L.append('- WARNING: plan versions differ (%s vs %s): ids may not mean the same request' % (
             ma.get('plan_version'), mb.get('plan_version')))
     L.append('')
-    rows, flags = [], []
+    L.append('Completed requests (both ran to their end) compare LATENCY, and only on identical completed work: '
+             'the same result and the same logical work counters (%s; /resolve: num_kmers). Deadline-limited '
+             'requests (a time budget, deadline or resource budget stopped either side) compare CERTIFIED REACH '
+             '(complete_to_bp of both arms, steps, complete walks, the stop) and CONSUMED WORK (work units where '
+             'the server reports them, else the annotation rows requested): their elapsed is about the budget '
+             'on both sides and hides any gain. reuse = paths cut at a cached row (timing.path_cache.hits), '
+             'peak cache = timing.path_cache.peak_bytes; "-" where a server reports none.\n'
+             % ', '.join(COMPLETED_WORK_KEYS))
+    done_rows, dl_rows, other_rows, flags, work_flags = [], [], [], [], []
     per_suite = {}
     for key in [k for k in ka if k in kb]:
         (ra, sa), (rb, sb) = ka[key], kb[key]
@@ -1272,33 +1506,107 @@ def compare(path_a, path_b):
                 'result_sha') else 'DIFFERENT'
         if verdict == 'DIFFERENT':
             flags.append(key)
+        cls = _pair_class(ra, sa, rb, sb, xa, xb)
+        ps = per_suite.setdefault(ra['suite'], {'lat': [], 'excluded': 0, 'reach': [], 'work': [], 'further': 0,
+                                                'same': 0, 'less': 0, 'deadline': 0})
         ratio = div(xb['elapsed'], xa['elapsed'])
-        if ratio and ra.get('http') == 200 and rb.get('http') == 200:
-            # a time-bound walk's elapsed is the budget: its gain is bp per second
-            tbound = (sa is not None and sa.get('time_bound')) or (sb is not None and sb.get('time_bound'))
-            gain = div(xa['bp_s'], xb['bp_s']) if tbound and xa['bp_s'] and xb['bp_s'] else ratio
-            per_suite.setdefault(ra['suite'], []).append(gain)
-        rows.append([key, fmt(xa['elapsed']), fmt(xb['elapsed']), fmt(ratio, 2), fmt(xa['ms_row'], 2),
-                     fmt(xb['ms_row'], 2), fmt(div(xb['ms_row'], xa['ms_row']), 2), fmt(xa['bp']), fmt(xb['bp']),
-                     fmt(xa['ratio'], 2), fmt(xb['ratio'], 2), fmt(xa['bp_s']), fmt(xb['bp_s']), verdict])
+        if cls == 'completed':
+            logical = _logical_diff(xa['logical'], xb['logical'])
+            identical = verdict in ('equal', 'walks equal') and logical in ('same', '?')
+            if identical and ratio:
+                ps['lat'].append(ratio)
+            else:
+                ps['excluded'] += 1
+                if verdict in ('equal', 'walks equal') and logical not in ('same', '?'):
+                    work_flags.append('%s (%s)' % (key, logical))
+            done_rows.append([key, fmt(xa['elapsed']), fmt(xb['elapsed']), fmt(ratio, 2) if identical else
+                              '(%s)' % fmt(ratio, 2), fmt(xa['ms_row'], 2), fmt(xb['ms_row'], 2), logical,
+                              fmt(xa['reuse']), fmt(xb['reuse']), fmt(xa['peak_cache']), fmt(xb['peak_cache']),
+                              verdict])
+        elif cls == 'deadline':
+            ps['deadline'] += 1
+            bpa, bpb = xa['bp'], xb['bp']
+            if bpa is not None and bpb is not None:
+                ps['further' if bpb > bpa else 'less' if bpb < bpa else 'same'] += 1
+                if bpa > 0 and bpb > 0:
+                    ps['reach'].append(bpb / bpa)
+            (wa, ua), (wb, ub) = xa['work'], xb['work']
+            wr = div(wb, wa) if ua == ub and wa else None
+            if wr:
+                ps['work'].append(wr)
+            dl_rows.append([key, fmt(xa['elapsed']), fmt(xb['elapsed']), xa['stop'] or '-', xb['stop'] or '-',
+                            fmt(bpa), fmt(bpb), fmt(div(bpb, bpa), 2), fmt(xa['steps']), fmt(xb['steps']),
+                            '%s/%s' % (fmt(xa['complete_walks']), fmt(xa['leaves'])),
+                            '%s/%s' % (fmt(xb['complete_walks']), fmt(xb['leaves'])),
+                            _work_cell(xa['work']), _work_cell(xb['work']), fmt(wr, 2),
+                            fmt(xa['reuse']), fmt(xb['reuse']), fmt(xa['peak_cache']), fmt(xb['peak_cache']),
+                            verdict])
+        else:
+            other_rows.append([key, fmt(xa['elapsed']), fmt(xb['elapsed']), xa['stop'] or '-', xb['stop'] or '-',
+                               verdict])
     only_a = [k for k in ka if k not in kb]
     only_b = [k for k in kb if k not in ka]
-    L.append('Per suite: geometric mean of B/A elapsed (time-bound walks: of A/B bp per second); < 1 = B faster.\n')
-    L.append(md_table(['suite', 'n', 'geomean B/A'],
-                      [[s, len(v), fmt(geomean(v), 3)] for s, v in per_suite.items()]))
+    L.append('Per suite. Latency: geometric mean of B/A elapsed over the completed pairs with identical work '
+             '(< 1 = B faster; "excluded": completed pairs whose result or logical work differ). Reach: geometric '
+             'mean of B/A certified bp over the deadline-limited pairs (> 1 = B reached further; pairs at 0 bp '
+             'only counted), B further / same / less, and the geometric mean of B/A consumed work.\n')
+    L.append(md_table(['suite', 'completed', 'latency B/A', 'excluded', 'deadline-limited', 'reach B/A',
+                       'further/same/less', 'work B/A'],
+                      [[s, len(v['lat']), fmt(geomean(v['lat']), 3), v['excluded'], v['deadline'],
+                        fmt(geomean(v['reach']), 3), '%d/%d/%d' % (v['further'], v['same'], v['less']),
+                        fmt(geomean(v['work']), 3)] for s, v in per_suite.items()]))
     L.append('')
-    L.append(md_table(['id', 'A ms', 'B ms', 'B/A', 'A ms/row', 'B ms/row', 'B/A row', 'A bp', 'B bp',
-                       'A budget', 'B budget', 'A bp/s', 'B bp/s', 'result'], rows))
-    L.append('')
+    if done_rows:
+        L.append('## completed: latency on identical completed work\n')
+        L.append('B/A in parentheses: not comparable (the result or the logical work differ).\n')
+        L.append(md_table(['id', 'A ms', 'B ms', 'B/A', 'A ms/row', 'B ms/row', 'logical work', 'A reuse',
+                           'B reuse', 'A peak cache B', 'B peak cache B', 'result'], done_rows))
+        L.append('')
+    if dl_rows:
+        L.append('## deadline-limited: certified reach and consumed work\n')
+        L.append('bp = complete_to_bp of both arms; walks = complete walks / leaves; work = work units (wu) or '
+                 'annotation rows requested (rows); work B/A only in one unit.\n')
+        L.append(md_table(['id', 'A ms', 'B ms', 'A stop', 'B stop', 'A bp', 'B bp', 'bp B/A', 'A steps',
+                           'B steps', 'A walks', 'B walks', 'A work', 'B work', 'work B/A', 'A reuse', 'B reuse',
+                           'A peak cache B', 'B peak cache B', 'result'], dl_rows))
+        L.append('')
+    if other_rows:
+        L.append('## not compared\n')
+        L.append(md_table(['id', 'A ms', 'B ms', 'A stop', 'B stop', 'result'], other_rows))
+        L.append('')
     if only_a or only_b:
         L.append('- only in A: %s' % (', '.join(only_a) or '-'))
         L.append('- only in B: %s' % (', '.join(only_b) or '-'))
+    if work_flags:
+        L.append('\n**Completed with equal results but different logical work: %s** -- the server\'s counting '
+                 'changed; their latency is not compared.' % ', '.join(work_flags))
     if flags:
         L.append('\n**DIFFERENT deterministic results (same request): %s** -- results must be equal unless the '
                  'server\'s behaviour changed on purpose.' % ', '.join(flags))
     else:
         L.append('\nNo deterministic result changed (rows marked "request differs" or "time-bound" were not compared).')
     return '\n'.join(L), flags
+
+
+def load_for_compare(path):
+    """A results.json for --compare. One written before SCRIPT_VERSION 2 lacks the arms' counters and
+    leaves_by_reason (steps, complete walks) and the physical fields: when its raw/ responses are next to it,
+    its requests are analysed again from them, in memory (nothing is written); otherwise reach and work are
+    filled from what it recorded (the missing numbers stay None)."""
+    R = load_results(path)
+    run_dir = path if os.path.isdir(path) else os.path.dirname(os.path.abspath(path))
+    old = any('reach' not in s for rec in R.get('requests') or [] for s in rec.get('results') or [])
+    raws = sorted(glob.glob(os.path.join(run_dir, 'raw', '[0-9]*.json.gz')))
+    if old and raws:
+        records = []
+        for p in raws:
+            with gzip.open(p, 'rt') as f:
+                e = json.load(f)
+            records.append(analyze(dict(e['meta'], raw_file='raw/' + os.path.basename(p)), e['request'],
+                                   e['response']))
+        R = assemble(R.get('meta') or {}, records)
+        R['_rederived'] = True
+    return R
 
 
 # ============================================================================ main

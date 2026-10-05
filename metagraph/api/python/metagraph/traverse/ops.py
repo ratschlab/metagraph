@@ -1376,21 +1376,23 @@ def _run_route(a, run, spell, segs):
     """routes() of one run: (route, bases) with |spell|, else the route."""
     route = [run.segment]
     s = run.segment
-    while segs[s].parents:
-        seg = segs[s]
+    seg = segs[s]
+    while seg.parents:
         nxt = seg.parents[0]
         if len(seg.parents) > 1:
             at = derive.lineage_label_at(a, run, seg.from_bp)
-            for j, part in enumerate(derive.partition_sets(a)[s]):
+            for j, part in enumerate(derive.merge_parts(a, s)):
                 if at in part:
                     nxt = seg.parents[j]
                     break
         route.append(nxt)
         s = nxt
+        seg = segs[s]
     route.reverse()
     if not spell:
         return route
-    bases = ''.join(segs[x].walk or '' for x in route)[:run.to_bp]
+    # a list, not a generator: join() builds one from a generator first (the same text)
+    bases = ''.join([segs[x].walk or '' for x in route])[:run.to_bp]
     if segs[route[0]].walk is None:
         bases = None
     elif a.side == 'left':
@@ -1419,8 +1421,10 @@ def _routes(g, sel, arm, spell, b, resume):
         if b is not None and not isinstance(sel, (int, Label)):
             _uses_g(b, g, 'label_index')
         lab = label(g, sel)
-        args = [a.side, lab.id, bool(spell)]
-        k0, = _resume_pos(g, 'routes', args, resume, 1)
+        if b is not None or resume is not None:
+            # the token's arguments: only a budgeted call stops, only a resumed one reads them
+            args = [a.side, lab.id, bool(spell)]
+            k0, = _resume_pos(g, 'routes', args, resume, 1)
         if g.mode != 'constrain':
             if b is not None:
                 rd = _annotate_routes_price(b, g, a, lab.id)
@@ -1431,10 +1435,10 @@ def _routes(g, sel, arm, spell, b, resume):
                     b.charge(*_route_price(a, segs, rd, anchor, j, True))
                 out.append((route, _route_bases(a, route, j)) if spell else route)
             return out
-        ids = derive.runs_by_label(a).get(lab.id, ()) if b is None else None
+        ids = derive.label_runs(a, lab.id) if b is None else None
         if b is not None:
             rd = _route_depths(b, g, a)
-            ids = derive.runs_by_label(a).get(lab.id, ())
+            ids = derive.label_runs(a, lab.id)
             b.phase = 'rows'
         for k in range(k0, len(ids)):
             run = a.runs[ids[k]]
@@ -1553,7 +1557,7 @@ def _label_walks(g, sel, arm, b, resume, with_routes=False):
                 md = derive.merge_depth(a)
                 every = derive.subtree_bounds(a)[0]
                 b.phase = 'rows'
-            ids = derive.runs_by_label(a).get(lab.id, ())
+            ids = derive.label_runs(a, lab.id)
             for k in range(start, len(ids)):
                 run = a.runs[ids[k]]
                 if b is not None:
@@ -1760,7 +1764,7 @@ def _change_reasons(g, a, chain, on_chain, rbs, at, added, removed):
                     why = {'why': 'switch', 'from': g.labels[ev.from_label].as_dict(),
                            'cost': ev.cost}
             if len(s.parents) > 1 and s.from_bp == at:
-                for j, part in enumerate(derive.partition_sets(a)[sid]):
+                for j, part in enumerate(derive.merge_parts(a, sid)):
                     if l in part and j > 0:
                         why = {'why': 'merge', 'via_parent': s.parents[j]}
         if why is None:
@@ -1996,40 +2000,94 @@ def _is_number(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _finite_nonneg(v):
+    """A switch cost or loss budget the server accepts: a number >= 0 and finite (JSON
+    carries no NaN or infinity, an int beyond a double is none either, and a NaN compares
+    false with every budget, so a search over it would answer quietly wrong)."""
+    if not _is_number(v):
+        return False
+    try:
+        return math.isfinite(v) and v >= 0
+    except OverflowError:
+        return False
+
+
+def _check_change_cost(change_cost):
+    """Validates the fields of a change_cost the library prices -- the model's type, the
+    entries' type (a list, under every model), a constant's value, a table's default and
+    every entry of a table: [from, to, cost] with two label names (strings) and a finite
+    cost >= 0, the server's rule (traverse.cpp parse_cost) --
+    BEFORE any of them is used as a dict key, in a set or in arithmetic: an entry such as
+    [["C"], "A", 0.5] raised TypeError from a set membership test, which escaped the tool
+    layer's bad_argument (review of pass 5, finding 7), and a malformed entry was skipped
+    silently where the server refuses the request. A field that fails is a ValueError
+    naming it. A model the library does not know passes: its callers answer for it. None
+    (no change_cost) is forbid. -> change_cost."""
+    if change_cost is None:
+        return None
+    if not isinstance(change_cost, dict):
+        raise ValueError('labels.change_cost is an object, not %r' % (change_cost,))
+    model = change_cost.get('model', 'forbid')
+    if not isinstance(model, str):
+        raise ValueError('labels.change_cost.model is "forbid", "constant" or "table", not %r'
+                         % (model,))
+    # entries under every model, not only a table's: a budgeted call charges their count
+    # whatever the model (_switch_reach), and {'model': 'forbid', 'entries': True} raised
+    # TypeError from len() there (review of the pass-5 fixes). The server never accepts
+    # entries on another model (Strict), but a constant override deep-merged onto a
+    # table's strategy keeps that table's list, so a list passes here; None reads as none
+    entries = change_cost.get('entries')
+    if entries is not None and not isinstance(entries, (list, tuple)):
+        raise ValueError('labels.change_cost.entries is a list of [from, to, cost], not %r'
+                         % (entries,))
+    if model == 'constant':
+        v = change_cost.get('value')
+        if not _finite_nonneg(v):
+            raise ValueError('labels.change_cost.value is a finite number >= 0, not %r' % (v,))
+    elif model == 'table':
+        d = change_cost.get('default', 'forbid')
+        if not (isinstance(d, str) and d == 'forbid') and not _finite_nonneg(d):
+            raise ValueError('labels.change_cost.default is "forbid" or a finite number >= 0, '
+                             'not %r' % (d,))
+        # required, as the server requires it: a table without entries is refused there
+        if entries is None:
+            raise ValueError('labels.change_cost.entries is a list of [from, to, cost], not %r'
+                             % (entries,))
+        for i, e in enumerate(entries):
+            if not (isinstance(e, (list, tuple)) and len(e) == 3
+                    and isinstance(e[0], str) and isinstance(e[1], str)):
+                raise ValueError('labels.change_cost.entries[%d] is [from, to, cost] with two '
+                                 'label names (strings), not %r' % (i, e))
+            if not _finite_nonneg(e[2]):
+                raise ValueError('labels.change_cost.entries[%d]: the cost of %r -> %r is a '
+                                 'finite number >= 0, not %r' % (i, e[0], e[1], e[2]))
+    return change_cost
+
+
 def _switch_cost(change_cost, src, dst):
     """cost(src -> dst) by label NAME under the request's change_cost, as the server
     prices a switch (forbid: +inf; constant: value; table: the last entry for the pair,
     else its default, 'forbid' = +inf; a label to itself costs 0). None for a model the
     library does not know: reachability cannot be decided then. A malformed field of a
     model it knows is a ValueError naming the field (a caller's override; the tool layer
-    answers bad_argument), never an exception of another kind."""
+    answers bad_argument), never an exception of another kind: the whole cost is checked
+    first (_check_change_cost)."""
+    _check_change_cost(change_cost)
     if src == dst:
         return 0.0
     model = (change_cost or {}).get('model', 'forbid')
     if model == 'forbid':
         return math.inf
     if model == 'constant':
-        v = change_cost.get('value')
-        if not _is_number(v):
-            raise ValueError('labels.change_cost.value is a number, not %r' % (v,))
-        return float(v)
+        return float(change_cost['value'])
     if model == 'table':
-        entries = change_cost.get('entries') or []
-        if not isinstance(entries, list):
-            raise ValueError('labels.change_cost.entries is a list of [from, to, cost], not %r'
-                             % (entries,))
         got = None
-        for e in entries:
-            if isinstance(e, list) and len(e) == 3 and e[0] == src and e[1] == dst:
-                if not _is_number(e[2]):
-                    raise ValueError('labels.change_cost.entries: the cost of %r is a number, '
-                                     'not %r' % (e[:2], e[2]))
+        for e in change_cost.get('entries') or ():
+            if e[0] == src and e[1] == dst:
                 got = float(e[2])
         if got is not None:
             return got
         d = change_cost.get('default', 'forbid')
-        if d != 'forbid' and not _is_number(d):
-            raise ValueError('labels.change_cost.default is a number or "forbid", not %r' % (d,))
         return math.inf if d == 'forbid' else float(d)
     return None
 
@@ -2062,7 +2120,10 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     labels the request names; a name of |sinks| (also a target) ends a chain but never
     continues one. Prices as _switch_cost does (a table's last entry for a pair
     wins, else its default; a label to itself costs 0); None for a model the library does
-    not know. A malformed field of a model it knows is a ValueError naming it."""
+    not know. A malformed field of a model it knows is a ValueError naming it, raised
+    before any entry is used (_check_change_cost)."""
+    # every field is checked before an endpoint enters a set or a cost the arithmetic
+    _check_change_cost(change_cost)
     if lb is not None:
         n = len(sources) + len(targets)
         lb.charge(4 * n + 2 * len((change_cost or {}).get('entries') or ()),
@@ -2074,27 +2135,16 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
         return {}
     if model == 'constant':
         # one switch reaches every label, and a chain only costs more
-        c = change_cost.get('value')
-        if not _is_number(c):
-            raise ValueError('labels.change_cost.value is a number, not %r' % (c,))
-        return {t: float(c) for t in targets if float(c) <= budget}
+        c = float(change_cost['value'])
+        return {t: c for t in targets if c <= budget}
     if model != 'table':
         return None
     names = set(sources) | set(targets)
-    entries = change_cost.get('entries') or []
-    if not isinstance(entries, list):
-        raise ValueError('labels.change_cost.entries is a list of [from, to, cost], not %r'
-                         % (entries,))
     table = {}
-    for e in entries:
-        if isinstance(e, list) and len(e) == 3 and e[0] in names and e[1] in names:
-            if not _is_number(e[2]):
-                raise ValueError('labels.change_cost.entries: the cost of %r is a number, '
-                                 'not %r' % (e[:2], e[2]))
+    for e in change_cost.get('entries') or ():
+        if e[0] in names and e[1] in names:
             table[(e[0], e[1])] = float(e[2])     # the last entry for a pair wins
     d = change_cost.get('default', 'forbid')
-    if d != 'forbid' and not _is_number(d):
-        raise ValueError('labels.change_cost.default is a number or "forbid", not %r' % (d,))
     fallback = math.inf if d == 'forbid' else float(d)
     out_edges = collections.defaultdict(list)
     for (u, v), c in table.items():
@@ -2150,9 +2200,7 @@ def _rebuilt_extra(g, seed_labels, budget, strategy, lb=None):
     labels left out because their names cannot be verified). The retrieval's original seed
     labels become switch targets too: they were in the original pool."""
     lab = strategy.get('labels') or {}
-    cost = lab.get('change_cost') or {'model': 'forbid'}
-    if cost.get('model') == 'constant' and not _is_number(cost.get('value')):
-        raise ValueError('labels.change_cost.value is a number, not %r' % (cost.get('value'),))
+    cost = _check_change_cost(lab.get('change_cost')) or {'model': 'forbid'}
     seed_names = [l.name for l in seed_labels]
     seed_ids = {l.id for l in seed_labels}
     seeds = set(seed_names)
@@ -2342,11 +2390,15 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         _deep_merge(final, {k: v for k, v in overrides.items()
                             if k not in ('release', 'graph', 'graph_path')})
         flab = _section(final, 'labels')
-        _section(final, 'labels', 'change_cost')
+        # the merged cost the request will carry, checked whole even when the caller gives
+        # labels.extra (no switch search reads it then, and the server would refuse it)
+        _check_change_cost(_section(final, 'labels', 'change_cost') or None)
         _section(final, 'branching')
         given = overrides.get('labels') or {}
-        if 'loss_budget' in given and not _is_number(given['loss_budget']):
-            raise ValueError('labels.loss_budget is a number, not %r' % (given['loss_budget'],))
+        if 'loss_budget' in given and not _finite_nonneg(given['loss_budget']):
+            # a NaN budget would compare false with every loss and leave out every label
+            raise ValueError('labels.loss_budget is a finite number >= 0, not %r'
+                             % (given['loss_budget'],))
         if given.get('extra') is not None and not (
                 isinstance(given['extra'], list) and all(isinstance(x, str) for x in given['extra'])):
             raise ValueError('labels.extra is a list of label names, not %r' % (given['extra'],))
@@ -2463,8 +2515,12 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         original = _section(strategy, 'branching').get('max_label_branches')
         given_b = overrides.get('branching') or {}
         mlb = _section(final, 'branching').get('max_label_branches')
+        # integral without int(): int(inf) raised OverflowError, which escaped the tool
+        # layer's bad_argument, and int(nan) a ValueError that named no field (Python's
+        # json reads Infinity and 1e999); is_integer() is False for both
         if 'max_label_branches' in given_b and not (
-                mlb == 'unlimited' or (_is_number(mlb) and int(mlb) == mlb and mlb >= 0)):
+                mlb == 'unlimited' or (_is_number(mlb) and mlb >= 0 and (
+                    isinstance(mlb, int) or mlb.is_integer()))):
             raise ValueError('branching.max_label_branches is a non-negative integer or '
                              '"unlimited", not %r' % (mlb,))
         if original == 'unlimited' or (isinstance(original, int)
@@ -3365,7 +3421,7 @@ def _spellings(arm, segs):
     once (derive.walk_batch); {} when the retrieval carries no bases (where walk_bases()
     raises, the keyers' answer for a missing spelling)."""
     try:
-        got = derive.walk_batch(arm, segs)
+        got = derive.walk_batch(arm, segs, chains=False)
     except ValueError:
         return {}
     return {s: w for s, (_, w) in got.items() if w is not None}
@@ -3470,7 +3526,7 @@ def _route_parent(a, run, seg):
     """The parent of merge |seg| through which |run|'s lineage arrived (its incoming label
     in that parent's partition) -> (parent, exact). Not found: parents[0], not exact."""
     at = derive.lineage_label_at(a, run, seg.from_bp)
-    for j, part in enumerate(derive.partition_sets(a)[seg.id]):
+    for j, part in enumerate(derive.merge_parts(a, seg.id)):
         if at in part:
             return seg.parents[j], True
     return seg.parents[0], False
@@ -3522,11 +3578,10 @@ def _evidence_at(a, run, anchor, t):
     above = derive.merge_above(a)
     route_from = 0
     m = above[anchor]
-    psets = derive.partition_sets(a) if m is not None else None
     while m is not None:
         seg = segs[m]
         if seg.from_bp <= t and derive.lineage_label_at(a, run, seg.from_bp) \
-                not in psets[m][0]:
+                not in derive.merge_parts(a, m)[0]:
             route_from = seg.from_bp
             break
         m = above[seg.parents[0]]
@@ -4208,11 +4263,14 @@ def cache_bytes(g):
 
 
 def cache_signature(g):
-    """A cheap fingerprint of the caches' sizes (the number of entries of each), which
-    changes whenever a query adds to them."""
-    sig = [len(g.cache)]
+    """A cheap fingerprint of the caches: each cache's keys and the number of entries of
+    each value, which changes whenever a query adds to them. The keys too, not only their
+    count: a step may swap one key for another of the same length -- runs_by_label (one
+    entry on a single-label arm) replacing label_runs()'s count left the lengths equal,
+    and the store never charged the index (review of the pass-5 fixes)."""
+    sig = [tuple(g.cache)]
     for a in g.arms.values():
-        sig.append(len(a.cache))
+        sig.append(tuple(a.cache))
         for v in a.cache.values():
             sig.append(len(v) if isinstance(v, (dict, list, tuple)) else 1)
     for v in g.cache.values():

@@ -1159,6 +1159,15 @@ keyword overrides deep-merged into the strategy (``release``, ``graph`` and
   chain through any label of the retrieval, the kept ones included). An override section the
   rebuild reads that is not an object (``labels``, ``labels.change_cost``,
   ``branching``), or a malformed field of it, is refused with a ``ValueError`` naming it.
+  The merged ``labels.change_cost`` is checked whole before any of it is used, by the
+  server's rule: ``model`` a string; ``entries``, when present, a list under every model;
+  a constant's ``value`` and a table's ``default`` a finite number >= 0 (the default may
+  also be ``"forbid"``); a table's ``entries`` required, every entry ``[from, to, cost]``
+  with two label names (strings) and a finite cost >= 0 -- the error names the entry
+  (``labels.change_cost.entries[3]``). A ``labels.loss_budget`` override is a finite
+  number >= 0, a ``branching.max_label_branches`` override an integer >= 0 or
+  ``"unlimited"`` (not infinity or NaN). The MCP tool ``traverse_continue`` answers these
+  with ``bad_argument``, also with ``execute=False`` and under local limits.
 
 A label alive at a walk's leaf that does not cover the continuation's whole tail (it
 switched in within the last bases) is not among the continuation's labels, so the request

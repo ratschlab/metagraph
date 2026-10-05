@@ -15,6 +15,8 @@ USAGE
   bench_library.py RUN_DIR/raw --lib /path/to/old/api/python --label old
   # before/after: per-op timing ratios + result fingerprints (exit code 1 when a result changed)
   bench_library.py --compare OUT_OLD/library_results.json OUT_NEW/library_results.json
+  # two versions timed interleaved per (item, op) -- the reliable A/B on a busy machine
+  bench_library.py RUN_DIR/raw --fixtures --interleave /path/to/old/api/python /path/to/new/api/python --rounds 3
 
 INPUTS
   Files or directories (directories: *.json, *.json.gz, *.mgt, non-recursive unless --recursive). A JSON
@@ -37,11 +39,28 @@ METHOD
   Fingerprints: every op's result is reduced to a stable digest (dataclasses by field, sets sorted, no
   object addresses) in another untimed pass; --compare flags (item, op) pairs whose digests differ.
   memory_bytes is informational (it changes whenever the model's layout does) and never flagged.
+  Work: with a library that has stage L budgets (f667d775 and later), one more untimed call per (item, op)
+  under local_budget() without limits records its usage: lwu (local work units at the cold price,
+  deterministic) and model_kb (the modelled memory account's peak). It is the call's consumed work in the
+  library's own units, not CPU time.
+  --compare compares TIME ONLY ON THE SAME COMPLETED WORK: an (item, op) whose result fingerprints differ is
+  flagged and left out of the ratios and sums (its times measure different work), and pairs with equal
+  results whose lwu differ are listed (the work model or its charges changed).
+
+INTERLEAVED A/B (--interleave LIB_A LIB_B)
+  Two separate runs compare the machine's state as much as the code: on a loaded machine whole runs of one
+  library differed by +-25 % on every op alike (A1 -> A2 1.20, A2 -> A3 0.77, 2026-10-04). --interleave starts
+  one worker process per library (the same inputs, items and ops) and times each (item, op) in --rounds rounds
+  of A B B A, each request the cold repetitions above; per (item, op) the minimum of each side, B/A per op over
+  the pairs with equal result fingerprints (others listed and left out; exit code 1 when any changed), and a
+  NOISE CONTROL: A's first request of each round against its last (A2/A1, the same code milliseconds apart),
+  as a geometric mean and as the 90th percentile of its spread -- a B/A inside that spread is no difference.
+  Output: ab_results.json (one row per (item, op): a_ms, b_ms, a1_ms, a2_ms, fp_a, fp_b, err) and summary.md.
 
 OUTPUT (--out DIR, default bench_library_out/<label>_<timestamp>)
   library_results.json   meta (library path, module file, source digest, git head + dirty flag, python),
-                         items, one row per (item, op): t_min_ms, t_med_ms, reps, peak_kb, held_kb, err, fp;
-                         compare rows
+                         items, one row per (item, op): t_min_ms, t_med_ms, reps, peak_kb, held_kb, err, fp,
+                         usage {lwu, model_kb} (null without stage L); compare rows
   summary.md             per-op table (median / p90 / max over items), size bins, the slowest calls, compare,
                          errors
 
@@ -356,6 +375,22 @@ def peak_of(fn):
     return res, (peak - base) / 1024.0, (cur - base) / 1024.0
 
 
+def usage_of(fn):
+    """Stage L's account of one call of |fn| under a budget without limits: {lwu (local work units, cold price:
+    deterministic, the same in any process), model_kb (the modelled memory account's peak)}; None for a library
+    without stage L (before f667d775) or a call that raised. Never timed."""
+    lb = getattr(T, 'local_budget', None)
+    if lb is None:
+        return None
+    try:
+        with lb() as b:
+            fn()
+    except Exception:  # noqa -- an op that does not apply raises the same without a budget
+        return None
+    u = b.usage()
+    return {'lwu': u.get('work_units'), 'model_kb': (u.get('memory_bytes') or 0) / 1024.0}
+
+
 def measure(items, ops, args):
     table = op_table()
     rows = []
@@ -382,7 +417,7 @@ def measure(items, ops, args):
                 fp = None
             rows.append({'key': it['key'], 'op': 'parse', 't_min_ms': min(ts) * 1e3,
                          't_med_ms': statistics.median(ts) * 1e3, 'reps': r, 'peak_kb': peak, 'held_kb': held,
-                         'err': None, 'fp': fp})
+                         'err': None, 'fp': fp, 'usage': usage_of(lambda: parse_item(it))})
         for name in ops:
             if name == 'parse':
                 continue
@@ -397,8 +432,10 @@ def measure(items, ops, args):
                     fp = fingerprint(res)
                 except Exception as e:  # noqa
                     fp = 'unhashable: %s' % type(e).__name__
+            g = parse_item(it)
             row = {'key': it['key'], 'op': name, 't_min_ms': min(cold) * 1e3, 't_med_ms': statistics.median(cold) * 1e3,
-                   'reps': len(cold), 'peak_kb': peak, 'held_kb': held, 'err': err or err2, 'fp': fp}
+                   'reps': len(cold), 'peak_kb': peak, 'held_kb': held, 'err': err or err2, 'fp': fp,
+                   'usage': usage_of(lambda: fn(g)) if not (err or err2) else None}
             if hot:
                 row['t_warm_ms'] = min(hot) * 1e3
             rows.append(row)
@@ -506,17 +543,20 @@ def summary_md(res):
         rs = [r for r in rows if r['op'] == op and r.get('t_min_ms') is not None and not r.get('err')]
         errs = sum(1 for r in rows if r['op'] == op and r.get('err'))
         if not rs:
-            trows.append([op, 0, '-', '-', '-', '-', '-', '-', errs])
+            trows.append([op, 0, '-', '-', '-', '-', '-', '-', '-', errs])
             continue
         ts = [r['t_min_ms'] for r in rs]
         worst = max(rs, key=lambda r: r['t_min_ms'])
+        lwu = [r['usage']['lwu'] for r in rs if (r.get('usage') or {}).get('lwu') is not None]
         trows.append([op, len(rs), fmt(statistics.median(ts)), fmt(pct(ts, 0.9)), fmt(worst['t_min_ms']),
                       '%s (%d B)' % (worst['key'][:48], by_key.get(worst['key'], {}).get('body_bytes', 0)),
                       fmt(statistics.median([r['peak_kb'] for r in rs if r.get('peak_kb') is not None] or [0]), 1),
-                      fmt(max([r['peak_kb'] for r in rs if r.get('peak_kb') is not None] or [0]), 0), errs])
+                      fmt(max([r['peak_kb'] for r in rs if r.get('peak_kb') is not None] or [0]), 0),
+                      fmt(statistics.median(lwu)) if lwu else '-', errs])
     L.append('## per op (cold: fresh parse before every repetition; t_min over repetitions)\n')
+    L.append('median lwu = stage L local work units of one call (deterministic; "-" without stage L).\n')
     L.append(md_table(['op', 'items', 'median ms', 'p90 ms', 'max ms', 'slowest item', 'median peak KB',
-                       'max peak KB', 'errors'], trows))
+                       'max peak KB', 'median lwu', 'errors'], trows))
     L.append('')
     bins = [(0, 5000, '< 5 KB'), (5000, 20000, '5-20 KB'), (20000, 80000, '20-80 KB'), (80000, 10 ** 12, '>= 80 KB')]
     brows = []
@@ -558,7 +598,10 @@ def summary_md(res):
 
 
 def compare_runs(pa, pb):
-    A, B = json.load(open(pa)), json.load(open(pb))
+    with open(pa) as f:
+        A = json.load(f)
+    with open(pb) as f:
+        B = json.load(f)
     ra = {(r['key'], r['op']): r for r in A['rows']}
     rb = {(r['key'], r['op']): r for r in B['rows']}
     common = [k for k in ra if k in rb]
@@ -573,11 +616,14 @@ def compare_runs(pa, pb):
     for k in common:
         if k[1] not in ops:
             ops.append(k[1])
-    rows, mism = [], []
+    rows, mism, lwu_changed = [], [], []
     for op in ops:
         rat, peak = [], []
         worst = None
         nfp = 0
+        tot_a = tot_b = 0.0
+        wa = wb = 0
+        nw = 0
         for k in common:
             if k[1] != op:
                 continue
@@ -586,29 +632,40 @@ def compare_runs(pa, pb):
                 if bool(a.get('err')) != bool(b.get('err')):
                     mism.append((k, 'error %s -> %s' % (a.get('err'), b.get('err'))))
                 continue
+            if op not in INFORMATIONAL and a.get('fp') and b.get('fp') and a['fp'] != b['fp']:
+                # not the same completed work: its time is not compared
+                nfp += 1
+                mism.append((k, 'result fingerprint %s -> %s' % (a['fp'], b['fp'])))
+                continue
             x = b['t_min_ms'] / a['t_min_ms']
             rat.append(x)
+            tot_a += a['t_min_ms']
+            tot_b += b['t_min_ms']
             if worst is None or x > worst[0]:
                 worst = (x, k[0], a['t_min_ms'], b['t_min_ms'])
             if a.get('peak_kb') and b.get('peak_kb'):
                 peak.append(b['peak_kb'] / a['peak_kb'])
-            if op not in INFORMATIONAL and a.get('fp') and b.get('fp') and a['fp'] != b['fp']:
-                nfp += 1
-                mism.append((k, 'result fingerprint %s -> %s' % (a['fp'], b['fp'])))
+            ua, ub = a.get('usage') or {}, b.get('usage') or {}
+            if ua.get('lwu') is not None and ub.get('lwu') is not None:
+                nw += 1
+                wa += ua['lwu']
+                wb += ub['lwu']
+                if ua['lwu'] != ub['lwu']:
+                    lwu_changed.append((k, ua['lwu'], ub['lwu']))
         if not rat:
             continue
         gm = math.exp(sum(math.log(x) for x in rat) / len(rat))
-        tot_a = sum(ra[k]['t_min_ms'] for k in common if k[1] == op and ra[k].get('t_min_ms') and rb[k].get('t_min_ms')
-                    and not ra[k].get('err') and not rb[k].get('err'))
-        tot_b = sum(rb[k]['t_min_ms'] for k in common if k[1] == op and ra[k].get('t_min_ms') and rb[k].get('t_min_ms')
-                    and not ra[k].get('err') and not rb[k].get('err'))
         rows.append([op, len(rat), fmt(gm, 3), fmt(statistics.median(rat), 3), fmt(tot_a), fmt(tot_b),
                      fmt(tot_b / tot_a if tot_a else None, 3),
                      '%s (%s -> %s ms) %s' % (fmt(worst[0], 2), fmt(worst[2]), fmt(worst[3]), worst[1][:40]),
-                     fmt(statistics.median(peak), 2) if peak else '-', nfp if op not in INFORMATIONAL else 'n/a'])
-    L.append('B/A of t_min per (item, op); < 1 = B faster. "sum" = total over the matched items.\n')
+                     fmt(statistics.median(peak), 2) if peak else '-', nfp if op not in INFORMATIONAL else 'n/a',
+                     '%s -> %s' % (fmt(wa), fmt(wb)) if nw else '-'])
+    L.append('B/A of t_min per (item, op), over the pairs that did the same completed work (equal result '
+             'fingerprints); < 1 = B faster. "sum" = total over those items; "results changed" = pairs left out '
+             'because their results differ. lwu = stage L local work units of the call (cold price, deterministic; '
+             '"-" for a library without stage L), summed over the compared pairs.\n')
     L.append(md_table(['op', 'items', 'geomean B/A', 'median B/A', 'sum A ms', 'sum B ms', 'sum B/A',
-                       'worst B/A (item)', 'median peak B/A', 'results changed'], rows))
+                       'worst B/A (item)', 'median peak B/A', 'results changed', 'lwu A -> B'], rows))
     ca = {(c['a'], c['b'], c['mode']): c for c in A.get('compare') or []}
     cb = {(c['a'], c['b'], c['mode']): c for c in B.get('compare') or []}
     crow = []
@@ -631,49 +688,19 @@ def compare_runs(pa, pb):
             L.append('- %s: %s' % (k if isinstance(k, str) else '%s %s' % (k[1], k[0]), why))
     else:
         L.append('No result changed (memory_bytes is informational and not compared).')
+    if lwu_changed:
+        L.append('\n%d (item, op) pairs with equal results charged different local work units (the work model '
+                 'or the charges changed; informational):' % len(lwu_changed))
+        for k, x, y in lwu_changed[:20]:
+            L.append('- %s %s: %s -> %s lwu' % (k[1], k[0], x, y))
     only = len(set(ra) ^ set(rb))
     if only:
         L.append('\n(%d (item, op) rows are in only one of the two runs)' % only)
     return '\n'.join(L), mism
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0],
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('inputs', nargs='*', help='files or directories of recorded responses (default: the '
-                                              'repository fixtures)')
-    ap.add_argument('--lib', default=REPO_LIB, help='directory holding the metagraph package (default: %s)' % REPO_LIB)
-    ap.add_argument('--fixtures', action='store_true', help='add this checkout\'s fixtures (tests/data/traverse) '
-                                                           'to the inputs')
-    ap.add_argument('--recursive', action='store_true', help='descend into input directories')
-    ap.add_argument('--max-items', type=int, default=0, help='at most N graphlets, spread evenly over the size '
-                                                             'range (smallest and largest included)')
-    ap.add_argument('--no-dedupe', action='store_true', help='time identical graphlet bodies more than once')
-    ap.add_argument('--ops', default=','.join(ALL_OPS), help='comma list of ops (%s)' % ','.join(ALL_OPS))
-    ap.add_argument('--no-compare', action='store_true', help='skip compare() on pairs of the same seed')
-    ap.add_argument('--max-pairs', type=int, default=12)
-    ap.add_argument('--reps', type=int, default=0, help='cap the repetitions per op (default: by body size)')
-    ap.add_argument('--warm', action='store_true', help='also time the op again on the same object')
-    ap.add_argument('--out', help='output directory (default bench_library_out/<label>_<timestamp>)')
-    ap.add_argument('--label', default='lib')
-    ap.add_argument('--progress', action='store_true', help='one line per item on stderr')
-    ap.add_argument('--compare', nargs=2, metavar=('A', 'B'), help='compare two library_results.json')
-    ap.add_argument('--compare-out', help='also write the comparison markdown here')
-    args = ap.parse_args(argv)
-
-    if args.compare:
-        text, mism = compare_runs(*args.compare)
-        print(text)
-        if args.compare_out:
-            with open(args.compare_out, 'w') as f:
-                f.write(text + '\n')
-        return 1 if mism else 0
-
-    ops = [o.strip() for o in args.ops.split(',') if o.strip()]
-    bad = [o for o in ops if o not in ALL_OPS]
-    if bad:
-        ap.error('unknown ops: %s' % ', '.join(bad))
-    libm = load_library(args.lib)
+def select_items(args):
+    """-> (files, all items, the items timed, duplicates left out) as the arguments choose them."""
     files = expand_inputs(args.inputs, args.recursive)
     if not args.inputs or args.fixtures:
         files += fixture_files()
@@ -694,6 +721,221 @@ def main(argv=None):
         step = (len(srt) - 1) / float(args.max_items - 1) if args.max_items > 1 else 0
         pick = sorted({int(round(i * step)) for i in range(args.max_items)})
         items = [srt[i] for i in pick]
+    return files, all_items, items, dup
+
+
+# ============================================================================ interleaved A/B
+
+def worker(args):
+    """--worker LIB: one library version in its own process, timing on request. Writes a header line
+    {library, items: [[key, bytes]...]}, then answers each line {i, op, reps} with {t: [ms...], fp, err}."""
+    libm = load_library(args.worker)
+    _, _, items, _ = select_items(args)
+    table = op_table()
+    print(json.dumps({'library': libm, 'items': [[it['key'], it['body_bytes']] for it in items]}), flush=True)
+    fps = {}
+    for line in sys.stdin:
+        q = json.loads(line)
+        it, op = items[q['i']], q['op']
+        err = None
+        if op == 'parse':
+            ts = time_parse(it, q['reps'])
+        else:
+            ts, _, err = time_op(it, table[op], q['reps'], False)
+        k = (q['i'], op)
+        if k not in fps and not err and op not in INFORMATIONAL:
+            try:
+                if op == 'parse':
+                    fps[k] = fingerprint(parser_mod.dump(parse_item(it), envelope=False))
+                else:
+                    res, e2 = call(table[op], parse_item(it))
+                    fps[k] = None if e2 else fingerprint(res)
+            except Exception as e:  # noqa
+                fps[k] = 'unhashable: %s' % type(e).__name__
+        print(json.dumps({'t': [x * 1e3 for x in ts], 'fp': fps.get(k), 'err': err}), flush=True)
+    return 0
+
+
+def interleave(args, ops):
+    """--interleave LIB_A LIB_B: both versions in two worker processes, timed per (item, op) in rounds of
+    A B B A (each request a few cold repetitions), so that the machine's drift between whole runs (+-25 % on a
+    loaded machine) cancels; per (item, op) the minimum of each side. A noise control per (item, op): A's first
+    request of each round against its last (A1 / A2, the same code a few milliseconds apart)."""
+    passthrough = list(args.inputs)
+    for flag in ('fixtures', 'recursive', 'no_dedupe'):
+        if getattr(args, flag):
+            passthrough.append('--' + flag.replace('_', '-'))
+    if args.max_items:
+        passthrough += ['--max-items', str(args.max_items)]
+    procs, heads = [], []
+    for lib in args.interleave:
+        p = subprocess.Popen([sys.executable, os.path.abspath(__file__), '--worker', os.path.abspath(lib)]
+                             + passthrough, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+        procs.append(p)
+        heads.append(json.loads(p.stdout.readline()))
+    if heads[0]['items'] != heads[1]['items']:
+        raise SystemExit('the two workers chose different items')
+
+    def ask(p, i, op, reps):
+        p.stdin.write(json.dumps({'i': i, 'op': op, 'reps': reps}) + '\n')
+        p.stdin.flush()
+        return json.loads(p.stdout.readline())
+    started = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+    t0 = time.time()
+    rows = []
+    for i, (key, size) in enumerate(heads[0]['items']):
+        for op in ops:
+            reps = reps_for(size, op, args.reps)
+            a, b, a1, a2, fa, fb, err = [], [], [], [], None, None, None
+            for _ in range(max(1, args.rounds)):
+                for j, tag in enumerate('ABBA'):
+                    x = ask(procs[0] if tag == 'A' else procs[1], i, op, reps)
+                    if x['err']:
+                        err = '%s: %s' % (tag, x['err'])
+                        break
+                    if tag == 'A':
+                        a += x['t']
+                        (a1 if j == 0 else a2).extend(x['t'])
+                        fa = x['fp']
+                    else:
+                        b += x['t']
+                        fb = x['fp']
+                if err:
+                    break
+            rows.append({'key': key, 'op': op, 'bytes': size, 'err': err,
+                         'a_ms': min(a) if a else None, 'b_ms': min(b) if b else None,
+                         'a1_ms': min(a1) if a1 else None, 'a2_ms': min(a2) if a2 else None,
+                         'fp_a': fa, 'fp_b': fb})
+        if args.progress:
+            print('%3d/%d %s  %.0f s' % (i + 1, len(heads[0]['items']), key[:60], time.time() - t0),
+                  file=sys.stderr, flush=True)
+    for p in procs:
+        p.stdin.close()
+        p.wait()
+        p.stdout.close()
+    meta = {'label': args.label, 'library_a': heads[0]['library'], 'library_b': heads[1]['library'],
+            'python': sys.version.split()[0], 'platform': platform.platform(), 'started': started,
+            'seconds': time.time() - t0, 'ops': ops, 'rounds': args.rounds, 'argv': sys.argv[1:],
+            'method': 'two worker processes, one per library; per (item, op) rounds of A B B A, each request '
+                      'cold repetitions by body size (fresh parse, gc off during the timed call); the minimum '
+                      'per side; noise control A1/A2 = the first A request of each round against the last'}
+    res = {'format': 'metagraph-bench-library-ab', 'version': 1, 'meta': meta, 'rows': rows}
+    text, changed = interleave_md(res)
+    stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    out = args.out or os.path.join('bench_library_out', '%s_%s' % (re.sub(r'[^A-Za-z0-9._-]+', '_', args.label), stamp))
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, 'ab_results.json'), 'w') as f:
+        json.dump(res, f, indent=1, default=str)
+        f.write('\n')
+    with open(os.path.join(out, 'summary.md'), 'w') as f:
+        f.write(text + '\n')
+    print(text)
+    print('wrote %s/{ab_results.json,summary.md}: %d rows, %.0f s' % (out, len(rows), time.time() - t0))
+    return 1 if changed else 0
+
+
+def interleave_md(res):
+    """The interleaved comparison as markdown -> (text, the rows whose results differ)."""
+    meta, rows = res['meta'], res['rows']
+    L = ['# library benchmark, interleaved A/B: %s\n' % meta['label']]
+    for tag in ('a', 'b'):
+        lib = meta['library_' + tag]
+        L.append('- %s: `%s` (source sha %s, git %s%s)' % (tag.upper(), lib['path'], lib['source_sha'],
+                                                            lib['git_head'], ' dirty' if lib.get('git_dirty') else ''))
+    L.append('- %s; %d rounds of A B B A per (item, op); python %s; started %s, took %.0f s\n' % (
+        meta['method'], meta['rounds'], meta['python'], meta['started'], meta.get('seconds') or 0))
+    changed = [r for r in rows if not r['err'] and r['op'] not in INFORMATIONAL and r['fp_a'] != r['fp_b']]
+    trows = []
+    for op in meta['ops']:
+        rs = [r for r in rows if r['op'] == op and not r['err'] and r['a_ms'] and r['b_ms'] and r not in changed]
+        if not rs:
+            continue
+        x = [r['b_ms'] / r['a_ms'] for r in rs]
+        noise = [r['a2_ms'] / r['a1_ms'] for r in rs if r['a1_ms'] and r['a2_ms']]
+        # the spread of A2/A1 as a factor: 1.15 = the same code differed by up to 15 % (90th percentile)
+        spread = math.exp(pct([abs(math.log(v)) for v in noise], 0.9)) if noise else None
+        w = max(rs, key=lambda r: r['b_ms'] / r['a_ms'])
+        trows.append([op, len(rs), fmt(geomean(x), 3), fmt(statistics.median(x), 3),
+                      fmt(sum(r['a_ms'] for r in rs)), fmt(sum(r['b_ms'] for r in rs)),
+                      fmt(sum(r['b_ms'] for r in rs) / sum(r['a_ms'] for r in rs), 3),
+                      fmt(geomean(noise), 3) if noise else '-', fmt(spread, 2) if noise else '-',
+                      '%s (%s -> %s ms) %s' % (fmt(w['b_ms'] / w['a_ms'], 2), fmt(w['a_ms']), fmt(w['b_ms']),
+                                               w['key'][:40])])
+    L.append('B/A of the minimum per (item, op) over the pairs with equal results; < 1 = B faster. Noise: A2/A1, '
+             'the same code a few ms apart (its geometric mean, and the 90th percentile of its spread as a factor): '
+             'a B/A within that spread is not a difference.\n')
+    L.append(md_table(['op', 'items', 'geomean B/A', 'median B/A', 'sum A ms', 'sum B ms', 'sum B/A',
+                       'noise A2/A1', 'noise p90 x', 'worst B/A (item)'], trows))
+    errs = [r for r in rows if r['err']]
+    if errs:
+        L.append('\n%d (item, op) rows not timed (an op that does not apply): %s' % (
+            len(errs), ', '.join(sorted({r['op'] for r in errs}))))
+    if changed:
+        L.append('\n**%d results changed** (left out of the ratios):\n' % len(changed))
+        for r in changed[:60]:
+            L.append('- %s %s: %s -> %s' % (r['op'], r['key'], r['fp_a'], r['fp_b']))
+    else:
+        L.append('\nNo result changed (memory_bytes is informational and not compared).')
+    return '\n'.join(L), changed
+
+
+def geomean(xs):
+    return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else None
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 epilog='See python3 bench_library.py --help-long for the inputs, the method, '
+                                        'the interleaved A/B and the outputs.')
+    ap.add_argument('inputs', nargs='*', help='files or directories of recorded responses (default: the '
+                                              'repository fixtures)')
+    ap.add_argument('--lib', default=REPO_LIB, help='directory holding the metagraph package (default: %s)' % REPO_LIB)
+    ap.add_argument('--fixtures', action='store_true', help='add this checkout\'s fixtures (tests/data/traverse) '
+                                                           'to the inputs')
+    ap.add_argument('--recursive', action='store_true', help='descend into input directories')
+    ap.add_argument('--max-items', type=int, default=0, help='at most N graphlets, spread evenly over the size '
+                                                             'range (smallest and largest included)')
+    ap.add_argument('--no-dedupe', action='store_true', help='time identical graphlet bodies more than once')
+    ap.add_argument('--ops', default=','.join(ALL_OPS), help='comma list of ops (%s)' % ','.join(ALL_OPS))
+    ap.add_argument('--no-compare', action='store_true', help='skip compare() on pairs of the same seed')
+    ap.add_argument('--max-pairs', type=int, default=12)
+    ap.add_argument('--reps', type=int, default=0, help='cap the repetitions per op (default: by body size)')
+    ap.add_argument('--warm', action='store_true', help='also time the op again on the same object')
+    ap.add_argument('--out', help='output directory (default bench_library_out/<label>_<timestamp>)')
+    ap.add_argument('--label', default='lib')
+    ap.add_argument('--progress', action='store_true', help='one line per item on stderr')
+    ap.add_argument('--compare', nargs=2, metavar=('A', 'B'), help='compare two library_results.json')
+    ap.add_argument('--compare-out', help='also write the comparison markdown here')
+    ap.add_argument('--interleave', nargs=2, metavar=('LIB_A', 'LIB_B'),
+                    help='time two library versions interleaved per (item, op) (see INTERLEAVED A/B)')
+    ap.add_argument('--rounds', type=int, default=2, help='with --interleave: A B B A rounds per (item, op)')
+    ap.add_argument('--worker', help=argparse.SUPPRESS)
+    ap.add_argument('--help-long', action='store_true', help='print the full documentation')
+    args = ap.parse_args(argv)
+
+    if args.help_long:
+        print(__doc__)
+        return 0
+
+    if args.compare:
+        text, mism = compare_runs(*args.compare)
+        print(text)
+        if args.compare_out:
+            with open(args.compare_out, 'w') as f:
+                f.write(text + '\n')
+        return 1 if mism else 0
+
+    ops = [o.strip() for o in args.ops.split(',') if o.strip()]
+    bad = [o for o in ops if o not in ALL_OPS]
+    if bad:
+        ap.error('unknown ops: %s' % ', '.join(bad))
+    if args.worker:
+        return worker(args)
+    if args.interleave:
+        return interleave(args, ops)
+    libm = load_library(args.lib)
+    files, all_items, items, dup = select_items(args)
     started = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
     t0 = time.time()
     rows = measure(items, ops, args)

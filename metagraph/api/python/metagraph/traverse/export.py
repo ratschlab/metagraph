@@ -212,7 +212,7 @@ def _arm_json(g, arm, bud=None, done=None):
     chains = derive.walk_batch(arm, [p.leaf for p in ps], spell=False)
     spelled = {}
     if cont_leaves:
-        spelled = derive.walk_batch(arm, cont_leaves)
+        spelled = derive.walk_batch(arm, cont_leaves, chains=False)
     if bud is not None:
         def path_prices():
             rbs = derive.runs_by_segment(arm)
@@ -486,7 +486,7 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None):
             if not width:
                 # the seed in each record (its bases spelled once more per record)
                 bud.charge(len(chosen) * (seed_n >> 8), 3 * len(chosen) * (seed_n + 1))
-        spelled = derive.walk_batch(a, [p.leaf for p in chosen])
+        spelled = derive.walk_batch(a, [p.leaf for p in chosen], chains=False)
         if bud is not None:
             for _ in _blocks(bud, pw, pm, done, len(chosen)):
                 pass

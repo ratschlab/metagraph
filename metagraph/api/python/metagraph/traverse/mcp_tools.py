@@ -1585,7 +1585,7 @@ class GraphletTools:
             routes = {}
             for side in {lw.arm for lw in walks}:
                 if g.mode == 'constrain':
-                    ids = derive.runs_by_label(g.arms[side]).get(lab.id, ())
+                    ids = derive.label_runs(g.arms[side], lab.id)
                     routes[side] = dict(zip(ids, ops.routes(g, lab, side)))
                 else:
                     routes[side] = iter(ops.routes(g, lab, side))

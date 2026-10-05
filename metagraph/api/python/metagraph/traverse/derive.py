@@ -15,7 +15,7 @@ from .model import EndLabel, Path, Split
 
 __all__ = [
     'entry_base', 'rule_entry', 'rule_end', 'rule_partition', 'runs_by_segment',
-    'runs_by_label', 'partition_sets',
+    'runs_by_label', 'label_runs', 'partition_sets', 'merge_parts',
     'leaves', 'paths', 'path_of_leaf', 'chain', 'splits', 'split_branches',
     'label_end_events', 'reconverge_events', 'end_labels', 'labels_at_end',
     'label_summary', 'needed_budgets', 'continuation_sequence', 'walk_bases',
@@ -112,14 +112,54 @@ def runs_by_segment(arm):
 def runs_by_label(arm):
     """label id -> the ids of its runs, in run order. routes() and label_walks() answer
     for one label: scanning every run of the arm per label made a listing over all labels
-    quadratic (labels x runs)."""
+    quadratic (labels x runs). Callers that answer for one label read it through
+    label_runs(), which builds it only once it pays off."""
     got = arm.cache.get('runs_by_label')
     if got is None:
         got = {}
         for r in arm.runs:
             got.setdefault(r.label, []).append(r.id)
         arm.cache['runs_by_label'] = got
+        # label_runs()'s count, no longer read; on a single-label arm the swap leaves every
+        # length equal, which is why ops.cache_signature() reads the keys too
+        arm.cache.pop('run_scans', None)
     return got
+
+
+# Building runs_by_label costs about six scans of the runs (58-70 us against 10-12 us on
+# the 900-1,000-label retrievals), and built on a fresh model's first single-label call it
+# made routes() and label_walks() for one label 2-5x slower than the scan it replaced (the
+# review of the efficiency batch, P10). The first lookups of an arm scan; the index is
+# built by the lookup after them, so a listing over every label pays about one index more
+# than building it first, and a caller that asks for a few labels pays no more than the
+# scans did (the rule of ops._LABEL_SCANS for label names).
+_RUN_SCANS = 6
+
+
+def label_runs(arm, label):
+    """The ids of |label|'s runs on |arm|, in run order (a list; () for none):
+    runs_by_label() once it is built, else a scan of the runs for the arm's first
+    _RUN_SCANS lookups. The same ids in the same order either way."""
+    got = arm.cache.get('runs_by_label')
+    if got is None:
+        n = arm.cache.get('run_scans', 0)
+        if n < _RUN_SCANS:
+            arm.cache['run_scans'] = n + 1
+            return [r.id for r in arm.runs if r.label == label]
+        got = runs_by_label(arm)
+    return got.get(label, ())
+
+
+def _merge_sets(seg, shared):
+    """One merge's partition as frozensets; equal arrays (interned: one object) share one
+    set through |shared| (id(array) -> set)."""
+    sets = []
+    for p in seg.partition:
+        fs = shared.get(id(p))
+        if fs is None:
+            fs = shared[id(p)] = frozenset(p) if len(p) else _EMPTY_SET
+        sets.append(fs)
+    return tuple(sets)
 
 
 def partition_sets(arm):
@@ -127,22 +167,71 @@ def partition_sets(arm):
     Membership in the stored array('I') is a linear scan of up to every label id, and the
     evidence walk and the route reconstruction test one label per merge they pass; equal
     arrays (interned: one object) share one set. Segment.partition keeps the arrays, which
-    is what dump() encodes and what the model exposes."""
+    is what dump() encodes and what the model exposes. Built whole here (what a budgeted
+    call is charged for: derive.uses() builds it with its price); unbudgeted membership
+    tests read merge_parts(), which builds a merge's sets only once they pay off. The
+    sets merge_parts() built are reused, and its state is dropped (one copy)."""
     got = arm.cache.get('partition_sets')
     if got is None:
+        built = arm.cache.pop('merge_parts', None) or {}
+        shared = arm.cache.pop('partition_shared', None) or {}
+        arm.cache.pop('merge_scanned', None)
         got = {}
-        shared = {}
         for s in arm.segments:
             if len(s.parents) > 1:
-                sets = []
-                for p in s.partition:
-                    fs = shared.get(id(p))
-                    if fs is None:
-                        fs = shared[id(p)] = frozenset(p) if len(p) else _EMPTY_SET
-                    sets.append(fs)
-                got[s.id] = tuple(sets)
+                x = built.get(s.id)
+                got[s.id] = x if x is not None else _merge_sets(s, shared)
         arm.cache['partition_sets'] = got
     return got
+
+
+# Membership in a merge's stored arrays is a scan that stops at the label; building the
+# merge's sets costs about 1.3x a scan of all its arrays that finds nothing (array('I')
+# boxes each element it compares: about 16 us per 1,000 ids). One label's routes() and
+# label_walks() test a merge on its runs' routes at most twice (the route, then the
+# evidence walk: measured over every label of the 900-1,000-label retrievals), and
+# building at the second test made label_walks() of one label 1.7x slower than the scans
+# of ce949da5 (P10). A merge is scanned for its first _MERGE_SCANS tests and its sets are
+# built at the next: a loop over many labels or runs pays at most two scans more per
+# merge than building first.
+_MERGE_SCANS = 2
+
+
+def merge_parts(arm, seg_id):
+    """The partition of merge |seg_id| (one container per parent, in parents order) for a
+    membership test: its frozensets once partition_sets() is built or once this merge has
+    been tested _MERGE_SCANS times; until then, the stored arrays. The same answer to
+    `label in part` either way.
+
+    Unbudgeted state, three flat dicts in Arm.cache -- merge_scanned (merge -> the tests it
+    was scanned for), merge_parts (merge -> its sets) and partition_shared (id(array) ->
+    set) -- at most the sets partition_sets() holds plus one entry per merge and per
+    distinct array. Flat, so that every step that adds memory adds an entry: the store
+    re-measures a model's caches only when ops.cache_signature() (keys and lengths) changes,
+    and state kept in a fixed-size tuple would grow unseen by its max_ram_mb account."""
+    c = arm.cache
+    got = c.get('partition_sets')
+    if got is not None:
+        return got[seg_id]
+    # the scans touch one dict only (a call on a fresh model costs what ce949da5's did)
+    scanned = c.get('merge_scanned')
+    if scanned is None:
+        c['merge_scanned'] = {seg_id: 1}
+        return arm.segments[seg_id].partition
+    n = scanned.get(seg_id, 0)
+    if n < _MERGE_SCANS:
+        scanned[seg_id] = n + 1
+        return arm.segments[seg_id].partition
+    built = c.get('merge_parts')
+    if built is None:
+        built = c['merge_parts'] = {}
+    x = built.get(seg_id)
+    if x is None:
+        shared = c.get('partition_shared')
+        if shared is None:
+            shared = c['partition_shared'] = {}
+        x = built[seg_id] = _merge_sets(arm.segments[seg_id], shared)
+    return x
 
 
 def leaves(arm):
@@ -388,11 +477,12 @@ def walk_bases(arm, leaf):
     return ''.join(parts)
 
 
-def walk_batch(arm, targets, spell=True):
+def walk_batch(arm, targets, spell=True, chains=True):
     """{seg: (chain, bases)} for every segment of |targets|: its first-parent chain root
-    -> seg (a new list per target) and, with |spell|, its bases root -> end in WALKING
-    order (None when the retrieval carries no bases; a ValueError for a model with bases
-    on some segments only, as walk_bases()).
+    -> seg (a new list per target; None with chains=False, for a caller that reads only
+    the bases) and, with |spell|, its bases root -> end in WALKING order (None when the
+    retrieval carries no bases; a ValueError for a model with bases on some segments
+    only, as walk_bases()).
 
     The targets share the prefixes of their common ancestors: a prefix is kept only where
     two targets' chains part (or one target goes on below another), so the work and the
@@ -401,10 +491,26 @@ def walk_batch(arm, targets, spell=True):
     prefix kept at every segment of a deep chain would be quadratic in memory instead.
     For one target this is chain() and walk_bases()."""
     segs = arm.segments
+    if isinstance(targets, (list, tuple, set, frozenset)) and len(targets) <= _FEW_WALKS:
+        # a few walks (a small export, walks(top=2)): chain() and walk_bases() in one loop
+        # each, without the bound and the batch's set and dict, which made small exports
+        # 25-60 % slower than walk_bases() had (P10). Target by target costs at most k times
+        # the deepest chain, the batch at least three Python steps per segment of it, so for
+        # k <= 3 targets it is never the slower choice
+        if not targets:
+            return {}
+        has_bases = spell and segs[0].walk is not None
+        if len(targets) == 1:
+            for t in targets:
+                return {t: _walk_one(segs, t, has_bases, chains)}
+        return {t: _walk_one(segs, t, has_bases, chains) for t in sorted(set(targets))}
     tset = set(targets)
     if not tset:
         return {}
     has_bases = spell and bool(segs) and segs[0].walk is not None
+    one = _walk_each(segs, tset, has_bases, chains)
+    if one is not None:
+        return one
     # the union of the targets' chains, and per segment how many of its first-parent
     # children lie in it
     inu = set()
@@ -447,10 +553,84 @@ def walk_batch(arm, targets, spell=True):
         if n >= 2 or (target and n):
             keep[s] = (chain_, bases)
             if target:
-                out[s] = (list(chain_), bases)
+                out[s] = (list(chain_) if chains else None, bases)
         elif target:
-            out[s] = (chain_, bases)
+            out[s] = (chain_ if chains else None, bases)
     return out
+
+
+# Spelling target by target costs about one Python step per chain segment, the batch about
+# three per segment of the chains' union plus C-level copies of the shared prefixes:
+# measured on the 57 benchmark graphlets, target by target was 0.24-0.62x the batch's time
+# up to 5 chain steps per segment and 1.5x at 14 (5.2x at 73, to_fasta() of a 2,213-segment
+# beam arm), so the crossover is near 9 steps per segment of the union. The arm's segment
+# count stands in for the union (at least as large, so the choice errs toward the batch
+# only when the union is small, where both are cheap).
+_EACH_STEPS = 8
+_FEW_WALKS = 3
+
+
+def _walk_each(segs, tset, has_bases, chains=True):
+    """walk_batch() target by target, while that costs less: each target's chain walked on
+    its own, (chain, bases) as walk_batch() gives them, in its order -- or None where the
+    chains' total length exceeds _EACH_STEPS times the arm's segments, where finding the
+    shared prefixes pays off. Finding them (a set and a dict over the chains' union, a
+    sort) made a few short walks 2-4x slower to spell than walk_bases() had (to_fasta(),
+    to_gfa() and walks(top=5) on the small and the 1,000-label fixtures, P10). The total
+    is read from the segments' depths before any walk (no work is spent on a walk that is
+    then redone); a depth the model does not keep (a hand-built model's 0) only changes
+    the choice, never the answer, and with chains the walk itself stops at the same bound
+    (counted by the chains' lengths; without chains by the depths)."""
+    budget = _EACH_STEPS * len(segs)
+    if sum([segs[t].depth for t in tset]) + len(tset) > budget:
+        return None
+    out = {}
+    for t in sorted(tset):
+        got = out[t] = _walk_one(segs, t, has_bases, chains)
+        budget -= len(got[0]) if chains else segs[t].depth + 1
+        if budget < 0:
+            return None
+    return out
+
+
+def _walk_one(segs, t, has_bases, chains=True):
+    """(chain root -> t, its bases in walking order or None): chain() and walk_bases() in
+    one loop; without |chains| (None for the chain) only the bases, as walk_bases()."""
+    if not chains:
+        if not has_bases:
+            return None, None
+        parts = []
+        s = t
+        while True:
+            seg = segs[s]
+            w = seg.walk
+            if w is None:
+                raise ValueError(NO_BASES)
+            parts.append(w)
+            p = seg.parents
+            if not p:
+                break
+            s = p[0]
+        parts.reverse()
+        return None, ''.join(parts)
+    ids = []
+    parts = []
+    s = t
+    while True:
+        seg = segs[s]
+        ids.append(s)
+        parts.append(seg.walk)
+        p = seg.parents
+        if not p:
+            break
+        s = p[0]
+    ids.reverse()
+    if not has_bases:
+        return ids, None
+    if None in parts:
+        raise ValueError(NO_BASES)
+    parts.reverse()
+    return ids, ''.join(parts)
 
 
 def natural_flank(arm, leaf):
@@ -532,13 +712,11 @@ def evidence(arm, run):
     route_from = 0
     above = merge_above(arm)
     m = above[run.segment]
-    if m is not None:
-        psets = partition_sets(arm)
     while m is not None:
         seg = segs[m]
         if seg.from_bp <= t:
             label_at = lineage_label_at(arm, run, seg.from_bp)
-            if label_at not in psets[m][0]:
+            if label_at not in merge_parts(arm, m)[0]:
                 route_from = seg.from_bp
                 break
         m = above[seg.parents[0]]
@@ -791,6 +969,15 @@ def uses(b, g, arm, *names):
         if (key, n) not in used:
             w, m = table[n]
             b.uses((key, n), w, m)
+            build = _BUILT_WHEN_CHARGED.get(n)
+            if build is not None:
+                # paid for whole: a budgeted call reads the whole index, as priced, never
+                # the scans that label_runs() and merge_parts() answer unbudgeted calls
+                # with before an index pays off (their work is not what the price models)
+                build(arm)
+
+
+_BUILT_WHEN_CHARGED = {'runs_by_label': runs_by_label, 'partition_sets': partition_sets}
 
 
 # ------------------------------------------------------------------ check_rules
