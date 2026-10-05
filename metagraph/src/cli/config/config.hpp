@@ -105,6 +105,8 @@ class Config {
 
     // traversal (see docs/SPEC-labeled-traversal-core.md)
     bool traverse_resolve = false;          // run resolve/select instead of traversal
+    // print the loader dependency inventory of -i / -a (index_load_inventory) and exit
+    bool traverse_index_inventory = false;
     std::string index_release;              // echoed in responses; requests may pin it
     // the index identity of DESIGN-traverse-graphlet.md §3.1 (single-index mode): a
     // name for humans and routing, and the bundle manifest whose digest is the identity
@@ -133,8 +135,18 @@ class Config {
     double traverse_attempt_allowance_ms = 10'000;
     uint64_t traverse_attempt_retention_s = 3600;
     size_t traverse_attempt_retention = 10'000;
+    // The longest a tombstone is held to cover the not_after_ms a cancel (or a refused copy of
+    // the request) names, plus the clock skew allowance (s; never less than retention_s, which
+    // every tombstone is held at least): what bounds how long one cancel can keep an id
+    // refused (review of pass 5, finding 1)
+    uint64_t traverse_attempt_tombstone_max_s = 86'400;
+    // the accepted ranges of the retention settings (refused at start-up beyond them): a year,
+    // ten million attempts
+    static constexpr uint64_t kMaxAttemptRetentionS = 31'536'000;
+    static constexpr uint64_t kMaxAttemptRetentionCount = 10'000'000;
     // what a ledger adds to a request's not_after_ms before it treats an unanswered attempt as
-    // never started (stated in the capabilities; the server's own check is strict), ms
+    // one that cannot start subsequently (stated in the capabilities; the server's own check is
+    // strict), ms
     uint64_t traverse_clock_skew_ms = 2000;
     // the expected duration of one uninterruptible piece of a /traverse annotation read under
     // a deadline (the reads are decoded in chunks sized from the observed per-row time, the

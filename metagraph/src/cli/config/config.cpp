@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <optional>
 #include <unordered_set>
 #include <filesystem>
 
@@ -123,17 +124,41 @@ Config::Config(int argc, char *argv[]) {
     // as a double, so that a JSON client reads it as written and a ledger can add to it (atoll
     // wrapped -1 to 2^64 - 1, stated as such; review of pass 5). The attempts' allowance too: a
     // fraction would be stated rounded and enforced unrounded
-    const auto exact_ms = [&](const char *option, const char *text, uint64_t *out) {
+    // the value of |text| when it is an integer in [0, 2^53 - 1] (none otherwise)
+    const auto exact_integer = [](const char *text) -> std::optional<uint64_t> {
         char *end = nullptr;
         const double v = std::strtod(text, &end);
         if (end == text || *end != '\0' || !(v >= 0) || v != std::floor(v)
                 || v > 9007199254740991.0) {
+            return std::nullopt;
+        }
+        return static_cast<uint64_t>(v);
+    };
+    const auto exact_ms = [&](const char *option, const char *text, uint64_t *out) {
+        const std::optional<uint64_t> v = exact_integer(text);
+        if (!v) {
             std::cerr << "Error: " << option << " must be an integer in [0, 2^53 - 1], got '"
                       << text << "'" << std::endl;
             print_usage_and_exit = true;
             return;
         }
-        *out = static_cast<uint64_t>(v);
+        *out = *v;
+    };
+    // An integer in [0, |max|]: the attempts' retention settings (review of pass 5, finding 4:
+    // atoll read -1 as 2^64 - 1 seconds, which the capabilities stated while the conversion to
+    // a signed std::chrono::seconds expired every tombstone at once). |max| keeps every
+    // conversion the registry makes exact (seconds to steady-clock nanoseconds, to Unix-epoch
+    // milliseconds) far from overflowing, so a value is refused at start-up rather than wrapped.
+    // Every refusal names the option's own range (a negative or non-numeric value too)
+    const auto bounded = [&](const char *option, const char *text, uint64_t max, uint64_t *out) {
+        const std::optional<uint64_t> v = exact_integer(text);
+        if (!v || *v > max) {
+            std::cerr << "Error: " << option << " must be an integer in [0, " << max
+                      << "], got '" << text << "'" << std::endl;
+            print_usage_and_exit = true;
+            return;
+        }
+        *out = *v;
     };
 
     // parse remaining command line items
@@ -377,6 +402,8 @@ Config::Config(int argc, char *argv[]) {
             output_compacted = true;
         } else if (!strcmp(argv[i], "--resolve")) {
             traverse_resolve = true;
+        } else if (!strcmp(argv[i], "--index-inventory")) {
+            traverse_index_inventory = true;
         } else if (!strcmp(argv[i], "--index-release")) {
             index_release = get_value(i++);
         } else if (!strcmp(argv[i], "--index-name")) {
@@ -420,9 +447,17 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--traverse-delivery-build-mbps")) {
             traverse_delivery_build_mbps = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--traverse-attempt-retention-s")) {
-            traverse_attempt_retention_s = atoll(get_value(i++));
+            bounded(argv[i], get_value(i), kMaxAttemptRetentionS, &traverse_attempt_retention_s);
+            i++;
         } else if (!strcmp(argv[i], "--traverse-attempt-retention")) {
-            traverse_attempt_retention = atoll(get_value(i++));
+            uint64_t count = 0;
+            bounded(argv[i], get_value(i), kMaxAttemptRetentionCount, &count);
+            traverse_attempt_retention = count;
+            i++;
+        } else if (!strcmp(argv[i], "--traverse-attempt-tombstone-max-s")) {
+            bounded(argv[i], get_value(i), kMaxAttemptRetentionS,
+                    &traverse_attempt_tombstone_max_s);
+            i++;
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
@@ -520,7 +555,9 @@ Config::Config(int argc, char *argv[]) {
                       && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
-                      && !(identity == CONCATENATE && !infbase.empty())) {
+                      && !(identity == CONCATENATE && !infbase.empty())
+                      // the inventory names its files with -i/-a; reading stdin would wait for EOF
+                      && !(identity == TRAVERSE && traverse_index_inventory)) {
         std::string line;
         while (std::getline(std::cin, line)) {
             if (line.size())
@@ -589,6 +626,7 @@ Config::Config(int argc, char *argv[]) {
             && identity != SERVER_QUERY
             && !(identity == TRANSFORM_ANNOTATION && anno_type == Config::RowDiff)
             && !(identity == BUILD && complete)
+            && !(identity == TRAVERSE && traverse_index_inventory)
             && !fnames.size()) {
         std::cerr << "Error: No input file(s) passed" << std::endl;
         print_usage_and_exit = true;
@@ -1546,6 +1584,7 @@ if (advanced) {
             fprintf(stderr, "\t   --index-release [STR]\trelease id echoed in results; requests may pin it []\n");
             fprintf(stderr, "\t   --index-name [STR]\t\tname of the index in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE]\tmanifest of the index bundle (files with size and sha256); its digest is the index identity []\n");
+            fprintf(stderr, "\t   --index-inventory \t\tprint the files the loaders open for -i / -a (JSON) and exit, loading nothing [off]\n");
             fprintf(stderr, "\t   --traverse-chunk-target-ms [INT]\tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");
             fprintf(stderr, "\t   --traverse-path-cache-mb [INT]\tbound of a request's row-diff path cache (decoded rows kept so that later reads stop their row-diff paths at them), within the label cache's allotment under a memory budget; 0 = off [128]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
@@ -1585,8 +1624,9 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-max-memory-mb [INT] \tmaximum of bounds.max_memory_mb per /traverse seed: a larger one is lowered to it, an omitted one set to it; 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-max-work-units [INT] \tmaximum of bounds.max_work_units per /traverse seed, likewise; 0 = off [0]\n");
             fprintf(stderr, "\t   --traverse-attempt-allowance-ms [INT] \tadded to seeds x time budget in the bound enforced on a /traverse with attempt_id [10000]\n");
-            fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long [3600]\n");
-            fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tand at most this many (oldest dropped first) [10000]\n");
+            fprintf(stderr, "\t   --traverse-attempt-retention-s [INT] \tfinished attempts stay queryable this long (and their ids refused; one sent with not_after_ms is held until not_after_ms + the clock skew allowance, within the tombstone cap), and a cancel of an unknown id tombstones it at least this long, in [0, 31536000]; 0 = nothing kept, no tombstones (such a cancel is refused, 429) [3600]\n");
+            fprintf(stderr, "\t   --traverse-attempt-retention [INT] \tat most this many finished attempts are kept (oldest dropped first; one sent with not_after_ms stays held, its id refused, as --traverse-attempt-retention-s says), and a cancel of an unknown id is tombstoned only while fewer than this many tombstones and held attempts are held (else it is refused, 429), in [0, 10000000] [10000]\n");
+            fprintf(stderr, "\t   --traverse-attempt-tombstone-max-s [INT] \tthe longest a tombstone, or a finished attempt's id, is held to cover a not_after_ms (+ the clock skew allowance), in [0, 31536000]; never less than --traverse-attempt-retention-s [86400]\n");
             fprintf(stderr, "\t   --traverse-clock-skew-ms [INT] \tclock skew a ledger adds to not_after_ms, stated in the capabilities [2000]\n");
             fprintf(stderr, "\t   --traverse-chunk-target-ms [INT] \tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");
             fprintf(stderr, "\t   --traverse-path-cache-mb [INT] \tbound of a /traverse request's row-diff path cache (decoded rows kept so that later reads stop their row-diff paths at them), within the label cache's allotment under a memory budget; 0 = off [128]\n");

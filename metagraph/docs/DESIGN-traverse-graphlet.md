@@ -1,6 +1,6 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.5 (2026-10-04; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
+**Status:** v5.7 (2026-10-04; v5.7 = the review of pass 5 and the path cache's first reads, §24; v5.6 = pass 5 as implemented, §23; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
@@ -1092,3 +1092,158 @@ that reach into long annotation reads, and a delivery window that holds for larg
   cancel, state and both capabilities routes with their query strings, closes its upstream connection when the
   client goes and keeps a read timeout of at least `hard_cap_ms` plus the transfer; the server's clock is
   synchronised within `clock_skew_allowance_ms`.
+
+# 24. The review of pass 5, and the path cache's first reads *(v5.7, 2026-10-04)*
+
+An external review of pass 5 (HEAD `5801aea1`) found the absolute deadline formula sound under its stated clock-skew
+and uninterruptible-piece qualifications and MGT v1 intact, and four blockers for index identity and for
+cancellation-based lease release (findings 1-4), two moderate findings (5, 6) and one in the library (7). A staging
+benchmark of the efficiency pass (feature level 4) showed first reads slower than at feature level 3 (R10). Every
+confirmed finding is fixed; MGT v1 is unchanged (no record, field or token). The SPEC (§4.2, §5, §6.8, §8.2, §8.4,
+§10.3, T52) is normative; these changes are **feature level 5** (the constant is raised with the release).
+
+- **Tombstones and early release (finding 1).** With `retention_s` 1, a request with `not_after_ms` = now + 60 s was
+  half uploaded and cancelled (404, `tombstone: true`), a repeat cancel at 0.76 s gave the same promise, and the upload
+  completed at 1.18 s ran: a tombstone held for `retention_s` alone does not justify releasing capacity. Now
+  `POST /traverse/cancel` takes the cancelled request's `not_after_ms`, and a tombstone is held at least
+  `retention_s` and until the server's clock reads `not_after_ms + clock_skew_allowance_ms`, capped by
+  `--traverse-attempt-tombstone-max-s` (86,400 by default; `max(cap, retention_s)` as applied, stated). Every
+  tombstone answer — the cancel's and a repeat's 404, the state's 404, and the 409 refusing a copy — states
+  `suppressed_until_ms`, the `not_after_ms` it was judged against and `covers_admission` (true iff a `not_after_ms`
+  was named and the expiry reaches it plus the skew; else `covers_admission_reason`). A repeat never shortens a
+  tombstone and extends it to its own `not_after_ms`; a refused copy (the dispatch-time 409) extends it to the
+  copy's own `not_after_ms`, so every later copy — a proxy's replay carries the same instant — is refused while it
+  could still be admitted. The hold is kept while either clock says it is live (the steady clock for the computed
+  duration, the wall clock until it reads the expiry), so a forward step of the wall clock cannot shorten it; a
+  backward step by more than the skew after the expiry can revive a copy's instant (the ledger's skew assumption).
+  Tombstones live in memory, so a restarted process holds none: a request may name `expect_server_instance`, and a
+  process with another `server_instance` refuses it before anything runs (409 `instance_mismatch`). **The release
+  rule** (normative, also in the capabilities): early release only on 404 + `tombstone: true` + `covers_admission:
+  true` from the same `server_instance`, for an attempt sent with exactly that `not_after_ms` and with
+  `expect_server_instance` naming that instance; an attempt sent without `not_after_ms` is never released early;
+  otherwise only on a finished state or after `not_after_ms + clock_skew_allowance_ms + bound_ms`. Assumed: clocks
+  within the skew, no rewriting of the request's ids, and no copy reaching another server that serves the same
+  ledger. The ledger's sentence is corrected: after `not_after_ms` + skew an unanswered attempt **cannot start
+  subsequently** (it may already be running; `bound_ms` covers that), not "never started".
+- **Retention settings (finding 4).** `--traverse-attempt-retention-s -1` started, stated 2⁶⁴ − 1 s, and expired every
+  tombstone at once. The retention seconds, the count and the tombstone cap are bounded integers (a year; ten
+  million), anything else refuses to start naming the option and its range. `retention_s` 0 means no suppression:
+  a cancel of an unknown id is a 429 with `tombstone: false, reason: "no_suppression"` (a full table:
+  `tombstones_full`), and the capabilities say so.
+- **One loader dependency inventory (findings 2, 3).** Two pairs of symlinks to one graph and annotation with
+  different `.seqs` beside them shared one manifest check (bundles were grouped by the main files' real paths), and
+  stated one `index_fp` while answering with different accessions; a masked graph's `.bloom`, loaded by
+  `DBGSuccinct::load` and able to turn `graph_runs` `[[0, 36]]` into `[]`, was in no manifest. `index_load_inventory`
+  now lists every file the server's loaders open for a pair, derived from the listed spelling as the loaders derive
+  it: graph; mask when it opens, then Bloom filter when it exists; annotation; anchors and fork successors beside the
+  graph for `.row_diff`; `.seqs` for a coordinate annotation unless `--no-coord-mapping`. A unit test checks its
+  annotation table against the types `initialize_annotation` builds. It decides the manifest check (a file of the
+  inventory a manifest does not name refuses to start, naming it) and the bundle dedup (two lines are one index
+  only when their whole inventories resolve to the same real paths in the same roles, so every distinct bundle is
+  checked against its manifest). `metagraph traverse --index-inventory -i G -a A` prints it as JSON with its
+  table; `scripts/traversal/index_manifest.py` (single mode, `--server-csv`, `--digests`) mirrors it, and an
+  integration test compares the two on every sidecar kind. Not in it, because nothing opens them: a column
+  annotation's `.coords`, the graph's `.weights`, anchors beside another annotation type, the in-memory header
+  index. `index_fp` covers what it claims again — every file the pair loads, by size at start-up and by digest at
+  build time (a same-size replacement is still found only by `--verify`); `index_meta_fp` is unchanged, a negative
+  check.
+- **Tombstone holds, refined.** A refused copy's suppression is judged against its own `not_after_ms`, a finished
+  attempt's id is held like a tombstone, and the hold is live through `suppressed_until_ms` inclusive (the review of
+  these fixes, below).
+- **The budgeted lookahead (finding 5)** takes its runs and pieces in the walk's order, each sorted, as the default
+  reads do (31,297 decoder charges against 161,679 on the reviewer's fixture). **Delivery checks (finding 6)** come
+  every 64 KiB of a large token too (a piece is copied up to the next check); one token's preparation stays
+  uninterruptible and its time is part of `observed_max_uninterruptible_ms`. **Finding 7** (the library's malformed
+  continuation costs) is fixed in the library.
+- **R10, the path cache's first reads.** On staging a first header-named walk ran 9,947 ms on a 1,000 ms budget with
+  689 ms of reading; the time outside the read timers was the **sequence header index**, built by the first request
+  naming a header (33 M headers: 4.6 s for a synthetic 33 M on the M5 Max, single-threaded, under a mutex), which the
+  freshly deployed server had not built yet. It is built while the index loads now, and `timing` states the seed
+  phase (`seed_phase_ms`, `seed_fetch_ms`, `label_resolve_ms`). The cache did slow first reads, though: keeping every
+  row of every path copied each wide tuple row of a path (one allocation per column with more than two
+  coordinates), shown on a synthetic index of 8,000 labels with 24,000-coordinate rows — 1.6-6.2 times slower first
+  reads than keeping fewer rows on paths of up to 1,000 rows, and a walk reading one row per call 16.9 s against
+  2.2 s with the cache off, its generations churned. A read now keeps the rows asked for, the 8 after each, the
+  checkpoints (distance to the anchor a multiple of 16) and the narrow rows (under 4,096 bytes: UHGG keeps every
+  row, as before), and keeps tuple rows flat. On the synthetic index no request is slower than the pass-5 binary or
+  the cache off beyond noise, first reads are 1.1-2.9 times faster than with the cache off, one-row walks 6-15
+  times; budgeted reads keep exact costs (tested across rules). Staging requests to rerun: `budgets.*`,
+  `callsize.*`, `resolve.*`, `walks.*.first`, `lookahead.*` — on a server that has served one header-named request
+  before (or the build with the header index at load), interleaved with the previous build.
+- **R8, attributing an overrun.** A warm tuple walk ran 6,136 ms on 5,000 and nothing said which piece was late.
+  `timing.deadline` states the seed's longest uninterruptible piece (kind, rows, coordinates mapped in it) and
+  what stopped the walk how long after its deadline. A read maps its rows' coordinates inside its piece, so the rate
+  a chunk is sized by includes the mapping.
+- **The efficiency pass, audited (part B).** Path reuse: a row's logical charge is its standalone charge whether
+  decoded, cached or shared (holds; tested across retention rules, capacities 0 / 64 KiB / 128 MiB, batches, chunks
+  and a seed warm after a copy of itself); the physical work is in `timing.path_cache` only (fixed); the cache lives
+  in the label cache's allotment under a memory budget, the lookahead admitted as without it (holds); reconstruction
+  suffixes are kept as full rows at the requested rows, their successors, the checkpoints and the narrow rows, not
+  as raw diffs (stated). `/resolve`'s single decode retained every present row until the profile was done; it now
+  decodes in bounded batches, a discovery accumulating its profiles as it reads (fixed in its second version, below:
+  the first kept a prefix of 256 MiB for a profile pass that decoded the rest again; the ranking and ties
+  unchanged). Header ranges: the run mapper kept rank and select per run where every sequence
+  matters; a query of named headers now filters by its own sequences' ranges instead of mapping every coordinate
+  (fixed, as the review advised; pushing the ranges into decoding is 3c). `/resolve` with explicit labels, reported
+  1-5% slower: not reproduced locally beyond noise (mini refseq and the synthetic index, three builds; the run
+  mapper costs at most two extra selects per sequence change), to be rechecked on staging with repetitions.
+  `WalkerDeadlineChunks` run on a virtual clock (exact bounds, no failure under load). The delivery reserve's
+  calibration text is corrected: on a warm SRA server the first tree and full attempts were cut at 3-5 s of 40 s at
+  levels 3 and 4 alike (the tree measuring 115-129 against the 30 assumed); per-detail starting ratios were not
+  adopted on one locus.
+- **`schema_version`** is the one request schema accepted (1, no window); a future request change adds
+  `request_schema_versions` and keeps accepting 1 for a stated window; clients key features on `feature_level`.
+- **Order of the later work, as the review recommends.** Stage 3b's `/resolve` budgets come before the remaining
+  annotation formats. For 3c: the 64-column crossover is a tuning point, not a threshold (count distinct columns,
+  BRWT ancestor sharing, dependency length, selected tuple volume); the charge model counts the coordinates examined,
+  shifted or cancelled during reconstruction, not only the survivors; header-range filtering inside the decode
+  shifts the ranges along the dependency path, never one absolute interval at every row; a tuple column's presence
+  is not the XOR of Boolean nonemptiness; and interruption checkpoints inside dependency traversal, BRWT probing and
+  tuple reconstruction come before a finite `max_uninterruptible_ms` is advertised. Measure first: first-touch
+  batching and bounded prefetch of known dependency ranges, with major/minor fault counts; anchor density (path
+  length percentiles, tuple volume, overlap; logical work changes with the representation and stays attributed to
+  its identity); parallel decode only after reuse, with global concurrency bounds, commits in walk order and
+  joined workers; cross-request caching with complete index identity, byte limits and unchanged logical charges;
+  benchmarks that compare completed work, or certified reach and consumed work for deadline-limited requests.
+- **The review of these fixes** (before release, of the working tree; seven findings, all fixed, each with a
+  regression test from the reviewer's probe):
+  - *A finished state did not hold against a replay (moderate).* The release rule lets a ledger release on a
+    finished state, but a finished attempt's id was refused only while retained: with `retention_s` 1, or
+    `retention_count` 1 and one later finish, the identical request (same `attempt_id`, `not_after_ms`,
+    `expect_server_instance`) ran again. A finished attempt sent with `not_after_ms` is now held, its id refused,
+    until its `not_after_ms` + skew (within `tombstone_max_s` of the finish, and extended by a refused copy's later
+    `not_after_ms`), past its retention if need be, among the tombstones and on both clocks. Held attempts are never
+    dropped early, so `retention_count` does not bound them; `tombstone_max_s` does (stated). Without `not_after_ms`
+    nothing bounds a replay: the release rule states that a finished state then assumes no copy arrives after the
+    attempt left retention (and with retention 0, after it finished).
+  - *Off by one at the expiry (minor).* The tombstone ended when the wall clock read `suppressed_until_ms` exactly,
+    while the strict `not_after_ms` check still admits in that millisecond: with skew 0, 27 of 40 covered copies
+    ran. The hold is live through `suppressed_until_ms` inclusive (the steady hold one ms longer), which also makes
+    the stated clock-step limit exact (a backward step of **more** than the skew).
+  - *A copy without `not_after_ms` was told it was covered (low).* The 409 fell back to a cancel's `not_after_ms`;
+    it is judged against the copy's own now, `covers_admission: false, no_not_after_ms` without one.
+  - *Texts (nit).* The SPEC's "tombstones are kept `retention_s` each", the help of `--traverse-attempt-retention`
+    (tombstones are never dropped oldest first: beyond the count a cancel is refused), and the start-up refusals,
+    which now name each option's own range for every bad value.
+  - *One manifest for a directory of bundles (major).* Loaded files are matched to manifest entries by base name,
+    and nothing required base names to be distinct: a manifest listing `A/…` and `B/…` with shared names passed for
+    both bundles, and two single-index servers stated one `index_fp` and `index_meta_fp` with different accessions
+    (R3's dedup only covers pairs of one multi-graph server). Duplicate base names are refused, by the server, the
+    CLI and `index_manifest.py --verify`.
+  - *A manifest listing an optional file the pair does not load (minor).* The check ran one way (loaded ⊆ listed):
+    a bundle without its `.seqs` beside the symlinks, or a server with `--no-coord-mapping`, stated the `index_fp`
+    of one that loads it, and for a mask or a Bloom filter both fingerprints were equal. A manifest may not list an
+    optional inventory file (`.edgemask`, `.bloom`, `.seqs`) the pair does not load; `--extra` files outside the
+    inventory stay allowed.
+  - *`/resolve` held every row anyway, and decoded most twice (moderate).* The first R6 fix kept a 256 MiB prefix of
+    a discovery's rows and decoded the rest again in one call for the profile pass: the same peak (1.66 GB on the
+    synthetic 3 kb locus of 8,000 wide columns) and 40–56% more CPU. Now every `/resolve` decodes in batches (64
+    rows first, then about 64 MiB by the widest row of the batch before, at most twice its rows and 4,096) and holds
+    one batch; a discovery accumulates each label's k-mers, runs and trace chain while it reads (no profile pass),
+    keeping a repeated k-mer's row for its later occurrences within 256 MiB; explicit labels prime their query with
+    each distinct row once. On the synthetic index the 0.3–3 kb queries take 3–17% less CPU, header presence −7% to
+    +14%, at 144–167 MB instead of up to 1.66 GB; a 9.8 kb genome repeating the locus three times is faster for
+    column presence, within 8% for explicit labels, and 24–48% slower for header and trace discovery (its repeats
+    beyond 256 MiB decoded again) at about 370 MB instead of 4.8 GB (medians of 5 on a loaded machine). A discovery indexes its column labels by a 4-byte slot per column instead of an accumulator
+    per column. Tested: the profiles equal across batch sizes, byte targets and kept bounds, on a query and on one
+    repeating two thirds of it, and equal to the same labels given explicitly; no read exceeds its batch.

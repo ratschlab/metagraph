@@ -27,9 +27,10 @@ im = _load()
 
 
 def _args(**kw):
+    # every option main() parses, at its default (--no-coord-mapping and --inventory too)
     a = dict(server_csv=None, jobs=1, digests=[], digests_only=False, match_base_names=False,
              out_dir=None, write_csv=None, force=False, graph=None, annotation=None, output=None,
-             name=None, extra=[])
+             name=None, extra=[], no_coord_mapping=False, inventory=False)
     a.update(kw)
     return argparse.Namespace(**a)
 
@@ -43,12 +44,20 @@ class TestIndexManifestBatch(unittest.TestCase):
         self.addCleanup(self._quiet.close)
         self.tmp = tempfile.TemporaryDirectory()
         d = self.root = self.tmp.name
-        # two bundles sharing one graph (one graph, two annotations), and a third graph
+        # two bundles sharing one graph (one graph, two annotations), and a third graph. The
+        # shared graph's mask and Bloom filter are loaded for both of its pairs, the coordinate
+        # annotation's .seqs for its own; the files the server never opens for these pairs
+        # (row-diff anchors without a .row_diff annotation, weights, a column's .coords) are
+        # in no bundle and never hashed
         self.files = {}
-        for name, data in (('g1.dbg', b'graph one' * 1000), ('g1.dbg.anchors', b'anchors'),
-                           ('a1.relaxed.row_diff_brwt.annodbg', b'annotation one'),
+        self.unloaded = {'g1.dbg.anchors', 'g1.dbg.weights', 'a2.column.annodbg.coords'}
+        for name, data in (('g1.dbg', b'graph one' * 1000), ('g1.edgemask', b'mask'),
+                           ('g1.bloom', b'bloom'), ('g1.dbg.anchors', b'anchors'),
+                           ('g1.dbg.weights', b'weights'),
+                           ('a1.relaxed.row_diff_brwt_coord.annodbg', b'annotation one'),
                            ('a1.relaxed.seqs', b'headers'),
                            ('a2.column.annodbg', b'annotation two'),
+                           ('a2.column.annodbg.coords', b'coords'),
                            ('g3.dbg', b'graph three'), ('a3.column.annodbg', b'annotation 3')):
             p = os.path.join(d, name)
             with open(p, 'wb') as f:
@@ -58,7 +67,7 @@ class TestIndexManifestBatch(unittest.TestCase):
         self.csv = os.path.join(d, 'graphs.csv')
         with open(self.csv, 'w') as out:
             out.write('\n'.join([
-                'A,%s,%s,,ns.a' % (f['g1.dbg'], f['a1.relaxed.row_diff_brwt.annodbg']),
+                'A,%s,%s,,ns.a' % (f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']),
                 'B,%s,%s' % (f['g1.dbg'], f['a2.column.annodbg']),
                 'B2,%s,%s' % (f['g1.dbg'], f['a2.column.annodbg']),   # the same pair again
                 '',
@@ -87,9 +96,11 @@ class TestIndexManifestBatch(unittest.TestCase):
         written = im.batch(_args(server_csv=self.csv, jobs=4, out_dir=out_dir,
                                  write_csv=os.path.join(self.root, 'with.csv')), hasher=hasher)
         self.assertEqual(3, len(written))
-        # every distinct file once: the shared graph (and its sidecar) too
+        # every distinct file once: the shared graph (and its sidecars) too; the files no
+        # pair's server loads never
         self.assertEqual(sorted(set(calls)), sorted(calls))
-        self.assertEqual(len(self.files), len(calls))
+        self.assertEqual(sorted(os.path.realpath(p) for n, p in self.files.items()
+                                if n not in self.unloaded), sorted(calls))
         f = self.files
         for (g, a), out in written.items():
             with open(out) as fh:
@@ -103,10 +114,10 @@ class TestIndexManifestBatch(unittest.TestCase):
         self.assertEqual(os.path.join(self.root, 'col4', 'c.manifest.json'),
                          written[(f['g3.dbg'], f['a3.column.annodbg'])])
         self.assertEqual(os.path.join(out_dir, 'A.a1.relaxed.manifest.json'),
-                         written[(f['g1.dbg'], f['a1.relaxed.row_diff_brwt.annodbg'])])
+                         written[(f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg'])])
         self.assertEqual(os.path.join(out_dir, 'B.a2.column.manifest.json'),
                          written[(f['g1.dbg'], f['a2.column.annodbg'])])
-        with open(written[(f['g1.dbg'], f['a1.relaxed.row_diff_brwt.annodbg'])]) as fh:
+        with open(written[(f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg'])]) as fh:
             self.assertEqual('ns.a', json.load(fh)['index_ns'])
         # the list written back: every line, the manifest column filled, index_ns kept, and
         # read again as the server reads it
@@ -274,23 +285,94 @@ class TestIndexManifestBatch(unittest.TestCase):
             im.batch(_args(server_csv=csv, force=True))
 
     def test_sidecars_are_those_the_server_loads(self):
+        """The bundle is the loader dependency inventory (load_inventory, the mirror of
+        metagraph's index_load_inventory; review of pass 5, findings 2 and 3): the sidecars
+        the loaders open for the pair, derived from the LISTED spelling, and nothing the
+        server does not open. The integration test compares it with the binary's
+        `traverse --index-inventory` on real bundles; this one pins the rules on stand-ins."""
         d = self.root
-        names = ('G.dbg', 'G.dbg.anchors', 'G.dbg.rd_succ', 'G.edgemask', 'G.dbg.weights',
-                 'X.column.annodbg', 'X.column.annodbg.coords', 'X.seqs',
-                 'Y.row_diff_brwt_coord.annodbg', 'Y.seqs')
+        names = ('G.dbg', 'G.dbg.anchors', 'G.dbg.rd_succ', 'G.edgemask', 'G.bloom',
+                 'G.dbg.weights', 'X.column.annodbg', 'X.column.annodbg.coords', 'X.seqs',
+                 'Y.row_diff_brwt_coord.annodbg', 'Y.seqs', 'Z.row_diff.annodbg',
+                 'H.dbg', 'H.bloom')
         for name in names:
             with open(os.path.join(d, name), 'w') as out:
                 out.write(name)
         p = lambda n: os.path.join(d, n)
-        self.assertEqual([p('G.dbg.anchors'), p('G.dbg.rd_succ'), p('G.edgemask'),
-                          p('G.dbg.weights'), p('X.column.annodbg.coords'), p('X.seqs')],
+        # a column annotation: the graph's dummy-edge mask and, as the mask opens, its Bloom
+        # filter (finding 3: loaded, and able to change answers); never the weights, the
+        # column's .coords or a .seqs beside an annotation that is not a coordinate one
+        self.assertEqual([p('G.edgemask'), p('G.bloom')],
                          im.sidecars(p('G.dbg'), p('X.column.annodbg')))
+        self.assertEqual([(p('G.dbg'), 'graph', True), (p('G.edgemask'), 'graph_mask', False),
+                          (p('G.bloom'), 'graph_bloom', False),
+                          (p('X.column.annodbg'), 'annotation', True)],
+                         im.load_inventory(p('G.dbg'), p('X.column.annodbg')))
+        # a column row-diff annotation: the anchors and fork successors beside the GRAPH,
+        # required
+        self.assertEqual([(p('G.dbg.anchors'), 'row_diff_anchors', True),
+                          (p('G.dbg.rd_succ'), 'row_diff_fork_succ', True)],
+                         im.load_inventory(p('G.dbg'), p('Z.row_diff.annodbg'))[-2:])
+        # a coordinate annotation: its sequence headers, unless the server runs with
+        # --no-coord-mapping (it does not load them then)
+        self.assertEqual([p('G.edgemask'), p('G.bloom'), p('Y.seqs')],
+                         im.sidecars(p('G.dbg'), p('Y.row_diff_brwt_coord.annodbg')))
+        self.assertEqual([p('G.edgemask'), p('G.bloom')],
+                         im.sidecars(p('G.dbg'), p('Y.row_diff_brwt_coord.annodbg'),
+                                     coord_mapping=False))
         self.assertEqual(p('Y.seqs'), im.coordinate_headers(p('Y.row_diff_brwt_coord.annodbg')))
+        self.assertIsNone(im.coordinate_headers(p('X.column.annodbg')))
+        # the Bloom filter only after the mask: DBGSuccinct::load reads it only then
+        self.assertEqual([], im.sidecars(p('H.dbg'), p('X.column.annodbg')))
+        # required files are listed although missing (the server cannot load without them),
+        # and the bundle is then refused, naming them
+        self.assertEqual([p('H.dbg.anchors'), p('H.dbg.rd_succ')],
+                         im.sidecars(p('H.dbg'), p('Z.row_diff.annodbg')))
+        refuse = lambda m: (_ for _ in ()).throw(im.ManifestError(m))
+        with self.assertRaises(im.ManifestError) as cm:
+            im.bundle_files(p('H.dbg'), p('Z.row_diff.annodbg'), [], fail=refuse)
+        self.assertIn('H.dbg.anchors', str(cm.exception))
+        # a symlinked spelling: the sidecars beside the links, not beside their targets
+        # (finding 2: two symlinks to one graph and annotation hid different .seqs files)
+        link = os.path.join(d, 'link')
+        os.makedirs(link)
+        os.symlink(p('G.dbg'), os.path.join(link, 'G.dbg'))
+        os.symlink(p('Y.row_diff_brwt_coord.annodbg'),
+                   os.path.join(link, 'Y.row_diff_brwt_coord.annodbg'))
+        self.assertEqual([], im.sidecars(os.path.join(link, 'G.dbg'),
+                                         os.path.join(link, 'Y.row_diff_brwt_coord.annodbg')))
+        with open(os.path.join(link, 'Y.seqs'), 'w') as out:
+            out.write('other headers')
+        self.assertEqual([os.path.join(link, 'Y.seqs')],
+                         im.sidecars(os.path.join(link, 'G.dbg'),
+                                     os.path.join(link, 'Y.row_diff_brwt_coord.annodbg')))
         # a further graph or annotation is not part of one index's bundle
         with self.assertRaises(im.ManifestError):
             im.bundle_files(p('G.dbg'), p('X.column.annodbg'),
-                            [p('Y.row_diff_brwt_coord.annodbg')],
-                            fail=lambda m: (_ for _ in ()).throw(im.ManifestError(m)))
+                            [p('Y.row_diff_brwt_coord.annodbg')], fail=refuse)
+
+    def test_no_coord_mapping_leaves_the_headers_out_in_both_modes(self):
+        """--no-coord-mapping: the server does not load the .seqs, so neither single nor batch
+        mode lists it, and the two write the same manifest."""
+        f = self.files
+        g, a = f['g1.dbg'], f['a1.relaxed.row_diff_brwt_coord.annodbg']
+        single = os.path.join(self.root, 'single.json')
+        im.write(_args(graph=g, annotation=a, output=single, no_coord_mapping=True))
+        with open(single) as fh:
+            ref = json.load(fh)
+        self.assertNotIn('a1.relaxed.seqs', [e['path'] for e in ref['files']])
+        csv = os.path.join(self.root, 'one.csv')
+        with open(csv, 'w') as out:
+            out.write('A,%s,%s\n' % (g, a))
+        written = im.batch(_args(server_csv=csv, out_dir=self.root + '/nc',
+                                 no_coord_mapping=True))
+        with open(written[(g, a)]) as fh:
+            got = json.load(fh)
+        self.assertEqual(ref['index_fp'], got['index_fp'])
+        with_headers = os.path.join(self.root, 'with.json')
+        im.write(_args(graph=g, annotation=a, output=with_headers))
+        with open(with_headers) as fh:
+            self.assertIn('a1.relaxed.seqs', [e['path'] for e in json.load(fh)['files']])
 
     def test_lines_the_server_refuses_are_refused(self):
         for line in ('A,g,a,m,ns,extra', 'A,g', 'A,g,a,m,bad ns'):

@@ -19,7 +19,13 @@
 #include "cli/load/load_annotated_graph.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse_attempts.hpp"
+#include "annotation/coord_to_header.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "common/utils/string_utils.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -265,7 +271,8 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
     // server reads them before the request is parsed, to register the attempt (attempt_ids,
     // the same rule); declared here so that strict parsing accepts them
     const AttemptIds ids = attempt_ids(json);
-    for (const char *field : { "attempt_id", "budget_id", "locus_id", "not_after_ms" }) {
+    for (const char *field : { "attempt_id", "budget_id", "locus_id", "not_after_ms",
+                               "expect_server_instance" }) {
         s.has(field);
     }
     req.attempt_id = ids.attempt_id;
@@ -1788,6 +1795,39 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
         t["tuple_rows_fetched"] = uint_json(r.annotation_counters.tuple_rows_fetched);
         t["coords_mapped"] = uint_json(r.annotation_counters.coords_mapped);
         t["annotation_fetch_ms"] = r.annotation_counters.fetch_seconds * 1000;
+        // the seed phase (validation or derivation): its time, the part of it spent
+        // resolving label names (a first header name builds the header index) and the part
+        // spent reading (in annotation_fetch_ms too)
+        const LabelOracle::Counters &c = r.annotation_counters;
+        t["seed_phase_ms"] = c.seed_phase_seconds * 1000;
+        t["seed_fetch_ms"] = c.seed_fetch_seconds * 1000;
+        t["label_resolve_ms"] = c.label_resolve_seconds * 1000;
+        // the deadline record (R8): the seed's longest uninterruptible piece, and what stopped
+        // its walk how long after its deadline — which piece made a stop late
+        Json::Value dl;
+        const DeadlineRecord &d = r.deadline;
+        Json::Value piece;
+        piece["ms"] = d.longest.ms;
+        piece["kind"] = d.longest.kind;
+        piece["rows"] = uint_json(d.longest.rows);
+        piece["coordinates"] = uint_json(d.longest.coordinates);
+        dl["longest_piece"] = std::move(piece);
+        if (!d.stopped_by.empty())
+            dl["stopped_by"] = d.stopped_by;
+        if (d.after_deadline_ms)
+            dl["stop_after_deadline_ms"] = *d.after_deadline_ms;
+        t["deadline"] = std::move(dl);
+        if (c.path_cache_hits || c.path_cache_stored_rows || c.path_cache_peak_bytes) {
+            // the row-diff path cache's physical work (only here: what the cache keeps
+            // never changes a result, a charge or an admission)
+            Json::Value pc;
+            pc["hits"] = uint_json(c.path_cache_hits);
+            pc["stored_rows_read"] = uint_json(c.path_cache_stored_rows);
+            pc["rows_kept"] = uint_json(c.path_cache_rows_kept);
+            pc["bytes_kept"] = uint_json(c.path_cache_bytes_kept);
+            pc["peak_bytes"] = uint_json(c.path_cache_peak_bytes);
+            t["path_cache"] = std::move(pc);
+        }
         j["timing"] = std::move(t);
     }
     return j;
@@ -2434,36 +2474,157 @@ static bool ends_with(const std::string &s, std::string_view suffix) {
         && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-std::vector<std::string> index_bundle_files(const std::string &graph,
-                                            const std::string &annotation) {
-    std::vector<std::string> files { graph, annotation };
-    auto add_if_present = [&](const std::string &path) {
-        if (std::ifstream(path).good())
-            files.push_back(path);
+const std::vector<IndexAnnotationKind>& index_annotation_kinds() {
+    using namespace annot;
+    // parse_annotation_type's extensions, in its order (the first suffix that matches decides),
+    // with what the loader does beyond the file itself for each: RowDiff<ColumnMajor> reads
+    // the row-diff anchors and fork successors beside the GRAPH (build_annotated_dbg), and a
+    // MultiIntMatrix (coordinate) annotation the sequence headers (load_coord_to_header). A
+    // unit test checks both against the types initialize_annotation constructs
+    static const std::vector<IndexAnnotationKind> kinds = {
+        { ColumnCompressed<>::kExtension, false, false },
+        { ColumnCoordAnnotator::kExtension, false, true },
+        { MultiBRWTCoordAnnotator::kExtension, false, true },
+        { RowDiffCoordAnnotator::kExtension, false, true },
+        { RowDiffBRWTCoordAnnotator::kExtension, false, true },
+        { RowDiffColumnAnnotator::kExtension, true, false },
+        { RowCompressed<>::kExtension, false, false },
+        { MultiBRWTAnnotator::kExtension, false, false },
+        { RowDiffBRWTAnnotator::kExtension, false, false },
+        { BinRelWTAnnotator::kExtension, false, false },
+        { RowFlatAnnotator::kExtension, false, false },
+        { RowSparseAnnotator::kExtension, false, false },
+        { RowDiffRowFlatAnnotator::kExtension, false, false },
+        { RowDiffRowSparseAnnotator::kExtension, false, false },
+        { RowDiffDiskAnnotator::kExtension, false, false },
+        { IntRowDiffDiskAnnotator::kExtension, false, false },
+        { RowDiffDiskCoordAnnotator::kExtension, false, true },
+        { RainbowfishAnnotator::kExtension, false, false },
+        { RbBRWTAnnotator::kExtension, false, false },
+        { IntMultiBRWTAnnotator::kExtension, false, false },
+        { IntRowDiffBRWTAnnotator::kExtension, false, false },
     };
-    // the sidecars the loader reads (load_annotated_graph.cpp, DBGSuccinct::load,
-    // load_coord_to_header): checked too, so that a manifest whose sidecars are another
-    // build's does not lend its identity (review of pass 5: a manifest with wrong .anchors,
-    // .rd_succ and .seqs was accepted, and the .seqs was loaded)
-    add_if_present(graph + ".anchors");
-    add_if_present(graph + ".rd_succ");
-    if (ends_with(graph, ".dbg"))
-        add_if_present(graph.substr(0, graph.size() - 4) + ".edgemask");
-    add_if_present(annotation + ".coords");
-    // <base>.<type>.annodbg: the sequence headers are <base>.seqs
-    if (ends_with(annotation, ".annodbg")) {
-        const std::string typed = annotation.substr(0, annotation.size() - 8);
-        const size_t dot = typed.find_last_of('.');
-        const size_t slash = typed.find_last_of('/');
-        if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
-            add_if_present(typed.substr(0, dot) + ".seqs");
+    return kinds;
+}
+
+std::vector<IndexFile> index_load_inventory(const std::string &graph,
+                                            const std::string &annotation,
+                                            bool coord_mapping) {
+    using graph::DBGSuccinct;
+    std::vector<IndexFile> files;
+    // The paths are derived from the LISTED spelling, as the loaders derive them: a sidecar is
+    // looked up next to a symlinked main file, not next to its target (review of pass 5,
+    // finding 2: two symlinks to one graph and annotation hid different .seqs files)
+    files.push_back({ graph, "graph", true });
+    if (utils::ends_with(graph, DBGSuccinct::kExtension)) {
+        // DBGSuccinct::load: the dummy-edge mask when it opens, and only then the Bloom filter
+        // when it exists (review of pass 5, finding 3: the .bloom was loaded, could change
+        // answers, and no manifest covered it)
+        const std::string prefix = utils::remove_suffix(graph, DBGSuccinct::kExtension);
+        const std::string mask = prefix + DBGSuccinct::kDummyMaskExtension;
+        if (std::ifstream(mask).good()) {
+            files.push_back({ mask, "graph_mask", false });
+            const std::string bloom = prefix + DBGSuccinct::kBloomFilterExtension;
+            if (std::filesystem::exists(bloom))
+                files.push_back({ bloom, "graph_bloom", false });
+        }
+    }
+    files.push_back({ annotation, "annotation", true });
+    for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
+        if (!utils::ends_with(annotation, kind.extension))
+            continue;
+        if (kind.row_diff_anchors) {
+            // config.infbase + kRowDiffAnchorExt: the graph's spelling, required (the loader
+            // exits without them)
+            files.push_back({ graph + annot::matrix::kRowDiffAnchorExt, "row_diff_anchors",
+                              true });
+            files.push_back({ graph + annot::matrix::kRowDiffForkSuccExt,
+                              "row_diff_fork_succ", true });
+        }
+        if (kind.coordinates && coord_mapping) {
+            const std::string seqs = utils::remove_suffix(annotation, kind.extension)
+                                   + annot::CoordToHeader::kExtension;
+            if (std::filesystem::exists(seqs))
+                files.push_back({ seqs, "coord_to_header", false });
+        }
+        break;
     }
     return files;
 }
 
+std::vector<std::string> index_bundle_files(const std::string &graph,
+                                            const std::string &annotation,
+                                            bool coord_mapping) {
+    std::vector<std::string> files;
+    for (const IndexFile &f : index_load_inventory(graph, annotation, coord_mapping)) {
+        files.push_back(f.path);
+    }
+    return files;
+}
+
+std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
+                                                       const std::string &annotation,
+                                                       bool coord_mapping) {
+    using graph::DBGSuccinct;
+    // every optional file the inventory could hold for the pair, as it derives the paths
+    std::vector<std::string> candidates;
+    if (utils::ends_with(graph, DBGSuccinct::kExtension)) {
+        const std::string prefix = utils::remove_suffix(graph, DBGSuccinct::kExtension);
+        candidates.push_back(prefix + DBGSuccinct::kDummyMaskExtension);
+        candidates.push_back(prefix + DBGSuccinct::kBloomFilterExtension);
+    }
+    for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
+        if (!utils::ends_with(annotation, kind.extension))
+            continue;
+        if (kind.coordinates) {
+            candidates.push_back(utils::remove_suffix(annotation, kind.extension)
+                                 + annot::CoordToHeader::kExtension);
+        }
+        break;
+    }
+    const std::vector<std::string> loaded = index_bundle_files(graph, annotation, coord_mapping);
+    std::vector<std::string> unloaded;
+    for (const std::string &c : candidates) {
+        if (std::find(loaded.begin(), loaded.end(), c) == loaded.end())
+            unloaded.push_back(c);
+    }
+    return unloaded;
+}
+
+Json::Value index_inventory_json(const std::string &graph, const std::string &annotation,
+                                 bool coord_mapping) {
+    Json::Value j;
+    j["graph"] = graph;
+    j["annotation"] = annotation;
+    j["coord_mapping"] = coord_mapping;
+    Json::Value files(Json::arrayValue);
+    for (const IndexFile &f : index_load_inventory(graph, annotation, coord_mapping)) {
+        Json::Value e;
+        e["path"] = f.path;
+        e["role"] = f.role;
+        e["required"] = f.required;
+        e["exists"] = std::filesystem::exists(f.path);
+        files.append(std::move(e));
+    }
+    j["files"] = std::move(files);
+    // the table the paths are derived by (scripts/traversal/index_manifest.py mirrors it, and
+    // an integration test compares the two)
+    Json::Value kinds(Json::arrayValue);
+    for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
+        Json::Value k;
+        k["extension"] = kind.extension;
+        k["row_diff_anchors"] = kind.row_diff_anchors;
+        k["coordinates"] = kind.coordinates;
+        kinds.append(std::move(k));
+    }
+    j["annotation_kinds"] = std::move(kinds);
+    return j;
+}
+
 std::string index_manifest_fingerprint(const std::string &manifest_path,
                                        const std::vector<std::string> &loaded,
-                                       std::string *stated_name) {
+                                       std::string *stated_name,
+                                       const std::vector<std::string> &not_loaded) {
     std::ifstream in(manifest_path);
     if (!in.good())
         throw std::runtime_error("index manifest " + manifest_path + ": cannot be read");
@@ -2497,14 +2658,54 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
         const size_t slash = p.find_last_of('/');
         return slash == std::string::npos ? p : p.substr(slash + 1);
     };
+    // Base names unique: loaded files are matched to entries by base name, so a manifest of a
+    // directory listing several bundles that share names (A/graph.dbg, B/graph.dbg,
+    // A/annotation.seqs, B/annotation.seqs) passed for every one of them, which then stated
+    // one index_fp for different indexes (review of the pass-5 fixes; index_manifest.py writes
+    // bare base names, and --verify refuses such a manifest too)
+    std::map<std::string, std::string> by_name;
+    for (const auto &[p, entry] : files) {
+        auto [it, inserted] = by_name.emplace(base_name(p), p);
+        if (!inserted) {
+            throw bad("its entries " + it->second + " and " + p + " share the base name "
+                      + it->first + ": loaded files are matched by base name, so a manifest "
+                        "describes one bundle with distinct base names (index_manifest.py "
+                        "writes one per pair)");
+        }
+    }
+    // The optional files of this pair's inventory that it does not load (missing beside the
+    // listed spelling, the graph's mask not read, --no-coord-mapping) must not be listed
+    // either: index_fp would describe a file set that is not the loaded one, while an index
+    // that does load the file states the same index_fp (review of the pass-5 fixes). Files
+    // outside the inventory (--extra: a column annotation's .coords, the .weights, anchors
+    // beside another annotation type) stay allowed
+    for (const std::string &path : not_loaded) {
+        auto it = by_name.find(base_name(path));
+        if (it != by_name.end()) {
+            throw bad("it lists " + it->second + ", which the server does not load for this "
+                      "index (" + path + ": missing beside the listed file, its graph mask not "
+                      "read, or --no-coord-mapping): a manifest lists exactly the optional "
+                      "files of the loader inventory that are loaded (traverse "
+                      "--index-inventory), so that index_fp identifies the loaded files");
+        }
+    }
     for (const std::string &path : loaded) {
         std::ifstream f(path, std::ios::binary | std::ios::ate);
         if (!f.good())
-            continue;   // named without its extension: the loader resolves it, not us
+            continue;   // a required file that is missing: the loader names it
         const uint64_t size = static_cast<uint64_t>(f.tellg());
-        bool listed = false;
+        bool named = false, listed = false;
         for (const auto &[p, entry] : files) {
+            named |= base_name(p) == base_name(path);
             listed |= base_name(p) == base_name(path) && entry.first == size;
+        }
+        if (!named) {
+            // a sidecar the loader reads (a .bloom, a .seqs) that the manifest does not cover
+            // could change answers under an unchanged fingerprint (review of pass 5, finding 3)
+            throw bad("it does not cover the file " + path + " (" + std::to_string(size)
+                      + " bytes), which the server loads for this index: the manifest must "
+                        "list every file of the loader inventory (traverse --index-inventory; "
+                        "scripts/traversal/index_manifest.py lists them)");
         }
         if (!listed) {
             throw bad("the loaded file " + path + " (" + std::to_string(size)
@@ -2563,9 +2764,13 @@ IndexIdentity index_identity(const Config &config, const graph::AnnotatedDBG &an
     if (!config.index_manifest.empty()) {
         if (config.infbase_annotators.size() != 1)
             throw std::runtime_error("--index-manifest: one annotation (-a) is loaded with it");
-        id.fp = index_manifest_fingerprint(config.index_manifest,
-                                           index_bundle_files(config.infbase,
-                                                              config.infbase_annotators[0]));
+        id.fp = index_manifest_fingerprint(
+                config.index_manifest,
+                index_bundle_files(config.infbase, config.infbase_annotators[0],
+                                   !config.no_coord_mapping),
+                nullptr,
+                index_unloaded_optional_files(config.infbase, config.infbase_annotators[0],
+                                              !config.no_coord_mapping));
     }
     id.meta_fp = index_meta_fingerprint(LabelOracle(anno_graph));
     return id;
@@ -4476,7 +4681,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     TraverseRequest req = parse_traverse_request(json);
     std::unique_ptr<Attempt> local;
     if (!attempt && !req.attempt_id.empty()) {
-        local = local_attempt({ req.attempt_id, req.budget_id, req.locus_id, req.not_after_ms });
+        local = local_attempt({ req.attempt_id, req.budget_id, req.locus_id, req.not_after_ms, {} });
         attempt = local.get();
     }
     if (!req.release.empty() && !release.empty() && req.release != release)
@@ -4569,6 +4774,10 @@ Json::Value process_traverse_request(const Json::Value &json,
     // the row-diff path cache of this request's reads (the walker bounds it per seed under a
     // memory budget): what a read returns does not depend on it, the decoding work does
     oracle.set_path_cache_max(limits.path_cache_bytes);
+    if (limits.path_cache_retention) {
+        const auto [checkpoint, successors, narrow] = *limits.path_cache_retention;
+        oracle.path_cache().set_retention(checkpoint, successors, narrow);
+    }
     // checked here, where k is known: a continuation shorter than k is not a valid seed,
     // so the promise that continuations are resubmittable (§7.1) would not hold
     const uint64_t k = oracle.get_k();
@@ -4613,6 +4822,14 @@ Json::Value process_traverse_request(const Json::Value &json,
         d.direct_reads = now.direct_reads - before.direct_reads;
         d.coords_mapped = now.coords_mapped - before.coords_mapped;
         d.fetch_seconds = now.fetch_seconds - before.fetch_seconds;
+        d.path_cache_hits = now.path_cache_hits - before.path_cache_hits;
+        d.path_cache_stored_rows = now.path_cache_stored_rows - before.path_cache_stored_rows;
+        d.path_cache_rows_kept = now.path_cache_rows_kept - before.path_cache_rows_kept;
+        d.path_cache_bytes_kept = now.path_cache_bytes_kept - before.path_cache_bytes_kept;
+        d.path_cache_peak_bytes = now.path_cache_peak_bytes;   // the request's so far
+        d.seed_phase_seconds = now.seed_phase_seconds - before.seed_phase_seconds;
+        d.label_resolve_seconds = now.label_resolve_seconds - before.label_resolve_seconds;
+        d.seed_fetch_seconds = now.seed_fetch_seconds - before.seed_fetch_seconds;
         before = now;
         return d;
     };
@@ -4650,7 +4867,10 @@ Json::Value process_traverse_request(const Json::Value &json,
             return;
         }
         Timer written;
-        texts->texts.push_back(json_text(rj, true, text_check));
+        double gap = 0;
+        texts->texts.push_back(json_text(rj, true, text_check, attempt ? &gap : nullptr));
+        if (attempt)
+            attempt->note_delivery_gap_ms(gap);
         rj = Json::Value();
         if (attempt) {
             attempt->note_delivered(texts->texts.back().size(), built_seconds + written.elapsed(),
@@ -4807,6 +5027,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             const std::string outcome = failed["outcome"]["walks"].asString();
             append(std::move(failed), 0);
             delivered(outcome);
+            oracle.sync_path_cache_counters();
             per_seed(oracle.counters());   // do not bill this seed's reads to the next
         } catch (const SeedBudgetError &e) {
             // a request budget does not hold this seed (§14): failed per seed, like a
@@ -4817,6 +5038,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             const std::string outcome = failed["outcome"]["walks"].asString();
             append(std::move(failed), 0);
             delivered(outcome);
+            oracle.sync_path_cache_counters();
             per_seed(oracle.counters());
         } catch (const AttemptAborted &) {
             // the client is gone: nothing is written, but what the seed consumed until it was
@@ -4902,11 +5124,28 @@ int traverse_graph(Config *config) {
     assert(config);
     assert(config->infbase_annotators.size() == 1);
 
+    if (config->traverse_index_inventory) {
+        // what a manifest of this index must cover (index_manifest.py cross-checks its own
+        // list against it): nothing is loaded
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = config->output_json ? "" : "  ";
+        std::cout << Json::writeString(builder, index_inventory_json(
+                             config->infbase, config->infbase_annotators[0],
+                             !config->no_coord_mapping)) << std::endl;
+        return 0;
+    }
+
     auto loaded = load_graph_with_async_annotation(*config);
     auto graph = loaded.first.get();
     auto anno_graph = loaded.second.get();
     assert(anno_graph);
     graph.reset();
+
+    // the reverse index of the sequence headers, built once before the requests (as the
+    // server builds it while the index loads): a first header name does not pay it inside
+    // its seed's time budget
+    if (const auto *coord_to_header = anno_graph->get_coord_to_header())
+        coord_to_header->build_header_index();
 
     // the index identity every response states (§3.1), computed once for all requests
     IndexIdentity identity;
@@ -4940,6 +5179,16 @@ int traverse_graph(Config *config) {
         try {
             if (!config->traverse_resolve) {
                 const AttemptIds ids = attempt_ids(json);
+                // a request meant for another server_instance is not started, as the server
+                // refuses it (409): this process's instance is its own, random, so any one named
+                // is another's
+                if (instance_mismatch(ids, local_instance())) {
+                    const Json::Value body = instance_mismatch_json(ids, local_instance());
+                    logger->error("Request in {} not started: {}", file, body["error"].asString());
+                    std::cout << Json::writeString(builder, body) << std::endl;
+                    status = 1;
+                    continue;
+                }
                 // a request whose not_after_ms has passed is not started, as the server
                 // refuses it (409): its body, and the exit status of a request error
                 if (const uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(

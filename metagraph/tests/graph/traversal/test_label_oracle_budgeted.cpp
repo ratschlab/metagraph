@@ -7,6 +7,7 @@
 #include <future>
 #include <memory>
 #include <random>
+#include <set>
 #include <thread>
 
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
@@ -1041,6 +1042,80 @@ TEST(LabelOraclePacing, InterruptedReadsChangeNothing) {
     ReadPacing w = stop_at(2);
     qw.warm(keys, &w);
     EXPECT_TRUE(w.interrupted);
+}
+
+// Review of pass 5, finding 5 (the reviewer's pacing_probe.cpp): the budget-aware lookahead
+// (warm) cut its runs from the globally sorted missing keys, which put rows of as many paths
+// as rows into each run. Its runs are taken in the walk's order now, each piece sorted: on 32
+// independent paths of 64 walked rows each, in runs of 8 (a cache of 8 keys), the decoder's
+// charges are those of decoding the walk-ordered runs (28,736 in the review's measurement)
+// and a third or less of those of the sorted runs (161,679). Counted, not timed
+TEST(LabelOracleBudgeted, LookaheadRunsFollowTheWalk) {
+    std::mt19937 gen(1282);
+    std::vector<std::string> seqs, names;
+    for (size_t i = 0; i < 32; ++i) {
+        std::string s(240, 'A');
+        for (char &c : s) {
+            c = "ACGT"[gen() % 4];
+        }
+        seqs.push_back(s);
+        names.push_back("p" + std::to_string(i));
+    }
+    auto anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(21, seqs, names);
+    LabelOracle oracle(*anno);
+    ASSERT_TRUE(oracle.decode_charged());
+    // the walk: 64 consecutive nodes of each path, path after path
+    std::vector<node_index> walking;
+    for (const std::string &seq : seqs) {
+        const auto keys = oracle.keys_of_sequence(seq);
+        walking.insert(walking.end(), keys.begin() + 70, keys.begin() + 134);
+    }
+    std::vector<node_index> sorted = walking;
+    std::sort(sorted.begin(), sorted.end());
+    ASSERT_EQ(walking.size(), std::set<node_index>(walking.begin(), walking.end()).size());
+    // the decoder's charges for runs of 8 cut from |order|, each run sorted
+    auto charges_of = [&](const std::vector<node_index> &order) {
+        uint64_t charges = 0;
+        for (size_t begin = 0; begin < order.size(); begin += 8) {
+            std::vector<Row> chunk;
+            for (size_t i = begin; i < std::min(begin + 8, order.size()); ++i) {
+                chunk.push_back(AnnotatedDBG::graph_to_anno_index(order[i]));
+            }
+            std::sort(chunk.begin(), chunk.end());
+            DecodeBudget budget;
+            std::vector<annot::matrix::BinaryMatrix::SetBitPositions> out;
+            std::vector<annot::matrix::RowCost> costs;
+            std::vector<uint64_t> held;
+            EXPECT_EQ(annot::matrix::DecodeStatus::OK,
+                      oracle.get_rows(chunk, budget, &out, &costs, &held));
+            charges += budget.charges();
+        }
+        return charges;
+    };
+    const uint64_t walk_order = charges_of(walking), sorted_order = charges_of(sorted);
+    EXPECT_GT(sorted_order, 3 * walk_order);
+    std::vector<LabelRef> labels;
+    for (const std::string &name : names) {
+        labels.push_back(oracle.resolve_label(name));
+    }
+    // the warms' own charges: the decoder's for the walk-ordered runs, plus each run's
+    // containers and the hits built (a few per run), far below the sorted runs'
+    for (bool recorder : { false, true }) {
+        DecodeBudget budget;
+        if (recorder) {
+            LabelRecorder rec(oracle, LabelKind::COLUMN, 64, 8);
+            rec.warm(walking, budget, nullptr);
+        } else {
+            LabelQuery query(oracle, labels, false, LabelOracle::Access::ROWS, 8);
+            query.warm(walking, budget, nullptr);
+        }
+        std::cerr << (recorder ? "recorder" : "query") << " warm: " << budget.charges()
+                  << " decoder charges; runs cut from the walk " << walk_order
+                  << ", from the sorted keys " << sorted_order << std::endl;
+        EXPECT_GE(budget.charges(), walk_order) << recorder;
+        EXPECT_LT(budget.charges(), walk_order + 64 * (walking.size() / 8)) << recorder;
+        EXPECT_LT(3 * budget.charges(), sorted_order) << recorder;
+    }
 }
 
 } // namespace

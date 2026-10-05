@@ -21,6 +21,10 @@
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
+#include "cli/load/load_annotation.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 
 
 namespace {
@@ -30,13 +34,24 @@ using mtg::graph::traversal::AttemptAborted;
 using mtg::graph::traversal::ExternalStop;
 using Clock = Attempt::Clock;
 
-// A clock the test moves: the registry's retention and an attempt's bound read it
+// A clock the test moves: the registry's retention and an attempt's bound read it. The wall
+// clock (not_after_ms, a tombstone's wall-clock hold) moves with it, |wall_step| ms apart (a
+// test steps the wall clock alone by changing that)
 struct FakeClock {
     Clock::time_point base = Clock::now();
     std::atomic<int64_t> ms { 0 };
+    std::atomic<int64_t> wall_step { 0 };
+    static constexpr int64_t kWallBase = 1791137002417;   // 2026-10-04T18:03:22.417Z
     std::function<Clock::time_point()> fn() {
         return [this]() { return base + std::chrono::milliseconds(ms.load()); };
     }
+    std::function<std::chrono::system_clock::time_point()> wall_fn() {
+        return [this]() {
+            return std::chrono::system_clock::time_point(
+                    std::chrono::milliseconds(kWallBase + ms.load() + wall_step.load()));
+        };
+    }
+    uint64_t wall_ms() const { return kWallBase + ms.load() + wall_step.load(); }
 };
 
 AttemptSettings settings_with(FakeClock *clock, uint64_t retention_s = 60,
@@ -52,8 +67,10 @@ AttemptSettings settings_with(FakeClock *clock, uint64_t retention_s = 60,
     // the floor's unless a test sets the reserve's parts (the default, 1000 since the
     // efficiency pass's calibration, would exceed this allowance's floor)
     s.delivery_stop_ms = 250;
-    if (clock)
+    if (clock) {
         s.clock = clock->fn();
+        s.wall_clock = clock->wall_fn();
+    }
     return s;
 }
 
@@ -102,6 +119,22 @@ TEST(GraphletAttempt, IdsAreValidated) {
     EXPECT_THROW(attempt_ids(r), InvalidRequest);
     r.removeMember("locus_id");
     EXPECT_NO_THROW(attempt_ids(r));
+    // expect_server_instance (review of pass 5, finding 1): a token, with attempt_id only
+    r["expect_server_instance"] = "0123456789abcdef";
+    EXPECT_THROW(attempt_ids(r), InvalidRequest);
+    r["attempt_id"] = "a1";
+    EXPECT_EQ("0123456789abcdef", attempt_ids(r).expect_server_instance);
+    r["expect_server_instance"] = 7;
+    EXPECT_THROW(attempt_ids(r), InvalidRequest);
+    r["expect_server_instance"] = "";
+    EXPECT_THROW(attempt_ids(r), InvalidRequest);
+    // declared by strict parsing
+    Json::Value req;
+    req["seeds"][0]["sequence"] = std::string(40, 'A');
+    req["strategy"] = Json::Value(Json::objectValue);
+    req["attempt_id"] = "a1";
+    req["expect_server_instance"] = "0123456789abcdef";
+    EXPECT_NO_THROW(parse_traverse_request(req));
 }
 
 // The bound is n_seeds x T + allowance on the attempt's clock, capped by the HTTP server's;
@@ -372,12 +405,54 @@ TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
     // written as integers (jsoncpp writes an integral double as 10000.0)
     EXPECT_NE(std::string::npos, json_text(att, true).find("\"allowance_ms\":10000,"));
     Json::Value fields(Json::arrayValue);
-    for (const char *f : { "attempt_id", "budget_id", "locus_id", "not_after_ms" }) {
+    for (const char *f : { "attempt_id", "budget_id", "locus_id", "not_after_ms",
+                           "expect_server_instance" }) {
         fields.append(f);
     }
     EXPECT_EQ(fields, att["fields"]);
     EXPECT_NE(std::string::npos, att["not_after"].asString().find("clock_skew_allowance_ms"));
+    // the review's sentence: an unanswered request may already be running
+    EXPECT_NE(std::string::npos, att["not_after"].asString().find("cannot start subsequently"));
+    EXPECT_EQ(std::string::npos, att["not_after"].asString().find("never started"));
     EXPECT_EQ(registry.server_instance(), att["server_instance"].asString());
+    // the tombstone's cap as applied, the cancel's fields, and the normative release rule
+    EXPECT_EQ(Json::uintValue, att["tombstone_max_s"].type());
+    EXPECT_EQ(86400u, att["tombstone_max_s"].asUInt64());
+    Json::Value cancel_fields(Json::arrayValue);
+    for (const char *f : { "attempt_id", "wait_ms", "not_after_ms" }) {
+        cancel_fields.append(f);
+    }
+    EXPECT_EQ(cancel_fields, att["cancel_fields"]);
+    for (const char *phrase : { "covers_admission: true", "same server_instance",
+                                "exactly that not_after_ms", "expect_server_instance",
+                                "never released early",
+                                "not_after_ms + clock_skew_allowance_ms + bound_ms",
+                                // the review of the pass-5 fixes, finding 1: what a finished
+                                // state promises, and what it assumes
+                                "A finished attempt's id stays refused (409)",
+                                "never dropped early",
+                                "assumes that no copy of the request arrives after the attempt "
+                                "left retention" }) {
+        EXPECT_NE(std::string::npos, att["release_rule"].asString().find(phrase)) << phrase;
+    }
+    // findings 2 and 3: the hold is live through suppressed_until_ms inclusive, and a refused
+    // copy is judged by its own not_after_ms alone
+    for (const char *phrase : { "suppressed_until_ms",
+                                "the wall clock while it reads at most suppressed_until_ms "
+                                "(inclusive)",
+                                "for the refused request's 409 its own, absent when it has none",
+                                "finished attempts held past their retention" }) {
+        EXPECT_NE(std::string::npos, att["suppression"].asString().find(phrase)) << phrase;
+    }
+    EXPECT_NE(std::string::npos, att["instance"].asString().find("instance_mismatch"));
+    // a retention below the cap's setting: the cap is never below it
+    s.retention_s = 100'000;
+    s.tombstone_max_s = 10;
+    EXPECT_EQ(100'000u, AttemptRegistry(s).capabilities_json()["tombstone_max_s"].asUInt64());
+    // retention 0: no tombstones, said so
+    s.retention_s = 0;
+    EXPECT_NE(std::string::npos, AttemptRegistry(s).capabilities_json()["suppression"].asString()
+                                         .find("no_suppression"));
 }
 
 // Pass 5, W6: the seeds stop being walked at bound - max(allowance / 2, reserve), the reserve
@@ -654,7 +729,11 @@ TEST(GraphletAttemptRegistry, CancelOfAnUnknownIdRefusesItLater) {
     auto [unknown, j] = registry.state("never");
     EXPECT_EQ(404, unknown);
     EXPECT_FALSE(j.isMember("tombstone"));
+    // held through retention_s inclusive (the wall clock's expiry; GET does not extend it, a
+    // refused copy would), gone after it
     clock.ms = 30'000;
+    EXPECT_TRUE(registry.state("early").second.isMember("tombstone"));
+    clock.ms = 30'001;
     EXPECT_FALSE(registry.start(late));
 }
 
@@ -697,10 +776,450 @@ TEST(GraphletAttemptRegistry, TombstonesOutliveLaterFinishes) {
     registry.finish(z3, "completed", 200, 1);
     // a known tombstone answers as before, without taking more room
     EXPECT_EQ(404, registry.cancel("Z1", 0).first);
-    // by age only: after retention_s they go, and the ids are free
-    clock.ms += 30'000;
+    // by age only: after retention_s (inclusive) they go, and the ids are free
+    clock.ms += 30'001;
     EXPECT_FALSE(registry.start(late));
     EXPECT_EQ(404, registry.cancel("Z4", 0).first);
+}
+
+// Review of pass 5, finding 1: a tombstone held for retention_s alone let a half-uploaded
+// request whose not_after_ms lay beyond it run once it expired. A cancel naming the request's
+// not_after_ms holds the tombstone until not_after_ms + clock_skew_ms (within the cap), every
+// tombstone answer states suppressed_until_ms and covers_admission, and the timeline the review
+// walked ends with the late copy refused: by the tombstone while it is live, by the strict
+// not_after check once it is gone
+TEST(GraphletAttemptRegistry, CancelNotAfterMsHoldsTheTombstoneThroughAdmission) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 1);   // retention 1 s, as the review's
+    settings.clock_skew_ms = 2000;
+    AttemptRegistry registry(settings);
+    const uint64_t t0 = clock.wall_ms();
+    const uint64_t not_after = t0 + 60'000;
+
+    auto [status, body] = registry.cancel("delayed-original", 0, not_after);
+    ASSERT_EQ(404, status);
+    EXPECT_TRUE(body["tombstone"].asBool());
+    EXPECT_FALSE(body["cancelled"].asBool());
+    EXPECT_EQ(Json::uintValue, body["suppressed_until_ms"].type());
+    EXPECT_EQ(not_after + 2000, body["suppressed_until_ms"].asUInt64());
+    EXPECT_EQ(not_after, body["not_after_ms"].asUInt64());
+    EXPECT_TRUE(body["covers_admission"].asBool());
+    EXPECT_FALSE(body.isMember("covers_admission_reason"));
+    EXPECT_EQ(registry.server_instance(), body["server_instance"].asString());
+
+    auto copy = [&](const std::string &id, std::optional<uint64_t> na) {
+        auto a = attempt_of(registry, id);
+        AttemptIds ids = a->ids();
+        ids.not_after_ms = na;
+        a->set_ids(ids);
+        return a;
+    };
+    // the repeated cancel at 0.763 s states the same expiry
+    clock.ms = 763;
+    auto [again, repeated] = registry.cancel("delayed-original", 0);
+    EXPECT_EQ(404, again);
+    EXPECT_EQ(not_after + 2000, repeated["suppressed_until_ms"].asUInt64());
+    EXPECT_EQ(not_after, repeated["not_after_ms"].asUInt64());
+    EXPECT_TRUE(repeated["covers_admission"].asBool());
+    // the original upload completes at 1.177 s, past retention_s: refused, nothing registered
+    clock.ms = 1177;
+    auto refused = registry.start(copy("delayed-original", not_after));
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(refused->expired);
+    EXPECT_TRUE(refused->body["tombstone"].asBool());
+    EXPECT_TRUE(refused->body["covers_admission"].asBool());
+    EXPECT_EQ(not_after + 2000, refused->body["suppressed_until_ms"].asUInt64());
+    // GET states it too (read only)
+    auto [get_status, got] = registry.state("delayed-original");
+    EXPECT_EQ(404, get_status);
+    EXPECT_TRUE(got["tombstone"].asBool());
+    EXPECT_TRUE(got["covers_admission"].asBool());
+    EXPECT_EQ(not_after + 2000, got["suppressed_until_ms"].asUInt64());
+    // through the expiry still held (GET, which does not extend it: the expiry is inclusive);
+    // after it the tombstone is gone, and a copy is refused by its own not_after_ms (409
+    // expired), which passed 2 s ago
+    auto tombstoned = [&](const std::string &id) {
+        return registry.state(id).second.isMember("tombstone");
+    };
+    clock.ms = static_cast<int64_t>(not_after + 2000 - t0) - 1;
+    EXPECT_TRUE(tombstoned("delayed-original"));
+    clock.ms = static_cast<int64_t>(not_after + 2000 - t0);
+    EXPECT_TRUE(tombstoned("delayed-original"));
+    clock.ms = static_cast<int64_t>(not_after + 2000 - t0) + 1;
+    EXPECT_FALSE(tombstoned("delayed-original"));
+    refused = registry.start(copy("delayed-original", not_after));
+    ASSERT_TRUE(refused);
+    EXPECT_TRUE(refused->expired);
+    EXPECT_EQ(404, registry.state("delayed-original").first);
+    EXPECT_FALSE(registry.state("delayed-original").second.isMember("tombstone"));
+
+    // Without not_after_ms the tombstone is held retention_s and covers nothing: a ledger may
+    // not release on it, and the review's late upload runs once it expired
+    const uint64_t t1 = clock.wall_ms();
+    auto [plain_status, plain] = registry.cancel("no-not-after", 0);
+    EXPECT_EQ(404, plain_status);
+    EXPECT_EQ(t1 + 1000, plain["suppressed_until_ms"].asUInt64());
+    EXPECT_FALSE(plain["covers_admission"].asBool());
+    EXPECT_EQ("no_not_after_ms", plain["covers_admission_reason"].asString());
+    EXPECT_FALSE(plain.isMember("not_after_ms"));
+    clock.ms += 1001;
+    EXPECT_FALSE(registry.start(copy("no-not-after", std::nullopt)));
+}
+
+// A repeated cancel never shortens a tombstone, extends it with a later not_after_ms, and keeps
+// it at least retention_s from then; the cap bounds the extension (and covers_admission says
+// when the cap left the not_after_ms uncovered)
+TEST(GraphletAttemptRegistry, TombstonesAreNeverShortenedAndCapped) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 10);
+    settings.clock_skew_ms = 500;
+    settings.tombstone_max_s = 100;
+    AttemptRegistry registry(settings);
+    const uint64_t t0 = clock.wall_ms();
+    auto [s1, b1] = registry.cancel("x", 0, t0 + 50'000);
+    ASSERT_EQ(404, s1);
+    EXPECT_EQ(t0 + 50'500, b1["suppressed_until_ms"].asUInt64());
+    // an earlier not_after_ms: unchanged (never shortened), and judged against the cancel's own
+    auto [s2, b2] = registry.cancel("x", 0, t0 + 1'000);
+    EXPECT_EQ(t0 + 50'500, b2["suppressed_until_ms"].asUInt64());
+    EXPECT_EQ(t0 + 1'000, b2["not_after_ms"].asUInt64());
+    EXPECT_TRUE(b2["covers_admission"].asBool());
+    // a later one extends it
+    auto [s3, b3] = registry.cancel("x", 0, t0 + 70'000);
+    EXPECT_EQ(t0 + 70'500, b3["suppressed_until_ms"].asUInt64());
+    // without one: judged against the largest named, and kept at least retention_s from now
+    clock.ms = 65'000;
+    auto [s4, b4] = registry.cancel("x", 0);
+    EXPECT_EQ(t0 + 75'000, b4["suppressed_until_ms"].asUInt64());
+    EXPECT_EQ(t0 + 70'000, b4["not_after_ms"].asUInt64());
+    EXPECT_TRUE(b4["covers_admission"].asBool());
+    // beyond the cap (100 s from now): held to the cap, not covered
+    auto [s5, b5] = registry.cancel("y", 0, clock.wall_ms() + 500'000);
+    EXPECT_EQ(404, s5);
+    EXPECT_EQ(clock.wall_ms() + 100'000, b5["suppressed_until_ms"].asUInt64());
+    EXPECT_FALSE(b5["covers_admission"].asBool());
+    EXPECT_EQ("beyond_tombstone_max", b5["covers_admission_reason"].asString());
+    // a not_after_ms already passed is covered by retention_s alone
+    auto [s6, b6] = registry.cancel("z", 0, clock.wall_ms() - 5'000);
+    EXPECT_EQ(clock.wall_ms() + 10'000, b6["suppressed_until_ms"].asUInt64());
+    EXPECT_TRUE(b6["covers_admission"].asBool());
+}
+
+// A copy of a cancelled request refused at dispatch (409) extends the tombstone to its own
+// not_after_ms + clock_skew_ms and states the suppression against it, so that every later copy
+// (a proxy's replay carries the same not_after_ms) is refused while it could still be admitted
+TEST(GraphletAttemptRegistry, ARefusedCopyExtendsTheTombstone) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 1);
+    settings.clock_skew_ms = 2000;
+    AttemptRegistry registry(settings);
+    ASSERT_EQ(404, registry.cancel("r", 0).first);   // no not_after_ms: 1 s
+    const uint64_t not_after = clock.wall_ms() + 30'000;
+    auto copy = [&]() {
+        auto a = attempt_of(registry, "r");
+        AttemptIds ids = a->ids();
+        ids.not_after_ms = not_after;
+        a->set_ids(ids);
+        return a;
+    };
+    clock.ms = 500;
+    auto refused = registry.start(copy());
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(refused->expired);
+    EXPECT_EQ("unknown", refused->body["state"].asString());
+    EXPECT_TRUE(refused->body["tombstone"].asBool());
+    EXPECT_EQ(not_after + 2000, refused->body["suppressed_until_ms"].asUInt64());
+    EXPECT_EQ(not_after, refused->body["not_after_ms"].asUInt64());
+    EXPECT_TRUE(refused->body["covers_admission"].asBool());
+    // past the 1 s it was cancelled for: a later copy is still refused
+    clock.ms = 20'000;
+    refused = registry.start(copy());
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(refused->expired);
+    EXPECT_TRUE(refused->body["covers_admission"].asBool());
+    // and once the tombstone is gone, by its own not_after_ms (each refusal also kept the
+    // tombstone at least retention_s from then, which the last one, at 20 s, did not lengthen)
+    clock.ms = 32'000;
+    EXPECT_TRUE(registry.state("r").second.isMember("tombstone"));
+    clock.ms = 32'001;
+    EXPECT_FALSE(registry.state("r").second.isMember("tombstone"));
+    EXPECT_TRUE(registry.start(copy())->expired);
+}
+
+// The hold is kept while either clock says it is live: a forward step of the wall clock does
+// not shorten it (the steady clock holds it), a backward one lengthens it (the wall clock must
+// read suppressed_until_ms too)
+TEST(GraphletAttemptRegistry, TombstonesSurviveWallClockSteps) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 10);
+    AttemptRegistry registry(settings);
+    // GET reads the hold without extending it (a refused copy would extend it)
+    auto tombstoned = [&](const std::string &id) {
+        return registry.state(id).second.isMember("tombstone");
+    };
+    ASSERT_EQ(404, registry.cancel("fwd", 0).first);
+    // the wall clock jumps an hour ahead: the steady clock still holds it for 10 s (through
+    // its last ms, as the wall clock would)
+    clock.wall_step = 3'600'000;
+    clock.ms = 10'000;
+    EXPECT_TRUE(tombstoned("fwd"));
+    clock.ms = 10'001;
+    EXPECT_FALSE(tombstoned("fwd"));
+    // a minute back: the steady hold of a new tombstone ends 10 s later, the wall clock reads
+    // past its expiry only 60 s after that, and until then the tombstone stays
+    clock.wall_step = 0;
+    ASSERT_EQ(404, registry.cancel("back", 0).first);   // at 10'001: held through 20'001
+    clock.wall_step = -60'000;
+    clock.ms = 20'002;
+    EXPECT_TRUE(tombstoned("back"));
+    clock.ms = 80'001;
+    EXPECT_TRUE(tombstoned("back"));
+    clock.ms = 80'002;
+    EXPECT_FALSE(tombstoned("back"));
+    EXPECT_FALSE(registry.start(attempt_of(registry, "back")));
+}
+
+// Review of pass 5, finding 4: retention 0 means no suppression — a cancel of an unknown id is
+// refused (429, tombstone: false, reason no_suppression), never promised and expired at once
+TEST(GraphletAttemptRegistry, RetentionZeroKeepsNoTombstones) {
+    FakeClock clock;
+    AttemptRegistry registry(settings_with(&clock, 0));
+    auto [status, body] = registry.cancel("c0", 0, clock.wall_ms() + 60'000);
+    EXPECT_EQ(429, status);
+    EXPECT_FALSE(body["tombstone"].asBool());
+    EXPECT_FALSE(body["cancelled"].asBool());
+    EXPECT_EQ("no_suppression", body["reason"].asString());
+    EXPECT_FALSE(body.isMember("suppressed_until_ms"));
+    EXPECT_NE(std::string::npos, body["error"].asString().find("NOT tombstoned"));
+    // so a request with the id runs
+    EXPECT_FALSE(registry.start(attempt_of(registry, "c0")));
+    EXPECT_NE(std::string::npos, registry.retention_text().find("not kept"));
+}
+
+// The restart hole of finding 1: a request naming another server_instance is refused before
+// anything (409 instance_mismatch, nothing registered, ahead of a duplicate or an expired
+// not_after_ms); naming this one, it runs
+TEST(GraphletAttemptRegistry, ExpectServerInstanceRefusesAnotherProcess) {
+    FakeClock clock;
+    AttemptRegistry registry(settings_with(&clock));
+    auto with = [&](const std::string &id, const std::string &instance,
+                    std::optional<uint64_t> not_after = std::nullopt) {
+        auto a = attempt_of(registry, id);
+        AttemptIds ids = a->ids();
+        ids.budget_id = "b";
+        ids.expect_server_instance = instance;
+        ids.not_after_ms = not_after;
+        a->set_ids(ids);
+        return a;
+    };
+    const std::string other = registry.server_instance() == "0123456789abcdef"
+                            ? "fedcba9876543210" : "0123456789abcdef";
+    auto refused = registry.start(with("i1", other, clock.wall_ms() - 1));
+    ASSERT_TRUE(refused);
+    EXPECT_TRUE(refused->instance_mismatch);
+    EXPECT_FALSE(refused->expired);
+    const Json::Value &body = refused->body;
+    EXPECT_EQ((std::vector<std::string>{ "attempt_id", "budget_id", "error",
+                                         "expect_server_instance", "not_after_ms",
+                                         "server_instance", "state" }), body.getMemberNames());
+    EXPECT_EQ("instance_mismatch", body["state"].asString());
+    EXPECT_EQ(other, body["expect_server_instance"].asString());
+    EXPECT_EQ(registry.server_instance(), body["server_instance"].asString());
+    EXPECT_EQ(404, registry.state("i1").first);
+    // ahead of a tombstone: another process's id means nothing here
+    ASSERT_EQ(404, registry.cancel("i2", 0).first);
+    EXPECT_TRUE(registry.start(with("i2", other))->instance_mismatch);
+    // this process's instance: as without the field
+    EXPECT_FALSE(registry.start(with("i3", registry.server_instance())));
+    EXPECT_EQ("running", registry.state("i3").second["state"].asString());
+    EXPECT_TRUE(instance_mismatch(with("x", other)->ids(), registry.server_instance()));
+    EXPECT_FALSE(instance_mismatch(attempt_of(registry, "y")->ids(), registry.server_instance()));
+}
+
+// Review of the pass-5 fixes, finding 1: a ledger releases on a finished state, so a finished
+// attempt's id must stay refused while a replay of the request could still be admitted — until
+// its not_after_ms + clock_skew_ms (within the cap from its finish), past retention_s and past
+// retention_count, among the tombstones (a cancel of an unknown id is refused while they fill
+// the table). Without not_after_ms nothing bounds a replay: the id goes with its retention, as
+// stated, and with retention 0 nothing is kept at all
+TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
+    auto sent = [](AttemptRegistry &registry, const std::string &id,
+                   std::optional<uint64_t> not_after) {
+        auto a = attempt_of(registry, id);
+        AttemptIds ids = a->ids();
+        ids.not_after_ms = not_after;
+        ids.expect_server_instance = registry.server_instance();
+        a->set_ids(ids);
+        return a;
+    };
+    {
+        // by age (the reviewer's p1: retention 1 s, the replay at 1.3 s ran)
+        FakeClock clock;
+        AttemptSettings settings = settings_with(&clock, 1);
+        settings.clock_skew_ms = 2000;
+        AttemptRegistry registry(settings);
+        const uint64_t not_after = clock.wall_ms() + 60'000;
+        auto original = sent(registry, "fin-1", not_after);
+        ASSERT_FALSE(registry.start(original));
+        registry.finish(original, "completed", 200, 1);
+        auto [cs, cancelled] = registry.cancel("fin-1", 0, not_after);
+        EXPECT_EQ(404, cs);
+        EXPECT_EQ("finished", cancelled["state"].asString());
+        EXPECT_EQ("finished", registry.state("fin-1").second["state"].asString());
+        clock.ms = 1'300;
+        auto replay = registry.start(sent(registry, "fin-1", not_after));
+        ASSERT_TRUE(replay);
+        EXPECT_FALSE(replay->expired);
+        EXPECT_EQ("finished", replay->body["state"].asString());
+        EXPECT_EQ(200, registry.state("fin-1").first);
+        // through not_after_ms + the skew, inclusive; after it a replay is expired
+        clock.ms = 62'000;
+        replay = registry.start(sent(registry, "fin-1", not_after));
+        ASSERT_TRUE(replay);
+        EXPECT_FALSE(replay->expired);
+        clock.ms = 62'001;
+        EXPECT_EQ(404, registry.state("fin-1").first);
+        replay = registry.start(sent(registry, "fin-1", not_after));
+        ASSERT_TRUE(replay);
+        EXPECT_TRUE(replay->expired);
+    }
+    {
+        // by count (the reviewer's p1b: retention_count 1, one later finish evicted it)
+        FakeClock clock;
+        AttemptRegistry registry(settings_with(&clock, 3600, 1));
+        const uint64_t not_after = clock.wall_ms() + 60'000;
+        auto original = sent(registry, "ev-1", not_after);
+        ASSERT_FALSE(registry.start(original));
+        registry.finish(original, "completed", 200, 1);
+        auto other = sent(registry, "ev-2", std::nullopt);
+        ASSERT_FALSE(registry.start(other));
+        registry.finish(other, "completed", 200, 1);
+        auto replay = registry.start(sent(registry, "ev-1", not_after));
+        ASSERT_TRUE(replay);
+        EXPECT_FALSE(replay->expired);
+        EXPECT_EQ("finished", replay->body["state"].asString());
+        // held among the tombstones: the table (retention_count 1) is full, so a cancel of an
+        // unknown id promises nothing
+        auto [full, refused] = registry.cancel("unknown-1", 0);
+        EXPECT_EQ(429, full);
+        EXPECT_EQ("tombstones_full", refused["reason"].asString());
+        // one without not_after_ms is dropped by count as before: a replay of it runs
+        auto bare = sent(registry, "ev-3", std::nullopt);
+        ASSERT_FALSE(registry.start(bare));
+        registry.finish(bare, "completed", 200, 1);
+        auto last = sent(registry, "ev-4", std::nullopt);
+        ASSERT_FALSE(registry.start(last));
+        registry.finish(last, "completed", 200, 1);
+        EXPECT_FALSE(registry.start(sent(registry, "ev-3", std::nullopt)));
+        // the held one stays until its not_after_ms + skew (2 s), then frees the table
+        clock.ms = 62'000;
+        EXPECT_TRUE(registry.start(sent(registry, "ev-1", not_after)));
+        clock.ms = 62'001;
+        EXPECT_TRUE(registry.start(sent(registry, "ev-1", not_after))->expired);
+        EXPECT_EQ(404, registry.cancel("unknown-2", 0).first);
+    }
+    {
+        // the cap: held at most tombstone_max_s after the finish (stated: a not_after_ms
+        // further out is not covered); a refused copy with a later not_after_ms extends the
+        // hold of a running attempt, applied from its finish
+        FakeClock clock;
+        AttemptSettings settings = settings_with(&clock, 1);
+        settings.clock_skew_ms = 0;
+        settings.tombstone_max_s = 100;
+        AttemptRegistry registry(settings);
+        auto far = sent(registry, "far", clock.wall_ms() + 500'000);
+        ASSERT_FALSE(registry.start(far));
+        registry.finish(far, "completed", 200, 1);
+        clock.ms = 100'000;
+        EXPECT_TRUE(registry.start(sent(registry, "far", clock.wall_ms() + 400'000)));
+        // that refusal extended it (the copy's not_after_ms, capped 100 s from then)
+        clock.ms = 200'001;
+        EXPECT_FALSE(registry.start(sent(registry, "far", clock.wall_ms() + 300'000)));
+
+        const uint64_t own = clock.wall_ms() + 10'000;
+        auto running = sent(registry, "run", own);
+        ASSERT_FALSE(registry.start(running));
+        EXPECT_TRUE(registry.start(sent(registry, "run", own + 20'000)));
+        registry.finish(running, "completed", 200, 1);
+        clock.ms += 25'000;   // past its own not_after_ms, before the copy's
+        EXPECT_TRUE(registry.start(sent(registry, "run", own + 20'000)));
+    }
+    {
+        // retention 0: nothing kept, a finished state promises nothing against a replay
+        FakeClock clock;
+        AttemptRegistry registry(settings_with(&clock, 0));
+        const uint64_t not_after = clock.wall_ms() + 60'000;
+        auto original = sent(registry, "z", not_after);
+        ASSERT_FALSE(registry.start(original));
+        registry.finish(original, "completed", 200, 1);
+        EXPECT_FALSE(registry.start(sent(registry, "z", not_after)));
+        EXPECT_NE(std::string::npos, registry.capabilities_json()["release_rule"].asString()
+                                             .find("retention_s is 0"));
+    }
+}
+
+// Review of the pass-5 fixes, finding 2: with clock_skew_ms 0 a cancel's covers_admission
+// (suppressed_until_ms == not_after_ms) must hold at the instant the wall clock reads
+// not_after_ms, which the strict not_after check still admits — the tombstone is live through
+// suppressed_until_ms inclusive, also after its steady hold passed
+TEST(GraphletAttemptRegistry, TombstonesHoldThroughSuppressedUntilInclusive) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 1);
+    settings.clock_skew_ms = 0;
+    AttemptRegistry registry(settings);
+    const uint64_t not_after = clock.wall_ms() + 1200;
+    auto [status, body] = registry.cancel("sk-0", 0, not_after);
+    ASSERT_EQ(404, status);
+    EXPECT_TRUE(body["covers_admission"].asBool());
+    EXPECT_EQ(not_after, body["suppressed_until_ms"].asUInt64());
+    auto copy = [&]() {
+        auto a = attempt_of(registry, "sk-0");
+        AttemptIds ids = a->ids();
+        ids.not_after_ms = not_after;
+        a->set_ids(ids);
+        return a;
+    };
+    // the steady hold over, the wall clock (one ms behind) reading not_after_ms exactly
+    clock.ms = 1'201;
+    clock.wall_step = -1;
+    ASSERT_EQ(not_after, clock.wall_ms());
+    EXPECT_FALSE(not_after_passed(copy()->ids(), clock.wall_ms()));
+    auto refused = registry.start(copy());
+    ASSERT_TRUE(refused);
+    EXPECT_FALSE(refused->expired);
+    EXPECT_TRUE(refused->body["tombstone"].asBool());
+    // the refusal held it again through not_after_ms (and its retention): once the clock read
+    // later, the copy is refused by its own not_after_ms
+    clock.ms = 2'202;
+    clock.wall_step = 0;
+    refused = registry.start(copy());
+    ASSERT_TRUE(refused);
+    EXPECT_TRUE(refused->expired);
+}
+
+// Review of the pass-5 fixes, finding 3: a refused copy's suppression is judged against its own
+// not_after_ms alone — a copy without one is not covered (no_not_after_ms), whatever not_after_ms
+// a cancel named, and indeed runs once re-sent after the tombstone
+TEST(GraphletAttemptRegistry, ARefusedCopyIsJudgedByItsOwnNotAfterMs) {
+    FakeClock clock;
+    AttemptSettings settings = settings_with(&clock, 1);
+    settings.clock_skew_ms = 100;
+    AttemptRegistry registry(settings);
+    const uint64_t not_after = clock.wall_ms() + 1500;
+    auto [status, body] = registry.cancel("nna-1", 0, not_after);
+    ASSERT_EQ(404, status);
+    EXPECT_TRUE(body["covers_admission"].asBool());
+    auto refused = registry.start(attempt_of(registry, "nna-1"));   // no not_after_ms
+    ASSERT_TRUE(refused);
+    EXPECT_TRUE(refused->body["tombstone"].asBool());
+    EXPECT_FALSE(refused->body.isMember("not_after_ms"));
+    EXPECT_FALSE(refused->body["covers_admission"].asBool());
+    EXPECT_EQ("no_not_after_ms", refused->body["covers_admission_reason"].asString());
+    // GET and a repeated cancel still answer for the largest not_after_ms named
+    EXPECT_TRUE(registry.state("nna-1").second["covers_admission"].asBool());
+    const uint64_t until = refused->body["suppressed_until_ms"].asUInt64();
+    clock.ms = static_cast<int64_t>(until - FakeClock::kWallBase) + 1;
+    EXPECT_FALSE(registry.start(attempt_of(registry, "nna-1")));
 }
 
 TEST(GraphletAttemptRegistry, RetentionByCountAndAge) {
@@ -970,6 +1489,47 @@ TEST(GraphletServer, CheckedWriterIsByteIdentical) {
     }
 }
 
+// Review of pass 5, finding 6 (the reviewer's pass5_delivery_probe.cpp): one JSON string value
+// of 16 MiB was appended whole by the checked writer, and a seed's 16 MiB text whole by the
+// response's assembly — one check each. Both now copy in pieces up to the next check: at
+// least size / 64 KiB checks, the bytes unchanged, and the longest stretch between two checks
+// (the value's escaping, before it is copied) measured
+TEST(GraphletServer, DeliveryChecksEvery64KiBOfALargeToken) {
+    Json::Value v;
+    v["text"] = std::string(16 * 1024 * 1024, 'A');
+    size_t checks = 0;
+    double gap = 0;
+    const std::string text = json_text(v, true, [&]() { checks++; }, &gap);
+    EXPECT_EQ(json_text(v, true), text);
+    EXPECT_GE(checks, text.size() / kDeliveryCheckBytes);
+    EXPECT_GT(gap, 0);
+    Json::Value envelope(Json::objectValue);
+    envelope["algorithm_version"] = "x";
+    envelope["timing"]["elapsed_ms"] = 1;
+    Json::Value whole = envelope;
+    whole["results"].append(v);
+    whole["results"].append(Json::Value(Json::objectValue));
+    checks = 0;
+    gap = 0;
+    const std::string response = assemble_traverse_response(envelope, { text, "{}" },
+                                                            [&]() { checks++; }, &gap);
+    EXPECT_EQ(json_text(whole, true), response);
+    EXPECT_EQ(assemble_traverse_response(envelope, { text, "{}" }), response);
+    EXPECT_GE(checks, text.size() / kDeliveryCheckBytes);
+    EXPECT_GT(gap, 0);
+    // a check's exception stops the copying between two pieces
+    struct Stop : std::runtime_error {
+        using std::runtime_error::runtime_error;
+    };
+    size_t calls = 0;
+    EXPECT_THROW(assemble_traverse_response(envelope, { text }, [&]() {
+                     if (++calls == 3)
+                         throw Stop("stop");
+                 }),
+                 Stop);
+    EXPECT_EQ(3u, calls);
+}
+
 // The multi-graph list (pass 5, W2): three columns read as they always were, two optional
 // ones (manifest_path, index_ns), empty meaning none; more than five columns, fewer than
 // three, or an index_ns that is no token refuse the line
@@ -1067,4 +1627,134 @@ TEST(GraphletServer, GraphListIdentitiesAgreePerPair) {
         EXPECT_NE(std::string::npos, std::string(ex.what()).find("one index_fp")) << ex.what();
         EXPECT_NE(std::string::npos, std::string(ex.what()).find("lines 1 and 10")) << ex.what();
     }
+}
+
+
+// Review of pass 5, findings 2 and 3: one inventory of what the loaders open. Its table of
+// annotation types is checked against the loader itself — for every annotation type the CLI
+// knows, the extension of the object initialize_annotation constructs is in the table, maps
+// back to that type, and the table says it reads the row-diff anchors beside the graph exactly
+// when its matrix is RowDiff<ColumnMajor>, and the sequence headers exactly when it is a
+// MultiIntMatrix (build_annotated_dbg's and load_coord_to_header's own tests)
+TEST(GraphletServer, InventoryTableMatchesTheLoadersTypes) {
+    using namespace mtg::annot;
+    size_t seen = 0;
+    for (int t = Config::ColumnCompressed; t <= Config::RowDiffDiskCoord; ++t) {
+        const auto type = static_cast<Config::AnnotationType>(t);
+        auto annotation = initialize_annotation(type);
+        ASSERT_TRUE(annotation) << t;
+        const std::string ext = annotation->file_extension();
+        EXPECT_EQ(type, parse_annotation_type("x" + ext)) << ext;
+        const auto &matrix = annotation->get_matrix();
+        const bool coordinates = dynamic_cast<const matrix::MultiIntMatrix *>(&matrix);
+        const bool anchors = dynamic_cast<const matrix::RowDiff<matrix::ColumnMajor> *>(&matrix);
+        const IndexAnnotationKind *kind = nullptr;
+        for (const IndexAnnotationKind &k : index_annotation_kinds()) {
+            // the first suffix that matches decides, as in parse_annotation_type
+            if (ext.size() >= k.extension.size()
+                    && ext.compare(ext.size() - k.extension.size(), k.extension.size(),
+                                   k.extension) == 0) {
+                kind = &k;
+                break;
+            }
+        }
+        ASSERT_TRUE(kind) << ext;
+        EXPECT_EQ(ext, kind->extension);
+        EXPECT_EQ(coordinates, kind->coordinates) << ext;
+        EXPECT_EQ(anchors, kind->row_diff_anchors) << ext;
+        ++seen;
+    }
+    EXPECT_EQ(index_annotation_kinds().size(), seen);
+}
+
+// Finding 2 itself: two lines whose graph and annotation are symlinks to the same files, but
+// whose .seqs beside the symlinks differ, are two indexes — each validated against the manifest
+// it names, so the shared manifest (A's) refuses B, naming B's own .seqs; with B's own
+// manifest they state different index_fp
+TEST(GraphletServer, SymlinkedMainFilesDoNotHideTheirSidecars) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::absolute("temp_inventory_symlinks_" + std::to_string(getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir / "A");
+    fs::create_directories(dir / "B");
+    auto write = [&](const fs::path &p, const std::string &content) {
+        std::ofstream(p, std::ios::binary) << content;
+        return p.string();
+    };
+    write(dir / "shared.dbg", "graph bytes");
+    write(dir / "sharedanno.column_coord.annodbg", "annotation bytes");
+    for (const char *side : { "A", "B" }) {
+        fs::create_symlink(dir / "shared.dbg", dir / side / "graph.dbg");
+        fs::create_symlink(dir / "sharedanno.column_coord.annodbg",
+                           dir / side / "annotation.column_coord.annodbg");
+    }
+    write(dir / "A" / "annotation.seqs", "sampleA");
+    write(dir / "B" / "annotation.seqs", "sampleBBBB");
+    const std::string ga = (dir / "A" / "graph.dbg").string(),
+                      aa = (dir / "A" / "annotation.column_coord.annodbg").string(),
+                      gb = (dir / "B" / "graph.dbg").string(),
+                      ab = (dir / "B" / "annotation.column_coord.annodbg").string();
+    // the sidecars are looked up beside the listed spelling, not beside the symlinks' target
+    EXPECT_EQ((std::vector<std::string> { ga, aa, (dir / "A" / "annotation.seqs").string() }),
+              index_bundle_files(ga, aa));
+    EXPECT_EQ((std::vector<std::string> { gb, ab, (dir / "B" / "annotation.seqs").string() }),
+              index_bundle_files(gb, ab));
+    const Json::Value inventory = index_inventory_json(gb, ab);
+    EXPECT_EQ("coord_to_header", inventory["files"][2]["role"].asString());
+    EXPECT_TRUE(inventory["files"][2]["exists"].asBool());
+    EXPECT_FALSE(inventory["files"][2]["required"].asBool());
+    auto manifest = [&](const std::string &name, const std::string &seqs) {
+        Json::Value m;
+        for (const auto &[path, content] : std::vector<std::pair<std::string, std::string>> {
+                 { "graph.dbg", "graph bytes" },
+                 { "annotation.column_coord.annodbg", "annotation bytes" },
+                 { "annotation.seqs", seqs } }) {
+            Json::Value e;
+            e["path"] = path;
+            e["size"] = Json::UInt64(content.size());
+            e["sha256"] = sha256_hex(content);
+            m["files"].append(e);
+        }
+        return write(dir / name, json_text(m, true));
+    };
+    const std::string shared = manifest("shared-manifest.json", "sampleA");
+    std::vector<GraphListEntry> entries {
+        parse_graph_list_line("A," + ga + "," + aa + "," + shared + ",bundle", 1),
+        parse_graph_list_line("B," + gb + "," + ab + "," + shared + ",bundle", 2),
+    };
+    auto fp = [&](const GraphListEntry &e) {
+        return index_manifest_fingerprint(e.manifest_path,
+                                          index_bundle_files(e.graph_path, e.annotation_path));
+    };
+    try {
+        graph_list_identities(entries, fp);
+        ADD_FAILURE() << "B's .seqs was hidden behind A's";
+    } catch (const std::exception &ex) {
+        EXPECT_NE(std::string::npos,
+                  std::string(ex.what()).find((dir / "B" / "annotation.seqs").string()))
+                << ex.what();
+    }
+    // each with its own manifest: two indexes, two identities
+    entries[1] = parse_graph_list_line("B," + gb + "," + ab + ","
+                                       + manifest("b-manifest.json", "sampleBBBB") + ",bundle", 2);
+    const auto ids = graph_list_identities(entries, fp);
+    EXPECT_NE(ids.at({ ga, aa }).second, ids.at({ gb, ab }).second);
+    EXPECT_FALSE(ids.at({ ga, aa }).second.empty());
+    // the same pair spelled twice (here through the same symlinks) is still one index
+    entries.push_back(parse_graph_list_line("A2," + ga + "," + aa, 3));
+    EXPECT_EQ(ids.at({ ga, aa }), graph_list_identities(entries, fp).at({ ga, aa }));
+    // without the .seqs beside B, B loads no headers: a third bundle, refused by A's manifest
+    // only if it lists... (it does: the manifest lists a file B does not load, which is
+    // allowed; the loaded files are covered) — so B states A's identity only when it loads A's
+    // files: here its sidecar set differs, and one index_fp for two indexes is refused
+    fs::remove(dir / "B" / "annotation.seqs");
+    entries.pop_back();
+    entries[1] = parse_graph_list_line("B," + gb + "," + ab + "," + shared + ",bundle", 2);
+    try {
+        graph_list_identities(entries, fp);
+        ADD_FAILURE() << "two indexes stated one index_fp";
+    } catch (const std::invalid_argument &ex) {
+        EXPECT_NE(std::string::npos, std::string(ex.what()).find("one index_fp")) << ex.what();
+    }
+    fs::remove_all(dir);
 }

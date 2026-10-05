@@ -115,6 +115,10 @@ class CoordToHeader {
      * Thread-safe.
      */
     std::optional<std::pair<Column, size_t>> find_header(std::string_view header) const;
+    // Builds the reverse index now, if not built yet, and returns its number of distinct
+    // headers: the server builds it when the index is loaded, so that no request pays it (on
+    // refseq33m, 33M headers, a first header name took seconds inside a 1 s budget)
+    size_t build_header_index() const;
     // how many times this object built its reverse index (to test that it is built once)
     size_t num_header_index_builds() const;
 
@@ -122,6 +126,7 @@ class CoordToHeader {
 
   private:
     struct HeaderIndex;
+    void build_header_index_locked() const;
 
     std::vector<std::vector<std::string>> headers_;
     std::vector<bit_vector_sd> coord_offsets_;

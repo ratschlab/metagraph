@@ -836,6 +836,15 @@ struct ResourceAccount {
     bool row_diff_uncounted = false;
 };
 
+// A seed's deadline record (R8; timing only): its longest uninterruptible piece, and, when a
+// stop ended its walk, what stopped it (time_budget, attempt, cancelled, memory, work) and how
+// long after its deadline (the seed's time budget, or the attempt's walk-until) it stopped
+struct DeadlineRecord {
+    UninterruptiblePiece longest;
+    std::string stopped_by;
+    std::optional<double> after_deadline_ms;
+};
+
 struct SeedResult {
     std::string seed_id;
     std::string validated_seed_id;
@@ -864,6 +873,7 @@ struct SeedResult {
     std::vector<std::array<LabelArmSummary, 2>> label_summary;   // per label_dict entry
     LabelOracle::Counters annotation_counters;
     double elapsed_seconds = 0;
+    DeadlineRecord deadline;
     const char *access_path = "";
     std::optional<ResourceStop> resource_stop;
     ResourceAccount account;

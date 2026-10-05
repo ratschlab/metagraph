@@ -431,14 +431,17 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             // trace's lookups only moved entries within the cache, so it is still there
             const auto *entry = cache->find(visit.row, true);
             assert(entry);
-            const uint64_t bytes = copy_bytes(entry->row);
+            const uint64_t bytes = entry->copy_bytes;
             if (!budget.charge(bytes))
                 return refuse();
-            slot[v] = entry->row;
+            entry->row.load(&slot[v]);
+            assert(bytes == copy_bytes(slot[v]));
             visit.slot_bytes = bytes;
             cache->hits++;
             continue;
         }
+        if (cache)
+            cache->stored_rows_read++;
         if (!fetcher.fetch(visit.row, &slot[v], &visit.stored, budget))
             return refuse();
         visit.slot_bytes = visit.stored;
@@ -480,10 +483,15 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             last.recon_peak = last.stored;
             last.full = last.stored;
             last.set_anchor(last.row);
-            if (cache) {
+            if (cache && cache->keeps(0, path_end - 1 - path, slot[end])) {
                 const PathAggregates agg = aggregates_of(last);
-                cache->insert(last.row, slot[end], &agg);
+                cache->insert(last.row, slot[end], 0, &agg);
             }
+        } else if (cache && path_end - path == 1 && !last.cached()) {
+            // a requested row reconstructed by an earlier path of the call, which did not
+            // keep it (RowDiffCache::keeps keeps every requested row)
+            const PathAggregates agg = aggregates_of(last);
+            cache->insert(last.row, slot[end], last.length - 1, &agg);
         }
         RowT result;
         uint64_t result_bytes = 0;
@@ -520,10 +528,10 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             // earlier in the call — the demand must not depend on the batch (review F4)
             visit.full = changes ? result_bytes : next.full;
             visit.set_anchor(next.anchor());
-            if (cache) {
+            if (cache && cache->keeps(visit.length - 1, p - path, result)) {
                 // outside this budget: the cache keeps within its own bound (the caller's)
                 const PathAggregates agg = aggregates_of(visit);
-                cache->insert(visit.row, result, &agg);
+                cache->insert(visit.row, result, visit.length - 1, &agg);
             }
             // the stored diff is used up; a row a later path ends at keeps the full row
             budget.release(visit.slot_bytes);

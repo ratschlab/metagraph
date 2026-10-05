@@ -1,13 +1,17 @@
 #include "resolve.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <cctype>
 #include <map>
 #include <numeric>
+#include <tuple>
 
 #include <tsl/hopscotch_map.h>
+#include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/logger.hpp"
 
@@ -96,6 +100,223 @@ static std::vector<KmerInterval> runs_of(const std::vector<bool> &mask) {
 }
 
 
+namespace {
+
+/**
+ * The support of one label, built k-mer by k-mer in ascending k-mer order (each k-mer at most
+ * once): what a discovery accumulates while it reads the rows, and the trace of an explicit
+ * label over its hits.
+ *   add(i)                 the label is present at k-mer i: |kmers|, and the runs its maximal
+ *                          runs (runs_of over the k-mers it is present at)
+ *   add_trace(i, coords)   the label is present at k-mer i with |coords| (sorted; possibly
+ *                          none): |kmers| as add, and the runs, |trace_breaks| and |traced| the
+ *                          trace-consistent runs — a chain of coordinates increasing by one per
+ *                          k-mer, a k-mer without coordinates (or without the label: a gap in
+ *                          the calls) breaking it. |scratch|: a buffer the caller reuses (a
+ *                          discovery calls this for every label of every row)
+ *   take_runs()            the runs, once the last k-mer was added
+ * A discovery calls these for every label of every row, so what a call reads and writes — the
+ * counts, the run being extended and a chain of up to four coordinates — is kept together in
+ * the accumulator, and its vectors are touched only when a run closes or a trace jumps
+ */
+struct LabelSupport {
+    static constexpr uint64_t kNone = std::numeric_limits<uint64_t>::max();
+
+    uint64_t kmers = 0;
+    uint64_t traced = 0;
+    uint64_t last = kNone;                   // the k-mer of the last add_trace
+    KmerInterval open { kNone, kNone };      // the run being extended, not yet in |runs|
+    SmallVector<Coord, 4> live;              // the chain's coordinates at k-mer |last|
+    std::vector<KmerInterval> runs;          // the closed runs
+    std::vector<uint64_t> trace_breaks;      // k-mer starts where a trace run ended early
+
+    void add(uint64_t i) {
+        kmers++;
+        extend(i);
+    }
+
+    void add_trace(uint64_t i, const Coord *coords, size_t n, std::vector<Coord> &scratch) {
+        kmers++;
+        // the k-mers since the last call did not have the label: the chain ended there
+        if (last == kNone || last + 1 != i)
+            live.clear();
+        last = i;
+        if (!n) {
+            live.clear();
+            return;
+        }
+        if (live.size() == n) {
+            // the common case on a conserved stretch: every coordinate continues the chain,
+            // which moves on by one in place (what the merge below gives, without its copies)
+            size_t j = 0;
+            while (j < n && coords[j] == live[j] + 1) {
+                ++j;
+            }
+            if (j == n) {
+                std::copy(coords, coords + n, live.begin());
+                extend(i);
+                traced++;
+                return;
+            }
+        }
+        // the coordinates continuing the chain (c - 1 in |live|), by a merge: both are sorted
+        scratch.clear();
+        size_t k = 0;
+        for (size_t j = 0; j < n; ++j) {
+            const Coord c = coords[j];
+            if (!c)
+                continue;
+            while (k < live.size() && live[k] < c - 1) {
+                ++k;
+            }
+            if (k < live.size() && live[k] == c - 1)
+                scratch.push_back(c);
+        }
+        if (scratch.empty()) {
+            if (!live.empty())
+                trace_breaks.push_back(i);  // supported, but the trace jumped
+            // no coordinate continues the chain: start a new trace run here
+            live.assign(coords, coords + n);
+            start(i);
+        } else {
+            extend(i);
+            live.assign(scratch.begin(), scratch.end());
+        }
+        traced++;
+    }
+
+    std::vector<KmerInterval> take_runs() {
+        if (open.begin != kNone)
+            runs.push_back(open);
+        open = { kNone, kNone };
+        return std::move(runs);
+    }
+
+  private:
+    // the run ending at i continues through i; else a new run starts at i
+    void extend(uint64_t i) {
+        if (open.end == i) {
+            open.end = i + 1;
+        } else {
+            start(i);
+        }
+    }
+    void start(uint64_t i) {
+        if (open.begin != kNone)
+            runs.push_back(open);
+        open = { i, i + 1 };
+    }
+};
+
+// The size of the next batch of rows a /resolve decodes: the first kResolveFirstBatchRows
+// rows, then about |target_bytes| of rows as wide as the widest of the batch before (rows
+// widen and narrow along a query, conserved and variable regions, and the average would
+// underestimate), at most twice that batch's rows (the next rows can be wider still) and at
+// most |max_rows|
+struct BatchSizer {
+    size_t max_rows;
+    uint64_t target_bytes;
+    size_t next;
+
+    BatchSizer(size_t max_rows, uint64_t target_bytes)
+          : max_rows(std::max<size_t>(1, max_rows)), target_bytes(target_bytes),
+            next(std::min(this->max_rows, kResolveFirstBatchRows)) {}
+
+    template <class RowT>
+    void done(const std::vector<RowT> &batch) {
+        uint64_t widest = 1;
+        for (const auto &row : batch) {
+            widest = std::max(widest, annot::matrix::row_copy_bytes(row));
+        }
+        next = static_cast<size_t>(std::max<uint64_t>(1, std::min<uint64_t>({
+                target_bytes / widest, 2 * batch.size(), max_rows })));
+    }
+};
+
+std::vector<Row> anno_rows(const std::vector<node_index> &keys) {
+    std::vector<Row> rows;
+    rows.reserve(keys.size());
+    for (node_index key : keys) {
+        rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
+    }
+    return rows;
+}
+
+/**
+ * Calls |use(j, row)| for every j of |keys| (the present k-mers' keys, in k-mer order) in
+ * order, with the row of keys[j] decoded by |decode| (a vector of keys to their rows) in
+ * batches (BatchSizer: a batch is the next rows to decode, not its k-mers). A key's row is
+ * decoded once per batch, and a row whose key occurs again after its batch is kept for that
+ * occurrence while the rows kept take at most |kept_max| bytes (row_copy_bytes), dropped at its
+ * last occurrence; beyond that bound a repeated row is decoded again. |checkpoint| runs between
+ * batches. What the request holds is one batch of rows and the rows kept
+ */
+template <class RowT, class Decode, class Use, class Checkpoint>
+void for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint64_t kept_max,
+                  const Decode &decode, const Use &use, const Checkpoint &checkpoint) {
+    constexpr size_t kNever = std::numeric_limits<size_t>::max();
+    // the next occurrence of each k-mer's key (kNever: none)
+    std::vector<size_t> next_use(keys.size(), kNever);
+    {
+        tsl::hopscotch_map<node_index, size_t> later;
+        for (size_t j = keys.size(); j-- > 0; ) {
+            auto [it, inserted] = later.try_emplace(keys[j], j);
+            if (!inserted) {
+                next_use[j] = it->second;
+                it.value() = j;
+            }
+        }
+    }
+    tsl::hopscotch_map<node_index, std::pair<RowT, uint64_t>> kept;
+    uint64_t kept_bytes = 0;
+    tsl::hopscotch_map<node_index, size_t> in_batch;
+    std::vector<node_index> batch_keys;
+    for (size_t begin = 0; begin < keys.size(); ) {
+        // the k-mers whose rows are kept or among the next |sizer.next| rows to decode
+        in_batch.clear();
+        batch_keys.clear();
+        size_t end = begin;
+        for ( ; end < keys.size(); ++end) {
+            if (kept.count(keys[end]) || in_batch.count(keys[end]))
+                continue;
+            if (batch_keys.size() == sizer.next)
+                break;
+            in_batch.emplace(keys[end], batch_keys.size());
+            batch_keys.push_back(keys[end]);
+        }
+        std::vector<RowT> batch;
+        if (!batch_keys.empty()) {
+            batch = decode(batch_keys);
+            sizer.done(batch);   // before any row is moved to |kept|
+        }
+        for (size_t j = begin; j < end; ++j) {
+            auto kit = kept.find(keys[j]);
+            if (kit != kept.end()) {
+                use(j, kit->second.first);
+                if (next_use[j] == kNever) {
+                    kept_bytes -= kit->second.second;
+                    kept.erase(kit);
+                }
+                continue;
+            }
+            RowT &row = batch[in_batch.find(keys[j])->second];
+            use(j, row);
+            // occurring again after this batch (none of its k-mers after j has the key)
+            if (next_use[j] != kNever && next_use[j] >= end) {
+                const uint64_t bytes = annot::matrix::row_copy_bytes(row);
+                if (kept_bytes + bytes <= kept_max) {
+                    kept_bytes += bytes;
+                    kept.emplace(keys[j], std::make_pair(std::move(row), bytes));
+                }
+            }
+        }
+        begin = end;
+        checkpoint();
+    }
+}
+
+} // namespace
+
 SupportProfile resolve_support(LabelOracle &oracle,
                                std::string_view query,
                                const ResolveOptions &options) {
@@ -130,25 +351,43 @@ SupportProfile resolve_support(LabelOracle &oracle,
 
     std::vector<bool> in_graph(profile.num_kmers);
     std::vector<node_index> present_keys;
+    std::vector<uint64_t> present_pos;   // the k-mer index of each present key
     for (uint64_t i = 0; i < keys.size(); ++i) {
         in_graph[i] = keys[i] != npos;
-        if (in_graph[i])
+        if (in_graph[i]) {
             present_keys.push_back(keys[i]);
+            present_pos.push_back(i);
+        }
     }
     profile.graph_runs = runs_of(in_graph);
     size_t num_present = present_keys.size();
 
+    // ---- the rows: decoded in batches, each dropped once it is used (review of the pass-5
+    // fixes, finding 7: the discovery kept a prefix of the rows for the profile pass, which
+    // decoded all the others again in one call, so the request held about all of them and paid
+    // a second decode). |use(j, row)| gets the row of present_keys[j], j ascending: tuple rows
+    // with |tuple_rows|, else whole rows (for_each_row: a repeated key's row is kept for its
+    // later occurrences within kept_bytes)
+    auto each_row = [&](bool tuple_rows, const auto &use_rows, const auto &use_tuples) {
+        const BatchSizer sizer(options.batch_rows, options.batch_bytes);
+        if (tuple_rows) {
+            for_each_row<MultiIntMatrix::RowTuples>(present_keys, sizer, options.kept_bytes,
+                [&](const std::vector<node_index> &batch) {
+                    return oracle.get_row_tuples(anno_rows(batch));
+                }, use_tuples, checkpoint);
+        } else {
+            for_each_row<BinaryMatrix::SetBitPositions>(present_keys, sizer, options.kept_bytes,
+                [&](const std::vector<node_index> &batch) {
+                    return oracle.get_rows(anno_rows(batch));
+                }, use_rows, checkpoint);
+        }
+    };
+
     // ---- which labels to profile
     std::vector<LabelRef> refs;
     const bool with_coords = options.support == Support::TRACE;
-    // Discovery decodes the rows of the present k-mers once: the profile pass below takes its
-    // hits from them (LabelQuery::prime) instead of decoding every row again, which made a
-    // column discover cost 1.6-2.1 times the profile of explicit labels (refseq33m, the
-    // efficiency pass). Tuple rows when the profile needs coordinates (header labels, trace),
-    // whose columns are those of the whole rows (TupleRowDiff::get_rows keeps the tuple rows'
-    // columns; a coordinate matrix sets a column's bit exactly where it has coordinates)
-    std::vector<BinaryMatrix::SetBitPositions> plain;
-    std::vector<MultiIntMatrix::RowTuples> tuples;
+    // a discovery's labels, with the support it accumulated while it read the rows
+    std::vector<LabelSupport> discovered;
     if (!options.labels.empty()) {
         for (const auto &name : options.labels) {
             refs.push_back(oracle.resolve_label(name));
@@ -158,37 +397,57 @@ SupportProfile resolve_support(LabelOracle &oracle,
             throw std::invalid_argument("Header discovery requires a CoordToHeader index");
         checkpoint();
 
-        std::vector<Row> rows;
-        rows.reserve(present_keys.size());
-        for (node_index key : present_keys) {
-            rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
-        }
-        // (column, seq_id or 0) -> supported k-mers, in one flat hash table: a std::map node
-        // per label took 0.8-1.7 us a pair, 1.83 s for a header discover on 23S (refseq33m)
-        tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash> counts;
-        if (options.discover_kind == LabelKind::COLUMN) {
-            if (with_coords) {
-                tuples = oracle.get_row_tuples(rows);
-                for (const auto &row : tuples) {
-                    for (const auto &entry : row) {
-                        counts[{ entry.first, 0 }]++;
-                    }
+        // Discovery reads every present k-mer's row once and accumulates, per label, both what
+        // ranks it (its k-mers) and its profile (support runs; for trace the chain's state), so
+        // that the top labels' profiles need no second read of the rows (a profile pass over
+        // them made a column discover cost 1.6-2.1 times the profile of explicit labels on
+        // refseq33m; keeping the rows for it held a query's worth of wide tuple rows). The
+        // labels are those LabelQuery derives from the same rows: a column of the row (tuple
+        // rows when trace needs its coordinates), and a sequence of a column holding one of
+        // its coordinates (tuple rows), its local coordinates sorted.
+        // The accumulators of the labels found, in the order they were first seen: a column's
+        // by a slot per column id (4 bytes a column, where an accumulator per column of the
+        // index, about 100 bytes, would be allocated and cleared by every request), a sequence's by
+        // (column, seq_id) in one flat hash table (a std::map node per label took 0.8-1.7 us a
+        // pair, 1.83 s for a header discover on 23S, refseq33m)
+        const bool by_column = options.discover_kind == LabelKind::COLUMN;
+        constexpr uint32_t kNoSlot = std::numeric_limits<uint32_t>::max();
+        std::vector<uint32_t> slot(by_column ? oracle.num_columns() : 0, kNoSlot);
+        tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash> index;
+        std::vector<LabelSupport> found;
+        std::vector<std::pair<Column, uint64_t>> found_ids;
+        auto of = [&](Column c, uint64_t seq_id) -> LabelSupport& {
+            if (by_column) {
+                uint32_t &at = slot[c];
+                if (at == kNoSlot) {
+                    at = static_cast<uint32_t>(found.size());
+                    found.emplace_back();
+                    found_ids.emplace_back(c, 0);
                 }
-            } else {
-                plain = oracle.get_rows(rows);
-                for (const auto &row : plain) {
-                    for (Column c : row) {
-                        counts[{ c, 0 }]++;
-                    }
-                }
+                return found[at];
             }
-        } else {
-            tuples = oracle.get_row_tuples(rows);
-            std::vector<Coord> sorted;
-            for (const auto &row : tuples) {
+            auto [it, inserted] = index.try_emplace({ c, seq_id }, found.size());
+            if (inserted) {
+                found.emplace_back();
+                found_ids.emplace_back(c, seq_id);
+            }
+            return found[it->second];
+        };
+        std::vector<Coord> scratch;
+        const bool tuple_rows = with_coords || options.discover_kind == LabelKind::HEADER;
+        std::vector<Coord> sorted;
+        std::vector<Coord> local;
+        each_row(tuple_rows,
+            [&](size_t j, const BinaryMatrix::SetBitPositions &row) {
+                for (Column c : row) {
+                    of(c, 0).add(present_pos[j]);
+                }
+            },
+            [&](size_t j, const MultiIntMatrix::RowTuples &row) {
+                const uint64_t i = present_pos[j];
                 for (const auto &[c, coords] : row) {
-                    // each sequence of the column counted once per k-mer: on sorted
-                    // coordinates its coordinates are adjacent, and the run mapper
+                    // a trace runs on sorted coordinates (LabelQuery sorts a hit's), and on
+                    // sorted coordinates a sequence's are adjacent: the run mapper
                     // (LabelOracle::map_coords) maps a sequence's run for one rank/select
                     const Coord *data = coords.data();
                     if (!std::is_sorted(coords.begin(), coords.end())) {
@@ -196,37 +455,66 @@ SupportProfile resolve_support(LabelOracle &oracle,
                         std::sort(sorted.begin(), sorted.end());
                         data = sorted.data();
                     }
+                    if (options.discover_kind == LabelKind::COLUMN) {
+                        // tuple rows only for a trace (presence reads whole rows)
+                        of(c, 0).add_trace(i, data, coords.size(), scratch);
+                        continue;
+                    }
                     uint64_t previous = std::numeric_limits<uint64_t>::max();
+                    if (!with_coords) {
+                        // each sequence of the column counted once per k-mer
+                        oracle.map_coords(c, data, coords.size(),
+                                          [&, column = c](Coord, uint64_t seq_id, Coord) {
+                            if (seq_id != previous)
+                                of(column, seq_id).add(i);
+                            previous = seq_id;
+                        });
+                        continue;
+                    }
+                    // each sequence's local coordinates, in order (sorted)
+                    local.clear();
                     oracle.map_coords(c, data, coords.size(),
-                                      [&, column = c](Coord, uint64_t seq_id, Coord) {
-                        if (seq_id != previous)
-                            counts[{ column, seq_id }]++;
+                                      [&, column = c](Coord, uint64_t seq_id, Coord at) {
+                        if (seq_id != previous && !local.empty()) {
+                            of(column, previous).add_trace(i, local.data(), local.size(),
+                                                           scratch);
+                            local.clear();
+                        }
                         previous = seq_id;
+                        local.push_back(at);
                     });
+                    if (!local.empty())
+                        of(c, previous).add_trace(i, local.data(), local.size(), scratch);
                 }
-            }
-        }
+            });
         checkpoint();
-        std::vector<std::pair<std::pair<Column, uint64_t>, uint64_t>> ranked(counts.begin(), counts.end());
-        tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash>().swap(counts);
+        std::vector<std::tuple<std::pair<Column, uint64_t>, uint64_t, uint64_t>> ranked;
+        ranked.reserve(found.size());
+        for (uint64_t at = 0; at < found.size(); ++at) {
+            ranked.emplace_back(found_ids[at], found[at].kmers, at);
+        }
+        std::vector<uint32_t>().swap(slot);
+        tsl::hopscotch_map<std::pair<Column, uint64_t>, uint64_t, LabelKeyHash>().swap(index);
         // more k-mers first; ties by column id, then seq_id (the order the std::map gave)
         std::sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) {
-            return a.second != b.second ? a.second > b.second : a.first < b.first;
+            return std::get<1>(a) != std::get<1>(b) ? std::get<1>(a) > std::get<1>(b)
+                                                    : std::get<0>(a) < std::get<0>(b);
         });
         if (ranked.size() > options.discover_max_labels) {
             LabelTruncation trunc;
             trunc.total = ranked.size();
             trunc.kept = options.discover_max_labels;
-            trunc.min_kept_kmers = ranked[trunc.kept - 1].second;
-            trunc.max_dropped_kmers = ranked[trunc.kept].second;
+            trunc.min_kept_kmers = std::get<1>(ranked[trunc.kept - 1]);
+            trunc.max_dropped_kmers = std::get<1>(ranked[trunc.kept]);
             for (size_t i = trunc.kept; i < ranked.size(); ++i) {
-                if (ranked[i].second == num_present)
+                if (std::get<1>(ranked[i]) == num_present)
                     trunc.dropped_full_length++;
             }
             ranked.resize(trunc.kept);
             profile.labels_truncated = trunc;
         }
-        for (const auto &[id, count] : ranked) {
+        discovered.reserve(ranked.size());
+        for (const auto &[id, count, at] : ranked) {
             LabelRef ref;
             ref.kind = options.discover_kind;
             ref.column = id.first;
@@ -234,6 +522,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
             ref.name = ref.kind == LabelKind::COLUMN ? oracle.column_name(ref.column)
                                                      : oracle.header_name(ref.column, ref.seq_id);
             refs.push_back(ref);
+            discovered.push_back(std::move(found[at]));
         }
     }
 
@@ -246,81 +535,92 @@ SupportProfile resolve_support(LabelOracle &oracle,
     if (refs.empty())
         return profile;
 
-    // ---- support per k-mer
-    LabelQuery query_labels(oracle, refs, with_coords);
-    checkpoint();
-    // a discovery's rows give the hits (the query reads tuple rows exactly when the
-    // discovery decoded them: header labels or trace)
-    if (!tuples.empty()) {
-        query_labels.prime(present_keys, tuples);
-    } else if (!plain.empty()) {
-        query_labels.prime(present_keys, plain);
-    }
-    std::vector<MultiIntMatrix::RowTuples>().swap(tuples);
-    std::vector<BinaryMatrix::SetBitPositions>().swap(plain);
-    auto hits = query_labels.fetch(keys);
-    checkpoint();
-
-    // Presence (no coordinates) is scattered in one pass over the k-mers: iterating per
-    // label and scanning each k-mer's hit list would cost O(labels x k-mers x hits),
-    // which at discovery-scale label counts dominates everything else.
-    if (!with_coords) {
-        std::vector<std::vector<bool>> supported(refs.size(),
-                                                 std::vector<bool>(profile.num_kmers, false));
-        for (uint64_t i = 0; i < hits.size(); ++i) {
-            for (const auto &h : hits[i]) {
-                assert(h.label < refs.size());
-                supported[h.label][i] = true;
+    if (options.labels.empty()) {
+        // a discovery's profiles are what it accumulated
+        for (LabelId l = 0; l < refs.size(); ++l) {
+            LabelProfile &lp = profile.labels[l];
+            LabelSupport &support = discovered[l];
+            lp.runs = support.take_runs();
+            lp.trace_breaks = std::move(support.trace_breaks);
+            lp.kmers_supported = with_coords ? support.traced : support.kmers;
+        }
+    } else {
+        // ---- support per k-mer of explicit labels
+        LabelQuery query_labels(oracle, refs, with_coords);
+        checkpoint();
+        // The distinct keys' whole or tuple rows are decoded in batches and primed into the
+        // query (the hits a fetch builds from them, kept per key), so that the fetch below
+        // decodes nothing and the request holds one batch of rows at a time beside the hits —
+        // each row once, as the fetch decoded the distinct keys; direct cell reads hold no rows
+        const std::string path = query_labels.access_path();
+        if (path != "direct") {
+            std::vector<node_index> distinct;
+            {
+                tsl::hopscotch_set<node_index> seen;
+                for (node_index key : present_keys) {
+                    if (seen.insert(key).second)
+                        distinct.push_back(key);
+                }
+            }
+            BatchSizer sizer(options.batch_rows, options.batch_bytes);
+            std::vector<node_index> batch;
+            for (size_t begin = 0; begin < distinct.size(); begin += batch.size()) {
+                batch.assign(distinct.begin() + begin,
+                             distinct.begin() + std::min(distinct.size(), begin + sizer.next));
+                if (path == "tuples") {
+                    const auto rows = oracle.get_row_tuples(anno_rows(batch));
+                    query_labels.prime(batch, rows);
+                    sizer.done(rows);
+                } else {
+                    const auto rows = oracle.get_rows(anno_rows(batch));
+                    query_labels.prime(batch, rows);
+                    sizer.done(rows);
+                }
+                checkpoint();
             }
         }
-        for (LabelId l = 0; l < refs.size(); ++l) {
-            profile.labels[l].runs = runs_of(supported[l]);
-            profile.labels[l].kmers_supported
-                = std::count(supported[l].begin(), supported[l].end(), true);
-        }
-    }
+        auto hits = query_labels.fetch(keys);
+        checkpoint();
 
-    for (LabelId l = 0; l < refs.size() && with_coords; ++l) {
-        LabelProfile &lp = profile.labels[l];
-        std::vector<bool> supported(profile.num_kmers, false);
-        {
+        // Presence (no coordinates) is scattered in one pass over the k-mers: iterating per
+        // label and scanning each k-mer's hit list would cost O(labels x k-mers x hits),
+        // which at discovery-scale label counts dominates everything else.
+        if (!with_coords) {
+            std::vector<std::vector<bool>> supported(refs.size(),
+                                                     std::vector<bool>(profile.num_kmers, false));
+            for (uint64_t i = 0; i < hits.size(); ++i) {
+                for (const auto &h : hits[i]) {
+                    assert(h.label < refs.size());
+                    supported[h.label][i] = true;
+                }
+            }
+            for (LabelId l = 0; l < refs.size(); ++l) {
+                profile.labels[l].runs = runs_of(supported[l]);
+                profile.labels[l].kmers_supported
+                    = std::count(supported[l].begin(), supported[l].end(), true);
+            }
+        }
+
+        for (LabelId l = 0; l < refs.size() && with_coords; ++l) {
             // trace-consistent runs: a chain of coordinates increasing by one per k-mer.
             // Column labels have coordinates in the column frame, header labels in the
-            // sequence frame; either way consecutive k-mers must have consecutive coords.
-            std::vector<Coord> live;
+            // sequence frame; either way consecutive k-mers must have consecutive coords
+            // (LabelSupport::add_trace, k-mer by k-mer)
+            LabelSupport support;
+            std::vector<Coord> scratch;
             for (uint64_t i = 0; i < hits.size(); ++i) {
-                const SmallVector<Coord> *coords = nullptr;
                 for (const auto &h : hits[i]) {
                     if (h.label == l) {
-                        coords = &h.coords;
+                        support.add_trace(i, h.coords.data(), h.coords.size(), scratch);
                         break;
                     }
                 }
-                if (!coords || coords->empty()) {
-                    live.clear();
-                    continue;
-                }
-                std::vector<Coord> next;
-                for (Coord c : *coords) {
-                    if (c && std::binary_search(live.begin(), live.end(), c - 1))
-                        next.push_back(c);
-                }
-                if (next.empty()) {
-                    if (!live.empty())
-                        lp.trace_breaks.push_back(i);  // supported, but the trace jumped
-                    // no coordinate continues the chain: start a new trace run here
-                    next.assign(coords->begin(), coords->end());
-                    lp.runs.push_back({ i, i + 1 });
-                } else if (!lp.runs.empty() && lp.runs.back().end == i) {
-                    lp.runs.back().end = i + 1;
-                } else {
-                    lp.runs.push_back({ i, i + 1 });
-                }
-                live.swap(next);
-                supported[i] = true;
             }
+            LabelProfile &lp = profile.labels[l];
+            lp.runs = support.take_runs();
+            lp.trace_breaks = std::move(support.trace_breaks);
+            lp.kmers_supported = support.traced;
         }
-        lp.kmers_supported = std::count(supported.begin(), supported.end(), true);
     }
 
     // ---- seed candidates: identical maximal runs grouped

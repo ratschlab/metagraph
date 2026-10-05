@@ -364,6 +364,20 @@ std::vector<std::string> filter_graphs_from_list(
 }
 
 
+// The reverse index of the sequence headers (CoordToHeader::find_header), built while the
+// index loads rather than by the first request naming a header: on refseq33m (33M headers)
+// that request spent seconds in it, inside its time budget and outside every read timer (R10:
+// 9.3 s of a 1 s budget)
+static void build_header_index(const graph::AnnotatedDBG &index) {
+    const auto *coord_to_header = index.get_coord_to_header();
+    if (!coord_to_header)
+        return;
+    Timer timer;
+    const size_t headers = coord_to_header->build_header_index();
+    logger->info("[Server] Sequence header index built: {} headers in {:.1f} s", headers,
+                 timer.elapsed());
+}
+
 int run_server(Config *config) {
     assert(config);
     std::atomic<size_t> num_requests = 0;
@@ -409,7 +423,12 @@ int run_server(Config *config) {
             if (!config->index_manifest.empty()) {
                 single_identity.fp = index_manifest_fingerprint(
                         config->index_manifest,
-                        index_bundle_files(config->infbase, config->infbase_annotators[0]));
+                        index_bundle_files(config->infbase, config->infbase_annotators[0],
+                                           !config->no_coord_mapping),
+                        nullptr,
+                        index_unloaded_optional_files(config->infbase,
+                                                      config->infbase_annotators[0],
+                                                      !config->no_coord_mapping));
                 logger->info("[Server] Index manifest {}: index_fp {}", config->index_manifest,
                              single_identity.fp);
             }
@@ -423,6 +442,7 @@ int run_server(Config *config) {
             logger->info("[Server] Annotated graph loaded. Current mem usage: {} MiB", get_curr_RSS() >> 20);
             // set before the future is ready, so every request sees it complete
             single_identity.meta_fp = index_meta_fingerprint(graph::traversal::LabelOracle(*anno_graph));
+            build_header_index(*anno_graph);
             return anno_graph;
         });
     } else {
@@ -457,14 +477,19 @@ int run_server(Config *config) {
         // lines stating different identities for one pair, refuses to start
         std::map<GraphPair, std::pair<std::string, std::string>> pair_identity;
         try {
+            // what each pair loads (the loader dependency inventory of its listed spellings)
+            auto inventory = [&](const GraphListEntry &e) {
+                return index_bundle_files(e.graph_path, e.annotation_path,
+                                          !config->no_coord_mapping);
+            };
             pair_identity = graph_list_identities(entries, [&](const GraphListEntry &e) {
                 std::string stated;
                 std::string fp;
                 try {
-                    fp = index_manifest_fingerprint(e.manifest_path,
-                                                    index_bundle_files(e.graph_path,
-                                                                       e.annotation_path),
-                                                    &stated);
+                    fp = index_manifest_fingerprint(
+                            e.manifest_path, inventory(e), &stated,
+                            index_unloaded_optional_files(e.graph_path, e.annotation_path,
+                                                          !config->no_coord_mapping));
                 } catch (const std::exception &ex) {
                     throw std::invalid_argument("line " + std::to_string(e.line) + " of the "
                                                 "graph list: " + ex.what());
@@ -475,7 +500,7 @@ int run_server(Config *config) {
                                  e.manifest_path, stated, e.line, e.index_ns);
                 }
                 return fp;
-            });
+            }, inventory);
         } catch (const std::exception &e) {
             logger->error("[Server] {}", e.what());
             std::exit(1);
@@ -538,6 +563,9 @@ int run_server(Config *config) {
             config_copy.infbase_annotators = { anno_fname };
             it.value() = initialize_annotated_dbg(loaded_graphs[graph_path_to_idx.at(graph_fname)],
                                                   config_copy);
+        }
+        for (const auto &[pair, index] : graphs_cache) {
+            build_header_index(*index);
         }
         // every response computed on a pair states its identity
         for (const auto &[pair, index] : graphs_cache) {
@@ -705,6 +733,7 @@ int run_server(Config *config) {
     attempt_settings.hard_cap_ms = kContentTimeoutS * 1000.0 - 1000;
     attempt_settings.retention_s = config->traverse_attempt_retention_s;
     attempt_settings.retention_count = config->traverse_attempt_retention;
+    attempt_settings.tombstone_max_s = config->traverse_attempt_tombstone_max_s;
     attempt_settings.clock_skew_ms = config->traverse_clock_skew_ms;
     attempt_settings.content_timeout_s = kContentTimeoutS;
     attempt_settings.delivery_compress_mbps = config->traverse_delivery_compress_mbps;
@@ -788,9 +817,15 @@ int run_server(Config *config) {
         // known to the attempt's delivery reserve); the response is assembled from them, byte
         // for byte the text of the whole tree
         ResultTexts texts;
-        control.write = [&texts](const Json::Value &envelope, const std::function<void()> &check) {
-            return texts.active ? assemble_traverse_response(envelope, texts.texts, check)
-                                : json_text(envelope, true, check);
+        control.write = [&texts, attempt](const Json::Value &envelope,
+                                          const std::function<void()> &check) {
+            // the longest stretch between two checks (deadline_check, finding 6)
+            double gap = 0;
+            std::string text = texts.active
+                ? assemble_traverse_response(envelope, texts.texts, check, &gap)
+                : json_text(envelope, true, check, &gap);
+            attempt->note_delivery_gap_ms(gap);
+            return text;
         };
         // the attempt's client and bound while the response is written and compressed
         control.check = [&]() {
@@ -806,6 +841,7 @@ int run_server(Config *config) {
             // the longest single annotation read of any /traverse (deadline_check), and the
             // slowest build rate measured on its large seeds (the delivery reserve)
             attempts.note_uninterruptible(attempt->max_read_ms());
+            attempts.note_uninterruptible(attempt->max_delivery_gap_ms());
             attempts.note_build_rate(attempt->own_build_mbps());
             attempts.note_account_per_text_byte(attempt->delivery_detail(),
                                                 attempt->own_account_per_text_byte());
@@ -842,6 +878,12 @@ int run_server(Config *config) {
                 // other attempt); and one whose not_after_ms has passed is not started at all
                 // (its ledger may already have released it), also without usage
                 if (auto refused = attempts.start(attempt)) {
+                    if (refused->instance_mismatch) {
+                        logger->info("[Server] Attempt {} (request {}): not started, {}",
+                                     attempt->ids().attempt_id, request_id,
+                                     refused->body["error"].asString());
+                        throw HttpError(409, std::move(refused->body));
+                    }
                     if (refused->expired) {
                         logger->info("[Server] Attempt {} (request {}): not started, {}",
                                      attempt->ids().attempt_id, request_id,
@@ -849,9 +891,18 @@ int run_server(Config *config) {
                         throw HttpError(409, std::move(refused->body));
                     }
                     Json::Value body;
-                    body["error"] = "attempt_id '" + attempt->ids().attempt_id + "' is running "
-                                    "or was used on this server within the retention period ("
-                                  + attempts.retention_text() + "): an attempt runs once";
+                    if (refused->body["tombstone"].asBool()) {
+                        // its attempt object states the suppression, judged against this
+                        // request's not_after_ms (the tombstone now covers it when it can)
+                        body["error"] = "attempt_id '" + attempt->ids().attempt_id + "' was "
+                                        "cancelled before this request arrived (tombstoned: "
+                                      + attempts.retention_text() + "): it is not run";
+                    } else {
+                        body["error"] = "attempt_id '" + attempt->ids().attempt_id + "' is "
+                                        "running or was used on this server within the "
+                                        "retention period (" + attempts.retention_text()
+                                      + "): an attempt runs once";
+                    }
                     body["attempt"] = std::move(refused->body);
                     throw HttpError(409, std::move(body));
                 }
@@ -898,9 +949,11 @@ int run_server(Config *config) {
         }, /* compact */ true, &control);
     };
 
-    // Cancel a running attempt by its id (POST {"attempt_id", "wait_ms"?}): 200 when it was
-    // asked to stop (state stopping, or finished within wait_ms), 404 when it has finished or
-    // is unknown. Not refused while the index loads: an attempt may be cancelled at any time
+    // Cancel a running attempt by its id (POST {"attempt_id", "wait_ms"?, "not_after_ms"?}):
+    // 200 when it was asked to stop (state stopping, or finished within wait_ms), 404 when it
+    // has finished or is unknown (an unknown id tombstoned, held to the not_after_ms given +
+    // the clock skew allowance), 429 when an unknown id was not tombstoned. Not refused while
+    // the index loads: an attempt may be cancelled at any time
     server.resource["^/traverse/cancel$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                         shared_ptr<HttpServer::Request> request) {
         const size_t request_id = num_requests++;
@@ -909,7 +962,7 @@ int run_server(Config *config) {
             if (!json.isObject())
                 throw InvalidRequest("request: expected an object");
             for (const std::string &name : json.getMemberNames()) {
-                if (name != "attempt_id" && name != "wait_ms")
+                if (name != "attempt_id" && name != "wait_ms" && name != "not_after_ms")
                     throw InvalidRequest("request: unknown field '" + name + "'");
             }
             if (!json["attempt_id"].isString() || !valid_attempt_id(json["attempt_id"].asString())) {
@@ -923,8 +976,11 @@ int run_server(Config *config) {
                     throw InvalidRequest("request.wait_ms: expected an integer in [0, 10000]");
                 wait_ms = w.asUInt64();
             }
+            // the not_after_ms of the request being cancelled (the same rule as /traverse's): a
+            // tombstone of an unknown id is held until it has passed + the skew allowance
+            const std::optional<uint64_t> not_after_ms = read_not_after_ms(json, "request");
             const std::string id = json["attempt_id"].asString();
-            auto [status, body] = attempts.cancel(id, wait_ms);
+            auto [status, body] = attempts.cancel(id, wait_ms, not_after_ms);
             logger->info("[Server] Attempt {}: cancel requested (request {}): {} {}", id,
                          request_id, status, body.get("state", "").asString());
             if (status != 200)
@@ -992,10 +1048,16 @@ int run_server(Config *config) {
             "observation, not a bound. A chunked read returns exactly what one read would (the "
             "same rows, caches and counters) unless the deadline stops it, and a stopped read "
             "censors the walk at the read (the unchunked walk ran it to its end, past the "
-            "deadline, before its next check). Not chunked: /resolve, the mapping of a seed's "
-            "k-mers, a head's processing (checked every work_check_interval units), a seed's "
-            "finalisation and summary, the response's building between the attempt's delivery "
-            "checks, and the transport; chunk_target_ms 0: one piece per read",
+            "deadline, before its next check). The text of each seed's result and of the "
+            "response is written under the attempt's delivery check every 64 KiB, a larger "
+            "piece copied in pieces up to the next check; the preparation of one token (one "
+            "JSON value, e.g. a graphlet string of many MB, is escaped whole before it is "
+            "copied) is not interrupted, and the longest time between two such checks is part "
+            "of observed_max_uninterruptible_ms. Not chunked: /resolve, the mapping of a "
+            "seed's k-mers, a head's processing (checked every work_check_interval units), a "
+            "seed's finalisation and summary, the building of a seed's JSON tree between the "
+            "attempt's delivery checks (every 4096 objects), and the transport; "
+            "chunk_target_ms 0: one piece per read",
             pacer.far_factor, pacer.far_factor, pacer.first_rows, pacer.rest_factor);
         return d;
     };
@@ -1048,11 +1110,15 @@ int run_server(Config *config) {
         // the row-diff path cache of the reads (feature level 4, the efficiency pass)
         Json::Value decode_cache;
         decode_cache["path_cache_mb"] = static_cast<Json::UInt64>(config->traverse_path_cache_mb);
-        decode_cache["rule"] = "on a row-diff annotation the rows a /traverse request's reads "
-            "reconstruct (the requested rows, the rows on their row-diff paths and the anchors "
-            "read) are kept in a cache of at most path_cache_mb MiB, so that a later read's "
+        decode_cache["rule"] = "on a row-diff annotation rows a /traverse request's reads "
+            "reconstruct are kept in a cache of at most path_cache_mb MiB, so that a later read's "
             "row-diff path stops at a cached row instead of decoding to its anchor again (in two "
-            "generations: the older is dropped when the current one fills half the bound). What a "
+            "generations: the older is dropped when the current one fills half the bound): the "
+            "rows asked for, the 8 rows after each on its path, every row whose distance to its "
+            "anchor is a multiple of 16 (anchors included) and every row whose copy holds less "
+            "than 4096 bytes — not every row of every path, which copied each wide row of a long "
+            "path and made first reads slower than without the cache (tuple rows are kept flat: "
+            "columns, ends, coordinates). What a "
             "read returns, the work units charged (each row with its whole row-diff path) and "
             "the memory admissions (each row by the demand of its whole path) do not depend on "
             "it; the decode time and the physical counters in timing do. Without a memory budget "

@@ -4061,53 +4061,65 @@ struct Fan {
     }
 };
 
-// reads made slow: |us| per row, busy-waited (sleeping overshoots)
-std::function<void(size_t)> slow_rows(double us) {
-    return [us](size_t rows) {
-        const auto until = std::chrono::steady_clock::now()
-                         + std::chrono::nanoseconds(static_cast<int64_t>(rows * us * 1000));
-        while (std::chrono::steady_clock::now() < until) {}
-    };
+// R9 (the verification of the efficiency pass: these tests failed under load, 5 of ~400
+// runs, on wall-clock bounds and on paced_calls 168 against at most 167): they run on a VIRTUAL
+// clock (DecodePacer::test_clock_ms) that only the slow reads advance, by |us| per row (and the
+// shared cost of a call), so that every deadline, every chunk the pacer sizes and every stop is
+// the same on a loaded machine as on a quiet one, and the bounds below are exact: what a walk
+// does between reads takes no virtual time
+struct VirtualClock {
+    std::shared_ptr<double> ms = std::make_shared<double>(0);
+    std::function<double()> fn() const {
+        auto m = ms;
+        return [m]() { return *m; };
+    }
+    double now() const { return *ms; }
+};
+
+// reads made slow on |clock|: |us| per row
+std::function<void(size_t)> slow_rows(const VirtualClock &clock, double us) {
+    auto ms = clock.ms;
+    return [ms, us](size_t rows) { *ms += rows * us / 1000; };
 }
 
-// an attempt that stops (|kind|) once |at_ms| passed on its clock, read where a real one is:
-// at every poll here, and in the paced reads' poll_now; its walk-until (ms_left) is |at_ms|,
-// or |until_ms| when given (a cancel is not a deadline: a real one comes before the walk-until)
+// an attempt that stops (|kind|) once |at_ms| passed on |clock|, read where a real one is: at
+// every poll here, and in the paced reads' poll_now; its walk-until (ms_left) is |at_ms|, or
+// |until_ms| when given (a cancel is not a deadline: a real one comes before the walk-until)
 struct StopAt {
     double at_ms;
     ExternalStop kind;
     double until_ms;
-    Timer timer;
+    VirtualClock clock;
+    double start;
     bool tripped = false;
     AttemptMeter meter;
     AttemptControl control;
-    StopAt(double at, ExternalStop kind, double until = -1)
-          : at_ms(at), kind(kind), until_ms(until < 0 ? at : until) {
+    StopAt(const VirtualClock &clock, double at, ExternalStop kind, double until = -1)
+          : at_ms(at), kind(kind), until_ms(until < 0 ? at : until), clock(clock),
+            start(clock.now()) {
         auto poll = [this]() {
-            if (timer.elapsed() * 1000 >= at_ms)
+            if (this->clock.now() - start >= at_ms)
                 tripped = true;
             return tripped ? this->kind : ExternalStop::NONE;
         };
         control.poll = poll;
         control.poll_now = poll;
-        control.ms_left = [this]() { return until_ms - timer.elapsed() * 1000; };
-        control.elapsed_ms = [this]() { return timer.elapsed() * 1000; };
+        control.ms_left = [this]() { return until_ms - (this->clock.now() - start); };
+        control.elapsed_ms = [this]() { return this->clock.now() - start; };
         control.bound_ms = until_ms;
         control.meter = &meter;
     }
 };
 
 // reads whose rows share work, as a row-diff annotation's rows share the decoding of their
-// row-diff paths: every call costs |call_us| beside |row_us| per row, so that splitting a read
-// costs |call_us| per chunk; |calls| counts the calls
-std::function<void(size_t)> shared_cost(double call_us, double row_us,
+// row-diff paths: every call costs |call_us| beside |row_us| per row on |clock|, so that
+// splitting a read costs |call_us| per chunk; |calls| counts the calls
+std::function<void(size_t)> shared_cost(const VirtualClock &clock, double call_us, double row_us,
                                         std::shared_ptr<size_t> calls) {
+    auto ms = clock.ms;
     return [=](size_t rows) {
         ++*calls;
-        const auto until = std::chrono::steady_clock::now()
-                         + std::chrono::nanoseconds(static_cast<int64_t>((call_us + rows * row_us)
-                                                                         * 1000));
-        while (std::chrono::steady_clock::now() < until) {}
+        *ms += (call_us + rows * row_us) / 1000;
     };
 }
 
@@ -4128,18 +4140,22 @@ struct Timed {
     double max_read_ms = 0;
 };
 
+// a walk of |fan| on a virtual clock (|control|'s, when given), its reads |us_per_row| each
 Timed run_fan(const Fan &fan, const Strategy &st, double target_ms, double us_per_row,
-              const AttemptControl *control = nullptr, std::vector<std::string> labels = {}) {
+              StopAt *stop = nullptr, std::vector<std::string> labels = {}) {
+    VirtualClock clock = stop ? stop->clock : VirtualClock();
     LabelOracle oracle(*fan.anno);
     oracle.pacer().target_ms = target_ms;
-    oracle.test_read_hook = slow_rows(us_per_row);
+    oracle.pacer().test_clock_ms = clock.fn();
+    oracle.test_read_hook = slow_rows(clock, us_per_row);
     Seed seed;
     seed.sequence = fan.seed;
     seed.labels = std::move(labels);
     Timed t;
-    Timer timer;
-    t.result = traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", nullptr, control);
-    t.ms = timer.elapsed() * 1000;
+    const double start = clock.now();
+    t.result = traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", nullptr,
+                             stop ? &stop->control : nullptr);
+    t.ms = clock.now() - start;
     t.max_read_ms = oracle.pacer().max_read_ms;
     return t;
 }
@@ -4161,9 +4177,13 @@ TEST(WalkerDeadlineChunks, TimeBudgetHoldsWithinAChunk) {
     // the test bites: the whole read overran the budget by far
     EXPECT_GE(whole.ms, 100 + 150) << "the unpaced walk did not overrun";
     EXPECT_GE(whole.max_read_ms, 150);
-    // budget + one chunk + one row + what the walk does between checks
-    EXPECT_LE(paced.ms, 100 + 10 + 0.1 + 60) << "the paced walk overran";
-    EXPECT_LE(paced.max_read_ms, 10 + 10);
+    // budget + one chunk + one row (the walk between reads takes no virtual time)
+    EXPECT_LE(paced.ms, 100 + 10 + 0.1 + 1e-6) << "the paced walk overran";
+    EXPECT_LE(paced.max_read_ms, 10 + 0.1 + 1e-6);
+    // the deadline record states the stop and how late it came
+    EXPECT_EQ("time_budget", paced.result.deadline.stopped_by);
+    ASSERT_TRUE(paced.result.deadline.after_deadline_ms);
+    EXPECT_LE(*paced.result.deadline.after_deadline_ms, 10 + 0.1 + 1e-6);
     // the same censoring point
     const ArmResult &a = whole.result.arms[kRight];
     const ArmResult &b = paced.result.arms[kRight];
@@ -4209,14 +4229,15 @@ TEST(WalkerDeadlineChunks, AttemptStopsReachLongReads) {
     Strategy st = fan_strategy(1);    // a 1 ms seed budget does not stop the validation
     st.max_extension_bp = 10;
     for (double target : { 0.0, 10.0 }) {
+        VirtualClock clock;
         LabelOracle oracle(*anno);
         oracle.pacer().target_ms = target;
-        oracle.test_read_hook = slow_rows(100);
-        StopAt stop(40, ExternalStop::ATTEMPT_DEADLINE);
+        oracle.pacer().test_clock_ms = clock.fn();
+        oracle.test_read_hook = slow_rows(clock, 100);
+        StopAt stop(clock, 40, ExternalStop::ATTEMPT_DEADLINE);
         Seed seed;
         seed.sequence = record.substr(0, 2000);
         seed.labels = { "long" };
-        Timer timer;
         try {
             traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", nullptr,
                           &stop.control);
@@ -4224,13 +4245,14 @@ TEST(WalkerDeadlineChunks, AttemptStopsReachLongReads) {
         } catch (const SeedBudgetError &e) {
             EXPECT_EQ(ResourceStop::ATTEMPT_DEADLINE, e.stop().resource);
         }
-        const double ms = timer.elapsed() * 1000;
+        const double ms = clock.now();
         if (target > 0) {
-            EXPECT_LE(ms, 40 + 10 + 30);
+            // the stop, one chunk and one row
+            EXPECT_LE(ms, 40 + 10 + 0.1 + 1e-6);
             // the rows decoded before the stop are the seed's work
             EXPECT_GT(stop.meter.work_seed, 8u * 64);
         } else {
-            EXPECT_GE(ms, 150);     // the whole validation read ran first
+            EXPECT_GE(ms, 199 - 1e-6);     // the whole validation read ran first
         }
     }
     // without an attempt, a seed budget of 1 ms still validates the seed and delivers the
@@ -4248,19 +4270,21 @@ TEST(WalkerDeadlineChunks, AttemptStopsReachLongReads) {
     // a cancel inside the fan's lookahead read when the walk-until is near: the read is split,
     // and the walk stops within a chunk, partial
     Fan fan;
-    StopAt cancel(60, ExternalStop::CANCELLED);
-    const Timed t = run_fan(fan, fan_strategy(600'000), 10, 100, &cancel.control);
+    StopAt cancel(VirtualClock(), 60, ExternalStop::CANCELLED);
+    const Timed t = run_fan(fan, fan_strategy(600'000), 10, 100, &cancel);
     ASSERT_TRUE(t.result.resource_stop);
     EXPECT_EQ(ResourceStop::CANCELLED, t.result.resource_stop->resource);
-    EXPECT_LE(t.ms, 60 + 10 + 60);
+    EXPECT_LE(t.ms, 60 + 10 + 0.1 + 1e-6);
     EXPECT_LT(t.result.arms[kRight].complete_to_bp, 150u);
+    EXPECT_EQ("cancelled", t.result.deadline.stopped_by);
     // with the walk-until far away the read is one piece (no deadline can fall into it), as
     // before pass 5: the cancel is seen at the checkpoint after it (stated in spec §6.8)
-    StopAt far_cancel(60, ExternalStop::CANCELLED, 600'000);
-    const Timed f = run_fan(fan, fan_strategy(600'000), 10, 100, &far_cancel.control);
+    StopAt far_cancel(VirtualClock(), 60, ExternalStop::CANCELLED, 600'000);
+    const Timed f = run_fan(fan, fan_strategy(600'000), 10, 100, &far_cancel);
     ASSERT_TRUE(f.result.resource_stop);
     EXPECT_EQ(ResourceStop::CANCELLED, f.result.resource_stop->resource);
     EXPECT_GE(f.max_read_ms, 300);      // the lookahead's 4,096 rows at 100 us, whole
+    EXPECT_EQ("read", std::string(f.result.deadline.longest.kind));
 }
 
 // Review of pass 5, F1: far from its deadline a read is one piece, so a paced walk the deadline
@@ -4275,13 +4299,14 @@ TEST(WalkerDeadlineChunks, FarDeadlineReadsAreOnePiece) {
     Seed seed;
     seed.sequence = fan.seed;
     auto run = [&](double target, size_t *calls, double *ms, double *max_read) {
+        VirtualClock clock;
         LabelOracle oracle(*fan.anno);
         oracle.pacer().target_ms = target;
+        oracle.pacer().test_clock_ms = clock.fn();
         auto counted = std::make_shared<size_t>(0);
-        oracle.test_read_hook = shared_cost(2000, 1, counted);
-        Timer timer;
+        oracle.test_read_hook = shared_cost(clock, 2000, 1, counted);
         SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
-        *ms = timer.elapsed() * 1000;
+        *ms = clock.now();
         *calls = *counted;
         *max_read = oracle.pacer().max_read_ms;
         return serialize(r);
@@ -4294,8 +4319,8 @@ TEST(WalkerDeadlineChunks, FarDeadlineReadsAreOnePiece) {
     // at most the derivation's first read is probed (its budget is finite and nothing is
     // measured yet); every other read is one piece
     EXPECT_LE(paced_calls, whole_calls + 1);
-    EXPECT_LE(paced_ms, whole_ms * 1.2 + 30);
-    EXPECT_NEAR(whole_max, paced_max, 0.5 * whole_max + 5);
+    EXPECT_LE(paced_ms, whole_ms + 2 + 0.1);
+    EXPECT_NEAR(whole_max, paced_max, 1e-9);
 }
 
 // Review of pass 5, F2: a split read starts with at most first_rows rows, whatever the rows of
@@ -4324,23 +4349,25 @@ TEST(WalkerDeadlineChunks, SplitReadsStartSmall) {
     }
     const Strategy st = fan_strategy(100);
     for (double target : { 0.0, 10.0 }) {
+        VirtualClock clock;
         LabelOracle oracle(*fan.anno);
         oracle.pacer().target_ms = target;
+        oracle.pacer().test_clock_ms = clock.fn();
         auto read = std::make_shared<uint64_t>(0);
-        oracle.test_read_hook = [read, cheap](size_t rows) {
-            const uint64_t fast = *read < cheap ? std::min<uint64_t>(rows, cheap - *read) : 0;
+        auto fast = slow_rows(clock, 10), slow = slow_rows(clock, 100);
+        oracle.test_read_hook = [read, cheap, fast, slow](size_t rows) {
+            const uint64_t cheap_rows = *read < cheap ? std::min<uint64_t>(rows, cheap - *read) : 0;
             *read += rows;
-            slow_rows(10)(fast);
-            slow_rows(100)(rows - fast);
+            fast(cheap_rows);
+            slow(rows - cheap_rows);
         };
-        Timer timer;
         const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
-        const double ms = timer.elapsed() * 1000;
+        const double ms = clock.now();
         ASSERT_TRUE(r.resource_stop);
         EXPECT_EQ(ResourceStop::TIME, r.resource_stop->resource);
         if (target > 0) {
-            EXPECT_LE(oracle.pacer().max_read_ms, 10 + 10);
-            EXPECT_LE(ms, 100 + 10 + 0.1 + 60);
+            EXPECT_LE(oracle.pacer().max_read_ms, 10 + 0.1 + 1e-6);
+            EXPECT_LE(ms, 100 + 10 + 0.1 + 1e-6);
         } else {
             EXPECT_GE(oracle.pacer().max_read_ms, 150);    // the test bites: 4,096 rows whole
         }
@@ -4354,12 +4381,13 @@ TEST(WalkerDeadlineChunks, DerivationWindowIsPaced) {
     Fan fan;
     const Strategy st = fan_strategy(30);
     for (double target : { 0.0, 10.0 }) {
+        VirtualClock clock;
         LabelOracle oracle(*fan.anno);
         oracle.pacer().target_ms = target;
-        oracle.test_read_hook = slow_rows(2000);
+        oracle.pacer().test_clock_ms = clock.fn();
+        oracle.test_read_hook = slow_rows(clock, 2000);
         Seed seed;
         seed.sequence = fan.seed;
-        Timer timer;
         try {
             traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
             ADD_FAILURE() << "the derivation was not stopped";
@@ -4369,11 +4397,12 @@ TEST(WalkerDeadlineChunks, DerivationWindowIsPaced) {
                 EXPECT_NE(std::string::npos, std::string(e.what()).find("after 0 of "))
                     << e.what();
         }
-        const double ms = timer.elapsed() * 1000;
+        const double ms = clock.now();
         if (target > 0) {
-            EXPECT_LE(ms, 30 + 10 + 2 + 30);
+            // the budget, one chunk and one row
+            EXPECT_LE(ms, 30 + 10 + 2 + 1e-6);
         } else {
-            EXPECT_GE(ms, 55);      // 30 rows (the seed's k-mers) at 2 ms, read whole
+            EXPECT_GE(ms, 60 - 1e-6);      // 30 rows (the seed's k-mers) at 2 ms, read whole
         }
     }
 }

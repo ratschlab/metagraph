@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <optional>
+#include <tuple>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -77,8 +78,11 @@ constexpr const char *kTraverseAlgorithmVersion = "traverse-0.2";
 // chunked deadlines, compression_level and the delivery reserve; 4 (the efficiency pass): the
 // server's maxima of the budgets (the probe's max_memory_mb / max_work_units, clamped like the
 // time cap), the row-diff path cache (the probe's decode_cache) and the delivery reserve's
-// calibrated starting estimates (delivery_reserve.calibration)
-constexpr int kTraverseFeatureLevel = 4;
+// calibrated starting estimates (delivery_reserve.calibration); 5 (the review of 5801aea1): a
+// cancel's not_after_ms with suppressed_until_ms / covers_admission on every tombstone answer,
+// expect_server_instance (409 instance_mismatch), validated retention settings, the loader
+// inventory behind per-graph identity, and the seed phase and deadline record in timing
+constexpr int kTraverseFeatureLevel = 5;
 
 /**
  * What identifies the index a response was computed on (DESIGN-traverse-graphlet.md
@@ -103,32 +107,79 @@ bool valid_index_name(const std::string &name);
 // index_meta_fp of the index behind |oracle| (cost: one pass over the column names)
 std::string index_meta_fingerprint(const graph::traversal::LabelOracle &oracle);
 /**
- * The files an index of |graph| and |annotation| is loaded from: the two, and the sidecars the
- * loader reads beside them when they exist — the row-diff anchors and fork successors
- * (<graph>.anchors, <graph>.rd_succ), the succinct graph's dummy-edge mask (<graph without
- * .dbg>.edgemask), the coordinates of a column annotation (<annotation>.coords) and the
- * sequence headers of a coordinate annotation (<annotation without .<type>.annodbg>.seqs) —
- * as scripts/traversal/index_manifest.py collects them.
+ * The loader dependency inventory of an index listed as |graph| and |annotation| (review of
+ * pass 5, findings 2 and 3): every file the server's loaders open for the pair, its path
+ * derived from the LISTED spelling exactly as the loaders derive it (a sidecar next to a
+ * symlink, not next to its target), in loading order —
+ *   graph               the graph file (required)
+ *   graph_mask          <graph without .dbg>.edgemask, when it opens (DBGSuccinct::load)
+ *   graph_bloom         <graph without .dbg>.bloom, when it exists and the mask was read
+ *   annotation          the annotation file (required)
+ *   row_diff_anchors    <graph>.anchors and
+ *   row_diff_fork_succ  <graph>.rd_succ, for a .row_diff.annodbg (required: build_annotated_dbg)
+ *   coord_to_header     <annotation without .<type>.annodbg>.seqs, for a coordinate
+ *                       annotation when it exists and |coord_mapping| (not --no-coord-mapping)
+ * A required file is listed whether it exists or not (the loader fails without it), an
+ * optional one only when the loader would read it. Deliberately not listed: what the server
+ * does not open — a column annotation's .coords (merge_load reads the columns only), the graph's
+ * .weights, any leftover <graph>.anchors beside another annotation type (theirs are inside the
+ * annotation file) — and the header index of the coordinate mapping, which is built in memory
+ * from the .seqs. scripts/traversal/index_manifest.py mirrors this list (load_inventory; an
+ * integration test compares the two on every sidecar kind through `traverse --index-inventory`).
  */
+struct IndexFile {
+    std::string path;
+    const char *role;
+    bool required;
+};
+std::vector<IndexFile> index_load_inventory(const std::string &graph,
+                                            const std::string &annotation,
+                                            bool coord_mapping = true);
+// the annotation extensions the loader knows (parse_annotation_type's, in its order) and what
+// it reads beside each: the row-diff anchors beside the graph, the sequence headers
+struct IndexAnnotationKind {
+    std::string extension;
+    bool row_diff_anchors;
+    bool coordinates;
+};
+const std::vector<IndexAnnotationKind>& index_annotation_kinds();
+// the paths of index_load_inventory (what a manifest is checked against)
 std::vector<std::string> index_bundle_files(const std::string &graph,
-                                            const std::string &annotation);
+                                            const std::string &annotation,
+                                            bool coord_mapping = true);
+// the optional files the inventory derives for the pair — <graph without .dbg>.edgemask and
+// .bloom, a coordinate annotation's .seqs — that index_load_inventory leaves out (missing, the
+// mask not read, |coord_mapping| false): a manifest must not list them (by base name)
+std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
+                                                       const std::string &annotation,
+                                                       bool coord_mapping = true);
+// `traverse --index-inventory`: {graph, annotation, coord_mapping, files: [{path, role,
+// required, exists}], annotation_kinds: [{extension, row_diff_anchors, coordinates}]}
+Json::Value index_inventory_json(const std::string &graph, const std::string &annotation,
+                                 bool coord_mapping = true);
 /**
  * Read an index manifest, validate it and return its fingerprint. The manifest is a JSON
  * object with `files: [{path, size, sha256}, ...]` (paths relative to the manifest,
  * '/'-separated, unique; sha256 64 lowercase hex); other keys (builder, inputs) are
  * metadata and not part of the identity. The fingerprint is the lowercase hex sha256 of
  * the lines "<path>\t<size>\t<sha256>\n" in ascending byte order of path; an `index_fp`
- * the manifest states must equal it. Every file of |loaded| (index_bundle_files) that exists
- * on disk must be listed (by base name) with its size, and the manifest must list no graph
- * (*dbg) or annotation (*.annodbg) file other than those of |loaded|: a manifest of another
- * bundle, or of a directory holding several, must not lend its identity. Throws
+ * the manifest states must equal it. Its entries' base names must be distinct (loaded files
+ * are matched by base name). Every file of |loaded| (index_bundle_files: the loader
+ * dependency inventory) that exists on disk must be listed (by base name) with its size —
+ * sizes, not digests: the server does not re-hash the bundle, so a replacement of one file by
+ * another of the same size is not detected (index_manifest.py --verify re-hashes) — no file
+ * of |not_loaded| (index_unloaded_optional_files) may be listed, and the manifest must list
+ * no graph (*dbg) or annotation (*.annodbg) file other than those of |loaded|: a manifest of
+ * another bundle, or of a directory holding several, must not lend its identity, and
+ * index_fp identifies the loaded files. Throws
  * std::runtime_error naming the problem. |stated_name|, when given, receives the manifest's
  * own `index_ns` (metadata; "" when it states none): the server's name for the index comes
  * from its configuration, and a different one in the manifest is only logged.
  */
 std::string index_manifest_fingerprint(const std::string &manifest_path,
                                        const std::vector<std::string> &loaded,
-                                       std::string *stated_name = nullptr);
+                                       std::string *stated_name = nullptr,
+                                       const std::vector<std::string> &not_loaded = {});
 // lowercase hex SHA-256 (FIPS 180-4) of |data|
 std::string sha256_hex(std::string_view data);
 // the identity of the index |config| names (--index-name, --index-manifest against the
@@ -288,6 +339,9 @@ struct TraverseLimits {
     // Not a cap: the bound of the request's row-diff path cache (LabelOracle::path_cache,
     // Config::traverse_path_cache_mb); 0: off, every read decodes its rows' whole paths
     uint64_t path_cache_bytes = 0;
+    // Tests: the cache's retention rule (RowDiffCache::keeps: checkpoint, successors,
+    // narrow_bytes) instead of its defaults; what it keeps never changes a response
+    std::optional<std::tuple<uint32_t, uint32_t, uint64_t>> path_cache_retention;
 };
 
 // The results of a /traverse response written as text, one per seed, as each was built

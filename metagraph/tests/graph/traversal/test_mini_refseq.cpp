@@ -1,9 +1,12 @@
 #include "gtest/gtest.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
+#include <thread>
 
 #include "tests/graph/traversal/test_trie_oracle.hpp"
 #include "tests/graph/traversal/test_trie_checks.hpp"
@@ -212,6 +215,183 @@ TEST_F(MiniRefSeq, DiscoverBlaNDMCarriers) {
     ASSERT_NE(profile.labels.end(), it);
     EXPECT_EQ(783u, it->kmers_supported);
     EXPECT_EQ("x783", encode_runs(it->runs, profile.num_kmers));
+}
+
+// R6 (review of pass 5) and finding 7 of the review of its fixes: a /resolve decodes the
+// present rows in batches of at most ResolveOptions::batch_rows rows sized to about
+// batch_bytes (the first kResolveFirstBatchRows, each at most twice the one before), and holds
+// one batch at a time — a discovery accumulates its labels' support while it reads (no profile
+// pass decoding the rows again) and keeps a repeated k-mer's row for its later occurrences
+// within kept_bytes, an explicit profile primes its query with each distinct row once. The
+// profile is the same however the rows are batched or kept, and a discovery's profiles are
+// exactly those of the same labels given explicitly: column and header labels, presence and
+// trace, on the query and on a query repeating most of it (its k-mers occurring twice)
+TEST_F(MiniRefSeq, ResolveDecodesEachRowOnceInBoundedBatches) {
+    auto text = [](const SupportProfile &p) {
+        std::ostringstream os;
+        for (const auto &l : p.labels) {
+            os << l.label.name << ' ' << l.kmers_supported << ' ' << encode_runs(l.runs, p.num_kmers);
+            for (uint64_t b : l.trace_breaks) {
+                os << ' ' << b;
+            }
+            os << '\n';
+        }
+        return os.str();
+    };
+    const std::string repeated = query_ + query_.substr(0, 2 * query_.size() / 3);
+    size_t compared = 0;
+    for (const std::string &query : { query_, repeated }) {
+        const std::vector<node_index> keys = oracle_->keys_of_sequence(query);
+        std::vector<node_index> present_keys;
+        std::copy_if(keys.begin(), keys.end(), std::back_inserter(present_keys),
+                     [](node_index key) { return key != npos; });
+        const uint64_t present = present_keys.size();
+        std::sort(present_keys.begin(), present_keys.end());
+        const uint64_t distinct = std::unique(present_keys.begin(), present_keys.end())
+                                - present_keys.begin();
+        ASSERT_GT(distinct, 2 * kResolveFirstBatchRows);
+        if (&query == &repeated) {
+            ASSERT_GT(present, distinct + 2 * kResolveFirstBatchRows);
+        }
+        for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
+            for (Support support : { Support::KMER, Support::TRACE }) {
+                ResolveOptions options;
+                options.discover = true;
+                options.discover_kind = kind;
+                options.support = support;
+                options.discover_max_labels = 50;
+                LabelOracle reference_oracle(*anno_graph_);
+                const SupportProfile reference = resolve_support(reference_oracle, query, options);
+                ASSERT_FALSE(reference.labels.empty());
+                // the same labels given explicitly (their profile pass, LabelQuery's hits)
+                ResolveOptions explicit_options;
+                explicit_options.support = support;
+                for (const auto &l : reference.labels) {
+                    explicit_options.labels.push_back(l.label.name);
+                }
+                {
+                    LabelOracle oracle(*anno_graph_);
+                    EXPECT_EQ(text(reference), text(resolve_support(oracle, query, explicit_options)))
+                        << int(kind) << ' ' << int(support);
+                }
+                for (size_t batch : { size_t(1), size_t(7), size_t(100), kResolveBatchRows }) {
+                    for (uint64_t bytes : { uint64_t(1), uint64_t(20000), kResolveBatchBytes }) {
+                        for (uint64_t kept : { uint64_t(0), uint64_t(30000), kResolveKeptBytes }) {
+                            for (ResolveOptions *o : { &options, &explicit_options }) {
+                                if (o == &explicit_options && kept != kResolveKeptBytes)
+                                    continue;   // an explicit profile keeps no rows
+                                o->batch_rows = batch;
+                                o->batch_bytes = bytes;
+                                o->kept_bytes = kept;
+                                LabelOracle oracle(*anno_graph_);
+                                std::vector<size_t> reads;
+                                oracle.test_read_hook = [&](size_t rows) { reads.push_back(rows); };
+                                EXPECT_EQ(text(reference), text(resolve_support(oracle, query, *o)))
+                                    << batch << ' ' << bytes << ' ' << kept;
+                                const uint64_t fetched = oracle.counters().rows_fetched
+                                                       + oracle.counters().tuple_rows_fetched;
+                                const bool direct = oracle.counters().direct_reads > 0;
+                                compared++;
+                                if (direct)
+                                    continue;
+                                // no read beyond batch_rows rows, the first at most
+                                // kResolveFirstBatchRows, each at most twice the one before, and
+                                // with a byte target below one row's bytes one row a read after
+                                // the first
+                                ASSERT_FALSE(reads.empty());
+                                EXPECT_EQ(std::min(batch, kResolveFirstBatchRows), reads[0]);
+                                for (size_t i = 0; i < reads.size(); ++i) {
+                                    EXPECT_LE(reads[i], batch) << i;
+                                    if (i > 0) {
+                                        EXPECT_LE(reads[i], 2 * reads[i - 1]) << i;
+                                    }
+                                    if (bytes == 1 && i > 0) {
+                                        EXPECT_EQ(1u, reads[i]) << i;
+                                    }
+                                }
+                                // every distinct row once when the repeated ones can be kept
+                                // (an explicit profile always), at most once per k-mer else
+                                if (o == &explicit_options || kept == kResolveKeptBytes) {
+                                    EXPECT_EQ(distinct, fetched) << batch << ' ' << bytes;
+                                } else {
+                                    EXPECT_LE(fetched, present) << batch << ' ' << bytes;
+                                    EXPECT_GE(fetched, distinct) << batch << ' ' << bytes;
+                                    if (kept == 0 && batch == 1 && &query == &repeated) {
+                                        EXPECT_EQ(present, fetched);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(2u * 4 * (4 * 3 * (3 + 1)), compared);
+}
+
+// R6 (permitted-range filtering): a query of header labels looks a coordinate up among the
+// ranges of its own sequences instead of mapping it to its sequence (rank and select); its
+// hits are those of mapping every coordinate (map_coord) and keeping the requested sequences'
+// — with and without coordinates, by the default and the budget-aware reads
+TEST_F(MiniRefSeq, HeaderHitsFilterRequestedRanges) {
+    ResolveOptions options;
+    options.discover = true;
+    options.discover_kind = LabelKind::HEADER;
+    options.discover_max_labels = 12;
+    const SupportProfile discovered = resolve_support(*oracle_, query_, options);
+    ASSERT_GE(discovered.labels.size(), 6u);
+    std::vector<LabelRef> refs;
+    for (const auto &l : discovered.labels) {
+        refs.push_back(l.label);
+    }
+    const std::vector<node_index> keys = oracle_->keys_of_sequence(query_);
+    std::vector<Row> rows;
+    std::vector<node_index> present;
+    for (node_index key : keys) {
+        if (key == npos)
+            continue;
+        present.push_back(key);
+        rows.push_back(AnnotatedDBG::graph_to_anno_index(key));
+    }
+    const auto tuples = oracle_->get_row_tuples(rows);
+    for (bool with_coords : { false, true }) {
+        // the reference: every coordinate mapped, the requested sequences kept
+        std::vector<LabelQuery::NodeHits> expected(rows.size());
+        for (size_t i = 0; i < rows.size(); ++i) {
+            std::map<LabelId, std::vector<Coord>> by_label;
+            for (const auto &[c, coords] : tuples[i]) {
+                for (Coord coord : coords) {
+                    const auto [seq_id, local] = oracle_->map_coord(c, coord);
+                    for (LabelId l = 0; l < refs.size(); ++l) {
+                        if (refs[l].column == c && refs[l].seq_id == seq_id)
+                            by_label[l].push_back(local);
+                    }
+                }
+            }
+            for (auto &[l, locals] : by_label) {
+                std::sort(locals.begin(), locals.end());
+                LabelQuery::Hit hit{ l, {} };
+                if (with_coords)
+                    hit.coords.assign(locals.begin(), locals.end());
+                expected[i].push_back(hit);
+            }
+        }
+        LabelQuery query(*oracle_, refs, with_coords);
+        EXPECT_EQ(expected, query.fetch(present)) << with_coords;
+        if (oracle_->decode_charged()) {
+            LabelQuery budgeted(*oracle_, refs, with_coords);
+            annot::matrix::DecodeBudget budget;
+            std::vector<LabelQuery::NodeHits> out;
+            std::vector<KeyCost> costs;
+            out.reserve(present.size());
+            costs.reserve(present.size());
+            size_t refused_at = 0;
+            ASSERT_TRUE(budgeted.fetch(present.data(), present.size(), budget, &out, &costs,
+                                       &refused_at, nullptr));
+            EXPECT_EQ(expected, out) << with_coords;
+        }
+    }
 }
 
 // explicit labels: a partial carrier's support runs match the presence mask that
@@ -833,6 +1013,82 @@ TEST_F(MiniRefSeq, PacedReadsAreByteIdentical) {
     EXPECT_GT(stopped, 0u);
 }
 
+// R8 (staging at feature level 3: a warm tuple walk with a 5,000 ms budget ran 6,136 ms, and
+// nothing said which piece overran): under output.timing every seed states its deadline record
+// — its longest uninterruptible piece (kind, rows, coordinates mapped to headers in it) and,
+// when a stop ended its walk, what stopped it and how long after its deadline — and nowhere
+// else. A read maps its rows' coordinates inside its piece, so its measured rate includes the
+// mapping: with slow reads the longest piece is a read of header rows, with its coordinates
+TEST_F(MiniRefSeq, DeadlineRecordNamesTheLongestPiece) {
+    const std::string seed = query_.substr(0, 120);
+    // header labels: the reads map coordinates; slow reads (2 ms a row) make them the longest
+    std::vector<std::string> headers;
+    {
+        Json::Value probe;
+        probe["sequence"] = seed;
+        probe["discover"]["kind"] = "header";
+        probe["discover"]["max_labels"] = 3;
+        const Json::Value out = mtg::cli::process_resolve_request(probe, *anno_graph_, "", 0,
+                                                                   nullptr, nullptr);
+        for (const Json::Value &l : out["labels"]) {
+            headers.push_back(l["label"].asString());
+        }
+    }
+    ASSERT_FALSE(headers.empty());
+    for (bool stopped : { false, true }) {
+        LabelOracle oracle(*anno_graph_);
+        oracle.pacer().target_ms = stopped ? 1 : 50;
+        oracle.test_read_hook = [](size_t rows) {
+            std::this_thread::sleep_for(std::chrono::microseconds(2000 * rows));
+        };
+        Strategy st;
+        st.max_extension_bp = 150;
+        st.time_budget_ms = stopped ? 50 : 600000;
+        Seed s;
+        s.sequence = seed;
+        s.labels = { headers[0] };
+        const SeedResult r = traverse_seed(oracle, s, st, LabelChangeCost::forbid());
+        const DeadlineRecord &d = r.deadline;
+        EXPECT_GT(d.longest.ms, 0);
+        EXPECT_GT(d.longest.rows, 0u) << d.longest.kind;
+        const std::string kind = d.longest.kind;
+        EXPECT_TRUE(kind == "read" || kind == "chunk" || kind == "rest") << kind;
+        EXPECT_GT(d.longest.coordinates, 0u) << kind;
+        if (stopped) {
+            ASSERT_TRUE(r.resource_stop);
+            EXPECT_EQ(ResourceStop::TIME, r.resource_stop->resource);
+            EXPECT_EQ("time_budget", d.stopped_by);
+            ASSERT_TRUE(d.after_deadline_ms);
+            EXPECT_GE(*d.after_deadline_ms, 0);
+        } else {
+            EXPECT_FALSE(r.resource_stop);
+            EXPECT_EQ("", d.stopped_by);
+            EXPECT_FALSE(d.after_deadline_ms);
+        }
+    }
+    // in the response's timing only
+    for (bool timing : { false, true }) {
+        Json::Value r;
+        r["seeds"][0]["sequence"] = seed;
+        r["seeds"][0]["labels"][0] = headers[0];
+        r["strategy"]["bounds"]["max_extension_bp"] = 50;
+        r["strategy"]["output"]["timing"] = timing;
+        mtg::cli::TraverseLimits limits;
+        limits.chunk_target_ms = 50;
+        const Json::Value out = mtg::cli::process_traverse_request(r, *anno_graph_, "", limits);
+        const std::string text = mtg::cli::json_text(out, true);
+        EXPECT_EQ(timing, text.find("\"longest_piece\"") != std::string::npos);
+        if (timing) {
+            const Json::Value &d = out["results"][0]["timing"]["deadline"];
+            for (const char *field : { "ms", "kind", "rows", "coordinates" }) {
+                EXPECT_TRUE(d["longest_piece"].isMember(field)) << field;
+            }
+            EXPECT_FALSE(d.isMember("stopped_by"));
+            EXPECT_TRUE(out["results"][0]["timing"].isMember("seed_phase_ms"));
+        }
+    }
+}
+
 // The efficiency pass, the row-diff path cache: the rows a request's reads reconstruct are
 // kept so that later reads stop their row-diff paths at them. The response is byte for byte
 // the one without the cache — constrain and annotate, derived labels, no budget, memory
@@ -881,10 +1137,24 @@ TEST_F(MiniRefSeq, PathCacheKeepsTheResponse) {
                         compared++;
                     }
                 }
+                // R10: the retention rule with no row narrow (mini refseq's rows all are), as
+                // on a wide index — checkpoints of 4 and of 16, and only the requested rows
+                for (const auto &rule : { std::make_tuple(4u, 1u, uint64_t(0)),
+                                          std::make_tuple(16u, 8u, uint64_t(0)),
+                                          std::make_tuple(1u << 30, 0u, uint64_t(0)) }) {
+                    mtg::cli::TraverseLimits on;
+                    on.path_cache_bytes = uint64_t(128) << 20;
+                    on.path_cache_retention = rule;
+                    EXPECT_EQ(reference, mtg::cli::json_text(
+                            mtg::cli::process_traverse_request(r, *anno_graph_, "", on), true))
+                        << mode << " budget " << budget << " batch " << batch << " checkpoint "
+                        << std::get<0>(rule);
+                    compared++;
+                }
             }
         }
     }
-    EXPECT_EQ(96u, compared);
+    EXPECT_EQ(168u, compared);
     EXPECT_GT(stopped, 0u);
 
     // the cache is used, kept from seed to seed without a memory budget, and a seed's own
@@ -907,6 +1177,61 @@ TEST_F(MiniRefSeq, PathCacheKeepsTheResponse) {
         }
         EXPECT_EQ(uint64_t(128) << 20, oracle.path_cache().limit());
     }
+}
+
+// R6 (review of pass 5, path reuse): a seed walked with the path cache warm — the rows an
+// earlier seed of the request kept (without a memory budget the cache is the request's) — gives
+// the result it gives cold, alone in its request, and the result without the cache: the same
+// walks, the same stops under memory and work budgets, at batch_kmers 1 and 64, in one piece
+// and in one-row chunks, with a default, a tiny and no cache
+TEST_F(MiniRefSeq, PathCacheWarmSeedIsTheColdSeed) {
+    const std::string seed = query_.substr(0, 120);
+    size_t compared = 0;
+    for (int budget = 0; budget < 4; ++budget) {
+        for (int batch : { 1, 64 }) {
+            auto request = [&](size_t copies) {
+                Json::Value r;
+                for (size_t i = 0; i < copies; ++i) {
+                    r["seeds"][Json::ArrayIndex(i)]["sequence"] = seed;
+                }
+                Json::Value &st = r["strategy"];
+                st["bounds"]["max_extension_bp"] = 150;
+                st["annotation"]["batch_kmers"] = batch;
+                st["output"]["detail"] = "full";
+                st["output"]["timing"] = false;
+                switch (budget) {
+                    case 1: st["bounds"]["max_memory_mb"] = 3; break;
+                    case 2: st["bounds"]["max_work_units"] = 20000; break;
+                    case 3: st["bounds"]["max_work_units"] = 2000000; break;
+                    default: break;
+                }
+                return r;
+            };
+            mtg::cli::TraverseLimits off;
+            Json::Value cold = mtg::cli::process_traverse_request(request(1), *anno_graph_, "",
+                                                                  off)["results"][0];
+            const std::string reference = mtg::cli::json_text(cold, true);
+            for (uint64_t bytes : { uint64_t(0), uint64_t(64) << 10, uint64_t(128) << 20 }) {
+                for (double chunk : { 0.0, 1e-9 }) {
+                    mtg::cli::TraverseLimits on;
+                    on.path_cache_bytes = bytes;
+                    on.chunk_target_ms = chunk;
+                    const Json::Value both = mtg::cli::process_traverse_request(
+                            request(2), *anno_graph_, "", on)["results"];
+                    ASSERT_EQ(2u, both.size());
+                    EXPECT_EQ(reference, mtg::cli::json_text(both[0], true));
+                    Json::Value warm = both[1];
+                    EXPECT_TRUE(warm["duplicate"].asBool());
+                    warm.removeMember("duplicate");
+                    EXPECT_EQ(reference, mtg::cli::json_text(warm, true))
+                        << "budget " << budget << " batch " << batch << " cache " << bytes
+                        << " chunk " << chunk;
+                    compared++;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(48u, compared);
 }
 
 // Review of the efficiency pass, finding 1: under a memory budget the path cache is off until

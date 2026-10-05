@@ -113,7 +113,8 @@ class IRowDiff {
     // which then gives the costs of its whole path, so that every RowCost — and what the
     // caller admits and charges by it — is the same with and without the cache; only the
     // decoding (and the charges of its transient buffers) shrinks. A cached row is copied
-    // into the call, charged as its copy; every row the call reconstructs is cached with its
+    // into the call, charged as its copy; the rows the call reconstructs that the cache's
+    // retention rule selects (RowDiffCache::keeps) are cached with their
     // aggregates within the cache's own bound, which is not this budget's (the caller's
     // allotment): also by a call that is refused afterwards (the rows are the same either way).
     // With the cache's admit_as_uncached set, the call also charges, from its trace until its
@@ -144,8 +145,9 @@ class IRowDiff {
      * pass): the rows get_rows() / get_row_tuples() return, serial. Each row-diff path
      * stops at an anchor, at a row visited before in the call (as get_rd_ids), or at a row
      * |cache| holds, whose full row then starts the reconstruction as an anchor's stored row
-     * does; every row the call reconstructs — the requested rows, the rows on their paths and
-     * the anchors read — is cached within the cache's bound. Unsupported (supports_path_cache
+     * does; of the rows the call reconstructs, those the cache's retention rule selects
+     * (RowDiffCache::keeps: the requested rows, the rows just after them, the checkpoints and
+     * the narrow rows) are cached within the cache's bound. Unsupported (supports_path_cache
      * false): std::logic_error.
      */
     virtual bool supports_path_cache() const { return false; }
@@ -512,6 +514,7 @@ void IRowDiff::call_rows_cached(const std::vector<BinaryMatrix::Row> &row_ids,
         rd_ids[j] = rows[order[j]];
     }
     std::vector<RowT> slot(num_visits);
+    cache.stored_rows_read += rd_ids.size();
     {
         auto stored = call_rd_rows(rd_ids);
         assert(stored.size() == order.size());
@@ -523,11 +526,14 @@ void IRowDiff::call_rows_cached(const std::vector<BinaryMatrix::Row> &row_ids,
         }
     }
     std::vector<uint8_t> known(num_visits, 0);   // its full row is cached or reconstructed
+    // each visit's distance to its anchor, once known (the cache's retention rule reads it)
+    std::vector<uint32_t> depth(num_visits, 0);
     for (uint32_t v = 0; v < num_visits; ++v) {
         if (cached[v]) {
             const auto *entry = cache.find(rows[v], false);
             assert(entry);
-            slot[v] = entry->row;
+            entry->row.load(&slot[v]);
+            depth[v] = entry->depth;
             known[v] = 1;
             cache.hits++;
         }
@@ -537,8 +543,9 @@ void IRowDiff::call_rows_cached(const std::vector<BinaryMatrix::Row> &row_ids,
         times[v]++;
     }
 
-    // ---- reconstruct in the requested order (as call_rows with one group), caching every
-    // full row the call learns: the anchors read and each row on a path
+    // ---- reconstruct in the requested order (as call_rows with one group), keeping in the
+    // cache the rows its retention rule selects (RowDiffCache::keeps): the requested rows, the
+    // rows just after them on their paths and the checkpoints, anchors included
     for (size_t i = 0; i < n; ++i) {
         const uint32_t *path = steps.data() + start[i];
         const uint32_t *path_end = steps.data() + start[i + 1];
@@ -552,13 +559,17 @@ void IRowDiff::call_rows_cached(const std::vector<BinaryMatrix::Row> &row_ids,
         }
         if (!known[last]) {
             // an anchor read in this call: its stored row is its full row
-            cache.insert(rows[last], result);
+            depth[last] = 0;
+            if (cache.keeps(0, path_end - 1 - path, result))
+                cache.insert(rows[last], result, 0);
             known[last] = 1;
         }
         for (const uint32_t *p = path_end - 1; p != path; ) {
             const uint32_t y = *--p;
             add_diff(slot[y], &result);
-            cache.insert(rows[y], result);
+            depth[y] = depth[p[1]] + 1;
+            if (cache.keeps(depth[y], p - path, result))
+                cache.insert(rows[y], result, depth[y]);
             known[y] = 1;
             if (--times[y]) {
                 slot[y] = result;
@@ -566,6 +577,9 @@ void IRowDiff::call_rows_cached(const std::vector<BinaryMatrix::Row> &row_ids,
                 RowT().swap(slot[y]);
             }
         }
+        // a requested row reconstructed by an earlier path of the call, which did not keep it
+        if (path_end - path == 1 && !cached[last])
+            cache.insert(rows[last], result, depth[last]);
         call_row(i, std::move(result));
     }
     assert(std::all_of(times.begin(), times.end(), [](uint32_t t) { return !t; }));

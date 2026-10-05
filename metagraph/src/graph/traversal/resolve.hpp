@@ -26,6 +26,21 @@ struct KmerInterval {
     }
 };
 
+// A /resolve decodes the present k-mers' rows in batches and holds one batch at a time
+// (review of the pass-5 fixes, finding 7: the discovery kept a prefix of the rows for the
+// profile pass, which decoded every other row again in one call — a second decode, and no
+// bound). The first batch has kResolveFirstBatchRows rows; each next one is sized from the
+// widest row of the one before to about kResolveBatchBytes (row_copy_bytes), at most twice the
+// previous batch's rows and at most kResolveBatchRows rows — so a batch is larger than
+// kResolveBatchBytes only where the rows widen within the query. A row is decoded once per
+// batch; a discovery keeps the row of a k-mer that occurs again later in the query for that
+// occurrence, at most kResolveKeptBytes of such rows (beyond that a repeated row is decoded
+// again), and an explicit profile decodes each distinct row once (its hits are kept per key)
+constexpr size_t kResolveFirstBatchRows = 64;
+constexpr size_t kResolveBatchRows = 4096;
+constexpr uint64_t kResolveBatchBytes = uint64_t(64) << 20;
+constexpr uint64_t kResolveKeptBytes = uint64_t(256) << 20;
+
 struct ResolveOptions {
     // exactly one of |labels| (explicit) or |discover| must be set
     std::vector<std::string> labels;
@@ -41,6 +56,12 @@ struct ResolveOptions {
     // exception — the server's check that the client is still connected. Not a request field.
     std::function<bool()> stop;
     std::function<void()> abandon;
+    // the batches the rows are decoded in: at most |batch_rows| rows, sized to about
+    // |batch_bytes|, and the bound of the rows a discovery keeps for repeated k-mers (tests
+    // vary them; the profile does not depend on them). Not request fields
+    size_t batch_rows = kResolveBatchRows;
+    uint64_t batch_bytes = kResolveBatchBytes;
+    uint64_t kept_bytes = kResolveKeptBytes;
 };
 
 struct LabelProfile {

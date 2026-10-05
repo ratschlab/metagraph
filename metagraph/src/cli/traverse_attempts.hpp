@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -46,11 +47,18 @@ struct AttemptIds {
     std::string budget_id;      // echoed only
     std::string locus_id;       // echoed only
     // The instant (Unix epoch, ms, on the server's clock) after which the request must not be
-    // started: a ledger that lost track of an attempt treats it as never started once its own
-    // clock passes this plus the server's stated clock skew allowance, so the server refuses
-    // it at handler start once it has passed (409, state expired) rather than run work the
-    // ledger has already released. With or without attempt_id; echoed in usage
+    // started: a ledger that lost track of an attempt treats it as one that cannot start
+    // subsequently once its own clock passes this plus the server's stated clock skew
+    // allowance (an unanswered request may already be running: the attempt's bound covers
+    // that), so the server refuses it at handler start once it has passed (409, state
+    // expired) rather than start work the ledger has already released. With or without
+    // attempt_id; echoed in usage
     std::optional<uint64_t> not_after_ms;
+    // The server_instance the request is meant for (with attempt_id only): a process with
+    // another one refuses it before anything runs (409, state instance_mismatch). Tombstones
+    // live in memory, so after a restart a delayed copy of a cancelled request would find
+    // none and run: with this field it is refused instead (review of pass 5, finding 1)
+    std::string expect_server_instance;
 };
 
 // The largest not_after_ms accepted: 2^53 - 1, the largest integer every JSON reader keeps
@@ -58,10 +66,20 @@ struct AttemptIds {
 constexpr uint64_t kMaxNotAfterMs = (uint64_t(1) << 53) - 1;
 
 // The request fields of /traverse (top level) the server reads before the request is parsed.
-// Throws InvalidRequest when an id is not a string matching the pattern, when budget_id or
-// locus_id is given without attempt_id, or when not_after_ms is not an integer in
-// [0, kMaxNotAfterMs].
+// Throws InvalidRequest when an id is not a string matching the pattern, when budget_id,
+// locus_id or expect_server_instance is given without attempt_id, or when not_after_ms is not
+// an integer in [0, kMaxNotAfterMs].
 AttemptIds attempt_ids(const Json::Value &request);
+// not_after_ms as /traverse and POST /traverse/cancel read it: absent (nullopt), or an integer
+// in [0, kMaxNotAfterMs]; throws InvalidRequest naming |where| otherwise
+std::optional<uint64_t> read_not_after_ms(const Json::Value &request, const std::string &where);
+
+// Whether a request carrying |ids| names another server_instance than |instance| (it must then
+// be refused before anything runs), and the 409 body: {error, state: "instance_mismatch",
+// expect_server_instance, server_instance, attempt_id/budget_id/locus_id as given,
+// not_after_ms when given}
+bool instance_mismatch(const AttemptIds &ids, const std::string &instance);
+Json::Value instance_mismatch_json(const AttemptIds &ids, const std::string &instance);
 
 // Whether a request carrying |ids| must be refused at handler start: its not_after_ms is
 // earlier than |now_ms| (the server's clock, Unix epoch ms; strict: no allowance is added,
@@ -82,9 +100,17 @@ struct AttemptSettings {
     // read the request's header): the content timeout of the HTTP server, after which it shuts
     // the connection, less one second for the response to leave. 0: none (the CLI)
     double hard_cap_ms = 899'000;
-    // finished attempts are kept this long, and at most this many (oldest dropped first)
+    // finished attempts are kept this long, and at most this many (oldest dropped first) —
+    // one sent with not_after_ms is held longer, until not_after_ms + clock_skew_ms (within
+    // the cap), among the tombstones —; a cancel of an unknown id tombstones it at least
+    // retention_s, at most retention_count tombstones at once. 0: nothing is kept (no
+    // tombstone: such a cancel is refused, 429; no finished attempt is held)
     uint64_t retention_s = 3600;
     size_t retention_count = 10'000;
+    // the longest a tombstone is held to cover a not_after_ms (+ clock_skew_ms) named by a
+    // cancel or by a refused copy of the request, and a finished attempt's id from its finish
+    // (s; never less than retention_s)
+    uint64_t tombstone_max_s = 86'400;
     // the client's connection is checked at most this often (ms)
     uint64_t client_check_ms = 100;
     // the clock (the bound, the client check's interval) is read at every |poll_stride|-th poll
@@ -95,9 +121,10 @@ struct AttemptSettings {
     std::function<std::chrono::steady_clock::time_point()> clock;
     // the wall clock not_after_ms is compared with (tests inject one; system_clock by default)
     std::function<std::chrono::system_clock::time_point()> wall_clock;
-    // What a ledger must add to not_after_ms before it treats an unanswered attempt as never
-    // started (stated in capabilities, not used by the server, whose check is strict): how far
-    // this server's clock may be from the ledger's (NTP keeps them closer; ms)
+    // What a ledger must add to not_after_ms before it treats an unanswered attempt as one that
+    // cannot start subsequently (stated in capabilities; the server's own not_after check is
+    // strict, and a tombstone covering a not_after_ms is held to it plus this): how far this
+    // server's clock may be from the ledger's (NTP keeps them closer; ms)
     uint64_t clock_skew_ms = 2000;
     // the HTTP server's content timeout (s), from which hard_cap_ms is derived: stated
     uint64_t content_timeout_s = 900;
@@ -108,8 +135,10 @@ struct AttemptSettings {
     // prices every delivered byte several times over). The ratios are starting estimates just
     // below the smallest measured on real responses — 33.5 (UHGG full) to 1,344 (SRA summary)
     // for the JSON details, 58.4 and more for a graphlet (pass 5) —, which a server replaces
-    // by its own measurements: before the efficiency pass 20 and 40 cut a server's first
-    // large attempt per detail early (an SRA tree at 2.0 s of 35 s, 43.6 MB of 402 MB)
+    // by its own measurements. Conservative: a server's first large attempt of a detail can
+    // still be cut early until it measured that detail (a warm SRA server cut the first tree
+    // and full attempts of a 16S beam at 3-5 s of 40 s with 20/40 and with 30/50 alike, the
+    // tree measuring 115-129; review of the efficiency pass)
     double delivery_compress_mbps = 50;
     double delivery_build_mbps = 10;
     double account_per_text_byte_json = 30;
@@ -288,6 +317,11 @@ class Attempt {
     // of its walks, LabelOracle::pacer()), stated in usage as observed_max_uninterruptible_ms
     void note_max_read_ms(double ms);
     double max_read_ms() const;
+    // The longest time between two delivery checks while a seed's text or the response was
+    // written (json_text's max_gap_ms: e.g. the preparation of one large token), which the
+    // server adds to deadline_check.observed_max_uninterruptible_ms (not to usage)
+    void note_delivery_gap_ms(double ms);
+    double max_delivery_gap_ms() const;
 
     // ---- statements
     // the response-level `usage` block, |reason| completed | cancelled | deadline | error
@@ -313,6 +347,7 @@ class Attempt {
     Clock::time_point finished_at() const;
 
   private:
+    friend class AttemptRegistry;
     Clock::time_point now() const;
     std::string iso(Clock::time_point t) const;
     double ms_since_received(Clock::time_point t) const;
@@ -359,6 +394,7 @@ class Attempt {
     size_t seeds_walked_ = 0;
     size_t seeds_abandoned_ = 0;                      // walks the client's departure cut
     double max_read_ms_ = 0;                          // note_max_read_ms
+    double max_delivery_gap_ms_ = 0;                  // note_delivery_gap_ms
     // the delivery reserve's state (the handler's thread; written under |mutex_|)
     std::string detail_;
     double configured_ratio_ = 20;                    // the configured account per text byte
@@ -383,12 +419,33 @@ class Attempt {
     std::optional<size_t> bytes_;
     Json::Value final_usage_;                         // the usage without per_seed, at finish
     bool tombstone_ = false;
+    // The hold of a tombstone, or of a finished attempt's id (the registry's, under its
+    // mutex): it is kept while EITHER clock says it is live — the steady clock until
+    // |tomb_steady_until_| (exclusive: the duration computed when it was set or extended, plus
+    // the one ms the wall clock's inclusive expiry adds; a forward step of the wall clock does
+    // not shorten it), and the wall clock while it reads at most |tomb_wall_until_ms_|
+    // (inclusive: the strict not_after check still admits a copy at not_after_ms itself, so a
+    // hold to not_after_ms + skew must include that instant; review of the pass-5 fixes,
+    // finding 2) — so a covered not_after_ms has passed on that clock whenever the hold is
+    // gone. Never shortened
+    Clock::time_point tomb_steady_until_;
+    uint64_t tomb_wall_until_ms_ = 0;
+    // the largest not_after_ms a cancel or a refused copy named for the id (none: none did)
+    std::optional<uint64_t> tomb_not_after_ms_;
+    // a finished attempt whose retention ended while its hold had not: kept among the
+    // tombstones (in the registry's |tomb_expiry_|) until the hold ends
+    bool held_ = false;
 };
 
 /**
  * The attempts of one server process: the running ones by attempt_id, and the finished ones
  * (and tombstones) for the retention period. An attempt_id is unique per server process while
- * it is running or retained: a second request with it is refused (409), never run twice.
+ * it is running or retained: a second request with it is refused (409), never run twice. A
+ * finished attempt sent with not_after_ms is retained at least until not_after_ms +
+ * clock_skew_ms (within the cap from its finish), so that a replay of the request is refused
+ * while it could still be admitted (review of the pass-5 fixes, finding 1: a ledger releases
+ * on a finished state, and a replay arriving after retention_s, or after retention_count later
+ * finishes, ran again).
  */
 class AttemptRegistry {
   public:
@@ -399,18 +456,26 @@ class AttemptRegistry {
     // are gone) from one that forgot an attempt after the retention period
     const std::string& server_instance() const { return instance_; }
 
-    // Why start() registered nothing (a 409): the id is running, retained or tombstoned
-    // (|body| the other attempt's state), or the request's not_after_ms has passed (|expired|,
-    // |body| the whole 409 body, expired_json)
+    // Why start() registered nothing (a 409): the request names another server_instance
+    // (|instance_mismatch|, |body| the whole 409 body, instance_mismatch_json), the id is
+    // running, retained or tombstoned (|body| the other attempt's state; a tombstone's with
+    // its suppression, judged against the refused request's not_after_ms), or the request's
+    // not_after_ms has passed (|expired|, |body| the whole 409 body, expired_json)
     struct StartRefusal {
         bool expired = false;
         Json::Value body;
+        bool instance_mismatch = false;
     };
-    // Registers a managed attempt, unless its id is running or retained (or tombstoned) —
-    // checked first, so that an expired refusal always means that no attempt with the id
-    // exists on this server_instance — or its not_after_ms has passed on the wall clock: then
-    // nothing is registered (an expired request is kept nowhere: any later copy of it is
-    // expired too)
+    // Registers a managed attempt, unless it names another server_instance (checked first:
+    // the ids of another process mean nothing here), its id is running or retained (or
+    // tombstoned) — checked before the not_after check, so that an expired refusal always
+    // means that no attempt with the id exists on this server_instance — or its not_after_ms
+    // has passed on the wall clock: then nothing is registered (an expired request is kept
+    // nowhere: any later copy of it is expired too). A tombstoned id's refusal extends the
+    // tombstone to the request's not_after_ms + clock_skew_ms (within the cap, never
+    // shortened), so that every later copy of it is refused while it could still be admitted;
+    // a running or finished attempt's refusal extends its hold likewise (a running one's from
+    // its finish)
     std::optional<StartRefusal> start(const std::shared_ptr<Attempt> &attempt);
     // the wall clock not_after_ms is compared with (Unix epoch ms)
     uint64_t now_ms() const;
@@ -418,11 +483,17 @@ class AttemptRegistry {
     // bound's parts with their number types (integers, ms) and rules, and the clock skew a
     // ledger adds to not_after_ms
     Json::Value capabilities_json() const;
-    // POST /traverse/cancel {attempt_id, wait_ms}: (HTTP status, body). An unknown id is
-    // tombstoned for retention_s (404, tombstone: true); when retention_count tombstones are
-    // held already it is not, and the cancel is refused (429, tombstone: false): the promise
-    // that the id will not run here is never given for less than retention_s
-    std::pair<int, Json::Value> cancel(const std::string &id, uint64_t wait_ms);
+    // POST /traverse/cancel {attempt_id, wait_ms, not_after_ms}: (HTTP status, body). An
+    // unknown id is tombstoned (404, tombstone: true) for at least retention_s and, when the
+    // cancel names the request's not_after_ms, until not_after_ms + clock_skew_ms (at most
+    // max(tombstone_max_s, retention_s) from now); every tombstone answer states
+    // suppressed_until_ms and covers_admission. A repeated cancel never shortens the
+    // tombstone, extends it to its own not_after_ms, and keeps it at least retention_s from
+    // now. When retention_count tombstones are held already, or retention_s is 0, the id is
+    // not tombstoned and the cancel is refused (429, tombstone: false, reason): nothing is
+    // promised for it
+    std::pair<int, Json::Value> cancel(const std::string &id, uint64_t wait_ms,
+                                       std::optional<uint64_t> not_after_ms = std::nullopt);
     // GET /traverse/attempt/{id}: (HTTP status, body)
     std::pair<int, Json::Value> state(const std::string &id);
     // the handler returned: the attempt is finished, and kept for the retention period
@@ -452,6 +523,23 @@ class AttemptRegistry {
     void expire_locked();
     Attempt::Clock::time_point now() const;
     Json::Value unknown_json(const std::string &id) const;
+    // extends |held|'s hold — a tombstone's, or a finished (or running) attempt's — to at
+    // least retention_s from now (|at_least_retention|: tombstones) and, given |not_after_ms|,
+    // to not_after_ms + clock_skew_ms within the cap from now: never shortened, re-keyed in
+    // |tomb_expiry_| when it is there (under |mutex_|)
+    void hold_locked(Attempt &held, std::optional<uint64_t> not_after_ms,
+                     bool at_least_retention = true);
+    // a tombstone's suppression, judged against |against| — and, with |fallback|, without it
+    // against the largest not_after_ms named for the id (a cancel's and GET's answers; never a
+    // refused request's, whose own not_after_ms alone says whether a copy of IT is covered):
+    // suppressed_until_ms, not_after_ms, covers_admission and, when that is false,
+    // covers_admission_reason (under |mutex_|)
+    void add_suppression_locked(Json::Value *j, const Attempt &tomb,
+                                std::optional<uint64_t> against, bool fallback) const;
+    // whether |a|'s hold is live now (either clock; under |mutex_|)
+    bool hold_live_locked(const Attempt &a, Attempt::Clock::time_point t, uint64_t wall) const;
+    // the cap of a tombstone's hold (ms): max(tombstone_max_s, retention_s)
+    uint64_t tombstone_cap_ms() const;
 
     AttemptSettings settings_;
     std::string instance_;
@@ -459,10 +547,16 @@ class AttemptRegistry {
     std::map<std::string, std::shared_ptr<Attempt>> attempts_;
     // finished attempts, oldest first: kept retention_s, at most retention_count of them
     std::deque<std::shared_ptr<Attempt>> retained_;
-    // tombstones, oldest first, apart from the finished attempts: each is kept the full
-    // retention_s, whatever finishes after it (review of the stage-4 backend, F6: sharing
-    // retention_count, later finishes evicted a tombstone early and the cancelled id ran)
-    std::deque<std::shared_ptr<Attempt>> tombstones_;
+    // the tombstones, and the finished attempts held past their retention, by their
+    // steady-clock expiry (and id), apart from the retained attempts: each is kept its whole
+    // hold, whatever finishes after it (review of the stage-4 backend, F6: sharing
+    // retention_count, later finishes evicted a tombstone early and the cancelled id ran); one
+    // whose steady expiry passed while its wall-clock one has not (the wall clock stepped back)
+    // is re-keyed to the time its wall clock still needs. A held finished attempt is never
+    // dropped early, so the table can exceed retention_count by them (a cancel of an unknown id
+    // is refused, 429, while it holds that many): what it holds is bounded by the attempts
+    // that finish within the cap
+    std::set<std::pair<Attempt::Clock::time_point, std::string>> tomb_expiry_;
     // microseconds, rounded up
     std::atomic<uint64_t> max_uninterruptible_us_ { 0 };
     mutable std::mutex rates_mutex_;

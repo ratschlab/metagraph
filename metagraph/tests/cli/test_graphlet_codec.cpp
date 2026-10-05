@@ -1645,34 +1645,138 @@ TEST(Graphlet, IndexIdentity) {
     }
     // other files (metadata the tool's --extra adds) are part of the identity, not refused
     EXPECT_NO_THROW(index_manifest_fingerprint(listing("m10.json", { "README" }), { graph, anno }));
-    // ... and the sidecars the loader reads beside the graph and the annotation are checked as
-    // the two are: a manifest whose sidecars are another build's does not lend its identity
+    // ... and the sidecars the loader reads beside the graph and the annotation (the loader
+    // dependency inventory) are checked as the two are: a manifest whose sidecars are another
+    // build's, or that does not cover one, does not lend its identity
     EXPECT_EQ((std::vector<std::string> { graph, anno }), index_bundle_files(graph, anno));
-    const std::string anchors = write("g.dbg.anchors", "anchors"),
-                      mask = write("g.edgemask", "mask"),
-                      coords = write("a.annodbg.coords", "coords");
+    const std::string mask = write("g.edgemask", "mask"),
+                      bloom = write("g.bloom", "bloom filter");
+    write("a.annodbg.coords", "coords");   // not loaded: never in the inventory
+    write("g.dbg.anchors", "anchors");      // a leftover beside a non-row_diff annotation
     const std::string coord_anno = write("x.row_diff_brwt_coord.annodbg", "coordinate annotation"),
                       seqs = write("x.seqs", "headers");
-    EXPECT_EQ((std::vector<std::string> { graph, anno, anchors, mask, coords }),
+    const std::string rd_anno = write("r.row_diff.annodbg", "row diff annotation");
+    const std::string anchors = (dir / "g.dbg.anchors").string(),
+                      fork_succ = (dir / "g.dbg.rd_succ").string();
+    EXPECT_EQ((std::vector<std::string> { graph, mask, bloom, anno }),
               index_bundle_files(graph, anno));
-    EXPECT_EQ((std::vector<std::string> { graph, coord_anno, anchors, mask, seqs }),
+    EXPECT_EQ((std::vector<std::string> { graph, mask, bloom, coord_anno, seqs }),
               index_bundle_files(graph, coord_anno));
-    EXPECT_THROW(index_manifest_fingerprint((dir / "m1.json").string(),
-                                            index_bundle_files(graph, anno)), std::runtime_error);
+    // --no-coord-mapping: the headers are not loaded
+    EXPECT_EQ((std::vector<std::string> { graph, mask, bloom, coord_anno }),
+              index_bundle_files(graph, coord_anno, false));
+    // row_diff (column): the anchors and fork successors beside the graph, required (listed
+    // whether they exist or not: the loader fails without them)
+    EXPECT_EQ((std::vector<std::string> { graph, mask, bloom, rd_anno, anchors, fork_succ }),
+              index_bundle_files(graph, rd_anno));
+    // the Bloom filter is read only with the mask
+    std::filesystem::remove(dir / "g.edgemask");
+    EXPECT_EQ((std::vector<std::string> { graph, anno }), index_bundle_files(graph, anno));
+    write("g.edgemask", "mask");
+    // a manifest that covers neither the mask nor the Bloom filter: refused, naming the file
+    try {
+        index_manifest_fingerprint((dir / "m1.json").string(), index_bundle_files(graph, anno));
+        ADD_FAILURE() << "a manifest without the mask was accepted";
+    } catch (const std::runtime_error &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("does not cover the file "
+                                                                + mask)) << e.what();
+    }
     Json::Value full = parse_json(slurp(dir / "m1.json"));
     for (const auto &[name, content] : std::vector<std::pair<std::string, std::string>> {
-             { "g.dbg.anchors", "anchors" }, { "g.edgemask", "mask" },
-             { "a.annodbg.coords", "coords" } }) {
+             { "g.edgemask", "mask" } }) {
         Json::Value e;
         e["path"] = name;
         e["size"] = Json::UInt64(content.size());
         e["sha256"] = sha256_hex(content);
         full["files"].append(e);
     }
-    const std::string complete = write("m11.json", compact(full));
+    const std::string no_bloom = write("m11.json", compact(full));
+    try {
+        index_manifest_fingerprint(no_bloom, index_bundle_files(graph, anno));
+        ADD_FAILURE() << "a manifest without the Bloom filter was accepted";
+    } catch (const std::runtime_error &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("does not cover the file "
+                                                                + bloom)) << e.what();
+    }
+    Json::Value bloom_entry;
+    bloom_entry["path"] = "g.bloom";
+    bloom_entry["size"] = Json::UInt64(12);
+    bloom_entry["sha256"] = sha256_hex("bloom filter");
+    full["files"].append(bloom_entry);
+    const std::string complete = write("m12.json", compact(full));
     EXPECT_NO_THROW(index_manifest_fingerprint(complete, index_bundle_files(graph, anno)));
-    write("g.dbg.anchors", "anchors of another build");
-    EXPECT_THROW(index_manifest_fingerprint(complete, index_bundle_files(graph, anno)),
+    write("g.bloom", "a Bloom filter of another build");
+    try {
+        index_manifest_fingerprint(complete, index_bundle_files(graph, anno));
+        ADD_FAILURE() << "another build's Bloom filter was accepted";
+    } catch (const std::runtime_error &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("is not listed with that size"))
+                << e.what();
+    }
+    write("g.bloom", "bloom filter");
+
+    // Review of the pass-5 fixes: a manifest written for a directory of bundles that share
+    // base names (a/x.seqs, b/x.seqs) matched every one of them, and two indexes stated one
+    // index_fp; the base names of a manifest's entries must be distinct
+    Json::Value shared = parse_json(slurp(dir / "m12.json"));
+    for (const char *path : { "a/x.seqs", "b/x.seqs" }) {
+        Json::Value e;
+        e["path"] = path;
+        e["size"] = Json::UInt64(7);
+        e["sha256"] = sha256_hex(path);
+        shared["files"].append(e);
+    }
+    try {
+        index_manifest_fingerprint(write("m13.json", compact(shared)),
+                                   index_bundle_files(graph, anno));
+        ADD_FAILURE() << "a manifest with two entries named x.seqs was accepted";
+    } catch (const std::runtime_error &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("share the base name x.seqs"))
+                << e.what();
+    }
+    // ... also when one of the two is the bundle's own file (sub/g.dbg beside g.dbg)
+    try {
+        index_manifest_fingerprint(listing("m14.json", { "sub/g.dbg" }), { graph, anno });
+        ADD_FAILURE() << "a manifest with two entries named g.dbg was accepted";
+    } catch (const std::runtime_error &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("share the base name g.dbg"))
+                << e.what();
+    }
+
+    // ... and a manifest lists exactly the optional inventory files the pair loads: one that
+    // lists a .seqs, a mask or a Bloom filter the server does not load (missing beside the
+    // listed spelling, the mask unread, --no-coord-mapping) would state the identity of an
+    // index that does load it
+    Json::Value with_seqs = parse_json(slurp(dir / "m12.json"));
+    with_seqs["files"][1]["path"] = "x.row_diff_brwt_coord.annodbg";
+    with_seqs["files"][1]["size"] = Json::UInt64(21);
+    with_seqs["files"][1]["sha256"] = sha256_hex("coordinate annotation");
+    Json::Value seqs_entry;
+    seqs_entry["path"] = "x.seqs";
+    seqs_entry["size"] = Json::UInt64(7);
+    seqs_entry["sha256"] = sha256_hex("headers");
+    with_seqs["files"].append(seqs_entry);
+    const std::string coord_manifest = write("m15.json", compact(with_seqs));
+    EXPECT_NO_THROW(index_manifest_fingerprint(coord_manifest, index_bundle_files(graph, coord_anno),
+                                               nullptr,
+                                               index_unloaded_optional_files(graph, coord_anno)));
+    EXPECT_TRUE(index_unloaded_optional_files(graph, coord_anno).empty());
+    EXPECT_EQ((std::vector<std::string> { seqs }),
+              index_unloaded_optional_files(graph, coord_anno, false));
+    try {
+        index_manifest_fingerprint(coord_manifest, index_bundle_files(graph, coord_anno, false),
+                                   nullptr, index_unloaded_optional_files(graph, coord_anno, false));
+        ADD_FAILURE() << "a manifest listing the unloaded .seqs was accepted";
+    } catch (const std::runtime_error &e) {
+        EXPECT_NE(std::string::npos, std::string(e.what()).find("which the server does not load"))
+                << e.what();
+    }
+    // the mask unread: neither it nor the Bloom filter is loaded, and listing either is refused
+    std::filesystem::remove(dir / "g.edgemask");
+    EXPECT_EQ((std::vector<std::string> { mask, bloom }),
+              index_unloaded_optional_files(graph, anno));
+    EXPECT_THROW(index_manifest_fingerprint(complete, index_bundle_files(graph, anno), nullptr,
+                                            index_unloaded_optional_files(graph, anno)),
                  std::runtime_error);
     std::filesystem::remove_all(dir);
 }

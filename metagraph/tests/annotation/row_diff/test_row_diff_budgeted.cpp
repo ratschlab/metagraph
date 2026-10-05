@@ -864,7 +864,7 @@ TEST(RowDiffPathCache, Generations) {
     EXPECT_FALSE(cache.find(0, true));       // no aggregates
     PathAggregates agg;
     agg.length = 3;
-    cache.insert(0, SetBits{ 1, 2, 3 }, &agg);
+    cache.insert(0, SetBits{ 1, 2, 3 }, 0, &agg);
     ASSERT_TRUE(cache.find(0, true));
     EXPECT_EQ(3u, cache.find(0, true)->path.length);
     SetBits wide(4 * entry / sizeof(Column));
@@ -1018,6 +1018,131 @@ TEST(RowDiffPathCache, LookaheadAdmittedAsWithoutTheCache) {
             check_admitted_as_uncached<SetBits>(a);
         }
     }
+}
+
+// R10 (review of feature level 4): the retention rule (RowDiffCache::keeps). Whatever it
+// keeps — every row (checkpoint 1), the requested rows and checkpoints, almost nothing — the
+// default and the budget-aware decodes return the rows of the decode without the cache, and
+// the budget-aware one their costs; a call copies at most n x (successors + 3) + s /
+// checkpoint rows (n rows asked for, s stored rows read) into the cache when no row counts as
+// narrow, where keeping every row copied all s; and the narrow rows are all kept
+template <class RowT>
+void check_retention(const Annotation &a) {
+    struct Rule { uint32_t checkpoint, successors; uint64_t narrow; };
+    uint64_t total_all = 0, total_rule = 0;
+    for (const Rule rule : { Rule{ 1, 0, 0 }, Rule{ 4, 1, 0 }, Rule{ 16, 8, 0 },
+                             Rule{ uint32_t(1) << 30, 0, 0 },
+                             Rule{ uint32_t(1) << 30, 0, uint64_t(1) << 40 } }) {
+        for (bool budgeted : { false, true }) {
+            RowDiffPathCache cache;
+            cache.set_bound(uint64_t(64) << 20);
+            cache.set_retention(rule.checkpoint, rule.successors, rule.narrow);
+            auto &typed = [&]() -> RowDiffCache<RowT>& {
+                if constexpr(std::is_same_v<RowT, SetBits>) {
+                    return cache.rows;
+                } else {
+                    return cache.tuples;
+                }
+            }();
+            size_t calls = 0;
+            for (const auto &rows : walk_batches(a, 13)) {
+                const uint64_t kept_before = typed.rows_inserted;
+                const uint64_t stored_before = typed.stored_rows_read;
+                const uint64_t bytes_before = typed.bytes_inserted;
+                if (!budgeted) {
+                    EXPECT_EQ(reference<RowT>(a, rows), cached_rows<RowT>(a, rows, cache))
+                        << a.name << " rule " << rule.checkpoint << " call " << calls;
+                } else {
+                    DecodeBudget plain_budget, cached_budget;
+                    std::vector<RowT> plain_out, cached_out;
+                    std::vector<RowCost> plain_costs, cached_costs;
+                    std::vector<uint64_t> plain_held, cached_held;
+                    ASSERT_EQ(DecodeStatus::OK, decode<RowT>(a, rows, plain_budget, &plain_out,
+                                                             &plain_costs, &plain_held));
+                    DecodeStatus status;
+                    if constexpr(std::is_same_v<RowT, SetBits>) {
+                        status = a.rd->decode_rows(rows, cached_budget, &cached_out,
+                                                   &cached_costs, &cached_held, &cache);
+                    } else {
+                        status = a.rd->decode_row_tuples(rows, cached_budget, &cached_out,
+                                                         &cached_costs, &cached_held, &cache);
+                    }
+                    ASSERT_EQ(DecodeStatus::OK, status);
+                    EXPECT_EQ(plain_out, cached_out) << a.name << " call " << calls;
+                    ASSERT_EQ(plain_costs.size(), cached_costs.size());
+                    for (size_t i = 0; i < rows.size(); ++i) {
+                        EXPECT_TRUE(same_costs(plain_costs[i], cached_costs[i]))
+                            << a.name << " rule " << rule.checkpoint << " call " << calls;
+                    }
+                }
+                const uint64_t kept = typed.rows_inserted - kept_before;
+                const uint64_t stored = typed.stored_rows_read - stored_before;
+                if (rule.checkpoint == 1 || rule.narrow) {
+                    // every row the call reconstructed (each stored row read is one of them)
+                    EXPECT_EQ(stored, kept) << a.name << " call " << calls;
+                } else {
+                    EXPECT_LE(kept, rows.size() * (rule.successors + 3) + stored / rule.checkpoint)
+                        << a.name << " rule " << rule.checkpoint << " call " << calls;
+                }
+                // (a kept row's copy can hold no heap: up to two columns are inline)
+                if (!kept) {
+                    EXPECT_EQ(bytes_before, typed.bytes_inserted) << a.name;
+                }
+                calls++;
+            }
+            EXPECT_LE(typed.peak_bytes, uint64_t(64) << 20);
+            if (!budgeted && rule.checkpoint == 1)
+                total_all = typed.rows_inserted;
+            if (!budgeted && rule.checkpoint == 16)
+                total_rule = typed.rows_inserted;
+        }
+    }
+    // on these walks (paths of up to 100 rows) the rule copies fewer rows than keeping all
+    EXPECT_LT(total_rule, total_all) << a.name;
+}
+
+TEST(RowDiffPathCache, RetentionKeepsRowsAndCostsAndBoundsTheCopies) {
+    for (const Annotation &a : annotations()) {
+        if (a.tuples) {
+            check_retention<RowTuples>(a);
+        } else {
+            check_retention<SetBits>(a);
+        }
+    }
+}
+
+// The flat storage of a cached tuple row (StoredRow<RowTuples>) gives back the row exactly,
+// holds less than a RowTuples copy of a row whose columns carry more than two coordinates,
+// and states what that copy holds (Entry::copy_bytes, what a hit is charged)
+TEST(RowDiffPathCache, FlatTupleRowsRoundTrip) {
+    RowTuples row;
+    for (uint32_t c = 0; c < 300; ++c) {
+        RowTuples::value_type::second_type coords;
+        for (uint64_t i = 0; i < 1 + c % 5; ++i) {
+            coords.push_back(1000 * c + 7 * i);
+        }
+        row.emplace_back(3 * c, coords);
+    }
+    StoredRow<RowTuples> stored;
+    stored.store(row);
+    RowTuples back;
+    stored.load(&back);
+    EXPECT_EQ(row, back);
+    EXPECT_LT(stored.bytes(), row_copy_bytes(row));
+    RowDiffCache<RowTuples> cache;
+    cache.set_bound(uint64_t(1) << 20);
+    cache.insert(5, row, 3);
+    const auto *entry = cache.find(5, false);
+    ASSERT_TRUE(entry);
+    EXPECT_EQ(row_copy_bytes(row), entry->copy_bytes);
+    EXPECT_EQ(3u, entry->depth);
+    EXPECT_EQ(stored.bytes() + RowDiffCache<RowTuples>::kEntryBytes, cache.bytes());
+    EXPECT_EQ(1u, cache.rows_inserted);
+    EXPECT_EQ(stored.bytes(), cache.bytes_inserted);
+    RowTuples empty;
+    stored.store(empty);
+    stored.load(&back);
+    EXPECT_TRUE(back.empty());
 }
 
 } // namespace

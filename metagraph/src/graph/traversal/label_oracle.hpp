@@ -1,6 +1,7 @@
 #ifndef __TRAVERSAL_LABEL_ORACLE_HPP__
 #define __TRAVERSAL_LABEL_ORACLE_HPP__
 
+#include <chrono>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -55,6 +56,23 @@ namespace traversal {
  * read returns: the callers keep a read's counting and cache decisions whole and only split
  * its decoding.
  */
+/**
+ * One uninterruptible piece of a seed's work, as its deadline record states it (R8; timing
+ * only): what ran between two readings of the deadline — |kind| one of "read" (an annotation
+ * read in one piece), "chunk" (a chunk of a split read), "rest" (the piece that ended a split
+ * read), "kmer_mapping" (the seed's k-mers mapped to nodes and keys), "coord_mapping" (a derived
+ * seed's k-mer whose coordinates were mapped to headers), "derivation_step" (a derived seed's
+ * k-mer otherwise), "head" (the walk between two readings of the clock, reads excluded) and
+ * "finalisation" (from the walk's end or stop to its result) — with its rows and the
+ * coordinates mapped to headers in it.
+ */
+struct UninterruptiblePiece {
+    double ms = 0;
+    const char *kind = "";
+    uint64_t rows = 0;
+    uint64_t coordinates = 0;
+};
+
 struct DecodePacer {
     double target_ms = 0;          // 0: pacing off, one piece per read (as before)
     size_t first_rows = 8;         // the most rows of a split read's first chunk
@@ -75,8 +93,41 @@ struct DecodePacer {
     // after (|previous|: the read's previous chunk's rows, |previous_ms| its time), sized to
     // take min(target_ms, |ms_left|) at the rate the previous chunk measured
     size_t next(size_t remaining, double ms_left, size_t previous, double previous_ms) const;
-    // a piece of |rows| rows took |ms|
-    void record(size_t rows, double ms);
+    // a piece of |rows| rows took |ms| (|kind| and |coordinates| as UninterruptiblePiece's;
+    // the coordinate mapping of a read's rows happens inside its piece, so its rate includes
+    // it)
+    void record(size_t rows, double ms, const char *kind = "read", uint64_t coordinates = 0);
+    // The longest uninterruptible piece of the seed being walked (the walker resets it at the
+    // seed's start), reads and the other pieces the walker notes; the total time of the reads
+    // (record), which the walker's head pieces exclude
+    UninterruptiblePiece longest;
+    double read_ms = 0;
+    void note_piece(const char *kind, double ms, uint64_t rows = 0, uint64_t coordinates = 0);
+    // the coordinates mapped so far (LabelOracle::Counters::coords_mapped; 0 without it), for a
+    // piece's coordinates
+    const uint64_t *coords_mapped = nullptr;
+    uint64_t coords_now() const { return coords_mapped ? *coords_mapped : 0; }
+    // The clock the pieces are measured with and the walker's deadlines read (ms): the steady
+    // clock, or |test_clock_ms| when a test sets one (a virtual clock its slow reads advance,
+    // so that what a deadline stops does not depend on the machine's load)
+    std::function<double()> test_clock_ms;
+    double now_ms() const {
+        if (test_clock_ms)
+            return test_clock_ms();
+        return std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+};
+
+// The time since construction on a pacer's clock (DecodePacer::now_ms), ms
+class PacerTimer {
+  public:
+    explicit PacerTimer(const DecodePacer &pacer) : pacer_(pacer), start_(pacer.now_ms()) {}
+    double elapsed_ms() const { return pacer_.now_ms() - start_; }
+
+  private:
+    const DecodePacer &pacer_;
+    double start_;
 };
 
 /**
@@ -118,6 +169,20 @@ class LabelOracle {
         uint64_t direct_reads = 0;         // single-cell reads with GetEntrySupport::get
         uint64_t coords_mapped = 0;        // coordinates mapped to (sequence, local coord)
         double fetch_seconds = 0;
+        // the row-diff path cache's physical work (timing only; all 0 without it): paths cut
+        // at a cached row, stored rows read from the matrix by the reads with the cache, rows
+        // kept in the cache and their bytes, and the most it held so far (not a sum)
+        uint64_t path_cache_hits = 0;
+        uint64_t path_cache_stored_rows = 0;
+        uint64_t path_cache_rows_kept = 0;
+        uint64_t path_cache_bytes_kept = 0;
+        uint64_t path_cache_peak_bytes = 0;
+        // seed phases (Walker): the time of the seed's validation or derivation, of its label
+        // resolution (in it: a first header name builds the sequence header index), and of
+        // the reads in it (part of fetch_seconds)
+        double seed_phase_seconds = 0;
+        double label_resolve_seconds = 0;
+        double seed_fetch_seconds = 0;
     };
 
     // |coord_to_header_override| replaces the mapping loaded with the index (tests).
@@ -172,6 +237,9 @@ class LabelOracle {
         Coord last = 0;
     };
     SeqRange sequence_range(Column column, Coord coord) const;
+    // the first and last column coordinates of sequence |seq_id| of |column| (its range, as
+    // sequence_range states it). Requires a CoordToHeader.
+    SeqRange sequence_coords(Column column, uint64_t seq_id) const;
     /**
      * map_coord of the coordinates of one column, one after another, by the runs they form
      * (the efficiency pass; the same (seq_id, local) as map_coord). The coordinates of one
@@ -254,14 +322,17 @@ class LabelOracle {
                    std::vector<annot::matrix::RowCost> *costs, std::vector<uint64_t> *held) const;
 
     Counters& counters() const { return counters_; }
+    // counters() with the path cache's physical counters brought up to date
+    void sync_path_cache_counters() const;
     // the request's read pacing and measurement (the oracle is per request)
     DecodePacer& pacer() const { return pacer_; }
 
     /**
      * The row-diff path cache (row_diff_cache.hpp; the efficiency pass): on a row-diff
-     * annotation every read above — the default and the budget-aware ones — keeps the rows
-     * it reconstructs (the requested rows and the rows on their row-diff paths), so that a
-     * later read's path stops at a cached row instead of decoding to its anchor again. What
+     * annotation every read above — the default and the budget-aware ones — keeps rows it
+     * reconstructs (the requested rows, the rows just after them on their row-diff paths,
+     * every checkpoint row and every narrow row: RowDiffCache::keeps), so that a later read's
+     * path stops at a cached row instead of decoding to its anchor again. What
      * a read returns, and every RowCost (the work and memory a budget-aware read is charged
      * and admitted by: its whole path), do not depend on it; the decoding work does. Off
      * until set_path_cache_max() (the request's bound, --traverse-path-cache-mb): the walker
@@ -492,6 +563,21 @@ class LabelQuery {
     // table each, see LabelKeyHash)
     tsl::hopscotch_map<std::pair<Column, uint64_t>, LabelId, LabelKeyHash> header_labels_;
     tsl::hopscotch_set<Column> header_columns_;
+    // R6 (permitted-range filtering): per header column, the coordinate ranges of the requested
+    // sequences, ascending, with their labels — a coordinate is looked up among them (a binary
+    // search over the query's own sequences of that column) instead of being mapped to its
+    // sequence by a rank and a select, which every coordinate of the column cost before,
+    // those of the sequences no label names included
+    struct HeaderRange {
+        Coord first;
+        Coord last;
+        LabelId label;
+    };
+    tsl::hopscotch_map<Column, std::vector<HeaderRange>> header_ranges_;
+    // f(label, local) for each coordinate of |coords| (column |column|) in a requested
+    // sequence; every coordinate counts as mapped (Counters::coords_mapped), as map_coords
+    template <class F>
+    void map_requested(Column column, const Coord *coords, size_t n, const F &f) const;
     std::vector<Column> direct_columns_;  // sorted distinct columns for DIRECT/ROWS
 
     tsl::hopscotch_map<node_index, NodeHits> cache_;

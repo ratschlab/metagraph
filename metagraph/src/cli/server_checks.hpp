@@ -29,18 +29,29 @@ bool peer_closed(int fd);
 
 // |value| as the server writes it: compact (no indentation) or the default writer's
 // indentation, byte for byte what Json::writeString writes; with |check|, called every 64 KiB
-// of text, whose exception stops the writing and reaches the caller
+// of text (however large the pieces the writer hands over: they are copied in pieces up to the
+// next check, review of pass 5, finding 6), whose exception stops the writing and reaches the
+// caller. What stays uninterruptible is what the writer does between two pieces — preparing
+// one token, e.g. escaping one string value of 16 MiB, before it is copied — and |max_gap_ms|,
+// when given, receives the longest time between two checks (and from the start to the first,
+// and from the last to the end) for observed_max_uninterruptible_ms
 std::string json_text(const Json::Value &value, bool compact,
-                      const std::function<void()> &check = nullptr);
+                      const std::function<void()> &check = nullptr,
+                      double *max_gap_ms = nullptr);
 
 // The compact text of a /traverse response whose results were written as text one by one
 // (ResultTexts): |envelope|'s members before "results" and after it (jsoncpp writes an
 // object's members in byte order of their names), with "results":[t0,t1,...] between them —
-// byte for byte json_text(envelope with results, true); |check| as json_text's, also called
-// every 64 KiB of the results' texts
+// byte for byte json_text(envelope with results, true); |check| and |max_gap_ms| as
+// json_text's, the results' texts copied in pieces of at most 64 KiB with a check between
+// them (finding 6: a seed's text of 16 MiB was appended whole, one check after it)
 std::string assemble_traverse_response(const Json::Value &envelope,
                                        const std::vector<std::string> &results,
-                                       const std::function<void()> &check = nullptr);
+                                       const std::function<void()> &check = nullptr,
+                                       double *max_gap_ms = nullptr);
+
+// The interval of the checks of json_text and assemble_traverse_response (bytes of text)
+constexpr size_t kDeliveryCheckBytes = size_t(1) << 16;
 
 /**
  * One line of a multi-graph list (`server_query GRAPHS.csv`):
@@ -68,14 +79,19 @@ GraphListEntry parse_graph_list_line(const std::string &text, size_t line);
 /**
  * The identity each (graph, annotation) pair of a graph list states: (index_ns, index_fp),
  * "" for none. |fingerprint| returns the digest of an entry's manifest checked against the
- * entry's files (index_manifest_fingerprint), called once per (pair, manifest). One index,
- * one identity: lines naming the same pair must agree on what they state — an empty column
+ * entry's files (index_manifest_fingerprint), called once per (bundle, manifest). One index,
+ * one identity: lines naming the same index must agree on what they state — an empty column
  * states nothing and takes what another line states — and a conflict throws
- * std::invalid_argument naming both lines.
+ * std::invalid_argument naming both lines. Two lines name the same index when the complete
+ * loader inventories of their pairs (|inventory|, by default index_bundle_files of the listed
+ * spellings) resolve to the same real paths in the same roles; two different indexes stating
+ * one index_fp are refused too.
  */
 std::map<std::pair<std::string, std::string>, std::pair<std::string, std::string>>
 graph_list_identities(const std::vector<GraphListEntry> &entries,
-                      const std::function<std::string(const GraphListEntry &)> &fingerprint);
+                      const std::function<std::string(const GraphListEntry &)> &fingerprint,
+                      const std::function<std::vector<std::string>(const GraphListEntry &)>
+                              &inventory = nullptr);
 
 } // namespace cli
 } // namespace mtg

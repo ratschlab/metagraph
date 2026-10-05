@@ -101,20 +101,47 @@ Json::Value expired_json(const AttemptIds &ids, uint64_t now_ms,
     return j;
 }
 
+std::optional<uint64_t> read_not_after_ms(const Json::Value &request, const std::string &where) {
+    if (!request.isObject() || !request.isMember("not_after_ms"))
+        return std::nullopt;
+    // an integer in [0, 2^53 - 1]: a fraction, a sign, a string or a value no JSON reader keeps
+    // exactly is refused, never rounded into an instant the ledger did not mean
+    const Json::Value &v = request["not_after_ms"];
+    if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0) || v.asUInt64() > kMaxNotAfterMs) {
+        throw InvalidRequest(where + ".not_after_ms: expected an integer in [0, "
+                             + std::to_string(kMaxNotAfterMs) + "] (Unix epoch, ms)");
+    }
+    return v.asUInt64();
+}
+
+bool instance_mismatch(const AttemptIds &ids, const std::string &instance) {
+    return !ids.expect_server_instance.empty() && ids.expect_server_instance != instance;
+}
+
+Json::Value instance_mismatch_json(const AttemptIds &ids, const std::string &instance) {
+    Json::Value j;
+    j["error"] = "expect_server_instance '" + ids.expect_server_instance + "' is not this "
+                 "server's instance ('" + instance + "'; the process restarted, or the request "
+                 "reached another server): it was not started";
+    j["state"] = "instance_mismatch";
+    j["expect_server_instance"] = ids.expect_server_instance;
+    j["server_instance"] = instance;
+    if (!ids.attempt_id.empty())
+        j["attempt_id"] = ids.attempt_id;
+    if (!ids.budget_id.empty())
+        j["budget_id"] = ids.budget_id;
+    if (!ids.locus_id.empty())
+        j["locus_id"] = ids.locus_id;
+    if (ids.not_after_ms)
+        j["not_after_ms"] = uint_value(*ids.not_after_ms);
+    return j;
+}
+
 AttemptIds attempt_ids(const Json::Value &request) {
     AttemptIds ids;
     if (!request.isObject())
         return ids;   // parse_traverse_request names the problem
-    if (request.isMember("not_after_ms")) {
-        // an integer in [0, 2^53 - 1]: a fraction, a sign, a string or a value no JSON reader
-        // keeps exactly is refused, never rounded into an instant the ledger did not mean
-        const Json::Value &v = request["not_after_ms"];
-        if (!v.isIntegral() || (v.isInt64() && v.asInt64() < 0) || v.asUInt64() > kMaxNotAfterMs) {
-            throw InvalidRequest("request.not_after_ms: expected an integer in [0, "
-                                 + std::to_string(kMaxNotAfterMs) + "] (Unix epoch, ms)");
-        }
-        ids.not_after_ms = v.asUInt64();
-    }
+    ids.not_after_ms = read_not_after_ms(request, "request");
     auto read = [&](const char *field, std::string *out) {
         if (!request.isMember(field))
             return;
@@ -128,11 +155,16 @@ AttemptIds attempt_ids(const Json::Value &request) {
     read("attempt_id", &ids.attempt_id);
     read("budget_id", &ids.budget_id);
     read("locus_id", &ids.locus_id);
+    // the server_instance is 16 hex digits; any token is compared as given (another one is
+    // refused, 409), so a future format does not turn a mismatch into a 400
+    read("expect_server_instance", &ids.expect_server_instance);
     // an echo without the attempt it belongs to would be usage nobody can reconcile
     if (ids.attempt_id.empty() && !ids.budget_id.empty())
         throw InvalidRequest("request.budget_id: given without request.attempt_id");
     if (ids.attempt_id.empty() && !ids.locus_id.empty())
         throw InvalidRequest("request.locus_id: given without request.attempt_id");
+    if (ids.attempt_id.empty() && !ids.expect_server_instance.empty())
+        throw InvalidRequest("request.expect_server_instance: given without request.attempt_id");
     return ids;
 }
 
@@ -313,6 +345,16 @@ void Attempt::note_max_read_ms(double ms) {
 double Attempt::max_read_ms() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return max_read_ms_;
+}
+
+void Attempt::note_delivery_gap_ms(double ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    max_delivery_gap_ms_ = std::max(max_delivery_gap_ms_, ms);
+}
+
+double Attempt::max_delivery_gap_ms() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return max_delivery_gap_ms_;
 }
 
 bool Attempt::request_stop(ExternalStop reason) {
@@ -726,11 +768,25 @@ AttemptRegistry::AttemptRegistry(AttemptSettings settings)
 Clock::time_point AttemptRegistry::now() const { return settings_.clock(); }
 
 std::string AttemptRegistry::retention_text() const {
+    if (!settings_.retention_s) {
+        return fmt::format("attempts are not kept after they finish (retention 0 s); no cancel "
+                           "of an unknown id is tombstoned (refused, 429: nothing is promised "
+                           "for it)");
+    }
     return fmt::format("attempts are kept {} s after they finish, at most the last {} (oldest "
-                       "dropped first); a cancel of an unknown id tombstones it for {} s, at most "
-                       "{} tombstones at once (beyond that the cancel is refused, 429)",
-                       settings_.retention_s, settings_.retention_count, settings_.retention_s,
+                       "dropped first), and one sent with not_after_ms until that + {} ms, at "
+                       "most {} s after it finished (held among the tombstones); a cancel of an "
+                       "unknown id tombstones it at least {} s, and until the not_after_ms it "
+                       "names + {} ms, at most {} s, while fewer than {} tombstones and held "
+                       "attempts are held (else the cancel is refused, 429)",
+                       settings_.retention_s, settings_.retention_count, settings_.clock_skew_ms,
+                       tombstone_cap_ms() / 1000, settings_.retention_s,
+                       settings_.clock_skew_ms, tombstone_cap_ms() / 1000,
                        settings_.retention_count);
+}
+
+uint64_t AttemptRegistry::tombstone_cap_ms() const {
+    return std::max(settings_.tombstone_max_s, settings_.retention_s) * 1000;
 }
 
 void AttemptRegistry::note_uninterruptible(double ms) {
@@ -799,24 +855,113 @@ DeliveryMeasurements AttemptRegistry::measured() const {
     return m;
 }
 
+bool AttemptRegistry::hold_live_locked(const Attempt &a, Clock::time_point t,
+                                       uint64_t wall) const {
+    return a.tomb_steady_until_ > t || a.tomb_wall_until_ms_ >= wall;
+}
+
 void AttemptRegistry::expire_locked() {
     const Clock::time_point t = now();
     const auto keep = std::chrono::seconds(settings_.retention_s);
-    auto drop = [&](std::deque<std::shared_ptr<Attempt>> *queue) {
-        const std::shared_ptr<Attempt> &old = queue->front();
-        auto it = attempts_.find(old->ids().attempt_id);
-        if (it != attempts_.end() && it->second == old)
-            attempts_.erase(it);
-        queue->pop_front();
+    uint64_t wall = 0;
+    bool wall_read = false;
+    auto wall_now = [&]() {
+        if (!wall_read) {
+            wall = now_ms();
+            wall_read = true;
+        }
+        return wall;
     };
     while (!retained_.empty()
             && (retained_.size() > settings_.retention_count
                 || t - retained_.front()->finished_at() >= keep)) {
-        drop(&retained_);
+        const std::shared_ptr<Attempt> old = retained_.front();
+        retained_.pop_front();
+        auto it = attempts_.find(old->ids().attempt_id);
+        if (it == attempts_.end() || it->second != old)
+            continue;
+        if (hold_live_locked(*old, t, wall_now())) {
+            // Its retention ended, by age or by count, while a copy of the request could still
+            // be admitted: the id stays refused, among the tombstones, until its hold ends
+            // (review of the pass-5 fixes, finding 1: a ledger released on the finished state,
+            // and a replay after retention_s, or after retention_count later finishes, ran
+            // again). Never dropped early: it ran, so it cannot be refused like a cancel
+            old->held_ = true;
+            tomb_expiry_.emplace(old->tomb_steady_until_, old->ids().attempt_id);
+            continue;
+        }
+        attempts_.erase(it);
     }
-    // by age only: a tombstone promises that its id does not run here for retention_s
-    while (!tombstones_.empty() && t - tombstones_.front()->finished_at() >= keep) {
-        drop(&tombstones_);
+    // by its hold only: a tombstone (or a held finished attempt) promises that its id does not
+    // run here while it is live, and it is live while either clock says so
+    while (!tomb_expiry_.empty() && tomb_expiry_.begin()->first <= t) {
+        const auto [key, id] = *tomb_expiry_.begin();
+        tomb_expiry_.erase(tomb_expiry_.begin());
+        auto it = attempts_.find(id);
+        if (it == attempts_.end())
+            continue;
+        Attempt &held = *it->second;
+        if (!(held.tombstone() || held.held_) || held.tomb_steady_until_ != key)
+            continue;   // not this entry's (hold_locked re-keys its own)
+        if (held.tomb_wall_until_ms_ >= wall_now()) {
+            // the wall clock stepped back since the hold was set: kept until it reads past the
+            // expiry too (re-keyed strictly later, so the loop ends)
+            held.tomb_steady_until_
+                = t + std::chrono::milliseconds(held.tomb_wall_until_ms_ - wall + 1);
+            tomb_expiry_.emplace(held.tomb_steady_until_, id);
+            continue;
+        }
+        attempts_.erase(it);
+    }
+}
+
+void AttemptRegistry::hold_locked(Attempt &held, std::optional<uint64_t> not_after_ms,
+                                  bool at_least_retention) {
+    const uint64_t wall = now_ms();
+    uint64_t hold_ms = at_least_retention ? settings_.retention_s * 1000 : 0;
+    if (not_after_ms) {
+        held.tomb_not_after_ms_ = std::max(held.tomb_not_after_ms_.value_or(0), *not_after_ms);
+        // covered once this server's clock passed not_after_ms + the skew a ledger adds (both
+        // at most 2^53 - 1: no overflow)
+        const uint64_t target = *not_after_ms + settings_.clock_skew_ms;
+        hold_ms = std::max(hold_ms, std::min(target > wall ? target - wall : 0,
+                                             tombstone_cap_ms()));
+    } else if (!at_least_retention) {
+        return;   // a finished attempt's hold is that of a not_after_ms alone
+    }
+    // live through wall + hold_ms inclusive; the steady hold one ms longer to match
+    held.tomb_wall_until_ms_ = std::max(held.tomb_wall_until_ms_, wall + hold_ms);
+    const Clock::time_point until = now() + std::chrono::milliseconds(hold_ms + 1);
+    if (until > held.tomb_steady_until_) {
+        const std::string &id = held.ids().attempt_id;
+        const bool keyed = held.tombstone() || held.held_;
+        if (keyed)
+            tomb_expiry_.erase({ held.tomb_steady_until_, id });
+        held.tomb_steady_until_ = until;
+        if (keyed)
+            tomb_expiry_.emplace(until, id);
+    }
+}
+
+void AttemptRegistry::add_suppression_locked(Json::Value *j, const Attempt &tomb,
+                                             std::optional<uint64_t> against,
+                                             bool fallback) const {
+    if (!against && fallback)
+        against = tomb.tomb_not_after_ms_;
+    // the hold's last instant on the wall clock (inclusive): the tombstone is live whenever
+    // this server's clock reads at most it — the steady hold lasts as long from when it was
+    // set, so a forward step of the clock does not end it earlier — and once it is gone the
+    // clock has read later
+    (*j)["suppressed_until_ms"] = uint_value(tomb.tomb_wall_until_ms_);
+    if (against)
+        (*j)["not_after_ms"] = uint_value(*against);
+    const bool covers = against
+                     && tomb.tomb_wall_until_ms_ >= *against + settings_.clock_skew_ms;
+    (*j)["covers_admission"] = covers;
+    if (!covers) {
+        // no not_after_ms: nothing bounds when a copy of the request could still be admitted;
+        // beyond the cap: the tombstone expires while one could
+        (*j)["covers_admission_reason"] = against ? "beyond_tombstone_max" : "no_not_after_ms";
     }
 }
 
@@ -840,10 +985,34 @@ std::optional<AttemptRegistry::StartRefusal>
 AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt) {
     std::lock_guard<std::mutex> lock(mutex_);
     expire_locked();
+    // meant for another process (this one restarted, or the request reached another server):
+    // its tombstones, if any, are not here, so nothing here may run it
+    if (instance_mismatch(attempt->ids(), instance_))
+        return StartRefusal { false, instance_mismatch_json(attempt->ids(), instance_), true };
     const std::string &id = attempt->ids().attempt_id;
     auto it = attempts_.find(id);
-    if (it != attempts_.end())
-        return StartRefusal { false, it->second->state_json() };
+    if (it != attempts_.end()) {
+        Json::Value body = it->second->state_json();
+        if (it->second->tombstone()) {
+            // A copy of a cancelled request arrived (a proxy's replay carries the same
+            // not_after_ms): the tombstone is extended to cover its admission, so that every
+            // later copy is refused too while it could still be admitted, and the refusal
+            // states the suppression judged against this request's not_after_ms (review of
+            // pass 5, finding 1: it was neither refreshed nor reported)
+            hold_locked(*it->second, attempt->ids().not_after_ms);
+            // its own not_after_ms alone, no fallback to a cancel's: whether a copy of THIS
+            // request is covered (review of the pass-5 fixes, finding 3: a copy without one
+            // was told covers_admission by a cancel's not_after_ms, and ran once re-sent after
+            // the tombstone expired)
+            add_suppression_locked(&body, *it->second, attempt->ids().not_after_ms, false);
+        } else if (settings_.retention_s && attempt->ids().not_after_ms) {
+            // a copy of a running or finished request (a replay, or another request with its
+            // id): the id's hold covers the copy's not_after_ms too (a running attempt's is
+            // applied again from its finish)
+            hold_locked(*it->second, attempt->ids().not_after_ms, false);
+        }
+        return StartRefusal { false, std::move(body) };
+    }
     // not run, and not kept: a later copy of the request is expired as well, so nothing has
     // to remember it (GET /traverse/attempt answers 404 for it)
     const uint64_t now = now_ms();
@@ -856,16 +1025,24 @@ AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt) {
 Json::Value AttemptRegistry::capabilities_json() const {
     Json::Value att;
     Json::Value fields(Json::arrayValue);
-    for (const char *f : { "attempt_id", "budget_id", "locus_id", "not_after_ms" }) {
+    for (const char *f : { "attempt_id", "budget_id", "locus_id", "not_after_ms",
+                           "expect_server_instance" }) {
         fields.append(f);
     }
     att["fields"] = std::move(fields);
     att["id_pattern"] = "^[A-Za-z0-9._:-]{1,128}$";
     att["cancel"] = "POST /traverse/cancel";
+    Json::Value cancel_fields(Json::arrayValue);
+    for (const char *f : { "attempt_id", "wait_ms", "not_after_ms" }) {
+        cancel_fields.append(f);
+    }
+    att["cancel_fields"] = std::move(cancel_fields);
     att["state"] = "GET /traverse/attempt/{attempt_id}";
     att["server_instance"] = instance_;
     att["retention_s"] = uint_value(settings_.retention_s);
     att["retention_count"] = uint_value(settings_.retention_count);
+    // the cap of a tombstone's hold, as applied: max(tombstone_max_s, retention_s)
+    att["tombstone_max_s"] = uint_value(tombstone_cap_ms() / 1000);
     // integers (ms), as usage.bound states them: a ledger compares them with its own
     att["allowance_ms"] = ms_json(settings_.allowance_ms);
     att["hard_cap_ms"] = ms_json(settings_.hard_cap_ms);
@@ -906,8 +1083,14 @@ Json::Value AttemptRegistry::capabilities_json() const {
     // where the configured starting estimates come from (feature level 4, the efficiency pass)
     reserve["calibration"] = "starting estimates, replaced by this server's measurements: "
         "account_per_text_byte just below the smallest ratios measured on real responses (JSON "
-        "details 33.5 to 1,344, graphlet 58.4 and more; 20 and 40 before feature level 4, which "
-        "cut a server's first large attempt per detail early, e.g. an SRA tree at 2.0 s of 35 s); "
+        "details 33.5 to 1,344, graphlet 58.4 and more; 20 and 40 before feature level 4). They "
+        "stay conservative, so a server's first large attempt of a detail can still be cut "
+        "early until it has measured that detail on its own responses: on a warm SRA server the "
+        "first tree and full attempts of a 16S beam (40 s bound) were cut at 3-5 s at feature "
+        "levels 3 and 4 alike, the tree text measuring 115-129 account units a byte against the "
+        "30 assumed (an earlier figure of 18.2 s instead of 11.0 s came from a cold walk and "
+        "did not reproduce); per-detail starting ratios were not adopted, one locus being too "
+        "narrow a measurement to start a reserve from; "
         "stop_ms = chunk_target_ms + 950 (950 ms for the heads between two readings of the clock "
         "and the stopped seed's finalisation: 352 ms measured on a quiet SRA server, 1,001 ms on "
         "a loaded one, 1,699 ms once; + 200 before feature level 4; a longer one measured "
@@ -937,58 +1120,157 @@ Json::Value AttemptRegistry::capabilities_json() const {
         "when its handler starts is refused, 409 {error, state: \"expired\", not_after_ms, "
         "server_time_ms, the ids given, server_instance}, and never runs (no usage, nothing "
         "registered: a later GET /traverse/attempt answers 404); the check is strict, no "
-        "allowance added. A ledger treats an attempt it has no answer for as never started "
-        "once its own clock passes not_after_ms + clock_skew_allowance_ms, and as stopped once "
+        "allowance added. A ledger treats an attempt it has no answer for as one that cannot "
+        "start subsequently once its own clock passes not_after_ms + clock_skew_allowance_ms (an "
+        "unanswered request may already be running: bound_ms covers it), and as stopped once "
         "it passes that + bound_ms";
+    att["instance"] = "expect_server_instance (with attempt_id): a request naming another "
+        "server_instance than this process's is refused before anything runs, 409 {error, "
+        "state: \"instance_mismatch\", expect_server_instance, server_instance, the ids given, "
+        "not_after_ms if given}: tombstones live in memory, so a restarted process (a new "
+        "server_instance) has none, and a delayed copy of a cancelled request would otherwise "
+        "run there; a server below feature level 5 refuses the unknown field (400)";
+    if (settings_.retention_s) {
+        att["suppression"] = fmt::format(
+            "POST /traverse/cancel of an id no attempt of this process holds tombstones it (404, "
+            "tombstone: true): a request with the id arriving while the tombstone is live is "
+            "refused (409, its attempt object carrying the tombstone) and never runs. The "
+            "tombstone is held at least retention_s ({} s) from the cancel and, when the cancel "
+            "names the request's not_after_ms, until this server's clock reads later than "
+            "not_after_ms + clock_skew_allowance_ms, at most tombstone_max_s ({} s) from the "
+            "cancel. A repeated "
+            "cancel, and a refused copy of the request (with its own not_after_ms), never shorten "
+            "it: each extends it to at least retention_s from then and to its own not_after_ms + "
+            "clock_skew_allowance_ms within the cap. It is held while either clock says it is "
+            "live: the steady clock for the duration computed when it was set or extended, and "
+            "the wall clock while it reads at most suppressed_until_ms (inclusive). Every "
+            "tombstone answer (the cancel's 404, a repeated cancel's 404, GET /traverse/attempt's "
+            "404 and the refused request's 409) states suppressed_until_ms (that last instant, "
+            "Unix epoch ms on this server's clock), not_after_ms (the one it was judged against: "
+            "for the refused request's 409 its own, absent when it has none; for a cancel its "
+            "own, else, as for GET, the largest named for the id; absent when none was), "
+            "covers_admission (true iff a not_after_ms was judged against and "
+            "suppressed_until_ms >= not_after_ms + clock_skew_allowance_ms: no copy of that "
+            "request can start on this server_instance, since while the tombstone is live it is "
+            "refused and once it is gone this server's clock has read later than "
+            "suppressed_until_ms, so its not_after_ms has passed on the clock the strict check "
+            "reads) and, when false, covers_admission_reason (no_not_after_ms | "
+            "beyond_tombstone_max). What a clock step can do: a backward step of this server's "
+            "wall clock by more than clock_skew_allowance_ms after the tombstone expired can make "
+            "a copy's not_after_ms lie in the future again, so it could be admitted (the same "
+            "assumption the ledger's skew allowance makes); a forward step does not shorten the "
+            "hold. A cancel of an unknown id is tombstoned only while fewer than retention_count "
+            "({}) tombstones and finished attempts held past their retention (release_rule) are "
+            "held; beyond that it is refused (429, tombstone: false, reason: tombstones_full) and "
+            "promises nothing",
+            settings_.retention_s, tombstone_cap_ms() / 1000, settings_.retention_count);
+    } else {
+        att["suppression"] = "retention_s is 0: this server keeps no tombstones. A cancel of an "
+            "id no attempt of this process holds is refused (429, tombstone: false, reason: "
+            "no_suppression) and promises nothing; a request with the id arriving later runs";
+    }
+    // What a finished state promises against a replay of the request (review of the pass-5
+    // fixes, finding 1): the id's hold beyond retention, or, with nothing kept, nothing
+    const std::string finished_hold = settings_.retention_s
+        ? "A finished attempt's id stays refused (409) while it is retained (retention_s, "
+          "retention_count) and, for an attempt sent with not_after_ms, until this server's "
+          "clock reads later than not_after_ms + clock_skew_allowance_ms, at most "
+          "tombstone_max_s after it finished (held among the tombstones, on both clocks, and "
+          "never dropped early, so beyond retention_count if need be: tombstone_max_s bounds "
+          "how many are held): a replay of a finished request is then never run again when its "
+          "not_after_ms + clock_skew_allowance_ms lies within tombstone_max_s of the finish. A "
+          "finished state of an attempt sent without not_after_ms, or with one further out, "
+          "assumes that no copy of the request arrives after the attempt left retention. "
+        : "retention_s is 0: finished attempts are not kept, so a finished state assumes that "
+          "no copy of the request arrives after it. ";
+    att["release_rule"] = "A ledger may release an attempt's capacity before it finished only on "
+        "a 404 with tombstone: true and covers_admission: true from the same server_instance, "
+        "for an attempt it sent with exactly that not_after_ms and with expect_server_instance "
+        "equal to that server_instance (a copy reaching a restarted process or another server is "
+        "then refused, instance_mismatch). An attempt sent without not_after_ms, or without "
+        "expect_server_instance, is never released early on a tombstone. Otherwise it releases "
+        "only on a finished state (GET /traverse/attempt, a cancel's 404 or 200 with state "
+        "finished, or the response), or once its own clock passes not_after_ms + "
+        "clock_skew_allowance_ms + bound_ms. " + finished_hold + "A 429 and a cancel's 200 with "
+        "state stopping release nothing. Assumed: the ledger's clock is within "
+        "clock_skew_allowance_ms of this server's, this server's clock does not step back by "
+        "more than that, and nothing between the ledger and the server rewrites a request's "
+        "attempt_id, not_after_ms or expect_server_instance";
     return att;
 }
 
-std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint64_t wait_ms) {
+std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint64_t wait_ms,
+                                                    std::optional<uint64_t> not_after_ms) {
     std::shared_ptr<Attempt> attempt;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         expire_locked();
         auto it = attempts_.find(id);
         if (it == attempts_.end()) {
-            if (tombstones_.size() >= settings_.retention_count) {
-                // No tombstone can be kept for the whole retention period without evicting
-                // another one early, which would break that one's promise: nothing is promised
-                // for this id, said so, and the cancel can be retried
+            if (!settings_.retention_s) {
+                // Retention 0: this server suppresses nothing (review of pass 5, finding 4: a
+                // tombstone held 0 s was promised and expired at once), said so; a retry gives
+                // the same answer
+                Json::Value j = unknown_json(id);
+                j["error"] = "unknown attempt_id '" + id + "', and it was NOT tombstoned: this "
+                             "server keeps no tombstones (--traverse-attempt-retention-s 0), so a "
+                             "request with it that arrives later may still run here";
+                j["cancelled"] = false;
+                j["tombstone"] = false;
+                j["reason"] = "no_suppression";
+                return { 429, j };
+            }
+            if (tomb_expiry_.size() >= settings_.retention_count) {
+                // No tombstone can be kept for its whole hold without evicting another one
+                // early, which would break that one's promise: nothing is promised for this
+                // id, said so, and the cancel can be retried
                 Json::Value j = unknown_json(id);
                 j["error"] = "unknown attempt_id '" + id + "', and it was NOT tombstoned: "
-                             + std::to_string(tombstones_.size()) + " cancels of unknown ids are "
-                             "held already (" + retention_text() + "), so a request with it "
+                             + std::to_string(tomb_expiry_.size()) + " cancels of unknown ids "
+                             "are held already (" + retention_text() + "), so a request with it "
                              "that arrives later may still run here; retry the cancel later";
                 j["cancelled"] = false;
                 j["tombstone"] = false;
+                j["reason"] = "tombstones_full";
                 return { 429, j };
             }
-            // A cancel can overtake its request (still queued, or on the wire): the id is
-            // tombstoned for the retention period, so a request that arrives later is refused
-            // (409) and never runs here. A 404 from this server_instance therefore means the
-            // attempt will not run on it for retention_s, and a ledger can release its
-            // reservation
+            // A cancel can overtake its request (still queued, or on the wire, its body half
+            // uploaded): the id is tombstoned, so a request that arrives later is refused
+            // (409) and never runs here — for retention_s, and until the not_after_ms the
+            // cancel names + the clock skew allowance, after which the request's own
+            // not_after check refuses it. Only then (covers_admission) does a 404 from this
+            // server_instance mean that the attempt will not run on it at all (review of pass
+            // 5, finding 1: with retention 1 s a half-uploaded request completed at 1.18 s and
+            // ran)
             auto tomb = Attempt::make_tombstone(id, settings_, instance_);
             attempts_.emplace(id, tomb);
-            tombstones_.push_back(tomb);
+            hold_locked(*tomb, not_after_ms);
             Json::Value j = unknown_json(id);
             j["cancelled"] = false;
             j["tombstone"] = true;
+            add_suppression_locked(&j, *tomb, not_after_ms, true);
             return { 404, j };
         }
         attempt = it->second;
+        if (attempt->tombstone()) {
+            // repeated: never shortened, extended to this cancel's not_after_ms, and at least
+            // retention_s from now
+            hold_locked(*attempt, not_after_ms);
+            Json::Value j;
+            j["attempt_id"] = id;
+            j["server_instance"] = instance_;
+            j["error"] = "unknown attempt_id '" + id + "': a cancel named it before any request "
+                         "with it arrived; a request with it will be refused (409)";
+            j["state"] = "unknown";
+            j["cancelled"] = false;
+            j["tombstone"] = true;
+            add_suppression_locked(&j, *attempt, not_after_ms, true);
+            return { 404, j };
+        }
     }
     Json::Value j;
     j["attempt_id"] = id;
     j["server_instance"] = instance_;
-    if (attempt->tombstone()) {
-        j["error"] = "unknown attempt_id '" + id + "': a cancel named it before any request with "
-                     "it arrived; a request with it will be refused (409)";
-        j["state"] = "unknown";
-        j["cancelled"] = false;
-        j["tombstone"] = true;
-        return { 404, j };
-    }
     if (!attempt->cancel()) {
         j["error"] = "attempt '" + id + "' has finished: nothing to cancel";
         j["state"] = "finished";
@@ -1013,13 +1295,15 @@ std::pair<int, Json::Value> AttemptRegistry::state(const std::string &id) {
         if (it == attempts_.end())
             return { 404, unknown_json(id) };
         attempt = it->second;
-    }
-    if (attempt->tombstone()) {
-        Json::Value j = unknown_json(id);
-        j["error"] = "unknown attempt_id '" + id + "': a cancel named it before any request with "
-                     "it arrived; a request with it will be refused (409)";
-        j["tombstone"] = true;
-        return { 404, j };
+        if (attempt->tombstone()) {
+            // read only: the hold is not extended by looking at it
+            Json::Value j = unknown_json(id);
+            j["error"] = "unknown attempt_id '" + id + "': a cancel named it before any request "
+                         "with it arrived; a request with it will be refused (409)";
+            j["tombstone"] = true;
+            add_suppression_locked(&j, *attempt, std::nullopt, true);
+            return { 404, j };
+        }
     }
     return { 200, attempt->state_json() };
 }
@@ -1031,8 +1315,18 @@ void AttemptRegistry::finish(const std::shared_ptr<Attempt> &attempt, const std:
         return;
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = attempts_.find(attempt->ids().attempt_id);
-    if (it != attempts_.end() && it->second == attempt)
+    if (it != attempts_.end() && it->second == attempt) {
         retained_.push_back(attempt);
+        // Its id stays refused until no copy of the request can be admitted any more: until
+        // its not_after_ms (and any a refused copy named) + clock_skew_ms, within the cap from
+        // now — beyond its retention if need be (expire_locked). Nothing is kept with
+        // retention 0 (stated)
+        std::optional<uint64_t> not_after = attempt->ids().not_after_ms;
+        if (attempt->tomb_not_after_ms_)
+            not_after = std::max(not_after.value_or(0), *attempt->tomb_not_after_ms_);
+        if (settings_.retention_s && not_after)
+            hold_locked(*attempt, not_after, false);
+    }
     expire_locked();
 }
 

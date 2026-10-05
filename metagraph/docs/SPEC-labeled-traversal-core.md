@@ -132,15 +132,41 @@ Let L = |sequence|, k = graph k, k-mer starts i ∈ [0, L−k+1).
   k-mers. If more than `max_labels` distinct labels occur, the top `max_labels` by supported k-mer count are kept
   (tie: column id, then seq_id) and `labels_truncated: {kept, total, min_kept_kmers, max_dropped_kmers,
   dropped_full_length}` is reported. *(Efficiency pass, the same answers byte for byte: the rows are decoded
-  once — the support profile takes its hits from the discovery's rows (tuple rows when the profile needs
+  once — the support profile took its hits from the discovery's rows (tuple rows when the profile needs
   coordinates: header labels or `trace`; their columns are those of the whole rows) instead of decoding every row
   again, which made a column discover cost 1.6–2.1 times the profile of explicit labels on refseq33m —, the
-  counts go into one flat hash table instead of a `std::map` node per label (0.8–1.7 µs a pair, 1.83 s for a
-  header discover on 23S), and a header label's coordinates are mapped by their runs (§8.2), each sequence of a
-  column counted once per k-mer.)*
+  sequences' labels go into one flat hash table instead of a `std::map` node per label (0.8–1.7 µs a pair, 1.83 s
+  for a header discover on 23S), and a header label's coordinates are mapped by their runs (§8.2), each sequence
+  of a column counted once per k-mer. Feature level 5: the discovery accumulates the profiles while it reads the
+  rows, below.)*
 - **Seed candidates:** every maximal support run of each label with length ≥ `min_block_kmers`; labels with an
   identical run `[a, b)` are grouped. Candidate = `{kmer_interval, bp_interval, labels}`. Order: longer first,
   then more labels, then smaller `a`. Disconnected supported blocks of one label are separate candidates.
+
+**A `/resolve`'s memory** *(review of pass 5, part B, and of its fixes, finding 7; feature level 5)*. A `/resolve`
+decodes the present k-mers' rows in **batches** and holds one batch at a time: the first of 64 rows, each next one
+sized from the widest row of the one before to about 64 MiB (`row_copy_bytes`), at most twice the previous
+batch's rows and at most 4,096. A **discovery** accumulates, per label, while it reads the rows: its k-mers (the
+ranking) and its profile — support runs; for `trace` the chain of coordinates and its breaks, k-mer by k-mer —
+so the top labels' profiles need no second read. It keeps the row of a k-mer that occurs again later in the
+query for that occurrence, at most 256 MiB of such rows (`row_copy_bytes`), and decodes a repeated row again
+beyond that. An **explicit** profile primes its label query with each distinct present row once, batch by batch
+(the hits are kept per k-mer, for its labels only). What a request holds is therefore one batch, the rows kept
+for repeats, and per label found its accumulator (counts, runs, trace breaks, the chain's current coordinates);
+a discovery on column labels indexes its accumulators by a slot of 4 bytes per column of the index. Before, the
+efficiency pass decoded and held every present row until the profile was done, and the first fix of this review
+kept a prefix of 256 MiB for the profile pass, which decoded every other row again in one call — the same peak,
+and 40–56% more CPU on wide rows. Measured on a synthetic coordinate index of 8,000 labels whose core rows hold
+24,000 coordinates (user CPU, medians of 5, interleaved, on a machine loaded by other work — about ±10% noise; the
+previous build → now): on queries of 0.3–3 kb of that locus column presence, column and header trace and explicit
+labels 3–17% faster and header presence from 7% faster to 14% slower, at 144–167 MB instead of 0.23–1.66 GB; on a 9.8 kb
+genome repeating the locus three times column presence faster (1.20 → 0.91 s) and explicit labels within 8%, at
+165–236 MB instead of 1.7–1.8 GB, and header and trace discovery 24% and 48% slower (5.72 → 7.10 s, 3.04 →
+4.50 s) at about 370 MB instead of 4.8 GB — its repeats beyond the 256 MiB kept are decoded again. Every answer
+was the same. The ranking (more k-mers first, ties by column, then sequence) and the profiles do not depend on
+the batches or on what is kept (tested with batches of 1 to 4,096 rows, byte targets of 1 B to 64 MiB, 0 to
+256 MiB kept, on a query and on one repeating two thirds of it, column and header labels, presence and trace;
+a discovery's profiles equal those of the same labels given explicitly).
 
 ### 4.3 `select`
 
@@ -315,8 +341,10 @@ to a header).
   `usage`). `/resolve` does not accept them (400, unknown field).
 - **`not_after_ms`** (pass 5; top level, optional, with or without `attempt_id`): an integer in
   [0, 2⁵³ − 1], a Unix epoch instant in milliseconds on the server's clock, after which the request
-  must not be **started**. A ledger that has no answer for an attempt treats it as never started once
-  its own clock passes `not_after_ms + attempts.clock_skew_allowance_ms` (§10.3), and as stopped once
+  must not be **started**. A ledger that has no answer for an attempt treats it as one that **cannot start
+  subsequently** once its own clock passes `not_after_ms + attempts.clock_skew_allowance_ms` (§10.3) — an
+  unanswered request may already be running, which the attempt's bound covers *(review of pass 5: "never
+  started" claimed more than the check gives)* —, and as stopped once
   it passes that plus the attempt's `bound_ms`; the server makes that safe by refusing, when the
   request's handler starts, a request whose `not_after_ms` is earlier than its clock: **409**
   `{error, state: "expired", not_after_ms, server_time_ms, attempt_id?, budget_id?, locus_id?,
@@ -330,6 +358,15 @@ to a header).
   2⁵³ − 1 is a 400 naming the field, without `usage`. It is echoed as `usage.not_after_ms` and in the
   attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
   status 1). `/resolve` does not accept it (400, unknown field).
+- **`expect_server_instance`** *(review of pass 5; with `attempt_id` only)*: the `server_instance` (§10.3) the
+  request is meant for, a string compared as given. A process whose own `server_instance` is another refuses it
+  before anything runs or is registered: **409** `{error, state: "instance_mismatch", expect_server_instance,
+  server_instance, attempt_id, budget_id?, locus_id?, not_after_ms?}` (checked first, ahead of a duplicate id and
+  of `not_after_ms`). Tombstones (§10.3, `POST /traverse/cancel`) live in memory, so a restarted process — a new
+  `server_instance` — holds none, and a delayed copy of a cancelled request would otherwise run there; a ledger
+  that releases capacity early on a tombstone (§10.3, the release rule) sends its attempts with this field. Without
+  `attempt_id` it is a 400 naming the field. The CLI, whose instance is its own and random, refuses any value
+  (the 409 body on stdout, exit status 1). `/resolve` does not accept it (400, unknown field).
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
   and the regime is basic).
 - **`seeds[].labels` is optional.** Omitting it is the default and realizes the design note's
@@ -808,8 +845,12 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     with the configured values `account_per_text_byte` (30 for the JSON details, 50 for a graphlet — *calibrated
     in the efficiency pass, feature level 4*: just below the smallest account/text ratios measured on real
     responses, 33.5 (UHGG `full`) to 1,344 (SRA `summary`; 37.2 the smallest SRA JSON ratio) and 58.4 and more for
-    a graphlet; the 20 and 40 before cut a server's first large attempt per detail early, an SRA `tree` at 2.0 s of
-    its 35 s walk-until, 43.6 MB of 402 MB, and an SRA `tree` at 11.0 s on a fresh server in this pass),
+    a graphlet; they stay conservative: a server's first large attempt of a detail can still be cut early until it
+    has measured that detail itself — on a warm SRA server the first `tree` and `full` attempts of a 16S beam with a
+    40 s bound were cut at 3-5 s with 20/40 and with 30/50 alike, the `tree` text measuring 115-129 account units a
+    byte against the 30 assumed; the earlier report of 18.2 s instead of 11.0 s on a fresh server came from a cold
+    walk against an intermediate build and did not reproduce; per-detail starting ratios were considered and not
+    adopted, one locus being too narrow a measurement to start a reserve from),
     `compress_mbps` (`--traverse-delivery-compress-mbps`, default 50) and `build_mbps`
     (`--traverse-delivery-build-mbps`, default 10) until the server has measured its own: then, for each, the
     slowest rate — or for the detail the smallest ratio — of its last 16 measurements on `/traverse` responses
@@ -911,7 +952,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   are more than 64 times slower than any the request read before; the rest of a split read, when its rows are
   more than 4 times slower than its chunk's. **Not chunked**: `/resolve`
   (stage 3b), the mapping of a seed's k-mers, a head's processing (checked every `work_check_interval` units),
-  a seed's finalisation and summary, the response's building between two delivery checks, and the transport.
+  a seed's finalisation and summary, the response's building between two delivery checks (every 64 KiB of text
+  and every 4,096 objects of a seed's tree; one token's preparation in between), and the transport.
   `--traverse-chunk-target-ms 0` decodes every read in one piece, as before pass 5. Measured on the fan-out
   index of `TestTraverseWideIndex` (1,024 header labels, one lookahead read of about 66,000 rows), on a loaded
   M5 Max, budgets of 50, 100, 200 and 500 ms: with a column annotation, which the previous build overran by up to
@@ -920,6 +962,36 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   1.9 s, kept to within 60 ms (the largest piece 106 ms); and a walk its 30 s budget does not stop returns the
   same bytes in the time of the unchunked walk (one or two chunks of 8 and 32 rows per large read). On 60 real
   UHGG requests the walks took 15,973 ms against 15,932 ms for the previous build and 16,021 ms unchunked.
+  *Review of pass 5, finding 5:* the budget-aware lookahead (`LabelQuery::warm`, `LabelRecorder::warm` with a
+  budget) cut its runs from the globally sorted missing keys; its runs and their pieces are taken in the walk's
+  order now, each piece sorted, as the default reads take their chunks (32 independent paths, 2,048 walked rows,
+  runs of 8: 31,297 decoder charges against 161,679, the walk-ordered runs alone 28,736). Only what is cached
+  depends on it: a key is admitted and charged by its own costs when a level's fetch reads it. *R9:* the tests of
+  this paragraph (`WalkerDeadlineChunks`) run on a virtual clock (`DecodePacer::test_clock_ms`) that only their slow
+  reads advance, so their bounds are exact and they no longer fail under load (0 of 600 executions with 24 busy
+  processes; 5 of ~400 before).
+- **Delivery checks** *(review of pass 5, finding 6; feature level 5)*. The text of each seed's result and of the
+  response is written under the attempt's delivery check (its client and its bound) every 64 KiB: a piece the JSON
+  writer hands over, and a seed's text appended to the response, are copied in pieces up to the next check — before,
+  one 16 MiB string value was appended whole, one check after it, in the writing and in the assembly alike. What
+  stays uninterruptible is what the writer does between two pieces: preparing one token (escaping one string
+  value, e.g. a graphlet of many MB, before it is copied). The longest time between two checks of a written text is
+  measured and added to `deadline_check.observed_max_uninterruptible_ms` (not to `usage`, which states the reads).
+- **The deadline record** *(R8; feature level 5; in `timing` only, never in an untimed body)*. Per seed,
+  `timing.deadline`: `longest_piece {ms, kind, rows, coordinates}` — the seed's longest uninterruptible piece,
+  `kind` one of `read` (an annotation read in one piece), `chunk`, `rest` (the piece that ended a split read),
+  `kmer_mapping` (the seed's k-mers mapped to nodes, then to keys), `coord_mapping` (a derived seed's k-mer whose
+  coordinates were mapped to headers), `derivation_step` (a derived seed's k-mer otherwise), `head` (the walk
+  between two readings of the clock, its reads excluded) or `finalisation` (from the walk's stop or end to its
+  result), with its rows and the coordinates mapped to headers in it — and, when a stop ended the walk,
+  `stopped_by` (`time_budget`, `attempt`, `cancelled`, `memory`, `work`) and `stop_after_deadline_ms` (for
+  `time_budget` and `attempt`: how long after the seed's budget, or the attempt's walk-until, the walk saw it). A
+  read maps its rows' coordinates to headers inside its piece, so the rate a chunk is sized by includes the
+  mapping (checked: the staging overrun of a warm tuple walk, 6,136 ms on 5,000, could not say which piece was
+  late; it now can). Beside it, `timing.seed_phase_ms` (the seed's validation or derivation), `seed_fetch_ms` (its
+  reads, also in `annotation_fetch_ms`) and `label_resolve_ms` (resolving its label names), and, on a row-diff
+  annotation with the path cache, `timing.path_cache {hits, stored_rows_read, rows_kept, bytes_kept, peak_bytes}`
+  (§8.4): physical, timing only.
 - **Annotation reads under a budget** (stage 3 of `DESIGN-traverse-graphlet.md` §14.1). On an annotation whose
   reads are budget-aware — `RowDiff` over BRWT or ColumnMajor, with or without coordinates
   (`row_diff_brwt`, `row_diff_brwt_coord`, `row_diff`, `row_diff_coord`) — a request with a budget reads its
@@ -1899,6 +1971,18 @@ at 32–35 against 48, scattered ones at 40–42 against 39–42; on the mini re
 unchanged. A per-coordinate rank and select were 3–7% of a refseq33m request, the remaining per-row cost once
 selected-label decoding (3c) shrinks the decode.
 
+**Permitted-range filtering of header labels** *(review of pass 5, part B; feature level 5)*. A query of named
+header labels needs only its own sequences' coordinates: it holds, per column, the coordinate ranges `[first,
+last]` of its requested sequences (from `CoordToHeader::last_coord`), and looks each coordinate of the column up
+among them by a binary search — a coordinate outside them is dropped without being mapped, one inside maps to
+`(label, coordinate − first)`. The run mapper above (rank and select per run) still maps the coordinates where every
+sequence matters: the recorder (annotate), a header discovery and a derivation. The same hits and lists as mapping
+every coordinate (tested on mini refseq against `map_coord` for every coordinate, both read paths, with and without
+coordinates); `timing.coords_mapped` still counts every coordinate of the column examined. This is a filter applied
+to the reconstructed row; pushing the permitted columns and ranges into the row's decoding is stage 3c, where the
+ranges must be shifted along the row-diff path (a coordinate moves by one at each step), never applied as one
+absolute interval at every dependency row.
+
 ### 8.3 Batching along unbranched runs
 
 Walk structurally up to `batch_kmers` nodes while each node has exactly one non-`'$'` successor; map and fetch
@@ -1930,14 +2014,14 @@ Per-step costs to expect: `basic` DBGSuccinct right step O(σ) rank/select, left
 `primary` first-visit step adds O(k) (`rc_index_range`, counted).
 
 The reverse header index (header → `(column, seq_id)`, for resolving a header label by name) belongs to the
-`CoordToHeader` itself: built on its first lookup, shared by every request on the loaded index, and freed with
-it. It is never a process-wide cache keyed by the object's address: an object made later at a freed address
+`CoordToHeader` itself: built while the index loads (§10.3; feature level 5 — before, on its first lookup, inside
+that request's budget), shared by every request on the loaded index, and freed with it. It is never a process-wide cache keyed by the object's address: an object made later at a freed address
 could be answered from another's index, which no partial fingerprint of the headers can rule out.
 
 **The row-diff path cache** *(efficiency pass; feature level 4)*. On a row-diff annotation every read of a
 `/traverse` request — the default reads and the budget-aware ones (§6.8), a level's fetch, the lookahead, a
-derivation's window, a validation — keeps the rows it reconstructs (the requested rows, every row on their row-diff
-paths, the anchors read) in a cache of at most `--traverse-path-cache-mb` MiB (default 128, 0 = off; the CLI takes
+derivation's window, a validation — keeps rows it reconstructs (until feature level 5 every row of every path; now
+those its retention rule selects, below) in a cache of at most `--traverse-path-cache-mb` MiB (default 128, 0 = off; the CLI takes
 the same flag), so that a later read's row-diff path stops at a cached row instead of decoding to its anchor
 again. On refseq33m a fetch of one warm 23S k-mer cost one whole path decode (66–86 ms) and each further row of
 the same path 2.1 ms, so a walk fetching a few keys per level paid 27–41 ms a row against 4.6 ms read in one call;
@@ -1989,6 +2073,33 @@ it, not exactly, and a level read the cache lets through in one piece decodes th
 piece (§6.8: a stop's position does not depend on it). Without a memory budget they are the same with and without
 the cache. With several traversals at once each holds its own cache (up to `path_cache_mb` each without a memory
 budget).
+
+**Retention** *(review of feature level 4, R10; feature level 5)*. Keeping every row of every path copied each row
+of a long path into the cache. On a coordinate annotation with wide rows (refseq33m 23S: about 28,000 coordinates
+in 11,000 columns, one allocation per column with more than two of them) a first read, whose paths no later read
+meets, then cost several times the read without the cache, and a walk reading one row per call churned the cache's
+generations so that every call decoded its whole path again. A read now keeps (`RowDiffCache::keeps`): every row
+it was asked for (later paths meet them: a predecessor's path runs through its successor; a repeated read is a hit);
+the first 8 rows after each of them on its path (a forward walk reads these next); every row whose distance to its
+anchor is a multiple of 16, anchors included (a **checkpoint**: a later path through rows of this one stops within
+15 rows of a kept row instead of running to the anchor; the distance is a property of the row, so which rows are
+checkpoints does not depend on the calls); and every **narrow** row, whose copy holds less than 4,096 bytes (copying
+it costs little beside the descent that decoded it: on UHGG, binary rows of 10-200 bytes, the rule keeps every
+row, the same stored rows read and hits as before). A call of n rows whose paths read s stored rows thus keeps at
+most n × 11 + s / 16 rows that are not narrow, where it kept s; `timing.path_cache` counts what it copies
+(`rows_kept`, `bytes_kept`), the stored rows read (`stored_rows_read`), the hits and the peak. A tuple row is kept
+**flat** (its columns, the end of each column's coordinates, the coordinates: three buffers instead of one per
+column with more than two coordinates), its bytes so counted against the bound; a hit rebuilds the row exactly and
+a budget-aware read is charged its copy as before. Measured on a synthetic coordinate index (8,000 labels each
+carrying three copies of a 3 kb core with SNPs; 24,000 coordinates a row; paths of up to 100 and of up to 1,000
+rows), medians of 5, against the cache off and the pass-5 binary: no request slower beyond noise; isolated first
+reads 1.1-2.9 times faster than with the cache off (1.6-6.2 times faster than keeping every row), walks with
+`batch_kmers: 1` 6-15 times faster than with the cache off (keeping every row was 4.9 times faster than off on paths
+of 100, and 7.7 times slower on paths of 1,000: 16.9 s against 2.2 s), time-bounded walks cut with the cache off
+reaching 1.5-2.0 times its rows; on UHGG the same work as keeping every row. The seed phase (a validation, a
+derivation) keeps reading through the cache, as decided by these measurements: the isolated first reads above are
+seed phases. The rule changes what is kept only, never a row, a charge or an admission
+(tested across rules, capacities, batches, chunks and cold and warm seeds, T52).
 
 Under a memory budget the label caches get a fixed allotment of it (§5) and **evict wholesale** when they exceed
 it, as without one (a walk moves forward, so recency is not worth tracking). A row evicted and needed again is
@@ -2128,7 +2239,31 @@ the server.
     removed (§8.3) — and an attempt's walk-until (the reserve's estimates): the lookahead's radius cap, the single
     decode of a discovery, the coordinate runs and the path cache change only physical work (checked against the
     previous build, T51); the same holds for budgeted requests while the budgets' maxima are unset, where the
-    path cache can also change those counters (§8.4).
+    path cache can also change those counters (§8.4). **5** (the review of pass 5): the tombstone's suppression —
+    `POST /traverse/cancel` with `not_after_ms`, `suppressed_until_ms` / `covers_admission` /
+    `covers_admission_reason` in every tombstone answer, the refused copy extending the tombstone,
+    `--traverse-attempt-tombstone-max-s` and `attempts.tombstone_max_s`, `cancel_fields`, the `suppression`,
+    `release_rule` and `instance` texts — and `expect_server_instance` with its `instance_mismatch` 409; bounded
+    retention settings (retention 0: no tombstones, 429 `no_suppression`); and from the review of these fixes a
+    finished attempt's id held until its `not_after_ms` + skew (the release rule's finished state), the hold
+    live through `suppressed_until_ms` inclusive, and a refused copy's suppression judged against its own
+    `not_after_ms` alone; the loader dependency inventory (a manifest must cover every file the pair loads, the
+    `.bloom` included, with distinct base names and no optional file of the inventory the pair does not load;
+    bundles grouped by their whole inventory; `traverse --index-inventory`); the path cache's retention rule and flat tuple rows (§8.4), the
+    sequence header index built while the index loads, the header labels' range filter (§8.2), a `/resolve`'s
+    rows decoded in bounded batches, a discovery accumulating its profiles as it reads (§4.2), the budgeted
+    lookahead's runs in the walk's order (§8.3), the
+    delivery checks every 64 KiB of a large token and the delivery gaps in `observed_max_uninterruptible_ms`
+    (§6.8), and in `timing` the seed phase (`seed_phase_ms`, `seed_fetch_ms`, `label_resolve_ms`), the path cache's
+    physical work (`path_cache`) and the deadline record (`deadline`, §6.8). Feature level 5 changes no response of
+    a request without budgets beyond the digit, the `timing` block (new fields; `coords_mapped` counts the
+    coordinates a header label's filter examined, as before) and the texts of the capabilities; budgeted requests
+    keep their bytes too (checked against the previous build, T52). *(In the code the constant is raised with
+    the release; until then the server states 4.)*
+  - **`schema_version`** is the one request schema the server accepts: 1, with no compatibility window. A future
+    change of the request schema adds `request_schema_versions: [..]` to the capabilities and keeps accepting 1 for
+    a stated window; a `schema_version` above 1 without that list means a server whose requests a client written
+    for version 1 cannot make. Clients key features on `feature_level`, never on `schema_version`.
   - **The index identity** (`DESIGN-traverse-graphlet.md` §3.1), also in every graphlet's `H` record:
     - `index_ns`: a name for humans and routing, not identity (`[A-Za-z0-9._-]+`): `--index-name NAME` for a single
       index, the graph list's fifth column per (graph, annotation) pair; `null` when unset. A manifest's own
@@ -2139,10 +2274,33 @@ the server.
       beside them), hashed as the lines `<path>\t<size>\t<sha256>\n` in ascending byte order of path; other keys
       (builder, inputs, an entry's `digest`) are metadata. The build hashes the files once; the server reads the
       digests and checks, before loading anything, that every file it loads is listed (by base name) with its
-      size — the graph, the annotation and, when they exist, `<graph>.anchors` and `<graph>.rd_succ` (row-diff),
-      `<graph without .dbg>.edgemask`, `<annotation>.coords` (column coordinates) and `<annotation without
-      .<type>.annodbg>.seqs` (sequence headers) *(pass 5 review: before, the sidecars were not checked, and a
-      manifest whose sidecars were another build's was accepted)* —, that the manifest lists no graph (`*dbg`) or
+      size — the **loader dependency inventory** of the pair *(review of pass 5, findings 2 and 3; one C++
+      definition, `index_load_inventory`, which `metagraph traverse --index-inventory -i GRAPH -a ANNOTATION`
+      prints as JSON and `scripts/traversal/index_manifest.py` mirrors, an integration test comparing the two on
+      every sidecar kind)*: the graph; `<graph without .dbg>.edgemask` when it opens and then `<graph without
+      .dbg>.bloom` when it exists (`DBGSuccinct::load`; a Bloom filter that was loaded but listed nowhere changed
+      `/resolve`'s `graph_runs` from `[[0, 36]]` to `[]` under an unchanged fingerprint); the annotation;
+      `<graph>.anchors` and `<graph>.rd_succ` for a `.row_diff.annodbg` (required: the loader exits without them);
+      `<annotation without .<type>.annodbg>.seqs` for a coordinate annotation unless `--no-coord-mapping` — each
+      path derived from the LISTED spelling, as the loaders derive it (beside a symlink, not beside its target).
+      A file of the inventory the manifest does not name is refused, naming it; a named one of another size too.
+      *(Review of the pass-5 fixes.)* Loaded files are matched to entries by base name, so the entries' **base
+      names must be distinct**: a manifest written for a directory of bundles sharing names (`A/graph.dbg`,
+      `B/graph.dbg`, `A/annotation.seqs`, `B/annotation.seqs`) passed for each of them, and two single-index
+      servers stated one `index_fp` and one `index_meta_fp` while answering with different accessions; such a
+      manifest is refused, naming the shared base name (`index_manifest.py --verify` refuses it too, and writes
+      bare base names). And it must **not list an optional file of the pair's inventory that the pair does not
+      load** — `<graph without .dbg>.edgemask` or `.bloom`, or the annotation's `.seqs`, when it is missing beside
+      the listed spelling, the mask is not read, or with `--no-coord-mapping` —, so that `index_fp` identifies
+      the loaded files (a server without the `.seqs` beside its symlinks, or with `--no-coord-mapping`, stated the
+      `index_fp` of one that loads it; for a mask or a Bloom filter even `index_meta_fp` was the same). Files
+      outside the inventory (`index_manifest.py --extra`: a `.coords`, a `.weights`, anchors beside another
+      annotation type) stay allowed.
+      Deliberately not in it, because the server does not open them: a column annotation's `.coords`
+      (`merge_load` reads the columns only), the graph's `.weights`, an `<graph>.anchors` beside another
+      annotation type (those are inside the annotation file), and the reverse header index (built in memory from
+      the `.seqs`). *(Pass 5 review: before, the sidecars were not checked, and a manifest whose sidecars were
+      another build's was accepted.)* — It also checks that the manifest lists no graph (`*dbg`) or
       annotation (`*.annodbg`) file other than those (a manifest describes one graph with one annotation: one
       written for a directory holding several annotations of one graph lent one fingerprint to each), and that
       an `index_fp` the manifest states is the computed one; it refuses to start otherwise. Sizes, not contents,
@@ -2168,8 +2326,12 @@ the server.
     release id, as an earlier version of this section described — now refuses to start rather than have it
     misread). Every listed manifest is checked against the files its pair loads exactly as `--index-manifest` is
     (sizes and the digest of its list, no re-hashing), before anything is loaded; a mismatch refuses to start. One
-    index, one identity: lines naming the same pair — the same files, however their paths are spelled (compared by
-    real path) — must agree on what they state (an empty column states nothing and takes what another line of the
+    index, one identity: lines naming the same index — the same files, however their paths are spelled: two lines
+    are one index only when their pairs' **whole loader inventories** resolve to the same real paths in the same
+    roles *(review of pass 5, finding 2: grouped by the graph's and annotation's real paths alone, two pairs of
+    symlinks to one graph and annotation with different `.seqs` beside them shared one manifest check, and both
+    stated A's `index_fp` while answering with different accessions)*, so each distinct bundle is validated
+    against the manifest it names — must agree on what they state (an empty column states nothing and takes what another line of the
     pair states), and two different pairs never state one `index_fp` (a manifest whose files had the base names
     and sizes of two pairs, such as two annotations of one graph with swapped memberships, would let one index
     be taken for the other; copies of one index under two paths are refused too, as telling them apart would
@@ -2232,10 +2394,14 @@ the server.
   (small change to `process_request`). 503 while the index loads. Handlers run on the io threads: `-p ≥ 2` is
   documented as required for serving `/traverse` beside `/search`.
 - **Attempts** (requests with `attempt_id`, §5; stage 4, backend half). Both capabilities routes state them
-  under `attempts` (the same block): `fields` (`["attempt_id", "budget_id", "locus_id", "not_after_ms"]`),
-  `id_pattern`, `cancel`, `state`, `server_instance` (16 hex, random per process: a ledger tells a restarted
-  backend, whose attempts are gone, from an expired attempt), `retention_s`, `retention_count` (the finished
-  attempts kept, and apart from them the most tombstones held at once), `allowance_ms`, `hard_cap_ms`
+  under `attempts` (the same block): `fields` (`["attempt_id", "budget_id", "locus_id", "not_after_ms",
+  "expect_server_instance"]`; the last from feature level 5), `cancel_fields` (`["attempt_id", "wait_ms",
+  "not_after_ms"]`, feature level 5), `id_pattern`, `cancel`, `state`, `server_instance` (16 hex, random per
+  process: a ledger tells a restarted backend, whose attempts and tombstones are gone, from an expired attempt),
+  `retention_s`, `retention_count` (the finished attempts kept, and apart from them the most tombstones held at
+  once), `tombstone_max_s` (feature level 5: the longest a tombstone is held to cover a `not_after_ms`, as
+  applied — `max(--traverse-attempt-tombstone-max-s, retention_s)`), the `suppression`, `release_rule` and
+  `instance` texts (feature level 5, below), `allowance_ms`, `hard_cap_ms`
   (`content_timeout_s` × 1000 − 1000 = 899 000: the bound never exceeds it), `content_timeout_s` (900),
   `client_check_ms` (100), `clock_skew_allowance_ms` (`--traverse-clock-skew-ms`, default 2000: what a ledger adds
   to `not_after_ms`, §5; the server's own check adds nothing), the `bound` and `not_after` rules (text) and
@@ -2247,41 +2413,108 @@ the server.
   the smallest ratio and the longest stop time of the last `rate_window` this server measured, null until it has
   measured one — and its `rule`, §6.8). **Number types**: `allowance_ms`, `hard_cap_ms`,
   `clock_skew_allowance_ms`, `content_timeout_s`, `client_check_ms`, `retention_s`, `retention_count`,
-  `measured_text_bytes`, `rate_window`, `stop_ms`, `measured_stop_ms` (or null) and, in `deadline_check`,
+  `measured_text_bytes`, `rate_window`, `stop_ms`, `measured_stop_ms` (or null), `tombstone_max_s` and, in
+  `deadline_check`,
   `chunk_target_ms` and `observed_max_uninterruptible_ms` are integers (`allowance_ms` was written 10000.0 before
   feature level 3; `--traverse-attempt-allowance-ms`, `--traverse-clock-skew-ms` and
   `--traverse-chunk-target-ms` take integers in [0, 2⁵³ − 1], anything else is refused at start-up, so that a
-  JSON client reads each as written and a ledger can add to it); `compress_mbps`, `build_mbps`,
+  JSON client reads each as written and a ledger can add to it; *review of pass 5, finding 4*:
+  `--traverse-attempt-retention-s` and `--traverse-attempt-tombstone-max-s` take integers in [0, 31 536 000] (a
+  year) and `--traverse-attempt-retention` in [0, 10 000 000] — a negative, fractional, non-numeric or larger value
+  refuses to start, naming the option and its range: `-1` had started, stated 2⁶⁴ − 1 seconds and expired every
+  tombstone at once); `compress_mbps`, `build_mbps`,
   `account_per_text_byte`, `margin` and the measured rates and ratios (or null) are numbers (a rate may be
   fractional), as are the probe's `max_time_ms` and the time budgets.
   - `POST /traverse` with `attempt_id`: 200 with `usage` (complete, partial, failed seeds, cancelled); 400 with
     `{error, usage}` for a request error after the attempt was registered (a bad strategy, an unknown label or
     graph, too many seeds, an unreachable extra label, …); 400 with `{error}` alone for a malformed id, a malformed
     `not_after_ms`, or `budget_id`/`locus_id` without `attempt_id`; **409** with `{error, attempt}` (the other
-    attempt's state, no `usage`) when the id is running, retained, or tombstoned by a cancel; **409** with
+    attempt's state, no `usage`) when the id is running, retained, held past its retention (below), or tombstoned
+    by a cancel (a tombstone's `attempt` carries its suppression, judged against this request's own `not_after_ms`
+    alone — absent when it has none: then `covers_admission` is false, `no_not_after_ms` — and the refusal extends
+    the tombstone, below); **409** `{error, state: "instance_mismatch", …}` when
+    `expect_server_instance` names another process (§5; answered first); **409** with
     `{error, state: "expired", not_after_ms, server_time_ms, attempt_id, budget_id?, locus_id?, server_instance}`
     (no `usage`, nothing registered) when `not_after_ms` has passed (§5; the same without the ids for a request
     without `attempt_id`; the duplicate's 409 is answered first); 503 with `{error, usage}` (reason `deadline`)
     when the bound was reached while the response was built; 500 with `{error, usage}` for a non-standard
     exception; 503 while the index loads (no `usage`: the request was not read). A client that is gone gets no
     response (with or without `attempt_id`).
-  - `POST /traverse/cancel` `{"attempt_id": "…", "wait_ms": 0}` (`wait_ms` 0 … 10 000, default 0: how long to
-    wait for the attempt to finish): **200** `{attempt_id, server_instance, cancelled: true, state:
-    "stopping" | "finished", attempt}` when the attempt was asked to stop (now or before: idempotent; `state`
-    `finished` when it finished within `wait_ms`); **404** `{error, attempt_id, server_instance, cancelled:
+  - `POST /traverse/cancel` `{"attempt_id": "…", "wait_ms": 0, "not_after_ms": …}` (`wait_ms` 0 … 10 000, default
+    0: how long to wait for the attempt to finish; `not_after_ms` optional, feature level 5, validated as on
+    `/traverse` — the instant of the request being cancelled): **200** `{attempt_id, server_instance, cancelled:
+    true, state: "stopping" | "finished", attempt}` when the attempt was asked to stop (now or before: idempotent;
+    `state` `finished` when it finished within `wait_ms`); **404** `{error, attempt_id, server_instance, cancelled:
     false, state: "finished", attempt}` when it has finished; **404** `{error, attempt_id, server_instance,
-    cancelled: false, state: "unknown", tombstone: true}` for an id this server does not know — the id is then
-    **tombstoned** for the full retention period (`retention_s`), so that a request arriving later with it is
-    refused (409) and never runs here: a cancel can overtake its request, and such a 404 (`tombstone: true`) from
-    the same `server_instance` therefore means the attempt will not run on it for `retention_s` (a server
-    restart ends that: a new `server_instance`). Tombstones are kept apart from the finished attempts and expire
-    by age only, so later finishes never evict one early (review of the stage-4 backend, F6); at most
-    `retention_count` are held at once, and a cancel of an unknown id beyond that is refused, **429** `{error,
-    attempt_id, server_instance, cancelled: false, state: "unknown", tombstone: false}`: the id was not
-    tombstoned and nothing is promised (retry the cancel later). 400 for a bad body. Not refused while the index
-    loads.
+    cancelled: false, state: "unknown", tombstone: true, suppressed_until_ms, not_after_ms?, covers_admission,
+    covers_admission_reason?}` for an id this process does not know — the id is then **tombstoned**: a request
+    arriving later with it is refused (409) and never runs here (a cancel can overtake its request: still queued,
+    on the wire, its body half uploaded). *Review of pass 5, finding 1*: held for `retention_s` alone, a tombstone
+    expired while the request it suppressed could still be admitted — with `retention_s` 1, a request with
+    `not_after_ms` = now + 60 s was half uploaded and cancelled (404, `tombstone: true`), and its upload completed
+    at 1.18 s ran. A tombstone is now held **at least `retention_s`** from the cancel and, when the cancel names the
+    request's `not_after_ms`, **until this server's clock reads `not_after_ms + clock_skew_allowance_ms`**, at most
+    `tombstone_max_s` from the cancel. It is held while **either** clock says it is live: the steady clock for the
+    duration computed when it was set or extended, plus one millisecond (a forward step of the wall clock does not
+    shorten it), and the wall clock while it reads **at most** `suppressed_until_ms`, that millisecond included (a
+    backward step lengthens it). *(Review of the pass-5 fixes, finding 2: the tombstone ended when the clock read
+    `suppressed_until_ms` exactly, while the strict check still admits a request in the millisecond its clock
+    reads `not_after_ms`; with `--traverse-clock-skew-ms 0` a covered copy whose handler started in that
+    millisecond ran, 27 of 40 tries.)* A repeated cancel, and a
+    refused copy of the request (its 409 above, with its own `not_after_ms`: a proxy's replay carries the same),
+    **never shorten** it: each extends it to at least `retention_s` from then and to its own `not_after_ms` +
+    `clock_skew_allowance_ms` within the cap, so every later copy is refused while it could still be admitted.
+    Every tombstone answer — the cancel's 404, a repeated cancel's 404, `GET /traverse/attempt`'s 404 and the
+    refused request's 409 (in its `attempt`) — states `suppressed_until_ms` (the hold's last millisecond on the wall
+    clock, inclusive, Unix epoch ms on this server's clock), `not_after_ms` (the one it was judged against: for the
+    refused request's 409 its own alone, absent when it has none — *review of the pass-5 fixes, finding 3*: it fell
+    back to a cancel's, and stated `covers_admission: true` for a copy without `not_after_ms` that ran once re-sent
+    after the hold; for a cancel its own, else, as for GET, the largest named for the id; absent when none was),
+    `covers_admission` (**true iff a `not_after_ms` was judged against and `suppressed_until_ms ≥ not_after_ms +
+    clock_skew_allowance_ms`**: no copy of that request can start on this `server_instance` — while the tombstone
+    is live it is refused, and once it is gone this server's clock has read later than `suppressed_until_ms`, so
+    the copy's `not_after_ms` has passed on the clock the strict check reads) and, when false,
+    `covers_admission_reason` (`no_not_after_ms` | `beyond_tombstone_max`). Tombstones are kept apart from the
+    finished attempts and expire by their hold only, so later finishes never evict one early (review of the
+    stage-4 backend, F6); a cancel of an unknown id is tombstoned only while fewer than `retention_count`
+    tombstones and held finished attempts (below) are held, and refused beyond that, **429** `{error, attempt_id,
+    server_instance, cancelled: false, state: "unknown", tombstone: false, reason: "tombstones_full"}`: the id
+    was not tombstoned and nothing is promised (retry the cancel later). With `retention_s` 0 (finding 4) the
+    server keeps **no tombstones**: such a cancel is refused, **429** with `reason: "no_suppression"`, and a request
+    with the id arriving later runs (the capabilities' `suppression` says so). 400 for a bad body. Not refused
+    while the index loads. What a clock step can do: a backward step of this server's wall clock by more than
+    `clock_skew_allowance_ms` after a tombstone expired can make a copy's `not_after_ms` lie in the future again
+    (exactly: the hold ends once the clock reads later than `not_after_ms` + skew, and the strict check admits a
+    copy only while it reads at most `not_after_ms`; the assumption the ledger's skew allowance makes anyway).
+  - **The release rule** (normative; the capabilities' `release_rule`, feature level 5): a ledger may release an
+    attempt's capacity **before it finished only** on a 404 with `tombstone: true` **and** `covers_admission:
+    true` from the same `server_instance`, for an attempt it sent with **exactly that `not_after_ms`** and with
+    `expect_server_instance` equal to that `server_instance` (a copy reaching a restarted process is then refused,
+    `instance_mismatch`). An attempt sent without `not_after_ms`, or without `expect_server_instance`, is never
+    released early on a tombstone. Otherwise it releases only on a finished state (`GET /traverse/attempt`, a
+    cancel's 404 or 200 with `state: "finished"`, or the response), or once its own clock passes `not_after_ms +
+    clock_skew_allowance_ms + bound_ms`. **A finished state** promises that the request does not run again here:
+    a finished attempt's id stays refused (409, its state) while it is retained (`retention_s`,
+    `retention_count`) and, for an attempt sent with `not_after_ms`, until this server's clock reads later than
+    `not_after_ms + clock_skew_allowance_ms`, at most `tombstone_max_s` after it finished — past its retention if
+    need be, **held** among the tombstones (on both clocks, as a tombstone; a refused copy with a later
+    `not_after_ms` extends it within the cap). *(Review of the pass-5 fixes, finding 1: with `retention_s` 1, or
+    `retention_count` 1 and one later finish, a replay of a finished request — same `attempt_id`, `not_after_ms`
+    and `expect_server_instance` — arrived after the ledger had released on the finished state and ran again.)*
+    A finished state of an attempt sent **without** `not_after_ms`, or with one beyond `tombstone_max_s` of its
+    finish, assumes that no copy of the request arrives after the attempt left retention; with `retention_s` 0
+    nothing is kept, and a finished state assumes that no copy arrives after it. Held attempts are not bounded by
+    `retention_count` (they are never dropped early): their number is at most the finishes within
+    `tombstone_max_s`, so `--traverse-attempt-tombstone-max-s` bounds their memory. A 429 and a cancel's 200 with
+    `state: "stopping"` release nothing.
+    Assumed, not checked: the ledger's clock is within `clock_skew_allowance_ms` of this server's, this server's
+    clock does not step back by more than that, nothing between the ledger and the server rewrites a request's
+    `attempt_id`, `not_after_ms` or `expect_server_instance`, and no copy of the request reaches **another
+    server** that serves the same ledger (a server knows only its own tombstones; `expect_server_instance`
+    refuses such a copy only where it names that server's instance).
   - `GET /traverse/attempt/{attempt_id}`: **200** with the attempt's state, **404** `{error, attempt_id,
-    state: "unknown", server_instance}` (and `tombstone: true` for a tombstoned id) once it is no longer
+    state: "unknown", server_instance}` (and for a tombstoned id `tombstone: true` with its suppression, as the
+    cancel states it; reading it does not extend it) once it is no longer
     retained, 400 for a malformed id (the id is matched as sent, not percent-decoded):
 
     ```json
@@ -2308,8 +2541,12 @@ the server.
     `per_seed`).
   - Retention: finished attempts are kept `--traverse-attempt-retention-s` seconds (3600) and at most
     `--traverse-attempt-retention` of them (10 000, oldest dropped first; a running attempt is never dropped);
-    GET answers 404 after that and the id may be used again. Tombstones are kept `retention_s` each, at most
-    `retention_count` at once, apart from them (above). Every attempt is logged when it is
+    GET answers 404 after that and the id may be used again — unless the attempt was sent with `not_after_ms`:
+    its id is then **held** (GET 200, a request with it 409) until `not_after_ms + clock_skew_allowance_ms`
+    within `tombstone_max_s` of its finish (the release rule, above). Tombstones are held **at least**
+    `retention_s` and, for a `not_after_ms` a cancel or a refused copy names, until it + the skew allowance
+    within `tombstone_max_s` (above); a cancel of an unknown id is tombstoned only while fewer than
+    `retention_count` tombstones and held attempts are held. Every attempt is logged when it is
     registered, cancelled and finished (`[Server] Attempt <id> (request <n>) finished (<reason>): walk stopped at
     <instant> (<d> ms after the stop was requested by <who>), <s> of <n> seed(s) walked[ (<a> abandoned in its
     walk)], bound <b> ms; response
@@ -2334,10 +2571,18 @@ the server.
     (`--traverse-clock-skew-ms`).
   - A graph list that gives manifests (column 4) refuses to start when one does not describe its pair's files:
     regenerate them with `index_manifest.py --server-csv` after an index changes. Manifests written before the
-    review of pass 5 may lack sidecars the server now checks (`<graph without .dbg>.edgemask`,
-    `<annotation>.coords`, `<base>.seqs` of a `.column` annotation, which the tool used to look for under other
-    names), or list a second annotation (`--extra`): such a list refuses to start, naming the file; regenerate
-    the manifests.
+    review of pass 5 may lack files the server now checks (`<graph without .dbg>.edgemask`, `<graph without
+    .dbg>.bloom` beside a masked graph, `<base>.seqs` of a coordinate annotation, which the tool used to look for
+    under other names), or list a second annotation (`--extra`): such a list refuses to start, naming the file;
+    regenerate the manifests (`index_manifest.py`, whose default bundle is now the loader inventory: it no longer
+    adds a `.coords` or a `.weights` the server does not open — `--extra` adds them, changing the fingerprint).
+  - **The sequence header index** (header name → `(column, seq_id)`) is built while the index loads, before the
+    server answers traversal requests, and logged with its size and time (`[Server] Sequence header index built:
+    N headers in S s`; 4.6 s for 33 M synthetic headers on the M5 Max): built by the first request naming a header
+    instead, it cost that request seconds inside its time budget and outside every read timer (R10: staging,
+    refseq33m, a first header-named walk ran 9,947 ms on a 1,000 ms budget, 689 ms of it reading). It holds a
+    hash entry per header (on refseq33m, 33 M headers, on the order of 1-2 GB), which a server that serves header
+    labels would have built anyway. The CLI builds it once before its requests.
 
 ## 11. Tests
 
@@ -2424,6 +2669,7 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T49 | pass 5: delivery | `GraphletServer.AssembledResponseIsByteIdentical` (per-seed texts assembled = the whole tree's text, every detail, a failed seed, usage); `GraphletAttempt.DeliveryReserveMovesTheWalkUntil` (with the 1.25 margin, the configured and the measured stop time, and `usage.bound.walk_until_ms` the walk-until in force when it stopped the walk); `test_api_bodies_are_the_cli_output_at_every_encoding`; `test_wide_index_delivery_reserve_stops_the_walk`; the byte-identity harness against the previous build (1,380 real requests at chunks of 50 ms, 588 of them at 1 ms, 588 from a three-column graph list, 804 SRA requests) | §6.8, §10.3 |
 | T50 | pass 5: `standalone_text` and the reduced `J` | `test_traverse_standalone.py`: byte-equal to `dump(from_response(…), envelope=True)` on every fixture result, `usage` reduced to the totals and this seed's `per_seed`, `save()` and the store write the same bytes, reserved names refused | §7.5.2 |
 | T51 | the efficiency pass (feature level 4) | `RowDiffPathCache.*` (the cached default decode returns the default decode's rows call after call, under bounds that keep everything, evict often and keep nothing, and a shared bound that shrinks; the budget-aware decode with the cache gives every row the costs of its whole path and at most the held bytes, a row read alone at most its peak without the cache and within its demand, and refuses below its peak; the generations; a dropped generation frees its table, `DroppedGenerationsReleaseTheirTables`, and the counts follow the tables at a rotation and under a shrinking shared bound; the lookahead's reads admitted as without the cache, `LookaheadAdmittedAsWithoutTheCache`), `LabelOraclePathCache.SameAnswersAndCounters` (query and recorder, budgeted and not, every counter, the shared bound), `MiniRefSeq.PathCacheKeepsTheResponse` (96 responses byte-equal with and without the cache: constrain/annotate, memory budgets at their stops, work budgets, `batch_kmers` 1 and 64, an evicting cache, one-row chunks), `MiniRefSeq.PathCacheKeepsRootRefusals` (an annotate seed whose right root's read the seed_id's length moves across its refusal under 1 MiB: every response byte-equal with and without the cache, the refusals of a read alone among them), `MiniRefSeq.ServerBudgetMaxima` (also a seed failed in its seed phase by the work maximum and at an annotate root by the memory maximum: server_clamp, `requested`, no raise action, `server_limit`; a seed failed by the request's own budget keeps its lever), `CoordToHeader.SequenceRangeAgreesWithMapSingleCoord`, `LabelOracleCoordRuns.SameAsMapSingleCoord` (and the `DISABLED_` measurements); `test_row_diff_path_cache_keeps_the_bytes`, `test_server_budget_maxima`, `test_api_server_capabilities`; the byte-identity harness against the previous build (unbudgeted: 588 mini_refseq — also from a three-column graph list and with chunks of 1 ms —, 792 UHGG and 804 SRA `/traverse` requests, 688 `/resolve` requests; budgeted: the 588 mini_refseq requests under 4 MiB and under 300,000 work units, the 792 UHGG ones under 16 MiB; differences only in attempts' `walk_until_ms` and in walks the previous build's cold first touch cut by their time budget), and with the cache on and off (201 SRA and 198 UHGG requests at the default `batch_kmers`, at 1, the UHGG ones under 256 and 8 MiB and 10⁶ work units, 147 mini_refseq requests without and under 4 MiB) | §4.2, §6.8, §8.2–8.4, §10.3 |
+| T52 | the review of pass 5 and R10 (feature level 5) | `GraphletAttemptRegistry.CancelNotAfterMsHoldsTheTombstoneThroughAdmission` (the reviewer's half-upload timeline with retention 1 s on injected clocks: the cancel naming `not_after_ms` holds the tombstone to `not_after_ms + skew`, the repeat at 0.763 s states the same expiry, the copy at 1.177 s is refused, at the expiry the strict check refuses it; without `not_after_ms` `covers_admission` is false and the copy runs), `.TombstonesAreNeverShortenedAndCapped`, `.ARefusedCopyExtendsTheTombstone`, `.TombstonesSurviveWallClockSteps` (forward and backward steps), `.RetentionZeroKeepsNoTombstones`, `.ExpectServerInstanceRefusesAnotherProcess`, `.CapabilitiesStateIntegers` (the release rule's phrases, `cancel_fields`, `tombstone_max_s`, "cannot start subsequently"; what a finished state promises and assumes, the inclusive hold, the 409's own `not_after_ms`); the review of these fixes: `.FinishedAttemptsAreHeldThroughTheirNotAfterMs` (the reviewer's p1 — retention 1 s, the replay at 1.3 s — and p1b — retention_count 1, one later finish — refused until `not_after_ms` + skew inclusive, then expired; held attempts fill the tombstone table; without `not_after_ms` dropped as before; the cap from the finish and a refused copy's extension; retention 0 keeps nothing), `.TombstonesHoldThroughSuppressedUntilInclusive` (skew 0, a copy at the wall clock's `not_after_ms` after the steady hold passed is refused), `.ARefusedCopyIsJudgedByItsOwnNotAfterMs` (no `not_after_ms`: not covered, `no_not_after_ms`, and it runs once re-sent after the hold); `GraphletAttempt.IdsAreValidated` (`expect_server_instance`); `GraphletServer.InventoryTableMatchesTheLoadersTypes` (every annotation type `initialize_annotation` builds is in the inventory's table, row-diff anchors exactly for `RowDiff<ColumnMajor>`, headers exactly for a `MultiIntMatrix`), `.SymlinkedMainFilesDoNotHideTheirSidecars`, `.DeliveryChecksEvery64KiBOfALargeToken` (the reviewer's 16 MiB probe: ≥ size / 64 KiB checks writing and assembling, bytes unchanged, the gap measured); `Graphlet.IndexIdentity` (the `.bloom` and the mask in the inventory, a manifest not covering one refused naming it; entries `a/x.seqs` and `b/x.seqs` refused for their shared base name; a `.seqs` the pair does not load refused); `RowDiffPathCache.RetentionKeepsRowsAndCostsAndBoundsTheCopies` (keep-all, 4/1, 16/8, requested rows only and all-narrow rules: the default and budget-aware decodes' rows and costs unchanged; copies per call ≤ n × (successors + 3) + stored / checkpoint; keep-all copies every reconstructed row; the rule copies fewer), `.FlatTupleRowsRoundTrip`; `LabelOracleBudgeted.LookaheadRunsFollowTheWalk` (the reviewer's pacing probe: warm's decoder charges 31,297 against 161,679 for sorted runs, 28,736 for the walk-ordered runs alone; query and recorder); `MiniRefSeq.PathCacheKeepsTheResponse` (+ three retention rules, 168 comparisons), `.PathCacheWarmSeedIsTheColdSeed` (a seed after a copy of itself equals the seed alone, every budget, batch, chunk and cache capacity), `.DeadlineRecordNamesTheLongestPiece`, `.ResolveDecodesEachRowOnceInBoundedBatches` (the review of these fixes, finding 7: on the query and on one repeating two thirds of it, column and header labels, presence and trace, batches of 1 to 4,096 rows × byte targets 1 B / 20 kB / 64 MiB × 0 / 30 kB / 256 MiB kept (explicit labels keep none) — 384 runs: the profiles equal the reference and the same labels given explicitly, no read beyond its batch, the first 64 rows, each at most twice the one before, every distinct row decoded once when the repeats can be kept and always for explicit labels), `.HeaderHitsFilterRequestedRanges`; `WalkerDeadlineChunks.*` on a virtual clock (exact bounds; the deadline record of a paced stop). Integration `test_retention_settings_are_validated_at_start_up` (the reviewer's negative-retention probe and thirteen more values, the p3 refusals of the review of these fixes among them, refuse to start; the largest accepted are stated), `test_retention_zero_promises_no_suppression`, `test_a_cancel_naming_not_after_ms_covers_a_half_uploaded_request` (the reviewer's upload probe on a raw socket), `test_expect_server_instance_refuses_another_process` (server and CLI), `test_inventory_is_mirrored_by_index_manifest_py` (masked graph with a Bloom filter, row_diff, coordinate annotations with and without `.seqs`, `.coords`, `--no-coord-mapping`, symlinks; the tables equal), `test_symlinked_main_files_do_not_hide_their_sidecars` and `test_a_loaded_bloom_filter_is_part_of_the_identity` (the reviewer's `/tmp/metagraph-pass5-identity` cases, rebuilt); the review of these fixes: `test_a_finished_attempt_is_held_through_its_not_after_ms` (the reviewer's p1 and p1b on a real server: the replay after the ledger's release is a 409; and p4: a copy without `not_after_ms` is not covered), `test_a_manifest_names_one_bundle_and_its_loaded_files` (the reviewer's dup probe — a directory manifest of A/ and B/ refused by single-index servers, the CLI and `--verify`, naming the shared base name — and its C/ and `--no-coord-mapping` cases refused naming the `.seqs`), `test_retention_settings_are_validated_at_start_up` (each refusal names its option's own range). Byte identity against the previous build (f667d775): the unbudgeted and budgeted real requests on mini_refseq and UHGG, decompressed | §5, §6.8, §8.2, §8.4, §10.3 |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 

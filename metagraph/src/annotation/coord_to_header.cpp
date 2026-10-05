@@ -55,9 +55,13 @@ CoordToHeader& CoordToHeader::operator=(CoordToHeader &&other) {
     return *this;
 }
 
-std::optional<std::pair<CoordToHeader::Column, size_t>>
-CoordToHeader::find_header(std::string_view header) const {
+size_t CoordToHeader::build_header_index() const {
     std::lock_guard<std::mutex> lock(header_index_mutex_);
+    build_header_index_locked();
+    return header_index_->map.size();
+}
+
+void CoordToHeader::build_header_index_locked() const {
     if (!header_index_) {
         auto index = std::make_unique<HeaderIndex>();
         size_t total = 0;
@@ -75,6 +79,12 @@ CoordToHeader::find_header(std::string_view header) const {
         header_index_ = std::move(index);
         header_index_builds_++;
     }
+}
+
+std::optional<std::pair<CoordToHeader::Column, size_t>>
+CoordToHeader::find_header(std::string_view header) const {
+    std::lock_guard<std::mutex> lock(header_index_mutex_);
+    build_header_index_locked();
     auto it = header_index_->map.find(header);
     if (it == header_index_->map.end())
         return std::nullopt;

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <filesystem>
@@ -22,6 +23,7 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "server_utils.hpp"
+#include "traverse.hpp"
 
 
 namespace mtg {
@@ -104,40 +106,72 @@ struct ConnectionOf {
 };
 template struct ConnectionOf<&HttpServer::Request::connection>;
 
-// A streambuf appending to a string that calls |check| every |interval| bytes: the JSON text
-// of a large response is written under the caller's check, byte for byte what an
-// std::ostringstream receives (the same writer writes into either)
+// The checks of one delivered text: |check| called whenever |out| reached the next multiple of
+// the interval, and the longest time between two of them measured (from the start to the
+// first, and from the last to finish(): what nothing interrupts, a token's preparation
+// included)
+class DeliveryChecks {
+  public:
+    DeliveryChecks(const std::string &out, const std::function<void()> &check, size_t interval,
+                   double *max_gap_ms)
+          : out_(out), check_(check), interval_(interval), next_(out.size() + interval),
+            max_gap_ms_(max_gap_ms) {}
+    // the bytes |out| may grow by before the next check is due (at least 1)
+    size_t room() const { return next_ > out_.size() ? next_ - out_.size() : 1; }
+    void tick() {
+        if (out_.size() < next_)
+            return;
+        next_ = out_.size() + interval_;
+        gap();
+        check_();
+        since_.reset();
+    }
+    void finish() { gap(); }
+
+  private:
+    void gap() {
+        if (max_gap_ms_)
+            *max_gap_ms_ = std::max(*max_gap_ms_, since_.elapsed() * 1000);
+    }
+    const std::string &out_;
+    const std::function<void()> &check_;
+    size_t interval_;
+    size_t next_;
+    double *max_gap_ms_;
+    Timer since_;
+};
+
+// A streambuf appending to a string under DeliveryChecks: the JSON text of a large response is
+// written under the caller's check, byte for byte what an std::ostringstream receives (the same
+// writer writes into either). A piece the writer hands over is copied in pieces up to the next
+// check, so that a check comes every |interval| bytes however large the piece (review of pass
+// 5, finding 6: one 16 MiB string value was appended whole, one check after it)
 class CheckedStringBuf : public std::streambuf {
   public:
-    CheckedStringBuf(std::string *out, const std::function<void()> &check, size_t interval)
-          : out_(out), check_(check), interval_(interval), next_(interval) {}
+    CheckedStringBuf(std::string *out, DeliveryChecks *checks) : out_(out), checks_(checks) {}
 
   protected:
     int_type overflow(int_type c) override {
         if (traits_type::eq_int_type(c, traits_type::eof()))
             return traits_type::not_eof(c);
         out_->push_back(traits_type::to_char_type(c));
-        tick();
+        checks_->tick();
         return c;
     }
     std::streamsize xsputn(const char_type *s, std::streamsize n) override {
-        out_->append(s, static_cast<size_t>(n));
-        tick();
+        for (size_t left = static_cast<size_t>(n); left; ) {
+            const size_t piece = std::min(left, checks_->room());
+            out_->append(s, piece);
+            s += piece;
+            left -= piece;
+            checks_->tick();
+        }
         return n;
     }
 
   private:
-    void tick() {
-        if (out_->size() < next_)
-            return;
-        next_ = out_->size() + interval_;
-        check_();
-    }
-
     std::string *out_;
-    const std::function<void()> &check_;
-    size_t interval_;
-    size_t next_;
+    DeliveryChecks *checks_;
 };
 
 std::string trimmed(const std::string &s) {
@@ -281,25 +315,29 @@ bool peer_closed(int fd) {
     return errno == ECONNRESET || errno == ENOTCONN || errno == EPIPE || errno == ETIMEDOUT;
 }
 
-std::string json_text(const Json::Value &value, bool compact, const std::function<void()> &check) {
+std::string json_text(const Json::Value &value, bool compact, const std::function<void()> &check,
+                      double *max_gap_ms) {
     Json::StreamWriterBuilder builder;
     if (compact)
         builder["indentation"] = "";   // the traversal routes: half the bytes of the indented form
     if (!check)
         return Json::writeString(builder, value);
     std::string out;
-    CheckedStringBuf buf(&out, check, size_t(1) << 16);
+    DeliveryChecks checks(out, check, kDeliveryCheckBytes, max_gap_ms);
+    CheckedStringBuf buf(&out, &checks);
     std::ostream stream(&buf);
     // an exception of the check reaches the caller rather than setting badbit
     stream.exceptions(std::ios::badbit);
     std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
     writer->write(value, &stream);
+    checks.finish();
     return out;
 }
 
 std::string assemble_traverse_response(const Json::Value &envelope,
                                        const std::vector<std::string> &results,
-                                       const std::function<void()> &check) {
+                                       const std::function<void()> &check,
+                                       double *max_gap_ms) {
     Json::Value before(Json::objectValue);
     Json::Value after(Json::objectValue);
     for (const std::string &name : envelope.getMemberNames()) {
@@ -307,23 +345,35 @@ std::string assemble_traverse_response(const Json::Value &envelope,
             throw std::logic_error("assemble_traverse_response: the envelope holds results");
         (name < "results" ? before : after)[name] = envelope[name];
     }
-    std::string out = json_text(before, true, check);      // {...}
+    std::string out = json_text(before, true, check, max_gap_ms);      // {...}
     out.pop_back();
     if (out.size() > 1)
         out += ',';
     out += "\"results\":[";
-    size_t next_check = out.size() + (size_t(1) << 16);
-    for (size_t i = 0; i < results.size(); ++i) {
-        if (i)
-            out += ',';
-        out += results[i];
-        if (check && out.size() >= next_check) {
-            next_check = out.size() + (size_t(1) << 16);
-            check();
+    if (!check) {
+        for (size_t i = 0; i < results.size(); ++i) {
+            if (i)
+                out += ',';
+            out += results[i];
         }
+    } else {
+        // each text copied in pieces up to the next check (finding 6)
+        DeliveryChecks checks(out, check, kDeliveryCheckBytes, max_gap_ms);
+        for (size_t i = 0; i < results.size(); ++i) {
+            if (i)
+                out += ',';
+            const std::string &text = results[i];
+            for (size_t at = 0; at < text.size(); ) {
+                const size_t piece = std::min(text.size() - at, checks.room());
+                out.append(text, at, piece);
+                at += piece;
+                checks.tick();
+            }
+        }
+        checks.finish();
     }
     out += ']';
-    const std::string tail = json_text(after, true, check);  // {...}
+    const std::string tail = json_text(after, true, check, max_gap_ms);  // {...}
     if (tail.size() > 2) {
         out += ',';
         out.append(tail, 1, std::string::npos);
@@ -377,7 +427,8 @@ GraphListEntry parse_graph_list_line(const std::string &text, size_t line) {
 
 std::map<std::pair<std::string, std::string>, std::pair<std::string, std::string>>
 graph_list_identities(const std::vector<GraphListEntry> &entries,
-                      const std::function<std::string(const GraphListEntry &)> &fingerprint) {
+                      const std::function<std::string(const GraphListEntry &)> &fingerprint,
+                      const std::function<std::vector<std::string>(const GraphListEntry &)> &inventory) {
     using Pair = std::pair<std::string, std::string>;
     struct Stated {
         std::string value;
@@ -401,23 +452,42 @@ graph_list_identities(const std::vector<GraphListEntry> &entries,
                     + have->value + "' and '" + value + "'; one index has one identity");
         }
     };
-    // One index is one pair of files, however its paths are spelled: the lines are grouped by
-    // the pair's real paths (the files themselves), so that two spellings of one pair agree too
+    // One index is one set of loaded files, however its paths are spelled: the lines are
+    // grouped by the real paths of the pair's COMPLETE loader inventory (index_load_inventory:
+    // the main files and every sidecar, derived from the spelling as the loaders derive them),
+    // so that two spellings of one index agree, and two pairs whose main files are symlinks to
+    // the same files but whose sidecars differ are two indexes, each validated against its
+    // manifest (review of pass 5, finding 2: grouped by the main files' real paths, the second
+    // pair's own .seqs was never checked and both stated one index_fp)
     auto real = [](const std::string &path) {
         std::error_code ec;
         const std::filesystem::path p = std::filesystem::weakly_canonical(path, ec);
         return ec ? path : p.string();
     };
-    std::map<Pair, Pair> real_of;                          // the pair as listed -> real paths
+    // the bundle of a listed pair: its files' real paths in the inventory's order, and the
+    // real main files (for messages)
+    using Bundle = std::vector<std::string>;
+    std::map<Pair, Bundle> bundle_of;                      // the pair as listed -> its bundle
+    std::map<Bundle, Pair> pair_of;                        // a bundle -> the first pair listing it
     for (const GraphListEntry &e : entries) {
         const Pair listed { e.graph_path, e.annotation_path };
-        const Pair pair = real_of.emplace(listed, Pair { real(e.graph_path),
-                                                         real(e.annotation_path) })
-                                 .first->second;
+        auto [b, fresh_pair] = bundle_of.try_emplace(listed);
+        if (fresh_pair) {
+            const std::vector<std::string> files
+                = inventory ? inventory(e) : index_bundle_files(e.graph_path, e.annotation_path);
+            for (const std::string &f : files) {
+                b->second.push_back(real(f));
+            }
+            pair_of.try_emplace(b->second, listed);
+        }
+        const Bundle &bundle = b->second;
+        // keyed by the bundle's first listing: the messages name a pair as listed
+        const Pair pair = pair_of.at(bundle);
         auto &[ns, fp] = stated[pair];
         agree(&ns, e.index_ns, e.line, "index_ns", listed);
         if (e.manifest_path.empty())
             continue;
+        // every distinct bundle is validated against each manifest a line gives for it
         auto [it, fresh] = digests.try_emplace({ pair, e.manifest_path });
         if (fresh)
             it->second = fingerprint(e);
@@ -446,8 +516,8 @@ graph_list_identities(const std::vector<GraphListEntry> &entries,
         }
     }
     std::map<Pair, std::pair<std::string, std::string>> out;
-    for (const auto &[listed, pair] : real_of) {
-        const auto &s = stated.at(pair);
+    for (const auto &[listed, bundle] : bundle_of) {
+        const auto &s = stated.at(pair_of.at(bundle));
         out[listed] = { s.first.value, s.second.value };
     }
     return out;

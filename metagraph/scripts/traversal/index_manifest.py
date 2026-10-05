@@ -13,9 +13,12 @@ server does not re-hash the bundle (hundreds of GB) at start-up: it checks that 
 loads is listed with its size and that the stated index_fp is the digest of the list.
 
     index_manifest.py -i GRAPH -a ANNOTATION [-o MANIFEST] [--name NAME] [--extra FILE ...]
+                      [--no-coord-mapping]
+    index_manifest.py -i GRAPH -a ANNOTATION --inventory   # the files the server loads (JSON)
     index_manifest.py --verify MANIFEST          # re-hash every listed file and compare
     index_manifest.py --server-csv GRAPHS.csv [--jobs N] [--digests FILE ...] [--digests-only]
                       [--match-base-names] [--out-dir DIR] [--write-csv OUT.csv] [--force]
+                      [--no-coord-mapping]
 
 Batch mode (--server-csv) writes one manifest per (graph, annotation) pair of a multi-graph
 server's list, read as the server reads it (name,graph_path,annotation_path[,manifest_path
@@ -39,16 +42,25 @@ pair's first line's), else next to the annotation as in single mode; an existing
 kept unless --force. --write-csv writes the list back with the manifest column of every line
 filled with its pair's manifest (the index_ns column kept), ready for server_query.
 
-The bundle is the graph and the annotation plus the sidecars found next to them that the
-server loads -- <graph>.anchors and <graph>.rd_succ (row_diff), <graph without .dbg>.edgemask,
-<annotation>.coords (column coordinates), <annotation without .<type>.annodbg>.seqs (sequence
-headers) -- and <graph>.weights; the server checks each one it loads (metagraph's
-index_bundle_files). Anything else that belongs to the bundle is added with --extra, except a
-further graph (*dbg) or annotation (*.annodbg): a manifest describes one graph with one
-annotation, and the server refuses one that lists another. Paths in the manifest are
-the files' BASE NAMES, so the identity does not depend on where the bundle or the manifest
-lives (the server matches loaded files by base name too); the base names in one bundle must be
-distinct. --verify looks for the files next to the manifest, or under --root. Stdlib only.
+The bundle is the loader dependency inventory of the pair (load_inventory, which mirrors
+metagraph's index_load_inventory; `metagraph traverse --index-inventory -i GRAPH -a ANNOTATION`
+prints the binary's, and an integration test compares the two): the graph and the annotation,
+and every sidecar the server loads for them, its path derived from the LISTED spelling as the
+loaders derive it (next to a symlink, not next to its target) -- <graph without .dbg>.edgemask
+when it opens and then <graph without .dbg>.bloom when it exists (DBGSuccinct), <graph>.anchors
+and <graph>.rd_succ for a .row_diff.annodbg (required), and <annotation without
+.<type>.annodbg>.seqs for a coordinate annotation unless --no-coord-mapping. Files the server
+does not open are not part of it (a column annotation's .coords, the graph's .weights): add them
+with --extra if wanted, except a further graph (*dbg) or annotation (*.annodbg): a manifest
+describes one graph with one annotation, and the server refuses one that lists another -- or
+an optional file of the pair's inventory that it does not load (a mask or Bloom filter the
+loader skips, a .seqs missing beside the listed spelling or under --no-coord-mapping), so that
+index_fp identifies the loaded files. The server refuses a manifest that does not cover a file
+of the inventory. Paths in the manifest are the files' BASE NAMES, so the identity does not
+depend on where the bundle or the manifest lives (the server matches loaded files by base name
+too); the base names in one manifest must be distinct (the server, and --verify, refuse one
+that lists a base name twice). --verify looks for the files next to the manifest, or under
+--root. Stdlib only.
 """
 import argparse
 import hashlib
@@ -86,27 +98,108 @@ class ManifestError(Exception):
     pass
 
 
-def coordinate_headers(annotation):
-    """<base>.<type>.annodbg -> <base>.seqs, where the loader reads the sequence headers of a
-    coordinate annotation (None for a name without a type)."""
-    if not annotation.endswith('.annodbg'):
-        return None
-    head, sep, tail = annotation[:-len('.annodbg')].rpartition('.')
-    return head + '.seqs' if sep and '/' not in tail else None
+# parse_annotation_type's annotation extensions, in its order (the first suffix that matches
+# decides), with what the loader reads beside each: (extension, the row-diff anchors and fork
+# successors beside the GRAPH, the sequence headers). Mirrors metagraph's
+# index_annotation_kinds(), which `traverse --index-inventory` prints (annotation_kinds)
+ANNOTATION_KINDS = [
+    ('.column.annodbg', False, False),
+    ('.column_coord.annodbg', False, True),
+    ('.brwt_coord.annodbg', False, True),
+    ('.row_diff_coord.annodbg', False, True),
+    ('.row_diff_brwt_coord.annodbg', False, True),
+    ('.row_diff.annodbg', True, False),
+    ('.row.annodbg', False, False),
+    ('.brwt.annodbg', False, False),
+    ('.row_diff_brwt.annodbg', False, False),
+    ('.bin_rel_wt.annodbg', False, False),
+    ('.flat.annodbg', False, False),
+    ('.row_sparse.annodbg', False, False),
+    ('.row_diff_flat.annodbg', False, False),
+    ('.row_diff_sparse.annodbg', False, False),
+    ('.row_diff_disk.annodbg', False, False),
+    ('.row_diff_int_disk.annodbg', False, False),
+    ('.row_diff_disk_coord.annodbg', False, True),
+    ('.rbfish.annodbg', False, False),
+    ('.rb_brwt.annodbg', False, False),
+    ('.int_brwt.annodbg', False, False),
+    ('.row_diff_int_brwt.annodbg', False, False),
+]
 
 
-def sidecars(graph, annotation):
-    """The sidecars next to |graph| and |annotation| that belong to the bundle: those the
-    server loads (and checks against a manifest: metagraph's index_bundle_files), and the
-    graph's weights."""
-    cands = [graph + '.anchors', graph + '.rd_succ']
+def _opens(path):
+    try:
+        with open(path, 'rb'):
+            return True
+    except OSError:
+        return False
+
+
+def load_inventory(graph, annotation, coord_mapping=True):
+    """[(path, role, required)]: every file the server's loaders open for the pair listed as
+    |graph| and |annotation|, as metagraph's index_load_inventory derives them (a required file
+    is listed whether it exists or not, an optional one only when the loader would read it)."""
+    files = [(graph, 'graph', True)]
     if graph.endswith('.dbg'):
-        cands.append(graph[:-len('.dbg')] + '.edgemask')
-    cands += [graph + '.weights', annotation + '.coords']
+        # DBGSuccinct::load: the dummy-edge mask when it opens, and only then the Bloom filter
+        prefix = graph[:-len('.dbg')]
+        if _opens(prefix + '.edgemask'):
+            files.append((prefix + '.edgemask', 'graph_mask', False))
+            if os.path.exists(prefix + '.bloom'):
+                files.append((prefix + '.bloom', 'graph_bloom', False))
+    files.append((annotation, 'annotation', True))
+    for extension, anchors, coordinates in ANNOTATION_KINDS:
+        if not annotation.endswith(extension):
+            continue
+        if anchors:
+            files.append((graph + '.anchors', 'row_diff_anchors', True))
+            files.append((graph + '.rd_succ', 'row_diff_fork_succ', True))
+        if coordinates and coord_mapping:
+            seqs = annotation[:-len(extension)] + '.seqs'
+            if os.path.exists(seqs):
+                files.append((seqs, 'coord_to_header', False))
+        break
+    return files
+
+
+def unloaded_optional(graph, annotation, coord_mapping=True):
+    """The optional files the inventory derives for the pair -- <graph without .dbg>.edgemask
+    and .bloom, a coordinate annotation's .seqs -- that it does not load (missing, the mask not
+    read, or coord_mapping off), as metagraph's index_unloaded_optional_files: the server
+    refuses a manifest that lists one (by base name), so that index_fp identifies the files it
+    loads."""
+    candidates = []
+    if graph.endswith('.dbg'):
+        prefix = graph[:-len('.dbg')]
+        candidates += [prefix + '.edgemask', prefix + '.bloom']
     seqs = coordinate_headers(annotation)
     if seqs:
-        cands.append(seqs)
-    return [f for f in cands if os.path.isfile(f)]
+        candidates.append(seqs)
+    loaded = [path for path, _, _ in load_inventory(graph, annotation, coord_mapping)]
+    return [c for c in candidates if c not in loaded]
+
+
+def duplicate_base_names(paths):
+    """The base names more than one of |paths| has (sorted): the server matches loaded files to
+    manifest entries by base name, so it refuses a manifest with any."""
+    names = [os.path.basename(p) for p in paths]
+    return sorted({n for n in names if names.count(n) > 1})
+
+
+def sidecars(graph, annotation, coord_mapping=True):
+    """The files of the inventory besides the graph and the annotation (those the server loads
+    beside them)."""
+    return [path for path, role, _ in load_inventory(graph, annotation, coord_mapping)
+            if role not in ('graph', 'annotation')]
+
+
+def coordinate_headers(annotation):
+    """<base>.<type>.annodbg -> <base>.seqs, where the loader reads the sequence headers of a
+    coordinate annotation type (None for another type)."""
+    for extension, _, coordinates in ANNOTATION_KINDS:
+        if annotation.endswith(extension):
+            return annotation[:-len(extension)] + '.seqs' if coordinates else None
+    return None
 
 
 def is_graph_or_annotation(path):
@@ -114,12 +207,18 @@ def is_graph_or_annotation(path):
     return name.endswith('.annodbg') or name.endswith('dbg')
 
 
-def bundle_files(graph, annotation, extra, *, fail=None):
-    files = [graph, annotation] + sidecars(graph, annotation)
+def bundle_files(graph, annotation, extra, *, fail=None, coord_mapping=True):
+    files = [path for path, _, _ in load_inventory(graph, annotation, coord_mapping)]
     others = [f for f in extra if is_graph_or_annotation(f)]
     if others:
         (fail or sys.exit)('--extra %s: a manifest describes one graph with one annotation (the '
                            'server refuses one that lists another)' % ', '.join(others))
+    unloaded = {os.path.basename(p) for p in unloaded_optional(graph, annotation, coord_mapping)}
+    not_loaded = [f for f in extra if os.path.basename(f) in unloaded]
+    if not_loaded:
+        (fail or sys.exit)('--extra %s: an optional file of the loader inventory that the server '
+                           'does not load for this pair (the server refuses a manifest that lists '
+                           'it)' % ', '.join(not_loaded))
     files += list(extra)
     missing = [f for f in files if not os.path.isfile(f)]
     if missing:
@@ -141,7 +240,8 @@ def canonical_lines(entries):
 
 def write(args):
     out = args.output or annotation_base(args.annotation) + '.manifest.json'
-    files = bundle_files(args.graph, args.annotation, args.extra)
+    files = bundle_files(args.graph, args.annotation, args.extra,
+                         coord_mapping=not args.no_coord_mapping)
     total = sum(os.path.getsize(f) for f in files)
     print(f'{len(files)} files, {total / 1e9:.2f} GB to hash', file=sys.stderr)
     entries, hashed, t0 = [], 0, time.time()
@@ -312,7 +412,8 @@ def batch(args, hasher=sha256_file):
 
         def fail(msg, no=no):
             raise ManifestError('line %d: %s' % (no, msg))
-        files = bundle_files(graph, annotation, [], fail=fail)
+        files = bundle_files(graph, annotation, [], fail=fail,
+                             coord_mapping=not getattr(args, 'no_coord_mapping', False))
         if entry['manifest']:
             out = entry['manifest']
         elif args.out_dir:
@@ -417,6 +518,11 @@ def verify(path, root=None):
         manifest = json.load(f)
     root = root or os.path.dirname(os.path.abspath(path))
     problems = []
+    # the server matches loaded files by base name: entries sharing one (a manifest written for
+    # a directory of bundles) would lend one index_fp to every bundle, and it refuses them
+    for name in duplicate_base_names([e['path'] for e in manifest['files']]):
+        problems.append(f'base name listed more than once: {name} (a manifest describes one '
+                        f'bundle; the server refuses it)')
     for e in manifest['files']:
         p = os.path.join(root, e['path'])
         if not os.path.isfile(p):
@@ -458,6 +564,10 @@ def main():
     ap.add_argument('--out-dir', help='batch: where manifests without a CSV column go')
     ap.add_argument('--write-csv', metavar='OUT.csv', help='batch: the list with its manifests')
     ap.add_argument('--force', action='store_true', help='batch: replace existing manifests')
+    ap.add_argument('--no-coord-mapping', action='store_true',
+                    help='the server runs with --no-coord-mapping: it does not load the .seqs')
+    ap.add_argument('--inventory', action='store_true',
+                    help='with -i and -a: print the loader dependency inventory (JSON) and exit')
     args = ap.parse_args()
     if args.verify:
         verify(args.verify, args.root)
@@ -466,6 +576,10 @@ def main():
             batch(args)
         except ManifestError as e:
             sys.exit('index_manifest.py: %s' % e)
+    elif args.graph and args.annotation and args.inventory:
+        print(json.dumps([{'path': p, 'role': r, 'required': q, 'exists': os.path.exists(p)}
+                          for p, r, q in load_inventory(args.graph, args.annotation,
+                                                        not args.no_coord_mapping)], indent=1))
     elif args.graph and args.annotation:
         write(args)
     else:

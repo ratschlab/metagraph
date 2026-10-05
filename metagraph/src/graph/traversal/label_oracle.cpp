@@ -47,6 +47,9 @@ static uint64_t dependency_units(const RowCost &cost) {
 LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
                          const annot::CoordToHeader *coord_to_header_override)
       : anno_graph_(anno_graph) {
+    // the pieces of the reads state the coordinates mapped in them (the oracle is neither
+    // copied nor moved: its caches are per request)
+    pacer_.coords_mapped = &counters_.coords_mapped;
     const DeBruijnGraph &loaded = anno_graph_.get_graph();
 
     // Regime detection: a CanonicalDBG wrapper means a PRIMARY index. Otherwise the
@@ -255,6 +258,15 @@ LabelOracle::SeqRange LabelOracle::sequence_range(Column column, Coord coord) co
     return r;
 }
 
+LabelOracle::SeqRange LabelOracle::sequence_coords(Column column, uint64_t seq_id) const {
+    assert(coord_to_header_);
+    SeqRange r;
+    r.seq_id = seq_id;
+    r.first = seq_id ? coord_to_header_->last_coord(column, seq_id - 1) + 1 : 0;
+    r.last = coord_to_header_->last_coord(column, seq_id);
+    return r;
+}
+
 uint64_t LabelOracle::num_kmers_in_sequence(Column column, uint64_t seq_id) const {
     assert(coord_to_header_);
     return coord_to_header_->num_kmers_in_sequence(column, seq_id);
@@ -307,7 +319,15 @@ size_t DecodePacer::next(size_t remaining, double ms_left, size_t previous,
     return n >= static_cast<double>(remaining) ? remaining : static_cast<size_t>(n);
 }
 
-void DecodePacer::record(size_t rows, double ms) {
+void DecodePacer::note_piece(const char *kind, double ms, uint64_t rows, uint64_t coordinates) {
+    if (ms > longest.ms)
+        longest = UninterruptiblePiece{ ms, kind, rows, coordinates };
+}
+
+void DecodePacer::record(size_t rows, double ms, const char *kind, uint64_t coordinates) {
+    if (ms >= 0)
+        read_ms += ms;
+    note_piece(kind, ms, rows, coordinates);
     max_read_ms = std::max(max_read_ms, ms);
     if (!rows || !(ms >= 0))
         return;
@@ -323,6 +343,14 @@ void DecodePacer::record(size_t rows, double ms) {
 
 bool LabelOracle::path_cached() const {
     return path_cache_.enabled() && rd_ && rd_->supports_path_cache();
+}
+
+void LabelOracle::sync_path_cache_counters() const {
+    counters_.path_cache_hits = path_cache_.hits();
+    counters_.path_cache_stored_rows = path_cache_.stored_rows_read();
+    counters_.path_cache_rows_kept = path_cache_.rows_inserted();
+    counters_.path_cache_bytes_kept = path_cache_.bytes_inserted();
+    counters_.path_cache_peak_bytes = path_cache_.peak_bytes();
 }
 
 std::vector<BinaryMatrix::SetBitPositions>
@@ -439,6 +467,14 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
         }
         if (has_headers && !oracle_.coord_to_header())
             throw std::invalid_argument("Sequence header labels require a CoordToHeader index");
+        for (const auto &[key, label] : header_labels_) {
+            const LabelOracle::SeqRange r = oracle_.sequence_coords(key.first, key.second);
+            header_ranges_[key.first].push_back(HeaderRange{ r.first, r.last, label });
+        }
+        for (auto it = header_ranges_.begin(); it != header_ranges_.end(); ++it) {
+            std::sort(it.value().begin(), it.value().end(),
+                      [](const HeaderRange &a, const HeaderRange &b) { return a.first < b.first; });
+        }
         if (access == LabelOracle::Access::DIRECT)
             throw std::invalid_argument("Direct access is not available for header labels or coordinates");
         path_ = Path::TUPLES;
@@ -473,6 +509,22 @@ const char* LabelQuery::access_path() const {
     return "unknown";
 }
 
+template <class F>
+void LabelQuery::map_requested(Column column, const Coord *coords, size_t n, const F &f) const {
+    const std::vector<HeaderRange> &ranges = header_ranges_.at(column);
+    for (size_t i = 0; i < n; ++i) {
+        // the last range starting at or before the coordinate (the ranges are disjoint)
+        auto it = std::upper_bound(ranges.begin(), ranges.end(), coords[i],
+                                   [](Coord c, const HeaderRange &r) { return c < r.first; });
+        if (it == ranges.begin())
+            continue;
+        --it;
+        if (coords[i] <= it->last)
+            f(it->label, coords[i] - it->first);
+    }
+    oracle_.counters().coords_mapped += n;
+}
+
 void LabelQuery::hits_from_row(const BinaryMatrix::SetBitPositions &row, NodeHits *hits) const {
     for (Column c : row) {
         auto it = column_labels_.find(c);
@@ -500,21 +552,11 @@ void LabelQuery::hits_from_tuples(const MultiIntMatrix::RowTuples &row, NodeHits
         }
         if (!header_columns_.count(c))
             continue;
-        // one label lookup per sequence run, not per coordinate (map_coords' ranges)
-        uint64_t run_seq = std::numeric_limits<uint64_t>::max();
-        const LabelId *run_label = nullptr;
-        oracle_.map_coords(c, coords.data(), coords.size(),
-                           [&, column = c](Coord, uint64_t seq_id, Coord local) {
-            if (seq_id != run_seq) {
-                run_seq = seq_id;
-                auto lt = header_labels_.find(std::make_pair(column, seq_id));
-                run_label = lt == header_labels_.end() ? nullptr : &lt->second;
-            }
-            if (!run_label)
-                return;
-            auto [pos, inserted] = slot.try_emplace(*run_label, hits->size());
+        // only the coordinates of the requested sequences of the column (map_requested)
+        map_requested(c, coords.data(), coords.size(), [&](LabelId label, Coord local) {
+            auto [pos, inserted] = slot.try_emplace(label, hits->size());
             if (inserted)
-                hits->push_back(Hit{ *run_label, {} });
+                hits->push_back(Hit{ label, {} });
             if (with_coords_)
                 (*hits)[pos->second].coords.push_back(local);
         });
@@ -607,6 +649,14 @@ void LabelQuery::fetch_uncached(const node_index *keys, size_t n) {
     }
 }
 
+// The kind of the piece [begin, end) of a read of |n| rows (UninterruptiblePiece): the whole
+// read in one piece, a chunk of a split read, or the piece that ended it
+static const char* piece_kind(bool paced, size_t begin, size_t end, size_t n) {
+    if (!paced || (!begin && end == n))
+        return "read";
+    return end == n ? "rest" : "chunk";
+}
+
 // |keys| (sorted, distinct) in the order of their first appearance in |order|
 static std::vector<node_index> in_first_order(const std::vector<node_index> &keys,
                                               const std::vector<node_index> &order) {
@@ -661,9 +711,10 @@ static bool paced_fetch(DecodePacer &pacer, const std::vector<node_index> &keys,
         n = pacer.next(keys.size(), ms_left(), 0, 0);
     }
     if (n == keys.size()) {
-        Timer timer;
+        const uint64_t coords = pacer.coords_now();
+        PacerTimer timer(pacer);
         decode(keys.data(), keys.size());
-        pacer.record(keys.size(), timer.elapsed() * 1000);
+        pacer.record(keys.size(), timer.elapsed_ms(), "read", pacer.coords_now() - coords);
         return true;
     }
     const std::vector<node_index> ordered = in_first_order(keys, order);
@@ -678,10 +729,12 @@ static bool paced_fetch(DecodePacer &pacer, const std::vector<node_index> &keys,
         }
         chunk.assign(ordered.begin() + begin, ordered.begin() + begin + n);
         std::sort(chunk.begin(), chunk.end());
-        Timer timer;
+        const uint64_t coords = pacer.coords_now();
+        PacerTimer timer(pacer);
         decode(chunk.data(), n);
-        previous_ms = timer.elapsed() * 1000;
-        pacer.record(n, previous_ms);
+        previous_ms = timer.elapsed_ms();
+        pacer.record(n, previous_ms, begin && begin + n == ordered.size() ? "rest" : "chunk",
+                     pacer.coords_now() - coords);
         previous = n;
         begin += n;
     }
@@ -888,21 +941,11 @@ bool LabelQuery::hits_budgeted(const MultiIntMatrix::RowTuples &row, DecodeBudge
             touch(it->second, with_coords_ ? coords.size() : 0);
         if (!header_columns_.count(c))
             continue;
-        // one label lookup per sequence run, not per coordinate (as hits_from_tuples)
-        uint64_t run_seq = std::numeric_limits<uint64_t>::max();
-        const LabelId *run_label = nullptr;
-        oracle_.map_coords(c, coords.data(), coords.size(),
-                           [&, column = c](Coord, uint64_t seq_id, Coord local) {
-            if (seq_id != run_seq) {
-                run_seq = seq_id;
-                auto lt = header_labels_.find(std::make_pair(column, seq_id));
-                run_label = lt == header_labels_.end() ? nullptr : &lt->second;
-            }
-            if (!run_label)
-                return;
-            touch(*run_label, with_coords_ ? 1 : 0);
+        // as hits_from_tuples: the requested sequences' coordinates only
+        map_requested(c, coords.data(), coords.size(), [&](LabelId label, Coord local) {
+            touch(label, with_coords_ ? 1 : 0);
             if (with_coords_)
-                mapped.emplace_back(*run_label, local);
+                mapped.emplace_back(label, local);
         });
     }
     std::sort(touched_.begin(), touched_.end());
@@ -1150,11 +1193,13 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
         out->resize(base + end);
         costs->resize(base + end);
         size_t built = 0;
-        Timer timer;
+        const uint64_t coords = pacer.coords_now();
+        PacerTimer timer(pacer);
         const DecodeStatus status = decode_run(keys + pos, len, budget, out, base + pos, costs,
                                                &built);
-        previous_ms = timer.elapsed() * 1000;
-        pacer.record(len, previous_ms);
+        previous_ms = timer.elapsed_ms();
+        pacer.record(len, previous_ms, piece_kind(paced, pos, end, n),
+                     pacer.coords_now() - coords);
         previous = len;
         // the keys built, each admitted against what was left at its position
         for (size_t j = 0; j < built; ++j) {
@@ -1206,6 +1251,14 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
     }
     std::sort(missing.begin(), missing.end());
     missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
+    // The runs and their pieces are taken in the order of the keys' first appearance in
+    // |keys| — the walk's order, where the nodes of one path are adjacent and share the
+    // decoding of their row-diff paths — and each piece is decoded sorted, as paced_fetch
+    // takes the unbudgeted reads (review of pass 5, finding 5: runs cut from the globally
+    // sorted keys held rows of as many paths as rows; 32 paths, 2,048 rows, runs of 8: 161,679
+    // decoder charges against 28,736). Only what is cached depends on it: a key is admitted
+    // and charged by its own costs when the walk reads it (fetch)
+    missing = in_first_order(missing, keys);
     DecodePacer &pacer = oracle_.pacer();
     const bool paced = pacing && pacer.target_ms > 0;
     size_t previous = 0;
@@ -1236,11 +1289,14 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
                                    previous, previous_ms);
             }
             size_t built = 0;
-            Timer timer;
+            std::sort(missing.begin() + begin + at, missing.begin() + begin + at + piece);
+            const uint64_t coords = pacer.coords_now();
+            PacerTimer timer(pacer);
             ok = decode_run(missing.data() + begin + at, piece, budget, &hits, at, &costs,
                             &built) == DecodeStatus::OK;
-            previous_ms = timer.elapsed() * 1000;
-            pacer.record(piece, previous_ms);
+            previous_ms = timer.elapsed_ms();
+            pacer.record(piece, previous_ms, piece_kind(paced, at, at + piece, len),
+                         pacer.coords_now() - coords);
             previous = piece;
             at += piece;
         }
@@ -1869,11 +1925,13 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         std::vector<uint64_t> raws_held(len);
         std::vector<KeyCost> run_costs(len);
         size_t built = 0;
-        Timer timer;
+        const uint64_t coords = pacer.coords_now();
+        PacerTimer timer(pacer);
         DecodeStatus status = decode_run(keys + pos, len, budget, &raws, &raws_held, &run_costs,
                                          &built);
-        previous_ms = timer.elapsed() * 1000;
-        pacer.record(len, previous_ms);
+        previous_ms = timer.elapsed_ms();
+        pacer.record(len, previous_ms, piece_kind(paced, pos, end, n),
+                     pacer.coords_now() - coords);
         previous = len;
         if (!built && len == 1) {
             assert(status == DecodeStatus::REFUSED);
@@ -2002,6 +2060,8 @@ void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budg
     }
     std::sort(missing.begin(), missing.end());
     missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
+    // runs and pieces in the walk's order, each piece decoded sorted (LabelQuery::warm)
+    missing = in_first_order(missing, keys);
     DecodePacer &pacer = oracle_.pacer();
     const bool paced = pacing && pacer.target_ms > 0;
     size_t previous = 0;
@@ -2030,11 +2090,14 @@ void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budg
                                    previous, previous_ms);
             }
             size_t built = 0;
-            Timer timer;
+            std::sort(missing.begin() + begin + at, missing.begin() + begin + at + piece);
+            const uint64_t coords = pacer.coords_now();
+            PacerTimer timer(pacer);
             ok = decode_run(missing.data() + begin + at, piece, budget, &raws, &raws_held,
                             &run_costs, &built, at) == DecodeStatus::OK;
-            previous_ms = timer.elapsed() * 1000;
-            pacer.record(piece, previous_ms);
+            previous_ms = timer.elapsed_ms();
+            pacer.record(piece, previous_ms, piece_kind(paced, at, at + piece, len),
+                         pacer.coords_now() - coords);
             previous = piece;
             at += piece;
         }

@@ -1,10 +1,13 @@
 #ifndef __ROW_DIFF_CACHE_HPP__
 #define __ROW_DIFF_CACHE_HPP__
 
+#include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <limits>
 #include <utility>
+#include <vector>
 
 #include <tsl/hopscotch_map.h>
 
@@ -48,16 +51,75 @@ inline uint64_t row_copy_bytes(const MultiIntMatrix::RowTuples &row) {
 }
 
 /**
+ * How the cache stores a row. A binary row as it is (one buffer). A tuple row flattened into
+ * three buffers — its columns, the end of each column's coordinates, and the coordinates —
+ * rather than as a RowTuples copy, which allocates one buffer per column with more than two
+ * coordinates and frees them one by one when the row is evicted: on a wide row of a coordinate
+ * annotation (refseq33m 23S: ~11k columns, ~28k coordinates) those allocations were most of
+ * what keeping a row cost (R10). load() rebuilds the row exactly; copy_bytes is what a
+ * RowTuples copy of it holds (row_copy_bytes), which the budget-aware decode charges for a hit.
+ */
+template <class RowT>
+struct StoredRow;
+
+template <>
+struct StoredRow<BinaryMatrix::SetBitPositions> {
+    BinaryMatrix::SetBitPositions row;
+    void store(const BinaryMatrix::SetBitPositions &full) { row = full; }
+    void load(BinaryMatrix::SetBitPositions *out) const { *out = row; }
+    uint64_t bytes() const { return row_copy_bytes(row); }
+};
+
+template <>
+struct StoredRow<MultiIntMatrix::RowTuples> {
+    std::vector<BinaryMatrix::Column> columns;
+    std::vector<uint32_t> ends;
+    std::vector<uint64_t> coords;
+    void store(const MultiIntMatrix::RowTuples &full) {
+        uint64_t total = 0;
+        for (const auto &entry : full) {
+            total += entry.second.size();
+        }
+        assert(total <= std::numeric_limits<uint32_t>::max());
+        columns.resize(full.size());
+        ends.resize(full.size());
+        coords.resize(total);
+        uint64_t *out = coords.data();
+        for (size_t i = 0; i < full.size(); ++i) {
+            columns[i] = full[i].first;
+            out = std::copy(full[i].second.begin(), full[i].second.end(), out);
+            ends[i] = out - coords.data();
+        }
+    }
+    void load(MultiIntMatrix::RowTuples *out) const {
+        MultiIntMatrix::RowTuples row;
+        row.reserve(columns.size());
+        uint32_t begin = 0;
+        for (size_t i = 0; i < columns.size(); ++i) {
+            row.emplace_back(columns[i], MultiIntMatrix::Tuple(coords.begin() + begin,
+                                                               coords.begin() + ends[i]));
+            begin = ends[i];
+        }
+        out->swap(row);
+    }
+    uint64_t bytes() const {
+        return buffer_bytes(columns.size(), sizeof(BinaryMatrix::Column))
+             + buffer_bytes(ends.size(), sizeof(uint32_t))
+             + buffer_bytes(coords.size(), sizeof(uint64_t));
+    }
+};
+
+/**
  * The row-diff path cache (the efficiency pass): reconstructed rows of a row-diff
- * annotation — the rows a decode call returned and every row on their paths, anchors
- * included — kept across the decode calls of one request, so that a later call's path that
- * meets a cached row stops there instead of decoding to its anchor again. On refseq33m a
+ * annotation — the rows a decode call returned and the rows of their paths its retention
+ * rule selects (keeps()) — kept across the decode calls of one request, so that a later
+ * call's path that meets a cached row stops there instead of decoding to its anchor again. On refseq33m a
  * fetch of one warm 23S k-mer cost one whole path decode (66-86 ms) and each further row on
  * the same path 2.1 ms; a walk fetching a few keys per level paid 27-41 ms a row against 4.6
  * ms read in one call. A row's content does not depend on how it was reached, so what a
  * read returns never depends on the cache; only the decoding work does.
  *
- * Bounded in bytes (row_copy_bytes plus kEntryBytes per entry, an estimate of the table's
+ * Bounded in bytes (StoredRow::bytes plus kEntryBytes per entry, an estimate of the table's
  * share), in two generations: inserts go to the current one, which becomes the older one
  * when it reaches half the bound (the older one is dropped then); a hit in the older one
  * moves the row to the current one. A walk moves forward, so the rows of the last few
@@ -72,8 +134,14 @@ class RowDiffCache {
   public:
     using Row = BinaryMatrix::Row;
     struct Entry {
-        RowT row;
+        StoredRow<RowT> row;
+        // what a copy of the row holds (row_copy_bytes): the budget-aware decode charges a
+        // hit as its copy
+        uint64_t copy_bytes = 0;
         uint64_t bytes = 0;
+        // rows from it to its anchor, itself excluded (0: an anchor): what the retention rule
+        // reads for the rows reconstructed from it (keeps())
+        uint32_t depth = 0;
         // whether |path| is known: a row the budget-aware decode cached; the default decode
         // does not compute it, and the budget-aware decode treats such a row as not cached
         bool has_path = false;
@@ -116,9 +184,61 @@ class RowDiffCache {
         bytes_[0] += entry.bytes;
         return &gen_[0].emplace(row, std::move(entry)).first->second;
     }
-    // Cache the reconstructed row |full| of |row| (with its path aggregates, if known),
-    // within the bound; a row that does not fit even into an empty cache is not kept
-    void insert(Row row, const RowT &full, const PathAggregates *path = nullptr) {
+    /**
+     * Which of the rows a decode call reconstructs are kept (R10, the review of feature level
+     * 4). Keeping every row of every path copied each row of a long path into the cache: on
+     * a coordinate annotation with wide rows (refseq33m 23S: ~28k coordinates in ~11k
+     * columns) a first read, whose paths no later read meets, was several times slower than
+     * without the cache, and a walk reading one row per call (batch_kmers 1) churned the
+     * cache's generations so that every call decoded its whole path again — 21.7 s against
+     * 2.9 s without the cache on a synthetic index of 8,000 labels with paths of up to 1,000
+     * rows. A call keeps
+     *   - every row it was asked for (later paths meet them: a predecessor's path runs
+     *     through its successor, and a repeated read is a hit),
+     *   - the first |successors| rows after each of them on its path (a forward walk reads
+     *     these next, in its following levels),
+     *   - every row whose distance to its anchor is a multiple of |checkpoint|, anchors
+     *     included: any later path through a row of this one stops within checkpoint - 1
+     *     rows instead of running to the anchor; the distance is a property of the row (each
+     *     row has one row-diff successor), so which rows these are does not depend on the
+     *     calls, and
+     *   - every narrow row (row_copy_bytes below |narrow_bytes|), whose copy costs little
+     *     beside the descent that decoded it: on UHGG (binary rows of 10-200 bytes) keeping
+     *     all rows is what made branched walks about twice as fast, and the rule keeps them
+     *     all there (the same stored rows read and hits as keeping every row).
+     * So a call of n rows whose paths read s stored rows keeps at most n x (successors + 3) +
+     * s / checkpoint rows that are not narrow, where keeping every row kept s of them
+     * (rows_inserted and bytes_inserted count what it copies). Measured on the synthetic
+     * index (wide rows; paths of up to 100 and of up to 1,000 rows), against the cache off
+     * and the pass-5 binary: no request slower beyond noise, isolated first reads 1.3-2.2x
+     * faster than the cache off (a cut at a checkpoint replaces up to a whole path), walks
+     * with batch_kmers 1 14-15x; the defaults were chosen from 16/8, 32/16, 64/32 (also 4/8
+     * and 8/32 on UHGG), 16/8 being never slower than the cache off on either index.
+     */
+    static constexpr uint32_t kCheckpoint = 16;
+    static constexpr uint32_t kSuccessors = 8;
+    static constexpr uint64_t kNarrowBytes = 4096;
+    // the rule's parameters (tests vary them; what is kept never changes a row or a cost;
+    // narrow_bytes 0: no row is narrow)
+    uint32_t checkpoint = kCheckpoint;
+    uint32_t successors = kSuccessors;
+    uint64_t narrow_bytes = kNarrowBytes;
+    // |depth|: the row's distance to its anchor; |from_front|: its position on the path of
+    // the requested row that reconstructed it (0: that row); |row|: the row
+    bool keeps(uint32_t depth, size_t from_front, const RowT &row) const {
+        if (from_front <= successors || depth % checkpoint == 0)
+            return true;
+        // the row's own buffer first, a lower bound of its copy: a wide row is told without
+        // a pass over its columns (row_copy_bytes of a tuple row visits every column)
+        if (row.size() * sizeof(row[0]) >= narrow_bytes)
+            return false;
+        return row_copy_bytes(row) < narrow_bytes;
+    }
+
+    // Cache the reconstructed row |full| of |row| at |depth| (with its path aggregates, if
+    // known), within the bound; a row that does not fit even into an empty cache is not kept
+    void insert(Row row, const RowT &full, uint32_t depth = 0,
+                const PathAggregates *path = nullptr) {
         if (!enabled())
             return;
         auto it = gen_[0].find(row);
@@ -137,7 +257,10 @@ class RowDiffCache {
             }
             return;
         }
-        const uint64_t b = row_copy_bytes(full) + kEntryBytes;
+        Entry entry;
+        entry.row.store(full);
+        entry.copy_bytes = row_copy_bytes(full);
+        const uint64_t b = entry.row.bytes() + kEntryBytes;
         const uint64_t bound = limit();
         // a shared bound may have shrunk since the last insert
         trim(bound);
@@ -153,15 +276,17 @@ class RowDiffCache {
         }
         if (bytes() + b > bound)
             drop(1);
-        Entry entry;
-        entry.row = full;
         entry.bytes = b;
+        entry.depth = depth;
+        rows_inserted++;
+        bytes_inserted += b - kEntryBytes;
         if (path) {
             entry.has_path = true;
             entry.path = *path;
         }
         gen_[0].emplace(row, std::move(entry));
         bytes_[0] += b;
+        peak_bytes = std::max(peak_bytes, bytes());
     }
     // evict (the older generation first) until the cache holds at most |max| bytes; the
     // decode calls trim to limit() when they begin, so that a shared bound that shrank
@@ -178,8 +303,15 @@ class RowDiffCache {
         drop(1);
     }
 
-    // statistics (the physical work saved): paths cut at a cached row
+    // statistics (physical, timing only): paths cut at a cached row; rows copied into the
+    // cache and their bytes (row_copy_bytes)
     uint64_t hits = 0;
+    // stored rows (diffs and anchors) the decode calls with the cache read from the matrix
+    uint64_t stored_rows_read = 0;
+    uint64_t rows_inserted = 0;
+    uint64_t bytes_inserted = 0;
+    // the most the cache held at once (bytes(), at the end of an insert)
+    uint64_t peak_bytes = 0;
 
     // A budget-aware read with the cache holds less than without it — its paths stop at
     // cached rows — so a read refused without the cache may fit with it. That makes no
@@ -223,6 +355,16 @@ struct RowDiffPathCache {
     uint64_t limit() const { return rows.limit(); }
     uint64_t bytes() const { return rows.bytes() + tuples.bytes(); }
     uint64_t hits() const { return rows.hits + tuples.hits; }
+    uint64_t stored_rows_read() const { return rows.stored_rows_read + tuples.stored_rows_read; }
+    uint64_t rows_inserted() const { return rows.rows_inserted + tuples.rows_inserted; }
+    uint64_t bytes_inserted() const { return rows.bytes_inserted + tuples.bytes_inserted; }
+    uint64_t peak_bytes() const { return std::max(rows.peak_bytes, tuples.peak_bytes); }
+    // RowDiffCache::keeps's parameters, for both
+    void set_retention(uint32_t checkpoint, uint32_t successors, uint64_t narrow_bytes) {
+        rows.checkpoint = tuples.checkpoint = std::max<uint32_t>(checkpoint, 1);
+        rows.successors = tuples.successors = successors;
+        rows.narrow_bytes = tuples.narrow_bytes = narrow_bytes;
+    }
     // RowDiffCache::admit_as_uncached
     void set_admit_as_uncached(bool on) {
         rows.admit_as_uncached = on;

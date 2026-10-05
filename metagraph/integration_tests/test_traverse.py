@@ -2273,7 +2273,7 @@ class TestTraverseAPI(TestTraverseBase):
 
     def test_api_server_capabilities(self):
         """Pass 5, W3/W4: GET /capabilities, the server-wide document: routes and features,
-        feature_level 4 (3 in pass 5), algorithm_version (as every response's), mode single, no graph list,
+        feature_level 5 (4 at the efficiency pass, 3 in pass 5), algorithm_version (as every response's), mode single, no graph list,
         the attempts block (as the probe's) and how deadlines are checked; the number types
         a ledger compares are integers."""
         url = f'http://{self.host}:{self.port}'
@@ -2285,7 +2285,7 @@ class TestTraverseAPI(TestTraverseBase):
                           'content_encodings', 'deadline_check', 'feature_level', 'features',
                           'graphs', 'mode', 'ready', 'release', 'routes', 'schema_version',
                           'server_instance'}, set(c))
-        self.assertEqual((4, 'single', None, True, 1),
+        self.assertEqual((5, 'single', None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['ready'],
                           c['schema_version']))
         self.assertEqual(['search', 'align', 'resolve', 'traverse', 'attempts'], c['features'])
@@ -2300,13 +2300,13 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(probe['attempts']['server_instance'], c['server_instance'])
         self.assertEqual(probe['deadline_check'], c['deadline_check'])
         self.assertEqual(probe['algorithm_version'], c['algorithm_version'])
-        self.assertEqual(4, probe['feature_level'])
+        self.assertEqual(5, probe['feature_level'])
         self.assertEqual(1, c['compression_level'])
         self.assertEqual(1, probe['compression_level'])
         out = self._post('traverse', {'seeds': [{'sequence': self.element}],
                                       'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
         self.assertEqual(c['algorithm_version'], out['algorithm_version'])
-        self.assertEqual(4, out['capabilities']['feature_level'])
+        self.assertEqual(5, out['capabilities']['feature_level'])
         att = c['attempts']
         for key in ('allowance_ms', 'hard_cap_ms', 'clock_skew_allowance_ms', 'retention_s',
                     'retention_count', 'content_timeout_s', 'client_check_ms'):
@@ -2350,7 +2350,9 @@ class TestTraverseAPI(TestTraverseBase):
         url = f'http://{self.host}:{self.port}'
         caps = requests.get(url=url + '/traverse/capabilities').json()
         att = caps['attempts']
-        self.assertEqual(['attempt_id', 'budget_id', 'locus_id', 'not_after_ms'], att['fields'])
+        self.assertEqual(['attempt_id', 'budget_id', 'locus_id', 'not_after_ms',
+                          'expect_server_instance'], att['fields'])
+        self.assertEqual(['attempt_id', 'wait_ms', 'not_after_ms'], att['cancel_fields'])
         self.assertEqual('POST /traverse/cancel', att['cancel'])
         self.assertEqual('GET /traverse/attempt/{attempt_id}', att['state'])
         self.assertEqual(16, len(att['server_instance']))
@@ -2668,7 +2670,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         ret = self._caps('?graph=A')
         self.assertEqual(200, ret.status_code, ret.text)
         caps = ret.json()
-        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 4),
+        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 5),
                          (caps['graph'], caps['graph_path'], caps['index_ns'],
                           caps['index_fp'], caps['feature_level']))
         for key in ('attempts', 'deadline_check', 'budgets', 'algorithm_version',
@@ -2827,6 +2829,304 @@ class TestTraverseMultiGraph(TestTraverseBase):
             out = requests.post(server.url + '/traverse',
                                 data=json.dumps(self._request('B'))).json()
             self.assertEqual(self.index_fp, out['capabilities']['index_fp'])
+        finally:
+            server.close()
+
+    # ---- review of pass 5, findings 2 and 3: one loader dependency inventory
+
+    def _run_ok(self, cmd, cwd):
+        res = subprocess.run(shlex.split(cmd), cwd=cwd, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, (cmd, res.stderr.decode()[-2000:]))
+        return res
+
+    def _cli_inventory(self, graph, annotation, *flags):
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '--index-inventory', '--json',
+                                                       '-i', graph, '-a', annotation, *flags],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        return json.loads(res.stdout)
+
+    def _start_refused(self, csv):
+        server = self._Server(self, csv, wait=False)
+        try:
+            code = server.process.wait(timeout=120)
+        finally:
+            server.close()
+        return code, server.text()
+
+    def test_inventory_is_mirrored_by_index_manifest_py(self):
+        """The loader dependency inventory has one definition (index_load_inventory), which
+        `traverse --index-inventory` prints and scripts/traversal/index_manifest.py mirrors
+        (load_inventory, ANNOTATION_KINDS): on bundles with every sidecar kind — a masked
+        graph with a Bloom filter, an unmasked one, row_diff (anchors and fork successors
+        beside the graph), coordinate annotations with and without their .seqs, a column
+        annotation with its .coords (not loaded), --no-coord-mapping, a symlinked spelling —
+        both list the same files in the same roles, and their annotation tables are equal."""
+        sys.path.insert(0, os.path.join(REPO, 'scripts', 'traversal'))
+        import index_manifest as im
+        d = os.path.join(self.tempdir.name, 'inventory')
+        os.makedirs(d, exist_ok=True)
+        with open(f'{d}/in.fa', 'w') as f:
+            f.write('>s1\n' + self.records['acc1'] + '\n>s2\n' + self.records['acc2'] + '\n')
+        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 --mask-dummy '
+                     '--in-ram -o masked in.fa', d)
+        self._run_ok(f'{METAGRAPH} transform --initialize-bloom -o masked masked.dbg', d)
+        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 -o plain in.fa', d)
+        self._annotate_graph(f'{d}/in.fa', f'{d}/plain.dbg', f'{d}/col', 'column',
+                             extra_params='--coordinates')
+        self._annotate_graph(f'{d}/in.fa', f'{d}/plain.dbg', f'{d}/coord', 'column_coord')
+        self._run_ok(f'{METAGRAPH} annotate -p 1 -i plain.dbg --anno-filename '
+                     '--index-header-coords -o coord in.fa', d)
+        self._annotate_graph(f'{d}/in.fa', f'{d}/plain.dbg', f'{d}/nohead', 'column_coord')
+        self._annotate_graph(f'{d}/in.fa', f'{d}/plain.dbg', f'{d}/rd', 'row_diff')
+        for name in ('masked.edgemask', 'masked.bloom', 'col.column.annodbg.coords',
+                     'coord.seqs', 'plain.dbg.anchors', 'plain.dbg.rd_succ',
+                     'rd.row_diff.annodbg'):
+            self.assertTrue(os.path.exists(f'{d}/{name}'), name)
+        os.makedirs(f'{d}/link', exist_ok=True)
+        os.symlink(f'{d}/plain.dbg', f'{d}/link/plain.dbg')
+        os.symlink(f'{d}/coord.column_coord.annodbg', f'{d}/link/coord.column_coord.annodbg')
+        cases = [
+            ('masked.dbg', 'col.column.annodbg', (), ['graph', 'graph_mask', 'graph_bloom',
+                                                      'annotation']),
+            ('masked.dbg', 'coord.column_coord.annodbg', (),
+             ['graph', 'graph_mask', 'graph_bloom', 'annotation', 'coord_to_header']),
+            ('plain.dbg', 'coord.column_coord.annodbg', ('--no-coord-mapping',),
+             ['graph', 'annotation']),
+            ('plain.dbg', 'nohead.column_coord.annodbg', (), ['graph', 'annotation']),
+            ('plain.dbg', 'rd.row_diff.annodbg', (),
+             ['graph', 'annotation', 'row_diff_anchors', 'row_diff_fork_succ']),
+            # beside the symlinks there is no .seqs (nor an anchors file): none is listed
+            ('link/plain.dbg', 'link/coord.column_coord.annodbg', (), ['graph', 'annotation']),
+        ]
+        for graph, anno, flags, roles in cases:
+            cli = self._cli_inventory(f'{d}/{graph}', f'{d}/{anno}', *flags)
+            py = im.load_inventory(f'{d}/{graph}', f'{d}/{anno}',
+                                   coord_mapping='--no-coord-mapping' not in flags)
+            self.assertEqual([(e['path'], e['role'], e['required']) for e in cli['files']],
+                             py, (graph, anno))
+            self.assertEqual(roles, [e['role'] for e in cli['files']], (graph, anno))
+            self.assertTrue(all(e['exists'] for e in cli['files']), (graph, anno))
+        self.assertEqual([(k['extension'], k['row_diff_anchors'], k['coordinates'])
+                          for k in cli['annotation_kinds']], im.ANNOTATION_KINDS)
+
+    def test_symlinked_main_files_do_not_hide_their_sidecars(self):
+        """Review of pass 5, finding 2 (the reviewer's /tmp/metagraph-pass5-identity probe):
+        two pairs whose graph and annotation are symlinks to the same files, each with its own
+        .seqs beside the symlinks (sampleA, sampleBBBB), both naming A's manifest. Grouped by
+        the main files, B's .seqs was never checked and both stated one index_fp; now each
+        pair's whole inventory is checked, so the server refuses to start, naming B's .seqs.
+        With a manifest per pair (index_manifest.py --server-csv) it starts, and the two state
+        different index_fp and their own headers."""
+        d = os.path.join(self.tempdir.name, 'symlinks')
+        os.makedirs(d, exist_ok=True)
+        seq = 'ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG'
+        with open(f'{d}/source.fa', 'w') as f:
+            f.write('>sampleA\n' + seq + '\n')
+        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 -o shared '
+                     'source.fa', d)
+        self._annotate_graph(f'{d}/source.fa', f'{d}/shared.dbg', f'{d}/sharedanno',
+                             'column_coord')
+        for side, header in (('A', 'sampleA'), ('B', 'sampleBBBB')):
+            os.makedirs(f'{d}/{side}', exist_ok=True)
+            os.symlink(f'{d}/shared.dbg', f'{d}/{side}/graph.dbg')
+            os.symlink(f'{d}/sharedanno.column_coord.annodbg',
+                       f'{d}/{side}/annotation.column_coord.annodbg')
+            with open(f'{d}/{side}/source.fa', 'w') as f:
+                f.write('>' + header + '\n' + seq + '\n')
+            self._run_ok(f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
+                         '--index-header-coords -o annotation source.fa', f'{d}/{side}')
+        sizes = [os.path.getsize(f'{d}/{side}/annotation.seqs') for side in 'AB']
+        self.assertNotEqual(sizes[0], sizes[1])
+        # A's manifest (as the reviewer's shared-manifest.json): A's files, A's .seqs
+        files = []
+        for name in ('graph.dbg', 'annotation.column_coord.annodbg', 'annotation.seqs'):
+            with open(f'{d}/A/{name}', 'rb') as f:
+                data = f.read()
+            files.append({'path': name, 'size': len(data),
+                          'sha256': hashlib.sha256(data).hexdigest()})
+        with open(f'{d}/shared-manifest.json', 'w') as f:
+            json.dump({'format': 'metagraph-index-manifest', 'version': 1, 'files': files}, f)
+        csv = f'{d}/symlink.csv'
+        with open(csv, 'w') as f:
+            for side in 'AB':
+                f.write(f'{side},{d}/{side}/graph.dbg,{d}/{side}/annotation.column_coord.annodbg,'
+                        f'{d}/shared-manifest.json,bundle\n')
+        code, log = self._start_refused(csv)
+        self.assertEqual(1, code, log[-2000:])
+        self.assertIn(f'{d}/B/annotation.seqs', log)
+        # one manifest per pair: two indexes, two identities
+        script = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
+        plain = f'{d}/plain.csv'
+        with open(plain, 'w') as f:
+            for side in 'AB':
+                f.write(f'{side},{d}/{side}/graph.dbg,{d}/{side}/annotation.column_coord.annodbg'
+                        f',{d}/{side}.manifest.json\n')
+        res = subprocess.run([sys.executable, script, '--server-csv', plain],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        for side in 'AB':
+            with open(f'{d}/{side}.manifest.json') as f:
+                self.assertIn('annotation.seqs', [e['path'] for e in json.load(f)['files']])
+        server = self._Server(self, plain)
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            fps, names = [], []
+            for side in 'AB':
+                out = requests.post(server.url + '/resolve', data=json.dumps(
+                    {'graph': side, 'sequence': seq,
+                     'discover': {'kind': 'header', 'max_labels': 10}})).json()
+                fps.append(out['capabilities']['index_fp'])
+                names.append([l['label'] for l in out['labels']])
+            self.assertNotEqual(fps[0], fps[1])
+            self.assertEqual([['sampleA'], ['sampleBBBB']], names)
+        finally:
+            server.close()
+
+    def test_a_manifest_names_one_bundle_and_its_loaded_files(self):
+        """Review of the pass-5 fixes (the reviewer's p7/review-identity dup and mask probes): a
+        manifest written for a directory of bundles whose files share base names (A/graph.dbg,
+        B/graph.dbg, A/annotation.seqs, B/annotation.seqs) passed for every one of them, since
+        loaded files are matched by base name: two single-index servers stated one index_fp
+        with different headers. Such a manifest is refused by the server, the CLI and
+        index_manifest.py --verify, naming the shared base name. And a manifest that lists an
+        optional sidecar the pair does not load (a .seqs missing beside the symlinks of C, or
+        --no-coord-mapping) is refused too, so that index_fp identifies the loaded files."""
+        d = os.path.join(self.tempdir.name, 'dupnames')
+        os.makedirs(d, exist_ok=True)
+        seq = 'ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG'
+        with open(f'{d}/source.fa', 'w') as f:
+            f.write('>sampleA\n' + seq + '\n')
+        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 -o shared '
+                     'source.fa', d)
+        self._annotate_graph(f'{d}/source.fa', f'{d}/shared.dbg', f'{d}/sharedanno',
+                             'column_coord')
+        for side, header in (('A', 'sampleA'), ('B', 'sampleBBBB'), ('C', None)):
+            os.makedirs(f'{d}/{side}', exist_ok=True)
+            os.symlink(f'{d}/shared.dbg', f'{d}/{side}/graph.dbg')
+            os.symlink(f'{d}/sharedanno.column_coord.annodbg',
+                       f'{d}/{side}/annotation.column_coord.annodbg')
+            if header:
+                with open(f'{d}/{side}/source.fa', 'w') as f:
+                    f.write('>' + header + '\n' + seq + '\n')
+                self._run_ok(f'{METAGRAPH} annotate -p 1 -i graph.dbg --anno-filename '
+                             '--index-header-coords -o annotation source.fa', f'{d}/{side}')
+        # the directory's manifest: both bundles, by their paths under it
+        files = []
+        for side in 'AB':
+            for name in ('graph.dbg', 'annotation.column_coord.annodbg', 'annotation.seqs'):
+                with open(f'{d}/{side}/{name}', 'rb') as f:
+                    data = f.read()
+                files.append({'path': f'{side}/{name}', 'size': len(data),
+                              'sha256': hashlib.sha256(data).hexdigest()})
+        files.sort(key=lambda e: e['path'].encode())
+        canonical = ''.join('%s\t%d\t%s\n' % (e['path'], e['size'], e['sha256']) for e in files)
+        with open(f'{d}/dir.manifest.json', 'w') as f:
+            json.dump({'format': 'metagraph-index-manifest', 'version': 1,
+                       'index_fp': hashlib.sha256(canonical.encode()).hexdigest(),
+                       'files': files}, f)
+        script = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
+        res = subprocess.run([sys.executable, script, '--verify', f'{d}/dir.manifest.json'],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotEqual(0, res.returncode, res.stdout.decode())
+        self.assertIn('base name listed more than once: annotation.seqs', res.stdout.decode())
+        request = f'{d}/request.json'
+        with open(request, 'w') as f:
+            json.dump({'seeds': [{'sequence': seq}],
+                       'strategy': {'direction': 'right',
+                                    'output': {'detail': 'summary', 'timing': False}}}, f)
+
+        def refused(side, manifest, *flags):
+            pair = ['-i', f'{d}/{side}/graph.dbg', '-a',
+                    f'{d}/{side}/annotation.column_coord.annodbg', '--index-manifest', manifest]
+            server = subprocess.run(shlex.split(METAGRAPH) + [
+                'server_query', *pair, *flags, '--port', str(_free_port()), '--address',
+                '127.0.0.1'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+            cli = subprocess.run(shlex.split(METAGRAPH) + ['traverse', *pair, *flags, request],
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+            return ((server.returncode, server.stdout.decode()),
+                    (cli.returncode, cli.stdout.decode()))
+
+        for side in 'AB':
+            for code, log in refused(side, f'{d}/dir.manifest.json'):
+                self.assertEqual(1, code, log[-2000:])
+                self.assertIn('share the base name', log)
+        # one manifest per pair: A's lists its .seqs
+        res = subprocess.run([sys.executable, script, '-i', f'{d}/A/graph.dbg', '-a',
+                              f'{d}/A/annotation.column_coord.annodbg', '-o',
+                              f'{d}/A.manifest.json'],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        with open(f'{d}/A.manifest.json') as f:
+            self.assertIn('annotation.seqs', [e['path'] for e in json.load(f)['files']])
+        ok = subprocess.run(shlex.split(METAGRAPH) + [
+            'traverse', '-i', f'{d}/A/graph.dbg', '-a', f'{d}/A/annotation.column_coord.annodbg',
+            '--index-manifest', f'{d}/A.manifest.json', request],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+        self.assertEqual(0, ok.returncode, ok.stderr.decode()[-2000:])
+        # ... but C loads no .seqs (none beside its symlinks), and neither does A under
+        # --no-coord-mapping: both refuse A's manifest, naming the .seqs
+        for side, flags in (('C', ()), ('A', ('--no-coord-mapping',))):
+            for code, log in refused(side, f'{d}/A.manifest.json', *flags):
+                self.assertEqual(1, code, (side, flags, log[-2000:]))
+                self.assertIn('annotation.seqs, which the server does not load', log)
+
+    def test_a_loaded_bloom_filter_is_part_of_the_identity(self):
+        """Review of pass 5, finding 3 (the reviewer's /tmp/metagraph-pass5-identity/bloom): a
+        masked basic graph's Bloom filter is loaded and can change answers (another valid k=11
+        filter turned graph_runs [[0, 36]] into []), but no manifest listed it. A manifest
+        without it is refused at start-up, naming it; index_manifest.py lists it, and the
+        server starts with that manifest (a same-size replacement is not detected: the server
+        checks sizes, index_manifest.py --verify re-hashes)."""
+        d = os.path.join(self.tempdir.name, 'bloom')
+        os.makedirs(d, exist_ok=True)
+        seq = 'ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG'
+        with open(f'{d}/seq.fa', 'w') as f:
+            f.write('>A\n' + seq + '\n')
+        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 --mask-dummy '
+                     '--in-ram -o graph seq.fa', d)
+        self._run_ok(f'{METAGRAPH} transform --initialize-bloom -o graph graph.dbg', d)
+        self._annotate_graph(f'{d}/seq.fa', f'{d}/graph.dbg', f'{d}/annotation', 'column')
+        # the reviewer's manifest: graph, mask and annotation
+        files = []
+        for name in ('annotation.column.annodbg', 'graph.dbg', 'graph.edgemask'):
+            with open(f'{d}/{name}', 'rb') as f:
+                data = f.read()
+            files.append({'path': name, 'size': len(data),
+                          'sha256': hashlib.sha256(data).hexdigest()})
+        with open(f'{d}/old.manifest.json', 'w') as f:
+            json.dump({'format': 'metagraph-index-manifest', 'version': 1, 'files': files}, f)
+        csv = f'{d}/old.csv'
+        with open(csv, 'w') as f:
+            f.write(f'A,{d}/graph.dbg,{d}/annotation.column.annodbg,{d}/old.manifest.json\n')
+        code, log = self._start_refused(csv)
+        self.assertEqual(1, code, log[-2000:])
+        self.assertIn(f'does not cover the file {d}/graph.bloom', log)
+        res = subprocess.run(shlex.split(METAGRAPH) + [
+            'traverse', '-i', f'{d}/graph.dbg', '-a', f'{d}/annotation.column.annodbg',
+            '--index-manifest', f'{d}/old.manifest.json', f'{d}/seq.fa'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotEqual(0, res.returncode)
+        self.assertIn('graph.bloom', res.stderr.decode())
+        script = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
+        res = subprocess.run([sys.executable, script, '-i', f'{d}/graph.dbg', '-a',
+                              f'{d}/annotation.column.annodbg', '-o', f'{d}/new.manifest.json'],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        with open(f'{d}/new.manifest.json') as f:
+            self.assertEqual(['annotation.column.annodbg', 'graph.bloom', 'graph.dbg',
+                              'graph.edgemask'],
+                             [e['path'] for e in json.load(f)['files']])
+        csv = f'{d}/new.csv'
+        with open(csv, 'w') as f:
+            f.write(f'A,{d}/graph.dbg,{d}/annotation.column.annodbg,{d}/new.manifest.json\n')
+        server = self._Server(self, csv)
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            out = requests.post(server.url + '/resolve', data=json.dumps(
+                {'graph': 'A', 'sequence': seq, 'labels': ['A']})).json()
+            self.assertEqual([[0, 36]], out['graph_runs'])
         finally:
             server.close()
 
@@ -3488,6 +3788,231 @@ class TestTraverseAttempts(TestingBase):
             self.assertEqual(404, gone.status_code)
             self.assertIn('kept 1 s after they finish', gone.json()['error'])
             self.assertEqual(200, server.post('traverse', quick).status_code)
+
+    def test_a_finished_attempt_is_held_through_its_not_after_ms(self):
+        """Review of the pass-5 fixes, finding 1 (the reviewer's p1 and p1b): a ledger releases
+        on a finished state, and a replay of the request (same attempt_id, not_after_ms and
+        expect_server_instance) arriving after retention_s, or after retention_count later
+        finishes evicted the attempt, ran again. A finished attempt sent with not_after_ms
+        stays refused (409) until not_after_ms + the skew allowance, and the release rule
+        states it; a copy refused by a tombstone without a not_after_ms of its own is not
+        covered (finding 3)."""
+        for flags in (('--traverse-attempt-retention-s', '1'),
+                      ('--traverse-attempt-retention', '1')):
+            with self._Server(self, *flags) as server:
+                caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
+                self.assertIn('not_after_ms + clock_skew_allowance_ms, at most tombstone_max_s '
+                              'after it finished', caps['release_rule'])
+                instance = caps['server_instance']
+                not_after = int(time.time() * 1000) + 60000
+                req = self._request(1, radius=10, attempt_id='fin-1', not_after_ms=not_after,
+                                    expect_server_instance=instance)
+                first = server.post('traverse', req)
+                self.assertEqual(200, first.status_code, first.text)
+                cancel = server.post('traverse/cancel', {'attempt_id': 'fin-1',
+                                                         'not_after_ms': not_after})
+                self.assertEqual((404, 'finished'), (cancel.status_code, cancel.json()['state']))
+                self.assertEqual('finished', server.state('fin-1').json()['state'])
+                # the ledger releases; then its retention ends, by age or by count
+                if flags[0] == '--traverse-attempt-retention-s':
+                    time.sleep(1.3)
+                else:
+                    other = self._request(1, radius=10, attempt_id='fin-2')
+                    self.assertEqual(200, server.post('traverse', other).status_code)
+                replay = server.post('traverse', req)
+                self.assertEqual(409, replay.status_code, (flags, replay.text))
+                self.assertEqual('finished', replay.json()['attempt']['state'])
+                self.assertEqual(200, server.state('fin-1').status_code)
+        with self._Server(self, '--traverse-attempt-retention-s', '1',
+                          '--traverse-clock-skew-ms', '100') as server:
+            not_after = int(time.time() * 1000) + 1500
+            cancel = server.post('traverse/cancel', {'attempt_id': 'nna-1',
+                                                     'not_after_ms': not_after})
+            self.assertTrue(cancel.json()['covers_admission'])
+            copy = self._request(1, radius=10, attempt_id='nna-1')   # no not_after_ms
+            refused = server.post('traverse', copy)
+            self.assertEqual(409, refused.status_code, refused.text)
+            attempt = refused.json()['attempt']
+            self.assertNotIn('not_after_ms', attempt)
+            self.assertEqual((False, 'no_not_after_ms'),
+                             (attempt['covers_admission'], attempt['covers_admission_reason']))
+
+    def test_retention_settings_are_validated_at_start_up(self):
+        """Review of pass 5, finding 4: --traverse-attempt-retention-s -1 started and advertised
+        2^64 - 1 seconds while every tombstone expired at once. The retention settings are
+        bounded integers: a negative, non-numeric or too large value refuses to start, naming
+        the option and its own range (the review of the pass-5 fixes: a negative or non-numeric
+        value named [0, 2^53 - 1] instead)."""
+        ranges = {'--traverse-attempt-retention-s': '[0, 31536000]',
+                  '--traverse-attempt-retention': '[0, 10000000]',
+                  '--traverse-attempt-tombstone-max-s': '[0, 31536000]'}
+        for flag, value in (('--traverse-attempt-retention-s', '-1'),
+                            ('--traverse-attempt-retention-s', '1e400'),
+                            ('--traverse-attempt-retention-s', 'abc'),
+                            ('--traverse-attempt-retention-s', '1.5'),
+                            ('--traverse-attempt-retention-s', 'nan'),
+                            ('--traverse-attempt-retention-s', ''),
+                            ('--traverse-attempt-retention-s', '5 '),
+                            ('--traverse-attempt-retention-s', '31536001'),
+                            ('--traverse-attempt-retention-s', '9223372036854775808'),
+                            ('--traverse-attempt-retention', '-1'),
+                            ('--traverse-attempt-retention', 'inf'),
+                            ('--traverse-attempt-retention', '10000001'),
+                            ('--traverse-attempt-tombstone-max-s', '-5'),
+                            ('--traverse-attempt-tombstone-max-s', '18446744073709551615')):
+            res = subprocess.run(shlex.split(METAGRAPH) + [
+                'server_query', '-i', self.graph, '-a', self.anno, '--port', str(_free_port()),
+                '--address', '127.0.0.1', flag, value], stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=60)
+            self.assertNotEqual(0, res.returncode, (flag, value))
+            self.assertIn(flag + ' must be an integer in ' + ranges[flag], res.stderr.decode(),
+                          (flag, value))
+        # the largest accepted values start (and are stated)
+        with self._Server(self, '--traverse-attempt-retention-s', '31536000',
+                          '--traverse-attempt-retention', '10000000',
+                          '--traverse-attempt-tombstone-max-s', '31536000') as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
+            self.assertEqual((31536000, 10000000, 31536000),
+                             (caps['retention_s'], caps['retention_count'],
+                              caps['tombstone_max_s']))
+
+    def test_retention_zero_promises_no_suppression(self):
+        """Retention 0 s means no tombstones: a cancel of an unknown id is refused (429,
+        tombstone false, reason no_suppression), the capabilities say so, and a request with
+        the id runs (the reviewer's probe: before, the cancel answered tombstone true and the
+        request ran anyway). A count of 0 refuses likewise (reason tombstones_full)."""
+        req = self._request(1, radius=1, attempt_id='cancelled-before-upload')
+        with self._Server(self, '--traverse-attempt-retention-s', '0') as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()['attempts']
+            self.assertEqual(0, caps['retention_s'])
+            self.assertIn('no tombstones', caps['suppression'])
+            first = server.post('traverse/cancel', {'attempt_id': 'cancelled-before-upload',
+                                                    'not_after_ms': int(time.time() * 1000)
+                                                    + 60000})
+            self.assertEqual(429, first.status_code, first.text)
+            self.assertEqual((False, False, 'no_suppression'),
+                             (first.json()['tombstone'], first.json()['cancelled'],
+                              first.json()['reason']))
+            self.assertEqual(404, server.state('cancelled-before-upload').status_code)
+            self.assertEqual(200, server.post('traverse', req).status_code)
+        with self._Server(self, '--traverse-attempt-retention', '0') as server:
+            first = server.post('traverse/cancel', {'attempt_id': 'cancelled-before-upload'})
+            self.assertEqual(429, first.status_code, first.text)
+            self.assertEqual((False, 'tombstones_full'),
+                             (first.json()['tombstone'], first.json()['reason']))
+
+    def _half_uploaded(self, server, req):
+        """Send the header and half the body of |req| on a raw socket: the request is on the
+        wire, its handler not started."""
+        body = json.dumps(req).encode()
+        split = len(body) // 2
+        sock = socket.create_connection(('127.0.0.1', server.port), timeout=30)
+        sock.sendall(b'POST /traverse HTTP/1.1\r\nHost: localhost\r\n'
+                     b'Content-Type: application/json\r\n'
+                     + b'Content-Length: %d\r\nConnection: close\r\n\r\n' % len(body)
+                     + body[:split])
+        time.sleep(0.05)
+        return sock, body[split:]
+
+    @staticmethod
+    def _complete(sock, rest):
+        import http.client
+        sock.sendall(rest)
+        response = http.client.HTTPResponse(sock)
+        response.begin()
+        out = json.loads(response.read())
+        sock.close()
+        return response.status, out
+
+    def test_a_cancel_naming_not_after_ms_covers_a_half_uploaded_request(self):
+        """Review of pass 5, finding 1, the reviewer's timeline with retention 1 s: a request
+        with not_after_ms = now + 60 s is half uploaded, then cancelled (404, tombstone). With
+        the cancel naming that not_after_ms, the tombstone is held to not_after_ms + the skew
+        allowance (suppressed_until_ms, covers_admission true), a repeat cancel at 0.76 s states
+        the same expiry, and the upload completed at 1.2 s is refused (409, the tombstone) and
+        never runs. Without not_after_ms in the cancel (and no repeat), covers_admission is
+        false (a ledger may not release on it) and the upload completed at 1.2 s runs, as the
+        retention period alone allows."""
+        with self._Server(self, '--traverse-attempt-retention-s', '1') as server:
+            skew = requests.get(server.url + '/capabilities').json()['attempts'][
+                'clock_skew_allowance_ms']
+            for covered in (True, False):
+                attempt_id = 'delayed-original-%d' % covered
+                not_after = int(time.time() * 1000) + 60000
+                req = self._request(1, radius=5, attempt_id=attempt_id, not_after_ms=not_after)
+                sock, rest = self._half_uploaded(server, req)
+                cancel = {'attempt_id': attempt_id}
+                if covered:
+                    cancel['not_after_ms'] = not_after
+                first = server.post('traverse/cancel', cancel)
+                start = time.monotonic()
+                self.assertEqual(404, first.status_code, first.text)
+                body = first.json()
+                self.assertTrue(body['tombstone'])
+                self.assertEqual(covered, body['covers_admission'], body)
+                if covered:
+                    self.assertEqual(not_after + skew, body['suppressed_until_ms'])
+                    self.assertEqual(not_after, body['not_after_ms'])
+                else:
+                    self.assertEqual('no_not_after_ms', body['covers_admission_reason'])
+                    self.assertLess(body['suppressed_until_ms'], not_after)
+                if covered:
+                    # (uncovered, a repeat cancel would keep the tombstone 1 s from then, and
+                    # the copy's refusal would extend it to the copy's not_after_ms)
+                    time.sleep(0.75)
+                    second = server.post('traverse/cancel', {'attempt_id': attempt_id})
+                    self.assertEqual(404, second.status_code, second.text)
+                    self.assertEqual(body['suppressed_until_ms'],
+                                     second.json()['suppressed_until_ms'])
+                    self.assertTrue(second.json()['covers_admission'])
+                time.sleep(max(0.0, 1.2 - (time.monotonic() - start)))
+                status, out = self._complete(sock, rest)
+                state = server.state(attempt_id)
+                if covered:
+                    self.assertEqual(409, status, out)
+                    self.assertTrue(out['attempt']['tombstone'])
+                    self.assertTrue(out['attempt']['covers_admission'])
+                    self.assertNotIn('usage', out)
+                    self.assertEqual(404, state.status_code)
+                    self.assertTrue(state.json()['tombstone'])
+                    self.assertEqual(not_after + skew, state.json()['suppressed_until_ms'])
+                else:
+                    self.assertEqual(200, status, out)
+                    self.assertEqual('completed', out['usage']['reason'])
+
+    def test_expect_server_instance_refuses_another_process(self):
+        """The restart hole of finding 1: tombstones live in memory, so a copy reaching a
+        restarted process would run. A request naming another server_instance is refused before
+        anything runs (409 instance_mismatch, nothing registered); naming this one, it runs. The
+        CLI, whose instance is its own, refuses one too."""
+        with self._Server(self) as server:
+            mine = requests.get(server.url + '/capabilities').json()['attempts'][
+                'server_instance']
+            other = 'f' * 16 if mine != 'f' * 16 else 'e' * 16
+            req = self._request(1, radius=5, attempt_id='inst-1', expect_server_instance=other)
+            refused = server.post('traverse', req)
+            self.assertEqual(409, refused.status_code, refused.text)
+            body = refused.json()
+            self.assertEqual(('instance_mismatch', other, mine, 'inst-1'),
+                             (body['state'], body['expect_server_instance'],
+                              body['server_instance'], body['attempt_id']))
+            self.assertEqual(404, server.state('inst-1').status_code)
+            req['expect_server_instance'] = mine
+            ok = server.post('traverse', req)
+            self.assertEqual(200, ok.status_code, ok.text)
+            self.assertEqual(mine, ok.json()['usage']['server_instance'])
+            # without attempt_id the field is refused (400)
+            plain = self._request(1, radius=5, expect_server_instance=mine)
+            self.assertEqual(400, server.post('traverse', plain).status_code)
+        path = self.tempdir.name + '/instance.json'
+        with open(path, 'w') as f:
+            json.dump(self._request(1, radius=5, attempt_id='cli-1',
+                                    expect_server_instance='0' * 16), f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '-i', self.graph, '-a',
+                                                       self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(1, res.returncode)
+        self.assertEqual('instance_mismatch', json.loads(res.stdout)['state'])
 
     def test_concurrent_attempts_with_cancels(self):
         """Sixteen attempts at once, half of them cancelled: each response and each state

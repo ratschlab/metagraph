@@ -915,7 +915,10 @@ class Walker {
     const bool annotate_;
     PathCacheScope path_cache_scope_;
 
-    Timer timer_;
+    // the seed's clock (the deadlines, its elapsed time): the oracle's pacer's, the steady clock
+    // unless a test set a virtual one (DecodePacer::test_clock_ms); ms since the walker began
+    const double start_ms_ = oracle_.pacer().now_ms();
+    double elapsed_ms() const { return oracle_.pacer().now_ms() - start_ms_; }
     SeedResult result_;
     std::string seed_upper_;
     std::vector<node_index> nodes_;
@@ -961,6 +964,12 @@ class Walker {
     // two comparisons (ResourceAccount::largest_charge)
     uint64_t compared_at_ = 0;
     uint64_t largest_charge_ = 0;
+    // the deadline record (R8, timing): the clock and the reads' total time when checkpoint()
+    // last read the clock (-1: not yet), and the walk's first stop — when (on the seed's clock),
+    // by what, and how long after its deadline
+    double head_clock_ms_ = -1;
+    double head_reads_ms_ = 0;
+    double stop_ms_ = -1;
     uint64_t depth_ = 0;             // the level being processed
     size_t events_written_ = 0;      // events pushed, for the plan's debug check
     // the annotation is read by the budget-aware decode path: a request budget is set and
@@ -1014,7 +1023,9 @@ void Walker::validate_seed() {
         }
     }
 
+    PacerTimer mapping(oracle_.pacer());
     nodes_ = map_to_nodes_sequentially(graph_, seed_upper_);
+    oracle_.pacer().note_piece("kmer_mapping", mapping.elapsed_ms(), nodes_.size());
     assert(nodes_.size() == seq.size() - k_ + 1);
     {
         std::vector<KmerInterval> runs;
@@ -1095,7 +1106,9 @@ void Walker::validate_seed() {
     // support of every seed k-mer. One pass over the seed's annotation rows: either
     // of the labels given, or — when none are given — of every label, whose
     // intersection IS the derived permitted set (§6.1, `permit: per_hit`).
+    const PacerTimer key_mapping(oracle_.pacer());
     std::vector<node_index> keys = oracle_.keys_of_sequence(seed_upper_);
+    oracle_.pacer().note_piece("kmer_mapping", key_mapping.elapsed_ms(), keys.size());
     std::vector<LabelRef> seed_refs;
     std::vector<LabelQuery::NodeHits> hits;
     // A set derived from the seed supports every seed k-mer by construction, so unless
@@ -1110,7 +1123,9 @@ void Walker::validate_seed() {
                 if (other.name == name)
                     throw std::invalid_argument("Duplicate seed label '" + name + "'");
             }
+            Timer resolving;
             seed_refs.push_back(oracle_.resolve_label(name));
+            oracle_.counters().label_resolve_seconds += resolving.elapsed();
         }
         LabelQuery validation(oracle_, seed_refs, trace_);
         hits = fetch_seed_hits(validation, keys);
@@ -1235,7 +1250,9 @@ void Walker::validate_seed() {
 
     // ---- extra labels (switch targets)
     for (size_t i = 0; i < strategy_.extra.size(); ++i) {
+        Timer resolving;
         LabelRef ref = oracle_.resolve_label(strategy_.extra[i]);
+        oracle_.counters().label_resolve_seconds += resolving.elapsed();
         for (const auto &other : result_.label_dict) {
             if (other.same_target(ref)) {
                 throw std::invalid_argument("Extra label '" + strategy_.extra[i]
@@ -1384,14 +1401,17 @@ size_t Walker::read_window(const std::vector<Row> &rows, annot::matrix::DecodeBu
         std::vector<RowCost> got_costs;
         std::vector<uint64_t> held;
         DecodeStatus status;
-        Timer timer;
+        const uint64_t coords = pacer.coords_now();
+        PacerTimer timer(pacer);
         if constexpr(std::is_same_v<RowT, annot::matrix::BinaryMatrix::SetBitPositions>) {
             status = oracle_.get_rows(sub, budget, &got, &got_costs, &held);
         } else {
             status = oracle_.get_row_tuples(sub, budget, &got, &got_costs, &held);
         }
-        previous_ms = timer.elapsed() * 1000;
-        pacer.record(len, previous_ms);
+        previous_ms = timer.elapsed_ms();
+        pacer.record(len, previous_ms,
+                     !pacing || (!pos && len == n) ? "read" : pos + len == n ? "rest" : "chunk",
+                     pacer.coords_now() - coords);
         previous = len;
         if (status != DecodeStatus::OK) {
             assert(status == DecodeStatus::REFUSED);
@@ -1446,7 +1466,7 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     // immediate deadline here; the server's own cap is what bounds that case.
     const double budget_ms = strategy_.time_budget_ms;
     auto out_of_time = [&]() {
-        return budget_ms > 0 && timer_.elapsed() * 1000.0 >= budget_ms;
+        return budget_ms > 0 && elapsed_ms() >= budget_ms;
     };
     // The candidate set of the FIRST k-mer consumed is a whole annotation row: no
     // intersection has narrowed it yet. A seed of exactly k bases never gets an
@@ -1534,7 +1554,7 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         "permitted set from the seed, after " + std::to_string(done.size())
                         + " of " + std::to_string(keys.size()) + " k-mers; name the labels "
                           "explicitly or shorten the seed",
-                        budget_ms, timer_.elapsed() * 1000.0);
+                        budget_ms, elapsed_ms());
             }
             seed_external_stop();
             throw std::logic_error("a paced read of the derivation stopped without a stop");
@@ -1613,7 +1633,8 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                     }
                     piece = pacer.next(piece, pace->ms_left(), previous, previous_ms);
                 }
-                Timer timer;
+                const uint64_t coords = pacer.coords_now();
+                PacerTimer timer(pacer);
                 if (!at && piece == distinct.size()) {
                     // one piece: the read as it always was
                     if (with_coords) {
@@ -1634,8 +1655,11 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         }
                     }
                 }
-                previous_ms = timer.elapsed() * 1000;
-                pacer.record(piece, previous_ms);
+                previous_ms = timer.elapsed_ms();
+                pacer.record(piece, previous_ms,
+                             !at && piece == distinct.size() ? "read"
+                                 : at + piece == distinct.size() ? "rest" : "chunk",
+                             pacer.coords_now() - coords);
                 previous = piece;
                 at += piece;
             }
@@ -1731,6 +1755,10 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
 
         for (size_t i : order) {
             const bool first = done.empty();
+            // the k-mer's step is one uninterruptible piece (its coordinates mapped to headers
+            // in it): the deadline is read after it (R8)
+            const uint64_t step_coords = oracle_.pacer().coords_now();
+            const PacerTimer step(oracle_.pacer());
             // counted when the row is CONSUMED, not when the sub-batch is fetched, so
             // the reported count is the number of k-mers the derivation actually read
             oracle_.counters().rows_requested++;
@@ -1846,6 +1874,11 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 }
                 compacted_at = live.size();
             }
+            {
+                const uint64_t mapped = oracle_.pacer().coords_now() - step_coords;
+                oracle_.pacer().note_piece(mapped ? "coord_mapping" : "derivation_step",
+                                           step.elapsed_ms(), 1, mapped);
+            }
             // per k-mer, like the deadline: the window was charged when it was read
             seed_external_stop();
             if (out_of_time()) {
@@ -1854,7 +1887,7 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         "permitted set from the seed, after " + std::to_string(done.size())
                         + " of " + std::to_string(keys.size()) + " k-mers; name the labels "
                           "explicitly or shorten the seed",
-                        budget_ms, timer_.elapsed() * 1000.0);
+                        budget_ms, elapsed_ms());
             }
         }
         observe();
@@ -3222,12 +3255,22 @@ void Walker::checkpoint(bool force) {
     if (!force && used < next_check_)
         return;
     next_check_ = used + kWorkCheckInterval;
+    {
+        // the walk since the clock was last read here, its reads excluded (they are pieces
+        // of their own): one head's processing, or a few (R8)
+        const double now = elapsed_ms();
+        const double reads = oracle_.pacer().read_ms;
+        if (head_clock_ms_ >= 0)
+            oracle_.pacer().note_piece("head", (now - head_clock_ms_) - (reads - head_reads_ms_));
+        head_clock_ms_ = now;
+        head_reads_ms_ = reads;
+    }
     // The deadline needs the clock, so it is read before every head and at least every
     // interval, so that one wide level cannot overrun it by more than that. Never at depth
     // 0: a zero budget means "no extension", and the boundary check in run() is what ends
     // such a walk after its first level.
     if (depth_ > 0 && time_exceeded())
-        throw BudgetTrip { ResourceStop::TIME, timer_.elapsed() * 1000.0 };
+        throw BudgetTrip { ResourceStop::TIME, elapsed_ms() };
     // A stop from outside the walk is read where the deadline is (before every head and at
     // least every interval), at any depth: unlike a zero time budget it says nothing about
     // extension, and a cancelled attempt must stop as soon as it can. It stops the walk like
@@ -3252,9 +3295,9 @@ ReadPacing* Walker::pacing(Deadline deadline) {
         double left = std::numeric_limits<double>::infinity();
         const double budget = strategy_.time_budget_ms;
         if (deadline == Deadline::WALK) {
-            left = budget > 0 ? budget - timer_.elapsed() * 1000.0 : 0;
+            left = budget > 0 ? budget - elapsed_ms() : 0;
         } else if (deadline == Deadline::DERIVATION && budget > 0) {
-            left = budget - timer_.elapsed() * 1000.0;
+            left = budget - elapsed_ms();
         }
         if (control_ && control_->ms_left)
             left = std::min(left, control_->ms_left());
@@ -3267,7 +3310,7 @@ ReadPacing* Walker::pacing(Deadline deadline) {
         const double budget = strategy_.time_budget_ms;
         if ((deadline == Deadline::WALK && time_exceeded())
                 || (deadline == Deadline::DERIVATION && budget > 0
-                        && timer_.elapsed() * 1000.0 >= budget)) {
+                        && elapsed_ms() >= budget)) {
             paced_by_time_ = true;
             return true;
         }
@@ -3278,7 +3321,7 @@ ReadPacing* Walker::pacing(Deadline deadline) {
 
 BudgetTrip Walker::paced_trip() {
     if (paced_by_time_)
-        return BudgetTrip { ResourceStop::TIME, timer_.elapsed() * 1000.0 };
+        return BudgetTrip { ResourceStop::TIME, elapsed_ms() };
     // the stop flag is set by now: the poll returns it (a gone client throws)
     switch (external_stop()) {
         case ExternalStop::CANCELLED:
@@ -3327,7 +3370,7 @@ double Walker::attempt_ms() const {
     // whole milliseconds, rounded up: the statements' integers (K, Q and the cap trigger), and
     // never less than what elapsed
     return std::ceil(control_ && control_->elapsed_ms ? control_->elapsed_ms()
-                                                      : timer_.elapsed() * 1000.0);
+                                                      : elapsed_ms());
 }
 
 void Walker::write_meter() const noexcept {
@@ -3352,6 +3395,30 @@ EndReason Walker::note_stop(const ArmState &arm, const Item *head,
                             ResourceStop::Resource resource, double demand, bool injected,
                             const char *phase, double used, const ResourceStop *detail) {
     if (!result_.resource_stop) {
+        // the deadline record (R8): what stopped the walk, and how long after its deadline
+        // (the seed's time budget on the seed's clock, the attempt's walk-until on its own)
+        stop_ms_ = elapsed_ms();
+        DeadlineRecord &d = result_.deadline;
+        switch (resource) {
+            case ResourceStop::TIME:
+                d.stopped_by = "time_budget";
+                d.after_deadline_ms = std::max(0.0, stop_ms_ - strategy_.time_budget_ms);
+                break;
+            case ResourceStop::ATTEMPT_DEADLINE:
+                d.stopped_by = "attempt";
+                if (control_ && control_->ms_left)
+                    d.after_deadline_ms = std::max(0.0, -control_->ms_left());
+                break;
+            case ResourceStop::CANCELLED:
+                d.stopped_by = "cancelled";
+                break;
+            case ResourceStop::MEMORY:
+                d.stopped_by = "memory";
+                break;
+            case ResourceStop::WORK:
+                d.stopped_by = "work";
+                break;
+        }
         ResourceStop q = detail ? *detail : ResourceStop();
         q.resource = resource;
         q.injected = injected;
@@ -3812,7 +3879,7 @@ std::vector<LabelRecorder::NodeLabels> Walker::fetch_present(ArmState &arm,
 
 bool Walker::time_exceeded() const {
     return strategy_.time_budget_ms <= 0
-        || timer_.elapsed() * 1000.0 >= strategy_.time_budget_ms;
+        || elapsed_ms() >= strategy_.time_budget_ms;
 }
 
 void Walker::sort_items(std::vector<Item> &items) const {
@@ -5719,19 +5786,37 @@ SeedResult Walker::run() {
         const Walker &walker;
         ~Metered() { walker.write_meter(); }
     } metered { *this };
+    // this seed's deadline record (the pacer is the request's)
+    oracle_.pacer().longest = UninterruptiblePiece();
     // the seed phase observes what it holds against the memory budget (observe_seed_scratch)
     mem_limit_ = strategy_.max_memory_bytes;
     budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
     // under a request budget the annotation is read by the budget-aware decode path when the
     // index has it (stage 3 of DESIGN-traverse-graphlet.md §14.1), from the seed phase on
     decode_charged_ = budgeted_ && oracle_.decode_charged();
-    try {
-        validate_seed();
-    } catch (SeedDerivationError &e) {
-        // a seed failed in its derivation states memory_bound_soft like any other result
-        // under a memory budget, with what the derivation was seen to hold (finding 8)
-        e.set_soft_overshoot(overshoot_);
-        throw;
+    {
+        // the seed phase's time and its reads' (timing): before them nothing else looks at
+        // the clock, and a slow one is otherwise visible only as elapsed time no counter
+        // explains (R10: 9.3 s of a 1 s budget outside the walk's fetch time)
+        struct SeedPhase {
+            explicit SeedPhase(LabelOracle::Counters &counters)
+                  : counters(counters), fetch_before(counters.fetch_seconds) {}
+            ~SeedPhase() {
+                counters.seed_phase_seconds += timer.elapsed();
+                counters.seed_fetch_seconds += counters.fetch_seconds - fetch_before;
+            }
+            LabelOracle::Counters &counters;
+            const double fetch_before;
+            Timer timer;
+        } phase(oracle_.counters());
+        try {
+            validate_seed();
+        } catch (SeedDerivationError &e) {
+            // a seed failed in its derivation states memory_bound_soft like any other result
+            // under a memory budget, with what the derivation was seen to hold (finding 8)
+            e.set_soft_overshoot(overshoot_);
+            throw;
+        }
     }
     init_edge_coding();
     if (annotate_) {
@@ -5798,11 +5883,11 @@ SeedResult Walker::run() {
                     return item.ext_bp < strategy_.max_extension_bp;
                 });
                 if (head != arm.frontier.end()) {
-                    note_stop(arm, &*head, ResourceStop::TIME, timer_.elapsed() * 1000.0);
+                    note_stop(arm, &*head, ResourceStop::TIME, elapsed_ms());
                     break;
                 }
             }
-            cap_demand_ = timer_.elapsed() * 1000.0;
+            cap_demand_ = elapsed_ms();
             for (ArmState &arm : arms_) {
                 stop_frontier(arm, EndReason::TIME_BUDGET);
             }
@@ -5817,6 +5902,8 @@ SeedResult Walker::run() {
         ++depth;
     }
 
+    // the finalisation, from the walk's stop (or end) to the result, is one piece
+    const double walk_end_ms = stop_ms_ >= 0 ? stop_ms_ : elapsed_ms();
     if (annotate_) {
         // the labels met along either arm, in the order first seen
         result_.label_dict = recorder_->labels();
@@ -5853,9 +5940,12 @@ SeedResult Walker::run() {
 
     result_.arms[static_cast<size_t>(Arm::LEFT)] = std::move(arms_[0].result);
     result_.arms[static_cast<size_t>(Arm::RIGHT)] = std::move(arms_[1].result);
+    oracle_.sync_path_cache_counters();
     result_.annotation_counters = oracle_.counters();
     result_.access_path = annotate_ ? recorder_->access_path() : query_->access_path();
-    result_.elapsed_seconds = timer_.elapsed();
+    result_.elapsed_seconds = elapsed_ms() / 1000;
+    oracle_.pacer().note_piece("finalisation", result_.elapsed_seconds * 1000 - walk_end_ms);
+    result_.deadline.longest = oracle_.pacer().longest;
     return std::move(result_);
 }
 
