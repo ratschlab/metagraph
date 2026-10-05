@@ -2258,8 +2258,7 @@ the server.
     physical work (`path_cache`) and the deadline record (`deadline`, §6.8). Feature level 5 changes no response of
     a request without budgets beyond the digit, the `timing` block (new fields; `coords_mapped` counts the
     coordinates a header label's filter examined, as before) and the texts of the capabilities; budgeted requests
-    keep their bytes too (checked against the previous build, T52). *(In the code the constant is raised with
-    the release; until then the server states 4.)*
+    keep their bytes too (checked against the previous build, T52). The server states 5 from `7cdde4c2`.
   - **`schema_version`** is the one request schema the server accepts: 1, with no compatibility window. A future
     change of the request schema adds `request_schema_versions: [..]` to the capabilities and keeps accepting 1 for
     a stated window; a `schema_version` above 1 without that list means a server whose requests a client written
