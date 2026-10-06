@@ -112,6 +112,19 @@ Invariants that every stage keeps:
 
 ### 2.1 Record coordinates (level 6)
 
+**Status (2026-10-05).** C0–C2 committed with D3 (`7aaee760`, chunk W1). Chunk W2: C3 (the reserve's coordinate
+share with the exact sample, the capabilities of revision 8 plus the `deadline_check` sentence of 3c-N5, level 6),
+C4 (the positional oracle with the recorded switch cells, M1 and M2) and the C++ half of C7 are done, with the
+owner's R21 (4) (a merge displays its majority parent) and the server's shutdown on SIGTERM (also while an index
+loads); DESIGN §26 records them with the measurement tables. **R21 (4) under a memory budget is for you to
+confirm**: as built (the review's option (a)) `tree` and `full` detail keep the arrival order under a memory
+budget, the request's or the server's, so no budget's stop moves — and on a server with a memory maximum (ops note
+O2) those details never show the rule (DESIGN §26.9). **The D4 gate by regime** (revision 4's column fixture with 16 chains
+a run, the refseq33m projection, and what completing takes): it holds for header labels at refseq's chain counts
+and column labels below 16 chains a run (median depth at the stop −3 to −4%), and does not hold for column labels
+with 16 or more chains a run (−13 to −16% projected; failures at depth 0 on the fixtures) nor for header-heavy
+seeds — X-C8 is returned to you (DESIGN §26.9).
+
 **Goal**
 - With `output.coordinates: true`, every seed result reports where each run's sequence lies.
 - Positions are within the record for header labels and global for column labels.

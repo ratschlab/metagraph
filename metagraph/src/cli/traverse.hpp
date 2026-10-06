@@ -81,8 +81,11 @@ constexpr const char *kTraverseAlgorithmVersion = "traverse-0.2";
 // calibrated starting estimates (delivery_reserve.calibration); 5 (the review of 5801aea1): a
 // cancel's not_after_ms with suppressed_until_ms / covers_admission on every tombstone answer,
 // expect_server_instance (409 instance_mismatch), validated retention settings, the loader
-// inventory behind per-graph identity, and the seed phase and deadline record in timing
-constexpr int kTraverseFeatureLevel = 5;
+// inventory behind per-graph identity, and the seed phase and deadline record in timing; 6
+// (record coordinates): strategy.output.coordinates and max_coordinate_occurrences with the
+// coordinates block or null form per seed, the coordinates limitation and drop_coordinates,
+// the probe's coordinates block and delivery_reserve.coordinate_account_per_text_byte
+constexpr int kTraverseFeatureLevel = 6;
 
 /**
  * What identifies the index a response was computed on (DESIGN-traverse-graphlet.md
@@ -215,6 +218,12 @@ Json::Value seed_result_to_json(const graph::traversal::SeedResult &result,
 Json::Value profile_to_json(const graph::traversal::SupportProfile &profile,
                             const graph::traversal::SeedSelection *selection,
                             const std::string &run_format);
+// The `coordinates` block of GET /traverse/capabilities (feature level 6; not in the
+// per-request capabilities, which change only in their feature_level): whether this index
+// reports record coordinates (supports_trace), the knobs and the cap's default, the block
+// kinds it can report, the limitation and the action, what bounds the block's size, and the
+// rule — positions, the interval rule, the column record-end numbering, the assumptions
+Json::Value coordinates_capabilities_json(const graph::traversal::LabelOracle &oracle);
 // |identity| null: no name, no manifest, meta_fp computed here
 Json::Value capabilities_to_json(const graph::traversal::LabelOracle &oracle,
                                  const std::string &release,
@@ -246,6 +255,23 @@ graph::traversal::DeliveryCosts delivery_costs(const std::string &detail, bool s
 // the length the JSON writers here give |s| inside a JSON string, quotes excluded: what
 // delivery_costs prices a name's text by
 uint64_t json_escaped_size(std::string_view s);
+// The length of json_text(|value|, true) — the compact text the server writes — counted from
+// digits and fixed punctuation, without writing it (a string's or a real's own text is
+// written by the writer itself, so that its escaping and digits are the writer's)
+uint64_t compact_json_size(const Json::Value &value);
+// The bytes of a seed's compact result text (one entry of `results`, as the server writes
+// it) that are there because record coordinates were asked for: the `coordinates` member
+// (the block, or null with `coordinates_reason`), a cut list's `coordinates` limitation, the
+// `drop_coordinates` action of a resource stop and, in a graphlet, the coordinates K record,
+// the Q record's drop_coordinates token and the digits these add to the Z record,
+// graphlet_lines and graphlet_bytes. Counted exactly (compact_json_size), so that the text of
+// the same result without them — the opt-out request's, when the walk is the same — is the
+// result's text less this: what the server's delivery reserve leaves out of its ratio
+// samples beside the account's coordinate share (plan revision 3). 0 without them. |check|:
+// the attempt's delivery check, called every 4096 values counted (a large block is counted
+// under the attempt's bound, as it is written)
+uint64_t coordinates_text_bytes(const Json::Value &result,
+                                const std::function<void()> &check = {});
 
 // What the H record states besides the result: the index and the seed's position.
 struct GraphletContext {

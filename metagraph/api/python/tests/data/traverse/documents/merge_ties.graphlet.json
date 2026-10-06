@@ -19,14 +19,14 @@
   "has_coord_to_header": true,
   "has_coordinates": true,
   "index_fp": null,
-  "index_meta_fp": "d162e9761461fa47",
+  "index_meta_fp": "fbfd396e439f0d22",
   "index_ns": "fixtures",
   "k": 15,
   "label_modes": [
    "constrain",
    "annotate"
   ],
-  "num_labels": 2,
+  "num_labels": 4,
   "regime": "basic",
   "release": "",
   "schema_version": 1,
@@ -37,41 +37,40 @@
   {
    "annotation": {
     "access_path": "direct",
-    "direct_reads": 180,
-    "keys_mapped": 106,
-    "rows_requested": 106
+    "direct_reads": 438,
+    "keys_mapped": 148,
+    "rows_requested": 148
    },
    "arms": {
     "right": {
-     "branch_events_total": 0,
-     "complete_to_bp": 200,
+     "branch_events_total": 2,
+     "complete_to_bp": 100,
      "completeness_scope": "united_history",
      "counters": {
       "edge_reuse_probes": 0,
       "max_reminimisation_rounds": 0,
-      "output_bp": 90,
-      "pair_evaluations": 102,
+      "output_bp": 132,
+      "pair_evaluations": 0,
       "refusal_scans": 0,
       "reminimisation_rounds": 0,
-      "steps": 90,
-      "successor_enumerations": 91,
+      "steps": 132,
+      "successor_enumerations": 130,
       "switch_sources_cut": 0
      },
      "counts": {
-      "bases": 90,
+      "bases": 132,
       "label_ends": {
-       "dead_end": 1,
-       "label_lost": 2
+       "max_extension_bp": 3
       },
       "leaves": 1,
       "leaves_by_reason": {
-       "semantic": 1
+       "max_extension_bp": 1
       },
-      "max_bp": 90,
-      "merges": 0,
-      "runs": 3,
-      "segments": 1,
-      "splits": 0
+      "max_bp": 100,
+      "merges": 2,
+      "runs": 5,
+      "segments": 7,
+      "splits": 2
      },
      "evidence": {
       "complete": true,
@@ -84,7 +83,7 @@
      },
      "labels_per_node": {
       "cap": 64,
-      "max_seen": 0,
+      "max_seen": 2,
       "nodes_truncated": 0
      },
      "limitations": [
@@ -93,35 +92,35 @@
        "kind": "scope",
        "knob": "branching.on_reconverge",
        "limit": "merge",
-       "observed": 0
+       "observed": 2
       }
      ],
      "status": "complete"
     }
    },
-   "graphlet": "H mgt 1 15 basic $ACGT c k m 64 1000 0 walk fixtures * d162e9761461fa47\nS 402fd22b59c5df47 30 16 1 ATAAAGCTAATAACCCCCGTGAGGCAAGAT\nL c 0 * 0 pA.fa\nL c 1 * 1 B.fa\nO c c c i\nK r scope branching.on_reconverge s:merge i:0 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA r c 200 u 0 0 1 0 0 steps=90,successor_enumerations=91,output_bp=90,pair_evaluations=102,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 0 * 1 3 1 0 0 90\nB 0 1 1 1 1 50 0 0 0 0 0 0 0 L:1\nB 50 1 1 1 1 40 0 0 0 0 0 0 0 D:1,L:1\nG * 0 90 * * * * * * TTCTACGAGGGCTCTCTGGGCACGATATTAAGAGGTGCTACAAGTAGATCCCTCGTCTAAACTCTATATTTTCTTGGATGGAATGACATA\nE 30 s 0 1 1\nE 60 s 1 0 1\nT * 0:2:0:0\nR 0 0 0 30 Lw 0 * * * 0 0\nR 0 1 30 60 Lw 0 0:1 0 * 0 1\nR 0 0 60 90 D 0 1:1 1 0 0 2\nZ 17\n",
-   "graphlet_bytes": 849,
-   "graphlet_lines": 17,
+   "graphlet": "H mgt 1 15 basic $ACGT c k m 64 40 0 walk fixtures * fbfd396e439f0d22\nS 18618eb4f40ac8b9 30 16 3 ATGAGCGTGCCTCTAACGTTCATACCAAAT\nL c 0 * 0 a.fa\nL c 1 * 0 b.fa\nL c 3 * 1 oth.fa\nO p c c i\nK r scope branching.on_reconverge s:merge i:2 * . completeness holds for the united-history rule, not per path; use \"keep\" for the per-path guarantee\nA r c 100 u 0 0 1 2 0 steps=132,successor_enumerations=130,output_bp=132,pair_evaluations=0,edge_reuse_probes=0,reminimisation_rounds=0,max_reminimisation_rounds=0,refusal_scans=0,switch_sources_cut=0 * 2 * 7 5 1 2 2 132\nB 0 2 3 4 1 70 0 2 2 1 0 0 0 .\nB 50 2 3 4 1 62 0 0 0 1 0 0 0 .\nB 100 1 3 3 1 0 0 0 0 0 0 0 0 X:3\nV 20 0 AT 2,2 2 . .\nV 46 3 CG 2,2 2 . .\nG * 0 20 * * * * 1 * TTTCCTATTTAGCCTCTGTC\nG 0 20 16 !1 * * * * * ATTACGTTTGACAATG\nG 0 20 16 !0 * * * * * TTTACGTTTGACAATG\nG 1,2 36 10 * * * 0,2|1 1 * ACCCAGCCCT\nG 3 46 16 !1 * * * * * CCGGCGGGTCGACTTG\nG 3 46 16 !0 * * * * * GCGGCGGGTCGACTTG\nG 4,5 62 38 * * * 0,2|1 * * GTCCGGACGATAGCACTTAGTTCCTCACTTCACAATAG\nT X 1:0:0:62,2:0:2:0\nC 38 0 0 !\nR 6 0 0 100 X 0 * * 0 0 0\nR 6 1 0 100 X 36 * * 0 0 0\nR 6 2 0 100 X 0 * * 0 2 0\nR 2 2 0 36 m 0 * * * 1 0\nR 5 2 0 62 m 0 * * * 2 0\nZ 28\n",
+   "graphlet_bytes": 1167,
+   "graphlet_lines": 28,
    "label_mode": "constrain",
    "limitations": [],
    "outcome": {
     "branch_diagnostics": "complete",
     "delivery": "inline",
     "label_evidence": "complete",
-    "walks": "complete"
+    "walks": "partial"
    },
    "seed": {
     "labels_dropped": 0,
     "labels_dropped_digest": "",
-    "labels_from_seed": true,
-    "labels_supporting_total": 1,
+    "labels_from_seed": false,
+    "labels_supporting_total": 3,
     "length_bp": 30,
     "num_kmers": 16,
-    "num_labels": 2,
-    "num_seed_labels": 1,
-    "seed_id": "reentry",
+    "num_labels": 3,
+    "num_seed_labels": 3,
+    "seed_id": "merge_ties",
     "seed_id_mismatch": true,
-    "validated_seed_id": "402fd22b59c5df47"
+    "validated_seed_id": "18618eb4f40ac8b9"
    }
   }
  ],
@@ -130,7 +129,7 @@
    "batch_kmers": 64
   },
   "bounds": {
-   "max_extension_bp": 200,
+   "max_extension_bp": 100,
    "max_live_paths": 1000,
    "max_output_bp": 2000000,
    "max_paths": 10000,
@@ -141,7 +140,7 @@
   "branching": {
    "bubble_window_bp": 0,
    "hairpins": "skip",
-   "max_label_branches": 0,
+   "max_label_branches": "unlimited",
    "max_splits_per_path": 64,
    "min_successor_fraction": 0.0,
    "min_successor_labels": 1,
@@ -157,13 +156,10 @@
   },
   "labels": {
    "change_cost": {
-    "model": "constant",
-    "value": 1.0
+    "model": "forbid"
    },
-   "extra": [
-    "pB.fa"
-   ],
-   "loss_budget": 2.0,
+   "extra": [],
+   "loss_budget": 0.0,
    "max_labels_per_node": 64,
    "max_seed_labels": 1000,
    "max_switch_sources": 64,
@@ -172,7 +168,7 @@
    "switch_on": "loss"
   },
   "output": {
-   "continuation_bp": 1000,
+   "continuation_bp": 40,
    "detail": "graphlet",
    "max_branch_events": 100,
    "profile_bin_bp": 50,

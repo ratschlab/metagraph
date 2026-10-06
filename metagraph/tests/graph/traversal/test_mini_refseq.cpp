@@ -7,6 +7,7 @@
 #include <map>
 #include <sstream>
 #include <thread>
+#include <tuple>
 
 #include "tests/graph/traversal/test_trie_oracle.hpp"
 #include "tests/graph/traversal/test_trie_checks.hpp"
@@ -19,8 +20,10 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
+#include "cli/traverse_attempts.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "common/unix_tools.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 
 
 namespace {
@@ -1590,7 +1593,7 @@ size_t overlapping_count(const std::string &hay, const std::string &needle) {
 
 struct PositionalCheck {
     size_t runs = 0, occurrences = 0, seed_lists = 0, lower_bound = 0, strictly_lower = 0,
-           switch_runs = 0, cut = 0, crossing = 0;
+           switch_runs = 0, cut = 0, crossing = 0, record_end = 0;
 };
 
 // The positional oracle (DESIGN §18.3): every reported interval's bases in the source record are
@@ -1608,12 +1611,25 @@ void check_positions(const SeedResult &r, const std::string &seed, const SourceR
             return std::vector<std::pair<std::string, uint64_t>>{ { src.by_accession.at(ref.name), 0 } };
         return src.by_column.at(ref.name);
     };
-    auto bases = [&](LabelId l, uint64_t s, uint64_t e) -> std::string {
+    // The bases at [s, e) of every record whose numbering holds the interval: one, except for
+    // a column label's interval in a record's last k - 1 bases, whose numbers are the next
+    // record's first k - 1 positions too (review of W1, finding 6; the capabilities' rule says
+    // so): an occurrence holds if one of them is the run's string. |second|: it was not the
+    // first record holding the numbers (the ambiguity occurred)
+    auto matches = [&](LabelId l, uint64_t s, uint64_t e, const std::string &want,
+                       bool *second) -> int {
+        int found = -1;
+        size_t n = 0;
         for (const auto &[text, start] : records_of(l)) {
-            if (s >= start && e - start <= text.size())
-                return text.substr(s - start, e - s);
+            if (s >= start && e - start <= text.size()) {
+                if (found < 0 && text.compare(s - start, e - s, want) == 0) {
+                    found = 1;
+                    *second = n > 0;
+                }
+                n++;
+            }
         }
-        return "";
+        return n ? std::max(found, 0) : -1;      // -1: no record holds [s, e)
     };
     auto count = [&](LabelId l, const std::string &needle) {
         size_t n = 0;
@@ -1624,12 +1640,14 @@ void check_positions(const SeedResult &r, const std::string &seed, const SourceR
         const SeedCoordinates &sc = r.seed_coordinates[l];
         EXPECT_EQ(count(l, seed), sc.total) << what << " seed list of " << r.label_dict[l].name;
         for (Coord s : sc.starts) {
-            const std::string b = bases(l, s, s + seed.size());
-            if (b.empty()) {
+            bool second = false;
+            const int m = matches(l, s, s + seed.size(), seed, &second);
+            if (m < 0) {
                 c->crossing++;
                 continue;
             }
-            EXPECT_EQ(seed, b) << what;
+            EXPECT_EQ(1, m) << what << " seed [" << s << ", " << s + seed.size() << ")";
+            c->record_end += second;
         }
         c->seed_lists++;
     }
@@ -1668,12 +1686,14 @@ void check_positions(const SeedResult &r, const std::string &seed, const SourceR
             }
             for (Coord e : rc.ends) {
                 const uint64_t s = arm.arm == Arm::RIGHT ? e + k - length : e;
-                const std::string b = bases(run.label, s, s + length);
-                if (b.empty()) {
+                bool second = false;
+                const int m = matches(run.label, s, s + length, own, &second);
+                if (m < 0) {
                     c->crossing++;
                     continue;
                 }
-                EXPECT_EQ(own, b) << at << " [" << s << ", " << s + length << ")";
+                EXPECT_EQ(1, m) << at << " [" << s << ", " << s + length << ")";
+                c->record_end += second;
                 c->occurrences++;
             }
             const size_t truth = count(run.label, string);
@@ -1693,10 +1713,14 @@ void check_positions(const SeedResult &r, const std::string &seed, const SourceR
 
 } // namespace
 
-// The positional oracle on the real index (C2; plan revision 1's switch cells): the whole blaNDM
-// gene to 1,000 bp and a six-copy repeat window of NZ_CP030345.1 (150 bp), under the branch limit
-// 0, 2 and the exhaustive preset, switch cells (a constant cost of 0.5 and 1 within a loss budget
-// of 2, limits 0 and 2), caps 1, 16 and "unlimited", header labels and column (taxid) labels
+// The positional oracle on the real index (C2, C4; plan revision 1's switch cells): the whole
+// blaNDM gene to 1,000 bp and a six-copy repeat window of NZ_CP030345.1 (150 bp), under the
+// branch limit 0, 2 and the exhaustive preset, switch cells (a constant cost of 0.5 and 1 within
+// a loss budget of 2, limits 0 and 2, to 3,000 bp as recorded) on these and on the seeds of the
+// recorded switch requests (next/coords-plan/swreq_*: blaNDM reverse-complemented, three 200-bp
+// windows of its carriers, a second repeat), caps 1, 16 and "unlimited", header labels and column (taxid)
+// labels, the latter also switching (where review of W1's finding 6 shows: an interval in a
+// record's last k - 1 bases has the next record's first numbers)
 TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
     const SourceRecords src = read_records(31);
     ASSERT_EQ(42u, src.by_accession.size());
@@ -1723,6 +1747,9 @@ TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
             st->max_splits_per_path = Strategy::kUnlimited;
             st->max_extension_bp = 600;
         } });
+        // the seeds of the recorded switch requests swreq_mini_ndm1_* and swreq_rep0_*: to
+        // their radius of 3,000 bp, like the recorded ones below (review of W2: these four
+        // cells a seed ran to the default 1,000 bp)
         for (double c : { 0.5, 1.0 }) {
             for (size_t limit : { size_t(0), size_t(2) }) {
                 cells.push_back({ name + " switch " + std::to_string(c) + " limit " + std::to_string(limit),
@@ -1730,6 +1757,7 @@ TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
                     *cost = LabelChangeCost::constant(c);
                     st->loss_budget = 2;
                     st->max_label_branches = limit;
+                    st->max_extension_bp = 3000;
                 } });
             }
         }
@@ -1738,7 +1766,59 @@ TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
         st->seed_label_kind = LabelKind::COLUMN;
         st->max_label_branches = 2;
     } });
+    // the seeds of the recorded switch requests (swreq_*): each under the four switch cells, to
+    // the recorded requests' radius of 3,000 bp
+    std::string ndm1_rc = query_;
+    reverse_complement(ndm1_rc.begin(), ndm1_rc.end());
+    const std::vector<std::pair<std::string, std::string>> recorded {
+        { "ndm1_rc", ndm1_rc },
+        { "win200_00", "ACCCGACCAAGGTCACCCGCACCGCGCTGCAGAACGCCGCGTCGATCGCGGGCCTGATGATCACCACCGAAGC"
+                       "GATGGTGGCCGAGGCCCCGAAGAAGGACGAGCCGGCGATGCCGGCCGGCGGCGGCATGGGCGGCATGGGCGG"
+                       "CATGGATTTCTAAGCCCCGCGATCCATCAAGCAAGACCACAAAGCCCGGCCTCGT" },
+        { "win200_03", "GCGATCCTTCCAACTCGTCGCAAAGCCCAGCTTCGCATAAAACGCCTCTGTCACATCGAAATCGCGCGATGG"
+                       "CAGATTGGGGGTGACGTGGTCAGCCATGGCTCAGCGCAGCTTGTCGGCCATGCGGGCCGTATGAGTGATTGC"
+                       "GGCGCGGCTATCGGGGGCGGAATGGCTCATCACGATCATGCTGGCCTTGGGGAACG" },
+        { "win200_05", "CGCCCCGTGCGGTTACGTCGAATGTCGCGGGCGCTTTGACATCGCGCGCAGCTGGCCAGATCGCCATGGTCG"
+                       "GTTTGTTCGTCGATGCGGATGATGCTGTCATCGCCGACGCACTGGTGGCAGCCAAGCTGAACGCGCTGCAGC"
+                       "TGCACGGTTCGGAATCGCCCGAACGCGTGGCCCAGTTGCGCGCGCGGTTTGGCAAG" },
+        { "rep3", "AGCGGTAAATCGTGGAGTGATCGACATTCACTCCGCGTTCAGCCAGCATCTCCTGCAGCTCACGGTAACTGATG"
+                  "CCGTATTTGCAGTACCAGCGTACGGCCCACAGAATGATGTCACGCTGAAAATGCCGGCCTTTGAATGGGTTCATGT" },
+    };
+    for (const auto &[name, seed] : recorded) {
+        ASSERT_TRUE(name == "ndm1_rc" || seed.size() >= 150) << name;
+        for (double c : { 0.5, 1.0 }) {
+            for (size_t limit : { size_t(0), size_t(2) }) {
+                cells.push_back({ name + " switch " + std::to_string(c) + " limit " + std::to_string(limit),
+                                  seed, [c, limit](Strategy *st, LabelChangeCost *cost) {
+                    *cost = LabelChangeCost::constant(c);
+                    st->loss_budget = 2;
+                    st->max_label_branches = limit;
+                    st->max_extension_bp = 3000;
+                } });
+            }
+        }
+    }
+    // column labels switching (the reviewer's col_sw cells, to the recorded requests' 3,000 bp)
+    for (const auto &[name, seed] : { std::make_pair(std::string("ndm1"), query_),
+                                      std::make_pair(std::string("repeat"), repeat),
+                                      std::make_pair(std::string("ndm1_rc"), recorded[0].second),
+                                      std::make_pair(std::string("win200_03"), recorded[2].second) }) {
+        cells.push_back({ name + " column labels switch 0.5 limit 2", seed,
+                          [](Strategy *st, LabelChangeCost *cost) {
+            st->seed_label_kind = LabelKind::COLUMN;
+            *cost = LabelChangeCost::constant(0.5);
+            st->loss_budget = 2;
+            st->max_label_branches = 2;
+            st->max_extension_bp = 3000;
+        } });
+    }
     PositionalCheck total;
+    // per seed, the deepest end of a run in its header-label switch cells: past the default
+    // radius of 1,000 bp, so that the positions of what the recorded switch requests reach
+    // beyond it are checked too (the review of W2 found the ndm1 and repeat seeds' switch cells
+    // walked to 1,000 bp only); some single cells end sooner (a limit-0 walk from the repeat:
+    // 36 bp)
+    std::map<std::string, uint64_t> switch_deepest;
     for (const Cell &cell : cells) {
         for (size_t cap : { size_t(1), size_t(16), Strategy::kUnlimited }) {
             Strategy st;
@@ -1753,17 +1833,33 @@ TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
             seed.sequence = cell.seed;
             const SeedResult r = traverse_seed(*oracle_, seed, st, cost);
             check_positions(r, cell.seed, src, &total, cell.name + " cap " + std::to_string(cap));
+            if (cell.name.find(" switch ") != std::string::npos
+                    && cell.name.find("column") == std::string::npos) {
+                uint64_t &deepest = switch_deepest[cell.name.substr(0, cell.name.find(' '))];
+                for (const ArmResult &arm : r.arms) {
+                    for (const LabelRun &run : arm.runs) {
+                        deepest = std::max(deepest, run.to_bp);
+                    }
+                }
+            }
         }
     }
-    std::cerr << total.runs << " runs (" << total.switch_runs << " switch-entered, "
-              << total.lower_bound << " lower bounds, " << total.strictly_lower << " strictly), "
-              << total.occurrences << " occurrences, " << total.seed_lists << " seed lists, "
-              << total.cut << " lists cut, " << total.crossing << " across records" << std::endl;
+    EXPECT_EQ(7u, switch_deepest.size());
+    for (const auto &[name, deepest] : switch_deepest) {
+        EXPECT_GT(deepest, 1000u) << name;
+    }
+    std::cerr << cells.size() << " cells x 3 caps: " << total.runs << " runs ("
+              << total.switch_runs << " switch-entered, " << total.lower_bound
+              << " lower bounds, " << total.strictly_lower << " strictly), " << total.occurrences
+              << " occurrences, " << total.seed_lists << " seed lists, " << total.cut
+              << " lists cut, " << total.crossing << " across records, " << total.record_end
+              << " in a record's last k - 1 bases read as the next record's" << std::endl;
     EXPECT_GT(total.runs, 1000u);
     EXPECT_GT(total.switch_runs, 0u);
     EXPECT_GT(total.lower_bound, 0u);       // the switch cells mark some
     EXPECT_GT(total.cut, 0u);               // the repeat's six copies at cap 1
     EXPECT_EQ(0u, total.crossing);
+    EXPECT_GT(total.record_end, 0u);        // the column record-end numbering is exercised
 }
 
 // Opt-in responses (trace, coordinates) are the same whatever the row-diff path cache holds,
@@ -1820,6 +1916,658 @@ TEST_F(MiniRefSeq, CoordinatesKeepTheResponseUnderThePathCache) {
     }
     EXPECT_EQ(144u, compared);
     EXPECT_GT(stopped, 0u);
+}
+
+// Plan revision 3 on the real index: a seed's opt-in result text less coordinates_text_bytes is
+// its opt-out text — the delivery reserve's ratio sample of a request with coordinates is the
+// one the request without them gives — in every detail, at caps 1 (the repeat's lists cut, a K
+// record in a graphlet), 16 and "unlimited", for header and column labels, switch cells and the
+// null form (support kmer); unbudgeted, so the walks are the same. compact_json_size is the
+// writer's length of each whole response
+TEST_F(MiniRefSeq, CoordinateShareIsExact) {
+    const std::string repeat = "CAAAGTTAGCGATGAGGCAGCCTTTTGTCTTATTCAAAGGCCTTACATTTCAAAAACTCTGCTTACC"
+                               "AGGCGCATTTCGCCCAGGGGATCACCATAATAAAATGCTGAGGCCTGGCCTTTGCGTAGTGCACGCAT"
+                               "CACCTCAATACCTTT";
+    const char *const trace = R"({"support": "trace", "branching": {"on_reconverge": "keep",
+                                  "max_label_branches": 2}, "bounds": {"max_extension_bp": 1000}})";
+    const std::vector<std::pair<std::string, std::string>> cells {
+        { query_, trace },
+        { repeat, trace },
+        { repeat, R"({"support": "trace", "labels": {"seed_label_kind": "column"},
+                      "branching": {"on_reconverge": "keep", "max_label_branches": 2},
+                      "bounds": {"max_extension_bp": 1000}})" },
+        { repeat, R"({"support": "trace", "labels": {"change_cost": {"model": "constant", "value": 0.5},
+                      "loss_budget": 2}, "branching": {"on_reconverge": "keep", "max_label_branches": 2},
+                      "bounds": {"max_extension_bp": 1000}})" },
+        { query_, R"({"branching": {"on_reconverge": "keep"}, "bounds": {"max_extension_bp": 500}})" },
+    };
+    auto parse = [](const std::string &text) {
+        Json::Value v;
+        std::string errors;
+        std::unique_ptr<Json::CharReader> reader(Json::CharReaderBuilder().newCharReader());
+        EXPECT_TRUE(reader->parse(text.data(), text.data() + text.size(), &v, &errors)) << errors;
+        return v;
+    };
+    size_t results = 0, cut = 0, graphlet_cut = 0;
+    for (const auto &[seed, strategy] : cells) {
+        for (const char *detail : { "summary", "tree", "full", "graphlet" }) {
+            Json::Value plain;
+            plain["seeds"][0]["sequence"] = seed;
+            plain["strategy"] = parse(strategy);
+            plain["strategy"]["output"]["detail"] = detail;
+            plain["strategy"]["output"]["timing"] = false;
+            const Json::Value off = mtg::cli::process_traverse_request(plain, *anno_graph_, "");
+            EXPECT_EQ(mtg::cli::json_text(off, true).size(), mtg::cli::compact_json_size(off));
+            for (const Json::Value &cap : { Json::Value(1), Json::Value(16), Json::Value("unlimited") }) {
+                Json::Value r = plain;
+                r["strategy"]["output"]["coordinates"] = true;
+                r["strategy"]["output"]["max_coordinate_occurrences"] = cap;
+                const Json::Value on = mtg::cli::process_traverse_request(r, *anno_graph_, "");
+                EXPECT_EQ(mtg::cli::json_text(on, true).size(), mtg::cli::compact_json_size(on));
+                ASSERT_EQ(off["results"].size(), on["results"].size());
+                for (Json::ArrayIndex i = 0; i < on["results"].size(); ++i) {
+                    const Json::Value &a = on["results"][i], &b = off["results"][i];
+                    const uint64_t coordinates = mtg::cli::coordinates_text_bytes(a);
+                    EXPECT_GT(coordinates, 0u);
+                    EXPECT_EQ(0u, mtg::cli::coordinates_text_bytes(b));
+                    EXPECT_EQ(mtg::cli::json_text(b, true).size(),
+                              mtg::cli::json_text(a, true).size() - coordinates)
+                        << detail << " cap " << mtg::cli::json_text(cap, true) << " " << strategy;
+                    const bool is_cut = a["coordinates"].isObject() && !a["coordinates"]["complete"].asBool();
+                    cut += is_cut;
+                    graphlet_cut += is_cut && a.isMember("graphlet")
+                                  && a["graphlet"].asString().find("\nK * coordinates ") != std::string::npos;
+                    results++;
+                }
+            }
+        }
+    }
+    std::cerr << results << " results, " << cut << " incomplete, " << graphlet_cut
+              << " with a coordinates K record" << std::endl;
+    EXPECT_EQ(60u, results);
+    EXPECT_GT(graphlet_cut, 0u);
+}
+
+// ---------------------------------------------------------------- measurements M1 and M2
+
+namespace {
+
+// a seed's result as the server writes it (compact JSON; a graphlet with its body), the
+// coordinates' share of that text, and the seconds building it took
+struct Written {
+    uint64_t text = 0, coordinate_text = 0;
+    double seconds = 0;
+};
+
+Written write_result(const SeedResult &r, const Seed &seed, const Strategy &st,
+                     const std::string &detail, const LabelOracle &oracle) {
+    Timer timer;
+    Json::Value rj = mtg::cli::seed_result_to_json(r, st, detail, false);
+    if (detail == "graphlet") {
+        mtg::cli::GraphletContext ctx;
+        ctx.k = oracle.get_k();
+        ctx.regime = to_string(oracle.regime());
+        ctx.alphabet = oracle.graph().alphabet();
+        ctx.identity.meta_fp = "*";
+        size_t lines = 0;
+        std::string text = mtg::cli::graphlet_text(r, seed, st, ctx, rj, &lines);
+        rj["graphlet_bytes"] = Json::UInt64(text.size());
+        rj["graphlet_lines"] = Json::UInt64(lines);
+        rj["graphlet"] = std::move(text);
+    }
+    Written w;
+    w.coordinate_text = mtg::cli::coordinates_text_bytes(rj);
+    w.text = mtg::cli::json_text(rj, true).size();
+    w.seconds = timer.elapsed();
+    return w;
+}
+
+// the delivery costs the server sets for |st| (process_traverse_request)
+void price(Strategy *st, const LabelChangeCost &cost, const std::string &detail) {
+    st->delivery = mtg::cli::delivery_costs(detail, st->sequences, mtg::cli::mgt_float_width(*st, cost),
+                                            st->coordinates ? mtg::cli::CoordinatesOutput::BLOCK
+                                                            : mtg::cli::CoordinatesOutput::NONE);
+}
+
+double median(std::vector<double> v) {
+    if (v.empty())
+        return 0;
+    std::sort(v.begin(), v.end());
+    return v.size() % 2 ? v[v.size() / 2] : (v[v.size() / 2 - 1] + v[v.size() / 2]) / 2;
+}
+
+} // namespace
+
+namespace {
+
+uint64_t requested_depth(const SeedResult &r) {
+    uint64_t d = 0;
+    for (const ArmResult &arm : r.arms) {
+        if (arm.requested)
+            d += arm.complete_to_bp;
+    }
+    return d;
+}
+
+constexpr uint64_t kMiB = uint64_t(1) << 20;
+
+// The smallest whole-MiB budget (bounds.max_memory_mb) whose admitted account holds an
+// unbudgeted walk whose account peaked at |peak|: a budget's caches' allotments are part of its
+// account (memory_allotments), so the budget is above the peak
+uint64_t completion_budget(uint64_t peak) {
+    uint64_t mib = std::max<uint64_t>(1, (peak + kMiB - 1) / kMiB);
+    while (peak + memory_allotments(mib * kMiB) > mib * kMiB) {
+        ++mib;
+    }
+    return mib * kMiB;
+}
+
+// One cell of the D4 gate (decision X-C8; PLAN §2.1 revision 4, review of W2): a trace walk
+// unbudgeted, and under memory budgets of 50% and 75% of its own opt-out peak (exact bytes),
+// with and without coordinates (cap 16): the depth at the stop. That metric is relative to the
+// opt-out walk and drops what fails at depth 0 without coordinates, so a cell also states what
+// it takes to COMPLETE: the smallest whole-MiB budget that holds the walk with and without
+// coordinates (completion_budget, checked by walking at it and a MiB below), and what the walk
+// with coordinates does at the budget that completes it without them (complete, stopped, failed
+// at depth 0). |project|: coordinates priced as on refseq33m's taxid columns, whose runs carry
+// thousands of chains — every run's and every seed label's list at the cap of 16, whatever the
+// fixture's chains (the walker adds 2 * sizeof(Coord) for each occurrence it really holds: at
+// most 256 B a list over the projection)
+struct GateCell {
+    bool ok = true;
+    uint64_t peak_off = 0, peak_on = 0;      // unbudgeted account peaks, exact bytes
+    uint64_t need_off = 0, need_on = 0;      // completion budgets, whole MiB in bytes
+    uint64_t depth_free = 0;
+    uint64_t d_off[2] {}, d_on[2] {};        // depth at 50% and 75% of peak_off
+    bool f_off[2] {}, f_on[2] {}, s_off[2] {}, s_on[2] {};
+    int at_need_off = 0;                     // with coordinates at need_off: 0 complete, 1 stop, 2 failed
+    uint64_t at_need_off_depth = 0;
+    std::vector<uint64_t> chains;            // unbudgeted, with coordinates: each run's true count
+    size_t lower = 0, switch_runs = 0, switch_lower = 0;
+};
+
+GateCell gate_cell(const AnnotatedDBG &anno, const Seed &seed, const Strategy &base,
+                   const LabelChangeCost &cost, const std::string &detail, bool project) {
+    GateCell c;
+    auto walk = [&](bool coordinates, uint64_t budget, bool *failed) {
+        Strategy st = base;
+        st.coordinates = coordinates;
+        st.max_memory_bytes = budget;
+        price(&st, cost, detail);
+        if (coordinates && project) {
+            const uint64_t occurrence = 2 * sizeof(Coord) + st.delivery.occurrence;
+            st.delivery.coordinate_run += 16 * occurrence;
+            st.delivery.coordinate_seed += 16 * occurrence;
+            st.delivery.occurrence = 0;
+        }
+        LabelOracle oracle(anno);
+        *failed = false;
+        try {
+            return traverse_seed(oracle, seed, st, cost);
+        } catch (const SeedBudgetError &) {
+            *failed = true;
+            return SeedResult();
+        }
+    };
+    bool failed = false;
+    const SeedResult free_off = walk(false, 0, &failed);
+    if (failed) {
+        c.ok = false;
+        return c;
+    }
+    const SeedResult free_on = walk(true, 0, &failed);
+    if (failed) {
+        c.ok = false;
+        return c;
+    }
+    c.peak_off = free_off.account.memory_peak;
+    c.peak_on = free_on.account.memory_peak;
+    c.depth_free = requested_depth(free_off);
+    for (const ArmResult &arm : free_on.arms) {
+        for (size_t i = 0; i < arm.run_coordinates.size(); ++i) {
+            c.chains.push_back(arm.run_coordinates[i].total);
+            c.lower += arm.run_coordinates[i].lower_bound;
+            if (arm.runs[i].entered_by_switch) {
+                c.switch_runs++;
+                c.switch_lower += arm.run_coordinates[i].lower_bound;
+            }
+        }
+    }
+    for (int i = 0; i < 2; ++i) {
+        const double fraction = i ? 0.75 : 0.5;
+        const uint64_t budget = static_cast<uint64_t>(fraction * c.peak_off);
+        const SeedResult off = walk(false, budget, &c.f_off[i]);
+        const SeedResult on = walk(true, budget, &c.f_on[i]);
+        c.d_off[i] = c.f_off[i] ? 0 : requested_depth(off);
+        c.d_on[i] = c.f_on[i] ? 0 : requested_depth(on);
+        c.s_off[i] = !c.f_off[i] && off.resource_stop.has_value();
+        c.s_on[i] = !c.f_on[i] && on.resource_stop.has_value();
+    }
+    auto completes = [&](bool coordinates, uint64_t budget) {
+        bool f = false;
+        const SeedResult r = walk(coordinates, budget, &f);
+        return !f && !r.resource_stop.has_value();
+    };
+    auto need = [&](bool coordinates, uint64_t peak) {
+        uint64_t b = completion_budget(peak);
+        while (!completes(coordinates, b)) {
+            b += kMiB;
+        }
+        while (b > kMiB && completes(coordinates, b - kMiB)) {
+            b -= kMiB;
+        }
+        return b;
+    };
+    c.need_off = need(false, c.peak_off);
+    c.need_on = need(true, c.peak_on);
+    const SeedResult at = walk(true, c.need_off, &failed);
+    c.at_need_off = failed ? 2 : at.resource_stop.has_value() ? 1 : 0;
+    c.at_need_off_depth = failed ? 0 : requested_depth(at);
+    return c;
+}
+
+// the rows of the gate's tables: per detail and budget fraction (and strategy, or regime)
+struct GateRow {
+    std::vector<double> ratio;               // depth with / without, where without > 0
+    size_t cells = 0, shallower = 0, deeper = 0, failed_on = 0, failed_off = 0;
+    size_t stopped_off = 0, stopped_on = 0;
+};
+
+// per detail (and strategy, or regime): what completing takes
+struct NeedRow {
+    std::vector<double> peak, need;          // with / without: account peaks, completion budgets
+    size_t cells = 0, complete = 0, stopped = 0, failed = 0;   // with coordinates at need_off
+    size_t runs = 0, runs16 = 0;
+    uint64_t max_chains = 0;
+};
+
+void add_gate(const GateCell &c, const std::string &detail, const std::string &suffix,
+              std::map<std::string, GateRow> *rows, std::map<std::string, NeedRow> *needs) {
+    for (int i = 0; i < 2; ++i) {
+        GateRow &row = (*rows)[detail + (i ? " 75%" : " 50%") + suffix];
+        row.cells++;
+        row.failed_off += c.f_off[i];
+        row.failed_on += c.f_on[i];
+        row.stopped_off += c.s_off[i];
+        row.stopped_on += c.s_on[i];
+        row.shallower += c.d_on[i] < c.d_off[i];
+        row.deeper += c.d_on[i] > c.d_off[i];
+        if (c.d_off[i])
+            row.ratio.push_back(double(c.d_on[i]) / double(c.d_off[i]));
+    }
+    NeedRow &n = (*needs)[detail + suffix];
+    n.cells++;
+    n.peak.push_back(double(c.peak_on) / double(c.peak_off));
+    n.need.push_back(double(c.need_on) / double(c.need_off));
+    n.complete += c.at_need_off == 0;
+    n.stopped += c.at_need_off == 1;
+    n.failed += c.at_need_off == 2;
+    for (uint64_t chains : c.chains) {
+        n.runs++;
+        n.runs16 += chains >= 16;
+        n.max_chains = std::max(n.max_chains, chains);
+    }
+}
+
+void print_gate(const std::map<std::string, GateRow> &rows,
+                const std::map<std::string, NeedRow> &needs) {
+    std::cerr << "depth at the stop: detail fraction [group] | cells | stopped off/on | failed at "
+                 "depth 0 off/on | shallower | median depth with/without | mean | worst" << std::endl;
+    for (const auto &[key, row] : rows) {
+        double mean = 0, worst = 1;
+        for (double x : row.ratio) {
+            mean += x / row.ratio.size();
+            worst = std::min(worst, x);
+        }
+        std::cerr << "  " << key << " | " << row.cells << " | " << row.stopped_off << "/"
+                  << row.stopped_on << " | " << row.failed_off << "/" << row.failed_on << " | "
+                  << row.shallower << " | " << median(row.ratio) << " | " << mean << " | "
+                  << worst << std::endl;
+    }
+    std::cerr << "completing: detail [group] | cells | runs (>= 16 chains) max chains | account "
+                 "peak with/without median, max | completion budget (MiB) with/without median, "
+                 "max | with coordinates at the budget completing without: complete / stopped / "
+                 "failed at depth 0" << std::endl;
+    for (const auto &[key, n] : needs) {
+        std::cerr << "  " << key << " | " << n.cells << " | " << n.runs << " (" << n.runs16
+                  << ") " << n.max_chains << " | " << median(n.peak) << ", "
+                  << (n.peak.empty() ? 0 : *std::max_element(n.peak.begin(), n.peak.end()))
+                  << " | " << median(n.need) << ", "
+                  << (n.need.empty() ? 0 : *std::max_element(n.need.begin(), n.need.end()))
+                  << " | " << n.complete << " / " << n.stopped << " / " << n.failed << std::endl;
+    }
+}
+
+} // namespace
+
+// M1 (PLAN §2.1 revision 4, the D4 gate of decision X-C8): every trace cell — 7 seeds (blaNDM
+// both ways, three 200-bp windows of its carriers, two repeat windows) x 8 strategies (branch
+// limit 0 and 2, constant switch costs 0.5 and 1 at limits 0 and 2 within a loss budget of 2,
+// column labels at limit 2, with and without a switch), out to 3,000 bp, in detail full and
+// graphlet — through gate_cell: the depth at the stop under 50% and 75% of its own opt-out peak
+// with against without coordinates, and what completing takes with and without; unbudgeted, how
+// often a run is a lower bound (decision C-N2). mini_refseq's runs carry at most 12 chains
+// (taxid columns of a few genomes each), so the column cells are also walked under the
+// refseq33m projection (gate_cell's |project|: every list at the cap of 16, as refseq33m's
+// taxid columns give). Budgets are bytes, exact, through the C++ API (the request's knob is
+// whole MiB). Run with --gtest_also_run_disabled_tests; the tables are in DESIGN §26.5
+TEST_F(MiniRefSeq, DISABLED_CoordinatesDepthAtTheStop) {
+    const std::string repeat = "CAAAGTTAGCGATGAGGCAGCCTTTTGTCTTATTCAAAGGCCTTACATTTCAAAAACTCTGCTTACC"
+                               "AGGCGCATTTCGCCCAGGGGATCACCATAATAAAATGCTGAGGCCTGGCCTTTGCGTAGTGCACGCAT"
+                               "CACCTCAATACCTTT";
+    std::string ndm1_rc = query_;
+    reverse_complement(ndm1_rc.begin(), ndm1_rc.end());
+    const std::vector<std::pair<std::string, std::string>> seeds {
+        { "ndm1", query_ }, { "ndm1_rc", ndm1_rc },
+        { "win200_00", "ACCCGACCAAGGTCACCCGCACCGCGCTGCAGAACGCCGCGTCGATCGCGGGCCTGATGATCACCACCGAAGC"
+                       "GATGGTGGCCGAGGCCCCGAAGAAGGACGAGCCGGCGATGCCGGCCGGCGGCGGCATGGGCGGCATGGGCGG"
+                       "CATGGATTTCTAAGCCCCGCGATCCATCAAGCAAGACCACAAAGCCCGGCCTCGT" },
+        { "win200_03", "GCGATCCTTCCAACTCGTCGCAAAGCCCAGCTTCGCATAAAACGCCTCTGTCACATCGAAATCGCGCGATGG"
+                       "CAGATTGGGGGTGACGTGGTCAGCCATGGCTCAGCGCAGCTTGTCGGCCATGCGGGCCGTATGAGTGATTGC"
+                       "GGCGCGGCTATCGGGGGCGGAATGGCTCATCACGATCATGCTGGCCTTGGGGAACG" },
+        { "win200_05", "CGCCCCGTGCGGTTACGTCGAATGTCGCGGGCGCTTTGACATCGCGCGCAGCTGGCCAGATCGCCATGGTCG"
+                       "GTTTGTTCGTCGATGCGGATGATGCTGTCATCGCCGACGCACTGGTGGCAGCCAAGCTGAACGCGCTGCAGC"
+                       "TGCACGGTTCGGAATCGCCCGAACGCGTGGCCCAGTTGCGCGCGCGGTTTGGCAAG" },
+        { "rep0", repeat },
+        { "rep3", "AGCGGTAAATCGTGGAGTGATCGACATTCACTCCGCGTTCAGCCAGCATCTCCTGCAGCTCACGGTAACTGATG"
+                  "CCGTATTTGCAGTACCAGCGTACGGCCCACAGAATGATGTCACGCTGAAAATGCCGGCCTTTGAATGGGTTCATGT" },
+    };
+    struct Kind {
+        std::string name;
+        bool column;
+        double cost;       // 0: forbid
+        size_t limit;
+    };
+    const std::vector<Kind> kinds {
+        { "b0", false, 0, 0 }, { "b2", false, 0, 2 },
+        { "sw0.5b0", false, 0.5, 0 }, { "sw0.5b2", false, 0.5, 2 },
+        { "sw1b0", false, 1, 0 }, { "sw1b2", false, 1, 2 },
+        { "col_b2", true, 0, 2 }, { "col_sw0.5b2", true, 0.5, 2 },
+    };
+    std::map<std::string, GateRow> rows;     // by detail and fraction, and by strategy
+    std::map<std::string, NeedRow> needs;
+    std::map<std::string, GateRow> projected;
+    std::map<std::string, NeedRow> projected_needs;
+    size_t runs = 0, lower = 0, switch_runs = 0, switch_lower = 0, strictly_cells = 0;
+    std::map<std::string, std::pair<size_t, size_t>> lower_by_kind;
+    for (const char *detail : { "full", "graphlet" }) {
+        for (const auto &[seed_name, sequence] : seeds) {
+            for (const Kind &kind : kinds) {
+                Strategy base;
+                base.support = Support::TRACE;
+                base.merge_reconverge = false;
+                base.max_extension_bp = 3000;
+                base.max_label_branches = kind.limit;
+                if (kind.column)
+                    base.seed_label_kind = LabelKind::COLUMN;
+                LabelChangeCost cost = LabelChangeCost::forbid();
+                if (kind.cost > 0) {
+                    cost = LabelChangeCost::constant(kind.cost);
+                    base.loss_budget = 2;
+                }
+                Seed seed;
+                seed.sequence = sequence;
+                const GateCell c = gate_cell(*anno_graph_, seed, base, cost, detail, false);
+                ASSERT_TRUE(c.ok) << seed_name << " " << kind.name << " " << detail;
+                if (std::string(detail) == "full") {
+                    // lower bounds, unbudgeted (C-N2)
+                    runs += c.chains.size();
+                    lower += c.lower;
+                    switch_runs += c.switch_runs;
+                    switch_lower += c.switch_lower;
+                    strictly_cells += c.lower > 0;
+                    lower_by_kind[kind.name].first += c.chains.size();
+                    lower_by_kind[kind.name].second += c.lower;
+                }
+                add_gate(c, detail, "", &rows, &needs);
+                add_gate(c, detail, " " + kind.name, &rows, &needs);
+                for (int i = 0; i < 2; ++i) {
+                    EXPECT_LE(c.d_on[i], c.d_off[i]) << seed_name << " " << kind.name << " "
+                                                     << detail << " " << (i ? 0.75 : 0.5);
+                }
+                EXPECT_GE(c.need_on, c.need_off) << seed_name << " " << kind.name << " " << detail;
+                if (kind.column) {
+                    const GateCell p = gate_cell(*anno_graph_, seed, base, cost, detail, true);
+                    ASSERT_TRUE(p.ok);
+                    add_gate(p, detail, " column, refseq33m projection", &projected,
+                             &projected_needs);
+                    add_gate(p, detail, " " + kind.name + ", refseq33m projection", &projected,
+                             &projected_needs);
+                    for (int i = 0; i < 2; ++i) {
+                        EXPECT_LE(p.d_on[i], c.d_on[i]) << seed_name << " " << kind.name;
+                    }
+                }
+            }
+        }
+    }
+    std::cerr << "M1, mini_refseq:" << std::endl;
+    print_gate(rows, needs);
+    std::cerr << "M1, the column cells under the refseq33m projection (every list at 16):" << std::endl;
+    print_gate(projected, projected_needs);
+    std::cerr << "C-N2: " << lower << " of " << runs << " runs lower bounds (" << switch_lower
+              << " of " << switch_runs << " switch-entered), in " << strictly_cells
+              << " of 56 cells" << std::endl;
+    for (const auto &[kind, n] : lower_by_kind) {
+        std::cerr << "  " << kind << ": " << n.second << " of " << n.first << std::endl;
+    }
+}
+
+// M1 by regime (review of W2: revision 4's column fixture with at least 16 chains a run, and
+// header-heavy seeds): the gate's cells on the fixtures of make_column_coord_fixtures.sh —
+// coord_lockstep (200 columns of one shared sequence, 16 records each: one path, 200 runs of 16
+// chains an arm) and coord_divcol (100 columns of their own sequences around a shared 600-bp
+// core, 16 records each: a split into a branch a column at each end of the core; seeds in the
+// core and in a flank) — and on make_wide_coord_fixture.sh's wide_coord (5,000 records of one
+// sequence: column labels one run of 5,000 chains an arm, header labels 5,000 runs of one chain
+// each). Column labels, branch limits 0 and 2 (header labels at 0), details full and graphlet,
+// to 3,000 bp. Run with --gtest_also_run_disabled_tests from the build directory after building
+// the fixtures there; the tables are in DESIGN §26.5
+TEST(MiniRefSeqWide, DISABLED_CoordinatesDepthByRegime) {
+    struct Fixture {
+        std::string dir, annotation, fasta;
+        std::vector<std::pair<std::string, size_t>> seeds;   // name, offset of 100 bp
+        std::vector<LabelKind> kinds;
+    };
+    const std::vector<Fixture> fixtures {
+        { "coord_lockstep", "cols", "fa/c000.fa", { { "1400", 1400 } }, { LabelKind::COLUMN } },
+        { "coord_divcol", "cols", "fa/c000.fa", { { "core 1400", 1400 }, { "flank 200", 200 } },
+          { LabelKind::COLUMN } },
+        { "wide_coord", "wide", "wide.fa", { { "1400", 1400 } },
+          { LabelKind::COLUMN, LabelKind::HEADER } },
+    };
+    std::map<std::string, GateRow> rows;
+    std::map<std::string, NeedRow> needs;
+    size_t built = 0;
+    for (const Fixture &fx : fixtures) {
+        if (!std::filesystem::exists(fx.dir + "/graph_k31.dbg")) {
+            std::cerr << "skipped " << fx.dir << ": build it with ../scripts/traversal/make_"
+                      << (fx.dir == "wide_coord" ? "wide_coord_fixture.sh" : "column_coord_fixtures.sh")
+                      << std::endl;
+            continue;
+        }
+        built++;
+        auto graph = std::make_shared<DBGSuccinct>(2);
+        ASSERT_TRUE(graph->load(fx.dir + "/graph_k31.dbg"));
+        auto annotation = std::make_unique<annot::RowDiffBRWTCoordAnnotator>();
+        ASSERT_TRUE(annotation->load(fx.dir + "/" + fx.annotation
+                                     + annot::RowDiffBRWTCoordAnnotator::kExtension));
+        using Matrix = annot::RowDiffBRWTCoordAnnotator::binary_matrix_type;
+        const_cast<Matrix&>(annotation->get_matrix()).set_graph(graph.get());
+        std::unique_ptr<annot::CoordToHeader> cth;
+        if (std::filesystem::exists(fx.dir + "/" + fx.annotation + ".seqs")) {
+            cth = std::make_unique<annot::CoordToHeader>();
+            ASSERT_TRUE(cth->load(fx.dir + "/" + fx.annotation));
+        }
+        AnnotatedDBG anno(std::move(graph), std::move(annotation), false, std::move(cth));
+        std::string sequence;
+        {
+            std::ifstream in(fx.dir + "/" + fx.fasta);
+            std::string line;
+            std::getline(in, line);
+            std::getline(in, sequence);
+        }
+        ASSERT_GE(sequence.size(), 1500u) << fx.dir;
+        for (const auto &[seed_name, offset] : fx.seeds) {
+            Seed seed;
+            seed.sequence = sequence.substr(offset, 100);
+            for (LabelKind kind : fx.kinds) {
+                const bool column = kind == LabelKind::COLUMN;
+                for (size_t limit : { size_t(0), size_t(2) }) {
+                    if (!column && limit)
+                        continue;
+                    Strategy base;
+                    base.support = Support::TRACE;
+                    base.merge_reconverge = false;
+                    base.max_extension_bp = 3000;
+                    base.max_seed_labels = 5000;
+                    base.max_label_branches = limit;
+                    base.seed_label_kind = kind;
+                    for (const char *detail : { "full", "graphlet" }) {
+                        const GateCell c = gate_cell(anno, seed, base, LabelChangeCost::forbid(),
+                                                     detail, false);
+                        const std::string name = fx.dir + " " + seed_name + " "
+                                               + (column ? "column" : "header") + " b"
+                                               + std::to_string(limit) + " " + detail;
+                        ASSERT_TRUE(c.ok) << name;
+                        uint64_t max_chains = 0;
+                        for (uint64_t x : c.chains) {
+                            max_chains = std::max(max_chains, x);
+                        }
+                        std::cerr << name << ": runs " << c.chains.size() << ", max chains "
+                                  << max_chains << " | depth free " << c.depth_free
+                                  << " | 50%: " << c.d_off[0] << (c.f_off[0] ? "F" : c.s_off[0] ? "s" : "")
+                                  << " / " << c.d_on[0] << (c.f_on[0] ? "F" : c.s_on[0] ? "s" : "")
+                                  << " | 75%: " << c.d_off[1] << (c.f_off[1] ? "F" : c.s_off[1] ? "s" : "")
+                                  << " / " << c.d_on[1] << (c.f_on[1] ? "F" : c.s_on[1] ? "s" : "")
+                                  << " | peak " << c.peak_on << " / " << c.peak_off
+                                  << " | completes at " << (c.need_on >> 20) << " / "
+                                  << (c.need_off >> 20) << " MiB | with coordinates at "
+                                  << (c.need_off >> 20) << " MiB: "
+                                  << (c.at_need_off == 0 ? "complete" : c.at_need_off == 1 ? "stopped" : "failed at depth 0")
+                                  << " (" << c.at_need_off_depth << ")" << std::endl;
+                        const std::string regime = column
+                                ? (max_chains >= 16 ? " column, >= 16 chains a run" : " column, < 16 chains")
+                                : " header, many runs";
+                        add_gate(c, detail, regime, &rows, &needs);
+                        add_gate(c, detail, " " + fx.dir + (column ? " column" : " header"),
+                                 &rows, &needs);
+                        for (int i = 0; i < 2; ++i) {
+                            EXPECT_LE(c.d_on[i], c.d_off[i]) << name;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (!built)
+        GTEST_SKIP() << "no fixture built";
+    print_gate(rows, needs);
+}
+
+// M2 (PLAN §2.1 revision 5): the wide coordinate fixture (scripts/traversal/
+// make_wide_coord_fixture.sh: one 3,000-bp sequence in 5,000 records under one column, sparse
+// row-diff anchors) walked under trace from a 100-bp seed in its middle: column labels (one run
+// an arm with 5,000 chains) and header labels (5,000 runs an arm with one chain each), caps 16
+// and "unlimited", details full and graphlet. Per cell: the text and its coordinates' share,
+// the account and its coordinate share, the time to build the text, the delivery reserve's
+// estimate of the text — the coordinate share at kCoordinateAccountPerTextByte must be at least
+// the coordinates' real text (decision D5) — and the walk-until it gives an attempt of one seed
+// at 30 s against the same request without coordinates. Run with
+// --gtest_also_run_disabled_tests from the build directory after building the fixture there
+TEST(MiniRefSeqWide, DISABLED_CoordinateReserveOnTheWideFixture) {
+    const std::string dir = "wide_coord";
+    if (!std::filesystem::exists(dir + "/graph_k31.dbg"))
+        GTEST_SKIP() << "build it with ../scripts/traversal/make_wide_coord_fixture.sh";
+    auto graph = std::make_shared<DBGSuccinct>(2);
+    ASSERT_TRUE(graph->load(dir + "/graph_k31.dbg"));
+    auto annotation = std::make_unique<annot::RowDiffBRWTCoordAnnotator>();
+    ASSERT_TRUE(annotation->load(dir + "/wide" + annot::RowDiffBRWTCoordAnnotator::kExtension));
+    using Matrix = annot::RowDiffBRWTCoordAnnotator::binary_matrix_type;
+    const_cast<Matrix&>(annotation->get_matrix()).set_graph(graph.get());
+    auto cth = std::make_unique<annot::CoordToHeader>();
+    ASSERT_TRUE(cth->load(dir + "/wide"));
+    AnnotatedDBG anno(std::move(graph), std::move(annotation), false, std::move(cth));
+    std::string sequence;
+    {
+        std::ifstream in(dir + "/wide.fa");
+        std::string line;
+        std::getline(in, line);
+        std::getline(in, sequence);
+    }
+    ASSERT_GE(sequence.size(), 1500u);
+    Seed seed;
+    seed.sequence = sequence.substr(1400, 100);
+    std::cerr << "M2: kind cap detail | walk s | text B (coordinates B) | account B (coordinates "
+                 "B) | build s | coordinate estimate / text | whole estimate / text (configured "
+                 "ratio) | pre-split estimate / text | reserve ms with / without | walk_until ms "
+                 "with / without" << std::endl;
+    for (bool column : { true, false }) {
+        for (size_t cap : { size_t(16), Strategy::kUnlimited }) {
+            for (const char *detail : { "full", "graphlet" }) {
+                Strategy st;
+                st.support = Support::TRACE;
+                st.merge_reconverge = false;
+                st.max_extension_bp = 3000;
+                st.max_seed_labels = 5000;
+                st.seed_label_kind = column ? LabelKind::COLUMN : LabelKind::HEADER;
+                st.max_coordinate_occurrences = cap;
+                const LabelChangeCost cost = LabelChangeCost::forbid();
+                Written w[2];
+                uint64_t account[2] = { 0, 0 }, coordinates[2] = { 0, 0 };
+                double walk_s[2] = { 0, 0 }, reserve[2] = { 0, 0 }, until[2] = { 0, 0 };
+                for (bool on : { false, true }) {
+                    Strategy s = st;
+                    s.coordinates = on;
+                    price(&s, cost, detail);
+                    LabelOracle oracle(anno);
+                    Timer timer;
+                    const SeedResult r = traverse_seed(oracle, seed, s, cost);
+                    walk_s[on] = timer.elapsed();
+                    w[on] = write_result(r, seed, s, detail, oracle);
+                    account[on] = r.account.memory_final;
+                    coordinates[on] = r.account.coordinates;
+                    // the reserve an attempt of this one seed keeps for it (configured rates and
+                    // ratios: what a server that has measured nothing yet uses)
+                    mtg::cli::AttemptSettings settings;
+                    auto attempt = std::make_shared<mtg::cli::Attempt>(
+                            0, std::chrono::system_clock::time_point(), settings, "0", true);
+                    mtg::cli::AttemptIds ids;
+                    ids.attempt_id = "m2";
+                    attempt->set_ids(ids);
+                    attempt->set_delivery_detail(detail);
+                    attempt->set_bound(1, 30'000);
+                    attempt->progress(account[on], coordinates[on]);
+                    reserve[on] = attempt->reserve_ms();
+                    until[on] = attempt->walk_until_ms();
+                }
+                const double ratio = std::string(detail) == "graphlet"
+                                   ? mtg::cli::AttemptSettings().account_per_text_byte_graphlet
+                                   : mtg::cli::AttemptSettings().account_per_text_byte_json;
+                const uint64_t k = mtg::cli::kCoordinateAccountPerTextByte;
+                const double coordinate_estimate = std::ceil(double(coordinates[1]) / k);
+                const double whole = std::ceil(double(account[1] - coordinates[1]) / ratio)
+                                   + coordinate_estimate;
+                // what the reserve estimated before the split, at the ratio the rest measures
+                const double rest_ratio = double(account[1] - coordinates[1])
+                                        / double(w[1].text - w[1].coordinate_text);
+                const double before = double(account[1]) / rest_ratio;
+                std::cerr << "  " << (column ? "column" : "header") << " "
+                          << (cap == Strategy::kUnlimited ? std::string("unlimited") : std::to_string(cap))
+                          << " " << detail << " | " << walk_s[1] << " (" << walk_s[0] << ") | "
+                          << w[1].text << " (" << w[1].coordinate_text << ") | " << account[1]
+                          << " (" << coordinates[1] << ") | " << w[1].seconds << " ("
+                          << w[0].seconds << ") | " << coordinate_estimate / w[1].coordinate_text
+                          << " | " << whole / w[1].text << " | " << before / w[1].text << " | "
+                          << reserve[1] << " / " << reserve[0] << " | " << until[1] << " / "
+                          << until[0] << std::endl;
+                // the coordinate share's estimate bounds its real text (D5)
+                EXPECT_GE(coordinate_estimate, double(w[1].coordinate_text));
+                // the rest is the opt-out walk's, exactly
+                EXPECT_EQ(account[0], account[1] - coordinates[1]);
+                EXPECT_EQ(w[0].text, w[1].text - w[1].coordinate_text);
+            }
+        }
+    }
 }
 
 // D3 on the real index: a derived seed whose time budget runs out during its derivation. On a
@@ -1969,6 +2717,117 @@ TEST_F(MiniRefSeq, PartialSupersetIsNotRefusedAsTheWholeSeeds) {
         EXPECT_EQ(1u, whole["seed"]["labels_supporting_total"].asUInt64()) << exhaustive;
         EXPECT_EQ(0u, whole["seed"]["labels_dropped"].asUInt64()) << exhaustive;
     }
+}
+
+// R21 (4) under a memory budget (review of W2): in tree and full detail every head reserves the
+// delivery of its displayed segment chain, so a merge keeps its arrival order there and the
+// budget's stop is level 5's (67bef367) — before, the majority parent's longer chain moved it
+// (win200_03 right, tree at 8 MiB: 2782 to 2780, full at 2 MiB: 800 to 799). Graphlet detail
+// charges no chain: the rule applies and the stop is level 5's too. The merges of the budgeted
+// tree response show the arrival order: a later parent kept more labels than the first
+TEST_F(MiniRefSeq, MemoryStopsDoNotDependOnTheDisplayedParent) {
+    const std::string seed = "GCGATCCTTCCAACTCGTCGCAAAGCCCAGCTTCGCATAAAACGCCTCTGTCACATCGAAATCGC"
+                             "GCGATGGCAGATTGGGGGTGACGTGGTCAGCCATGGCTCAGCGCAGCTTGTCGGCCATGCGGGCCGT"
+                             "ATGAGTGATTGCGGCGCGGCTATCGGGGGCGGAATGGCTCATCACGATCATGCTGGCCTTGGGGAACG";
+    // complete_to_bp of the right arm as level 5 states it (metagraph traverse of 67bef367)
+    const std::vector<std::tuple<std::string, int, uint64_t>> level5 {
+        { "tree", 8, 2782 }, { "full", 8, 2740 }, { "graphlet", 8, 3779 },
+        { "tree", 2, 815 }, { "full", 2, 800 }, { "graphlet", 2, 1048 },
+    };
+    for (const auto &[detail, mb, depth] : level5) {
+        Json::Value r;
+        r["seeds"][0]["sequence"] = seed;
+        r["strategy"]["direction"] = "right";
+        r["strategy"]["bounds"]["max_memory_mb"] = mb;
+        r["strategy"]["output"]["detail"] = detail;
+        r["strategy"]["output"]["timing"] = false;
+        const Json::Value out = mtg::cli::process_traverse_request(r, *anno_graph_, "");
+        const Json::Value &res = out["results"][0];
+        ASSERT_TRUE(res.isMember("resource_stop")) << detail << " " << mb;
+        EXPECT_EQ("memory", res["resource_stop"]["resource"].asString()) << detail << " " << mb;
+        EXPECT_EQ(depth, res["arms"]["right"]["complete_to_bp"].asUInt64()) << detail << " " << mb;
+        if (detail == "tree" && mb == 8) {
+            size_t later_kept_more = 0, merges = 0;
+            for (const Json::Value &s : res["arms"]["right"]["segments"]) {
+                if (s["parents"].size() < 2)
+                    continue;
+                merges++;
+                for (Json::ArrayIndex j = 1; j < s["labels_via_parent"].size(); ++j) {
+                    later_kept_more += s["labels_via_parent"][j].size()
+                                     > s["labels_via_parent"][0].size();
+                }
+            }
+            EXPECT_GT(merges, 0u);
+            EXPECT_GT(later_kept_more, 0u);
+        }
+    }
+}
+
+// R21 (4) in annotate mode compares the parents by their OWN segment (the fewest labels present
+// at a node of it, true counts; DESIGN §26.6), not by the walks they display. A parent that is
+// itself a merged segment holds the union of its parents' labels, so after nested merges the
+// rule can display a walk carried by fewer labels upstream. Pinned here as the rule stands, so
+// that the library's check of it (derive.carried_labels) follows a known rule: on
+// mini_win200_02 (the real cache's annotate_merge cell, right arm) the merge at 288 bp takes the
+// 5-bp merged segment from 283 (6 labels) before the 32-bp segment from 256 (5 labels), though
+// the walk through the former goes on through a 7-bp segment of 4 labels (276) — its path's
+// continuation is carried by label 3 only, where level 5's (the 256 parent's) was by 0, 1, 2, 4
+TEST_F(MiniRefSeq, AnnotateMergeRanksParentsByTheirOwnSegment) {
+    Json::Value r;
+    r["seeds"][0]["sequence"] = "TTAGCTTGGCGTGAGATTACCAATGTGTGACGGTTCGGTAGAGGCTTGCCGATAGACTCAAAGGTCTTTC"
+                                "GCCCCATGACAACGACTTTTCCCTCAGTGAGTCTGCGAAAAATCTTCTGCTCACCCGGAATTTTCCAGG"
+                                "GGATATTAGGACCATTGCCAATAACCCGATTGGCTCCCATCGCAGCAACGAGATAAATGCG";
+    r["strategy"]["labels"]["mode"] = "annotate";
+    r["strategy"]["branching"]["on_reconverge"] = "merge";
+    r["strategy"]["bounds"]["max_extension_bp"] = 300;
+    r["strategy"]["bounds"]["max_live_paths"] = 300;
+    r["strategy"]["output"]["detail"] = "full";
+    r["strategy"]["output"]["timing"] = false;
+    const Json::Value out = mtg::cli::process_traverse_request(r, *anno_graph_, "");
+    const Json::Value &arm = out["results"][0]["arms"]["right"];
+    std::map<uint64_t, const Json::Value*> segments;
+    for (const Json::Value &s : arm["segments"]) {
+        segments[s["id"].asUInt64()] = &s;
+    }
+    auto fewest = [](const Json::Value &s) {
+        uint64_t f = s["labels_total"].asUInt64();
+        for (const Json::Value &run : s["label_sets"]) {
+            f = std::min(f, run["labels_total"].asUInt64());
+        }
+        return f;
+    };
+    const Json::Value *merge = nullptr;
+    for (const Json::Value &s : arm["segments"]) {
+        if (s["from_bp"].asUInt64() == 288 && s["parents"].size() == 2)
+            merge = &s;
+    }
+    ASSERT_NE(nullptr, merge);
+    const Json::Value &first = *segments.at((*merge)["parents"][0].asUInt64());
+    const Json::Value &second = *segments.at((*merge)["parents"][1].asUInt64());
+    EXPECT_EQ(283u, first["from_bp"].asUInt64());
+    EXPECT_EQ(5u, first["length_bp"].asUInt64());
+    EXPECT_EQ(2u, first["parents"].size());            // itself a merge
+    EXPECT_EQ(6u, fewest(first));
+    EXPECT_EQ(256u, second["from_bp"].asUInt64());
+    EXPECT_EQ(32u, second["length_bp"].asUInt64());
+    EXPECT_EQ(5u, fewest(second));
+    // the displayed walk through the first goes on through its own first parent: 4 labels
+    const Json::Value &upstream = *segments.at(first["parents"][0].asUInt64());
+    EXPECT_EQ(276u, upstream["from_bp"].asUInt64());
+    EXPECT_EQ(4u, fewest(upstream));
+    size_t through = 0;
+    for (const Json::Value &path : arm["paths"]) {
+        bool via = false;
+        for (const Json::Value &id : path["segments"]) {
+            via |= id.asUInt64() == (*merge)["id"].asUInt64();
+        }
+        if (!via)
+            continue;
+        through++;
+        ASSERT_EQ(1u, path["continuation"]["labels"].size());
+        EXPECT_EQ(3u, path["continuation"]["labels"][0].asUInt64());
+    }
+    EXPECT_EQ(1u, through);
 }
 
 } // namespace

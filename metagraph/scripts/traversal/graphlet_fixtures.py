@@ -322,11 +322,27 @@ CLI_FIXTURES = {
         'index': 'bubbles',
         'doc': 'column labels through two SNP bubbles under on_reconverge merge: merge '
                'partitions (labels_via_parent), an ambiguous split (both.fa on both alleles) '
-               'with an m closure at each merge, b.fa through two non-first-parent merges '
-               '(R.route_bp != T.route_bp); continuations contained in the flank',
-        'shows': ['G:merge', 'G:partition', 'G:split_amb', 'R:m', 'R:route_split', 'T:extras',
-                  'C', 'O:pcci'],
+               'with an m closure at each merge; each merge\'s first parent is the one carried '
+               'by the most labels (R21 (4)): at 36 the A allele (a.fa, c.fa, both.fa), at 62 '
+               'the G allele (b.fa, c.fa, both.fa), which arrived second, so b.fa is routed in '
+               'at 36 and a.fa at 62; continuations contained in the flank',
+        'shows': ['G:merge', 'G:partition', 'G:split_amb', 'R:m', 'T:extras', 'C', 'O:pcci'],
         'request': {'seeds': [{'seed_id': 'merge', 'sequence': ['S']}],
+                    'strategy': {'direction': 'right',
+                                 'labels': {'seed_label_kind': 'column'},
+                                 'branching': {'max_label_branches': 'unlimited'},
+                                 'bounds': {'max_extension_bp': 100},
+                                 'output': {'profile_bin_bp': 50, 'continuation_bp': 40}}},
+    },
+    'merge_ties': {
+        'index': 'bubbles',
+        'doc': 'the merge fixture without c.fa: both alleles of each bubble are carried by two '
+               'labels, so each merge keeps its first-arrived parent first (a tie, R21 (4)), and '
+               'b.fa goes through two non-first-parent merges (R.route_bp, the earliest stamp, '
+               '!= T.route_bp, the latest)',
+        'shows': ['G:merge', 'G:partition', 'G:split_amb', 'R:m', 'R:route_split', 'T:extras'],
+        'request': {'seeds': [{'seed_id': 'merge_ties', 'sequence': ['S'],
+                               'labels': ['a.fa', 'b.fa', 'both.fa']}],
                     'strategy': {'direction': 'right',
                                  'labels': {'seed_label_kind': 'column'},
                                  'branching': {'max_label_branches': 'unlimited'},

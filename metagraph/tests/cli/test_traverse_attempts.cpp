@@ -644,43 +644,104 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     EXPECT_NEAR(reserve(1e6 / 404e3 + 1e6 / 104e3, 300), g->reserve_ms(), 1e-6);
 }
 
-// Review of W1, finding 3: an attempt whose output carries record coordinates measures a smaller
-// account per text byte (an occurrence's account is about a third of the rest's per byte of
-// text). Pooled, it would lower the estimate of every later attempt without them, whose
-// walk-until would then depend on whether such a request came first. It serves the attempt
-// itself (its own reserve: the smaller ratio, the more text estimated) and stays out of the
-// server's measurements, which the server feeds with pooled_account_per_text_byte
-TEST(GraphletAttempt, CoordinatesRatioStaysTheAttemptsOwn) {
+// The delivery reserve's coordinate share (C3, plan revision 3): the walked seed's record
+// coordinates (their part of its account) are estimated at kCoordinateAccountPerTextByte, the
+// rest at the ratio in use; without coordinates the estimate is the one before the split
+TEST(GraphletAttempt, ReserveCountsCoordinateText) {
     FakeClock clock;
-    AttemptRegistry registry(settings_with(&clock));
-    auto deliver = [&](const std::string &id, bool coordinates, double ratio) {
-        auto a = attempt_of(registry, id);
-        a->set_measured(registry.measured());
-        a->set_delivery_detail("full", coordinates);
-        a->set_bound(1, 30'000);
-        a->note_delivered(2'000'000, 1.0, static_cast<uint64_t>(ratio * 2'000'000));
-        EXPECT_EQ(ratio, a->own_account_per_text_byte()) << id;
-        EXPECT_EQ(coordinates ? 0.0 : ratio, a->pooled_account_per_text_byte()) << id;
-        // as the server does once the response is written (server.cpp, on_written)
-        registry.note_account_per_text_byte(a->delivery_detail(), a->pooled_account_per_text_byte());
-        return a;
+    AttemptSettings s = settings_with(&clock);
+    s.allowance_ms = 10'000;
+    s.delivery_compress_mbps = 50;     // 50,000 bytes per ms
+    s.delivery_build_mbps = 5;         // 5,000 bytes per ms
+    s.delivery_stop_ms = 100;
+    s.account_per_text_byte_json = 20;
+    auto reserve = [](double text) { return 1.25 * (text / 5e4 + text / 5e3) + 100; };
+    AttemptRegistry registry(s);
+    auto a = attempt_of(registry, "coordinates");
+    a->set_delivery_detail("full");
+    a->set_bound(2, 30'000);
+    // 20 account bytes a text byte for the rest, 12 for the coordinates: 1e6 + 1e5 bytes of text
+    a->progress(20 * 1'000'000ull + 12 * 100'000ull, 12 * 100'000ull);
+    EXPECT_NEAR(reserve(1'100'000), a->reserve_ms(), 1e-9);
+    // the same account without a coordinate share: all of it at 20 (the formula before C3)
+    a->progress(20 * 1'000'000ull + 12 * 100'000ull);
+    EXPECT_NEAR(reserve(1'060'000), a->reserve_ms(), 1e-9);
+    // both rounded up apart (a byte of text never priced below its account)
+    a->progress(41, 13);
+    EXPECT_NEAR(reserve(2 + 2), a->reserve_ms(), 1e-9);
+    // a share larger than the account (never reported) is taken as the whole account
+    a->progress(24, 1000);
+    EXPECT_NEAR(reserve(2), a->reserve_ms(), 1e-9);
+    // the ratio sample leaves the coordinate share's account and its exact text out: 2 MB of
+    // text of which 0.5 MB coordinates, from 80 x 1.5 MB + 6 MB
+    a->note_delivered(2'000'000, 1.0, 80 * 1'500'000ull + 6'000'000, 6'000'000, 500'000);
+    EXPECT_EQ(80.0, a->own_account_per_text_byte());
+    EXPECT_EQ(2.0, a->own_build_mbps());               // the build rate over the whole text
+    // a rest below measured_text_bytes measures no ratio, even in a large text
+    auto b = attempt_of(registry, "coordinates-heavy");
+    b->set_delivery_detail("full");
+    b->set_bound(1, 30'000);
+    b->note_delivered(2'000'000, 1.0, 30 * 1'000'000ull + 12 * 1'500'000ull, 12 * 1'500'000ull,
+                      1'500'000);
+    EXPECT_EQ(0.0, b->own_account_per_text_byte());
+    EXPECT_EQ(2.0, b->own_build_mbps());
+    // stated in the capabilities, a number a ledger can compute with
+    const Json::Value r = registry.capabilities_json()["delivery_reserve"];
+    ASSERT_TRUE(r["coordinate_account_per_text_byte"].isUInt64());
+    EXPECT_EQ(12u, r["coordinate_account_per_text_byte"].asUInt64());
+    EXPECT_EQ(kCoordinateAccountPerTextByte, r["coordinate_account_per_text_byte"].asUInt64());
+    EXPECT_NE(std::string::npos, r["rule"].asString().find("ceil(C / coordinate_account_per_text_byte)"));
+}
+
+// Plan revision 3 (review of W1, finding 3): an attempt with record coordinates feeds the
+// server's measured ratio with the sample the same walk without them gives (their account and
+// their exact text left out), so a later attempt without coordinates reads the same
+// measured_account_per_text_byte, and walks to the same walk-until, whether or not one with
+// coordinates came first. The exactness of the two parts on real responses is
+// MiniRefSeq.CoordinateShareIsExact's
+TEST(GraphletAttempt, CoordinatesLeaveTheServersRatioUnchanged) {
+    struct Seen {
+        double measured;
+        double walk_until;
     };
-    deliver("with1", true, 40);
-    EXPECT_EQ(0u, registry.measured().account_per_text_byte.count("full"));
-    deliver("without", false, 100);
-    deliver("with2", true, 30);
-    EXPECT_EQ(100.0, registry.measured().account_per_text_byte.at("full"));
-    // an attempt with coordinates reads the server's ratio and its own, the smaller: 30 here
-    auto own = deliver("with3", true, 30);
-    own->progress(30 * 40'000'000ull);
-    auto plain = attempt_of(registry, "plain");
-    plain->set_measured(registry.measured());
-    plain->set_delivery_detail("full");
-    plain->set_bound(1, 30'000);
-    plain->progress(30 * 40'000'000ull);
-    // the same account: the attempt with coordinates estimates 40 MB of text, the one without
-    // 12 MB (at the server's 100), the reserve of which is the smaller
-    EXPECT_LT(plain->reserve_ms(), own->reserve_ms());
+    auto run = [](bool with_coordinates) -> Seen {
+        FakeClock clock;
+        AttemptRegistry registry(settings_with(&clock));
+        auto deliver = [&](const std::string &id, uint64_t coordinate_account,
+                           uint64_t coordinate_text, double ratio) {
+            auto a = attempt_of(registry, id);
+            a->set_measured(registry.measured());
+            a->set_delivery_detail("full");
+            a->set_bound(1, 30'000);
+            const uint64_t text = 2'000'000;
+            a->note_delivered(text + coordinate_text, 1.0,
+                              static_cast<uint64_t>(ratio * text) + coordinate_account,
+                              coordinate_account, coordinate_text);
+            EXPECT_EQ(ratio, a->own_account_per_text_byte()) << id;
+            // as the server does once the response is written (server.cpp, on_written)
+            registry.note_account_per_text_byte(a->delivery_detail(),
+                                                a->own_account_per_text_byte());
+        };
+        deliver("first", 0, 0, 100);
+        // the same walk with coordinates (about 20 account bytes a byte of their text), or
+        // without them
+        if (with_coordinates) {
+            deliver("second", 20 * 300'000, 300'000, 100);
+        } else {
+            deliver("second", 0, 0, 100);
+        }
+        const DeliveryMeasurements m = registry.measured();
+        auto later = attempt_of(registry, "later");
+        later->set_measured(m);
+        later->set_delivery_detail("full");
+        later->set_bound(1, 30'000);
+        later->progress(100 * 40'000'000ull);
+        return { m.account_per_text_byte.at("full"), later->walk_until_ms() };
+    };
+    const Seen without = run(false), with = run(true);
+    EXPECT_EQ(100.0, without.measured);
+    EXPECT_EQ(without.measured, with.measured);
+    EXPECT_EQ(without.walk_until, with.walk_until);
 }
 
 TEST(GraphletAttemptRegistry, AnIdRunsOnce) {

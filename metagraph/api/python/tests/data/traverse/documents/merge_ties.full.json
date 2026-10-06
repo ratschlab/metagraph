@@ -19,7 +19,7 @@
   "has_coord_to_header": true,
   "has_coordinates": true,
   "index_fp": null,
-  "index_meta_fp": "178cc93c330374f0",
+  "index_meta_fp": "fbfd396e439f0d22",
   "index_ns": "fixtures",
   "k": 15,
   "label_modes": [
@@ -37,69 +37,40 @@
   {
    "annotation": {
     "access_path": "direct",
-    "direct_reads": 396,
-    "keys_mapped": 86,
-    "rows_requested": 86
+    "direct_reads": 438,
+    "keys_mapped": 148,
+    "rows_requested": 148
    },
    "arms": {
     "right": {
      "branch_events": [
       {
        "ambiguous": [
-        0
+        2
        ],
-       "at_bp": 10,
-       "dropped": [],
-       "labels_per_successor": [
-        1,
-        4
-       ],
-       "refused": [
-        {
-         "cause": "minority",
-         "char": "A",
-         "labels": [
-          0
-         ]
-        }
-       ],
-       "segment": 0,
-       "successors": "AG"
-      },
-      {
-       "ambiguous": [
-        1
-       ],
-       "at_bp": 12,
+       "at_bp": 20,
        "dropped": [],
        "labels_per_successor": [
         2,
-        3
+        2
        ],
        "refused": [],
        "segment": 0,
-       "successors": "CG"
+       "successors": "AT"
       },
       {
-       "ambiguous": [],
-       "at_bp": 40,
-       "dropped": [
-        1
+       "ambiguous": [
+        2
        ],
+       "at_bp": 46,
+       "dropped": [],
        "labels_per_successor": [
-        1
+        2,
+        2
        ],
-       "refused": [
-        {
-         "cause": "minority",
-         "char": "G",
-         "labels": [
-          1
-         ]
-        }
-       ],
-       "segment": 2,
-       "successors": "G"
+       "refused": [],
+       "segment": 3,
+       "successors": "CG"
       }
      ],
      "branch_events_truncated": 0,
@@ -108,14 +79,13 @@
      "counters": {
       "edge_reuse_probes": 0,
       "max_reminimisation_rounds": 0,
-      "output_bp": 68,
+      "output_bp": 132,
       "pair_evaluations": 0,
       "refusal_scans": 0,
       "reminimisation_rounds": 0,
-      "steps": 68,
-      "successor_enumerations": 69,
-      "switch_sources_cut": 0,
-      "work_units": 1482
+      "steps": 132,
+      "successor_enumerations": 130,
+      "switch_sources_cut": 0
      },
      "evidence": {
       "complete": true,
@@ -128,29 +98,59 @@
      },
      "growth": [
       {
-       "ambiguous_branches": 1,
+       "ambiguous_branches": 2,
        "blocked_repeat": 0,
        "bubbles": 0,
-       "distinct_live_labels": 4,
+       "distinct_live_labels": 3,
        "divergences": 0,
        "exact": true,
        "from_bp": 0,
-       "label_ends": {
-        "branch": 1,
-        "dead_end": 2,
-        "label_lost": 2
-       },
-       "live_pairs": 5,
+       "label_ends": {},
+       "live_pairs": 4,
        "max_live_paths": 2,
+       "reconvergences": 1,
+       "splits": 2,
+       "steps": 70,
+       "tips": 0
+      },
+      {
+       "ambiguous_branches": 0,
+       "blocked_repeat": 0,
+       "bubbles": 0,
+       "distinct_live_labels": 3,
+       "divergences": 0,
+       "exact": true,
+       "from_bp": 50,
+       "label_ends": {},
+       "live_pairs": 4,
+       "max_live_paths": 2,
+       "reconvergences": 1,
+       "splits": 0,
+       "steps": 62,
+       "tips": 0
+      },
+      {
+       "ambiguous_branches": 0,
+       "blocked_repeat": 0,
+       "bubbles": 0,
+       "distinct_live_labels": 3,
+       "divergences": 0,
+       "exact": true,
+       "from_bp": 100,
+       "label_ends": {
+        "max_extension_bp": 3
+       },
+       "live_pairs": 3,
+       "max_live_paths": 1,
        "reconvergences": 0,
-       "splits": 1,
-       "steps": 68,
+       "splits": 0,
+       "steps": 0,
        "tips": 0
       }
      ],
      "labels_per_node": {
       "cap": 64,
-      "max_seen": 3,
+      "max_seen": 2,
       "nodes_truncated": 0
      },
      "limitations": [
@@ -159,57 +159,39 @@
        "kind": "scope",
        "knob": "branching.on_reconverge",
        "limit": "merge",
-       "observed": 0
+       "observed": 2
       }
      ],
      "needed_budgets": [],
      "paths": [
       {
+       "continuation": {
+        "branches_used": 0,
+        "labels": [
+         0,
+         1,
+         2
+        ],
+        "loss_used": 0.0,
+        "sequence": "GTCCGGACGATAGCACTTAGTTCCTCACTTCACAATAG"
+       },
        "end_labels": [
-        {
-         "branches": 1,
-         "label": 1,
-         "loss": 0.0,
-         "route_bp": 0,
-         "run": 1
-        },
         {
          "branches": 0,
-         "label": 3,
-         "loss": 0.0,
-         "route_bp": 0,
-         "run": 3
-        }
-       ],
-       "end_reasons": {
-        "dead_end": 2
-       },
-       "id": 0,
-       "length_bp": 40,
-       "n_labels": 2,
-       "segments": [
-        0,
-        1
-       ]
-      },
-      {
-       "end_labels": [
-        {
-         "branches": 1,
          "label": 0,
          "loss": 0.0,
          "route_bp": 0,
          "run": 0
         },
         {
-         "branches": 1,
+         "branches": 0,
          "label": 1,
          "loss": 0.0,
-         "route_bp": 0,
-         "run": 4
+         "route_bp": 62,
+         "run": 1
         },
         {
-         "branches": 0,
+         "branches": 2,
          "label": 2,
          "loss": 0.0,
          "route_bp": 0,
@@ -217,73 +199,74 @@
         }
        ],
        "end_reasons": {
-        "branch": 1,
-        "label_lost": 2
+        "max_extension_bp": 3
        },
-       "id": 1,
-       "length_bp": 40,
+       "id": 0,
+       "length_bp": 100,
        "n_labels": 3,
+       "path_reason": "max_extension_bp",
        "segments": [
         0,
-        2
+        1,
+        3,
+        4,
+        6
        ]
       }
      ],
      "runs": [
       {
-       "branches": 1,
-       "end_reason": "label_lost",
+       "branches": 0,
+       "end_reason": "max_extension_bp",
        "entered_by": "seed",
        "from_bp": 0,
        "label": 0,
        "loss": 0.0,
        "route_bp": 0,
-       "segment": 2,
-       "to_bp": 40
+       "segment": 6,
+       "to_bp": 100
       },
       {
-       "branches": 1,
-       "end_reason": "dead_end",
+       "branches": 0,
+       "end_reason": "max_extension_bp",
        "entered_by": "seed",
        "from_bp": 0,
        "label": 1,
        "loss": 0.0,
-       "route_bp": 0,
-       "segment": 1,
-       "to_bp": 40
+       "route_bp": 36,
+       "segment": 6,
+       "to_bp": 100
       },
       {
-       "branches": 0,
-       "end_reason": "label_lost",
+       "branches": 2,
+       "end_reason": "max_extension_bp",
+       "entered_by": "seed",
+       "from_bp": 0,
+       "label": 2,
+       "loss": 0.0,
+       "route_bp": 0,
+       "segment": 6,
+       "to_bp": 100
+      },
+      {
+       "branches": 1,
        "entered_by": "seed",
        "from_bp": 0,
        "label": 2,
        "loss": 0.0,
        "route_bp": 0,
        "segment": 2,
-       "to_bp": 40
+       "to_bp": 36
       },
       {
-       "branches": 0,
-       "end_reason": "dead_end",
+       "branches": 2,
        "entered_by": "seed",
        "from_bp": 0,
-       "label": 3,
+       "label": 2,
        "loss": 0.0,
        "route_bp": 0,
-       "segment": 1,
-       "to_bp": 40
-      },
-      {
-       "branches": 1,
-       "end_reason": "branch",
-       "entered_by": "seed",
-       "from_bp": 0,
-       "label": 1,
-       "loss": 0.0,
-       "route_bp": 0,
-       "segment": 2,
-       "to_bp": 40
+       "segment": 5,
+       "to_bp": 62
       }
      ],
      "segments": [
@@ -291,85 +274,6 @@
        "events": [],
        "from_bp": 0,
        "id": 0,
-       "labels": [
-        0,
-        1,
-        2,
-        3
-       ],
-       "labels_at_end": [
-        0,
-        1,
-        2,
-        3
-       ],
-       "labels_total": 4,
-       "labels_truncated": false,
-       "length_bp": 12,
-       "parents": [],
-       "sequence": "AACTTCTGAAGT"
-      },
-      {
-       "events": [
-        {
-         "at_bp": 40,
-         "label": 1,
-         "reason": "dead_end",
-         "structural_successors": 0,
-         "type": "label_end"
-        },
-        {
-         "at_bp": 40,
-         "label": 3,
-         "reason": "dead_end",
-         "structural_successors": 0,
-         "type": "label_end"
-        }
-       ],
-       "from_bp": 12,
-       "id": 1,
-       "labels": [
-        1,
-        3
-       ],
-       "labels_at_end": [
-        1,
-        3
-       ],
-       "labels_total": 2,
-       "labels_truncated": false,
-       "length_bp": 28,
-       "parents": [
-        0
-       ],
-       "sequence": "CCAAGACAATGGGCCGAGCAAATCCTCT"
-      },
-      {
-       "events": [
-        {
-         "at_bp": 40,
-         "label": 0,
-         "reason": "label_lost",
-         "structural_successors": 1,
-         "type": "label_end"
-        },
-        {
-         "at_bp": 40,
-         "label": 1,
-         "reason": "minority",
-         "structural_successors": 1,
-         "type": "label_end"
-        },
-        {
-         "at_bp": 40,
-         "label": 2,
-         "reason": "label_lost",
-         "structural_successors": 1,
-         "type": "label_end"
-        }
-       ],
-       "from_bp": 12,
-       "id": 2,
        "labels": [
         0,
         1,
@@ -382,35 +286,215 @@
        ],
        "labels_total": 3,
        "labels_truncated": false,
-       "length_bp": 28,
+       "length_bp": 20,
+       "parents": [],
+       "sequence": "TTTCCTATTTAGCCTCTGTC"
+      },
+      {
+       "events": [],
+       "from_bp": 20,
+       "id": 1,
+       "labels": [
+        0,
+        2
+       ],
+       "labels_at_end": [
+        0,
+        2
+       ],
+       "labels_total": 2,
+       "labels_truncated": false,
+       "length_bp": 16,
        "parents": [
         0
        ],
-       "sequence": "GCTCGTTCCAGAGAACGAAACCCTACCT"
+       "sequence": "ATTACGTTTGACAATG"
+      },
+      {
+       "events": [],
+       "from_bp": 20,
+       "id": 2,
+       "labels": [
+        1,
+        2
+       ],
+       "labels_at_end": [
+        1,
+        2
+       ],
+       "labels_total": 2,
+       "labels_truncated": false,
+       "length_bp": 16,
+       "parents": [
+        0
+       ],
+       "sequence": "TTTACGTTTGACAATG"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 36,
+         "segments": [
+          1,
+          2
+         ],
+         "type": "reconverge"
+        }
+       ],
+       "from_bp": 36,
+       "id": 3,
+       "labels": [
+        0,
+        1,
+        2
+       ],
+       "labels_at_end": [
+        0,
+        1,
+        2
+       ],
+       "labels_total": 3,
+       "labels_truncated": false,
+       "labels_via_parent": [
+        [
+         0,
+         2
+        ],
+        [
+         1
+        ]
+       ],
+       "length_bp": 10,
+       "parents": [
+        1,
+        2
+       ],
+       "sequence": "ACCCAGCCCT"
+      },
+      {
+       "events": [],
+       "from_bp": 46,
+       "id": 4,
+       "labels": [
+        0,
+        2
+       ],
+       "labels_at_end": [
+        0,
+        2
+       ],
+       "labels_total": 2,
+       "labels_truncated": false,
+       "length_bp": 16,
+       "parents": [
+        3
+       ],
+       "sequence": "CCGGCGGGTCGACTTG"
+      },
+      {
+       "events": [],
+       "from_bp": 46,
+       "id": 5,
+       "labels": [
+        1,
+        2
+       ],
+       "labels_at_end": [
+        1,
+        2
+       ],
+       "labels_total": 2,
+       "labels_truncated": false,
+       "length_bp": 16,
+       "parents": [
+        3
+       ],
+       "sequence": "GCGGCGGGTCGACTTG"
+      },
+      {
+       "events": [
+        {
+         "at_bp": 62,
+         "segments": [
+          4,
+          5
+         ],
+         "type": "reconverge"
+        },
+        {
+         "at_bp": 100,
+         "label": 0,
+         "reason": "max_extension_bp",
+         "structural_successors": 0,
+         "type": "label_end"
+        },
+        {
+         "at_bp": 100,
+         "label": 1,
+         "reason": "max_extension_bp",
+         "structural_successors": 0,
+         "type": "label_end"
+        },
+        {
+         "at_bp": 100,
+         "label": 2,
+         "reason": "max_extension_bp",
+         "structural_successors": 0,
+         "type": "label_end"
+        }
+       ],
+       "from_bp": 62,
+       "id": 6,
+       "labels": [
+        0,
+        1,
+        2
+       ],
+       "labels_at_end": [
+        0,
+        1,
+        2
+       ],
+       "labels_total": 3,
+       "labels_truncated": false,
+       "labels_via_parent": [
+        [
+         0,
+         2
+        ],
+        [
+         1
+        ]
+       ],
+       "length_bp": 38,
+       "parents": [
+        4,
+        5
+       ],
+       "sequence": "GTCCGGACGATAGCACTTAGTTCCTCACTTCACAATAG"
       }
      ],
      "splits": [
       {
-       "at_bp": 12,
+       "at_bp": 20,
        "branches": [
         {
-         "char": "C",
+         "char": "A",
          "labels": [
-          1,
-          3
+          0,
+          2
          ],
          "labels_distinct": 2,
          "labels_truncated": false,
          "segment": 1
         },
         {
-         "char": "G",
+         "char": "T",
          "labels": [
-          0,
           1,
           2
          ],
-         "labels_distinct": 3,
+         "labels_distinct": 2,
          "labels_truncated": false,
          "segment": 2
         }
@@ -420,9 +504,42 @@
         2
        ],
        "kind": "ambiguous",
-       "labels_before": 4,
-       "prefix_bp": 12,
+       "labels_before": 3,
+       "prefix_bp": 20,
        "segment": 0
+      },
+      {
+       "at_bp": 46,
+       "branches": [
+        {
+         "char": "C",
+         "labels": [
+          0,
+          2
+         ],
+         "labels_distinct": 2,
+         "labels_truncated": false,
+         "segment": 4
+        },
+        {
+         "char": "G",
+         "labels": [
+          1,
+          2
+         ],
+         "labels_distinct": 2,
+         "labels_truncated": false,
+         "segment": 5
+        }
+       ],
+       "children": [
+        4,
+        5
+       ],
+       "kind": "ambiguous",
+       "labels_before": 3,
+       "prefix_bp": 46,
+       "segment": 3
       }
      ],
      "status": "complete"
@@ -432,22 +549,17 @@
     {
      "column": 0,
      "kind": "column",
-     "name": "x.fa"
+     "name": "a.fa"
     },
     {
      "column": 1,
      "kind": "column",
-     "name": "y.fa"
-    },
-    {
-     "column": 2,
-     "kind": "column",
-     "name": "z.fa"
+     "name": "b.fa"
     },
     {
      "column": 3,
      "kind": "column",
-     "name": "w.fa"
+     "name": "both.fa"
     }
    ],
    "label_mode": "constrain",
@@ -455,8 +567,8 @@
     {
      "label": 0,
      "right": {
-      "direct_bp": 40,
-      "reach_bp": 40,
+      "direct_bp": 100,
+      "reach_bp": 100,
       "reentries": 0,
       "runs": [
        0
@@ -466,70 +578,51 @@
     {
      "label": 1,
      "right": {
-      "direct_bp": 40,
-      "reach_bp": 40,
+      "direct_bp": 100,
+      "reach_bp": 100,
       "reentries": 0,
       "runs": [
-       1,
-       4
+       1
       ]
      }
     },
     {
      "label": 2,
      "right": {
-      "direct_bp": 40,
-      "reach_bp": 40,
+      "direct_bp": 100,
+      "reach_bp": 100,
       "reentries": 0,
       "runs": [
-       2
-      ]
-     }
-    },
-    {
-     "label": 3,
-     "right": {
-      "direct_bp": 40,
-      "reach_bp": 40,
-      "reentries": 0,
-      "runs": [
-       3
+       2,
+       3,
+       4
       ]
      }
     }
    ],
-   "limitations": [
-    {
-     "effect": "the memory budget is enforced on the walker's modelled state and on this response's output, admitted per head; the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of seed_id, are held before they can be charged, so the peak can exceed the budget by them (observed: the excess seen, MiB, rounded up)",
-     "kind": "memory_bound_soft",
-     "knob": "bounds.max_memory_mb",
-     "limit": 1,
-     "observed": 0
-    }
-   ],
+   "limitations": [],
    "outcome": {
     "branch_diagnostics": "complete",
     "delivery": "inline",
     "label_evidence": "complete",
-    "walks": "complete"
+    "walks": "partial"
    },
    "seed": {
     "dropped_labels": [],
     "labels": [
-     "x.fa",
-     "y.fa",
-     "z.fa",
-     "w.fa"
+     "a.fa",
+     "b.fa",
+     "both.fa"
     ],
     "labels_dropped": 0,
     "labels_dropped_digest": "",
-    "labels_from_seed": true,
-    "labels_supporting_total": 4,
+    "labels_from_seed": false,
+    "labels_supporting_total": 3,
     "length_bp": 30,
     "num_kmers": 16,
-    "seed_id": "memory_soft",
+    "seed_id": "merge_ties",
     "seed_id_mismatch": true,
-    "validated_seed_id": "2e433ba3262fdd15"
+    "validated_seed_id": "18618eb4f40ac8b9"
    }
   }
  ],
@@ -540,7 +633,6 @@
   "bounds": {
    "max_extension_bp": 100,
    "max_live_paths": 1000,
-   "max_memory_mb": 1,
    "max_output_bp": 2000000,
    "max_paths": 10000,
    "max_steps": 1000000,
@@ -550,10 +642,10 @@
   "branching": {
    "bubble_window_bp": 0,
    "hairpins": "skip",
-   "max_label_branches": 1,
+   "max_label_branches": "unlimited",
    "max_splits_per_path": 64,
    "min_successor_fraction": 0.0,
-   "min_successor_labels": 2,
+   "min_successor_labels": 1,
    "on_reconverge": "merge",
    "tip_window_bp": 0
   },
@@ -578,7 +670,7 @@
    "switch_on": "loss"
   },
   "output": {
-   "continuation_bp": 1000,
+   "continuation_bp": 40,
    "detail": "full",
    "max_branch_events": 100,
    "profile_bin_bp": 50,

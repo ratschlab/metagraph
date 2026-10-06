@@ -162,6 +162,20 @@ struct AttemptSettings {
 // response the model fitted exactly about half the time)
 constexpr double kReserveMargin = 1.25;
 
+// The most text one byte of the record coordinates' share of a seed's account (DeliveryCosts:
+// coordinate_fixed, coordinate_run, coordinate_seed, occurrence) can write, inverted: every
+// byte of coordinate text costs at least this many account bytes, whatever the digits — an
+// occurrence's widest text (two 20-digit numbers, 44 bytes with its brackets and comma) is
+// priced 872, a run's entry (221 bytes at its widest) 3,680, a seed label's (79) 1,728, the
+// block's skeleton with a cut list's limitation, K record and drop_coordinates (960 bytes in a
+// graphlet) 15,151, the null form (106) 1,584: 14.9 at the least
+// (GraphletCoordinates.CoordinateAccountBoundsItsText). The
+// reserve estimates the coordinate share's text with it, not with the measured ratio of the
+// rest of the output (115-129 for a tree, against 20-73 for an occurrence: measured, it
+// understated a coordinate-heavy seed's text up to 4 times, DESIGN §26 M2; plan revision 3,
+// decision D5)
+constexpr uint64_t kCoordinateAccountPerTextByte = 12;
+
 // a seed's text (or a response) of at least this many bytes measures a delivery rate (smaller
 // ones are dominated by fixed costs)
 constexpr uint64_t kMeasuredTextBytes = 1 << 20;
@@ -258,38 +272,40 @@ class Attempt {
     // ---- the delivery reserve (pass 5): the seeds stop being walked at
     // bound - max(allowance / 2, reserve), the reserve being kReserveMargin times the time to
     // build and compress what the response will hold — the text of the seeds finished so far
-    // (exact, written as each was built) and of the seed being walked (its modelled account /
-    // the account per text byte of the requested detail) — at the stated rates, or the build
+    // (exact, written as each was built) and of the seed being walked (its modelled account
+    // less its coordinate share / the account per text byte of the requested detail, plus the
+    // coordinate share / kCoordinateAccountPerTextByte) — at the stated rates, or the build
     // rate measured on this attempt's own seeds, plus the time from the walk-until to the
     // walk's end (delivery_stop_ms, or this server's measured stop latency). The handler's
     // thread: each moves the walk-until.
     // |detail|: the requested output.detail (its account per text byte: measured on this
-    // server, else the configured one for JSON or for a graphlet). |coordinates|: the request
-    // asked for record coordinates (output.coordinates), whose account per text byte is not
-    // the other outputs' (an occurrence's is about a third of theirs): its own measurement
-    // serves this attempt but is not offered to the server's (pooled_account_per_text_byte)
-    void set_delivery_detail(const std::string &detail, bool coordinates = false);
+    // server, else the configured one for JSON or for a graphlet)
+    void set_delivery_detail(const std::string &detail);
     const std::string& delivery_detail() const { return detail_; }
-    // the seed being walked holds |account| modelled bytes (at every level's end)
-    void progress(uint64_t account);
+    // the seed being walked holds |account| modelled bytes, |coordinates| of them its record
+    // coordinates' share (ResourceAccount::coordinates; 0 without output.coordinates), at
+    // every level's end
+    void progress(uint64_t account, uint64_t coordinates = 0);
     // a seed's result was written as |text_bytes| of text, built in |build_seconds|, from a
-    // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed)
-    void note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account = 0);
+    // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed), of
+    // which |coordinate_account| is the coordinate share and |coordinate_text| the exact text
+    // it wrote (coordinates_text_bytes): the ratio of the rest is measured without both, so
+    // that a request with coordinates measures what the same walk without them would (plan
+    // revision 3: their ratio would lower the estimate of every later attempt without them)
+    void note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account = 0,
+                        uint64_t coordinate_account = 0, uint64_t coordinate_text = 0);
     // what this server measured before the attempt started: it replaces the configured rates
     // and ratios (a measurement of the attempt's own seeds replaces it when more conservative)
     void set_measured(const DeliveryMeasurements &measured);
     // the slowest build rate and the smallest account-to-text ratio measured on this
-    // attempt's own seeds (0: none), and the longest time a seed's walk ended after the
-    // walk-until (0: none did), for the server's measurements
+    // attempt's own seeds (0: none; the ratio without the coordinate share), and the longest
+    // time a seed's walk ended after the walk-until (0: none did), for the server's
+    // measurements. The ratio is pooled whether or not the output carried coordinates: their
+    // account and text are left out of it exactly (note_delivered), so a request with them
+    // adds what the same request without them would
     double own_build_mbps() const;
     double own_account_per_text_byte() const;
     double own_stop_ms() const;
-    // what this attempt adds to the server's measured account per text byte of its detail: its
-    // own ratio, unless its output carries coordinates — their ratio would lower the estimate
-    // every later attempt without them uses, so that their walk-until would depend on whether
-    // a request with coordinates came first (review of W1, finding 3; the split of the
-    // coordinate share is C3's). 0: nothing
-    double pooled_account_per_text_byte() const;
     // the reserve now (ms)
     double reserve_ms() const;
 
@@ -406,12 +422,12 @@ class Attempt {
     double max_delivery_gap_ms_ = 0;                  // note_delivery_gap_ms
     // the delivery reserve's state (the handler's thread; written under |mutex_|)
     std::string detail_;
-    bool coordinates_ = false;                        // the output carries coordinates
     double configured_ratio_ = 20;                    // the configured account per text byte
     double server_ratio_ = 0;                         // measured on this server (0: none)
     double own_ratio_ = 0;                            // measured on this attempt (0: none)
     uint64_t delivered_bytes_ = 0;                    // the text of the seeds finished
     uint64_t walking_account_ = 0;                    // the seed being walked, its account
+    uint64_t walking_coordinates_ = 0;                // ... and its coordinate share
     double measured_build_mbps_ = 0;                  // this attempt's own (0: none yet)
     DeliveryMeasurements server_;                     // set_measured
     // the lowest walk-until a poll checked (the handler's thread writes it; usage reads it) and

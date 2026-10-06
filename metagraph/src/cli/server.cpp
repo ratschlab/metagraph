@@ -1,5 +1,17 @@
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <csignal>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
 #include <map>
 #include <mutex>
+#include <set>
+#include <thread>
+
+#include <unistd.h>
 
 #include <json/json.h>
 #include <tsl/hopscotch_map.h>
@@ -214,7 +226,163 @@ Json::Value process_align_request(const std::string &received_message,
     return root;
 }
 
-std::thread start_server(HttpServer &server_startup, Config &config, size_t num_threads) {
+// ---------------------------------------------------------------- shutdown (SIGTERM, SIGINT)
+
+namespace {
+
+/**
+ * The server's shutdown on SIGTERM or SIGINT. Without a handler the process kept running: in a
+ * container it is PID 1, for which the kernel drops a signal with the default action, so every
+ * `docker stop` of a deploy waited its whole timeout (120 s) and then killed it. Now:
+ *  - the signal handler only writes a byte to a pipe (async-signal-safe); a thread reading it
+ *    does the rest. A second signal ends the process at once (_exit);
+ *  - nothing new is served: a /traverse or /resolve request already reading its request or
+ *    arriving now finds its client "gone" at its first check;
+ *  - every traversal in flight (each /traverse request has an Attempt, with attempt_id or not)
+ *    is stopped at its next poll as if its client had gone away — nothing is written for it
+ *    and its connection is closed. A partial result written now would state a cause that is
+ *    not true ("cancelled": POST /traverse/cancel), and a ledger treats an attempt without an
+ *    answer as unanswered (not_after_ms, bound_ms), which is the truth;
+ *  - once they returned, or after kDrainMs, the HTTP server stops (its acceptor and every
+ *    connection closed, a response still being sent cut: incomplete, never a shorter complete
+ *    one, its Content-Length unmet) and the process exits from run_server (_Exit: returning
+ *    would join an index load still in progress in the loader's destructor);
+ *  - a handler that does not return within kExitMs more (a long /search, /align, or one
+ *    uninterruptible annotation read) does not hold the process: the log is flushed and the
+ *    process exits (_Exit, the state is in memory only).
+ * Before the server accepts connections the process exits at once. In single-index mode the
+ * server accepts them at once and answers 503 while its index loads: a signal then stops the
+ * server like any other, and the exit does not wait for the load.
+ */
+class Shutdown {
+  public:
+    static constexpr uint64_t kDrainMs = 3000;
+    static constexpr uint64_t kExitMs = 3000;
+
+    bool stopping() const { return stopping_.load(std::memory_order_acquire); }
+
+    // a /traverse request's attempt, for the duration of its handler
+    void enter(const std::shared_ptr<Attempt> &attempt) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        in_flight_.insert(attempt);
+        if (stopping())
+            attempt->request_stop(graph::traversal::ExternalStop::CLIENT_GONE);
+    }
+    void leave(const std::shared_ptr<Attempt> &attempt) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        in_flight_.erase(attempt);
+        if (in_flight_.empty())
+            changed_.notify_all();
+    }
+    // the server accepts connections: from now on a shutdown stops it (stopping it before
+    // start() would be lost: start() opens the acceptor anew)
+    void started(HttpServer *server) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        server_ = server;
+    }
+    // run_server is exiting (the server stopped): the shutdown thread need not force the exit
+    void finished() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        finished_ = true;
+        changed_.notify_all();
+    }
+
+    // installs the handlers and starts the thread that waits for them (once, at the start of
+    // run_server, before any request can arrive)
+    void install() {
+        if (::pipe(pipe_) != 0) {
+            logger->warn("[Server] No shutdown pipe ({}): SIGTERM and SIGINT keep their "
+                         "default action", std::strerror(errno));
+            return;
+        }
+        write_end_.store(pipe_[1]);
+        struct sigaction action;
+        std::memset(&action, 0, sizeof(action));
+        action.sa_handler = &Shutdown::on_signal;
+        sigemptyset(&action.sa_mask);
+        // the threads a signal interrupts carry on (reads, waits) as if it had not come
+        action.sa_flags = SA_RESTART;
+        sigaction(SIGTERM, &action, nullptr);
+        sigaction(SIGINT, &action, nullptr);
+        std::thread([this]() { wait_and_stop(); }).detach();
+    }
+
+  private:
+    static void on_signal(int sig) {
+        if (signalled_.exchange(true)) {
+            // a second signal: the first one's shutdown is not awaited
+            _exit(128 + sig);
+        }
+        const unsigned char byte = static_cast<unsigned char>(sig);
+        const ssize_t written = ::write(write_end_.load(), &byte, 1);
+        (void)written;
+    }
+
+    void wait_and_stop() {
+        unsigned char sig = 0;
+        while (::read(pipe_[0], &sig, 1) < 0 && errno == EINTR) {}
+        std::unique_lock<std::mutex> lock(mutex_);
+        stopping_.store(true, std::memory_order_release);
+        if (!server_) {
+            logger->info("[Server] Signal {} before the server accepted connections: exiting", sig);
+            logger->flush();
+            std::_Exit(0);
+        }
+        logger->info("[Server] Signal {}: shutting down; {} traversal(s) in flight stopped as "
+                     "if their clients had gone (nothing written for them), the server stops "
+                     "within {} ms", sig, in_flight_.size(), kDrainMs);
+        for (const auto &attempt : in_flight_) {
+            attempt->request_stop(graph::traversal::ExternalStop::CLIENT_GONE);
+        }
+        changed_.wait_for(lock, std::chrono::milliseconds(kDrainMs),
+                          [&]() { return in_flight_.empty(); });
+        HttpServer *server = server_;
+        const size_t left = in_flight_.size();
+        lock.unlock();
+        if (left) {
+            logger->warn("[Server] {} traversal(s) still running: their connections are closed",
+                         left);
+        }
+        server->stop();
+        lock.lock();
+        if (!changed_.wait_for(lock, std::chrono::milliseconds(kExitMs),
+                               [&]() { return finished_; })) {
+            logger->warn("[Server] A request handler did not return within {} ms of the stop: "
+                         "exiting without it", kExitMs);
+            logger->flush();
+            std::_Exit(0);
+        }
+    }
+
+    static inline std::atomic<bool> signalled_ { false };
+    static inline std::atomic<int> write_end_ { -1 };
+    int pipe_[2] = { -1, -1 };
+    std::atomic<bool> stopping_ { false };
+    std::mutex mutex_;
+    std::condition_variable changed_;
+    std::set<std::shared_ptr<Attempt>> in_flight_;
+    HttpServer *server_ = nullptr;
+    bool finished_ = false;
+};
+
+// a /traverse handler's attempt is in flight while this lives
+class InFlight {
+  public:
+    InFlight(Shutdown &shutdown, std::shared_ptr<Attempt> attempt)
+          : shutdown_(shutdown), attempt_(std::move(attempt)) { shutdown_.enter(attempt_); }
+    ~InFlight() { shutdown_.leave(attempt_); }
+    InFlight(const InFlight&) = delete;
+    InFlight& operator=(const InFlight&) = delete;
+
+  private:
+    Shutdown &shutdown_;
+    std::shared_ptr<Attempt> attempt_;
+};
+
+} // namespace
+
+std::thread start_server(HttpServer &server_startup, Config &config, size_t num_threads,
+                         std::function<void()> on_accepting = nullptr) {
     server_startup.config.thread_pool_size = num_threads;
 
     if (config.host_address != "") {
@@ -227,7 +395,12 @@ std::thread start_server(HttpServer &server_startup, Config &config, size_t num_
     logger->info("[Server] Will listen on {} port {}",
                  server_startup.config.address, server_startup.config.port);
     logger->info("[Server] Maximum connections: {}", num_threads);
-    return std::thread([&server_startup]() { server_startup.start(); });
+    return std::thread([&server_startup, on_accepting]() {
+        server_startup.start([on_accepting](unsigned short) {
+            if (on_accepting)
+                on_accepting();
+        });
+    });
 }
 
 using GraphPair = std::pair<std::string, std::string>;
@@ -380,6 +553,10 @@ static void build_header_index(const graph::AnnotatedDBG &index) {
 
 int run_server(Config *config) {
     assert(config);
+    // SIGTERM and SIGINT shut the server down promptly (class Shutdown); allocated for the
+    // process's lifetime, which its detached thread shares
+    Shutdown &shutdown = *new Shutdown();
+    shutdown.install();
     std::atomic<size_t> num_requests = 0;
 
     ThreadPool graph_loader(1, 1);
@@ -770,9 +947,12 @@ int run_server(Config *config) {
             const IndexIdentity identity = identity_of(index);
             // a client that is gone is not answered: abandoned between the request's phases
             try {
+                // a shutdown is treated as a client gone (class Shutdown)
+                auto gone = [&request, &shutdown]() {
+                    return shutdown.stopping() || client_gone(*request);
+                };
                 return process_resolve_request(json, index, config->index_release,
-                                               config->resolve_max_query_bp, &identity,
-                                               [&request]() { return client_gone(*request); });
+                                               config->resolve_max_query_bp, &identity, gone);
             } catch (const graph::traversal::AttemptAborted &e) {
                 throw ClientGone(e.what());
             }
@@ -792,10 +972,15 @@ int run_server(Config *config) {
         auto attempt = std::make_shared<Attempt>(
                 request_id, request->header_read_time, attempts.settings(),
                 attempts.server_instance(), /* enforced */ true,
-                [weak = std::weak_ptr<HttpServer::Request>(request)]() {
+                [weak = std::weak_ptr<HttpServer::Request>(request), &shutdown]() {
+                    // a shutdown is treated as a client gone (class Shutdown)
+                    if (shutdown.stopping())
+                        return true;
                     auto r = weak.lock();
                     return !r || client_gone(*r);
                 });
+        // stopped with the others if the server shuts down while it runs
+        const InFlight in_flight(shutdown, attempt);
         // what this server measured of its deliveries replaces the configured rates and ratios
         // in the attempt's reserve (the slowest, the smallest, of its recent responses)
         attempt->set_measured(attempts.measured());
@@ -840,12 +1025,13 @@ int run_server(Config *config) {
         control.on_written = [&](int status, std::optional<size_t> bytes) {
             // the longest single annotation read of any /traverse (deadline_check), and the
             // slowest build rate and smallest account per text byte measured on its large seeds
-            // (the delivery reserve; the latter not from an output with coordinates)
+            // (the delivery reserve; the latter without the record coordinates' share, so
+            // that an output with them measures what the same output without them would)
             attempts.note_uninterruptible(attempt->max_read_ms());
             attempts.note_uninterruptible(attempt->max_delivery_gap_ms());
             attempts.note_build_rate(attempt->own_build_mbps());
             attempts.note_account_per_text_byte(attempt->delivery_detail(),
-                                                attempt->pooled_account_per_text_byte());
+                                                attempt->own_account_per_text_byte());
             attempts.note_stop_latency(attempt->own_stop_ms());
             if (!registered) {
                 if (!status) {
@@ -1022,8 +1208,9 @@ int run_server(Config *config) {
     auto deadline_check_json = [&]() {
         Json::Value d;
         d["chunk_target_ms"] = static_cast<Json::UInt64>(config->traverse_chunk_target_ms);
-        // no bound on one row's decode exists before stage 3c (selected-label decoding): a
-        // row-diff row reads its whole dependency path, however wide
+        // No time bound on one piece is stated, and none will be (decision 3c-N5): the later
+        // stages' checkpoints bound the index operations of a piece, not its wall time, which
+        // page faults and scheduling leave open
         d["max_uninterruptible_ms"] = Json::Value();
         d["observed_max_uninterruptible_ms"]
             = static_cast<Json::UInt64>(attempts.observed_max_uninterruptible_ms());
@@ -1043,8 +1230,10 @@ int run_server(Config *config) {
             "less than 1/{} of the time left. A read far from its deadline is thus one piece, "
             "as before, and a cancel or a gone client is seen after it. A seed's validation is "
             "stopped by the attempt only, never by its own time budget. One chunk, at least "
-            "one row, is uninterruptible, and no bound on one row exists before stage 3c "
-            "(max_uninterruptible_ms: null); observed_max_uninterruptible_ms is the longest "
+            "one row, is uninterruptible, and no time bound on one piece is stated "
+            "(max_uninterruptible_ms: null, and it stays null: checkpoints inside reads bound "
+            "the index operations of a piece, not its wall time, which page faults and "
+            "scheduling leave open); observed_max_uninterruptible_ms is the longest "
             "single piece of this process, a whole read far from its deadline included, an "
             "observation, not a bound. A chunked read returns exactly what one read would (the "
             "same rows, caches and counters) unless the deadline stops it, and a stopped read "
@@ -1139,6 +1328,9 @@ int run_server(Config *config) {
         caps["content_encodings"] = encodings_json();
         caps["compression_level"] = config->traverse_compression_level;
         caps["deadline_check"] = deadline_check_json();
+        // record coordinates (feature level 6): only here, the per-request capabilities
+        // change only in their feature_level
+        caps["coordinates"] = coordinates_capabilities_json(oracle);
         return caps;
     };
 
@@ -1359,10 +1551,20 @@ int run_server(Config *config) {
         }
     };
 
-    std::thread server_thread = start_server(server, *config, num_server_threads);
+    std::thread server_thread = start_server(server, *config, num_server_threads,
+                                             [&]() { shutdown.started(&server); });
     server_thread.join();
-
-    return 0;
+    // The server stopped (only a shutdown stops it): the process exits here, without returning
+    // through this function's destructors. They join what may still run: graph_loader an index
+    // load in progress (single-index mode serves 503 while it loads, so a stop can come before
+    // it ends — on a cold disk minutes later, the whole docker-stop timeout this shutdown is
+    // there to avoid; review of W2), graphs_pool its tasks. Nothing of the process's state
+    // outlives it (an index is only read), so nothing is lost by not unwinding
+    logger->info("[Server] Stopped");
+    shutdown.finished();
+    logger->flush();
+    std::fflush(nullptr);
+    std::_Exit(0);
 }
 
 } // namespace cli

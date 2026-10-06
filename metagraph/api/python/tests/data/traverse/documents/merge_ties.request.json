@@ -1,0 +1,35 @@
+{
+ "seeds": [
+  {
+   "seed_id": "merge_ties",
+   "sequence": "ATGAGCGTGCCTCTAACGTTCATACCAAAT",
+   "labels": [
+    "a.fa",
+    "b.fa",
+    "both.fa"
+   ]
+  }
+ ],
+ "strategy": {
+  "direction": "right",
+  "labels": {
+   "seed_label_kind": "column"
+  },
+  "branching": {
+   "max_label_branches": "unlimited"
+  },
+  "bounds": {
+   "max_extension_bp": 100
+  },
+  "output": {
+   "profile_bin_bp": 50,
+   "continuation_bp": 40,
+   "timing": false
+  }
+ },
+ "fixture_index": {
+  "cli": "bubbles",
+  "k": 15,
+  "doc": "the merge fixture without c.fa: both alleles of each bubble are carried by two labels, so each merge keeps its first-arrived parent first (a tie, R21 (4)), and b.fa goes through two non-first-parent merges (R.route_bp, the earliest stamp, != T.route_bp, the latest)"
+ }
+}

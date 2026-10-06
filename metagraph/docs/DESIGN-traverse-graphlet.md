@@ -1,6 +1,7 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.7 (2026-10-04; v5.7 = the review of pass 5 and the path cache's first reads, §24; v5.6 = pass 5 as implemented, §23; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
+**Status:** v5.8 (2026-10-05; v5.8 = record coordinates as built, feature level 6, §26, after the review of
+levels 4–5, §25; v5.7 = the review of pass 5 and the path cache's first reads, §24; v5.6 = pass 5 as implemented, §23; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
@@ -661,7 +662,7 @@ interrupted Python parse keeping the original body and reporting a local failure
 ## 14.1 What is frozen with MGT v1, and what is enforced in stages *(v5)*
 
 Frozen with the format (the wire contract): the `O`, `Q`, `K` records and the `A` counters/evidence fields; the
-`resource_limit` end reason; the four outcome dimensions; the `limitations` kinds (*(v5.4)* their `effect` sentences are free text, which may be reworded within MGT v1; the kinds, knobs and value types are what is frozen); the
+`resource_limit` end reason; the four outcome dimensions; the `limitations` kinds (*(v5.4)* their `effect` sentences are free text, which may be reworded within MGT v1; the kinds, knobs and value types are what is frozen; *(v5.8, decision X-C12)* frozen means that no kind a reader knows changes its meaning, knob or value types — the kinds themselves are an **open `[a-z_]` token set**, as are a `K` record's extra field names and a `Q` record's scope, resource, phase and action tokens: a later feature level may add one, and a reader keeps a value it does not know, uninterpreted; the precedent is `memory_bound_soft` (28c51c31), level 6 adds the kind `coordinates` with the extra field `lists_cut` and the action `drop_coordinates` (C12); no record, field or grammar rule changes, which would be MGT v2); the
 `resource_stop` structure; `attempt_id`/`budget_id`/`locus_id` in requests and usage in every response. Enforced in
 stages, each stated in every response until it lands (`limitations` entries): (1) **now** — the existing caps, the
 evidence boundary, stated limitations, the outcome dimensions (being implemented in the JSON); (2) the two-phase
@@ -756,10 +757,19 @@ Per seed result (JSON, every detail level — `full`, `tree`, `summary` and `gra
 - Several occurrences per run occur when the label's record repeats the walked sequence (two live coordinate chains);
   they are listed in ascending `start`.
 - Runs closed by a merge do not occur (trace and merging are mutually exclusive). Runs entered by a switch carry the
-  new label's own coordinates from their start.
+  new label's own coordinates from their start — *(v5.8, amended by decision X-18.2)* except a run entered by a
+  switch into a label whose own lineage is still live there: the walker's entry keeps only that label's chains
+  that continue from before the switch, so chains starting at the switch node are missing; such a run carries the
+  inherited chains only and is marked `lower_bound: true` (decision C-N2 a: the block's `complete` false,
+  `runs_lower_bound`), the walk unchanged. It arises only with a switch cost (the default is `forbid`); M1 found
+  21 of 3,780 runs, all switch-entered, in 10 of 56 trace cells (§26).
 - Bounded like everything else: at most `output.max_coordinate_occurrences` (default 16, accepts `"unlimited"`) per
   run; a cut is stated as a limitation `coordinates` (knob `output.max_coordinate_occurrences`, observed = the true
-  count) — never silent.
+  count) — never silent. *(v5.8, as built, §26)*: observed is the largest true count among the cut lists, the
+  extra field `lists_cut` their number, and each cut list states `occurrences_total`; the block also has `kind`
+  `mixed`, `max_occurrences`, `complete`, `runs_lower_bound` and per run `from_bp`, `to_bp`, `chains_ended`
+  (C-N1) and `lower_bound`, and the intervals are written from the last node's coordinate c (`[c + k − L, c + k)`
+  right, `[c, c + L)` left, L = `to_bp − from_bp`), equivalent to the c₀ form above.
 
 ## 18.3 The library
 
@@ -1364,3 +1374,355 @@ byte-identical to `7aaee760`.
     selected column down to the first clear marker, k their nonempty lists), no longer D, which is the slack of
     revision 3. In the reviewer's case the merge term is 2,040; the work bound and the price's coordinate terms
     are 102,295 (corrected above, in the plan's revision 2, 3c-N10 and X-R3).
+
+# 26. Record coordinates as built, and feature level 6 *(v5.8, 2026-10-05)*
+
+Record coordinates (§18, the owner's decisions C1–C12 and the program plan's C-N1..C-N9, X-18.2, X-C8, X-C12;
+`PLAN-traverse-next-stages.md` §2.1) are implemented in two chunks: W1 (increments C0–C2, `7aaee760`: the walker's
+side tables and the wire contract, frozen at C2, with D3) and W2 (C3–C8: the delivery reserve's coordinate share,
+the capabilities, level 6, the real-index tests and measurements, the library, the documents). SPEC §5, §6.8, §7.0,
+§7.1, §7.5, §10.3 are normative; this section records what was built against §18, why, and what was measured.
+`feature_level` is **6**.
+
+## 26.1 The contract, as frozen at C2
+
+- **Request** (`strategy.output`): `coordinates` (boolean, default false; false is byte-identical to omitting it)
+  and `max_coordinate_occurrences` (an integer in [1, 2^64 − 2] or `"unlimited"`, default 16; 400 without
+  `coordinates: true` — decision C-N6 —, inert under `support: kmer` and in annotate mode — C-N7). Echoed, the cap's
+  default included, only when `coordinates` is true.
+- **Response**, per seed in every detail (a graphlet's JSON summary, never its body): the block, or `null` with
+  `coordinates_reason` (`index has no coordinates`, `support kmer`, `no traversal`, `partial derivation`, in that
+  order). The block: `kind` (`record` | `column` | `mixed`, C3), `k`, `max_occurrences`, `complete`,
+  `runs_lower_bound`?, `seed` (per seed label its occurrences of the seed) and `arms` (per requested arm one entry
+  per run, in `runs` order: `run`, `label`, `from_bp`, `to_bp`, `occurrences`, `occurrences_total`? when cut,
+  `chains_ended`? when > 0 (C5, C-N1), `lower_bound`? when true (C-N2, X-18.2)). Intervals 0-based, half-open,
+  forward strand, `[c + k − L, c + k)` right and `[c, c + L)` left from the chain's coordinate c at the run's last
+  node — the c₀ form of §18.2 rewritten, verified on 3,631 real runs before the build and on 10,696 occurrences of
+  9,498 runs by `MiniRefSeq.CoordinatesAgainstTheSourceRecords` now (5,508 of them switch-entered, 48 lower
+  bounds, 27 of them strictly below the string count; 326 lists cut; every recorded switch request's seed walked
+  to its 3,000 bp — the review of W2 found the blaNDM and first repeat seeds' switch cells at the default 1,000 —,
+  pinned: for each of the 7 seeds, a run of its switch cells ends past 1,000 bp).
+- **Column positions** are the column's k-mer index space (record i's k-mer j is `offset_i + j`, `offset_{i+1} =
+  offset_i + len_i − k + 1`), so **a record's last k − 1 bases share their numbers with the next record's first
+  k − 1 positions** (review of W1, finding 6): an interval there is attributed to one record only with the record
+  lengths, which are not stated (C10). Stated in SPEC §7.1, in the probe's `coordinates.rule` (C3) and exercised by
+  the positional oracle (3 such intervals in its column switch cells, numbers in a record's last k − 1 bases whose
+  bases are the next record's first ones, not the earlier record's).
+- **Limitation** `coordinates` (seed level, only when a list was cut; in no outcome class, C2 kept), knob
+  `output.max_coordinate_occurrences`, observed the largest true count, `lists_cut` the number of cut lists; MGT:
+  exactly one `K * coordinates …` record more, Z one higher. **Action** `drop_coordinates` right after
+  `use_graphlet` / `drop_sequences` wherever those are offered, for a request with coordinates (block or null form).
+- **Memory**: each run's side-table entry charged once at its creation at min(chains, cap) occurrences, a seed
+  label's with the depth-0 state, in the requested detail; `LabelRun`, `Entry` and `Item` unchanged (the layout
+  trap: their sizes are part of the model). **Work**: none — every coordinate was charged one unit with its row.
+- **D3** (the owner's decision R21 (3), all requests): a derived seed whose time budget runs out after 1 ≤ j < n of
+  its k-mers is delivered as a partial walk at depth 0 with the set of the j k-mers read, a `derivation`
+  limitation first (`cause: time_budget`, observed j) and `label_evidence: qualified`; j = 0, or a superset that
+  would fail the seed any other way, fails as before (SPEC §7.0). The library accepts it from W2 (its `check_rules`
+  flagged the qualified class against "complete" limitations before).
+
+## 26.2 The delivery reserve's coordinate share (C3; revisions 3 and 8, decision C-N4)
+
+- The walker's account has a **coordinate share** `ResourceAccount::coordinates`: the output's fixed part for
+  coordinates (`DeliveryCosts::coordinate_fixed`, already in `fixed`: the block's skeleton with a cut list's
+  limitation and K record, or the null form; counted again only in the share, nothing more is charged) plus every
+  entry and occurrence as charged at its creation. It is published with the account at every level's end
+  (`AttemptControl::progress(account, coordinates)`) and in the seed's meter.
+- **The estimate**: E = ⌈(A − C) / ratio⌉ + ⌈C / 12⌉, `kCoordinateAccountPerTextByte` = 12 a **bound**, not an
+  estimate: each part of the share is priced at least 12 times the most text it can write, whatever the digits
+  (`GraphletCoordinates.CoordinateAccountBoundsItsText`, detail `full` / `graphlet`):
+
+  | part | account (B) | widest text (B) | ratio |
+  |---|---|---|---|
+  | an occurrence (two 20-digit numbers, brackets, comma) | 872 | 44 | 19.8 |
+  | a run's entry (every optional member at its widest) | 3,680 | 221 | 16.7 |
+  | a seed label's entry | 1,728 | 79 | 21.9 |
+  | the block's skeleton, a cut list's limitation (20-digit count, `"unlimited"`), `drop_coordinates` (JSON detail) | 11,628 | 597 | 19.5 |
+  | the same with the K record, the Q token and the counts' digits (graphlet) | 15,151 | 960 | 15.8 |
+  | the null form with its longest reason and the tokens (graphlet) | 1,584 | 106 | 14.9 |
+
+  Without coordinates C = 0 and E is the formula before the split, to the bit.
+- **The ratio sample** leaves both sides of the share out: (A − C) / (text − the coordinates' text), the latter
+  counted **exactly** from digit counts and fixed punctuation (`coordinates_text_bytes`: the block or null form, a
+  cut list's limitation, `drop_coordinates`, and in a graphlet the escaped K record, the Q token and the digits they
+  add to Z, `graphlet_lines` and `graphlet_bytes`; `compact_json_size` counts compact JSON without writing it),
+  and only on a rest of at least `measured_text_bytes`. So an attempt with coordinates measures exactly what the same
+  walk without them does — `GraphletCoordinates.AttemptsMeasureTheSameRatioWithCoordinates` (the server's path on
+  seeds of 1.3 MB: equal doubles, cut and uncut, full and graphlet), `.CoordinateTextIsExactAndBoundedByItsAccount`
+  (142 results with 20-digit positions, memory stops and null forms: text − coordinates' text = the stripped
+  result's text; A − C = the opt-out account), `MiniRefSeq.CoordinateShareIsExact` (60 real results) — and **W1's
+  interim** (attempts with coordinates kept out of the server's measurements) is removed: they feed the measured
+  ratios again, which no longer depend on whether such a request came first
+  (`GraphletAttempt.CoordinatesLeaveTheServersRatioUnchanged`).
+
+## 26.3 Capabilities and level 6 (revision 8)
+
+The level-6 documents differ from level 5's exactly in: `feature_level` (both GET routes and every response's
+capabilities); `attempts.delivery_reserve.rule` (the coordinate share and the exact sample) and the new numeric
+`attempts.delivery_reserve.coordinate_account_per_text_byte: 12` (both GET routes); `deadline_check.rule`, one
+sentence (both GET routes: "no time bound on one piece is stated (max_uninterruptible_ms: null, and it stays null:
+checkpoints inside reads bound the index operations of a piece, not its wall time …)" in place of "no bound on one
+row exists before stage 3c", which implied a finite value after 3c — decision 3c-N5); and the probe's new
+`coordinates` block (`supported` = `supports_trace`, `knob`, `cap_knob`, `max_occurrences_default` 16, `kinds` this
+index can report, `limitation`, `action`, `output_bound` — which names the probe's `max_memory_mb` and
+`max_work_units` rather than a value, since a server maximum is the budget of every request without one —, `rule`).
+The per-request capabilities change only in the digit. The compact probe grows from 15,908 to 19,490 bytes on
+mini_refseq (the block 2,799, the reserve's rule 589 and the deadline rule 141 more; `GET /capabilities` 13,313 to
+14,081), past the 16 KiB default ceiling the MCP tool `traverse_capabilities` had at level 5; the library raises
+it to 32 KiB (W2's library part). Not changed, owner decision pending (review 6): whether `setup` pieces count toward
+`observed_max_uninterruptible_ms` (they are in the deadline record only).
+
+## 26.4 The owner's decisions, as built
+
+| ID | Decision | As built |
+|---|---|---|
+| C1–C12 | §18 and §21 | as §18 with the amendments of §18.2 (v5.8) |
+| C-N1 | `chains_ended` as drafted | chains continuing on no followed path of the lineage; partitions among clones not counted; clones inherit |
+| C-N2 | (a) mark lower bounds | `lower_bound` per run, `complete: false`, `runs_lower_bound`; M1: 0.56% of runs, all switch-entered — (b) not needed now |
+| C-N3 | `Coord*` subclasses | the library (W2) |
+| C-N4 | fixed bound 12, exact sample | §26.2 |
+| C-N5 | no server cap; true bound stated | the probe's `output_bound`; ops note O2 (`--traverse-max-memory-mb` on staging) |
+| C-N6 | 400 for a cap without coordinates; the library strips it | server as frozen; library W2 |
+| C-N7 | a cap under kmer support inert | as frozen |
+| C-N8 | no coordinates in GFA | library |
+| C-N9 | `compare()` notes, never clips | library |
+| X-18.2 | §18.2 amended | §18.2 (v5.8) |
+| X-C8 | auto-on under a memory budget only if the D4 gate passes | M1 by regime (§26.5): holds for header labels at refseq's chain counts and column labels below 16 chains a run (median −3 to −4%); does not hold for column labels with 16 or more chains a run (refseq33m's taxid columns: −13 to −16% projected, failures at depth 0 on the fixtures) nor for header-heavy seeds — returned to the owner (§26.9) |
+| X-C12 | open token sets | §14.1 (v5.8), SPEC §7.5 |
+| R21 (3) | D3 | §26.1 |
+| R21 (4) | a displayed walk follows the merge parent carried by the most labels | §26.6: everywhere except `tree` / `full` under a memory budget, which keep the arrival order so that no budget's stop moves (owner's choice, §26.9) |
+| R21 (5) | `compare()` above 64 labels: "qualified" can come from the per-node label limit | the library's docs (W2) |
+
+## 26.5 Measurements
+
+**M1 — the D4 gate, by regime, and C-N2.** Two measures per trace cell (`gate_cell` in `test_mini_refseq.cpp`): the
+depth at the stop (`complete_to_bp` over both arms) under memory budgets of 50% and 75% of the cell's own opt-out
+peak, exact bytes, with against without coordinates at cap 16; and — since that ratio is relative to the opt-out
+walk and drops a cell whose opt-out walk fails at depth 0 too (the review of W2) — what **completing** takes: the
+smallest whole-MiB budget that holds the walk with and without coordinates, and what the walk with coordinates does
+at the budget that completes it without them. Cells, all to 3,000 bp, details `full` and `graphlet`:
+mini_refseq (`MiniRefSeq.DISABLED_CoordinatesDepthAtTheStop`: 7 seeds — blaNDM both ways, three 200-bp windows of
+its carriers, two repeat windows — × 8 strategies — branch limits 0 and 2, switch costs 0.5 and 1 at limits 0 and 2
+within a loss budget of 2, column labels at limit 2 with and without a switch); its column cells again under the
+**refseq33m projection** (every run's and seed label's list priced at the cap of 16 occurrences, as refseq33m's
+taxid columns of many genomes give; mini_refseq's taxid columns reach 12 chains a run at most); and the fixtures
+of revision 4 (`MiniRefSeqWide.DISABLED_CoordinatesDepthByRegime`): `scripts/traversal/make_column_coord_fixtures.sh`
+— `coord_lockstep`, 200 columns of one shared 3,000-bp sequence, 16 records each (one path, 200 runs of 16 chains an
+arm), and `coord_divcol`, 100 columns of their own sequences around a shared 600-bp core, 16 records each (seeds in
+the core: a split into a branch a column at each end of it; and in a flank: one column) — and the wide fixture
+(below: column labels one run of 5,000 chains an arm, header labels 5,000 seed labels, a run of one chain each).
+
+| regime, cells (× full, graphlet) | chains a run | median depth with / without at 50% (full, graphlet) | at 75% | budget completing with / without (median; max) | with coordinates at the budget completing without |
+|---|---|---|---|---|---|
+| mini_refseq header labels, 42 | ≤ 6 | 0.95–0.97; 0.81, 0.52 single-lineage switch cells (limit 0) | 0.96–0.98; 0.94, 0.92 | all 56 cells: 1.00 full, 1.02 graphlet (1.33; 2.0, limit-0 switch cells) | all 56 cells: complete 29 / 24, stopped short 27 / 30, failed at depth 0 0 / 2 (full / graphlet, all strategies) |
+| mini_refseq column labels, 14 | ≤ 12 | 0.96, 0.96 (switch 0.91, 0.94) | 0.98, 0.97 | 1.00–1.04 (1.07) | (in the row above) |
+| the same, refseq33m projection | 16 | **0.87, 0.84** (col_b2 0.91, 0.90; with a switch 0.73, 0.68) | 0.91, 0.91 (switch 0.80; worst 0.28) | 1.06, 1.07 (1.13; 1.18) | complete 1 / 0, stopped 13 / 14 of 14 |
+| `coord_divcol`, core seed | 16 | **0.85, 0.87** | 0.90, 0.90 | 1.06 (121 → 128 MiB full, 108 → 115 graphlet) | stopped at 2,757 / 2,743 of 6,000 bp |
+| `coord_divcol`, flank seed (one column) | 16 | both at depth 0 | **0.66** full (398 → 262 bp); graphlet both 0 | 1.0 (3 MiB) | complete |
+| `coord_lockstep` (200 labels, one path) | 16 | the opt-out walk itself fails at depth 0 at 50% and 75%: not measured by this ratio | — | **2.1 full (13 → 27 MiB), 3.8 graphlet (5 → 19 MiB)** | **fails at depth 0** |
+| wide fixture, column labels | 5,000 (cap 16) | both fail at depth 0 | — | 1.0 (4 / 3 MiB) | complete |
+| wide fixture, header labels (5,000 seed labels) | 1 | both fail at depth 0 | — | **1.28 full (235 → 301 MiB), 3.1 graphlet (38 → 119 MiB)** | **fails at depth 0** |
+
+- **The gate (a median drop of at most 10%, X-C8) holds only where the coordinates' share of the account is small:
+  header labels at refseq's chain counts and column labels below 16 chains a run** (mini_refseq: median −3 to −4%;
+  every cell no deeper with coordinates, nearly every one a little shallower; the outliers are the single-lineage
+  switch cells, limit 0, where two `full` cells fail at depth 0 at 50% with coordinates and not without).
+- **It does not hold for column labels with 16 or more chains a run — refseq33m's taxid columns — nor for
+  header-heavy seeds.** Projected to refseq33m's chain counts the median drop is 13–16% at 50% (27–32% with a
+  switch); on the fixtures 13–15% (the core seed) and 34% (one column at 75%); and where many labels walk together
+  the seed needs 2–4 times the memory to complete with coordinates and **fails at depth 0** at the budget that
+  completes it without them (`coord_lockstep`; the wide fixture's 5,000 header labels). A library that turns
+  coordinates on under a memory budget there turns a complete answer into a refused seed; `drop_coordinates` is
+  offered, but only after the failure. X-C8 is returned to the owner with these numbers (§26.9).
+- **C-N2**: unbudgeted, 21 of 3,780 runs (0.56%) are lower bounds, all switch-entered (21 of 1,971, 1.1%), in 10 of
+  56 cells — 8 in `sw0.5b2`, 6 in `sw1b2`, 7 in `col_sw0.5b2`, none without a branch allowance. Marking (a) is
+  enough; the exact chain set (b) is not needed now.
+
+**M2 — the wide fixture** (`MiniRefSeqWide.DISABLED_CoordinateReserveOnTheWideFixture` on
+`scripts/traversal/make_wide_coord_fixture.sh`: one 3,000-bp sequence in 5,000 records under one column, labelled
+`wide.fa` — annotated on the relative name since the review of W2, which found the column's label, and with it the
+column rows' bytes, to be the absolute path of wherever the fixture was built —, row-diff anchors every 1,000 rows;
+a 100-bp seed in its middle walked to the records' ends; column labels give one run an arm with 5,000 chains,
+header labels 5,000 runs an arm with one chain each; build times from the first, less loaded run):
+
+| labels, cap, detail | text (coordinates) B | account (coordinate share) B | build ms with / without | coordinate estimate / their text | whole estimate / text | estimate before the split / text |
+|---|---|---|---|---|---|---|
+| column, 16, full | 14,608 (1,320) | 1,880,896 (62,572) | 0.15 / 0.24 | 3.95 | 4.51 | 0.94 |
+| column, 16, graphlet | 8,990 (1,612) | 1,639,593 (66,095) | 0.10 / 0.16 | 3.42 | 4.11 | 0.86 |
+| column, unlimited, full | 291,112 (277,824) | 14,919,040 (13,100,716) | 3.1 / 0.13 | 3.93 | 3.96 | 0.37 |
+| column, unlimited, graphlet | 285,202 (277,824) | 14,677,737 (13,104,239) | 3.0 / 0.08 | 3.93 | 3.94 | 0.24 |
+| header, 16 or unlimited, full | 5,076,957 (984,563)¹ | 222,416,410 (58,531,628) | 50 / 38 | 4.95 | 2.04 | 1.09 |
+| header, 16 or unlimited, graphlet | 1,378,634 (984,563)¹ | 83,242,348 (58,535,151) | 14 / 2.7 | 4.95 | 3.90 | 0.96 |
+
+¹ At cap 16. "Unlimited" writes 9 B more, all in the coordinates' text (the block's `max_occurrences`, `"unlimited"`
+in place of `16`); the accounts are the same, since each run holds one chain and no list is cut at either cap.
+
+- **D5 holds**: the coordinate share's estimate is 3.4–5.0 times the coordinates' real text, the whole estimate at
+  the configured ratios (30 / 50) 2.0–4.5 times the real text. Estimated as before the split — the whole account at
+  the ratio the rest of the output measures — the text of a coordinate-heavy seed was understated up to 4.1 times
+  (column, "unlimited", graphlet: 0.24), which is what the split fixes.
+- In every cell the account and the text less the coordinate share are exactly the opt-out walk's. The walk itself
+  takes the same time (0.24 s column, 1.3–1.5 s header); building the block costs 3 ms for 10,000 occurrences.
+- The reserve stays below the floor (allowance / 2) for these sizes, so the walk-until of a one-seed attempt at 30 s
+  is the floor's (35,000 ms) with and without coordinates; the reserve itself grows with them (header, full: 2,551 ms
+  against 1,819 ms; column, "unlimited": 1,173 against 1,009 ms).
+
+**M3** (done before the build, plan §2.1): about 441 B a seed on the 12 recorded staging trace responses. **M4**
+(staging, after the deploy, the owner): `bench_traverse.py --coordinates` on the refseq33m panel.
+
+## 26.6 The displayed parent at a merge (the owner's decision R21 (4))
+
+- **Where it was chosen**: `Walker::merge_level` made the first head to arrive at the node the merged segment's
+  first parent (`parents[0]`); everything displayed follows first parents — a path's `segments` chain
+  (`walk_path_leaf_first`), its spelled bases (`spell_path`) and continuation (`make_continuation`, the graphlet's
+  `C`), the end labels' `route_bp` (a label taken from a later parent is routed from the merge) and the
+  reconverge event's order. The graphlet writer, the JSON writer and the library read `parents[0]`; no other place
+  chooses a displayed parent.
+- **Now** the first parent is the one carried by the most labels: in constrain mode the labels whose lineages its
+  head brings into the merge node (`Item::state`), in annotate mode the fewest labels present at a node of the
+  parent's own segment (every head at the node holds the node's own labels, so the parents' own bases tell the
+  routes apart); ties keep the arrival order. Under trace support nothing merges, so coordinates are untouched.
+- **One exception keeps the arrival order: `tree` and `full` detail under a memory budget** (the request's or the
+  server's). There every head reserves the delivery of its path's segment chain (`DeliveryCosts::chain_entry`,
+  exactly what the JSON writes), whose length follows first parents, so the displayed parent decides the account
+  and with it the memory stop. With the majority first everywhere (the first build of W2), a stop moved where the
+  majority's chain was longer — on the cached real requests 52 of 6,552 budgeted responses, and in the review's
+  sample at 8 MiB in `tree` detail 10 of 294 mini_refseq requests, 1–4 levels shallower on an arm (twice 30), never
+  deeper — while the owner's decision changes what is displayed, never the depth a budget certifies. The other
+  ways out were worse: charging below the output breaks the memory bound; charging the longest parent's chain at
+  every merge makes the account independent of the display but moves more stops away from level 5. So where the
+  account depends on the displayed chain, the display stays as it was at level 5; `graphlet` and `summary` detail
+  charge no chain (the graphlet names a segment's first parent, not its chain) and follow the rule under every
+  budget. A `tree` or `full` request under a memory budget therefore displays the arrival order at a merge where
+  the same request without one displays the majority; which labels reach a leaf, with which loss and branches, is
+  the same in both. A server maximum (`--traverse-max-memory-mb`, ops note O2) is the budget of every request
+  without a smaller one, so on such a server every `tree` and `full` response keeps the arrival order and only
+  `graphlet` and `summary` show the rule — the price of option (a), stated so that the owner weighs it (§26.9). Pinned: `WalkerTest.MergeKeepsTheArrivalOrderWhereTheBudgetChargesTheChain` (with the chain
+  charged under a budget the same route is first whichever labels it carries; without either, the majority) and
+  `MiniRefSeq.MemoryStopsDoNotDependOnTheDisplayedParent` (win200_03 right at 8 and 2 MiB in `tree`, `full` and
+  `graphlet`: level 5's `complete_to_bp`, 2,782, 2,740, 3,779, 815, 800, 1,048). The owner may prefer the other
+  trade (the rule everywhere, stops moving shallower in `tree` / `full` under a memory budget): it is the one
+  condition in `Walker::merge_level` (`majority_first`), §26.9.
+- **The annotate rule compares the parents' own segments, not the walks they display.** A parent that is itself a
+  merged segment holds the union of its parents' labels, so after nested merges the rule can put first a short
+  merged segment whose displayed walk upstream is carried by fewer labels than the other parent's. Pinned as the
+  rule stands (`MiniRefSeq.AnnotateMergeRanksParentsByTheirOwnSegment`, the real cache's
+  `mini_win200_02__annotate_merge`, right arm): at the merge at 288 bp the 5-bp merged segment from 283 (6 labels)
+  is first before the 32-bp segment from 256 (5 labels), though its walk goes on through a 7-bp segment of 4 labels
+  (276); the path's continuation is carried by label 3 alone where level 5's (through the 256 parent) was carried
+  by 0, 1, 2 and 4. The review measured the net effect: over a fixed 10-bp window of the displayed walk, UHGG's
+  annotate merges whose first parent is not a majority fall from 191 (arrival order) to 68 of 558, and of the
+  continuations that changed 18 of 1,350 lose labels and 22 gain (mini_refseq 6 and 8 of 28). The library checks
+  this rule as it stands (`derive.carried_labels`). A rule over equal stretches of the displayed walks (the last W
+  bases through each parent and its first parents, labels present at every position) would rank these cases
+  right; it changes the library's check with it and is left to the owner (§26.9).
+- **What changes**, and only on requests with `on_reconverge: merge` where a merge's majority arrived later (and
+  not in `tree` / `full` under a memory budget): the order of `parents`, `labels_via_parent` and the reconverge
+  event's segments; the paths' chains, spelled bases and continuations through such a merge (a continuation's
+  labels with them); the end labels' `route_bp` (the majority's labels now 0, the minority's the merge depth); and,
+  on a tie of loss and branches, which parent's lineage continues (its run, its `labels_via_parent` entry, the
+  closed run's segment) — in the graphlet the `G` parents and partition, `R` and `T` records. Without a memory
+  budget, `tree` and `full` also state another account (`usage.memory`: the output they write is another one).
+  **What does not**: which labels reach each leaf, with which loss and branches, the arms' `complete_to_bp` (under
+  every budget), outcomes, limitations, `label_summary`'s direct and reach depths, work.
+- **Fixtures**: `merge` (CLI) changed at its 62 merge — the G allele (b.fa, c.fa, both.fa) arrived second and is now
+  first: a.fa is routed in at 62, b.fa only at 36 — and no longer shows `R:route_split`; `merge_ties` (new: the same
+  locus with a.fa, b.fa, both.fa named, two labels on each allele: ties keep the arrival order) shows it; `annotate`
+  changed at the same merge. The budget fixtures have no merge. The library's tests that encode the old `merge`
+  document follow (W2's library part).
+- **Checked** (T55): `WalkerTest.MergeIsSpelledThroughTheParentWithTheMostLabels` (the majority through either
+  branch, constrain and annotate), the two pins above; every byte-identity difference against level 5 is a merge
+  request and equal once the order-dependent fields above are canonicalised, and no budgeted stop moves (§26.8).
+
+## 26.7 Shutdown on SIGTERM
+
+`server_query` installed no signal handler; in a container it is PID 1, for which the kernel drops a signal with the
+default action, so every `docker stop` of a staging deploy waited its timeout (120 s) and killed it. Now SIGTERM
+and SIGINT write a byte to a pipe (the handler's only work, async-signal-safe); a thread reading it stops what is
+in flight and the server (SPEC §10.3): every traversal — each `/traverse` has an `Attempt`, managed or not — is
+stopped at its next poll as for a client gone (nothing is written for it, its connection closed: a partial result
+would state a cause that is not true, "cancelled", and a ledger treats the attempt as unanswered), a `/traverse` or
+`/resolve` arriving meanwhile finds its client gone, the HTTP server stops once they returned or after 3 s, and the
+process exits as soon as it has stopped (`_Exit` from `run_server`, the log flushed), 3 s later at the latest even if
+a handler (a `/search`, an uninterruptible read) has not returned. It does not return through `run_server`: its
+destructors would join what still runs, and in single-index mode the server listens at once and answers 503 while
+its index loads, so a signal can stop it with the load in progress — the first build of W2 then waited for the load
+to end (the review: 19 s on SRA in RAM, on a cold staging disk the whole docker-stop timeout). Before the server
+accepts connections it exits at once; a second signal exits immediately. Tested:
+`TestTraverseAttempts.test_sigterm_stops_the_server_promptly` (idle: exit 0 within 5 s; walking a three-seed
+attempt: the walk stopped, nothing written, exit 0 within 3.5 s) and `.test_sigterm_while_the_index_loads` (the
+graph a FIFO nobody writes, so the load never ends: GET /capabilities `ready: false`, /traverse/capabilities 503,
+then exit 0 within 5 s of the signal).
+
+## 26.8 Verification
+
+- **Opt-out byte identity** against level 5 (`67bef367`), decompressed, the `feature_level` digit and timing
+  masked (the cached real requests, on the final build; each difference posted again to fresh servers and
+  classified):
+
+  | requests | identical | timing counters only | R21 (4) display only | memory stop moved | other |
+  |---|---|---|---|---|---|
+  | 2,184 unbudgeted, `full` and `graphlet` (mini_refseq 588, UHGG 792, SRA 804) | 1,807 | 26 | 346 | — | 5: 4 identical on the recheck, 1 the SRA attempt `sra_16s_PZ326290__beam20` (`full`) |
+  | 6,552 budgeted, `full` and `graphlet` (300k work units, 4 MiB, 16 MiB × the three) | 6,054 | 6 | 492 (`graphlet` under the memory budgets, both details under the work budget) | 0 | 0 |
+  | 2,184 unbudgeted, `tree` and `summary` | 1,929 | 36 | 215 | — | 4: 3 identical on the recheck, 1 the same SRA attempt (`tree`) |
+  | 6,552 budgeted, `tree` and `summary` (2, 8, 16 MiB × the three) | 6,353 | 25 | 174 (all `summary`) | 0 | 0 |
+  | 688 `/resolve` | 688 | 0 | 0 | — | 0 |
+
+  Every differing request is `on_reconverge: merge` (most cached requests are: 502 of the 546 deterministic cells),
+  and "display only" means equal once `parents` / `labels_via_parent` are paired and sorted (a label moved only
+  between parents whose end sets hold it), the reconverge events' segments sorted, the paths' chains and
+  continuations, the run tables, `label_summary`'s run lists, the end labels' run and `route_bp`, the graphlet's
+  `R`, `C` and `T` extras and its partitions removed. **Under a memory budget the 5,460 `tree` and `full`
+  responses are level 5's** apart from timing (R21 (4)'s exception, §26.6), and no stop moved in any detail; the
+  first build of W2, with the rule everywhere, had moved 52 of the 6,552 `full` / `graphlet` budgeted stops, and 10
+  of 294 in the review's `tree` / `summary` sample at 8 MiB on mini_refseq. The SRA attempt varies base against base (4 posts to fresh
+  level-5 servers, 4 different responses: its walk-until depends on the load).
+- **Opt-in** (the same requests with coordinates, stripped of what they add, against level 6's own opt-out):
+  mini_refseq unbudgeted 586 of 588 identical (2 timing counters only), at 300k units, cap 1 and "unlimited" 588 of
+  588; at 4 MiB 334 identical and 254 stopping earlier by memory, never deeper (`drop_coordinates` offered in 336);
+  UHGG 779 identical and 13 timing only; SRA 776 identical, 27 timing only and the beam attempt above.
+- **The frozen contract of W1** (the same requests with coordinates on both, level 5 against level 6): mini_refseq
+  unbudgeted, at cap 1, at "unlimited" and at 4 MiB, and UHGG: every difference is a request of the opt-out run's
+  R21 (4) set (112, 112, 112, 48 and 87 of its 87) but one, UHGG's `uhgg_rand100_05__beam20` attempt (`full`),
+  which varies base against base too (4 of 4); the rest identical or timing only — no block, null form, echo,
+  limitation or action changed.
+- **Capabilities**: the diff against level 5 is exactly §26.3 (GET /capabilities: `feature_level`, the reserve's
+  `rule` and `coordinate_account_per_text_byte`, `deadline_check.rule`; GET /traverse/capabilities: the same and
+  the `coordinates` block).
+- **Tests**: unit, the traversal filter 430 of 430 in Release and in Debug (416 before W2: + `ReserveCountsCoordinateText`,
+  `CoordinatesLeaveTheServersRatioUnchanged` in place of W1's `CoordinatesRatioStaysTheAttemptsOwn`,
+  `CoordinateTextIsExactAndBoundedByItsAccount`, `CoordinateAccountBoundsItsText`,
+  `AttemptsMeasureTheSameRatioWithCoordinates`, `CapabilitiesBlockFollowsTheIndex`,
+  `MiniRefSeq.CoordinateShareIsExact`, `.MemoryStopsDoNotDependOnTheDisplayedParent`,
+  `.AnnotateMergeRanksParentsByTheirOwnSegment`, the typed `MergeIsSpelledThroughTheParentWithTheMostLabels` and
+  `MergeKeepsTheArrivalOrderWhereTheBudgetChargesTheChain` × 3; M1, its regime test and M2 disabled, run on the
+  final walker: what changed after them are comments and the positional oracle's depth pin); the annotation filter 574 of 574 (one more: the annotate pin matches it); integration *Traverse* 93
+  of 93 (with `test_sigterm_while_the_index_loads`, which times out on the build before the fix) and *api* 171 (16
+  expected failures, as before) and 21; the CLI fixtures and the hand-made ones up to date (R21 (4)'s exception
+  changes none: no budget fixture has a merge); GCC 13.5 `-Werror` (`-Wno-error=stringop-overflow`, as staging
+  builds) on the changed `src/` and `tests/` files, the one warning `walker.cpp`'s `-Wstringop-overflow` that was
+  there before, and on the 112 `src/` and 75 `tests/` files with the headers as they are now.
+
+## 26.9 Open (for the owner)
+
+- **X-C8, returned** (§26.5): the D4 gate holds for header labels at refseq's chain counts and for column labels
+  below 16 chains a run, and does not hold for column labels with 16 or more chains a run (refseq33m's taxid
+  columns) nor for header-heavy seeds: there the depth at a stop drops 13–34% and, where many labels walk together,
+  the seed needs 2–4 times the memory to complete and fails at depth 0 at the budget that completes it without
+  coordinates. The library turns coordinates on under a memory budget (W2's library part:
+  `AUTO_COORDINATES_UNDER_MEMORY_BUDGET`, which cites the gate). One option: auto-on under a memory budget only for
+  header labels with few seed labels, off for column labels (the library's constant and its rule; the request can
+  always ask for them).
+- **R21 (4) under a memory budget** (§26.6): built as the review's option (a) — `tree` and `full` detail keep the
+  arrival order under a memory budget, so every budget's stop is where level 5 put it and the rule changes the
+  display only. Its price: on a server with a memory maximum (ops note O2, recommended for staging) every `tree`
+  and `full` response is budgeted and keeps the arrival order; only `graphlet` and `summary` follow the rule. The
+  alternative (b), the rule everywhere, moves stops shallower in those details (52 of 6,552 cached budgeted
+  responses; 10 of 294 in the review's `tree` sample at 8 MiB; 1–4 levels on an arm, twice 30) and is one
+  condition (`majority_first` in `Walker::merge_level`); (c), charging the longest parent's chain at every merge,
+  moves more.
+- **The annotate rule** (§26.6) compares the parents' own segments, so after nested merges it can display a walk
+  carried by fewer labels; a rule over equal stretches of the displayed walks ranks those right but changes the
+  library's check (`derive.carried_labels`) with it.
+- The owner's pending decision of review 6: whether `setup` pieces count toward `observed_max_uninterruptible_ms`.
+- M4 on staging; then C2 (an outcome class for `coordinates`) at the first external review of level 6.

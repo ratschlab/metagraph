@@ -215,6 +215,12 @@ struct DeliveryCosts {
     uint64_t coordinate_run = 0;
     uint64_t coordinate_seed = 0;
     uint64_t occurrence = 0;
+    // The part of |fixed| that is the coordinate output's (the block's skeleton with a cut
+    // list's limitation and K record, or the null form with its reason; 0 without coordinates):
+    // charged with |fixed| as before, and counted again only in the account's coordinate share
+    // (ResourceAccount::coordinates), so that the server's delivery reserve can price the whole
+    // coordinate output at its own ratio and leave it out of the measured one (plan revision 3)
+    uint64_t coordinate_fixed = 0;
     // A seed-level limitation beyond the ones |fixed| holds, charged where a result states one
     // (the derivation limitation of a permitted set derived from part of the seed: Walker,
     // SeedResult::derivation_partial)
@@ -914,10 +920,10 @@ struct ResourceAccount {
     // nor counted. Both false without a budget.
     bool decode_charged = false;
     bool row_diff_uncounted = false;
-    // the part of the modelled memory that is the recorded coordinates (Strategy::coordinates:
-    // the seed's and the runs' entries and occurrences, as charged at their creation); 0
-    // without them. Their text per account byte differs from the rest of the output's, which
-    // the server's delivery reserve has to tell apart
+    // the part of the modelled memory that is the coordinate output (Strategy::coordinates:
+    // the fixed part, DeliveryCosts::coordinate_fixed, and the seed's and the runs' entries and
+    // occurrences as charged at their creation); 0 without them. Their text per account byte
+    // differs from the rest of the output's, which the server's delivery reserve tells apart
     uint64_t coordinates = 0;
 };
 

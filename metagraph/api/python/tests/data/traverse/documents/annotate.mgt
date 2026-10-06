@@ -35,7 +35,7 @@ P 61 62 4 0-1
 G 3 46 16 1-2 3 * * * * GCGGCGGGTCGACTTG
 P 46 61 3 !
 P 61 62 4 0-1
-G 4,5 62 8 ! 4 * * * * GTCCGGAC
+G 5,4 62 8 ! 4 * * * * GTCCGGAC
 P 62 70 4 !
 T X .
 C 20 0 0 !

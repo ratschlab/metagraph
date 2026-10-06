@@ -982,8 +982,9 @@ class Walker {
     std::vector<SmallVector<Coord>> boundary_coords_[2];
     // Record coordinates (Strategy::coordinates, DESIGN-traverse-graphlet.md §18): recorded
     // (trace support on an index with coordinates, and a permitted set read from the whole
-    // seed), the cap on a list, and the part of the account they are (their entries and
-    // occurrences as charged when created; ResourceAccount::coordinates). No work is charged
+    // seed), the cap on a list, and the part of the account they are (the output's fixed part
+    // for them, their entries and occurrences as charged when created;
+    // ResourceAccount::coordinates). No work is charged
     // for them: every coordinate was charged one unit with the row that carried it, and work
     // must not depend on what the output asks for (stage 2, finding 5)
     bool record_coords_ = false;
@@ -3276,6 +3277,11 @@ void Walker::init_budgets() {
     if (result_.derivation_partial)
         base_ += d.extra_limitation;
     fixed_base_ = base_;
+    // The coordinate output's fixed part is in base_ already (d.fixed); counted here too, in
+    // the coordinate share only, so that the share is all the account the coordinates add —
+    // what the delivery reserve prices at its own ratio and its ratio samples leave out (C3).
+    // Nothing is admitted or charged by this line
+    coord_account_ = strategy_.coordinates ? d.coordinate_fixed : 0;
     // the seed labels' recorded occurrences of the seed belong to the depth-0 state, admitted
     // with it (a budget too small for them fails the seed like any depth-0 state)
     for (const SeedCoordinates &sc : result_.seed_coordinates) {
@@ -4380,16 +4386,61 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
             held_merge += item.merge_reserve;
             held += item.reserve;
         }
+        // The displayed walk follows the first parent through a merge — the paths' segment
+        // chains and spelled bases, their continuations, and route_bp, which states what of
+        // that spelling a label does not carry —, so the first parent is the one carried by
+        // the most labels (the owner's decision R21 (4)): the labels whose lineages its head
+        // brings into the merge node (constrain), or the fewest labels present at a node of
+        // the parent's segment, true counts (annotate: every head at the node holds the
+        // node's own labels, so the parent's own bases tell the routes apart — as many labels
+        // as can carry it whole; only its own segment: a merged parent holds the union of its
+        // parents' labels, so after nested merges the walk displayed upstream of it can be
+        // carried by fewer — a known limit, pinned by MiniRefSeq.AnnotateMergeRanksParentsBy-
+        // TheirOwnSegment so that the library checks the same rule, DESIGN §26.6); ties in
+        // arrival order, as every parent was before. Which
+        // labels reach the merged head with which loss and branches does not depend on the
+        // order (each label's least (loss, branches) is kept); on a tie of both, the first
+        // parent's lineage continues, as before.
+        // One exception keeps the arrival order: tree and full detail (the JSON spells every
+        // path's segment chain, m_.chain_entry > 0) under a memory budget. The merged
+        // segment's chain length follows the first parent (new_segment: chain_len), and every
+        // later head reserves the delivery of its path's chain, exactly the output it writes;
+        // a majority parent with a longer chain would move the memory stop (review of W2:
+        // 1-4 levels on an arm, up to 30), and the owner's decision changes the display only,
+        // never the depth a budget certifies. Charging below the output would break the
+        // memory bound, charging the longest parent's chain at every merge would move more
+        // stops; so where the account depends on the displayed chain, the display stays as
+        // it was. Graphlet and summary detail charge no chain: the rule applies there always
+        const bool majority_first = !(m_.chain_entry > 0 && mem_limit_ > 0);
+        auto carried = [&](const Item &item) -> size_t {
+            if (!annotate_)
+                return item.state.size();
+            const Segment &parent = arm.result.segments[item.segment];
+            size_t fewest = parent.labels_start_total;
+            for (const LabelSetRun &run : parent.label_sets) {
+                fewest = std::min(fewest, run.labels_total);
+            }
+            return fewest;
+        };
+        std::vector<size_t> order(g.begin(), g.end());
+        size_t most = 0;
+        for (size_t j = 1; majority_first && j < order.size(); ++j) {
+            if (carried(arm.next[order[j]]) > carried(arm.next[order[most]]))
+                most = j;
+        }
+        std::rotate(order.begin(), order.begin() + most, order.begin() + most + 1);
+        // a stretch of revisited nodes is reported once per head, whichever parent is first
+        const bool revisiting = arm.next[g[0]].revisiting;
         // union of states keeping the min (loss, branches) entry per label; an entry
         // taken from a later parent is routed from here on (route_bp); under trace
         // support the live coordinates of both parents are united
-        Item primary = std::move(arm.next[g[0]]);
+        Item primary = std::move(arm.next[order[0]]);
         State st = primary.state;
         std::vector<size_t> parents { primary.segment };
         size_t path_id = primary.path_id;
         uint32_t splits = primary.splits;
-        for (size_t j = 1; j < g.size(); ++j) {
-            Item &other = arm.next[g[j]];
+        for (size_t j = 1; j < order.size(); ++j) {
+            Item &other = arm.next[order[j]];
             parents.push_back(other.segment);
             path_id = std::min(path_id, other.path_id);
             splits = std::max(splits, other.splits);
@@ -4451,8 +4502,8 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
                                annotate_ ? primary.present_total : st.size());
         Segment &mseg = arm.result.segments[m];
         mseg.labels_via_parent.assign(parents.size(), {});
-        for (size_t j = 0; j < g.size(); ++j) {
-            const Item &item = j == 0 ? primary : arm.next[g[j]];
+        for (size_t j = 0; j < order.size(); ++j) {
+            const Item &item = j == 0 ? primary : arm.next[order[j]];
             // runs are per path, so the kept entry's run identifies its parent
             for (const Entry &e : item.state) {
                 const Entry *kept = find_entry(st, e.label);
@@ -4481,6 +4532,7 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
         arm.first_arrival[primary.node] = { m, depth };
 
         primary.segment = m;
+        primary.revisiting = revisiting;
         // the merged entry set and its partition (constrain), or the node's own labels
         merge_cost += (annotate_ ? primary.present.size() : 2 * st.size()) * m_.seg_label;
         assert(merge_cost <= held_merge);

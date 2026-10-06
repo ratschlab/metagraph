@@ -5,6 +5,7 @@ import os
 import random
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -2004,6 +2005,34 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual((0, 0), (caps['max_memory_mb'], caps['max_work_units']))
         self.assertEqual(128, caps['decode_cache']['path_cache_mb'])
         self.assertIn('do not depend on it', caps['decode_cache']['rule'])
+        # feature level 6: record coordinates, on this index (coordinates and a CoordToHeader)
+        # with every kind; stated here only, not in the per-request capabilities
+        co = caps['coordinates']
+        self.assertEqual({'supported', 'knob', 'cap_knob', 'max_occurrences_default', 'kinds',
+                          'limitation', 'action', 'output_bound', 'rule'}, set(co))
+        self.assertEqual((True, 'output.coordinates', 'output.max_coordinate_occurrences', 16,
+                          ['record', 'column', 'mixed'], 'coordinates', 'drop_coordinates'),
+                         (co['supported'], co['knob'], co['cap_knob'],
+                          co['max_occurrences_default'], co['kinds'], co['limitation'],
+                          co['action']))
+        self.assertEqual(caps['supports_trace'], co['supported'])
+        # the true bound of the block, and the column record-end numbering (review of W1,
+        # finding 6)
+        # (a server maximum is the budget of a request without one: the text names the probe's
+        # max_memory_mb, never a value it could contradict)
+        self.assertIn("this server's max_memory_mb", co['output_bound'])
+        self.assertIn('both maxima 0, their default', co['output_bound'])
+        self.assertIn("a record's last k - 1 bases shares its numbers with the next record's "
+                      "first k - 1 positions", co['rule'])
+        self.assertIn('[c + k - L, c + k)', co['rule'])
+        out = self._post('traverse', {'seeds': [{'sequence': self.element}],
+                                      'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
+        self.assertNotIn('coordinates', out['capabilities'])
+        self.assertEqual(caps['feature_level'], out['capabilities']['feature_level'])
+        # max_uninterruptible_ms stays null (decision 3c-N5): no later stage promises a bound
+        self.assertIsNone(caps['deadline_check']['max_uninterruptible_ms'])
+        self.assertIn('it stays null', caps['deadline_check']['rule'])
+        self.assertNotIn('before stage 3c', caps['deadline_check']['rule'])
 
     def test_api_enforces_server_caps(self):
         caps = requests.get(url=f'http://{self.host}:{self.port}/traverse/capabilities').json()
@@ -2504,7 +2533,7 @@ class TestTraverseAPI(TestTraverseBase):
 
     def test_api_server_capabilities(self):
         """Pass 5, W3/W4: GET /capabilities, the server-wide document: routes and features,
-        feature_level 5 (4 at the efficiency pass, 3 in pass 5), algorithm_version (as every response's), mode single, no graph list,
+        feature_level 6 (5 at the review of pass 5, 4 at the efficiency pass, 3 in pass 5), algorithm_version (as every response's), mode single, no graph list,
         the attempts block (as the probe's) and how deadlines are checked; the number types
         a ledger compares are integers."""
         url = f'http://{self.host}:{self.port}'
@@ -2516,7 +2545,7 @@ class TestTraverseAPI(TestTraverseBase):
                           'content_encodings', 'deadline_check', 'feature_level', 'features',
                           'graphs', 'mode', 'ready', 'release', 'routes', 'schema_version',
                           'server_instance'}, set(c))
-        self.assertEqual((5, 'single', None, True, 1),
+        self.assertEqual((6, 'single', None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['ready'],
                           c['schema_version']))
         self.assertEqual(['search', 'align', 'resolve', 'traverse', 'attempts'], c['features'])
@@ -2531,13 +2560,13 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(probe['attempts']['server_instance'], c['server_instance'])
         self.assertEqual(probe['deadline_check'], c['deadline_check'])
         self.assertEqual(probe['algorithm_version'], c['algorithm_version'])
-        self.assertEqual(5, probe['feature_level'])
+        self.assertEqual(6, probe['feature_level'])
         self.assertEqual(1, c['compression_level'])
         self.assertEqual(1, probe['compression_level'])
         out = self._post('traverse', {'seeds': [{'sequence': self.element}],
                                       'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
         self.assertEqual(c['algorithm_version'], out['algorithm_version'])
-        self.assertEqual(5, out['capabilities']['feature_level'])
+        self.assertEqual(6, out['capabilities']['feature_level'])
         att = c['attempts']
         for key in ('allowance_ms', 'hard_cap_ms', 'clock_skew_allowance_ms', 'retention_s',
                     'retention_count', 'content_timeout_s', 'client_check_ms'):
@@ -2546,9 +2575,15 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(10000, att['allowance_ms'])
         reserve = att['delivery_reserve']
         self.assertEqual({'compress_mbps', 'build_mbps', 'account_per_text_byte',
+                          'coordinate_account_per_text_byte',
                           'measured_text_bytes', 'measured_compress_mbps', 'measured_build_mbps',
                           'measured_account_per_text_byte', 'rate_window', 'rule', 'margin',
                           'stop_ms', 'measured_stop_ms', 'calibration'}, set(reserve))
+        # feature level 6: the record coordinates' share of a seed's account is estimated at a
+        # fixed bound a ledger can reproduce (an integer)
+        self.assertIs(type(reserve['coordinate_account_per_text_byte']), int)
+        self.assertEqual(12, reserve['coordinate_account_per_text_byte'])
+        self.assertIn('ceil(C / coordinate_account_per_text_byte)', reserve['rule'])
         # the reserve's margin and the walk's stop time (review of pass 5, F3), calibrated in
         # the efficiency pass (feature level 4): + 950 ms (+ 200 before), ratios 30 / 50
         self.assertEqual(1.25, reserve['margin'])
@@ -2901,12 +2936,14 @@ class TestTraverseMultiGraph(TestTraverseBase):
         ret = self._caps('?graph=A')
         self.assertEqual(200, ret.status_code, ret.text)
         caps = ret.json()
-        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 5),
+        self.assertEqual(('A', self.graph, 'tinyA', self.index_fp, 6),
                          (caps['graph'], caps['graph_path'], caps['index_ns'],
                           caps['index_fp'], caps['feature_level']))
         for key in ('attempts', 'deadline_check', 'budgets', 'algorithm_version',
-                    'compression_level', 'content_encodings', 'work_bound'):
+                    'compression_level', 'content_encodings', 'work_bound', 'coordinates'):
             self.assertIn(key, caps)
+        # per pair: whether its index reports record coordinates is whether it supports trace
+        self.assertEqual(caps['supports_trace'], caps['coordinates']['supported'])
         out = self._post('traverse', self._request('A')).json()
         for key in ('index_ns', 'index_fp', 'index_meta_fp', 'k', 'num_labels'):
             self.assertEqual(out['capabilities'][key], caps[key], key)
@@ -3902,6 +3939,109 @@ class TestTraverseAttempts(TestingBase):
             self.assertIn('Attempt gone-1 (request', log)
             self.assertIn('no response written (the client is gone)', log)
             self.assertIn('client gone, walk stopped at', log)
+
+    def test_sigterm_stops_the_server_promptly(self):
+        """SIGTERM (what `docker stop` sends; the server, PID 1 in its container, ignored it, so
+        every deploy waited the stop timeout of 120 s): the server exits within seconds, with
+        status 0. An idle one at once; one walking an attempt stops the walk at its next poll as
+        for a client gone — nothing is written for it, its connection is closed, never a
+        partial result passed off as complete — and then exits."""
+        with self._Server(self) as server:
+            started = time.time()
+            server.process.send_signal(signal.SIGTERM)
+            self.assertEqual(0, server.process.wait(timeout=30))
+            self.assertLess(time.time() - started, 5)
+            log = server.text()
+            self.assertIn('Signal 15: shutting down', log)
+            self.assertIn('[Server] Stopped', log)
+        self._need_a_slow_walk()
+        with self._Server(self) as server:
+            got = {}
+
+            def walk():
+                try:
+                    got['r'] = server.post('traverse', self._request(3, attempt_id='term-1'),
+                                           timeout=300)
+                except requests.exceptions.RequestException as e:
+                    got['e'] = e
+            walker = threading.Thread(target=walk)
+            walker.start()
+            # the attempt is running (registered) before the signal
+            for _ in range(100):
+                if server.state('term-1').status_code == 200:
+                    break
+                time.sleep(0.05)
+            self.assertEqual('running', server.state('term-1').json()['state'])
+            time.sleep(0.3)
+            started = time.time()
+            server.process.send_signal(signal.SIGTERM)
+            self.assertEqual(0, server.process.wait(timeout=30))
+            took = time.time() - started
+            walker.join(timeout=30)
+            self.assertFalse(walker.is_alive())
+            # well within the drain time: the walk stops at its next poll; three seeds walk
+            # 3 x walk_ms uncut
+            self.assertLess(took, 3.5)
+            self.assertLess(took, 3 * self.walk_ms / 1000)
+            if 'r' in got:
+                # answered before the signal reached it: then whole and valid
+                self.assertEqual(200, got['r'].status_code, got['r'].text)
+                self.assertEqual(3, len(got['r'].json()['results']))
+            else:
+                self.assertIsInstance(got['e'], (requests.exceptions.ConnectionError,
+                                                 requests.exceptions.ChunkedEncodingError))
+            log = server.text()
+            self.assertIn('Signal 15: shutting down', log)
+            self.assertIn('1 traversal(s) in flight stopped', log)
+            self.assertIn('Attempt term-1 (request', log)
+            self.assertIn('[Server] Stopped', log)
+
+    def test_sigterm_while_the_index_loads(self):
+        """A single-index server listens at once and answers 503 (GET /capabilities: ready
+        false) while its index loads; SIGTERM then stops it within seconds too (review of W2:
+        returning through run_server joined the load in progress, 19 s on SRA, on a cold
+        staging disk the whole docker-stop timeout). The load here never ends: the graph is a
+        FIFO nobody writes to, so its loader blocks in open() for good."""
+        fifo = f'{self.tempdir.name}/never_loads.dbg'
+        if not os.path.exists(fifo):
+            os.mkfifo(fifo)
+        port = _free_port()
+        url = f'http://127.0.0.1:{port}'
+        log_path = f'{self.tempdir.name}/server-loading-{port}.log'
+        with open(log_path, 'w') as log:
+            process = subprocess.Popen(
+                shlex.split(METAGRAPH) + ['server_query', '-i', fifo, '-a', self.anno,
+                                          '--port', str(port), '--address', '127.0.0.1', '-p', '2'],
+                stdout=log, stderr=subprocess.STDOUT)
+            try:
+                caps = None
+                for _ in range(300):
+                    self.assertIsNone(process.poll(), 'the server exited while loading')
+                    try:
+                        ret = requests.get(url + '/capabilities', timeout=2)
+                        if ret.ok:
+                            caps = ret.json()
+                            break
+                    except requests.exceptions.RequestException:
+                        pass
+                    time.sleep(0.1)
+                self.assertIsNotNone(caps, 'the server did not listen')
+                self.assertFalse(caps['ready'])
+                self.assertEqual(503, requests.get(url + '/traverse/capabilities',
+                                                   timeout=5).status_code)
+                started = time.time()
+                process.send_signal(signal.SIGTERM)
+                self.assertEqual(0, process.wait(timeout=30))
+                self.assertLess(time.time() - started, 5)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+        with open(log_path) as f:
+            text = f.read()
+        self.assertIn('Signal 15: shutting down', text)
+        self.assertIn('[Server] Stopped', text)
+        self.assertNotIn('Annotated graph loaded', text)
 
     def test_cancel_waits_for_the_end(self):
         """A cancel with wait_ms answers once the attempt finished: its response written."""

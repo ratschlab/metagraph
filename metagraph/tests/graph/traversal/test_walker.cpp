@@ -951,6 +951,142 @@ TYPED_TEST(WalkerTest, MergedLineageKeepsItsRouteAcrossASplit) {
 }
 
 
+// The owner's decision R21 (4): a displayed walk through a merge follows the parent carried by
+// the most labels — the merged segment's first parent, whose chain the paths' segments, spelled
+// bases and continuations follow and against which route_bp states what a label does not carry —
+// whichever parent's head arrived first; ties keep the arrival order. Which labels reach the
+// leaf, with which loss and branches, is the same either way
+TYPED_TEST(WalkerTest, MergeIsSpelledThroughTheParentWithTheMostLabels) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    std::vector<std::string> b;
+    for (uint32_t seed = 5; ; ++seed) {
+        b = clean_blocks({ 30, 25, 25, 40 }, seed);
+        if (b[1][0] != b[2][0] && b[1].back() != b[2].back())
+            break;
+    }
+    const std::string &X = b[0], &Y = b[3];
+    for (auto mode : all_modes()) {
+        // the majority (two labels) through each of the two routes in turn, the minority (one
+        // label) through the other: the first parent is the majority's route both times
+        for (size_t majority : { size_t(1), size_t(2) }) {
+            const std::string &M = b[majority], &m = b[3 - majority];
+            auto anno = build_anno_graph<Graph, Annotation>(
+                    kK, { X + M + Y, X + M + Y, X + m + Y }, { "B", "C", "A" }, mode);
+            const Strategy st = strategy(Strategy::kUnlimited, true);
+            auto res = run(*anno, X, { "A", "B", "C" }, st);
+            const ArmResult &arm = res.arms[kRight];
+            check_invariants(arm, st);
+            const Segment *y = nullptr;
+            for (const auto &seg : arm.segments) {
+                if (seg.parents.size() == 2) {
+                    ASSERT_EQ(nullptr, y) << mode;
+                    y = &seg;
+                }
+            }
+            ASSERT_NE(nullptr, y) << mode << " majority " << majority;
+            // the first parent carries B and C, the second A
+            const std::vector<LabelId> bc { 1, 2 }, a { 0 };
+            EXPECT_EQ(bc, arm.segments[y->parents[0]].labels_end) << mode << " majority " << majority;
+            EXPECT_EQ(a, arm.segments[y->parents[1]].labels_end) << mode << " majority " << majority;
+            ASSERT_EQ(2u, y->labels_via_parent.size());
+            EXPECT_EQ(bc, y->labels_via_parent[0]);
+            EXPECT_EQ(a, y->labels_via_parent[1]);
+            ASSERT_EQ(1u, arm.paths.size()) << mode;
+            const PathResult &path = arm.paths[0];
+            // spelled through the majority's route; A is the label routed in at the merge
+            EXPECT_EQ(M + Y.substr(0, path.length_bp - M.size()), spell_path(arm, path))
+                << mode << " majority " << majority;
+            ASSERT_EQ(3u, path.end_labels.size());
+            for (const LabelEnd &e : path.end_labels) {
+                EXPECT_EQ(e.label == 0 ? y->from_bp : 0, e.route_bp) << mode << " label " << e.label;
+                EXPECT_EQ(0.0, e.loss);
+            }
+            // annotate mode: the heads at the merge node hold its own labels, so the parents'
+            // own bases decide (the fewest labels present on each): the same first parent
+            Strategy an = st;
+            an.label_mode = LabelMode::ANNOTATE;
+            an.direction = Strategy::RIGHT;
+            LabelOracle oracle(*anno);
+            Seed seed;
+            seed.sequence = X;
+            auto ar = traverse_seed(oracle, seed, an, LabelChangeCost::forbid());
+            const ArmResult &aa = ar.arms[kRight];
+            const Segment *ay = nullptr;
+            for (const auto &seg : aa.segments) {
+                if (seg.parents.size() == 2)
+                    ay = &seg;
+            }
+            ASSERT_NE(nullptr, ay) << mode << " majority " << majority;
+            ASSERT_EQ(1u, aa.paths.size());
+            EXPECT_EQ(M + Y.substr(0, aa.paths[0].length_bp - M.size()), spell_path(aa, aa.paths[0]))
+                << "annotate " << mode << " majority " << majority;
+        }
+    }
+}
+
+// R21 (4)'s one exception (review of W2): in tree and full detail (the JSON spells each path's
+// segment chain, DeliveryCosts::chain_entry) under a memory budget, every head reserves the
+// delivery of its displayed chain, so the displayed parent decides the account and with it the
+// memory stop; there a merge keeps the arrival order, and the depth the budget certifies is the
+// one before the rule. Without a budget, or without a chain charge (graphlet, summary), the
+// majority is first. The arrival order is the walk's, not the labels': the same route arrives
+// first whichever labels it carries
+TYPED_TEST(WalkerTest, MergeKeepsTheArrivalOrderWhereTheBudgetChargesTheChain) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    std::vector<std::string> b;
+    for (uint32_t seed = 5; ; ++seed) {
+        b = clean_blocks({ 30, 25, 25, 40 }, seed);
+        if (b[1][0] != b[2][0] && b[1].back() != b[2].back())
+            break;
+    }
+    const std::string &X = b[0], &Y = b[3];
+    for (auto mode : all_modes()) {
+        std::map<std::string, std::set<std::string>> first_route;   // by case: the routes first
+        for (size_t majority : { size_t(1), size_t(2) }) {
+            const std::string &M = b[majority], &m = b[3 - majority];
+            auto anno = build_anno_graph<Graph, Annotation>(
+                    kK, { X + M + Y, X + M + Y, X + m + Y }, { "B", "C", "A" }, mode);
+            for (bool chain : { false, true }) {
+                for (bool budget : { false, true }) {
+                    Strategy st = strategy(Strategy::kUnlimited, true);
+                    st.delivery.chain_entry = chain ? 16 : 0;
+                    // far above the walk: no stop, the rule is what differs
+                    st.max_memory_bytes = budget ? uint64_t(1) << 40 : 0;
+                    auto res = run(*anno, X, { "A", "B", "C" }, st);
+                    ASSERT_FALSE(res.resource_stop.has_value());
+                    const ArmResult &arm = res.arms[kRight];
+                    check_invariants(arm, st);
+                    ASSERT_EQ(1u, arm.paths.size()) << mode;
+                    const std::string spelled = spell_path(arm, arm.paths[0]);
+                    ASSERT_GE(spelled.size(), M.size());
+                    const std::string route = spelled.substr(0, M.size());
+                    ASSERT_TRUE(route == M || route == m) << mode;
+                    const std::string key = std::string(chain ? "chain" : "no chain")
+                                          + (budget ? ", budget" : ", no budget");
+                    first_route[key].insert(route);
+                    if (!(chain && budget)) {
+                        EXPECT_EQ(M, route) << mode << " " << key << " majority " << majority;
+                    }
+                    // which labels reach the leaf, with which loss, whatever is displayed
+                    ASSERT_EQ(3u, arm.paths[0].end_labels.size());
+                    for (const LabelEnd &e : arm.paths[0].end_labels) {
+                        EXPECT_EQ(0.0, e.loss);
+                    }
+                }
+            }
+        }
+        // the majority went through either route; displayed by the rule, both routes were
+        // first once; with the chain charged under a budget, the one that arrived first twice
+        EXPECT_EQ(2u, first_route["no chain, no budget"].size()) << mode;
+        EXPECT_EQ(2u, first_route["no chain, budget"].size()) << mode;
+        EXPECT_EQ(2u, first_route["chain, no budget"].size()) << mode;
+        EXPECT_EQ(1u, first_route["chain, budget"].size()) << mode;
+    }
+}
+
+
 // T11a: simple cycle L·J·C·J·E with J a single k-mer
 TYPED_TEST(WalkerTest, CycleJunction) {
     using Graph = typename TypeParam::first_type;

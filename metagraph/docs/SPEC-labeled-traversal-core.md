@@ -415,6 +415,18 @@ to a header).
   continuation sequence** (`sequence: ""`; its labels and loss are still reported); `1 … k − 1` is **rejected**
   naming k, because a continuation shorter than k is not valid `/traverse` input; from k on the continuation is a
   resubmittable seed.
+- **`output.coordinates`** (boolean, default `false`) and **`output.max_coordinate_occurrences`** (an integer in
+  [1, 2^64 − 2] or `"unlimited"`, default 16) *(feature level 6; opt-in, `DESIGN-traverse-graphlet.md` §18,
+  §26)*: report where each run's sequence lies (§7.1, the `coordinates` block). The cap **without**
+  `coordinates: true` is refused (400 "only with output.coordinates true, where it bounds the occurrence
+  lists; …"): it would change nothing (§7.0). 0 or a number above the maximum (`out of range [1,
+  18446744073709551614] (or "unlimited")`), another string (`expected an integer or "unlimited"`), a negative or
+  non-integral number (`expected a non-negative integer`) and a non-boolean `coordinates` (`expected a boolean`)
+  are refused naming the field. Both are accepted and inert under `support: kmer` and in `annotate` mode, where
+  the result states why it has none (`coordinates_reason`), so that a request switching its support stays valid.
+  The echo carries both fields — the cap's default included — only when `coordinates` is true, so it stays
+  resubmittable; `coordinates: false` is byte-identical to omitting it, and a request without coordinates is
+  answered as before (feature level 5) apart from the `feature_level` digit.
 - `bounds.*` scopes are in §6.8. `frontier.*` in §6.8. `output.detail`: `summary | tree | full | graphlet`
   (§7; `graphlet` is the lossless compact retrieval format of §7.5: a small JSON summary per seed with the MGT
   text embedded). `output.timing` (default `true`) adds the `timing` blocks. Both are request fields, not walker
@@ -843,7 +855,19 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     × 1000)) + stop_ms`, T the exact bytes of the text of the seeds finished so far (the server writes each seed's result
     as compact text once it is built and assembles the response from those texts — byte for byte the text of
     the whole tree, which is freed seed by seed), E the text the seed being walked is estimated to write (its
-    modelled account, published at every level's end, / the account per text byte of the requested detail),
+    modelled account, published at every level's end, / the account per text byte of the requested detail; from
+    feature level 6 the account's record-coordinates share C apart: E = ⌈(A − C) / ratio⌉ +
+    ⌈C / coordinate_account_per_text_byte⌉ with `coordinate_account_per_text_byte` 12, a bound — every byte of
+    coordinate text, whatever its digits, costs at least 12 account bytes (each part's ratio at its widest text is
+    14.9 to 21.9: an occurrence's 44 bytes for 872, a run's entry 221 for 3,680, a seed label's 79 for 1,728, the
+    block's skeleton with a cut list's limitation, K record and `drop_coordinates` 960 for 15,151 in a graphlet,
+    the null form 106 for 1,584) —, where an occurrence's
+    account is 20–73 times its text (872 bytes for 12–44) against 115–129 for a tree's other output, which the
+    measured ratio would have understated 2.6–4.1 times on coordinate-heavy seeds (`DESIGN-traverse-graphlet.md`
+    §26, M2); a ratio is
+    measured as (A − C) / (the text − the text the coordinates wrote, counted exactly from digits and
+    punctuation), on a rest of at least 1 MiB, so that a request with coordinates measures what the same walk
+    without them would, and the server's measured ratios do not depend on whether one came first),
     with the configured values `account_per_text_byte` (30 for the JSON details, 50 for a graphlet — *calibrated
     in the efficiency pass, feature level 4*: just below the smallest account/text ratios measured on real
     responses, 33.5 (UHGG `full`) to 1,344 (SRA `summary`; 37.2 the smallest SRA JSON ratio) and 58.4 and more for
@@ -1263,8 +1287,11 @@ is rejected instead (§5).
   **Conservative by construction** (`DESIGN-traverse-graphlet.md` §14, v5.2): each axis is computed from the
   result's own `limitations` (seed level and every arm), so an axis reads `complete` exactly when no limitation
   of its class is stated — a reader never finds a limitation whose axis still says `complete`, and never a
-  non-complete axis without the limitation that explains it. `server_clamp` and `derivation` belong to no class:
-  what a clamp caused is stated by the `walk_domain` or `seed_labels` entry it led to. A failed derivation
+  non-complete axis without the limitation that explains it. `server_clamp`, `coordinates` (decision C2:
+  record coordinates are opt-in output, whose own completeness their block states) and a failed seed's
+  `derivation` belong to no class: what a clamp caused is stated by the `walk_domain` or `seed_labels` entry it
+  led to. A `derivation` on a **walked** result — a permitted set derived from part of the seed (D3, below) — is
+  in the `qualified` class: such a set may hold labels the whole seed would exclude. A failed derivation
   reports `{"walks": "failed", "branch_diagnostics": "complete", "label_evidence": "complete", "delivery":
   "inline"}` — nothing was walked, so nothing else was cut — except that carriers cut before a trace check
   (its `seed_labels` entry) make `label_evidence` a `lower_bound`. Each axis is backed by the per-arm fields and
@@ -1295,7 +1322,8 @@ is rejected instead (§5).
 | `seed_labels` | seed | the derived permitted set was cut (`labels_dropped > 0`); on a failed result, carriers were cut before the trace check (`no_trace_carrier`) | `labels.max_seed_labels`, with `server_limit` when the server clamped it | `labels_supporting_total` |
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, a budget raised from zero (the walk ran under it), or a memory or work budget at the server's maximum (§10, R16) that stopped its walk or failed the seed | the clamped field | the requested value (`limit` is the effective one) |
 | `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: something is always held beyond the admitted account. **(i) On an annotation whose reads are budget-aware** (§6.8; `ResourceAccount::decode_charged`) the reads are charged inside the decoder, and the statement names only what is still uncharged: a level's key and successor lists and its fetched rows until its heads are processed, the seed phase's intersection and hits, the dictionary a failed seed's depth-0 state built, a failed result's echo of `seed_id` (named in the effect, review of the stage-2 recheck, design answer 5), an index-wide header lookup that the first request needing it builds (not observed: charging it would make a result depend on the server's history), and the label dictionary's first table (about 1.5 KB per request) with the transient copy while its list grows (not observed). **(ii) Other formats**: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of `seed_id`, are held before they can be charged. Neither is a hard request-wide memory bound (§6.8). In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account, MiB rounded up (0: none), observed wherever it is held and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Observed once a level's key and successor lists are built, after every call of a level's fetch (with the call's raw rows in (ii)) and at a refused read (with the rows read before it), at **every head admission** (the account the head needs with the level's lists and fetched rows beside it), after the roots' rows and the lookahead's warming, and over the seed phase's rows and intersection (after each sub-batch is read and again once it is consumed; each fetch call of the label validation before its charge, which can fail the seed; under `trace` the validation's peak — the hits, every label's live coordinate set and both arms' boundary coordinates — before anything can fail the seed, review of the stage-2 recheck, P2). In (ii) the decoder's own transient buffers are not counted (the materialised rows are). Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
-| `derivation` | failed seed | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode) | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
+| `coordinates` | seed | `output.coordinates` is true and an occurrence list — a seed label's or a run's — was cut at the cap to its first occurrences by start (each cut list states `occurrences_total`; the block `complete: false`). In no outcome class (decision C2) | `output.max_coordinate_occurrences` | the largest true count of a cut list; the extra field `lists_cut` counts the lists cut |
+| `derivation` | failed seed; a walked seed whose set was derived from part of it (D3) | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode). **D3** *(the owner's decision, feature level 6)*: a derived seed whose time budget runs out after 1 ≤ j < n of its k-mers is delivered as a walked result, without `error`, when nothing else would fail it — the set of the labels carrying the j k-mers read (a superset of the whole seed's carriers; `labels_from_seed`, `labels_supporting_total` its size), every requested arm truncated at `complete_to_bp` 0 (`cap_trigger` `time_budget`), this limitation first with `cause: time_budget` and `observed` = j, no `num_kmers` field, `outcome.walks: partial` and `label_evidence: qualified`; j = 0, or a superset that would fail the seed in any other way, fails as before | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
 
 ```json
 "outcome": {"walks": "complete", "branch_diagnostics": "cut", "label_evidence": "complete", "delivery": "inline"},
@@ -1311,7 +1339,10 @@ is rejected instead (§5).
   remaining, actions, message}`,
   the amounts in the knob's unit (MiB — `used` rounded up, `remaining` down —, work units, ms; `requested` is the
   request's value where the server clamped it), `actions` the levers (`raise_memory_budget`, `use_graphlet`,
-  `drop_sequences`, `raise_work_budget`, `raise_time_budget`, `continue_from_leaves`; on a seed a budget failed,
+  `drop_sequences`, `raise_work_budget`, `raise_time_budget`, `continue_from_leaves`; `drop_coordinates` (feature
+  level 6) right after `use_graphlet` and `drop_sequences` wherever those are offered — memory stops, depth-0
+  failures included — when the request has `output.coordinates: true`, whose block or null form is part of the
+  account; on a seed a budget failed,
   which has no leaves, the levers on the seed instead of `continue_from_leaves`: `lower_max_seed_labels` for a
   derived set, `name_fewer_labels` for a named one, `lower_max_labels_per_node` in annotate mode, and
   `shorten_seed` for a work budget the seed phase spent). A stop from outside the walk (§6.8) is stated the same
@@ -1509,12 +1540,59 @@ is rejected instead (§5).
   values at that point. A run can end with **no** event: a switch source whose lineage goes on only under
   other names ends `label_lost` silently, documented by the `switch` event(s) at `to_bp` (on the children when
   the source ends at a split; §13 note 20). `segments[].labels_via_parent` on a merged segment (more than one
-  parent): per parent, the labels whose kept entry came through it (empty lists in `annotate` mode).
+  parent): per parent, the labels whose kept entry came through it (empty lists in `annotate` mode). **The
+  first parent of a merge is the one carried by the most labels** *(the owner's decision R21 (4), feature level
+  6)*: in `constrain` mode the labels whose lineages its head brings into the merge node, in `annotate` mode the
+  fewest labels present at a node of the parent's own segment (every head at the node holds the node's own
+  labels; a merged parent holds the union of its parents' labels, so after nested merges the walk displayed
+  upstream can be carried by fewer, DESIGN §26.6); ties keep the arrival order, as every parent was before.
+  **Except in `tree` and `full` detail under a memory budget**, where a merge keeps the arrival order: there
+  every head reserves the delivery of its displayed segment chain, so the displayed parent would move the memory
+  stop, and the rule changes the display only, never the depth a budget certifies (`graphlet` and `summary`
+  charge no chain and follow the rule under every budget). The displayed walk — a path's `segments` chain and
+  spelled bases, its `continuation`, and `route_bp` (what of that spelling a label does not carry, §13 note 20) —
+  follows first parents, so it passes a merge through its majority parent. Which labels reach a leaf, with which
+  loss and branches, does not depend on the order; on a tie of loss and branches the first parent's lineage
+  continues (its run, its `labels_via_parent` entry).
   `hairpin` events: `followed` (`hairpins: follow`, the child is present) vs skipped. `revisit` events:
   `length_bp` (the distance difference to the first arrival) and `same_distance` (a `keep`-mode join at one
   node and depth). `label_dict[]`: `column`, and `seq_id` for header labels — the `LabelRef` that joins a label
   across retrievals (a name alone can be ambiguous). `growth[].label_ends` is an object even when empty (was
   `null`).
+- **Record coordinates** *(feature level 6; opt-in: `output.coordinates`, §5; `DESIGN-traverse-graphlet.md`
+  §18, §26)*. With `coordinates: true` every seed result, in every detail (a graphlet's JSON summary included,
+  never its MGT body), carries either `"coordinates": {block}` or `"coordinates": null` with
+  `"coordinates_reason"`: `"index has no coordinates"`, `"support kmer"` (annotate mode included), `"no
+  traversal"` (a failed derivation, a seed a budget failed, a seed refused for a label name, a seed never
+  started) or `"partial derivation"` (a `trace` seed walked with a set derived from part of it, D3), checked in
+  that order. The block (keys sorted): `kind` — `record` (every label a header: positions within its record),
+  `column` (every label a column: positions in the column's k-mer index space) or `mixed` (each label's kind
+  says which) —, `k`, `max_occurrences` (the cap, an integer or `"unlimited"`), `complete` (false iff a list was
+  cut or a run is a lower bound), `runs_lower_bound` (only when > 0), `seed` — per seed label, ascending:
+  `{label, occurrences: [[s, e], …], occurrences_total?}`, its occurrences of the whole seed (e − s =
+  `length_bp`) — and `arms` — per requested arm one entry per run, in `runs` order: `{run, label, from_bp, to_bp,
+  occurrences, occurrences_total?, chains_ended?, lower_bound?}`. **Intervals**: 0-based, half-open, forward
+  strand; an occurrence of a run is a chain of the label's coordinates live at the run's last node (chains only
+  continue or die along a run; a split hands each to at most one child), c its k-mer coordinate there and L =
+  `to_bp − from_bp`: `[c + k − L, c + k)` on the right arm, `[c, c + L)` on the left (L = 0: an empty interval at
+  the seed boundary); the interval holds the run's own bases. Each list keeps its first `max_occurrences`
+  occurrences by start and states `occurrences_total` when cut (the `coordinates` limitation, §7.0).
+  `chains_ended` (only when > 0, decision C-N1): chains live on the run's lineage that continued on no followed
+  path of it before its last node — a record end, a successor not followed, a continuation a switch took over;
+  chains partitioned among a split's children are not ended, and a clone inherits its prefix's count.
+  `lower_bound: true` (only when true; revision 1, decision C-N2): the run was entered by a switch into a label
+  whose own lineage was live there, and that label's chains starting at the switch node were left out, so
+  its count is a lower bound (the walk itself is unchanged). **Column positions**: record i's k-mer j is
+  `offset_i + j` with `offset_{i+1} = offset_i + len_i − k + 1`, so a column interval numbers base p of record i
+  as `offset_i + p`: **a record's last k − 1 bases share their numbers with the next record's first k − 1
+  positions**, an interval there is attributed to one record only with the record lengths (not stated; C10),
+  and column intervals of different records can overlap (`trace_record_boundaries` states that a column trace
+  can cross records). **Assumed, not detectable from the index**: one strand per record (no `--fwd-and-reverse`
+  build) and unique headers. Memory: each entry is charged once when its run is created, at min(chains, cap)
+  occurrences, in the requested detail (no work charge: every coordinate was charged one unit with its row);
+  budgeted requests with coordinates stop no deeper than without (`drop_coordinates`). The block is at most the
+  coordinates read, at most min(chains, cap) per list: without a budget (and `--traverse-max-memory-mb` 0, the
+  default) and with `"unlimited"` nothing else bounds it (the probe's `coordinates.output_bound`, §10.3).
 - **Derivable fields** (the graphlet stores none of them): `children`, `paths`, `splits`, `end_labels` and
   `end_reasons` of a leaf (its labels' runs), `label_end` events (the runs), `reconverge` events (the merged
   segments), `labels_at_end`, `label_summary`, `needed_budgets` (the `loss_budget` ends; a histogram, its
@@ -1700,7 +1778,15 @@ tail stays valid `/traverse` input.
 
 ### 7.5 The graphlet (MGT v1)
 
-**MGT v1 is frozen (2026-10-02).** This section is the wire contract; any change to a record, field or token is MGT v2.
+**MGT v1 is frozen (2026-10-02).** This section is the wire contract; any change to a record, a field or the
+grammar is MGT v2. **The `[a-z_]` token fields are open token sets** *(decision X-C12, amending the freeze text;
+the precedent is `memory_bound_soft`, 28c51c31)*: a K record's `kind` and its extra field names, and a Q record's
+`scope`, `resource`, `phase` and `actions`, can take values a later feature level adds — level 6 adds the kind
+`coordinates` with the extra field `lists_cut` and the action `drop_coordinates` (C12) — and a reader keeps a
+value it does not know, uninterpreted. Record coordinates (§7.1) are **not** in the body: only their limitation's K
+record is, when a list was cut (`K * coordinates output.max_coordinate_occurrences i:<cap> i:<largest> *
+lists_cut=i:<n> <effect>`, Z one higher); the block travels in the JSON summary (§7.5.5), with the J line of a
+standalone document.
 
 `output.detail: graphlet` returns, per seed, a small JSON summary with the **whole** result embedded as one
 line-based text, MGT v1 (`DESIGN-traverse-graphlet.md` §2, as implemented; where this section and the design
@@ -1883,7 +1969,7 @@ natural(right); seed coordinate of outward `i`: |seed| + i (right), −(i+1) (le
 ```
 {"seed": {seed_id, validated_seed_id, seed_id_mismatch, length_bp, num_kmers, labels_from_seed,
           labels_supporting_total, labels_dropped, labels_dropped_digest, num_labels, num_seed_labels},
- "label_mode", "duplicate"?, "outcome", "limitations",
+ "label_mode", "duplicate"?, "outcome", "limitations", "coordinates"?, "coordinates_reason"?,
  "arms": {"left"?|"right"?: {status, complete_to_bp, completeness_scope, frontier_remaining, labels_per_node,
           cap_trigger?, evidence, limitations, counters, branch_events_total,
           counts: {segments, leaves, splits, merges, runs, bases, max_bp,
@@ -2192,6 +2278,20 @@ the server.
 `POST /resolve`, `POST /traverse`, `GET /traverse/capabilities`, `GET /capabilities`, `POST /traverse/cancel` and
 `GET /traverse/attempt/{attempt_id}` in `server.cpp` (the attempts in `traverse_attempts.{hpp,cpp}`).
 
+- **Shutdown** *(level 6's commit)*: on SIGTERM or SIGINT the server exits within seconds, status 0. Before, it
+  had no handler, and in a container, where it is PID 1, the kernel drops a signal with the default action: each
+  `docker stop` waited its whole timeout (120 s on staging) and killed it. Now nothing new is served (a
+  `/traverse` or `/resolve` finds its client gone at its first check), every traversal in flight — with or
+  without `attempt_id` — is stopped at its next poll as for a client gone, so **nothing is written for it** and
+  its connection is closed (a partial result would state a cause that is not true; a ledger treats the attempt
+  as unanswered: `not_after_ms`, `bound_ms`), then, once they returned or after 3 s, the HTTP server stops (a
+  response still being sent is cut short of its `Content-Length`, never a shorter complete one), and a handler
+  that has not returned 3 s later (a `/search`, an uninterruptible read) does not hold the process. The process
+  exits once the server stopped, whatever still runs — in single-index mode the server listens at once and answers
+  503 while its index loads, and a signal then does not wait for the load. Before the server accepts connections
+  the process exits at once; a second signal ends it immediately.
+  Attempts' states, tombstones and holds live in the process and end with it (§10.3, the release rule).
+
 - **Capabilities: which route carries which fields.** (`/stats` carries none of them: it states the graph and
   annotation statistics only, unchanged.)
   - **Every `/resolve` and `/traverse` response**, `capabilities`: `schema_version` (the request schema the server
@@ -2212,7 +2312,17 @@ the server.
     `work_check_interval` units over budget; the physical decode counters in `timing`. Its text changed with the
     review of stage 3, answer 4), `memory_bound: "soft"` (stage 3 charges budget-aware annotation reads, §6.8, but
     what is held beyond the admitted account is still soft, §7.0 `memory_bound_soft`: no hard request-wide memory
-    bound), `attempts` (below), `content_encodings` (`["gzip", "deflate"]`) and, from feature level 3,
+    bound), `attempts` (below), from feature level 6 `coordinates` (record coordinates, §7.1: `supported` —
+    whether this index reports them, which is `supports_trace` —, `knob` `"output.coordinates"`, `cap_knob`
+    `"output.max_coordinate_occurrences"`, `max_occurrences_default` (16), `kinds` (the block kinds this index can
+    report: `record` and `mixed` need a `CoordToHeader`; `[]` when not supported), `limitation`
+    `"coordinates"`, `action` `"drop_coordinates"`, `output_bound` — what bounds the block's size: the
+    coordinates read, min(chains, cap) per list, the memory budget that charges each entry at its run's creation,
+    the work budget that charged each coordinate with its row; nothing else with neither and `"unlimited"`
+    (`--traverse-max-memory-mb` is 0 by default) — and `rule`: positions, the interval rule, the column
+    numbering in which a record's last k − 1 bases share their numbers with the next record's first positions,
+    `chains_ended`, `lower_bound`, the assumptions; only here: the per-request capabilities change only in their
+    `feature_level`), `content_encodings` (`["gzip", "deflate"]`) and, from feature level 3,
     `algorithm_version`, `compression_level` (the zlib level of the traversal routes' compressed bodies) and
     `deadline_check` (below), from feature level 4 `decode_cache: {path_cache_mb, rule}` (the row-diff path cache
     of the reads, §8.4); in multi-graph mode also `graph` and `graph_path`, the pair it describes.
@@ -2290,7 +2400,22 @@ the server.
     capabilities' `attempts.release_rule` and `attempts.instance` texts (a finished state is replay-safe only for
     an attempt pinned with `expect_server_instance`, §10.3), the values in `timing` (the deadline record's
     `setup` pieces and its last `head` piece, `seed_phase_ms` and `seed_fetch_ms` to the first checkpoint, §6.8)
-    and physical work (the path cache admits a row before copying it, §8.4).
+    and physical work (the path cache admits a row before copying it, §8.4). **6** (record coordinates,
+    `DESIGN-traverse-graphlet.md` §26): `output.coordinates` and `output.max_coordinate_occurrences` (§5) with the
+    `coordinates` block or null form per seed (§7.1), the `coordinates` limitation and its K record (§7.0, §7.5),
+    the action `drop_coordinates`, the probe's `coordinates` block,
+    `attempts.delivery_reserve.coordinate_account_per_text_byte` with the reserve's coordinate share (§6.8). Its capabilities differ from level 5's exactly in:
+    `feature_level` (both GET routes and every response), `attempts.delivery_reserve.rule` and the new
+    `attempts.delivery_reserve.coordinate_account_per_text_byte` (both GET routes), `deadline_check.rule` (both:
+    `max_uninterruptible_ms` stays null, no later stage promises a bound, decision 3c-N5) and the probe's
+    `coordinates` block. A request without coordinates is answered as at level 5 apart from the digit, the
+    `timing` block and an attempt's walk-until, with three intended changes: **D3** (a derived seed whose time
+    budget ran out after part of its k-mers is delivered as a partial walk, §7.0 `derivation`), the **first
+    parent of a merge** (R21 (4), §7.1: the displayed spelling, chains, continuations, `route_bp`, the order of
+    `parents` / `labels_via_parent` and on a tie which lineage continues, all `on_reconverge: merge`; not in
+    `tree` and `full` detail under a memory budget, where a head reserves its displayed chain's delivery and a
+    merge keeps the arrival order, so no budget's stop moves — T55, DESIGN §26.8), and the server's
+    **shutdown on SIGTERM** (below). The server states 6 from this level's commit.
   - **`schema_version`** is the one request schema the server accepts: 1, with no compatibility window. A future
     change of the request schema adds `request_schema_versions: [..]` to the capabilities and keeps accepting 1 for
     a stated window; a `schema_version` above 1 without that list means a server whose requests a client written
@@ -2437,6 +2562,8 @@ the server.
   `client_check_ms` (100), `clock_skew_allowance_ms` (`--traverse-clock-skew-ms`, default 2000: what a ledger adds
   to `not_after_ms`, §5; the server's own check adds nothing), the `bound` and `not_after` rules (text) and
   `delivery_reserve` (`compress_mbps`, `build_mbps`, `account_per_text_byte: {json, graphlet}` (30 and 50),
+  `coordinate_account_per_text_byte` (feature level 6: 12, an integer, so that a ledger can reproduce the
+  reserve, §6.8),
   `margin` (1.25), `stop_ms` (the configured time from the walk-until to the walk's end:
   `--traverse-chunk-target-ms` + 950), `calibration` (feature level 4: the measurements the starting estimates
   come from, text), `measured_text_bytes`, `rate_window`, `measured_compress_mbps`, `measured_build_mbps`,
@@ -2444,7 +2571,8 @@ the server.
   the smallest ratio and the longest stop time of the last `rate_window` this server measured, null until it has
   measured one — and its `rule`, §6.8). **Number types**: `allowance_ms`, `hard_cap_ms`,
   `clock_skew_allowance_ms`, `content_timeout_s`, `client_check_ms`, `retention_s`, `retention_count`,
-  `measured_text_bytes`, `rate_window`, `stop_ms`, `measured_stop_ms` (or null), `tombstone_max_s` and, in
+  `measured_text_bytes`, `rate_window`, `stop_ms`, `measured_stop_ms` (or null), `tombstone_max_s`,
+  `coordinate_account_per_text_byte` and, in
   `deadline_check`,
   `chunk_target_ms` and `observed_max_uninterruptible_ms` are integers (`allowance_ms` was written 10000.0 before
   feature level 3; `--traverse-attempt-allowance-ms`, `--traverse-clock-skew-ms` and
@@ -2714,6 +2842,9 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T51 | the efficiency pass (feature level 4) | `RowDiffPathCache.*` (the cached default decode returns the default decode's rows call after call, under bounds that keep everything, evict often and keep nothing, and a shared bound that shrinks; the budget-aware decode with the cache gives every row the costs of its whole path and at most the held bytes, a row read alone at most its peak without the cache and within its demand, and refuses below its peak; the generations; a dropped generation frees its table, `DroppedGenerationsReleaseTheirTables`, and the counts follow the tables at a rotation and under a shrinking shared bound; the lookahead's reads admitted as without the cache, `LookaheadAdmittedAsWithoutTheCache`), `LabelOraclePathCache.SameAnswersAndCounters` (query and recorder, budgeted and not, every counter, the shared bound), `MiniRefSeq.PathCacheKeepsTheResponse` (96 responses byte-equal with and without the cache: constrain/annotate, memory budgets at their stops, work budgets, `batch_kmers` 1 and 64, an evicting cache, one-row chunks), `MiniRefSeq.PathCacheKeepsRootRefusals` (an annotate seed whose right root's read the seed_id's length moves across its refusal under 1 MiB: every response byte-equal with and without the cache, the refusals of a read alone among them), `MiniRefSeq.ServerBudgetMaxima` (also a seed failed in its seed phase by the work maximum and at an annotate root by the memory maximum: server_clamp, `requested`, no raise action, `server_limit`; a seed failed by the request's own budget keeps its lever), `CoordToHeader.SequenceRangeAgreesWithMapSingleCoord`, `LabelOracleCoordRuns.SameAsMapSingleCoord` (and the `DISABLED_` measurements); `test_row_diff_path_cache_keeps_the_bytes`, `test_server_budget_maxima`, `test_api_server_capabilities`; the byte-identity harness against the previous build (unbudgeted: 588 mini_refseq — also from a three-column graph list and with chunks of 1 ms —, 792 UHGG and 804 SRA `/traverse` requests, 688 `/resolve` requests; budgeted: the 588 mini_refseq requests under 4 MiB and under 300,000 work units, the 792 UHGG ones under 16 MiB; differences only in attempts' `walk_until_ms` and in walks the previous build's cold first touch cut by their time budget), and with the cache on and off (201 SRA and 198 UHGG requests at the default `batch_kmers`, at 1, the UHGG ones under 256 and 8 MiB and 10⁶ work units, 147 mini_refseq requests without and under 4 MiB) | §4.2, §6.8, §8.2–8.4, §10.3 |
 | T52 | the review of pass 5 and R10 (feature level 5) | `GraphletAttemptRegistry.CancelNotAfterMsHoldsTheTombstoneThroughAdmission` (the reviewer's half-upload timeline with retention 1 s on injected clocks: the cancel naming `not_after_ms` holds the tombstone to `not_after_ms + skew`, the repeat at 0.763 s states the same expiry, the copy at 1.177 s is refused, at the expiry the strict check refuses it; without `not_after_ms` `covers_admission` is false and the copy runs), `.TombstonesAreNeverShortenedAndCapped`, `.ARefusedCopyExtendsTheTombstone`, `.TombstonesSurviveWallClockSteps` (forward and backward steps), `.RetentionZeroKeepsNoTombstones`, `.ExpectServerInstanceRefusesAnotherProcess`, `.CapabilitiesStateIntegers` (the release rule's phrases, `cancel_fields`, `tombstone_max_s`, "cannot start subsequently"; what a finished state promises and assumes, the inclusive hold, the 409's own `not_after_ms`); the review of these fixes: `.FinishedAttemptsAreHeldThroughTheirNotAfterMs` (the reviewer's p1 — retention 1 s, the replay at 1.3 s — and p1b — retention_count 1, one later finish — refused until `not_after_ms` + skew inclusive, then expired; held attempts fill the tombstone table; without `not_after_ms` dropped as before; the cap from the finish and a refused copy's extension; retention 0 keeps nothing), `.TombstonesHoldThroughSuppressedUntilInclusive` (skew 0, a copy at the wall clock's `not_after_ms` after the steady hold passed is refused), `.ARefusedCopyIsJudgedByItsOwnNotAfterMs` (no `not_after_ms`: not covered, `no_not_after_ms`, and it runs once re-sent after the hold); `GraphletAttempt.IdsAreValidated` (`expect_server_instance`); `GraphletServer.InventoryTableMatchesTheLoadersTypes` (every annotation type `initialize_annotation` builds is in the inventory's table, row-diff anchors exactly for `RowDiff<ColumnMajor>`, headers exactly for a `MultiIntMatrix`), `.SymlinkedMainFilesDoNotHideTheirSidecars`, `.DeliveryChecksEvery64KiBOfALargeToken` (the reviewer's 16 MiB probe: ≥ size / 64 KiB checks writing and assembling, bytes unchanged, the gap measured); `Graphlet.IndexIdentity` (the `.bloom` and the mask in the inventory, a manifest not covering one refused naming it; entries `a/x.seqs` and `b/x.seqs` refused for their shared base name; a `.seqs` the pair does not load refused); `RowDiffPathCache.RetentionKeepsRowsAndCostsAndBoundsTheCopies` (keep-all, 4/1, 16/8, requested rows only and all-narrow rules: the default and budget-aware decodes' rows and costs unchanged; copies per call ≤ n × (successors + 3) + stored / checkpoint; keep-all copies every reconstructed row; the rule copies fewer), `.FlatTupleRowsRoundTrip`; `LabelOracleBudgeted.LookaheadRunsFollowTheWalk` (the reviewer's pacing probe: warm's decoder charges 31,297 against 161,679 for sorted runs, 28,736 for the walk-ordered runs alone; query and recorder); `MiniRefSeq.PathCacheKeepsTheResponse` (+ three retention rules, 168 comparisons), `.PathCacheWarmSeedIsTheColdSeed` (a seed after a copy of itself equals the seed alone, every budget, batch, chunk and cache capacity), `.DeadlineRecordNamesTheLongestPiece`, `.ResolveDecodesEachRowOnceInBoundedBatches` (the review of these fixes, finding 7: on the query and on one repeating two thirds of it, column and header labels, presence and trace, batches of 1 to 4,096 rows × byte targets 1 B / 20 kB / 64 MiB × 0 / 30 kB / 256 MiB kept (explicit labels keep none) — 384 runs: the profiles equal the reference and the same labels given explicitly, no read beyond its batch, the first 64 rows, each at most twice the one before, every distinct row decoded once when the repeats can be kept and always for explicit labels), `.HeaderHitsFilterRequestedRanges`; `WalkerDeadlineChunks.*` on a virtual clock (exact bounds; the deadline record of a paced stop). Integration `test_retention_settings_are_validated_at_start_up` (the reviewer's negative-retention probe and thirteen more values, the p3 refusals of the review of these fixes among them, refuse to start; the largest accepted are stated), `test_retention_zero_promises_no_suppression`, `test_a_cancel_naming_not_after_ms_covers_a_half_uploaded_request` (the reviewer's upload probe on a raw socket), `test_expect_server_instance_refuses_another_process` (server and CLI), `test_inventory_is_mirrored_by_index_manifest_py` (masked graph with a Bloom filter, row_diff, coordinate annotations with and without `.seqs`, `.coords`, `--no-coord-mapping`, symlinks; the tables equal), `test_symlinked_main_files_do_not_hide_their_sidecars` and `test_a_loaded_bloom_filter_is_part_of_the_identity` (the reviewer's `/tmp/metagraph-pass5-identity` cases, rebuilt); the review of these fixes: `test_a_finished_attempt_is_held_through_its_not_after_ms` (the reviewer's p1 and p1b on a real server: the replay after the ledger's release is a 409; and p4: a copy without `not_after_ms` is not covered), `test_a_manifest_names_one_bundle_and_its_loaded_files` (the reviewer's dup probe — a directory manifest of A/ and B/ refused by single-index servers, the CLI and `--verify`, naming the shared base name — and its C/ and `--no-coord-mapping` cases refused naming the `.seqs`), `test_retention_settings_are_validated_at_start_up` (each refusal names its option's own range). Byte identity against the previous build (f667d775): the unbudgeted and budgeted real requests on mini_refseq and UHGG, decompressed | §5, §6.8, §8.2, §8.4, §10.3 |
 | T53 | the review of levels 4–5 (level 5 kept) | `RowDiffPathCache.ARefusedRowIsNeverCopied` (the reviewer's probe: a 1 KiB bound, its shared room 1 KiB, a row of 1,048,576 columns — no byte allocated by the insert nor at the moment the room is read, by jemalloc's thread counters; bytes, peak and kept rows 0, `rows_refused` 1; a tuple row of 65,536 columns likewise), `.AKeptRowIsCopiedWithinTheBound` (two rows of 1.5 MiB under 4 MiB and a third: the heap the cache holds stays within the bound during the insert, jemalloc's peak; the stated peak is what it held); `WalkerSeedPhase.SetupPiecesCoverTheSeedPhase` (2,500 headers with a 1,024-character prefix on a virtual clock that resolving a name advances by 1 ms: the longest piece is `setup`, exactly 2,500 ms, and `seed_phase_ms` 2,500 ms, at radius 5 and at radius 0 (no checkpoint); 10 seed and 20 extra labels: two setup pieces, 20 ms stated; a duplicate after 2,500 names: the failed seed's phase and piece stated), `.DuplicateChecksRefuseAsBefore` (the hash sets refuse what the scans refused, in the request's order, an unknown name before a later duplicate, extra labels against kept seed labels and earlier extras, a column and its header distinct targets); `GraphletAttemptRegistry.AFinishedStateIsReplaySafeOnlyWhenPinned` (the reviewer's finish-restart-replay probe on two registries: held by its process, the unpinned replay runs at the restarted one, the pinned one is refused `instance_mismatch`; the release rule's new phrases); integration `TestTraverseSeedPhase.test_the_longest_piece_covers_the_seed_phase` (the reviewer's deadline probe, CLI and warm server: the longest piece at least the names' resolution and a sixteenth of `seed_phase_ms`), `TestTraverseAttempts.test_a_finished_state_is_replay_safe_only_when_pinned` (the reviewer's attempt probe on a real server restarted on the same port: 200 with the same work units unpinned, 409 `instance_mismatch` pinned). Untimed bytes against the previous build (7aaee760) | §5, §6.8, §8.4, §10.3 |
+| T54 | record coordinates (feature level 6) | Walker: `WalkerCoordinates.*` (exact intervals on both arms against a per-base scan, a split's partition, switch-entered runs and their lower bounds, zero-length runs, cap cuts with true counts, column kind, `chains_ended` and its inheritance, work and walk independent of coordinates, memory stops no deeper, denials and attempt stops keeping the side table). Request and JSON: `GraphletCoordinates.*` (the 400s, null reasons in their order, the echo resubmittable, one block in every detail, the K record only where a list was cut and the stripped response equal to the opt-out one, the delivery model bounding the block at 20-digit positions, `drop_coordinates` on memory stops), `.CoordinateTextIsExactAndBoundedByItsAccount` (142 results: the text less `coordinates_text_bytes` is the stripped result's, a graphlet's K and Q tokens and its counts' digits included; the account less the coordinate share is the opt-out walk's; the share ≥ 12 × the text), `.CoordinateAccountBoundsItsText` (each part at its widest: 14.9 the least ratio), `.AttemptsMeasureTheSameRatioWithCoordinates` (the server's path on 1.3 MB seeds: the attempt's measured ratio equal with and without coordinates), `.CapabilitiesBlockFollowsTheIndex` (the probe's block per index: `supported` = `supports_trace`, `kinds` with and without a CoordToHeader and none without coordinates, the cap's default, the record-end sentence; never in the per-request capabilities); `GraphletAttempt.ReserveCountsCoordinateText`, `.CoordinatesLeaveTheServersRatioUnchanged`. Real index: `MiniRefSeq.CoordinatesAgainstTheSourceRecords` (39 cells × caps 1, 16, "unlimited": the blaNDM gene, its reverse complement, three 200-bp windows and two repeat windows under limits 0, 2, the exhaustive preset and the switch cells of every recorded switch request's seed — constant 0.5 and 1, loss budget 2, limits 0 and 2, to their 3,000 bp, a run of each seed's ending past 1,000 bp —, column labels with and without a switch to 3,000 bp: 9,498 runs, 5,508 switch-entered, 48 lower bounds (27 strictly below the string count), 10,696 occurrences whose bases are the run's, 326 lists cut, 3 column intervals in a record's last k − 1 bases read as the next record's), `.CoordinatesKeepTheResponseUnderThePathCache` (144 comparisons over budgets, batches, cache capacities and chunk targets), `.CoordinateShareIsExact` (60 results, every detail and cap: the opt-in text less the coordinates' is the opt-out text). Measurements (disabled tests, DESIGN §26): `MiniRefSeq.DISABLED_CoordinatesDepthAtTheStop` (M1, the D4 gate on mini_refseq, with what completing takes and the column cells under the refseq33m projection), `MiniRefSeqWide.DISABLED_CoordinatesDepthByRegime` (M1 by regime: the column fixtures of `scripts/traversal/make_column_coord_fixtures.sh`, 16 chains a run, and the wide fixture's column and header labels), `MiniRefSeqWide.DISABLED_CoordinateReserveOnTheWideFixture` (M2, `scripts/traversal/make_wide_coord_fixture.sh`). Integration `test_api_coordinates`, `test_api_capabilities` (the probe's block, not in the per-request capabilities, `max_uninterruptible_ms` null), `test_api_server_capabilities` (`coordinate_account_per_text_byte` 12, an integer), `test_multi_probe_describes_one_pair`. Byte identity against level 5 (67bef367): opt-out requests identical apart from the digit, timing and R21 (4) | §5, §6.8, §7.0, §7.1, §7.5, §10.3 |
+| T55 | the first parent of a merge (R21 (4)) | `WalkerTest.MergeIsSpelledThroughTheParentWithTheMostLabels` (three graph types × modes: the majority route (two labels) through either branch is the first parent, in constrain and annotate mode, the path spelled through it, the minority's label routed at the merge, losses unchanged); `WalkerTest.MergeKeepsTheArrivalOrderWhereTheBudgetChargesTheChain` (three graph types × modes: with the chain charged (`tree` / `full`) under a memory budget the route that arrived first is first whichever labels it carries; without the budget or without the chain charge, the majority); `MiniRefSeq.MemoryStopsDoNotDependOnTheDisplayedParent` (win200_03 right at 8 and 2 MiB in `tree`, `full` and `graphlet`: level 5's `complete_to_bp`; the budgeted `tree` response's merges in arrival order) and `.AnnotateMergeRanksParentsByTheirOwnSegment` (the annotate rule pinned as it stands on a nested merge of the real cache's `mini_win200_02__annotate_merge`: the 5-bp merged parent of 6 labels first before the 32-bp one of 5, its walk upstream through 4 labels, the path's continuation carried by label 3); the CLI fixtures `merge` (the 62 merge's majority arrived second: its parents and partition swapped, a.fa now routed at 62, b.fa at 36 only) and `merge_ties` (the same locus without c.fa: ties keep the arrival order and show `R:route_split`); the byte-identity differences against level 5 classified (DESIGN §26: every differing request is `on_reconverge: merge`, and equal once parents, partitions, chains, continuations, run tables and the end labels' run / route_bp are canonicalised; no budgeted stop moves) | §7.1 |
+| T56 | shutdown on SIGTERM | Integration `TestTraverseAttempts.test_sigterm_stops_the_server_promptly` (an idle server exits 0 within 5 s; one walking a three-seed attempt stops it at its next poll — nothing written, the connection closed — and exits 0 well within the drain time), `.test_sigterm_while_the_index_loads` (a single-index server whose graph is a FIFO nobody writes, so its load never ends: `ready: false`, 503, and exit 0 within 5 s of the signal) | §10.3 |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 
@@ -2872,6 +3003,19 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
     switching graphs.
 21. **Orientation of the graphlet** (§7.5.4): bases are stored in walking order on both arms, so positions index
     them directly; the JSON keeps the natural orientation.
+22. **Record coordinates are opt-in output, not in the MGT body** (feature level 6, §7.1; DESIGN §18, §26):
+    the design's field, with the owner's decisions C1–C12 and C-N1..C-N9 — in no outcome
+    class (C2), a cut stated by the block (`complete`, `occurrences_total`) and its limitation, a switch-entered
+    run into a still-live label marked `lower_bound` rather than walked differently (C-N2, X-18.2), column
+    positions in the column's k-mer index space without the record lengths (C10: a record's last k − 1 bases
+    share their numbers with the next record's first), the K kind `coordinates` and the action
+    `drop_coordinates` as free tokens (C12, X-C12). The cap has no server maximum (D6: the memory budget and the
+    coordinates read bound the block; set `--traverse-max-memory-mb` in deployments, ops note O2).
+23. **A merge displays its majority parent** (R21 (4), §7.1): the first parent of a merged segment — whose chain
+    the displayed walk, its continuation and `route_bp` follow — is the one carried by the most labels, not the
+    first to arrive; ties keep the arrival order. Before level 6 it was always the first to arrive, and it still is
+    in `tree` and `full` detail under a memory budget, where the displayed chain is charged and would move the
+    stop (the owner may trade that for the rule everywhere, DESIGN §26.9).
 
 **Open decisions (need input or data):**
 

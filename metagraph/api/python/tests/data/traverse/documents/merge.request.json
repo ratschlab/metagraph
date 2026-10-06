@@ -25,6 +25,6 @@
  "fixture_index": {
   "cli": "bubbles",
   "k": 15,
-  "doc": "column labels through two SNP bubbles under on_reconverge merge: merge partitions (labels_via_parent), an ambiguous split (both.fa on both alleles) with an m closure at each merge, b.fa through two non-first-parent merges (R.route_bp != T.route_bp); continuations contained in the flank"
+  "doc": "column labels through two SNP bubbles under on_reconverge merge: merge partitions (labels_via_parent), an ambiguous split (both.fa on both alleles) with an m closure at each merge; each merge's first parent is the one carried by the most labels (R21 (4)): at 36 the A allele (a.fa, c.fa, both.fa), at 62 the G allele (b.fa, c.fa, both.fa), which arrived second, so b.fa is routed in at 36 and a.fa at 62; continuations contained in the flank"
  }
 }

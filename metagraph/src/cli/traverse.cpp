@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -1818,6 +1819,141 @@ static Json::Value coordinates_json(const SeedResult &r, const Strategy &st, Jso
     return block;
 }
 
+static uint64_t decimal_digits(uint64_t x) {
+    uint64_t n = 1;
+    for (; x >= 10; x /= 10) {
+        n++;
+    }
+    return n;
+}
+
+// compact_json_size with |check| (the attempt's delivery check) called every 4096 values, so
+// that counting a large block is under the attempt's bound like writing it; |values| counts them
+static uint64_t compact_size(const Json::Value &v, const std::function<void()> &check,
+                             uint64_t *values) {
+    if (check && !(++*values & 4095))
+        check();
+    switch (v.type()) {
+        case Json::nullValue:
+            return 4;
+        case Json::booleanValue:
+            return v.asBool() ? 4 : 5;
+        case Json::uintValue:
+            return decimal_digits(v.asUInt64());
+        case Json::intValue: {
+            const int64_t x = v.asInt64();
+            // |x| without overflow at INT64_MIN
+            return x < 0 ? 1 + decimal_digits(static_cast<uint64_t>(-(x + 1)) + 1)
+                         : decimal_digits(static_cast<uint64_t>(x));
+        }
+        case Json::stringValue: {
+            const char *begin = nullptr, *end = nullptr;
+            v.getString(&begin, &end);
+            return 2 + json_escaped_size(std::string_view(begin, end - begin));
+        }
+        case Json::realValue:
+            // the writer's own digits (17 significant, its special values): short, and rare in
+            // what this counts
+            return json_text(v, true).size();
+        case Json::arrayValue: {
+            uint64_t n = 2 + (v.size() ? v.size() - 1 : 0);
+            for (const Json::Value &e : v) {
+                n += compact_size(e, check, values);
+            }
+            return n;
+        }
+        case Json::objectValue: {
+            uint64_t n = 2 + (v.size() ? v.size() - 1 : 0);
+            for (auto it = v.begin(); it != v.end(); ++it) {
+                const char *end = nullptr;
+                const char *key = it.memberName(&end);
+                n += 2 + json_escaped_size(std::string_view(key, end - key)) + 1
+                   + compact_size(*it, check, values);
+            }
+            return n;
+        }
+    }
+    return json_text(v, true).size();
+}
+
+uint64_t compact_json_size(const Json::Value &v) {
+    uint64_t values = 0;
+    return compact_size(v, {}, &values);
+}
+
+uint64_t coordinates_text_bytes(const Json::Value &result, const std::function<void()> &check) {
+    if (!result.isObject())
+        return 0;
+    uint64_t values = 0;
+    // a member of an object that holds others (a seed's result always does): its quoted key,
+    // the colon, its value and one comma
+    auto member = [&](const char *key) -> uint64_t {
+        if (!result.isMember(key))
+            return 0;
+        return 2 + std::strlen(key) + 1 + compact_size(result[key], check, &values) + 1;
+    };
+    uint64_t bytes = member("coordinates") + member("coordinates_reason");
+    // a cut list's limitation (seed level, at most one), an element of the list: with a comma
+    // when the list holds another
+    bool cut = false;
+    const Json::Value &lims = result["limitations"];
+    if (lims.isArray()) {
+        for (const Json::Value &l : lims) {
+            if (l.isObject() && l["kind"] == "coordinates") {
+                bytes += compact_json_size(l) + (lims.size() > 1 ? 1 : 0);
+                cut = true;
+            }
+        }
+    }
+    // drop_coordinates: offered right after use_graphlet and drop_sequences, so never first
+    // (resource_stop_json): the quoted token and its comma
+    bool drop = false;
+    if (result.isMember("resource_stop")) {
+        for (const Json::Value &a : result["resource_stop"]["actions"]) {
+            if (a == "drop_coordinates") {
+                bytes += 2 + std::strlen("drop_coordinates") + 1;
+                drop = true;
+            }
+        }
+    }
+    if (result.isMember("graphlet") && (cut || drop)) {
+        // in the MGT body (a JSON string, escaped once more): the K record of the cut list and
+        // the Q record's token (",drop_coordinates": printable, nothing to escape), and the Z
+        // record's count, one record more with the K
+        const char *begin = nullptr, *end = nullptr;
+        result["graphlet"].getString(&begin, &end);
+        const std::string_view body(begin, end - begin);
+        uint64_t mgt = 0, escaped = 0;
+        if (cut) {
+            // K records follow the H, S, X, L, O and Q records, so never the first line
+            const size_t at = body.find("\nK * coordinates ");
+            if (at != std::string_view::npos) {
+                const size_t eol = body.find('\n', at + 1);
+                const std::string_view line = body.substr(at + 1, eol == std::string_view::npos
+                                                                      ? std::string_view::npos
+                                                                      : eol - at);
+                mgt += line.size();
+                escaped += json_escaped_size(line);
+            }
+        }
+        if (drop) {
+            mgt += 1 + std::strlen("drop_coordinates");
+            escaped += 1 + std::strlen("drop_coordinates");
+        }
+        // Z states the line count, as graphlet_lines does: the K record is one line
+        const uint64_t lines = result["graphlet_lines"].asUInt64();
+        const uint64_t z = cut && lines ? decimal_digits(lines) - decimal_digits(lines - 1) : 0;
+        mgt += z;
+        escaped += z;
+        bytes += escaped + z;
+        // graphlet_bytes states the body's length
+        const uint64_t body_bytes = result["graphlet_bytes"].asUInt64();
+        if (body_bytes >= mgt)
+            bytes += decimal_digits(body_bytes) - decimal_digits(body_bytes - mgt);
+    }
+    return bytes;
+}
+
 Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const std::string &detail, bool timing) {
     const bool graphlet = detail == "graphlet";
     const ResourceStop *stop = stated_stop(r, st);
@@ -2168,6 +2304,65 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
 
 static IndexIdentity identity_or_default(const IndexIdentity *given, const LabelOracle &oracle);
 
+Json::Value coordinates_capabilities_json(const LabelOracle &oracle) {
+    Json::Value c;
+    // recorded under support trace only (§18.1), so exactly where trace is supported
+    const bool supported = oracle.has_coordinates() && oracle.regime() == Regime::BASIC;
+    c["supported"] = supported;
+    c["knob"] = "output.coordinates";
+    c["cap_knob"] = "output.max_coordinate_occurrences";
+    c["max_occurrences_default"] = uint_json(Strategy().max_coordinate_occurrences);
+    // what this index can report: record and mixed need header labels (a CoordToHeader)
+    Json::Value kinds(Json::arrayValue);
+    if (supported) {
+        if (oracle.coord_to_header())
+            kinds.append("record");
+        kinds.append("column");
+        if (oracle.coord_to_header())
+            kinds.append("mixed");
+    }
+    c["kinds"] = std::move(kinds);
+    c["limitation"] = "coordinates";
+    c["action"] = "drop_coordinates";
+    // The true bound of the block (plan revision 7): --traverse-max-memory-mb is 0 by default,
+    // so neither it nor the cap bounds the block's size on its own. The text names the probe's
+    // own max_memory_mb / max_work_units rather than a value: this function sees no server
+    // configuration, and a server maximum, when set, is the budget of every request without one
+    c["output_bound"] = "an occurrence is a coordinate chain the walk read (every coordinate "
+        "charged 1 work unit with its row), so a seed's listed occurrences are at most the "
+        "coordinates it read, and at most min(chains, max_coordinate_occurrences) per run and "
+        "seed label; under a memory budget (bounds.max_memory_mb, or this server's "
+        "max_memory_mb, which a request without one runs under when it is not 0) every entry "
+        "and occurrence is charged when its run is created (at the count it starts with, in the "
+        "requested detail), so the block is within the budget; under a work budget "
+        "(bounds.max_work_units, or this server's max_work_units) the coordinates read are "
+        "within it; with neither (both maxima 0, their default) and \"unlimited\", nothing else "
+        "bounds the block: set a budget, keep the cap, or drop the coordinates";
+    c["rule"] = "with output.coordinates true each seed result carries a coordinates block "
+        "under support trace, otherwise coordinates null with coordinates_reason (index has no "
+        "coordinates | support kmer | no traversal | partial derivation); per seed label its "
+        "occurrences of the seed, per requested arm one entry per run with the occurrences of "
+        "the run's own bases [from_bp, to_bp): 0-based, half-open, forward strand; an occurrence "
+        "is a chain of the label's coordinates live at the run's last node, c its k-mer "
+        "coordinate there and L = to_bp - from_bp: [c + k - L, c + k) on the right arm, "
+        "[c, c + L) on the left (L = 0: empty, at the seed boundary). Header labels (kind "
+        "record) number positions within their record; column labels (kind column) in the "
+        "column's k-mer index space, record i's k-mer j being offset_i + j with offset_{i+1} = "
+        "offset_i + len_i - k + 1, so a column label's interval in a record's last k - 1 bases "
+        "shares its numbers with the next record's first k - 1 positions: such an interval is "
+        "attributed to one record only with the record lengths, which are not stated, and "
+        "column intervals of different records can overlap (trace_record_boundaries: a "
+        "column's trace can cross records); mixed: each label's kind says which. Each list "
+        "keeps its first max_coordinate_occurrences by start and states occurrences_total when "
+        "cut (the coordinates limitation, in no outcome class, and complete false); "
+        "chains_ended counts the chains that stopped on the run's lineage before its last node; "
+        "lower_bound marks a run a switch entered into a label whose own lineage was live there, "
+        "its chains that start at the switch node left out (complete false, runs_lower_bound). "
+        "Assumed, not detectable from the index: one strand per record (no --fwd-and-reverse "
+        "build) and unique headers";
+    return c;
+}
+
 Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &release,
                                  const IndexIdentity *identity) {
     Json::Value c;
@@ -2176,8 +2371,8 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     // What the server offers beyond the base contract, monotonic: a client states a feature as
     // "feature_level >= n" (fields are only ever added; SPEC §10.3 lists each level). 2: attempts
     // (attempt_id/budget_id/locus_id, usage, POST /traverse/cancel, GET /traverse/attempt/{id},
-    // the enforced attempt bound) and the stop when the client is gone; 3: pass 5; 4:
-    // kTraverseFeatureLevel.
+    // the enforced attempt bound) and the stop when the client is gone; 3: pass 5; 4: the
+    // efficiency pass; 5: the review of pass 5; 6: record coordinates (kTraverseFeatureLevel).
     // In the probe and in every response, so that a client reading only responses states it too.
     c["feature_level"] = kTraverseFeatureLevel;
     c["k"] = uint_json(oracle.get_k());
@@ -4230,7 +4425,9 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
         // a limitation more also writes its K record (240 B of fields with its effect, its
         // limit and observed floats)
         const uint64_t k_record = kCopies * (240 + kEffect + 2 * wide) + kLine;
-        d.fixed += coordinate_fixed + (coordinates == CoordinatesOutput::BLOCK ? k_record : 0);
+        d.coordinate_fixed = coordinate_fixed
+                           + (coordinates == CoordinatesOutput::BLOCK ? k_record : 0);
+        d.fixed += d.coordinate_fixed;
         d.extra_limitation += k_record;
         // L <c|h> <column> <seq_id> <prefix_len> <suffix>: 38 B without the name
         d.label = record(40);
@@ -4271,6 +4468,7 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
         return d;
     }
     const bool segments = detail != "summary";
+    d.coordinate_fixed = coordinate_fixed;
     d.fixed = kDeflate + kEnvelopeJson + kLimitations * kLimitationJson + coordinate_fixed;
     // label_dict: element, object, 4 members, its kind; label_summary: element, object,
     // "label" and per arm a member with an object of 4 members and the runs list; a seed
@@ -5030,7 +5228,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     if (attempt) {
         attempt->set_bound(req.seeds.size(), req.strategy.time_budget_ms,
                            req.strategy.max_memory_bytes);
-        attempt->set_delivery_detail(req.detail, req.strategy.coordinates);
+        attempt->set_delivery_detail(req.detail);
     }
 
     LabelOracle oracle(anno_graph);
@@ -5132,13 +5330,13 @@ Json::Value process_traverse_request(const Json::Value &json,
         // poll that reads the clock and the client (the stop flag alone is read elsewhere)
         control.ms_left = [attempt]() { return attempt->ms_left(); };
         control.poll_now = [attempt]() { return attempt->poll(/* force */ true); };
-        // the walked seed's account, from which its output is estimated (the delivery reserve).
-        // Its recorded coordinates' part (|coordinates|, opt-in) is estimated with the walk's
-        // own ratio for now, which understates their text: an occurrence's account is ~43
-        // times its text, the rest of the output's 115-129 times (C3 splits it). The ratio an
-        // attempt with coordinates measures stays its own, out of the server's (set above)
-        control.progress = [attempt](uint64_t account, uint64_t /* coordinates */) {
-            attempt->progress(account);
+        // the walked seed's account, from which its output is estimated (the delivery reserve),
+        // with its record coordinates' share apart (opt-in; 0 without them): an occurrence's
+        // account is 20-73 times its text (872 bytes for 12-44), the rest of the output's
+        // 115-129, so the reserve prices that share at its own bound
+        // (kCoordinateAccountPerTextByte)
+        control.progress = [attempt](uint64_t account, uint64_t coordinates) {
+            attempt->progress(account, coordinates);
         };
     }
     DeliveryScope delivery(attempt);
@@ -5150,13 +5348,18 @@ Json::Value process_traverse_request(const Json::Value &json,
         ? std::function<void()>([attempt]() { attempt->check_delivery(); })
         : std::function<void()>();
     // |account|: the walk's final modelled account (0: no walk), whose ratio to the text the
-    // server measures for its next attempts' estimates
-    auto append = [&](Json::Value &&rj, double built_seconds, uint64_t account = 0) {
+    // server measures for its next attempts' estimates; |coordinates|: its record coordinates'
+    // share, which the ratio leaves out with the exact text it wrote (coordinates_text_bytes,
+    // counted before the tree is freed; plan revision 3)
+    auto append = [&](Json::Value &&rj, double built_seconds, uint64_t account = 0,
+                      uint64_t coordinates = 0) {
         if (!texts) {
             results.append(std::move(rj));
             return;
         }
         Timer written;
+        const uint64_t coordinate_text = attempt && account && req.strategy.coordinates
+                                       ? coordinates_text_bytes(rj, text_check) : 0;
         double gap = 0;
         texts->texts.push_back(json_text(rj, true, text_check, attempt ? &gap : nullptr));
         if (attempt)
@@ -5164,7 +5367,7 @@ Json::Value process_traverse_request(const Json::Value &json,
         rj = Json::Value();
         if (attempt) {
             attempt->note_delivered(texts->texts.back().size(), built_seconds + written.elapsed(),
-                                    account);
+                                    account, coordinates, coordinate_text);
         }
     };
     // a seed never started reads its annotation as one started would have
@@ -5315,7 +5518,7 @@ Json::Value process_traverse_request(const Json::Value &json,
             if (req.timing)
                 rj["timing"]["serialize_ms"] = seconds * 1000;
             const std::string outcome = rj["outcome"]["walks"].asString();
-            append(std::move(rj), seconds, meter.memory_final);
+            append(std::move(rj), seconds, meter.memory_final, meter.memory_coordinates);
             delivered(outcome);
         } catch (const SeedDerivationError &e) {
             // The permitted set could not be derived from THIS seed (nothing carries it

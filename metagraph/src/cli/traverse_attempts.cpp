@@ -260,8 +260,14 @@ double Attempt::reserve_ms() const {
     }
     const double compress_mbps = server_.compress_mbps > 0 ? server_.compress_mbps
                                                            : settings_.delivery_compress_mbps;
-    // the walked seed's text, estimated from its account
-    const double walking = std::ceil(static_cast<double>(walking_account_) / ratio_locked());
+    // the walked seed's text, estimated from its account: its record coordinates' share at
+    // their own bound (kCoordinateAccountPerTextByte), the rest at the ratio in use. Without
+    // coordinates the share is 0 and the estimate is the one before the split
+    const uint64_t coordinates = std::min(walking_coordinates_, walking_account_);
+    const double walking
+        = std::ceil(static_cast<double>(walking_account_ - coordinates) / ratio_locked())
+        + std::ceil(static_cast<double>(coordinates)
+                    / static_cast<double>(kCoordinateAccountPerTextByte));
     // MB/s are bytes per microsecond: x 1000 bytes per ms. With a margin for rates that vary
     // between responses, and the time the walk takes to end once its walk-until passed (it
     // stops at its next poll, then finalises the stopped seed), the configured one or the
@@ -291,11 +297,6 @@ double Attempt::own_account_per_text_byte() const {
     return own_ratio_;
 }
 
-double Attempt::pooled_account_per_text_byte() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return coordinates_ ? 0 : own_ratio_;
-}
-
 double Attempt::own_stop_ms() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return own_stop_ms_;
@@ -308,10 +309,9 @@ void Attempt::update_walk_until_locked() {
                                                         enforced() ? reserve_ms() : 0.0));
 }
 
-void Attempt::set_delivery_detail(const std::string &detail, bool coordinates) {
+void Attempt::set_delivery_detail(const std::string &detail) {
     std::lock_guard<std::mutex> lock(mutex_);
     detail_ = detail;
-    coordinates_ = coordinates;
     configured_ratio_ = detail == "graphlet" ? settings_.account_per_text_byte_graphlet
                                              : settings_.account_per_text_byte_json;
     auto it = server_.account_per_text_byte.find(detail);
@@ -319,26 +319,35 @@ void Attempt::set_delivery_detail(const std::string &detail, bool coordinates) {
     update_walk_until_locked();
 }
 
-void Attempt::progress(uint64_t account) {
+void Attempt::progress(uint64_t account, uint64_t coordinates) {
     std::lock_guard<std::mutex> lock(mutex_);
     walking_account_ = account;
+    walking_coordinates_ = coordinates;
     update_walk_until_locked();
 }
 
-void Attempt::note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account) {
+void Attempt::note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account,
+                             uint64_t coordinate_account, uint64_t coordinate_text) {
     std::lock_guard<std::mutex> lock(mutex_);
     delivered_bytes_ += text_bytes;
     walking_account_ = 0;
-    if (text_bytes >= kMeasuredTextBytes) {
-        if (build_seconds > 0) {
-            const double mbps = static_cast<double>(text_bytes) / build_seconds / 1e6;
-            measured_build_mbps_ = measured_build_mbps_ > 0 ? std::min(measured_build_mbps_, mbps)
-                                                            : mbps;
-        }
-        if (account) {
-            const double ratio = static_cast<double>(account) / static_cast<double>(text_bytes);
-            own_ratio_ = own_ratio_ > 0 ? std::min(own_ratio_, ratio) : ratio;
-        }
+    walking_coordinates_ = 0;
+    // the build rate over the whole text: the coordinates' is built like the rest
+    if (text_bytes >= kMeasuredTextBytes && build_seconds > 0) {
+        const double mbps = static_cast<double>(text_bytes) / build_seconds / 1e6;
+        measured_build_mbps_ = measured_build_mbps_ > 0 ? std::min(measured_build_mbps_, mbps)
+                                                        : mbps;
+    }
+    // The ratio of the rest of the output: the coordinate share's account and its exact text
+    // both left out, so that the sample is the one the same walk without coordinates gives
+    // (plan revision 3), and measured only on a rest of at least kMeasuredTextBytes (a seed
+    // whose text is mostly coordinates measures no ratio, like a small seed). Without
+    // coordinates both are 0: the sample is the one before the split
+    if (account > coordinate_account && text_bytes > coordinate_text
+            && text_bytes - coordinate_text >= kMeasuredTextBytes) {
+        const double ratio = static_cast<double>(account - coordinate_account)
+                           / static_cast<double>(text_bytes - coordinate_text);
+        own_ratio_ = own_ratio_ > 0 ? std::min(own_ratio_, ratio) : ratio;
     }
     update_walk_until_locked();
 }
@@ -1071,6 +1080,9 @@ Json::Value AttemptRegistry::capabilities_json() const {
     per["json"] = settings_.account_per_text_byte_json;
     per["graphlet"] = settings_.account_per_text_byte_graphlet;
     reserve["account_per_text_byte"] = std::move(per);
+    // the fixed bound the record coordinates' share is estimated with (feature level 6): a
+    // number, so that a ledger can reproduce the reserve
+    reserve["coordinate_account_per_text_byte"] = uint_value(kCoordinateAccountPerTextByte);
     reserve["measured_text_bytes"] = uint_value(kMeasuredTextBytes);
     const DeliveryMeasurements m = measured();
     reserve["measured_build_mbps"] = m.build_mbps > 0 ? Json::Value(m.build_mbps) : Json::Value();
@@ -1107,8 +1119,12 @@ Json::Value AttemptRegistry::capabilities_json() const {
     reserve["rule"] = "reserve_ms = margin x ((T + E) / (compress x 1000) + E / (build x 1000)) "
         "+ stop, rates in MB/s: T the exact bytes of the text of the seeds finished so far (each "
         "seed's result is written as text once built), E the text the seed being walked is "
-        "estimated to write (its modelled account, updated at every level's end, / the account "
-        "per text byte of the requested detail), stop the time from the walk-until to the "
+        "estimated to write: ceil((A - C) / the account per text byte of the requested detail) "
+        "+ ceil(C / coordinate_account_per_text_byte), A its modelled account and C the part of "
+        "it that is its record coordinates (output.coordinates: the block with its entries and "
+        "occurrences, or the null form; 0 without them), both updated at every level's end — "
+        "every byte of coordinate text costs at least coordinate_account_per_text_byte account "
+        "bytes, whatever its digits —, stop the time from the walk-until to the "
         "walk's end (the walk stops at its first poll after the walk-until, then finalises the "
         "stopped seed): stop_ms, or the longest this server measured over its last rate_window "
         "attempts that walked past their walk-until (measured_stop_ms) when longer. Each of "
@@ -1116,10 +1132,13 @@ Json::Value AttemptRegistry::capabilities_json() const {
         "build_mbps, account_per_text_byte) until this server has measured its own on responses "
         "and seeds of at least measured_text_bytes: then the slowest rate, and the smallest "
         "ratio for the detail, of its last rate_window measurements (the measured_* fields, as "
-        "of this document), and the attempt's own seeds' where those are more conservative. A "
-        "response is still not delivered (503) when it is built or compressed more slowly than "
-        "the rates used allow for with the margin, a seed writes more text than its account / "
-        "the ratio used, or the walk ends later after its walk-until than stop";
+        "of this document), and the attempt's own seeds' where those are more conservative; a "
+        "ratio is measured as (A - C) / (the seed's text - the text its record coordinates "
+        "wrote, counted exactly from digits and punctuation) on a rest of at least "
+        "measured_text_bytes, so that a request with coordinates measures what the same walk "
+        "without them would. A response is still not delivered (503) when it is built or "
+        "compressed more slowly than the rates used allow for with the margin, a seed writes "
+        "more text than its estimate, or the walk ends later after its walk-until than stop";
     att["delivery_reserve"] = std::move(reserve);
     att["not_after"] = "not_after_ms (Unix epoch ms, an integer in [0, 2^53 - 1], with or "
         "without attempt_id): a request whose not_after_ms is earlier than this server's clock "
