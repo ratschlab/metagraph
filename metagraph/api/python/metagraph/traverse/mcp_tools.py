@@ -146,6 +146,12 @@ _COORDS_IN_ROW = 4
 # reduce_budget are not set by the tool and pass as overrides did before)
 _CONTINUE_OWN = frozenset({'self', 'g', 'arm', 'leaves', 'reset_branches'})
 _LABELS_IN_ROW = 8
+# graphlet_compare's optional fields, in the order its page cuts them (fields_cut): the two
+# evidence blocks repeat what each handle's own answers state and grow with what the
+# retrievals record (two time-budgeted walks of one seed on refseq33m filled most of the
+# 2 KB default with them, and the page answered result_too_large); the export hint names a
+# tool. Everything else qualifies what equal or a difference means and is never cut
+_COMPARE_OPTIONAL = ('evidence', 'export')
 _WALKS_HINT = {
     'merge_entered': 'walks whose selected label is alive at the end only along its own '
                      'route through a merge (it joined the displayed walk through a '
@@ -304,6 +310,22 @@ class ToolError(Exception):
         return dict({'error': self.code, 'message': self.message}, **self.extra)
 
 
+def _cuts(fields, optional):
+    """|fields| as it is, then with its |optional| fields (those it has) dropped one more
+    at a time in that order, each such candidate naming what it lacks in fields_cut (last,
+    after the fields it keeps). The one rule by which an answer gives way under its
+    ceiling, shared by a receipt (_Receipt.fit) and a page's base (_page_cut), so that a
+    field is never left out without being named."""
+    out = dict(fields)
+    cut = []
+    yield dict(out)
+    for k in optional:
+        if k in out:
+            out.pop(k)
+            cut.append(k)
+            yield dict(out, fields_cut=list(cut))
+
+
 class _Receipt(dict):
     """The result of an operation that has changed something (a file written, a handle
     created): the caller must always learn its essential fields -- the file's path or the
@@ -327,15 +349,11 @@ class _Receipt(dict):
         return out
 
     def fit(self, limit):
-        out = dict(self)
-        cut = []
-        for k in self.optional:
-            if _size(dict(out, fields_cut=cut) if cut else out) <= limit:
+        # the first candidate that fits; with every optional field cut it is answered
+        # even over the ceiling (_check_receipt made sure it fits before the operation ran)
+        for out in _cuts(self, self.optional):
+            if _size(out) <= limit:
                 break
-            out.pop(k)
-            cut.append(k)
-        if cut:
-            out['fields_cut'] = cut
         return out
 
 
@@ -1034,6 +1052,44 @@ class GraphletTools:
             out['next_cursor'] = self._cursor(tool, handle, args, 0, partial,
                                               before + len(rows))
         return out
+
+    def _page_cut(self, tool, handle, args, rows, base, optional, max_bytes=None):
+        """_page() whose |base| gives way before its rows do: its |optional| fields are cut
+        in that order (_cuts, named in fields_cut) only as far as THIS page needs to carry
+        its first row whole. _page() fits rows to what the base leaves, so a base that
+        fills the ceiling left no room for a row: the row was cut to nothing or the page
+        answered result_too_large, although the base held fields that can be cut.
+
+          * the page with the whole base, when it fits and its first row is whole (or it
+            has no row to carry), is answered as it was -- byte for byte;
+          * else the first cut with which the page fits and carries its first row whole;
+          * else (a row larger than the page whatever is cut) the least cut with which
+            the page fits, its row cut and named as before (row_truncated);
+          * else the page with the whole base, which the wrapper refuses as before
+            (result_too_large): nothing is cut where cutting cannot make it fit.
+
+        Each page, a resumed one too, decides for itself by this rule and names its own
+        cut (the cursor binds the arguments, not max_bytes, so a page cannot assume an
+        earlier page's cut): the pages of one listing can differ in fields_cut. A page's
+        rows depend on the cut only through the room it leaves, so paging a listing still
+        yields its rows exactly once, in order."""
+        limit = _opt_int('max_bytes', max_bytes, 1) or self.max_bytes
+        if _CALL.get() is not None:
+            limit -= _LOCAL_RESERVE           # what _page keeps for the local block
+        start = self._offset(tool, handle, args, args.get('cursor'))
+        fitting = None
+        first = None
+        for cand in _cuts(base, optional):
+            page = self._page(tool, handle, args, rows, cand, max_bytes, start=start)
+            if first is None:
+                first = page
+            if _size(page) > limit:
+                continue
+            if 'row_truncated' not in page:
+                return page
+            if fitting is None:
+                fitting = page
+        return fitting if fitting is not None else first
 
     def _fit_summary(self, g, frame, side=None, max_bytes=None):
         """g.summary() sized so that |frame| with the summary in it stays <= max_bytes
@@ -2236,7 +2292,10 @@ class GraphletTools:
         without local limits it runs with no work or allocation budget (its cost follows
         both DAGs up to the depth). Under local limits (stage L) a comparison its budget
         stops answers comparable "unknown", equal null, counts null and no rows -- never
-        a difference from a half-keyed side -- with local.stop."""
+        a difference from a half-keyed side -- with local.stop. A page whose base would
+        leave no room for its first whole row cuts the two evidence blocks, then the export
+        hint (_COMPARE_OPTIONAL, named in fields_cut); what qualifies the comparison is
+        never cut, and a base that fits is answered as before."""
         ga, va = self._resolve(a)
         gb, vb = self._resolve(b)
         self._no_view(va, 'graphlet_compare', a)
@@ -2270,9 +2329,25 @@ class GraphletTools:
                 call.stop = dict(cmp.local_stop)
             base['counts'] = None
             base['rows'] = []
+            # no page, so the same cut is made here: the least with which the answer fits
+            # beside the local block that states the stop; none fitting, the whole answer,
+            # refused by the wrapper as before. Measured beside the local block's smallest
+            # form, the one _finish_local falls back to: an answer that fitted before keeps
+            # its evidence (the wrapper compacts its local block instead). The evidence is
+            # measured as it will be answered: marked interrupted now, as _finish_local
+            # marks it (again, the same)
+            limit = _opt_int('max_bytes', max_bytes, 1) or self.max_bytes
+            local = None
+            if call is not None:
+                _mark_interrupted(base, call.stop)
+                local = _local_block(call, 2)
+            for out in _cuts(base, _COMPARE_OPTIONAL):
+                if _size(out if local is None else dict(out, local=local)) <= limit:
+                    return out
             return base
         args = dict(b=b, arm=arm, mode=mode, cursor=cursor)
-        return self._page('graphlet_compare', a, args, rows, base, max_bytes)
+        return self._page_cut('graphlet_compare', a, args, rows, base, _COMPARE_OPTIONAL,
+                              max_bytes)
 
     @_tool
     def graphlet_subtrie(self, handle, labels, arm=None, mode='any', budget=None):

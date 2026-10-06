@@ -2126,6 +2126,16 @@ The contract:
   not fit is refused before it stores or writes anything (``receipt_too_large``, whose
   message names the lever the tool offers: a larger ``max_bytes``, or a shorter file name
   for an export or a save);
+* ``graphlet_compare``'s page gives way in its base before its rows: when the base would
+  leave no room for the page's first whole row, its two ``evidence`` blocks are cut, then
+  the ``export`` hint, and named in ``fields_cut`` (each page decides for itself; a
+  resumed page names its own cut). What qualifies the comparison (``comparable``,
+  ``equal``, ``reason``, ``depth_used``, ``counts``, ``notes``, ``support``, ``scopes``)
+  is never cut; a page whose base fits is answered as it was, and one that cannot fit even
+  so is still ``result_too_large``. Two time-budgeted walks of one seed filled the 2 KB
+  default with their evidence alone; the evidence of each handle is in its own answers
+  (``graphlet_summary``). A comparison its local budget stops makes the same cut where
+  its answer would not fit even with the ``local`` block in its compact form;
 * ``max_bytes`` bounds the bytes returned, not the work. Without ``local_limits`` (the
   default) the local tools (``graphlet_compare``, ``graphlet_export``, the route
   listings) run with no work or allocation budget, and their time and peak memory follow
