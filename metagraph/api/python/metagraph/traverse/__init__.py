@@ -5,6 +5,8 @@ the graphlet, MGT v1 (docs/DESIGN-traverse-graphlet.md §2) -- embedded in a sma
 summary (`strategy.output.detail: "graphlet"`). This package parses it and answers the
 follow-up questions an agent asks about one retrieval locally: walks, claims, label
 routes, support profiles, comparisons, FASTA/GFA, continuations and the next request.
+A retrieval made with strategy.output.coordinates (feature level 6) also says where each
+run's bases lie in the indexed records (Graphlet.coordinates, coords.py).
 Nothing here reads the graph; deepening is a new backend traversal that the library
 prepares (next_request) and the client runs.
 
@@ -25,10 +27,12 @@ default -- nothing is budgeted and every answer is what it always was.
 
 from ._codec import CodecError, GraphletFormatError, UNLIMITED
 from .model import (
-    AmbiguousLabel, Arm, BadSelector, Change, Claim, Comparison, Continuation, Graphlet,
-    IncompatibleContinuations, IncompleteRecording, Label, LabelWalk, MissingEnvelope,
-    NextRequest, Segment, Run, SupportRun, UnknownLabel, Walk,
+    AmbiguousLabel, Arm, BadSelector, Change, Claim, Comparison, Continuation, CoordClaim,
+    CoordLabelWalk, CoordWalk, Graphlet, IncompatibleContinuations, IncompleteRecording,
+    Label, LabelWalk, MissingEnvelope, NextRequest, Segment, Run, SupportRun, UnknownLabel,
+    Walk,
 )
+from .coords import Coordinates, RunCoordinates, SeedOccurrences
 from .parser import (FORMAT_VERSION, dump, from_response, is_canonical, load, parse, save,
                      seed_envelope, standalone_text)
 from .ops import GraphletView
@@ -45,6 +49,8 @@ __all__ = [
     'standalone_text', 'seed_envelope',
     'Graphlet', 'GraphletView', 'Label', 'Arm', 'Segment', 'Run', 'Walk', 'Claim',
     'LabelWalk', 'SupportRun', 'Change', 'Continuation', 'NextRequest', 'Comparison',
+    'CoordClaim', 'CoordWalk', 'CoordLabelWalk', 'Coordinates', 'RunCoordinates',
+    'SeedOccurrences',
     'GraphletFormatError', 'CodecError', 'MissingEnvelope', 'AmbiguousLabel',
     'UnknownLabel', 'BadSelector', 'IncompleteRecording', 'IncompatibleContinuations',
     'UNLIMITED',

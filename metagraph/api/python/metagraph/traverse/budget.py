@@ -88,6 +88,10 @@ ID_SHIFT_C = 5         # label ids in a C set or array operation: 1 lwu per 32
 ID_SHIFT_PARSE = 1     # label ids decoded during a parse: 1 lwu per 2
 BASE_SHIFT = 9         # bases spelled or copied: 1 lwu per 512
 TEXT_SHIFT = 4         # text written (JSON, sizes measured): 1 lwu per 16 bytes
+# an occurrence of record coordinates validated, clipped or written (feature level 6). No
+# input of an earlier level has one, so adding the weight moves no existing stop point:
+# WORK_MODEL stays 1
+W_COORD = 2
 
 # ------------------------------------------------------------------ the size model
 # CPython sizes, the larger of 3.10-3.14 where they differ (an ASCII str's header is 49

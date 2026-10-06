@@ -206,7 +206,8 @@ class TestTools(ToolsCase):
     def test_walk_support_labels_splits_claims(self):
         h = self.fetch(SEED['merge'])['handle']
         w = self.tools.graphlet_walk(h, 'right', 0, max_bytes=4096)
-        self.assertEqual([0, 1, 3, 4, 6], [r['segment'] for r in w['rows']])
+        # the displayed walk passes each merge through its majority parent (R21 (4))
+        self.assertEqual([0, 1, 3, 5, 6], [r['segment'] for r in w['rows']])
         self.assertEqual({'length_bp': 38, 'loss_used': 0.0, 'labels': 4}, w['continuation'])
         s = self.tools.graphlet_support(h, 'right', 0, max_bytes=4096)
         self.assertEqual(['split', 'merge', 'split', 'merge'],
@@ -218,7 +219,8 @@ class TestTools(ToolsCase):
         sp = self.tools.graphlet_splits(h, 'right', max_bytes=4096)
         self.assertEqual(['ambiguous', 'ambiguous'], [r['kind'] for r in sp['rows']])
         cl = self.tools.graphlet_claims(h, 'right', max_bytes=4096)
-        self.assertEqual({'c:0', 'c:3'}, {r['label']['ref'] for r in cl['rows']})
+        # route-consistent with the displayed walk: c.fa and both.fa's kept run
+        self.assertEqual({'c:2', 'c:3'}, {r['label']['ref'] for r in cl['rows']})
         cl = self.tools.graphlet_claims(h, 'right', route_consistent=False, max_bytes=4096)
         self.assertEqual(6, cl['total'])
         for out in (w, s, lab, one, sp, cl):
@@ -418,7 +420,9 @@ class TestReviewFindings(ToolsCase):
         h = self.handle('merge')
         rows = self.tools.graphlet_labels(h, arm='right', name={'ref': 'c:3'},
                                           max_bytes=8192)['rows']
-        self.assertEqual([(100, [0, 1, 3, 4, 6]), (36, [0, 2]), (62, [0, 1, 3, 5])],
+        # both.fa's runs in run order: closed at 62 on the minority's C allele, closed at
+        # 36 on the T allele, and kept through the first parents (R21 (4))
+        self.assertEqual([(62, [0, 1, 3, 4]), (36, [0, 2]), (100, [0, 1, 3, 5, 6])],
                          [(r['to_bp'], r['route']) for r in rows])
 
     def test_a_derived_handle_answers_for_its_view(self):

@@ -21,6 +21,13 @@ USAGE
   bench_traverse.py --compare OUT_BEFORE/results.json OUT_AFTER/results.json
   # rebuild results.json + summary.md from a run's raw/ (after changing the analysis)
   bench_traverse.py --reanalyze OUT_DIR
+  # record coordinates (feature level 6): the trace walks ask for them (cap 16, or --coordinate-cap)
+  bench_traverse.py ... --label level6-coords --coordinates
+  # then: elapsed with vs without them on the same windows (the walks' content is the same, so the
+  # pairs compare as identical completed work), and the block's size per seed
+  bench_traverse.py --compare OUT_OPTOUT/results.json OUT_COORDS/results.json
+  # offline (no server): the block size a run's trace walks WOULD carry, from its recorded responses
+  bench_traverse.py --coordinates-estimate OUT_DIR [OUT_DIR ...]
 
 THE REQUEST SET (fixed; ids are stable across runs, PLAN_VERSION changes when it does)
   caps      GET /traverse/capabilities (every run starts with it: limits, feature_level).
@@ -48,6 +55,9 @@ THE REQUEST SET (fixed; ids are stable across runs, PLAN_VERSION changes when it
             seed's graphlet must equal walks.<seed>.named (body without the H line, which holds the seed index).
   smoke     (not in "all") caps + one explicit /resolve + one named walk r100 on the smoke seed's own window
             (offset + suites.smoke.delta, away from every measured window): 3 requests.
+  --coordinates  every support-trace walk also sets output.coordinates true (and
+            max_coordinate_occurrences, default 16: --coordinate-cap N | unlimited); the request ids stay the
+            same, so --compare pairs a run with an opt-out run of the same windows (see COMPARE).
   On the refseq33m panel "all" is 54 requests. The order puts the fresh-window suites (budgets, walks) first;
   callsize / resolve / annotate / lookahead / batch run on windows the walks already read (warm by design;
   run alone, their *_first request is the first touch).
@@ -95,7 +105,11 @@ OUTPUT (--out DIR, default bench_out/<label>_<timestamp>)
                              stored_rows_read, peak_cache_bytes (timing.path_cache.peak_bytes); None on a server that
                              reports none, 0 when a server that reports timing.seed_phase_ms omits the object (it is
                              omitted when all its counters are 0)
-  summary.md     tables by suite, the invariant checks, certified reach and consumed work per seed, all requests
+                 coordinates   (a request with output.coordinates) the block's kind, compact JSON bytes and its
+                               share of the seed result, entries (seed labels, runs), occurrences, lists cut,
+                               lower-bound runs, the largest list, complete; or the null reason
+  summary.md     tables by suite, the invariant checks, certified reach and consumed work per seed, record
+                 coordinates (when asked for), all requests
   raw/NNN_<id>.json.gz   {meta, request, response} per request
   progress.jsonl one line per request as it completes
 
@@ -112,6 +126,10 @@ COMPARE (--compare A B; exit code 1 when a deterministic result changed)
                       bp B/A, steps, complete walks / leaves, the stop) and CONSUMED WORK (work units where the
                       server reports them, else the annotation rows requested; B/A only in one unit).
     not compared      an HTTP error on a side, a failed seed outside a deadline, a request that differs.
+  A pair whose requests differ only in output.coordinates / max_coordinate_occurrences (a --coordinates run
+  against an opt-out one) is the same request: its walks are the same (the MGT body differs at most by the
+  coordinates limitation's K record, which walks_sha leaves out), so its latency is the cost of the
+  coordinates; a "record coordinates" table then lists the block bytes and share per pair.
   Both tables also show the physical path-cache reuse and peak cache bytes (A and B) where the servers report
   them. Per suite: the geometric mean of B/A latency over the identical completed pairs (< 1 = B faster) and of
   B/A certified bp over the deadline-limited pairs (> 1 = B reached further), how many reached further / the
@@ -126,6 +144,15 @@ RESULT IDENTITY
   limitations changed). /resolve: the response without timing / capabilities / release. A seed result is
   deterministic when no time budget stopped it (no bounds.time_budget_ms limitation, no time_budget cap
   trigger, no time resource stop); only deterministic results are expected to repeat byte-identically.
+
+COORDINATES ESTIMATE (--coordinates-estimate RUN_DIR ...; offline, no server)
+  For every support-trace seed result recorded in the runs' raw/ responses (a run without --coordinates), the
+  coordinates block it would carry, built as the server writes it (keys sorted, compact JSON): one entry per
+  seed label and one per run of each arm (the R records), each with ONE occurrence whose positions have
+  --coordinate-digits digits (default 7: positions within a bacterial record; a column label's global positions
+  have more). Occurrences per entry are not in an opt-out response, so the estimate is a LOWER bound where a
+  record holds the walked sequence several times (rRNA operons, insertion sequences). Prints a table and writes
+  coordinates_estimate.json beside each run's results.json.
 
 COMPATIBILITY
   Works with servers without feature_level / attempts (8a98759a) and with newer ones (0a880475+): every field
@@ -159,8 +186,12 @@ try:
 except ImportError:  # pragma: no cover (non-POSIX)
     fcntl = None
 
-SCRIPT_VERSION = 2
+# 3: record coordinates (--coordinates, the per-seed coordinates facts, --coordinates-estimate); a
+# results.json of version 2 is read as it is (no coordinates facts)
+SCRIPT_VERSION = 3
 PLAN_VERSION = 1
+# the coordinates block of a trace walk with --coordinates (None: opt-out, the requests as they were)
+COORDINATES_CAP_DEFAULT = 16
 ALL_SUITES = ['caps', 'budgets', 'walks', 'callsize', 'resolve', 'annotate', 'lookahead', 'batch']
 EXTRA_SUITES = ['smoke']
 WALK_BUDGET_MS = 5000
@@ -343,10 +374,12 @@ def strategy(mode, radius, budget_ms, batch_kmers=DEFAULT_BATCH_KMERS, mlp=None,
 
 
 class Planner:
-    def __init__(self, panel, K):
+    def __init__(self, panel, K, coordinates=None):
         self.p = panel
         self.K = K
         self.reqs = []
+        # --coordinates: the cap (an int or "unlimited") every support-trace walk asks for; None: none asked
+        self.coordinates = coordinates
 
     def add(self, rid, suite, route, body=None, method='POST', windows=(), params=None):
         self.reqs.append({'id': rid, 'suite': suite, 'route': route, 'method': method, 'body': body,
@@ -370,6 +403,11 @@ class Planner:
         body = {'seeds': seeds, 'strategy': strategy(mode, radius, budget_ms, batch_kmers, mlp, mlpn)}
         params = {'mode': mode, 'radius': radius, 'budget_ms': budget_ms, 'batch_kmers': batch_kmers,
                   'seeds': [w['seed'] for w in windows]}
+        if mode == 'trace' and self.coordinates is not None:
+            # record coordinates are reported under support trace only: the other walks stay opt-out
+            body['strategy']['output'].update(coordinates=True,
+                                              max_coordinate_occurrences=self.coordinates)
+            params['coordinates'] = self.coordinates
         if labels is not None:
             params['labels'] = labels
         if mlp is not None:
@@ -658,7 +696,10 @@ class Runner:
                 'wall_ms': wall * 1000.0, 'headers_ms': None if t_hdr is None else t_hdr * 1000.0,
                 'http': code, 'error': err, 'content_encoding': enc, 'bytes_wire': len(wire),
                 'bytes_json': len(text), 'request_bytes': len(body) if body else 0,
-                'request_sha': sha(req['body']) if req['body'] is not None else None, 'base': self.base}
+                'request_sha': sha(req['body']) if req['body'] is not None else None,
+                'request_sha_nocoords': (sha(without_coordinates(req['body']))
+                                         if req['body'] is not None else None),
+                'base': self.base}
         fname = '%03d_%s.json.gz' % (n, re.sub(r'[^A-Za-z0-9._-]+', '_', req['id']))
         with gzip.open(os.path.join(self.raw, fname), 'wt') as f:
             json.dump({'meta': meta, 'request': req['body'], 'response': resp}, f)
@@ -699,6 +740,126 @@ class Runner:
                 print('     a request took over 60 s: pausing 60 s', flush=True)
                 time.sleep(60)
         return stop
+
+
+# ============================================================================ record coordinates
+
+def without_coordinates(body):
+    """|body| without strategy.output.coordinates / max_coordinate_occurrences (a copy): the identity of a
+    request apart from the coordinates it asks for, so that a --coordinates run pairs with an opt-out one."""
+    if not isinstance(body, dict) or not isinstance((body.get('strategy') or {}).get('output'), dict):
+        return body
+    out = json.loads(json.dumps(body))
+    o = out['strategy']['output']
+    o.pop('coordinates', None)
+    o.pop('max_coordinate_occurrences', None)
+    return out
+
+
+def coordinates_facts(res):
+    """What a seed result's coordinates field says (None when the request asked for none): the block's kind, its
+    compact JSON bytes and share of the result, entries, occurrences, lists cut, lower-bound runs, the largest
+    list, complete; or the null reason."""
+    if 'coordinates' not in res:
+        return None
+    c = res['coordinates']
+    if not isinstance(c, dict):
+        return {'present': False, 'reason': res.get('coordinates_reason')}
+    block = len(json.dumps(c, separators=(',', ':'), sort_keys=True).encode('utf-8'))
+    whole = len(json.dumps(res, separators=(',', ':'), sort_keys=True).encode('utf-8'))
+    seed = c.get('seed') or []
+    runs = [e for es in (c.get('arms') or {}).values() for e in es]
+    lists = seed + runs
+    totals = [e.get('occurrences_total', len(e.get('occurrences') or [])) for e in lists]
+    return {'present': True, 'kind': c.get('kind'), 'max_occurrences': c.get('max_occurrences'),
+            'complete': c.get('complete'), 'block_bytes': block, 'share': div(block, whole),
+            'seed_entries': len(seed), 'runs': len(runs),
+            'occurrences': sum(len(e.get('occurrences') or []) for e in lists),
+            'occurrences_total': sum(totals), 'max_list': max(totals, default=0),
+            'lists_cut': sum(1 for e in lists if 'occurrences_total' in e),
+            'runs_lower_bound': c.get('runs_lower_bound', 0),
+            'runs_chains_ended': sum(1 for e in runs if e.get('chains_ended'))}
+
+
+def estimate_block(res, digits=7):
+    """The coordinates block a support-trace seed result without one would carry, built as the server writes it
+    (keys sorted, compact JSON) with ONE occurrence per entry whose positions have |digits| digits: (block, its
+    compact bytes, the result's compact bytes). Counts are exact (an entry per seed label, one per R record of
+    each arm); the occurrences per entry are not in an opt-out response (a lower bound where a record repeats the
+    walked sequence)."""
+    body = res.get('graphlet') or ''
+    k = None
+    nsl = (res.get('seed') or {}).get('num_seed_labels') or 0
+    seed_bp = (res.get('seed') or {}).get('length_bp') or 0
+    arms = {}
+    kinds = set()
+    for line in body.split('\n'):
+        f = line.split(' ')
+        if f[0] == 'H' and len(f) > 3:
+            k = int(f[3])
+        elif f[0] == 'L' and len(f) > 1:
+            kinds.add(f[1])
+        elif f[0] == 'A' and len(f) > 1:
+            cur = arms.setdefault({'l': 'left', 'r': 'right'}[f[1]], [])
+        elif f[0] == 'R' and len(f) > 5 and arms:
+            # R <segment> <label> <from_bp> <to_bp> <end> ... (the run's own interval is enough here)
+            try:
+                a, b = int(f[3]), int(f[4])
+            except ValueError:
+                a, b = 0, 0
+            cur.append((len(cur), int(f[2]) if f[2].isdigit() else 0, a, b))
+    pos = 10 ** (digits - 1)
+    block = {'complete': True, 'k': k or 31, 'max_occurrences': COORDINATES_CAP_DEFAULT,
+             'kind': 'mixed' if len(kinds) > 1 else 'record' if kinds == {'h'} else 'column',
+             'seed': [{'label': i, 'occurrences': [[pos, pos + seed_bp]]} for i in range(nsl)],
+             'arms': {side: [{'from_bp': a, 'label': lab, 'occurrences': [[pos, pos + b - a]], 'run': i,
+                              'to_bp': b} for i, lab, a, b in runs] for side, runs in arms.items()}}
+    nb = len(json.dumps(block, separators=(',', ':'), sort_keys=True).encode('utf-8'))
+    whole = len(json.dumps(res, separators=(',', ':'), sort_keys=True).encode('utf-8'))
+    return block, nb, whole
+
+
+def coordinates_estimate(run_dirs, digits=7, out=print):
+    """--coordinates-estimate: the table over every support-trace seed result in the runs' raw responses."""
+    rows = []
+    for d in run_dirs:
+        found = []
+        for p in sorted(glob.glob(os.path.join(d, 'raw', '[0-9]*.json.gz'))):
+            with gzip.open(p, 'rt') as f:
+                e = json.load(f)
+            req, resp = e.get('request') or {}, e.get('response') or {}
+            st = (req.get('strategy') or {}) if isinstance(req, dict) else {}
+            if st.get('support') != 'trace' or not isinstance(resp, dict):
+                continue
+            for i, r in enumerate(resp.get('results') or []):
+                if not isinstance(r.get('graphlet'), str):
+                    continue
+                block, nb, whole = estimate_block(r, digits)
+                n_runs = sum(len(v) for v in block['arms'].values())
+                row = {'run': os.path.basename(os.path.normpath(d)), 'id': e['meta']['id'], 'result': i,
+                       'kind': block['kind'], 'seed_labels': len(block['seed']), 'runs': n_runs,
+                       'block_bytes_at_least': nb, 'result_bytes': whole,
+                       'share_at_least': div(nb, whole + nb),
+                       'graphlet_bytes': len(r['graphlet'].encode('utf-8')),
+                       'elapsed_ms': _num((r.get('timing') or {}).get('elapsed_ms'))}
+                found.append(row)
+                rows.append(row)
+        if found and os.path.isdir(d):
+            write_json_atomic(os.path.join(d, 'coordinates_estimate.json'),
+                              {'format': 'metagraph-bench-coordinates-estimate', 'version': SCRIPT_VERSION,
+                               'digits': digits, 'rows': found})
+    out('coordinates block estimate (one occurrence per entry, %d-digit positions; a lower bound):' % digits)
+    out(md_table(['run', 'id', 'kind', 'seed labels', 'runs', 'block B >=', 'result B', 'share >=',
+                  'graphlet B', 'elapsed ms'],
+                 [[r['run'], '%s#%d' % (r['id'], r['result']), r['kind'], r['seed_labels'], r['runs'],
+                   r['block_bytes_at_least'], r['result_bytes'], fmt(r['share_at_least'], 3),
+                   r['graphlet_bytes'], fmt(r['elapsed_ms'])] for r in rows]))
+    if rows:
+        xs = [r['block_bytes_at_least'] for r in rows]
+        out('\n%d trace seed results: block >= %s B median (%s .. %s), share >= %s median'
+            % (len(rows), fmt(statistics.median(xs), 0), min(xs), max(xs),
+               fmt(statistics.median([r['share_at_least'] for r in rows]), 3)))
+    return rows
 
 
 # ============================================================================ analysis of one request
@@ -789,6 +950,9 @@ def analyze_seed_result(res, budget_ms, window, n_seeds, top_elapsed, usage_work
         body = {k: v for k, v in res.items() if k != 'timing'}
         out['result_sha'] = sha(body)
     out['deterministic'] = not tb and not res.get('error')
+    coords = coordinates_facts(res)
+    if coords is not None:
+        out['coordinates'] = coords
     # derived
     el = timing.get('elapsed_ms')
     if el is None and top_elapsed is not None:
@@ -893,7 +1057,8 @@ def reach_and_work(s, usage_work=None):
 def analyze(meta, request, resp):
     rec = {k: meta.get(k) for k in ('n', 'id', 'suite', 'route', 'method', 'params', 'windows', 'started_at',
                                     'wall_ms', 'headers_ms', 'http', 'error', 'content_encoding', 'bytes_wire',
-                                    'bytes_json', 'request_bytes', 'request_sha', 'raw_file')}
+                                    'bytes_json', 'request_bytes', 'request_sha', 'request_sha_nocoords',
+                                    'raw_file')}
     if not isinstance(resp, dict):
         return rec
     caps = resp if meta['route'] == '/traverse/capabilities' else (resp.get('capabilities') or {})
@@ -1344,6 +1509,26 @@ def summary_md(results):
                          fmt(z.get('ms_per_kmer'), 2) + (' /kmer' if z else ''), '-', '-', '-',
                          (rec.get('error_body') or rec.get('error') or '')[:40] or '-',
                          '%s/%s' % (rec.get('bytes_wire'), rec.get('bytes_json'))])
+    crow = []
+    for rid, rec in R.items():
+        for i, s in enumerate(rec.get('results') or []):
+            c = s.get('coordinates')
+            if not c:
+                continue
+            name = rec['id'] + ('#%d' % i if len(rec.get('results') or []) > 1 else '')
+            if not c.get('present'):
+                crow.append([name, '-', 'null: %s' % c.get('reason'), '-', '-', '-', '-', '-', '-', '-', '-'])
+                continue
+            crow.append([name, c['kind'], c['block_bytes'], fmt(c['share'], 3), c['seed_entries'], c['runs'],
+                         '%s/%s' % (c['occurrences'], c['occurrences_total']), c['max_list'], c['lists_cut'],
+                         c['runs_lower_bound'], c['complete']])
+    if crow:
+        L.append('## record coordinates\n')
+        L.append('block = the compact JSON bytes of the coordinates block; share = of the seed result; '
+                 'occurrences listed / true; max = the largest true count of a list.\n')
+        L.append(md_table(['id', 'kind', 'block B', 'share', 'seed entries', 'runs', 'occurrences', 'max',
+                           'lists cut', 'lower-bound runs', 'complete'], crow))
+        L.append('')
     L.append('## all requests\n')
     L.append('bp = complete_to_bp per arm (certified); reach = the longest walk per arm (counts.max_bp).\n')
     L.append(md_table(['n', 'id', 'http', 'wall ms', 'server ms', 'fetch ms', 'rows', 'ms/row', 'bp L+R',
@@ -1446,11 +1631,21 @@ def _logical_diff(la, lb):
     return '; '.join(diff) if diff else 'same'
 
 
+def same_request(ra, rb):
+    """The same request, or the same apart from the record coordinates it asks for (a --coordinates run
+    against an opt-out one: the same walks, so the pair measures what the coordinates cost). A record of an
+    older run has no request_sha_nocoords: its request_sha stands for it (it asked for no coordinates)."""
+    if ra.get('request_sha') == rb.get('request_sha'):
+        return True
+    return (ra.get('request_sha_nocoords') or ra.get('request_sha')) == \
+        (rb.get('request_sha_nocoords') or rb.get('request_sha'))
+
+
 def _pair_class(ra, sa, rb, sb, xa, xb):
     """completed (both ran to their end: latency is comparable on identical completed work), deadline (a time
     budget, deadline or resource budget stopped either: compare certified reach and consumed work), or other
     (an HTTP error on a side, a failed seed, a request that differs)."""
-    if ra.get('http') != 200 or rb.get('http') != 200 or ra.get('request_sha') != rb.get('request_sha'):
+    if ra.get('http') != 200 or rb.get('http') != 200 or not same_request(ra, rb):
         return 'other'
     if sa is None and sb is None:
         return 'completed'          # /resolve: no budget stops it
@@ -1497,7 +1692,7 @@ def compare(path_a, path_b):
         xa, xb = metrics(ra, sa), metrics(rb, sb)
         if ra.get('http') != 200 or rb.get('http') != 200:
             verdict = 'http %s/%s' % (ra.get('http'), rb.get('http'))
-        elif ra.get('request_sha') != rb.get('request_sha'):
+        elif not same_request(ra, rb):
             verdict = 'request differs'
         elif sa is not None or sb is not None:
             verdict, _ = same_result(sa, sb)
@@ -1546,6 +1741,32 @@ def compare(path_a, path_b):
                                verdict])
     only_a = [k for k in ka if k not in kb]
     only_b = [k for k in kb if k not in ka]
+    coord_rows = []
+    for key in [k for k in ka if k in kb]:
+        (ra, sa), (rb, sb) = ka[key], kb[key]
+        ca, cb = (sa or {}).get('coordinates'), (sb or {}).get('coordinates')
+        if not ca and not cb:
+            continue
+        xa, xb = metrics(ra, sa), metrics(rb, sb)
+
+        def cell(c, f, nd=None):
+            if not c:
+                return '-'
+            if not c.get('present'):
+                return 'null' if f == 'block_bytes' else '-'
+            return fmt(c.get(f), nd) if nd is not None else c.get(f)
+        coord_rows.append([key, cell(ca, 'block_bytes'), cell(cb, 'block_bytes'), cell(ca, 'share', 3),
+                           cell(cb, 'share', 3), cell(ca, 'occurrences'), cell(cb, 'occurrences'),
+                           cell(ca, 'lists_cut'), cell(cb, 'lists_cut'), fmt(xa['elapsed']),
+                           fmt(xb['elapsed']), fmt(div(xb['elapsed'], xa['elapsed']), 2)])
+    if coord_rows:
+        L.append('## record coordinates\n')
+        L.append('block = the coordinates block\'s compact JSON bytes ("-": not asked for, "null": asked for, '
+                 'none reported); share = of the seed result; elapsed B/A is the cost of the coordinates where '
+                 'only B asked for them (the same walks: see the completed table).\n')
+        L.append(md_table(['id', 'A block B', 'B block B', 'A share', 'B share', 'A occurrences',
+                           'B occurrences', 'A cut', 'B cut', 'A ms', 'B ms', 'B/A'], coord_rows))
+        L.append('')
     L.append('Per suite. Latency: geometric mean of B/A elapsed over the completed pairs with identical work '
              '(< 1 = B faster; "excluded": completed pairs whose result or logical work differ). Reach: geometric '
              'mean of B/A certified bp over the deadline-limited pairs (> 1 = B reached further; pairs at 0 bp '
@@ -1655,6 +1876,15 @@ def main(argv=None):
     ap.add_argument('--compare-out', help='also write the comparison markdown here')
     ap.add_argument('--reanalyze', metavar='RUN_DIR', help='rebuild results.json + summary.md from RUN_DIR/raw')
     ap.add_argument('--help-long', action='store_true', help='print the full documentation')
+    ap.add_argument('--coordinates', action='store_true',
+                    help='support-trace walks ask for record coordinates (feature level 6)')
+    ap.add_argument('--coordinate-cap', default=str(COORDINATES_CAP_DEFAULT),
+                    help='with --coordinates: max_coordinate_occurrences, an int >= 1 or "unlimited" '
+                         '(default %d)' % COORDINATES_CAP_DEFAULT)
+    ap.add_argument('--coordinates-estimate', nargs='+', metavar='RUN_DIR',
+                    help='offline: the coordinates block size the runs\' recorded trace walks would carry')
+    ap.add_argument('--coordinate-digits', type=int, default=7,
+                    help='with --coordinates-estimate: digits per position (default 7)')
     args = ap.parse_args(argv)
 
     if args.help_long:
@@ -1670,6 +1900,19 @@ def main(argv=None):
     if args.reanalyze:
         reanalyze(args.reanalyze)
         return 0
+    if args.coordinates_estimate:
+        coordinates_estimate(args.coordinates_estimate, args.coordinate_digits)
+        return 0
+    cap = None
+    if args.coordinates:
+        cap = args.coordinate_cap
+        if cap != 'unlimited':
+            try:
+                cap = int(cap)
+            except ValueError:
+                ap.error('--coordinate-cap is an integer >= 1 or "unlimited"')
+            if cap < 1:
+                ap.error('--coordinate-cap is an integer >= 1 or "unlimited"')
     if not args.base and not args.dry_run:
         ap.error('--base is required (except with --dry-run, --compare, --reanalyze)')
 
@@ -1680,7 +1923,7 @@ def main(argv=None):
         K, overlaps, offset_note = choose_offset(panel, suites, args.avoid)
     else:
         K = int(args.window_offset)
-    reqs = Planner(panel, K).build(suites)
+    reqs = Planner(panel, K, cap).build(suites)
     if args.only:
         rx = re.compile(args.only)
         reqs = [r for r in reqs if rx.search(r['id'])]
@@ -1722,6 +1965,7 @@ def main(argv=None):
             'panel': {'name': panel.name, 'path': panel.path, 'sha': panel.sha}, 'window_offset': K,
             'offset_note': offset_note, 'suites': suites, 'only': args.only, 'max_requests': args.max_requests,
             'pause_s': args.pause_s, 'requests_planned': len(reqs), 'started': now_iso(),
+            'coordinates': cap,
             'python': sys.version.split()[0], 'platform': platform.platform(), 'argv': sys.argv[1:]}
     runner = Runner(args, out_dir)
     records = []

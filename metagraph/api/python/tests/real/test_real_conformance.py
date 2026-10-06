@@ -511,7 +511,9 @@ class _ConformanceBase(unittest.TestCase):
                 self.assertEqual(g.seed_index, i)
                 self.assertEqual(len({l.ref for l in g.labels}), len(g.labels),
                                  'label refs are unique')
-                if g.mode == 'constrain':
+                # (a column-kind cell derives the seed's COLUMNS: the catalog lists the
+                # header carriers /resolve reported for it)
+                if g.mode == 'constrain' and 'column_kind' not in (row.get('tags') or ()):
                     rec = cell.seed_record
                     if rec is not None and rec['kind'] != 'batch' and \
                             not g.seed_summary['seed'].get('labels_dropped'):

@@ -23,11 +23,12 @@ import json
 from operator import lt as _lt
 
 from . import budget as _B
+from . import coords as _C
 from . import derive
 from ._codec import REASON, UNLIMITED
 from .budget import (DICT_KEY, FLOAT, JSON_ID, LIST, LIST_ITEM, STR, W_GFA_LINE, W_NODE,
                      W_RECORD, W_STEP, LocalBudgetExceeded, dict_bytes, list_bytes)
-from .model import ARM_SIDES
+from .model import ARM_SIDES, MissingEnvelope
 
 _LEVERS = ('select_walks', 'narrow_arm', 'export_mgt')
 _BLOCK = 64
@@ -309,6 +310,24 @@ def _arm_json(g, arm, bud=None, done=None):
     return j
 
 
+def _json_copy(x):
+    """A copy of the JSON value |x| (dicts, lists and atoms, as json.loads made them): what
+    copy.deepcopy makes of it, without deepcopy's memo -- a dict entry and a kept-alive
+    reference per container copied, never charged, which over a coordinates block of
+    15,000 occurrences outgrew the copy itself (the traced peak passed the account by a
+    third). A JSON value shares and nests nothing, so no memo is needed; a list is copied
+    at its exact length (list.copy()), never over-allocated as a comprehension would."""
+    if isinstance(x, dict):
+        return {k: _json_copy(v) for k, v in x.items()}
+    if isinstance(x, list):
+        out = x.copy()
+        for i, v in enumerate(out):
+            if isinstance(v, (dict, list)):
+                out[i] = _json_copy(v)
+        return out
+    return x
+
+
 def to_json(g, *, budget=None):
     """Today's detail: full results[i] (natural orientation) -- the conformance oracle:
     from_response(r, out).to_json() equals the full result after normalize_result().
@@ -380,6 +399,19 @@ def _to_json(g, bud, done=None):
         out['timing'] = g.seed_summary['timing']
     if g.seed_summary.get('duplicate'):
         out['duplicate'] = True
+    if 'coordinates' in g.seed_summary:
+        # the record coordinates are JSON beside the body (MGT v1 is frozen, §18): copied
+        # verbatim -- the same block in every detail, so to_json() still equals the full
+        # result -- as a copy, so that a caller's edit of the result never reaches the
+        # graphlet's summary
+        raw = g.seed_summary['coordinates']
+        if bud is not None and isinstance(raw, dict):
+            entries, occ = _C._block_counts(raw)
+            bud.charge(W_NODE * entries + _B.W_COORD * occ,
+                       entries * dict_bytes(8) + occ * (LIST + 2 * LIST_ITEM + 2 * _B.INT))
+        out['coordinates'] = _json_copy(raw)
+        if 'coordinates_reason' in g.seed_summary:
+            out['coordinates_reason'] = g.seed_summary['coordinates_reason']
     return out
 
 
@@ -435,34 +467,125 @@ def _oriented(g, side, w, orientation, with_seed):
 
 
 def to_fasta(g, arm=None, leaves=None, with_seed=True, orientation='natural', width=None,
-             *, budget=None):
+             *, coordinates=None, budget=None):
     """One record per walk: '>{arm}_{path_id} length_bp=.. reason=.. labels=..'.
+
+    Record coordinates (§18.3): with |coordinates| None (the default) a retrieval that
+    carries them adds ' coords=ACC:start-end,...' to each header -- 1-based, closed, on the
+    record's forward strand, the seed included when with_seed -- for the header labels
+    (accessions) alive at the walk's leaf whose run was entered by the seed and covers the
+    whole walk: at most 8 (label, occurrence) pairs, ordered by label id then start, then '
+    coords_more=N' for the rest, and ' coords_cut=1' when such a run's list was cut at the
+    server's cap. Column labels are left out (their positions are global, C10). A
+    retrieval without them gives exactly the records it always did. False: never;
+    True: required (MissingEnvelope on a body alone, ValueError when the retrieval has
+    none). The JSON block is 0-based half-open; FASTA headers are 1-based closed.
+
     budget= (stage L): the spellings and every record are charged before they are
     built; a stop raises LocalBudgetExceeded and no text is returned."""
+    if coordinates is not None and not isinstance(coordinates, bool):
+        # by type: 0 equals False, yet the dispatch is by identity (it wrote coords=)
+        raise ValueError('coordinates is None (when present), True or False, not %r'
+                         % (coordinates,))
+    if coordinates is True:
+        if not g.has_envelope:
+            raise MissingEnvelope('to_fasta(coordinates=True) needs the response envelope: '
+                                  'a parsed body alone carries no record coordinates')
+        if not _C.present(g):
+            raise ValueError('this retrieval carries no record coordinates (%s)'
+                             % _C.reason(g))
     bud = _B.resolve(budget)
     if bud is None:
-        return _to_fasta(g, arm, leaves, with_seed, orientation, width, None)
+        return _to_fasta(g, arm, leaves, with_seed, orientation, width, None,
+                         coordinates=coordinates)
     with bud.scope('to_fasta', _LEVERS):
         done = [0]
         try:
-            return _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done)
+            return _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done,
+                             coordinates=coordinates)
         except LocalBudgetExceeded as e:
             raise e.restate(records=done[0])
 
 
-def _fasta_record(g, side, a, p, w, orientation, with_seed, width):
+_COORDS_IN_HEADER = 8
+
+
+def _fasta_rcs(g, side, coordinates):
+    """The arm's RunCoordinates a FASTA header states (None: no coords= field)."""
+    if coordinates is False or g.mode != 'constrain' or not _C.present(g):
+        return None
+    return _C.of(g).arms.get(side)
+
+
+def _coords_header(g, a, p, rcs, with_seed):
+    """' coords=ACC:s-e,...' (1-based closed) for walk |p|, '' when nothing qualifies: a
+    header label alive at the leaf whose run was entered by the seed and covers the whole
+    walk -- its occurrences are the walk's (with the seed: the seed's occurrence it
+    continues, which precedes the walk on the record's forward strand on the right arm
+    and follows it on the left)."""
+    if rcs is None:
+        return ''
+    n_seed = g.seed.length_bp if with_seed else 0
+    pairs = []
+    cut = False
+    for e in derive.end_labels(a, p.leaf):
+        lab = g.labels[e.label]
+        run = a.runs[e.run]
+        if lab.kind != 'header' or run.from_label is not None or run.from_bp != 0 \
+                or run.to_bp != p.length_bp:
+            continue
+        rc = rcs[e.run]
+        cut = cut or rc.truncated
+        for s, t in rc.intervals:
+            if a.side == 'right':
+                s -= n_seed
+            else:
+                t += n_seed
+            if t > s:
+                pairs.append((e.label, s, t))
+    if not pairs:
+        return ' coords_cut=1' if cut else ''
+    pairs.sort()
+    text = ' coords=' + ','.join('%s:%d-%d' % (g.labels[l].name, s + 1, t)
+                                 for l, s, t in pairs[:_COORDS_IN_HEADER])
+    if len(pairs) > _COORDS_IN_HEADER:
+        text += ' coords_more=%d' % (len(pairs) - _COORDS_IN_HEADER)
+    if cut:
+        text += ' coords_cut=1'
+    return text
+
+
+def _fasta_coord_prices(bud, g, a, rcs):
+    """(lwu, bytes) per walk (path id) of its coords= header field: the end labels read,
+    the occurrences formatted and sorted, the field's text (cached)."""
+    def prices():
+        longest = max((len(l.name) for l in g.labels), default=0)
+        pw, pm = [], []
+        for p in derive.paths(a):
+            ends = derive.end_labels(a, p.leaf)
+            n = sum(len(rcs[e.run].intervals) for e in ends)
+            shown = min(n, _COORDS_IN_HEADER)
+            pw.append(W_RECORD * (n > 0) + len(ends) + _B.W_COORD * n + _B.sort_work(n))
+            pm.append(3 * (shown * (longest + 44) + 40) + n * (_B.TUPLE + 3 * _B.INT))
+        return pw, pm
+    return derive.price_list(bud, g, a, 'fasta_coord_prices', prices)
+
+
+def _fasta_record(g, side, a, p, w, orientation, with_seed, width, rcs=None):
     """(header, bases) of walk |p| whose walking-order bases |w| are spelled."""
     seg = a.segments[p.leaf]
     reason = (REASON[seg.leaf.path_reason] if seg.leaf.path_reason
               else ','.join(sorted({a.runs[e.run].reason
                                     for e in derive.end_labels(a, p.leaf)})) or '.')
     n = len(derive.end_labels(a, p.leaf)) if g.mode == 'constrain' else len(seg.end)
-    return ('>%s_%d length_bp=%d reason=%s labels=%d seed=%s' % (
-        side, p.id, p.length_bp, reason, n, 'yes' if with_seed else 'no'),
+    return ('>%s_%d length_bp=%d reason=%s labels=%d seed=%s%s' % (
+        side, p.id, p.length_bp, reason, n, 'yes' if with_seed else 'no',
+        _coords_header(g, a, p, rcs, with_seed)),
         _wrap(_oriented(g, side, w, orientation, with_seed), width))
 
 
-def _fasta_records(g, side, a, chosen, orientation, with_seed, width, out, ordered=False):
+def _fasta_records(g, side, a, chosen, orientation, with_seed, width, out, ordered=False,
+                   rcs=None):
     """Append the records of |chosen| (in its order) to |out|, each spelled as the stream
     of derive.walk_iter() reaches it and dropped once written: the text and one walk's
     bases are held, not every chosen walk's (holding them all, and the batch's prefixes,
@@ -484,8 +607,13 @@ def _fasta_records(g, side, a, chosen, orientation, with_seed, width, out, order
                       else ','.join(sorted({a.runs[e.run].reason
                                             for e in derive.end_labels(a, p.leaf)})) or '.')
             n = len(derive.end_labels(a, p.leaf)) if constrain else len(seg.end)
-            out.append('>%s_%d length_bp=%d reason=%s labels=%d seed=%s' % (
-                side, p.id, p.length_bp, reason, n, seed))
+            if rcs is None:
+                out.append('>%s_%d length_bp=%d reason=%s labels=%d seed=%s' % (
+                    side, p.id, p.length_bp, reason, n, seed))
+            else:
+                out.append('>%s_%d length_bp=%d reason=%s labels=%d seed=%s%s' % (
+                    side, p.id, p.length_bp, reason, n, seed,
+                    _coords_header(g, a, p, rcs, with_seed)))
             out.append(_wrap(_oriented(g, side, w, orientation, with_seed), width))
         return
     # leaves in another order or repeated: each record into its slot
@@ -497,16 +625,18 @@ def _fasta_records(g, side, a, chosen, orientation, with_seed, width, out, order
     for leaf, _, w in stream:
         for i in at[leaf]:
             out[first + 2 * i], out[first + 2 * i + 1] = _fasta_record(
-                g, side, a, chosen[i], w, orientation, with_seed, width)
+                g, side, a, chosen[i], w, orientation, with_seed, width, rcs)
 
 
-def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None):
+def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None,
+              coordinates=None):
     from . import ops
     out = []
     total = 0
     sides = [g.arm(arm).side] if arm is not None else [s for s in ARM_SIDES if s in g.arms]
     for side in sides:
         a = g.arms[side]
+        rcs = _fasta_rcs(g, side, coordinates)
         if leaves is not None and not len(leaves):
             # no walk chosen: nothing to resolve, so the arm's paths are not built -- they
             # were, uncharged, and a refused export (stopped at its join) left them behind
@@ -555,11 +685,18 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None):
             if not width:
                 # the seed in each record (its bases spelled once more per record)
                 bud.charge(len(chosen) * (seed_n >> 8), 3 * len(chosen) * (seed_n + 1))
+            if rcs is not None:
+                # the coords= field of every header (the index charged once)
+                _C.uses(bud, g)
+                cw, cm = _fasta_coord_prices(bud, g, a, rcs)
+                pw = [x + cw[p.id] for x, p in zip(pw, chosen)]
+                pm = [x + cm[p.id] for x, p in zip(pm, chosen)]
+                total += sum([cm[p.id] for p in chosen]) // 3
         if bud is not None:
             for _ in _blocks(bud, pw, pm, done, len(chosen)):
                 pass
         _fasta_records(g, side, a, chosen, orientation, with_seed, width, out,
-                       ordered=leaves is None)
+                       ordered=leaves is None, rcs=rcs)
     if bud is not None:
         bud.phase = 'join'
         bud.charge(total >> 8, STR + total)

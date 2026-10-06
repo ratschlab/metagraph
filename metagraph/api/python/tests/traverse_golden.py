@@ -102,11 +102,25 @@ def read_json(path):
         return json.load(f)
 
 
+# the real cells that asked for record coordinates (feature level 6): opt-in retrievals, gated by
+# the coordinates golden file (golden/coordinates.json.gz) with the snapshots of data/traverse/coords;
+# the committed gate stays the opt-out one it was recorded as
+COORDINATE_CELLS = '__trace_coords'
+
+
 def golden_files():
     out = []
     for g in GOLDEN_GLOBS:
-        out += glob.glob(os.path.join(DATA, g))
+        out += [p for p in glob.glob(os.path.join(DATA, g))
+                if COORDINATE_CELLS not in os.path.basename(p)]
     return sorted(out)
+
+
+def coordinate_files():
+    """The inputs of the coordinates golden file: the snapshots and the real coordinate cells."""
+    return sorted(glob.glob(os.path.join(DATA, 'coords', '*.graphlet.json.gz'))
+                  + [p for p in glob.glob(os.path.join(DATA, GOLDEN_GLOBS[0]))
+                     if COORDINATE_CELLS in os.path.basename(p)])
 
 
 def items_of(paths, base=None):

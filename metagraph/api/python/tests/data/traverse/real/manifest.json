@@ -1565,6 +1565,235 @@
     "skipped": {}
    }
   },
+  "mini_refseq/mini_rep_00__trace_coords": {
+   "index": "mini_refseq",
+   "cell": "mini_rep_00__trace_coords",
+   "seed": "mini_rep_00",
+   "seed_kind": "repeat",
+   "seed_tier": "core",
+   "seed_order": 9,
+   "seed_length_bp": 150,
+   "seed_n_labels": 11,
+   "strategy": "trace_coords",
+   "tags": [
+    "constrain",
+    "trace",
+    "keep",
+    "coordinates"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "mini_refseq/mini_rep_00__trace_coords.request.json.gz",
+    "graphlet": "mini_refseq/mini_rep_00__trace_coords.graphlet.json.gz",
+    "full": "mini_refseq/mini_rep_00__trace_coords.full.json.gz"
+   },
+   "fetched_at": "2026-10-05T20:15:12",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.059,
+    "wire_bytes": 9239,
+    "json_bytes": 25487,
+    "body_bytes": 18443,
+    "lines": 120
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "complete",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 11,
+     "graphlet_bytes": 18443,
+     "graphlet_lines": 120,
+     "limitations": [],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 2000,
+       "scope": "per_path",
+       "segments": 8,
+       "leaves": 5,
+       "runs": 11,
+       "max_bp": 2000,
+       "cap": null,
+       "limitations": []
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 2000,
+       "scope": "per_path",
+       "segments": 6,
+       "leaves": 4,
+       "runs": 11,
+       "max_bp": 2000,
+       "cap": null,
+       "limitations": []
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.062,
+    "wire_bytes": 12287,
+    "json_bytes": 53880
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "record coordinates (feature level 6) on a window of an insertion sequence repeated in several records: header labels (kind record), several occurrences per run, \"unlimited\"; the positional oracle f_positions against the source records (its answers recorded: the bases' digests and the string counts)",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_walks",
+      "e_direct",
+      "e_library",
+      "f_positions"
+     ]
+    },
+    "skipped": {
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
+  "mini_refseq/mini_rep_00__trace_coords_column": {
+   "index": "mini_refseq",
+   "cell": "mini_rep_00__trace_coords_column",
+   "seed": "mini_rep_00",
+   "seed_kind": "repeat",
+   "seed_tier": "core",
+   "seed_order": 9,
+   "seed_length_bp": 150,
+   "seed_n_labels": 11,
+   "strategy": "trace_coords_column",
+   "tags": [
+    "constrain",
+    "trace",
+    "keep",
+    "coordinates",
+    "column_kind"
+   ],
+   "deterministic": true,
+   "files": {
+    "request": "mini_refseq/mini_rep_00__trace_coords_column.request.json.gz",
+    "graphlet": "mini_refseq/mini_rep_00__trace_coords_column.graphlet.json.gz",
+    "full": "mini_refseq/mini_rep_00__trace_coords_column.full.json.gz"
+   },
+   "fetched_at": "2026-10-05T20:15:12",
+   "graphlet": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.003,
+    "wire_bytes": 3410,
+    "json_bytes": 8410,
+    "body_bytes": 2137,
+    "lines": 32
+   },
+   "n_results": 1,
+   "n_errors": 0,
+   "results": [
+    {
+     "outcome": {
+      "branch_diagnostics": "complete",
+      "delivery": "inline",
+      "label_evidence": "qualified",
+      "walks": "complete"
+     },
+     "label_mode": "constrain",
+     "num_seed_labels": 4,
+     "graphlet_bytes": 2137,
+     "graphlet_lines": 32,
+     "limitations": [
+      "trace_record_boundaries"
+     ],
+     "arms": {
+      "left": {
+       "status": "complete",
+       "complete_to_bp": 2000,
+       "scope": "per_path",
+       "segments": 1,
+       "leaves": 1,
+       "runs": 4,
+       "max_bp": 10,
+       "cap": null,
+       "limitations": []
+      },
+      "right": {
+       "status": "complete",
+       "complete_to_bp": 2000,
+       "scope": "per_path",
+       "segments": 1,
+       "leaves": 1,
+       "runs": 4,
+       "max_bp": 335,
+       "cap": null,
+       "limitations": []
+      }
+     }
+    }
+   ],
+   "time_budget_tripped": false,
+   "full": {
+    "status": "ok",
+    "error": null,
+    "http_status": 200,
+    "elapsed_s": 0.003,
+    "wire_bytes": 3743,
+    "json_bytes": 11776
+   },
+   "heavy": false,
+   "status": "ok",
+   "why": "record coordinates of column labels (kind column): positions in the column's k-mer index space, trace_record_boundaries; f_positions in the column's records",
+   "expect": {
+    "ran": {
+     "conformance": [
+      "counts",
+      "identity",
+      "invariants",
+      "roundtrip",
+      "rules",
+      "save_load",
+      "seed",
+      "summary",
+      "to_json"
+     ],
+     "oracle": [
+      "a_present",
+      "b_claims",
+      "b_walks",
+      "e_direct",
+      "e_library",
+      "f_positions"
+     ]
+    },
+    "skipped": {
+     "c_routes": "no run whose displayed support starts at a merge"
+    }
+   }
+  },
   "sra/sra_hairpin__left_only": {
    "index": "sra",
    "cell": "sra_hairpin__left_only",

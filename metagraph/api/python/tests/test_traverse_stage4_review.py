@@ -166,7 +166,9 @@ class TestCapabilitiesFitTheDefaultCeiling(unittest.TestCase):
         return GraphletTools(GraphletStore(root), {'mini': Big()})
 
     def test_the_servers_description_is_returned_whole(self):
-        for size in (2400, 12000):
+        # 19,355 B: the level-6 probe on mini_refseq (the coordinates block, DESIGN §26.3),
+        # past the 16 KB the ceiling was before it
+        for size in (2400, 12000, 19355, 30000):
             caps = _capabilities(size)
             with tempfile.TemporaryDirectory() as root:
                 out = self.tools(caps, root).traverse_capabilities(index='mini')

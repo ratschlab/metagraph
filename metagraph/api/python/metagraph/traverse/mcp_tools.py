@@ -17,7 +17,7 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
     secret lives in the spool). EVERY return is <= max(max_bytes, MIN_MAX_BYTES) (2048
     by default; graphlet_sequence and the request of traverse_continue(execute=False)
     have the 16 KB sequence ceiling, stated in their result, and traverse_capabilities a
-    16 KB default ceiling, CAPABILITIES_MAX_BYTES, for the server's description of itself
+    32 KB default ceiling, CAPABILITIES_MAX_BYTES, for the server's description of itself
     (an explicit max_bytes still holds); a max_bytes below
     MIN_MAX_BYTES = 64, the smallest error that fits, or above MAX_MAX_BYTES = 16 MiB is
     a bad_argument): the cursor's
@@ -73,12 +73,26 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
     of refusing;
   * a request that would name labels by names the library cannot verify to resolve
     back to them (two labels of the retrieval share one, or it holds U+FFFD) is not
-    built: unverifiable_label_name.
+    built: unverifiable_label_name;
+  * record coordinates (feature level 6, DESIGN §18): traverse_fetch asks for them by the
+    client's rule (coordinates='auto': a support: trace strategy that does not set
+    output.coordinates, on an index that reports them; under a request memory budget only
+    while the D4 gate passes, X-C8 -- a decision not to ask is stated in coordinates_note,
+    and so is how to drop coordinates asked for under a memory budget where the seed
+    stopped on it);
+    graphlet_claims rows of a retrieval with them always carry them (coordinates: the
+    first 4 [start, end] of the claim, 0-based half-open on the forward strand,
+    coordinates_total, coordinates_truncated, coordinates_kind when the block mixes
+    header and column labels, coordinates_lower_bound when true); graphlet_walks and
+    graphlet_labels(name=) carry them with coordinates=true (no_coordinates when the
+    retrieval has none); every evidence block of such a retrieval states their kind and
+    completeness (evidence.coordinates).
 """
 
 import base64
 import collections
 import contextvars
+import copy
 import hashlib
 import hmac
 import inspect
@@ -90,10 +104,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from . import budget as _B
+from . import coords as _C
 from . import derive, export, ops
 from ._codec import GraphletFormatError
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
-from .client import AttemptAtBound, ServerInitializing, TraverseError
+from .client import (AttemptAtBound, ServerInitializing, TraverseError, auto_coordinates,
+                     drop_coordinates_note)
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
@@ -107,8 +123,12 @@ __all__ = ['GraphletTools', 'ToolError', 'ToolLimits', 'TOOL_CLASS', 'tool_names
 
 DEFAULT_MAX_BYTES = 2048
 SEQUENCE_MAX_BYTES = 16 * 1024
-# traverse_capabilities' default ceiling: the server's capabilities in one piece
-CAPABILITIES_MAX_BYTES = 16 * 1024
+# traverse_capabilities' default ceiling: the server's capabilities in one piece. It grows
+# with what the server offers: 15.9 KB compact at feature level 5, 19.4 KB at level 6 (the
+# coordinates block and the reserve's coordinate rule, DESIGN §26.3) on mini_refseq -- past
+# the 16 KB this was, so an agent's first discovery call failed by default (result_too_large);
+# 32 KB leaves room for the stages planned after it
+CAPABILITIES_MAX_BYTES = 32 * 1024
 # the smallest max_bytes a tool accepts: below it not even the shortest error fits
 # ({"error":"result_too_large","max_bytes":63,"message":""} is 57 bytes)
 MIN_MAX_BYTES = 64
@@ -118,6 +138,9 @@ MIN_MAX_BYTES = 64
 MAX_MAX_BYTES = 16 * 1024 * 1024
 # ranked walk lists kept for paging (graphlet_walks): (handle, arm, arguments) -> ids
 _RANKED_CACHE = 16
+# record coordinates in a row: at most this many [start, end] pairs (C7; the total says how
+# many there are)
+_COORDS_IN_ROW = 4
 # the parameters of Graphlet.next_request() / ops.next_request() that traverse_continue
 # sets itself: an override of one of them would be a second value for it (bp and
 # reduce_budget are not set by the tool and pass as overrides did before)
@@ -971,8 +994,24 @@ class GraphletTools:
             # a lazy row stopped: the page so far, whole rows, and the cursor at the row
             if not out['rows']:
                 raise
-            call.stop = e.stop.as_dict()
-            call.partial = True
+            if call is not None:
+                call.stop = e.stop.as_dict()
+                call.partial = True
+            else:
+                # tools without local limits, under the caller's own ambient budget: no
+                # local block to state the stop in (writing it to the absent call was an
+                # AttributeError, the review of W2's library part, finding 4). The page
+                # states it, giving back rows from its end until it fits beside them: a
+                # page stays within max_bytes, and a row given back opens the next page
+                out['stop'] = e.stop.as_dict()
+                out['complete'] = False
+                size = _size(out)
+                while out['rows'] and size + reserve > max_bytes:
+                    row = out['rows'].pop()
+                    size -= _size(row) + (1 if out['rows'] else 0)
+                    i -= 1
+                if not out['rows']:
+                    raise
             out['complete'] = False
             out['next_cursor'] = self._cursor(tool, handle, args, i, resume, before)
             return out
@@ -1088,16 +1127,25 @@ class GraphletTools:
     @_tool
     def traverse_fetch(self, index=None, seed=None, strategy=None, keep=True,
                        max_graphlet_mb=8, replay=None, allow_unverified_index=False,
-                       max_bytes=None, budget=None):
+                       max_bytes=None, budget=None, coordinates='auto'):
         """One retrieval -> its summary and (keep) a handle. replay=<handle> re-runs the
         stored request of an entry (also an expired one) against the same index; an index
         whose identity with the entry's cannot be verified (a manifest digest on one side
         only) is refused as index_unverifiable unless allow_unverified_index=true, and
         the result then states it (identity.verified false). A stored result's handle is
         always returned: over the ceiling its summary, evidence and graphlet_bytes are
-        cut first (fields_cut)."""
+        cut first (fields_cut). coordinates: 'auto' (the client's rule: record coordinates
+        for a support: trace strategy on an index that reports them; under a request memory
+        budget while the D4 gate passes, otherwise not and coordinates_note says how to ask,
+        and coordinates_note says how to drop coordinates it asked for under one that share
+        a memory stop), true or false; a replay sends its stored request as it was."""
         _bool('keep', keep)
         _bool('allow_unverified_index', allow_unverified_index)
+        if coordinates != 'auto' and not isinstance(coordinates, bool):
+            # strict, as _bool() is for every other flag: 0 and 1 equal false and true but
+            # were dispatched by identity, so they asked for nothing (a silent no-op)
+            raise ToolError('bad_argument', 'coordinates is "auto", true or false, not %r'
+                            % (coordinates,))
         limit = max_bytes or self.max_bytes
         if isinstance(max_graphlet_mb, bool) or not isinstance(max_graphlet_mb, (int, float)) \
                 or max_graphlet_mb < 0:
@@ -1118,8 +1166,11 @@ class GraphletTools:
             req = None
         name, client = self._client(index)
         identity = None
+        coord_note = stated = None
         if req is None:
-            req = client.build_request([seed], strategy or {}, detail='graphlet')
+            strategy, stated = self._coordinates_strategy(client, strategy or {}, coordinates)
+            coord_note = (stated or {}).get('note')
+            req = client.build_request([seed], strategy, detail='graphlet')
         else:
             # a stored request without a graph (a loaded file, an older entry) runs on the
             # client's graph -- the one its capabilities, checked next, describe -- as
@@ -1131,9 +1182,15 @@ class GraphletTools:
         if not results:
             raise ToolError('empty_response', 'the server returned no result')
         result = results[0]
+        # coordinates the automatic rule asked for under a memory budget, in a seed that
+        # stopped on it: how to walk further without them (the client's note)
+        coord_note = drop_coordinates_note([result], stated) or coord_note
         if 'graphlet' not in result:
-            return {'error': 'seed_failed', 'message': result.get('error'),
-                    'outcome': result.get('outcome'), 'limitations': result.get('limitations')}
+            out = {'error': 'seed_failed', 'message': result.get('error'),
+                   'outcome': result.get('outcome'), 'limitations': result.get('limitations')}
+            if coord_note is not None:
+                out['coordinates_note'] = coord_note
+            return out
         nbytes = result.get('graphlet_bytes')
         if nbytes is None:
             nbytes = len(utf8_bytes(result['graphlet']))
@@ -1146,7 +1203,7 @@ class GraphletTools:
             # the checks that need no parse, as an unparsed entry (never a graphlet until
             # a parse completes); it can always be exported as it is (format mgt)
             return self._keep_unparsed(e, name, req, result, response, nbytes, spooled,
-                                       keep, identity, limit)
+                                       keep, identity, limit, coord_note=coord_note)
         if identity is not None:
             # what actually answered, not only what the capabilities said before
             identity = _weakest(identity, _same_index(ident, self._identity_of(g),
@@ -1179,31 +1236,63 @@ class GraphletTools:
             out['handle'] = handle
         if identity is not None:
             out['identity'] = identity
+        if coord_note is not None:
+            out['coordinates_note'] = coord_note
         out['evidence'] = ops.evidence_block(g)
         self._summary_into(g, out, max_bytes)
         if handle is None:
             return out
-        return _Receipt(out, ('summary', 'evidence', 'graphlet_bytes'))
+        return _Receipt(out, ('summary', 'evidence', 'graphlet_bytes', 'coordinates_note',
+                              'summary_stop'))
+
+    @staticmethod
+    def _coordinates_strategy(client, strategy, coordinates):
+        """The strategy a fetch sends for |coordinates| ('auto' | True | False): the
+        client's automatic rule (auto_coordinates) or the caller's choice, applied to a copy
+        (a backend double's build_request() takes no coordinates argument); the cap removed
+        where output.coordinates is not true. -> (strategy, the rule's statement: None for
+        an explicit choice or where the rule does not apply; its note says how to ask when
+        it did not under a memory budget)."""
+        stated = None
+        if coordinates == 'auto':
+            value, stated = auto_coordinates(client, strategy)
+        else:
+            value = coordinates
+        out = copy.deepcopy(strategy)
+        if value is not None and out.get('output') is None:
+            out['output'] = {}
+        o = out.get('output')
+        if isinstance(o, dict):         # any other value is the server's to refuse
+            if value is True:
+                o['coordinates'] = True
+            elif value is False:
+                o.pop('coordinates', None)
+            _C.strip_coordinate_cap(out)
+        return out, stated
 
     def _summary_into(self, g, out, max_bytes, side=None):
-        """out['summary'] = the fitted summary; under a budget a stop there leaves the
-        answer without it (the handle is made already), and local states the stop."""
+        """out['summary'] = the fitted summary. A stop there leaves the answer without it
+        -- a receipt's handle is made already and must reach the caller: under local limits
+        `local` states the stop; under the caller's own ambient budget (tools without local
+        limits) summary_stop does (it raised, and the stored entry's handle was lost)."""
         call = _CALL.get()
-        if call is None:
-            out['summary'] = self._fit_summary(g, out, side, max_bytes)
-            return
         try:
             out['summary'] = self._fit_summary(g, out, side, max_bytes)
         except LocalBudgetExceeded as e:
-            call.stop = e.stop.as_dict()
+            if call is not None:
+                call.stop = e.stop.as_dict()
+            else:
+                out['summary_stop'] = e.stop.as_dict()
 
     def _keep_unparsed(self, e, name, req, result, response, nbytes, spooled, keep,
-                       identity, limit, parent=None, derived_from=None):
+                       identity, limit, parent=None, derived_from=None, coord_note=None):
         """The answer of a fetch (or continuation) whose parse its budget stopped: the
         body stored as an unparsed entry when it is to be kept, the server's own per-seed
         summary (no parse needed) and the stop; nothing local is derived from it."""
         call = _CALL.get()
-        call.stop = e.stop.as_dict()
+        stop = e.stop.as_dict()
+        if call is not None:
+            call.stop = stop
         delivery = 'spooled' if spooled else (result.get('outcome') or {}).get('delivery')
         out = {'index': name, 'delivery': delivery, 'graphlet_bytes': nbytes,
                'parsed': False}
@@ -1215,14 +1304,22 @@ class GraphletTools:
         out['hint'] = ('the graphlet could not be parsed within the local parse budget: '
                        'graphlet_export(format="mgt") copies it out without a parse, or '
                        'raise the budget')
+        if call is None:
+            # tools without local limits, under the caller's own ambient budget: no local
+            # block to state the stop in (it was read off the call that is not there, an
+            # AttributeError, before the review of b2fc7816's open items)
+            out['stop'] = stop
+        if coord_note is not None:
+            out['coordinates_note'] = coord_note
+        optional = ('server_summary', 'hint', 'graphlet_bytes', 'stop', 'coordinates_note')
         if not (spooled or keep):
             return out
         receipt = dict(out, handle='g_' + '0' * 12)
-        _check_receipt(_Receipt(receipt, ('server_summary', 'hint', 'graphlet_bytes')), limit)
+        _check_receipt(_Receipt(receipt, optional), limit)
         out['handle'] = self.store.put_unparsed(
             result, response, req, source=name, delivery='spooled' if spooled else None,
             parent=parent, derived_from=derived_from)
-        return _Receipt(out, ('server_summary', 'hint', 'graphlet_bytes'))
+        return _Receipt(out, optional)
 
     def _replay_request(self, handle):
         """The stored request and index identity of an entry, live or expired."""
@@ -1355,7 +1452,7 @@ class GraphletTools:
             out['loss_budget_labels'] = per_label
         out['evidence'] = ops.evidence_block(g2)
         self._summary_into(g2, out, max_bytes)
-        return _Receipt(out, optional)
+        return _Receipt(out, optional + ('summary_stop',))
 
     # ================================================================ local tools
 
@@ -1393,9 +1490,16 @@ class GraphletTools:
     @_tool
     def graphlet_walks(self, handle, arm, rank='support', n=10, min_bp=0, label=None,
                        spell='none', tail_bp=60, route_consistent=True, cursor=None,
-                       max_bytes=None, budget=None):
+                       max_bytes=None, budget=None, coordinates=False):
+        """The arm's walks ranked, a page at a time. coordinates=true (a retrieval with
+        record coordinates; no_coordinates otherwise): each row also gives, per label of
+        labels_full shown, the occurrences of its run reaching the leaf (ref, the first 4
+        [start, end], total, truncated, lower_bound when true)."""
         g, view = self._resolve(handle)
         a = self._arm(g, arm, view)
+        _bool('coordinates', coordinates)
+        if coordinates:
+            _require_coordinates(g)
         _choice('rank', rank, ('support', 'length', 'loss', 'id'))
         _choice('spell', spell, ('none', 'tail', 'full'))
         n = _int('n', n, 1)
@@ -1421,15 +1525,26 @@ class GraphletTools:
                 if spell == 'tail':
                     s = s[-tail_bp:] if a.side == 'right' else s[:tail_bp]
                 row['sequence'] = s
+            if coordinates and w.coordinates is not None:
+                row['coordinates'] = [
+                    dict(_coords_row(w.coordinates[l.ref], _coords_kind(g, l.id)), ref=l.ref)
+                    for l in w.labels_full[:_LABELS_IN_ROW] if l.ref in w.coordinates]
             return row
         rows = _LazyRows(len(ids), row_of)
         call = _CALL.get()
         if call is not None:
             # the page's row of a walk is charged with the walk (built on demand)
-            call.budget.row_extra = (_B.W_ROW, _B.dict_bytes(10) + 2 * _B.STR + tail_bp
-                                     + _LABELS_IN_ROW * _B.dict_bytes(2))
+            extra = (_B.W_ROW, _B.dict_bytes(10) + 2 * _B.STR + tail_bp
+                     + _LABELS_IN_ROW * _B.dict_bytes(2))
+            if coordinates:
+                extra = (extra[0] + _LABELS_IN_ROW * _COORDS_ROW_EXTRA[0],
+                         extra[1] + _LABELS_IN_ROW * (_COORDS_ROW_EXTRA[1] + _B.dict_bytes(6)))
+            call.budget.row_extra = extra
         args = dict(arm=a.side, rank=rank, min_bp=min_bp, label=label, spell=spell,
                     tail_bp=tail_bp, route_consistent=route_consistent, cursor=cursor)
+        if coordinates:
+            # only when asked: a cursor of a call without it is what it always was
+            args['coordinates'] = True
         base = {'handle': handle, 'arm': a.side,
                 'evidence': ops.evidence_block(g, a.side, view)}
         if filtered:
@@ -1615,8 +1730,19 @@ class GraphletTools:
 
     @_tool
     def graphlet_labels(self, handle, arm=None, rank='direct_bp', n=20, min_direct_bp=0,
-                        at_bp=None, name=None, cursor=None, max_bytes=None, budget=None):
+                        at_bp=None, name=None, cursor=None, max_bytes=None, budget=None,
+                        coordinates=False):
+        """The label table (ranked by direct_bp or reach_bp), or with name= one label's
+        walks with their routes. coordinates=true (name= only, a retrieval with record
+        coordinates; no_coordinates otherwise): each walk's row also carries its run's
+        occurrences (the first 4 [start, end], total, truncated, lower_bound when true)."""
+        _bool('coordinates', coordinates)
+        if coordinates and name is None:
+            raise ToolError('bad_argument', 'coordinates applies to one label\'s walks: pass '
+                            'name= with it')
         g, view = self._resolve(handle)
+        if coordinates:
+            _require_coordinates(g)
         if arm is not None:
             sides = [self._arm(g, arm, view).side]
         else:
@@ -1634,7 +1760,7 @@ class GraphletTools:
                                 % lab.ref)
             if call is not None:
                 return self._label_walks_budgeted(g, view, handle, arm, sides, lab, cursor,
-                                                  max_bytes, n, call)
+                                                  max_bytes, n, call, coordinates)
             walks = g.label_walks(lab, sides[0] if len(sides) == 1 else None)
             # each run's OWN route (ops.routes yields one per run of the label, in run
             # order on the arm), not the first run's; annotate mode: one witness route
@@ -1652,13 +1778,18 @@ class GraphletTools:
                     route = routes[lw.arm][lw.run] if lw.run is not None else None
                 else:
                     route = next(routes[lw.arm])
-                rows.append({'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
-                             'evidence_from': lw.evidence_from, 'end': lw.end,
-                             'walks_below': len(lw.leaves_below),
-                             'merged_into': lw.merged_into, 'route': route})
+                row = {'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
+                       'evidence_from': lw.evidence_from, 'end': lw.end,
+                       'walks_below': len(lw.leaves_below),
+                       'merged_into': lw.merged_into, 'route': route}
+                if coordinates and lw.coordinates is not None:
+                    _coords_row(lw.coordinates, _coords_kind(g, lab.id), row)
+                rows.append(row)
             base = dict(lab.as_dict(), handle=handle,
                         evidence=ops.evidence_block(g, arm, view))
             args = dict(arm=arm, name=lab.ref, cursor=cursor)
+            if coordinates:
+                args['coordinates'] = True
             return self._page('graphlet_labels', handle, args, rows, base, max_bytes, n)
         _choice('rank', rank, ('direct_bp', 'reach_bp'))
         min_direct_bp = _int('min_direct_bp', min_direct_bp)
@@ -1696,15 +1827,20 @@ class GraphletTools:
         return self._page('graphlet_labels', handle, args, rows, base, max_bytes, n)
 
     def _label_walks_budgeted(self, g, view, handle, arm, sides, lab, cursor, max_bytes, n,
-                              call):
+                              call, coordinates=False):
         """graphlet_labels(name=) under a budget: the label's walks (whole rows, resumable
         where label_walks() stopped), each with its own route, charged as it is made."""
         args = dict(arm=arm, name=lab.ref, cursor=cursor)
+        if coordinates:
+            args['coordinates'] = True
         start, resume, before = self._position('graphlet_labels', handle, args, cursor)
         b = call.budget
         partial = None
         # each walk comes with its own route, made and charged with it, and the page's row
         b.row_extra = (_B.W_ROW, _B.dict_bytes(9))
+        if coordinates:
+            b.row_extra = (b.row_extra[0] + _COORDS_ROW_EXTRA[0],
+                           b.row_extra[1] + _COORDS_ROW_EXTRA[1])
         try:
             walks = ops.label_walks_routes(g, lab, sides[0] if len(sides) == 1 else None,
                                            resume=resume)
@@ -1719,10 +1855,13 @@ class GraphletTools:
             b.row_extra = (0, 0)
         rows = []
         for lw, route in walks:
-            rows.append({'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
-                         'evidence_from': lw.evidence_from, 'end': lw.end,
-                         'walks_below': len(lw.leaves_below),
-                         'merged_into': lw.merged_into, 'route': route})
+            row = {'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
+                   'evidence_from': lw.evidence_from, 'end': lw.end,
+                   'walks_below': len(lw.leaves_below),
+                   'merged_into': lw.merged_into, 'route': route}
+            if coordinates and lw.coordinates is not None:
+                _coords_row(lw.coordinates, _coords_kind(g, lab.id), row)
+            rows.append(row)
         base = dict(lab.as_dict(), handle=handle, evidence=ops.evidence_block(g, arm, view))
         return self._page('graphlet_labels', handle, args, rows, base, max_bytes, n,
                           resume=resume, before=before, partial=partial, start=start)
@@ -1822,8 +1961,12 @@ class GraphletTools:
                 # where the claims go on, and what the filter removed before that position
                 resume = tuple(r_in[:-1])
                 filtered.update(dict(r_in[-1]))
-            # the page's row of a claim is charged with the claim (whole rows either way)
-            call.budget.row_extra = (_B.W_ROW, _B.dict_bytes(18))
+            # the page's row of a claim is charged with the claim (whole rows either way),
+            # and its coordinates where the retrieval has them
+            extra = (_B.W_ROW, _B.dict_bytes(18))
+            if g.mode == 'constrain' and _C.present(g):
+                extra = (extra[0] + _COORDS_ROW_EXTRA[0], extra[1] + _COORDS_ROW_EXTRA[1])
+            call.budget.row_extra = extra
             try:
                 got = g.claims(a, labels=sel, strict=False, resume=resume)
             except LocalBudgetExceeded as e:
@@ -1847,6 +1990,10 @@ class GraphletTools:
                 continue
             d = c.as_dict()
             d.pop('arm')
+            if c.coordinates is not None:
+                # C7: claims rows always carry them (the row's form, not the claim's list)
+                d.pop('coordinates', None)
+                _coords_row(c.coordinates, _coords_kind(g, c.label.id), d)
             rows.append(d)
         base = {'handle': handle, 'arm': a.side,
                 'evidence': ops.evidence_block(g, a.side, view)}
@@ -2205,13 +2352,13 @@ class GraphletTools:
         # the stored entry again ran under the store's parse limits, which could refuse
         # it after the entry was made, and the answer lost the new handle (the review of
         # levels 4-5, max_ram_mb=0 with parse_limits of 1 lwu)
-        if call is not None:
-            out = {'handle': h, 'summary': None}
-            if g.has_envelope:
-                self._summary_into(g, out, None)
-            return _Receipt(out, ('summary',))
-        return _Receipt({'handle': h, 'summary': self._fit_summary(g, {'handle': h})
-                         if g.has_envelope else None}, ('summary',))
+        # under local limits a stop of the summary is stated in local; under the caller's
+        # ambient budget in summary_stop: the entry is stored, so its handle is returned
+        # either way (it raised, and the handle was lost: b2fc7816's open item)
+        out = {'handle': h, 'summary': None}
+        if g.has_envelope:
+            self._summary_into(g, out, None)
+        return _Receipt(out, ('summary', 'summary_stop'))
 
 
 def _admit_paths(call, g, a):
@@ -2288,6 +2435,47 @@ def _weakest(first, second):
     if first.get('verified') and not second.get('verified'):
         return second
     return first
+
+
+def _coords_row(rc, kind=None, out=None):
+    """The record coordinates of a row (C7): the first _COORDS_IN_ROW [start, end] pairs
+    (0-based, half-open, forward strand), the true total, whether the row shows fewer than
+    the total (the row's own cut or the server's cap), the label's kind when the block
+    mixes kinds, and lower_bound when the run's occurrences may be understated."""
+    d = {} if out is None else out
+    shown = [list(x) for x in rc.intervals[:_COORDS_IN_ROW]]
+    d['coordinates'] = shown
+    d['coordinates_total'] = rc.total
+    d['coordinates_truncated'] = rc.total > len(shown)
+    if kind is not None:
+        d['coordinates_kind'] = kind
+    if rc.lower_bound:
+        d['coordinates_lower_bound'] = True
+    return d
+
+
+# what a row's coordinates cost a budgeted page (4 keys, at most 4 pairs): charged with the
+# row (row_extra), like the row itself
+_COORDS_ROW_EXTRA = (_B.W_ELEM + _COORDS_IN_ROW * _B.W_COORD,
+                     5 * _B.DICT_KEY + _B.LIST + _COORDS_IN_ROW * (_B.LIST + 2 * _B.INT_ID))
+
+
+def _coords_kind(g, label_id):
+    """The label's coordinate kind for a row: only when the block mixes kinds (C3)."""
+    c = _C.of(g)
+    if c is None or c.kind != 'mixed':
+        return None
+    return _C.label_kind(g, label_id)
+
+
+def _require_coordinates(g):
+    """A tool asked for coordinates (coordinates=true) on a retrieval that has none:
+    an error naming why, never rows silently without them."""
+    if not _C.present(g):
+        why = _C.reason(g)
+        raise ToolError('no_coordinates', 'this retrieval carries no record coordinates (%s): '
+                        'fetch it with a support: trace strategy and output.coordinates true '
+                        'on an index that reports them' % why, reason=why)
 
 
 def _row(x):

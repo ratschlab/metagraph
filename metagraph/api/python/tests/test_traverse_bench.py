@@ -231,6 +231,89 @@ class TestBenchTraverseCompare(unittest.TestCase):
         self.assertEqual(['walks.z.named.warm'], flags)
 
 
+class TestBenchTraverseCoordinates(unittest.TestCase):
+    """--coordinates (feature level 6): support-trace walks ask for record coordinates, a run
+    with them pairs with an opt-out run of the same windows (the same walks: the pair's
+    latency is the coordinates' cost), the summary and the comparison state the block's
+    size; --coordinates-estimate states the block an opt-out run's trace walks would
+    carry, from its recorded responses alone."""
+
+    BLOCK = {'arms': {'right': [{'from_bp': 0, 'label': 0, 'occurrences': [[1000000, 1000050],
+                                                                           [2000000, 2000050]],
+                                 'run': 0, 'to_bp': 50}]},
+             'complete': True, 'k': 31, 'kind': 'record', 'max_occurrences': 16,
+             'seed': [{'label': 0, 'occurrences': [[999960, 1000000], [1999960, 2000000]]}]}
+    BODY = ('H mgt 1 31 basic $ACGT c t k 64 1000 0 walk x * *\nS s 40 10 1 ' + 'A' * 40
+            + '\nL h 0 0 0 acc\nO c c c i\nA r c 50 p 0 0 1 1 0 . * 1 * 1 1 0 0 0 50\n'
+            'G . 0 50 ' + 'A' * 50 + ' * * * . * .\nR 0 0 0 50 X * * * *\nZ 8\n')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_the_plan_asks_only_trace_walks(self):
+        panel = BT.Panel(os.path.join(SCRIPTS, 'bench_panel_mini_refseq.json'))
+        plain = BT.Planner(panel, 0).build(['walks'])
+        coords = BT.Planner(panel, 0, 16).build(['walks'])
+        self.assertEqual([r['id'] for r in plain], [r['id'] for r in coords])
+        for a, b in zip(plain, coords):
+            out = b['body']['strategy']['output']
+            if a['params']['mode'] == 'trace':
+                self.assertEqual((True, 16), (out['coordinates'], out['max_coordinate_occurrences']))
+                self.assertNotEqual(BT.sha(a['body']), BT.sha(b['body']))
+            else:
+                self.assertNotIn('coordinates', out)
+            # apart from the coordinates, the same request
+            self.assertEqual(BT.sha(a['body']), BT.sha(BT.without_coordinates(b['body'])))
+
+    def test_facts_and_pairing(self):
+        def run(name, with_block):
+            seed = _seed(TEXT, 10.0, {'right': _arm(50, {'max_extension_bp': 1}, 50)})
+            if with_block:
+                seed['coordinates'] = self.BLOCK
+            meta, req, resp = _record(1, 'walks.x.trace.warm', 'walks', _traverse(seed))
+            body = {'strategy': {'output': {'detail': 'graphlet'}}}
+            if with_block:
+                body['strategy']['output'].update(coordinates=True, max_coordinate_occurrences=16)
+            meta['request_sha'] = BT.sha(body)
+            meta['request_sha_nocoords'] = BT.sha(BT.without_coordinates(body))
+            return _write_run(os.path.join(self.tmp.name, name), name, [(meta, body, resp)])
+        pa, pb = run('a', False), run('b', True)
+        rec = BT.load_results(pb)['requests'][0]['results'][0]
+        c = rec['coordinates']
+        self.assertEqual(('record', 2, 4, 4, 0, 1), (c['kind'], c['max_list'], c['occurrences'],
+                                                     c['occurrences_total'], c['lists_cut'],
+                                                     c['runs']))
+        self.assertIn('## record coordinates', BT.summary_md(BT.load_results(pb)))
+        text, flags = BT.compare(pa, pb)
+        self.assertEqual([], flags)
+        # the same request apart from the coordinates: a completed pair, its latency compared
+        self.assertIn('| walks | 1 |', text)
+        self.assertIn('## record coordinates', text)
+        self.assertNotIn('request differs', text.split('## completed')[1].split('\n\n')[2])
+
+    def test_the_estimate_of_a_recorded_run(self):
+        d = os.path.join(self.tmp.name, 'run')
+        os.makedirs(os.path.join(d, 'raw'))
+        resp = {'results': [{'seed': {'num_seed_labels': 1, 'length_bp': 40}, 'graphlet': self.BODY}]}
+        req = {'strategy': {'support': 'trace'}}
+        with gzip.open(os.path.join(d, 'raw', '001_walks.x.trace.first.json.gz'), 'wt') as f:
+            json.dump({'meta': {'id': 'walks.x.trace.first'}, 'request': req, 'response': resp}, f)
+        lines = []
+        rows = BT.coordinates_estimate([d], 7, out=lines.append)
+        self.assertEqual(1, len(rows))
+        r = rows[0]
+        self.assertEqual((1, 1, 'record'), (r['seed_labels'], r['runs'], r['kind']))
+        # exactly the server's shape with one occurrence per entry and 7-digit positions
+        block = {'arms': {'right': [{'from_bp': 0, 'label': 0, 'occurrences': [[1000000, 1000050]],
+                                     'run': 0, 'to_bp': 50}]},
+                 'complete': True, 'k': 31, 'kind': 'record', 'max_occurrences': 16,
+                 'seed': [{'label': 0, 'occurrences': [[1000000, 1000040]]}]}
+        self.assertEqual(len(json.dumps(block, separators=(',', ':'), sort_keys=True)),
+                         r['block_bytes_at_least'])
+        self.assertTrue(os.path.exists(os.path.join(d, 'coordinates_estimate.json')))
+
+
 class TestBenchLibraryCompare(unittest.TestCase):
     def test_time_only_on_the_same_completed_work(self):
         def run(label, rows):

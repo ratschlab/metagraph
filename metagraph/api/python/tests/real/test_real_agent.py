@@ -48,7 +48,7 @@ from metagraph.traverse import (  # noqa: E402
     GraphletStore, GraphletView, TraverseClient, derive, dump, parse,
 )
 from metagraph.traverse.mcp_tools import (  # noqa: E402
-    DEFAULT_MAX_BYTES, MIN_MAX_BYTES, SEQUENCE_MAX_BYTES, GraphletTools,
+    CAPABILITIES_MAX_BYTES, DEFAULT_MAX_BYTES, MIN_MAX_BYTES, SEQUENCE_MAX_BYTES, GraphletTools,
 )
 
 SPOOL_ROOT = os.path.join(R.SCRATCH, 'agent_spool')
@@ -235,6 +235,9 @@ class Agent:
                     kw.get('execute', args[4] if len(args) > 4 else True) is False)
                 limit = (self.tools.sequence_max_bytes
                          if name == 'graphlet_sequence' or dry_run else self.tools.max_bytes)
+                if name == 'traverse_capabilities':
+                    # the server's description of itself has its own default ceiling
+                    limit = max(limit, CAPABILITIES_MAX_BYTES)
             tc.assertIsInstance(out, dict, name)
             n = jsize(out)
             tc.assertLessEqual(n, limit, '%s(%r, %r) returned %d bytes > %d'

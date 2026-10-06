@@ -96,6 +96,14 @@ CELLS = [
     ('mini_refseq', 'mini_ndm1__annotate_exh',
      'annotate exhaustive on header labels: the recorded sets against /resolve discover '
      '(kind header)'),
+    ('mini_refseq', 'mini_rep_00__trace_coords',
+     'record coordinates (feature level 6) on a window of an insertion sequence repeated in '
+     'several records: header labels (kind record), several occurrences per run, '
+     '"unlimited"; the positional oracle f_positions against the source records (its answers '
+     'recorded: the bases\' digests and the string counts)'),
+    ('mini_refseq', 'mini_rep_00__trace_coords_column',
+     'record coordinates of column labels (kind column): positions in the column\'s k-mer '
+     'index space, trace_record_boundaries; f_positions in the column\'s records'),
 ]
 
 # cells NOT in the cache matrix, fetched live by snapshot() (a situation the cache has only
@@ -208,6 +216,9 @@ class Harness:
         R.require_server = no_server
         R.http = no_http
         R.server_up = lambda index, *, refresh=False: False
+        # the record oracle answers from the recorded bundles only: a local source FASTA
+        # would hide an answer the fixtures lack
+        R.RECORDS_DIR = {}
         self.rows = R.cells(heavy=None)
         self.oracle_answers = 0
         for row in self.rows:
@@ -328,6 +339,8 @@ def situations(h):
                 found['cut_events'].add(key)
             if res['outcome']['label_evidence'] == 'lower_bound':
                 found['label_evidence_lower_bound'].add(key)
+            if isinstance(res.get('coordinates'), dict):
+                found['coordinates_' + res['coordinates']['kind']].add(key)
             text = res['graphlet']
             for line in text.split('\n'):
                 f = line.split(' ')

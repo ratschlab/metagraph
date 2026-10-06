@@ -1088,6 +1088,76 @@ _BUILT_WHEN_CHARGED = {'runs_by_label': runs_by_label, 'partition_sets': partiti
 
 # ------------------------------------------------------------------ check_rules
 
+# From this feature level the server orders a merge's parents so that the first -- the one
+# the displayed walk follows (paths, spellings, continuations, route_bp) -- is the head
+# carrying the most labels, ties in arrival order (the owner's decision R21 (4)). Earlier
+# retrievals keep arrival order, and the library displays what the body stores either way.
+DISPLAYED_PARENT_LEVEL = 6
+
+
+def carried_labels(g, a, s, i):
+    """How many labels carry parent |i| of merge segment |s| (arm |a|) into the merge, by the
+    server's rule of R21 (4) (Walker::merge_level): constrain -- the labels whose lineages the
+    parent's head brings into the merge node: the ones the merge kept from it (its
+    partition entry) and the ones it closed there (an 'm' run ending at the parent's last
+    node, a label that came through another parent too); annotate -- the fewest labels
+    present at a node of the parent segment, true counts (every head at the merge node holds
+    the node's own labels, so the parent's own bases tell the routes apart: as many labels
+    as carry it whole). A label lost on the step into the merge node is in neither, as it
+    is in no head the server compares."""
+    pid = s.parents[i]
+    parent = a.segments[pid]
+    if g.mode == 'constrain':
+        closed = sum(1 for r in runs_by_segment(a)[pid]
+                     if a.runs[r].merged and a.runs[r].to_bp == parent.end_bp)
+        return len(s.partition[i]) + closed
+    return min([parent.entry_total] + [pr.total for pr in parent.presence])
+
+
+def feature_level(g):
+    """The feature level the response envelope's capabilities state (0: none stated, or a
+    body without its envelope)."""
+    caps = (g.envelope or {}).get('capabilities')
+    v = caps.get('feature_level') if isinstance(caps, dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) else 0
+
+
+def displayed_parent_rule(g):
+    """Which rule chose the parent g's merges display (R21 (4)): 'majority' (the envelope
+    states feature level 6 or more), 'arrival' (it states a lower level, or its
+    capabilities state none: a server from before the levels were stated -- every server
+    of level 5 or more states its level), or None, not known (a body without its
+    envelope, or an envelope without capabilities)."""
+    level = feature_level(g)
+    if level:
+        return 'majority' if level >= DISPLAYED_PARENT_LEVEL else 'arrival'
+    caps = (g.envelope or {}).get('capabilities')
+    return 'arrival' if isinstance(caps, dict) else None
+
+
+def majority_first(g, side, depth=None):
+    """Whether every merge of arm |side| (those starting before |depth|, when given)
+    displays a parent carried by the most labels -- no later parent carries more than the
+    first (carried_labels(); ties keep the arrival order) -- so that its display is the one
+    the rule of feature level 6 makes, whichever rule made it: True; False when a merge
+    shows a parent the level-6 rule would not (a lower level's arrival order); None when
+    a merge cannot be judged (constrain mode with recorded lists cut, whose partitions are
+    lower bounds, or a merge without its partition). An arm without merges is True."""
+    a = g.arms[side]
+    out = True
+    for s in a.segments:
+        if len(s.parents) < 2 or (depth is not None and s.from_bp >= depth):
+            continue
+        if g.mode == 'constrain' and (a.labels_per_node.nodes_truncated
+                                      or len(s.partition) != len(s.parents)):
+            out = None
+            continue
+        first = carried_labels(g, a, s, 0)
+        if any(carried_labels(g, a, s, i) > first for i in range(1, len(s.parents))):
+            return False
+    return out
+
+
 def check_rules(g, reference=None):
     """The §2.3 rules recomputed and compared, plus the §4/§9 invariants of the body.
 
@@ -1098,10 +1168,14 @@ def check_rules(g, reference=None):
                        emitted '*' where its rule does not reproduce the walker;
       'noncanonical'   an explicit field equal to its rule's value (the canonical form
                        writes '*'): valid, but not what a conforming writer emits;
-      'invariant'      a structural invariant of §4/§9 that does not hold.
+      'invariant'      a structural invariant of §4/§9 that does not hold (and, for a
+                       retrieval whose envelope states feature level 6 or more, R21 (4): at
+                       every merge the first parent is carried by the most labels -- the
+                       displayed walk follows it; carried_labels()).
     """
     out = []
     out.extend(_outcome_findings(g))
+    level = feature_level(g)
     ref_arms = (reference or {}).get('arms') if reference else None
     for side, arm in g.arms.items():
         segs = arm.segments
@@ -1134,6 +1208,27 @@ def check_rules(g, reference=None):
                         out.append({'arm': side, 'segment': s.id, 'field': fld,
                                     'kind': 'star_mismatch', 'decoded': mine,
                                     'reference': theirs})
+        if level >= DISPLAYED_PARENT_LEVEL and not (
+                g.mode == 'constrain' and arm.labels_per_node.nodes_truncated):
+            # R21 (4): from feature level 6 the displayed walk passes a merge through the
+            # parent carried by the most labels, ties in arrival order (which the body does
+            # not record: only a later parent carrying MORE is a violation). In constrain
+            # mode not decidable where recorded lists were cut (label_lists): the partitions
+            # are then lower bounds, and the server compares whole lineage states; annotate
+            # mode compares the true counts the body states
+            for s in segs:
+                if len(s.parents) > 1 and len(s.partition) == len(s.parents):
+                    first = carried_labels(g, arm, s, 0)
+                    for i in range(1, len(s.parents)):
+                        have = carried_labels(g, arm, s, i)
+                        if have > first:
+                            out.append({'arm': side, 'segment': s.id, 'field': 'parents',
+                                        'kind': 'invariant',
+                                        'msg': 'merge: the first (displayed) parent %d carries '
+                                               '%d labels, parent %d carries %d (feature level '
+                                               '%d: the first is the one carried by the most)'
+                                               % (s.parents[0], first, s.parents[i], have,
+                                                  level)})
         if g.mode != 'constrain':
             continue
         # §4 / T37 invariants
@@ -1181,6 +1276,32 @@ WALK_CLASS = ('walk_domain', 'seed_labels')
 LABEL_LOWER_CLASS = ('label_lists', 'inexact_counts', 'seed_labels', 'switch_sources',
                      'greedy_losses')
 LABEL_QUALIFIED_CLASS = ('trace_record_boundaries',)
+# (D3, owner decision R21 (3)) a WALKED result's derivation limitation is in the qualified
+# class too: its permitted set was derived from part of the seed, a superset of the labels
+# carrying the whole seed, so a label it reports may be one the whole seed excludes. A
+# failed seed's derivation limitation says why there is no result and qualifies nothing
+# (the server's outcome_of, traverse.cpp)
+WALKED_QUALIFIED_CLASS = ('derivation',)
+
+
+def qualifies(g, lim):
+    """Whether limitation |lim| of graphlet |g| puts its label evidence in the qualified
+    class (something reported may be overstated): trace_record_boundaries, and a walked
+    result's derivation (D3: a permitted set derived from part of the seed)."""
+    if lim.kind in LABEL_QUALIFIED_CLASS:
+        return True
+    return lim.kind in WALKED_QUALIFIED_CLASS and g.outcome is not None \
+        and g.outcome.walks != 'failed'
+
+
+def partial_derivation(g):
+    """The seed-level derivation limitation of a walked result (D3: the time budget ran
+    out while the permitted set was derived, after observed of the seed's k-mers; the walk
+    stopped at the seed), or None."""
+    if g.outcome is None or g.outcome.walks == 'failed':
+        return None
+    return next((l for l in g.limitations if l.kind == 'derivation' and l.arm is None),
+                None)
 
 
 def _outcome_findings(g):
@@ -1206,7 +1327,7 @@ def _outcome_findings(g):
     if cut != (o.branch_diagnostics == 'cut'):
         bad('branch_diagnostics', '%s with%s a branch_events limitation'
             % (o.branch_diagnostics, '' if cut else 'out'))
-    qualified = bool(kinds & set(LABEL_QUALIFIED_CLASS))
+    qualified = any(qualifies(g, l) for l in g.limitations)
     lower = bool(kinds & set(LABEL_LOWER_CLASS))
     want = 'qualified' if qualified else 'lower_bound' if lower else 'complete'
     if o.label_evidence != want:

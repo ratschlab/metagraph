@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from . import budget as _B
+from . import coords
 from ._codec import CodecError, GraphletFormatError, parse_int
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
 from .parser import (_check_transport, _write_all, dump, from_response, j_object, parse,
@@ -582,14 +583,40 @@ class GraphletStore:
             # of failing on every use while it stays listed (VMD-04)
             self._expire(handle)
             raise self._unknown(handle) from None
-        g = self._parsing(lambda b: parse(body, budget=b), self._parse_budget(parse_budget))
+        # an entry stores {} for none: a graphlet had an envelope when either side holds
+        # something (the rule of a J line, parser._attach_j: VPC-05)
+        has_env = bool(e.envelope) or bool(e.seed_summary)
+        # a summary with a coordinates block: every parse of the entry attaches the parsed
+        # index, a re-parse of a parsed entry (its resident model expired or was evicted)
+        # too -- so the model is the one from_response() made, with the same
+        # memory_bytes() and cache_signature(); an entry without a block parses as before
+        block = has_env and isinstance(e.seed_summary, dict) \
+            and isinstance(e.seed_summary.get('coordinates'), dict)
+        check = has_env and (not e.parsed or block)
+
+        def parse_entry(b):
+            if not check:
+                return parse(body, budget=b)
+            # the first whole parse of an entry stored unparsed (its parse stopped on a
+            # budget, L3), or any parse of one with a block: its record coordinates are
+            # validated with it (C9), as from_response() would have -- one parse call, so
+            # a stop in either keeps the entry as it was (unparsed, or parsed and not
+            # resident)
+            if b is None:
+                g_ = parse(body)
+                g_.envelope, g_.seed_summary = e.envelope, e.seed_summary
+                coords.attach(g_)
+                return g_
+            with b.scope('parse', ('export_mgt',)):
+                g_ = parse(body, budget=b)
+                g_.envelope, g_.seed_summary = e.envelope, e.seed_summary
+                coords.attach(g_, b)
+                return g_
+        g = self._parsing(parse_entry, self._parse_budget(parse_budget))
         if not e.parsed:
             # the body now passed a whole parse: it is a graphlet like any other
             e.parsed = True
             self._write_entry(e)
-        # an entry stores {} for none: a graphlet had an envelope when either side holds
-        # something (the rule of a J line, parser._attach_j: VPC-05)
-        has_env = bool(e.envelope) or bool(e.seed_summary)
         g.envelope = e.envelope if has_env else None
         g.seed_summary = e.seed_summary if has_env else None
         g.view = e.view

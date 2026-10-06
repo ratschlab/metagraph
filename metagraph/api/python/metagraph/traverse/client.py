@@ -27,6 +27,20 @@ only to a server that states `feature_level` >= 5 (read from GET /capabilities, 
 the client): a server below it refuses them with a 400, and a 400 to a request with
 attempt_id has already used that id up.
 
+Feature level 6 (DESIGN §18, §26): record coordinates. traverse() asks for them
+(strategy.output.coordinates) by itself for a support: trace strategy that does not set
+them, where GET /traverse/capabilities states the coordinates block for the index with
+supported true (supports_coordinates()) -- never on an index that cannot report them,
+where the null form would only cost depth. Under a request memory budget
+(bounds.max_memory_mb) only while the D4 gate passes (decision X-C8,
+AUTO_COORDINATES_UNDER_MEMORY_BUDGET): a run's coordinate account is charged with the
+walk, so a budgeted walk stops a little shallower with them; when it does not pass the
+response says so (coordinates_auto, notes) and coordinates=True asks for them, and when
+coordinates asked for that way share a memory stop the notes say how to drop them. It never
+retries silently without them: an older server's 400 is raised as it is. A request whose
+output.coordinates is not true never carries output.max_coordinate_occurrences, which the
+server refuses without it (C-N6).
+
 What GET /capabilities states is kept per server PROCESS: it is forgotten when an answer
 names another server_instance than the one read (a restart at the same address), on a 409
 instance_mismatch, and on a 400 that refuses a level-5 field as unknown (an older binary
@@ -49,20 +63,110 @@ import zlib
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
+from .coords import strip_coordinate_cap
+
 __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
            'AttemptAtBound', 'AttemptExpired', 'AttemptConflict', 'InstanceMismatch',
            'UnsupportedFeature', 'AttemptAnswer', 'AttemptSent', 'Suppression',
-           'ReleaseVerdict', 'release_verdict', 'ACCEPT_ENCODING', 'SUPPRESSION_LEVEL']
+           'ReleaseVerdict', 'release_verdict', 'ACCEPT_ENCODING', 'SUPPRESSION_LEVEL',
+           'COORDINATES_LEVEL', 'AUTO_COORDINATES_UNDER_MEMORY_BUDGET', 'auto_coordinates',
+           'drop_coordinates_note', 'strip_coordinate_cap']
 
 ACCEPT_ENCODING = 'gzip, deflate'
 # the feature level of the tombstone's suppression (a cancel with not_after_ms,
 # covers_admission) and of expect_server_instance (SPEC §10.3)
 SUPPRESSION_LEVEL = 5
+# the feature level whose GET /traverse/capabilities states the coordinates block (SPEC
+# §10.3): supports_coordinates() reads the block itself, not the level
+COORDINATES_LEVEL = 6
+# The D4 gate (decision X-C8): under a request memory budget the library asks for
+# coordinates automatically only if the median depth at the budget's stop with them stays
+# within 10% of the depth without -- each run's coordinate entry and occurrences are
+# charged when the run is created, so a budgeted walk with them stops shallower. Measured
+# at level 6 (DESIGN §26.5): on mini_refseq's 56 trace cells the median depth is 0.959-0.971
+# of the depth without (a 3-4% drop), but the gate FAILS where it matters most: column labels
+# with 16 or more chains per run (refseq33m's taxid columns) and seeds with many header
+# labels need 2-4x the memory and can fail at depth 0 at a budget that completes without
+# them (the regime test). The gate is therefore not passed, and the library does not ask
+# under a memory budget: the answer says so and how to ask (_MEMORY_BUDGET_NOTE,
+# coordinates=True)
+AUTO_COORDINATES_UNDER_MEMORY_BUDGET = False
+_MEMORY_BUDGET_NOTE = (
+    'record coordinates were not requested automatically: the request has a memory budget '
+    '(bounds.max_memory_mb), under which their account makes the walk stop shallower (the '
+    'D4 gate, decision X-C8); pass coordinates=True to ask for them (output.coordinates), or '
+    'drop the memory budget')
+# where coordinates requested automatically under a memory budget share a memory stop
+# (DESIGN §26.5: the single-lineage switch cells are the outliers; at 50% of their peak two
+# of them fail at depth 0 with coordinates and not without)
+_DROP_COORDINATES_NOTE = (
+    'record coordinates were requested automatically under a memory budget '
+    '(bounds.max_memory_mb), and %d seed(s) stopped on it with drop_coordinates offered: '
+    'their coordinate account is part of what stopped them; send the request again with '
+    'coordinates=False (output.coordinates false) to walk further, or raise the budget')
 # A server refuses a field it does not know with a 400 naming it ("request: unknown field
 # 'not_after_ms'", server.cpp and traverse.cpp). For the fields the client sends by the
 # server's level, that 400 says the level the client kept is not the process's any more.
 _UNKNOWN_FIELD = re.compile(r"unknown field '([^']*)'")
 _LEVELLED_FIELDS = frozenset(('not_after_ms', 'expect_server_instance'))
+
+
+# the largest max_coordinate_occurrences a server accepts (2^64 - 2: the wire contract)
+_MAX_CAP = (1 << 64) - 2
+
+
+def _valid_cap(v):
+    if v == 'unlimited':
+        return True
+    return isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= _MAX_CAP
+
+
+def _memory_budget(strategy):
+    v = ((strategy or {}).get('bounds') or {}).get('max_memory_mb')
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0
+
+
+def auto_coordinates(client, strategy, graph=None, graph_path=None):
+    """The automatic rule for record coordinates (decision C8, X-C8) -> (value, statement):
+    value True (ask), or None (leave the strategy as given); statement None when the rule
+    does not apply (the strategy sets output.coordinates, or is not support: trace in
+    constrain mode), else {requested, reason[, memory_budget][, note]} -- reason
+    'supported' (asked; memory_budget true when under a request memory budget, the D4 gate
+    passing), 'unsupported' (the index states no coordinates block, or supported false) or
+    'memory_budget' (a request memory budget with the gate not passing: not asked, |note|
+    says how to ask). |client|: anything with supports_coordinates() (a TraverseClient);
+    one without asks for none."""
+    s = strategy or {}
+    out = s.get('output') if isinstance(s.get('output'), dict) else {}
+    if 'coordinates' in out:
+        return None, None
+    labels = s.get('labels') if isinstance(s.get('labels'), dict) else {}
+    if s.get('support', 'kmer') != 'trace' or labels.get('mode', 'constrain') != 'constrain':
+        return None, None
+    probe = getattr(client, 'supports_coordinates', None)
+    if probe is None or not probe(graph, graph_path):
+        return None, {'requested': False, 'reason': 'unsupported'}
+    if _memory_budget(s):
+        if not AUTO_COORDINATES_UNDER_MEMORY_BUDGET:
+            return None, {'requested': False, 'reason': 'memory_budget',
+                          'note': _MEMORY_BUDGET_NOTE}
+        return True, {'requested': True, 'reason': 'supported', 'memory_budget': True}
+    return True, {'requested': True, 'reason': 'supported'}
+
+
+def drop_coordinates_note(results, statement):
+    """The note for coordinates the automatic rule asked for under a memory budget
+    (|statement|: auto_coordinates()'s) where seed results of |results| (the response's
+    raw `results`, graphlet or failed) stopped on memory with drop_coordinates offered,
+    else None: it says how to walk further without them (DESIGN §26.5)."""
+    if not statement or not statement.get('requested') or not statement.get('memory_budget'):
+        return None
+    n = 0
+    for r in results or ():
+        stop = r.get('resource_stop') if isinstance(r, dict) else None
+        if isinstance(stop, dict) and 'drop_coordinates' in (stop.get('actions') or ()):
+            n += 1
+    return _DROP_COORDINATES_NOTE % n if n else None
 
 
 def _unknown_field(status, message):
@@ -302,6 +406,9 @@ class TraverseResponse:
     notes: List[str] = field(default_factory=list)
     # traverse(): the attempt fields as sent (AttemptSent; None without attempt_id)
     sent: Optional[AttemptSent] = None
+    # traverse(coordinates='auto'): what the automatic rule decided ({requested, reason,
+    # memory_budget?, note?}, auto_coordinates()); None where it did not apply
+    coordinates_auto: Optional[dict] = None
 
     @property
     def usage(self):
@@ -356,6 +463,8 @@ class TraverseClient:
         self.graph = graph
         self.feature_level = feature_level
         self._server_doc = None
+        # (graph, graph_path) -> whether GET /traverse/capabilities states coordinates
+        self._coord_support = {}
 
     # ---------------------------------------------------------------- transport
 
@@ -417,6 +526,10 @@ class TraverseClient:
         if not 200 <= status < 300:
             message = out.get('error') if isinstance(out, dict) else (text or '')[:500]
             refused = _unknown_field(status, message)
+            if status == 400 and isinstance(message, str) and 'coordinate' in message:
+                # a server that refuses the coordinates fields is not the one whose
+                # capabilities were read (a rollback at the same address): read them again
+                self._coord_support.clear()
             if refused in _LEVELLED_FIELDS and isinstance(payload, dict) and refused in payload:
                 # a field sent by the server's level is unknown to the process answering:
                 # an older binary replaced the one whose level the client kept (a rollback
@@ -531,6 +644,32 @@ class TraverseClient:
         return self._request('GET', '/traverse/capabilities'
                              + ('?' + '&'.join(query) if query else ''))
 
+    def supports_coordinates(self, graph=None, graph_path=None, refresh=False):
+        """Whether the index (|graph|, |graph_path| on a multi-graph server) reports record
+        coordinates: its GET /traverse/capabilities states the coordinates block (feature
+        level 6: on every index, `supported` saying whether this one records them) with
+        supported true, and supports_trace. Read once per (graph, graph_path) and kept
+        (|refresh| reads it again; a 400 that refuses a coordinates field forgets it). A
+        server whose capabilities route fails with an HTTP error is taken as not supporting
+        them."""
+        key = (graph or self.graph, graph_path)
+        got = None if refresh else self._coord_support.get(key)
+        if got is None:
+            try:
+                caps = self.capabilities() if graph is None and graph_path is None \
+                    else self.capabilities(graph, graph_path)
+            except TraverseError:
+                return False
+            block = caps.get('coordinates') if isinstance(caps, dict) else None
+            got = isinstance(block, dict) and block.get('supported') is True \
+                and caps.get('supports_trace') is True
+            self._coord_support[key] = got
+        return got
+
+    def auto_coordinates(self, strategy, graph=None, graph_path=None):
+        """auto_coordinates(self, ...): the automatic rule for record coordinates."""
+        return auto_coordinates(self, strategy, graph, graph_path)
+
     def server_capabilities(self):
         """GET /capabilities: the server-wide document — routes and features, feature_level,
         algorithm_version, mode (single | multi) and the graph names, the attempts block and
@@ -606,15 +745,33 @@ class TraverseClient:
 
     def build_request(self, seeds, strategy=None, *, detail='graphlet', timing=True,
                       graph=None, attempt_id=None, budget_id=None, locus_id=None,
-                      not_after_ms=None, expect_server_instance=None):
+                      not_after_ms=None, expect_server_instance=None, coordinates=None,
+                      max_coordinate_occurrences=None):
         """The /traverse request (a dict). |expect_server_instance| (with |attempt_id| only,
         feature level 5): the server_instance the attempt is meant for -- a string, or 'auto'
         for the server's own (server_instance(), kept for that process). An explicit one to
         a server below feature level 5 raises UnsupportedFeature (nothing is sent: that
         server would refuse the field with a 400 that uses the attempt_id up); 'auto' is
-        then left out. Either way AttemptSent.of(request) states what is sent."""
+        then left out. Either way AttemptSent.of(request) states what is sent.
+
+        |coordinates| (feature level 6): True sets strategy.output.coordinates, False
+        removes it (the same as false to the server, and valid to one that does not know
+        the field), None leaves the strategy as given (pure: no capabilities are read here;
+        traverse() applies the automatic rule). |max_coordinate_occurrences|: the cap per
+        occurrence list (an int >= 1 or "unlimited"). The cap is removed whenever the
+        resulting output.coordinates is not true: the server refuses it alone (C-N6)."""
         if expect_server_instance is not None and attempt_id is None:
             raise ValueError('expect_server_instance is sent with attempt_id only')
+        if coordinates is not None and not isinstance(coordinates, bool):
+            # by type, not by ==: 0 and 1 equal False and True, but the dispatch below is
+            # by identity, so they were taken for None (coordinates=0 kept coordinates,
+            # coordinates=1 dropped an explicit cap)
+            raise ValueError('coordinates is True, False or None, not %r' % (coordinates,))
+        if max_coordinate_occurrences is not None and not _valid_cap(max_coordinate_occurrences):
+            # refused here, before anything is sent: the server's 400 would use an
+            # attempt_id up (the frozen range of strategy.output.max_coordinate_occurrences)
+            raise ValueError('max_coordinate_occurrences is an integer in [1, %d] or '
+                             '"unlimited", not %r' % (_MAX_CAP, max_coordinate_occurrences))
         norm = []
         for s in seeds:
             norm.append({'sequence': s} if isinstance(s, str) else dict(s))
@@ -622,6 +779,13 @@ class TraverseClient:
         output = strategy.setdefault('output', {})
         output['detail'] = detail
         output['timing'] = timing
+        if coordinates is True:
+            output['coordinates'] = True
+        elif coordinates is False:
+            output.pop('coordinates', None)
+        if max_coordinate_occurrences is not None:
+            output['max_coordinate_occurrences'] = max_coordinate_occurrences
+        strip_coordinate_cap(strategy)
         req = {'seeds': norm, 'strategy': strategy}
         if self.release:
             req['release'] = self.release
@@ -648,7 +812,8 @@ class TraverseClient:
 
     def traverse(self, seeds, strategy=None, *, detail='graphlet', timing=True, graph=None,
                  attempt_id=None, budget_id=None, locus_id=None, not_after_ms=None,
-                 expect_server_instance=None):
+                 expect_server_instance=None, coordinates='auto',
+                 max_coordinate_occurrences=None):
         """-> TraverseResponse(envelope, graphlets, errors). A seed whose permitted set
         could not be derived is an error result ({seed, error}), not an exception: the
         other seeds' graphlets are still returned (so is a seed an attempt never started,
@@ -662,11 +827,25 @@ class TraverseClient:
         any exception raised once the request was built (a TraverseError, and a transport
         error too: a timeout, a reset connection), state the attempt fields as sent (for
         release_verdict()); an error raised while building it (UnsupportedFeature) sent
-        nothing."""
+        nothing.
+
+        |coordinates| (feature level 6): 'auto' (the default) asks for record coordinates
+        for a support: trace strategy that does not set output.coordinates, where the index
+        reports them (supports_coordinates()) -- under a request memory budget only while
+        the D4 gate passes (X-C8, AUTO_COORDINATES_UNDER_MEMORY_BUDGET); what it decided is
+        .coordinates_auto, and .notes states a decision not to ask under a memory budget,
+        or, where coordinates it asked for under one share a memory stop, how to drop them
+        (drop_coordinates_note()). True / False / None as in build_request(). A server that
+        refuses the field (an older one: 400) raises; nothing is retried without it."""
+        auto = None
+        if coordinates == 'auto':
+            coordinates, auto = auto_coordinates(self, strategy, graph)
         req = self.build_request(seeds, strategy, detail=detail, timing=timing, graph=graph,
                                  attempt_id=attempt_id, budget_id=budget_id, locus_id=locus_id,
                                  not_after_ms=not_after_ms,
-                                 expect_server_instance=expect_server_instance)
+                                 expect_server_instance=expect_server_instance,
+                                 coordinates=coordinates,
+                                 max_coordinate_occurrences=max_coordinate_occurrences)
         sent = AttemptSent.of(req)
         try:
             resp = self.response(self.traverse_raw(req))
@@ -680,6 +859,12 @@ class TraverseClient:
                 pass
             raise
         resp.sent = sent
+        resp.coordinates_auto = auto
+        if auto is not None and auto.get('note'):
+            resp.notes.append(auto['note'])
+        dropped = drop_coordinates_note((resp.raw or {}).get('results'), auto)
+        if dropped is not None:
+            resp.notes.append(dropped)
         return resp
 
     @staticmethod

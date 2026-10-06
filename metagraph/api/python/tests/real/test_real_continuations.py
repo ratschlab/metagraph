@@ -355,6 +355,12 @@ class TestNextRequestShape(unittest.TestCase):
                             got = st['labels']['extra']
                             self.assertEqual(got, [x for x in pool if x in got])
                             want['labels']['extra'] = got
+                        if req.branch_budget is not None:
+                            # the branch allowance reduced by the largest terminal branch
+                            # count (v5.4, DESIGN §19.3): its derivation is checked in
+                            # branch_budget, its value is what the request carries
+                            want.setdefault('branching', {})['max_label_branches'] = \
+                                req.branch_budget['effective']
                         # everything else is the retrieval's own normalized strategy
                         self.assertEqual(want, st)
                     if g.envelope.get('release'):

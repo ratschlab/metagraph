@@ -409,7 +409,7 @@ document a server writes (``is_canonical(x)`` tests it).
    with open('merge.mgt') as f:
        text = f.read()
    print(is_canonical(text), body.dump() == text)
-   damaged = text.replace('R 5 3 0 62 m 0 * * * 2 0\n', '')     # one run lost
+   damaged = text.replace('R 4 3 0 62 m 0 * * * 2 0\n', '')     # one run lost
    try:
        parse(damaged)
    except GraphletFormatError as e:
@@ -481,7 +481,12 @@ A **walk** is a leaf. Its id (``path_id``, the ``walk`` of the tool functions) i
 leaf's ordinal in segment order, as in the server's ``paths[]``, and its segments are the
 first-parent chain from the root: the **displayed** path. Behind a merge, a label may
 have come through another parent; its *own* route is then not the displayed one (see
-`Claims`_).
+`Claims`_). Which parent is first is the server's choice, stored in the body: from
+feature level 6 it is the parent whose head carries the **most labels** at the merge
+(ties in the order the heads arrived), so the displayed walk follows the bulk of the
+evidence; earlier servers kept arrival order. The library always displays the first
+parent as stored, and ``check_rules()`` reports a level-6 retrieval whose merge breaks
+the rule.
 
 In ``constrain`` mode the arm also holds **runs** (``arm.runs``): one per stretch of a
 label lineage, with ``label``, ``from_bp``, ``to_bp``, an end token (a reason code such
@@ -496,6 +501,10 @@ The fixture ``merge`` used below: a 30 bp seed, the right arm to 100 bp, four co
 labels, and two SNP bubbles that open at 20 and 46 and reconverge at 36 and 62
 (``on_reconverge: merge``). ``a.fa`` takes the first allele of both bubbles, ``b.fa`` the
 second of both, ``c.fa`` the first then the second, and ``both.fa`` is on every allele.
+Each merge's first parent is the allele carried by the most labels: at 36 the first
+(``a.fa``, ``c.fa``, ``both.fa``), at 62 the second (``b.fa``, ``c.fa``, ``both.fa``),
+which arrived second -- so the displayed walk is 0, 1, 3, 5, 6, ``b.fa`` joins it at 36
+and ``a.fa`` at 62.
 
 .. graphlet-example: segments
 
@@ -514,7 +523,7 @@ second of both, ``c.fa`` the first then the second, and ``both.fa`` is on every 
    3 (1, 2) 36 46 ACCCAG ['a.fa', 'b.fa', 'c.fa', 'both.fa']
    4 (3,) 46 62 CCGGCG ['a.fa', 'both.fa']
    5 (3,) 46 62 GCGGCG ['b.fa', 'c.fa', 'both.fa']
-   6 (4, 5) 62 100 GTCCGG ['a.fa', 'b.fa', 'c.fa', 'both.fa'] leaf
+   6 (5, 4) 62 100 GTCCGG ['a.fa', 'b.fa', 'c.fa', 'both.fa'] leaf
 
 Labels
 ^^^^^^
@@ -616,8 +625,9 @@ The outcome: four dimensions
      - ``complete`` | ``lower_bound`` | ``qualified``
      - ``lower_bound``: evidence may be *missing or understated* (``label_lists``,
        ``inexact_counts``, ``seed_labels``, ``switch_sources``, ``greedy_losses``).
-       ``qualified``: something may be *overstated* (``trace_record_boundaries``); it
-       wins when both apply.
+       ``qualified``: something may be *overstated* (``trace_record_boundaries``, and a
+       walked result's ``derivation``: its permitted set was derived from part of the
+       seed); it wins when both apply.
    * - ``delivery``
      - ``inline`` | ``spooled`` | ``paged``
      - How the body reached you; independent of the other three. Servers write
@@ -690,11 +700,31 @@ one). Each has ``kind``, ``knob`` (the request field, relative to ``strategy``),
      - label_evidence (qualified)
      - ``labels.seed_label_kind``: ``support: trace`` with column labels cannot see a
        record boundary.
+   * - ``derivation``
+     - seed
+     - label_evidence (qualified), in a walked result
+     - ``bounds.time_budget_ms``: the time budget ran out while the permitted set was
+       derived from the seed, after ``observed`` of its k-mers (feature level 5+). The
+       labels carrying the k-mers read were taken -- a superset of those carrying the
+       whole seed -- and the walk stopped at the seed (``complete_to_bp`` 0, walks
+       ``partial``). ``summary()`` names the case (``seed.derivation``). A seed whose
+       derivation failed outright has no graphlet; its result states the same kind and
+       qualifies nothing.
+   * - ``coordinates``
+     - seed
+     - none (decision C2, provisional)
+     - ``output.max_coordinate_occurrences``: record coordinate lists were cut at the
+       cap (``lists_cut`` of them, ``observed`` the largest true count). Only when a
+       request asked for coordinates (`Record coordinates`_); the block itself states
+       ``complete: false``.
    * - ``server_clamp``
      - seed
      - none of its own
      - The clamped field; what the clamp caused is stated by the ``walk_domain`` or
        ``seed_labels`` entry it led to.
+
+Limitation kinds are an open set of ``[a-z_]`` tokens: a reader keeps a kind it does not
+know (``memory_bound_soft`` and ``coordinates`` were added after MGT v1 was frozen).
 
 Semantic ends (``dead_end``, ``label_lost``, ``max_extension_bp``, ...) are not
 limitations: the requested domain is complete there.
@@ -799,9 +829,10 @@ to every result: ``complete_to_bp`` and ``scope`` per arm, ``support`` and
 ``reconverge``, the four outcome dimensions, the kinds of the limitations that apply
 (seed level and per arm; an informational ``scope`` is left out) and ``exact``, which
 holds for the arm only when its label evidence is complete *and* no recorded list on it
-was cut -- a limitation of the other arm does not make it inexact. In the
-query results, ``Walk.complete``, ``Walk.beyond_certified_bp`` and ``Claim.exact`` carry
-the same information per row.
+was cut -- a limitation of the other arm does not make it inexact. A retrieval that asked
+for record coordinates adds ``coordinates``: the block's ``kind`` and ``complete``, or
+the ``reason`` it has none. In the query results, ``Walk.complete``,
+``Walk.beyond_certified_bp`` and ``Claim.exact`` carry the same information per row.
 
 .. graphlet-example: evidence
 
@@ -866,16 +897,17 @@ non-first merge parent; ``False`` accepts any label alive at the walk's end.
 
 .. code-block:: text
 
-   0 100 max_extension_bp 4 ['a.fa', 'both.fa'] True
+   0 100 max_extension_bp 4 ['c.fa', 'both.fa'] True
    []
    [0]
    support [(1, 109), (2, 95), (0, 126)]
    length [(0, 126), (1, 109), (2, 95)]
    [0]
 
-All four labels are alive at the end of ``merge``'s single walk, but only ``a.fa`` and
-``both.fa`` spell it: ``b.fa`` and ``c.fa`` took the other allele of the second bubble
-and rejoined at 62.
+All four labels are alive at the end of ``merge``'s single walk, but only ``c.fa`` and
+``both.fa`` spell it: ``b.fa`` took the other allele of the first bubble and rejoined at
+36, ``a.fa`` the other allele of the second and rejoined at 62 (each merge displays the
+allele carried by the most labels).
 
 Claims
 ^^^^^^
@@ -914,16 +946,17 @@ at ``at_most_bp``, ``stretch`` and ``route_only``. ``end_class`` groups the reas
 
 .. code-block:: text
 
-   a.fa alive (0, 100) route_bp 0 evidence_from 0 radius 0
-   b.fa alive (0, 100) route_bp 62 evidence_from 62 radius 0
-   c.fa alive (0, 100) route_bp 62 evidence_from 62 radius 0
-   both.fa alive (0, 100) route_bp 0 evidence_from 0 radius 2
-   both.fa merged (0, 36) route_bp 0 evidence_from 0 open 1
+   a.fa alive (0, 100) route_bp 62 evidence_from 62 radius 0
+   b.fa alive (0, 100) route_bp 36 evidence_from 36 radius 0
+   c.fa alive (0, 100) route_bp 0 evidence_from 0 radius 0
    both.fa merged (0, 62) route_bp 0 evidence_from 0 open 2
+   both.fa merged (0, 36) route_bp 0 evidence_from 0 open 1
+   both.fa alive (0, 100) route_bp 0 evidence_from 0 radius 2
 
-``b.fa`` and ``c.fa`` have route support over the whole 100 bp but displayed support
-from 62 only. ``both.fa``'s lineage branched at both bubbles (``branches`` 2); the
-branches on the second parents were closed at the merges at 36 and 62.
+``a.fa`` and ``b.fa`` have route support over the whole 100 bp but displayed support
+from 62 and from 36 only. ``both.fa``'s lineage branched at both bubbles (``branches``
+2); its branches on the minority alleles were closed at the merges at 62 and 36, and
+the lineage through the displayed alleles is the one kept.
 
 **Claims at a depth.** ``at_most_bp=D`` restricts every claim to ``[0, D)``, as a
 comparison with a shallower retrieval must. A run that starts at or after ``D`` makes no
@@ -1036,15 +1069,16 @@ through the partition that holds the lineage.
 
 .. code-block:: text
 
-   1 (0, 100) 62 max_extension_bp [6]
-   [(20, 'T', 'A'), (46, 'G', 'C')]
+   1 (0, 100) 36 max_extension_bp [6]
+   [(20, 'T', 'A')]
    [[0, 2, 3, 5, 6]] [[0, 1, 3, 4, 6]]
-   3 (0, 100) max_extension_bp merged_into None
+   3 (0, 62) merged merged_into 6
    4 (0, 36) merged merged_into 3
-   5 (0, 62) merged merged_into 6
+   5 (0, 100) max_extension_bp merged_into None
 
-``b.fa``'s own route differs from the displayed walk at the two SNPs; its route runs
-through segments 2 and 5, the second alleles.
+``b.fa``'s own route differs from the displayed walk at the first SNP; its route runs
+through segments 2 and 5, the second alleles, and the displayed walk takes the second
+allele of the second bubble too. ``a.fa``'s route leaves the displayed walk at 46.
 
 In ``annotate`` mode a label's route may pass through any parent of a merge (that is how
 ``label_summary()`` measures ``direct_bp``), and ``claims()``, ``label_walks()`` and
@@ -1101,15 +1135,13 @@ was cut and ``total`` the true count.
    (0, 20) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
    (20, 36) ['a.fa', 'c.fa', 'both.fa']
    (36, 46) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
-   (46, 62) ['a.fa', 'both.fa']
+   (46, 62) ['b.fa', 'c.fa', 'both.fa']
    (62, 100) ['a.fa', 'b.fa', 'c.fa', 'both.fa']
    [(0, 100, 4)]
    20 removed b.fa split ['T']
    36 added b.fa merge 2
-   46 removed b.fa split ['G']
-   46 removed c.fa split ['G']
-   62 added b.fa merge 5
-   62 added c.fa merge 5
+   46 removed a.fa split ['C']
+   62 added a.fa merge 4
 
 Label summary
 ^^^^^^^^^^^^^
@@ -1370,7 +1402,23 @@ with the reason ``a`` recorded for them).
   ``True``.
 * ``'qualified'``: the scopes differ (``per_path`` against ``united_history``), or
   either side's label evidence is a lower bound or qualified (a cut list cannot tell
-  absent from cut).
+  absent from cut). Note that the per-node label limit alone can make it so: a seed
+  carried by more labels than ``labels.max_labels_per_node`` (64 by default) -- a
+  conserved gene, a repeat -- has its recorded lists cut, states ``label_lists`` and
+  ``label_evidence: lower_bound``, and every comparison with it is ``'qualified'``, never
+  equal. ``compare()`` does not raise the limit for you: fetch both sides again with a
+  larger ``labels.max_labels_per_node`` (or name fewer labels) when equality matters.
+  Also across the rule change of feature level 6 (modes ``claims``, ``walks``,
+  ``prefix_subset``): from level 6 a merge displays the parent carried by the most
+  labels, before it the first to arrive, so the same trie can spell a walk through a
+  merge differently on the two sides. A side follows the level-6 rule when its envelope
+  states level 6 or more, the older one when it states a lower level or its capabilities
+  state none (a server from before the levels were stated); a body without its envelope
+  may follow either. The comparison is ``'qualified'`` (a note says so) when one side
+  may follow the older rule and shows, at a merge before the depth, a parent carried by
+  fewer labels than another (``derive.majority_first()``), while the other may follow
+  the level-6 rule. A side whose merges all show their majority parent displays what
+  either rule would, so it is not qualified.
 * ``'unverifiable'``: either side has no ``index_fp`` (the server loaded no index
   manifest), so label joins cannot be verified; ``index_meta_fp`` can only prove two
   indexes different.
@@ -1378,7 +1426,9 @@ with the reason ``a`` recorded for them).
 * ``False``: different indexes, seeds or arms.
 
 ``equal`` is ``None`` whenever ``comparable`` is not ``True``; a note then says whether a
-difference was found. The constrained trie over ``{acc1, acc3}`` equals the
+difference was found. Record coordinates are not compared: two retrievals with them
+compare exactly as without, and the notes say ``coordinates are not compared (v1)``.
+The constrained trie over ``{acc1, acc3}`` equals the
 label-free oracle filtered to those labels, and without the filter the oracle's
 ``acc2`` claim is reported:
 
@@ -1491,15 +1541,142 @@ beside them); ``records(g)`` returns the same rows as plain dicts without pandas
    True
 
 
+Record coordinates
+------------------
+
+From feature level 6 a retrieval can say **where** its walks lie in the indexed records:
+with ``strategy.output.coordinates: true`` each seed result carries a ``coordinates``
+block (JSON beside the body: MGT v1 is frozen, so the body is unchanged and a saved
+``.mgt`` keeps the block in its ``J`` line). Coordinates exist only where they are well
+defined: under ``support: trace`` on an index with k-mer coordinates, where every run is
+one coordinate-consecutive occurrence in one record. Otherwise the result carries
+``coordinates: null`` with ``coordinates_reason`` (``index has no coordinates``,
+``support kmer``, ``no traversal`` or ``partial derivation``). Without the request
+nothing changes.
+
+**Positions** are 0-based, half-open, on the record's forward strand. A run's
+occurrence is where *its own* bases -- the walk's ``[from_bp, to_bp)`` -- lie: with ``c``
+the coordinate chain's k-mer coordinate at the run's last node and ``L = to_bp -
+from_bp``, ``[c + k - L, c + k)`` on the right arm and ``[c, c + L)`` on the left (the
+left arm walks backwards along the record); ``L = 0`` is an empty interval at the seed
+boundary. A seed occurrence is ``[c_first, c_first + len(seed))``.
+
+* **Header labels** (an accession, kind ``record``) number positions within their
+  record.
+* **Column labels** (kind ``column``) number positions in the column's k-mer index
+  space -- record i's k-mer j is ``offset_i + j``, with ``offset_{i+1} = offset_i +
+  len_i - k + 1``. So the last k-1 bases of a record share their numbers with the next
+  record's first positions: such an interval cannot be attributed to one record without
+  the record lengths (not reported), and two records' intervals can overlap. A column
+  trace can also cross a record boundary (``trace_record_boundaries``).
+* Kind ``mixed``: each label's own kind says how to read its positions.
+
+Each list keeps the first ``output.max_coordinate_occurrences`` occurrences by start
+(default 16, or ``"unlimited"``); a cut list states its true count, the block says
+``complete: false``, and the seed-level limitation ``coordinates`` counts the lists cut.
+``chains_ended`` counts copies that stopped inside a run. A run entered by a switch into
+a label whose own lineage was live there lists only the chains it inherited and is
+marked ``lower_bound`` (its occurrences may be understated; ``runs_lower_bound`` counts
+them, and the block is not complete).
+
+In the library ``g.coordinates`` is the parsed block (``Coordinates``: ``kind``, ``k``,
+``max_occurrences``, ``complete``, ``lists_cut``, ``runs_lower_bound``, ``seed`` by seed
+label id, ``arms`` with one ``RunCoordinates`` per run, indexed by run id) or ``None``,
+and ``g.coordinates_reason`` says why (``no envelope`` for a parsed body alone, ``not
+requested``, or the server's reason). The block is validated against the body as soon
+as it is read -- ``from_response()``, a saved file, the store's first parse of an
+unparsed entry: an inconsistent one is a ``GraphletFormatError`` (``coordinates: ...``),
+never a half-trusted answer. The queries carry them only for such a retrieval, as
+subclasses of their usual records (whose layout is unchanged):
+
+* ``claims()`` gives ``CoordClaim``: ``.coordinates`` is the run's ``RunCoordinates``
+  clipped to the claim -- at a cut ``at_most_bp`` only the run's bases before it remain
+  (a ``route_only`` claim keeps its own route's);
+* ``walks()`` gives ``CoordWalk``: ``.coordinates`` maps each label alive at the leaf
+  (its ref) to the occurrences of its run reaching the leaf; its claims are
+  ``CoordClaim``;
+* ``label_walks()`` gives ``CoordLabelWalk`` with the run's occurrences.
+
+.. graphlet-example: coordinates
+
+.. code-block:: python
+
+   import gzip
+
+   def coords_fixture(name):
+       with gzip.open('../coords/%s.graphlet.json.gz' % name, 'rt') as f:
+           resp = json.load(f)
+       return from_response(resp['results'][0], resp)
+
+   rep = coords_fixture('rep0_cut1')          # a repeat window, cap 1
+   c = rep.coordinates
+   print(c.kind, c.k, c.max_occurrences, c.complete, c.lists_cut)
+   so = c.seed[0]
+   print(rep.labels[0].name, so.intervals, so.total, so.truncated)
+   cl = rep.claims('right')[1]
+   print(cl.label.name, cl.from_bp, cl.to_bp, cl.coordinates.intervals, cl.coordinates.total)
+   print(rep.claims('right', at_most_bp=100)[1].coordinates.intervals)
+   print(coords_fixture('rep0_kmer_null').coordinates_reason)
+
+.. code-block:: text
+
+   record 31 1 False 16
+   NZ_CP030345.1 ((8276, 8426),) 6 True
+   NZ_MPCO01000003.1 0 300 ((84964, 85264),) 4
+   ((84964, 85064),)
+   support kmer
+
+``to_json()`` copies the block, so it still equals the server's full result. FASTA
+headers state the occurrences (see `FASTA`_); GFA has no field for them.
+``compare()`` does not compare them (it says so). ``next_request()`` carries the setting
+to the continuation, and a continuation that drops them (``output={'coordinates':
+False}``, the resource stop's action ``drop_coordinates``) also drops the cap, which the
+server refuses alone.
+
+**Asking for them.** ``TraverseClient.traverse(..., coordinates='auto')`` (the default)
+asks by itself for a ``support: trace`` strategy that does not set
+``output.coordinates``, where ``supports_coordinates()`` finds the index reporting them
+(``GET /traverse/capabilities``: its ``coordinates`` block with ``supported`` true),
+and never on an index that cannot report them. What it decided is
+``coordinates_auto``. Under a request memory budget (``bounds.max_memory_mb``) each
+run's coordinates are charged with the walk, so it stops a little shallower: the library
+asks there only while the measured depth at the stop stays within 10% of the depth
+without (the D4 gate). At level 6 the gate does not pass: the median drop on mini_refseq
+is 3-4%, but column labels with 16 or more chains per run (refseq33m's taxid columns) and
+seeds with many header labels need 2-4 times the memory, so under a memory budget the
+library does not ask. Where a seed then
+stops on its memory budget offering ``drop_coordinates``, ``notes`` says so and how to
+walk further (``coordinates=False``); with the gate off the response says that it did
+not ask and how to (``coordinates=True``). ``build_request(..., coordinates=,
+max_coordinate_occurrences=)`` is pure (``None`` leaves the strategy as given) and never
+sends the cap without ``coordinates: true``. A server that does not know the field
+refuses it (400); the client raises, it never retries without it.
+
+.. note::
+
+   Coordinates assume one strand per record (no ``--fwd-and-reverse`` build) and unique
+   headers; neither can be read from the index. The server states the true bound of the
+   block in its capabilities: an occurrence is a chain the walk read, so without a
+   memory or work budget and with ``"unlimited"`` nothing else bounds its size.
+
+
 Exports
 -------
 
 FASTA
 ^^^^^
 
-``to_fasta(arm=None, leaves=None, with_seed=True, orientation='natural', width=None)``
-writes one record per walk, ``>{arm}_{path_id}`` with its length, reason, number of
-labels and whether the seed is included.
+``to_fasta(arm=None, leaves=None, with_seed=True, orientation='natural', width=None,
+*, coordinates=None)`` writes one record per walk, ``>{arm}_{path_id}`` with its length,
+reason, number of labels and whether the seed is included. For a retrieval with record
+coordinates the header adds ``coords=ACC:start-end,...`` -- **1-based, closed** (the
+JSON block is 0-based, half-open), on the record's forward strand, the seed included
+when ``with_seed`` -- for each header label alive at the leaf whose run was entered by
+the seed and covers the whole walk: at most 8 (label, occurrence) pairs by label id and
+start, then ``coords_more=N``, and ``coords_cut=1`` when such a run's list was cut.
+Column labels are left out (their positions are global). ``coordinates=False`` never
+adds the field, ``True`` requires it; a retrieval without coordinates gives exactly the
+records it always did.
 
 .. graphlet-example: fasta
 
@@ -1515,8 +1692,18 @@ labels and whether the seed is included.
    >right_1 length_bp=10 reason=max_extension_bp labels=2 seed=yes
    CGTACCGTCGTAGCCATGCTGCTTCATTGCAGGTTCTATTTTACACCACG
    >right_0 length_bp=100 reason=max_extension_bp labels=4 seed=no
-   TTTCCTATTTAGCCTCTGTCATTACGTTTGACAATGACCCAGCCCTCCGGCGGGTCGACT
+   TTTCCTATTTAGCCTCTGTCATTACGTTTGACAATGACCCAGCCCTGCGGCGGGTCGACT
    TGGTCCGGACGATAGCACTTAGTTCCTCACTTCACAATAG
+
+.. graphlet-example: fasta-coordinates
+
+.. code-block:: python
+
+   print(rep.to_fasta('right', leaves=[0]).split('\n')[0])
+
+.. code-block:: text
+
+   >right_0 length_bp=300 reason=max_extension_bp labels=1 seed=yes coords=NZ_CABHKL010000003.1:102356-102805
 
 GFA
 ^^^
@@ -1574,12 +1761,12 @@ returns for the same request with ``detail: "full"``. It needs the envelope.
        full = json.load(f)
    mine = merge.to_json()
    print(normalize_result(mine) == normalize_result(full['results'][0]))
-   print(mine['arms']['right']['paths'][0]['end_labels'][1])     # b.fa, merged in at 62
+   print(mine['arms']['right']['paths'][0]['end_labels'][1])     # b.fa, merged in at 36
 
 .. code-block:: text
 
    True
-   {'label': 1, 'loss': 0.0, 'branches': 0, 'run': 1, 'route_bp': 62}
+   {'label': 1, 'loss': 0.0, 'branches': 0, 'run': 1, 'route_bp': 36}
 
 MGT
 ^^^
@@ -1600,7 +1787,7 @@ read with ``from_response()``; ``dump(envelope=True)`` adds the ``J`` line, whic
 .. code-block:: text
 
    H mgt 1 15 basic $ACGT c k m 64 40 0 walk fixtures * fbfd396e439f0d22
-   1225 1225 J {"algorithm_version":"traver
+   1223 1223 J {"algorithm_version":"traver
 
 
 Local budgets
@@ -1821,7 +2008,11 @@ index names to ``TraverseClient`` objects for the backend tools.
   difference: it is refused as ``index_unverifiable``, and run only when the caller
   passes ``allow_unverified_index=true`` (the result then states the identity
   unverified). A body over ``max_graphlet_mb`` is spooled complete and only its summary
-  and handle are returned (``delivery: spooled``).
+  and handle are returned (``delivery: spooled``). ``traverse_fetch(coordinates='auto')``
+  asks for record coordinates by the client's rule (`Record coordinates`_; true or false
+  to choose); ``coordinates_note`` says how to walk further without them where it asked
+  under a memory budget and the seed stopped on it (or, with the D4 gate off, that it did
+  not ask and how to). A replay sends its stored request as it was.
 * **Local tools over a handle:** ``graphlet_summary``, ``graphlet_walks``,
   ``graphlet_walk``, ``graphlet_support``, ``graphlet_labels``, ``graphlet_splits``,
   ``graphlet_claims``, ``graphlet_sequence``, ``graphlet_export``,
@@ -1835,7 +2026,7 @@ The contract:
 * every local answer carries the ``evidence`` block above;
 * every result fits ``max_bytes`` (2 KB by default, 64 bytes to 16 MiB when given;
   ``graphlet_sequence`` has its own
-  16 KB ceiling, stated in its result, and ``traverse_capabilities`` a 16 KB default, so
+  16 KB ceiling, stated in its result, and ``traverse_capabilities`` a 32 KB default, so
   that the server's description of itself comes whole; an explicit ``max_bytes`` still
   holds). List tools page, a page filled in time linear in its rows: they return
   ``total`` and an
@@ -1855,6 +2046,17 @@ The contract:
   the graphlet's size: a service sets ``local_limits`` (`Local budgets in the tools`_);
 * a filter never hides rows silently: what it removed is counted (e.g.
   ``filtered: {merge_entered: N}`` with a hint how to include them);
+* record coordinates: ``graphlet_claims`` rows of a retrieval with them always carry
+  them -- ``coordinates`` (the claim's first 4 ``[start, end]``, 0-based half-open),
+  ``coordinates_total``, ``coordinates_truncated`` (fewer shown than the total),
+  ``coordinates_kind`` (the label's, when the block mixes header and column labels) and
+  ``coordinates_lower_bound`` (when true); ``graphlet_walks`` (per label of the row) and
+  ``graphlet_labels(name=)`` carry them with ``coordinates=true``, which on a retrieval
+  without them is the error ``no_coordinates``;
+* under the caller's own ambient budget (``local_budget()``) with tools that have no
+  ``local_limits``, a stored entry still returns its handle: a summary its budget
+  stopped is left out and ``summary_stop`` states the stop, and a body whose parse
+  stopped is kept unparsed with the stop in ``stop``;
 * files are written to and read from the export directory (default
   ``<spool>/exports``) only;
 * failures are results ``{error, message, ...}`` -- a malformed argument too (an arm
@@ -1866,7 +2068,7 @@ The contract:
   ``result_too_large``, ``receipt_too_large``, ``backend_error`` (with the HTTP status,
   and ``retry_after_s`` while the server loads), ``backend_unreachable``,
   ``not_replayable``, ``seed_failed``, ``index_mismatch``, ``index_unverifiable``,
-  ``release_mismatch``, ``unverifiable_label_name``.
+  ``release_mismatch``, ``unverifiable_label_name``, ``no_coordinates``.
 
 .. graphlet-example: tools
 
@@ -1899,7 +2101,7 @@ The contract:
    traverse_capabilities, traverse_continue, traverse_fetch, traverse_resolve
    partial {'right': ['scope']}
    0 max_extension_bp 4 2 ACTTAGTTCCTCACTTCACAATAG
-   4 {'merge_entered': 2} ['a.fa', 'both.fa', 'both.fa', 'both.fa']
+   4 {'merge_entered': 2} ['c.fa', 'both.fa', 'both.fa', 'both.fa']
    3 3 False
    bad_cursor
    unknown_label path_not_allowed
@@ -2004,7 +2206,12 @@ through another parent: it has route support over the whole walk but displayed s
 only from ``evidence_from`` (``route_bp`` is the merge-derived part). Counting "labels
 that share this exact flank" means counting claims with ``evidence_from == 0`` (or
 ``labels_full``), not labels alive at the leaf. ``walks(labels=...)`` and the tool
-functions are route-consistent by default and say what they filtered.
+functions are route-consistent by default and say what they filtered. Which parent a
+merge displays is the server's choice: from feature level 6 the one carried by the most
+labels, before it the first to arrive -- so a level-6 retrieval and an older one of the
+same locus can spell different walks through a merge where the older one's first
+parent is not the majority (``compare()`` then says so and answers ``'qualified'``; a
+body without its envelope is taken to follow either rule).
 
 **No bases.** With ``output.sequences: false`` the segments carry no bases:
 ``spell()``, ``to_fasta()`` and ``to_gfa()`` raise ``ValueError``, ``Walk.sequence`` is
@@ -2036,7 +2243,25 @@ how much) before drawing conclusions from absence.
 **Route support is not occurrence.** ``direct_bp``, ``reach_bp`` and claims mean that
 a label's k-mers cover a graph route, not that its sequence contains those bases
 contiguously; and a beam path, or a path with switches, is a candidate supported by a
-chain of labels, not a sequence any one sample is claimed to contain.
+chain of labels, not a sequence any one sample is claimed to contain. Under ``support:
+trace`` with record coordinates each run *is* one contiguous occurrence, and the
+coordinates say where.
+
+**Reading record coordinates.** The JSON block, ``Coordinates`` and the tools' rows are
+0-based and half-open; FASTA headers are 1-based and closed. Positions are on the
+record's forward strand, also on the left arm (whose walk runs backwards along the
+record). A column label's positions are global to its column and can straddle two
+records; only header labels give positions within one record. A cut list
+(``truncated``, ``coords_cut=1``) or a ``lower_bound`` run lists *some* occurrences:
+the total says how many there are, or that there may be more. ``chains_ended`` counts
+copies of the walked sequence that stop inside the run -- not occurrences of the run.
+``compare()`` ignores coordinates.
+
+**A partial derivation (D3).** A seed whose time budget ran out while its permitted set
+was derived, after some but not all of its k-mers, is walked with the labels carrying
+the k-mers read: a superset of the seed's carriers, so its label evidence is
+``qualified`` and its walk stopped at the seed. ``summary()`` states it in
+``seed.derivation``; raise the time budget, shorten the seed or name the labels.
 
 
 Running the examples

@@ -19,6 +19,7 @@ __all__ = [
     'Segment', 'Run', 'GrowthBin', 'Refusal', 'BranchEvent', 'CapTrigger', 'Frontier',
     'LabelsPerNode', 'Counts', 'Limitation', 'Outcome', 'ResourceStop', 'Arm', 'Graphlet',
     'Walk', 'Claim', 'LabelWalk', 'SupportRun', 'Change', 'Continuation', 'Comparison',
+    'CoordClaim', 'CoordWalk', 'CoordLabelWalk',
     'Split', 'SplitPoint', 'Branch', 'Path', 'EndLabel', 'MissingEnvelope',
     'AmbiguousLabel', 'UnknownLabel', 'BadSelector', 'IncompleteRecording',
     'UnverifiableLabelName', 'ARM_SIDES',
@@ -463,6 +464,25 @@ class Graphlet:
     def has_envelope(self):
         return self.seed_summary is not None and self.envelope is not None
 
+    @property
+    def coordinates(self):
+        """The record coordinates of the retrieval (coords.Coordinates: where each run's
+        own bases lie in the indexed records, DESIGN §18), or None -- coordinates_reason
+        says why. Parsed from the per-seed summary and validated against the body (C9;
+        GraphletFormatError when inconsistent), kept in the graphlet's cache: a property,
+        not a slot, so the model of a graphlet without coordinates is what it always was."""
+        from . import coords
+        return coords.of(self)
+
+    @property
+    def coordinates_reason(self):
+        """Why coordinates is None: 'no envelope' (a parsed body alone carries none),
+        'not requested' (the request did not set strategy.output.coordinates), or the
+        server's reason ('index has no coordinates', 'support kmer', 'no traversal',
+        'partial derivation'); None when the retrieval has them."""
+        from . import coords
+        return coords.reason(self)
+
     def require_envelope(self, what):
         if not self.has_envelope:
             raise MissingEnvelope(
@@ -549,10 +569,13 @@ class Graphlet:
         return ops.subgraph(self, selectors, arm, mode, budget=budget, of=of)
 
     def to_fasta(self, arm=None, leaves=None, with_seed=True, orientation='natural',
-                 width=None, *, budget=None):
+                 width=None, *, coordinates=None, budget=None):
+        """FASTA, one record per walk (export.to_fasta); |coordinates|: None states the
+        record coordinates in the headers when the retrieval has them, False never,
+        True requires them."""
         from . import export
         return export.to_fasta(self, arm, leaves, with_seed, orientation, width,
-                               budget=budget)
+                               coordinates=coordinates, budget=budget)
 
     def to_gfa(self, with_seed=True, *, budget=None):
         from . import export
@@ -686,6 +709,28 @@ class Claim:
             'support': self.support, 'exact': self.exact,
         }
 
+    # a claim of a retrieval without record coordinates has none: a class attribute, not
+    # a slot, so a Claim's size (the stage-L account of every claims call) and its fields
+    # (the golden digests) are unchanged; CoordClaim carries them (decision C-N3)
+    coordinates = None
+
+
+@dataclass(slots=True)
+class CoordClaim(Claim):
+    """A claim of a retrieval with record coordinates: |coordinates| is its run's
+    coords.RunCoordinates clipped to the claim (the run's own bases [from_bp, to_bp), the
+    cut included; a route_only claim's route too). Made only for graphlets that carry a
+    coordinates block. Note: a CoordClaim never equals a Claim (dataclass equality compares
+    the types), which no comparison of the library relies on."""
+    coordinates: Any = None
+
+    def as_dict(self):
+        d = Claim.as_dict(self)
+        if self.coordinates is not None:
+            d['coordinates'] = self.coordinates.as_dict(
+                'record' if self.label.kind == 'header' else 'column')
+        return d
+
 
 @dataclass(slots=True)
 class Walk:
@@ -702,6 +747,17 @@ class Walk:
     complete: bool
     beyond_certified_bp: int
 
+    coordinates = None          # a class attribute (see Claim): CoordWalk carries them
+
+
+@dataclass(slots=True)
+class CoordWalk(Walk):
+    """A walk of a retrieval with record coordinates: |coordinates| maps each label
+    alive at the walk's leaf (its ref) to the coords.RunCoordinates of the run that reaches
+    the leaf -- where that run's own bases [from_bp, to_bp) lie in its record (a run entered
+    by the seed at 0 covers the whole walk)."""
+    coordinates: Any = None
+
 
 @dataclass(slots=True)
 class LabelWalk:
@@ -715,6 +771,15 @@ class LabelWalk:
     end: str
     leaves_below: List[int]
     merged_into: Optional[int]
+
+    coordinates = None          # a class attribute (see Claim): CoordLabelWalk carries them
+
+
+@dataclass(slots=True)
+class CoordLabelWalk(LabelWalk):
+    """A label walk of a retrieval with record coordinates: |coordinates| is its run's
+    coords.RunCoordinates (its own bases [from_bp, to_bp))."""
+    coordinates: Any = None
 
 
 @dataclass(slots=True)

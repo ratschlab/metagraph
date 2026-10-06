@@ -1,6 +1,6 @@
 """Offline regression over real retrievals: the CI side of tests/real/offline.py.
 
-Sixteen small retrievals of the live real-data suite (tests/real), committed under
+Eighteen small retrievals of the live real-data suite (tests/real), committed under
 data/traverse/real/ together with the /resolve answers their oracle checks need. Each is a
 real server response from one of three indexes:
 
@@ -19,7 +19,8 @@ fixtures with every server off:
                               time-budgeted cell, whose two fetches stopped apart)
   TestRealOfflineOracle       a_present, b_claims, b_lost, b_walks, b_stretch, b_maximal,
                               c_routes, d_annotate, e_direct, e_library, answered from the
-                              recorded /resolve answers
+                              recorded /resolve answers, and f_positions (record
+                              coordinates) from the recorded source-record answers
   TestRealOfflineFixtures     the files and their sizes, the situations the selection is
                               meant to cover (read from the bodies), the hairpin and
                               reverse-complement facts of the primary regime, no socket
@@ -114,7 +115,8 @@ REQUIRED = {
              'multi_genome_seed'],
     'mini_refseq': ['regime_basic', 'identity_verifiable', 'labels_header', 'support_trace',
                     'mode_constrain', 'mode_annotate', 'switch', 'end_edge_reuse',
-                    'reverse_complement_seed_pair'],
+                    'reverse_complement_seed_pair', 'coordinates_record',
+                    'coordinates_column'],
 }
 
 
@@ -277,6 +279,15 @@ class TestRealOfflineFixtures(unittest.TestCase):
                 for key, e in b['answers'].items():
                     self.assertRegex(key, r'\A[0-9a-f]{64}\Z')
                     self.assertNotIn('candidates', e['response'])
+                    if 'positions' in e['request']:
+                        # a record-oracle answer (f_positions): per slice the digests of the
+                        # bases there, per counted string its count (the strings kept as
+                        # their length and digest)
+                        n = len(e['request']['positions']['slices'])
+                        self.assertEqual(n, len(e['response']['slices']))
+                        self.assertTrue(all(isinstance(x, list) for x in e['response']['slices']))
+                        self.assertTrue(all(isinstance(x, int) for x in e['response']['counts']))
+                        continue
                     self.assertEqual(e['response']['num_kmers'],
                                      e['request']['sequence_bp'] - e['response']['k'] + 1)
 

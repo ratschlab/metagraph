@@ -15,6 +15,7 @@ from metagraph.traverse import (  # noqa: E402
     AmbiguousLabel, GraphletView, IncompleteRecording, MissingEnvelope, UnknownLabel,
     load, parse,
 )
+from metagraph.traverse import ops  # noqa: E402
 
 
 def refs(labels):
@@ -98,12 +99,16 @@ class TestWalks(unittest.TestCase):
 
     def test_route_consistent_label_filter(self):
         g = T.body('merge')
-        self.assertEqual([], g.walks('right', labels=['b.fa']))       # merged in at 62
+        self.assertEqual([], g.walks('right', labels=['b.fa']))       # merged in at 36
+        self.assertEqual([], g.walks('right', labels=['a.fa']))       # merged in at 62
         self.assertEqual([0], [w.path_id for w in g.walks('right', labels=['b.fa'],
                                                             route_consistent=False)])
         (w,) = g.walks('right')
-        self.assertEqual(['c:0', 'c:3'], refs(w.labels_full))
+        # c.fa and both.fa are on both first parents (the majority's, R21 (4))
+        self.assertEqual(['c:2', 'c:3'], refs(w.labels_full))
         self.assertEqual(4, w.n_alive)
+        (w,) = T.body('merge_ties').walks('right')
+        self.assertEqual(['c:0', 'c:3'], refs(w.labels_full))         # arrival order
 
     def test_rankings_and_filters(self):
         g = T.body('caps')
@@ -121,8 +126,11 @@ class TestWalks(unittest.TestCase):
     def test_annotate_walks(self):
         g = T.body('annotate')
         (w,) = g.walks('right')
-        # only a.fa is in every (cut) recorded list along the displayed walk
-        self.assertEqual(['c:0'], refs(w.labels_full))
+        # no label is in every (cut) recorded list along the displayed walk: it passes the
+        # second bubble through the G allele (b.fa, c.fa, both.fa: the parent present in the
+        # most labels, R21 (4)), whose list (cut to b.fa, c.fa) lacks a.fa, and the lists
+        # cut to a.fa, b.fa at the merge nodes lack c.fa
+        self.assertEqual([], refs(w.labels_full))
         self.assertEqual(2, w.n_alive)
         (w,) = g.walks('left')
         self.assertEqual(['c:0', 'c:1'], refs(w.labels_full))
@@ -177,8 +185,9 @@ class TestClaims(unittest.TestCase):
 
     def test_kinds(self):
         kinds = {c.run: c.kind for c in T.body('merge').claims('right')}
-        self.assertEqual({0: 'alive', 1: 'alive', 2: 'alive', 3: 'alive', 4: 'merged',
-                          5: 'merged'}, kinds)
+        # both.fa: runs 3 and 4 closed by the merges, run 5 kept
+        self.assertEqual({0: 'alive', 1: 'alive', 2: 'alive', 3: 'merged', 4: 'merged',
+                          5: 'alive'}, kinds)
         kinds = [c.kind for c in T.body('switch_chain').claims('right')]
         self.assertEqual(['diverged', 'diverged', 'alive', 'alive'], kinds)
         c = T.body('switch_chain').claims('right')[3]
@@ -206,16 +215,22 @@ class TestLabelWalksAndSupport(unittest.TestCase):
     def test_label_walks(self):
         g = T.body('merge')
         lw = g.label_walks('both.fa')
-        # the kept run and the two closed by the merges at 36 and 62, each with its route
-        self.assertEqual([(3, 0, 100, 'max_extension_bp', None), (4, 0, 36, 'merged', 3),
-                          (5, 0, 62, 'merged', 6)],
+        # the two runs closed by the merges at 62 and 36 and the kept one, each with its
+        # route: the kept lineage is the one through the first (majority) parents (R21 (4))
+        self.assertEqual([(3, 0, 62, 'merged', 6), (4, 0, 36, 'merged', 3),
+                          (5, 0, 100, 'max_extension_bp', None)],
                          [(x.run, x.from_bp, x.to_bp, x.end, x.merged_into) for x in lw])
-        self.assertEqual(['T', 'A'], [lw[1].sequence[20], lw[2].sequence[20]])
-        self.assertEqual('G', lw[2].sequence[46])
+        self.assertEqual(['A', 'T', 'A'], [x.sequence[20] for x in lw])
+        self.assertEqual(['C', 'G'], [lw[0].sequence[46], lw[2].sequence[46]])
+        self.assertEqual(g.spell('right', 0), lw[2].sequence)
         (b,) = g.label_walks('b.fa')
-        # b.fa's own route (T at 20, G at 46); the displayed bases are its only from 62
-        self.assertEqual((62, 'T', 'G'), (b.evidence_from, b.sequence[20], b.sequence[46]))
+        # b.fa's own route (T at 20, G at 46); the displayed bases are its only from 36
+        self.assertEqual((36, 'T', 'G'), (b.evidence_from, b.sequence[20], b.sequence[46]))
         self.assertNotEqual(g.spell('right', 0), b.sequence)
+        (a,) = g.label_walks('a.fa')
+        # a.fa's own route (A at 20, C at 46): displayed only from the merge at 62
+        self.assertEqual((62, 'A', 'C'), (a.evidence_from, a.sequence[20], a.sequence[46]))
+        self.assertEqual(g.spell('right', 0)[62:], a.sequence[62:])
         sw = T.body('switch_chain').label_walks('B')
         self.assertEqual([('switched', 30, [1, 2])],
                          [(x.end, len(x.sequence), x.leaves_below) for x in sw])
@@ -223,12 +238,17 @@ class TestLabelWalksAndSupport(unittest.TestCase):
     def test_support_changes_with_reasons(self):
         g = T.body('merge')
         ch = g.support_changes('right', 0)
-        self.assertEqual([(20, [], ['c:1']), (36, ['c:1'], []), (46, [], ['c:1', 'c:2']),
-                          (62, ['c:1', 'c:2'], [])],
+        # b.fa leaves at the first bubble and returns at its merge, a.fa at the second (the
+        # displayed walk follows the majority's G allele there, R21 (4))
+        self.assertEqual([(20, [], ['c:1']), (36, ['c:1'], []), (46, [], ['c:0']),
+                          (62, ['c:0'], [])],
                          [(c.at_bp, refs(c.added), refs(c.removed)) for c in ch])
         self.assertEqual({'why': 'split', 'took': ['T']},
                          {k: ch[0].reasons[0][k] for k in ('why', 'took')})
         self.assertEqual(('merge', 2), (ch[1].reasons[0]['why'], ch[1].reasons[0]['via_parent']))
+        self.assertEqual({'why': 'split', 'took': ['C']},
+                         {k: ch[2].reasons[0][k] for k in ('why', 'took')})
+        self.assertEqual(('merge', 4), (ch[3].reasons[0]['why'], ch[3].reasons[0]['via_parent']))
         sw = T.body('switch_chain').support_changes('right', 1)
         self.assertEqual(['switched', 'switch', 'switched', 'switch'],
                          [r['why'] for c in sw for r in c.reasons])
@@ -240,18 +260,26 @@ class TestLabelWalksAndSupport(unittest.TestCase):
         g = T.body('merge')
         disp = [(r.from_bp, r.to_bp, refs(r.labels)) for r in g.support_profile('right', 0)]
         self.assertEqual([(0, 20, ['c:0', 'c:1', 'c:2', 'c:3']), (20, 36, ['c:0', 'c:2', 'c:3']),
-                          (36, 46, ['c:0', 'c:1', 'c:2', 'c:3']), (46, 62, ['c:0', 'c:3']),
+                          (36, 46, ['c:0', 'c:1', 'c:2', 'c:3']),
+                          (46, 62, ['c:1', 'c:2', 'c:3']),
                           (62, 100, ['c:0', 'c:1', 'c:2', 'c:3'])], disp)
         route = g.support_profile('right', 0, kind='route')
         self.assertEqual([(0, 100, ['c:0', 'c:1', 'c:2', 'c:3'])],
                          [(r.from_bp, r.to_bp, refs(r.labels)) for r in route])
 
     def test_annotate_profile_states_exactness(self):
-        prof = T.body('annotate').support_profile('right', 0)
-        # cut lists (cap 2) up to the second bubble's A branch, where only 2 are recorded
+        g = T.body('annotate')
+        prof = g.support_profile('right', 0)
+        # cut lists (cap 2) along the whole displayed walk: it passes the second bubble
+        # through the G allele, present in 3 labels (the majority parent, R21 (4))
         self.assertEqual([(0, 20, False, 4), (20, 35, False, 3), (35, 46, False, 4),
-                          (46, 61, True, 2)],
-                         [(r.from_bp, r.to_bp, r.exact, r.total) for r in prof[:4]])
+                          (46, 61, False, 3), (61, 70, False, 4)],
+                         [(r.from_bp, r.to_bp, r.exact, r.total) for r in prof])
+        # a row is exact exactly when its list is whole: the C allele's own stretch (a.fa,
+        # both.fa: 2 labels, at the cap) is recorded whole, the merge node's is cut
+        self.assertEqual([(46, 61, True, 2), (61, 62, False, 4)],
+                         [(f, t, n == len(s), n) for f, t, s, n in ops._presence_profile(
+                             g.arms['right'], 4, None, g) if f >= 46])
 
 
 class TestContinuationAndNextRequest(unittest.TestCase):

@@ -11,7 +11,7 @@ There are two ways to run it:
 - **Live** (`test_real_*.py`): needs the three servers, or at least a filled retrieval
   cache in a scratch directory. It covers about 9,400 tests over 581 cached cells.
 - **Offline** (`../test_traverse_real_offline.py`): runs in CI with no server and no
-  scratch directory. It replays 16 small real retrievals committed under
+  scratch directory. It replays 18 small real retrievals committed under
   `../data/traverse/real/`, using the same conformance and oracle code. See
   [Offline fixtures](#offline-fixtures-ci).
 
@@ -25,7 +25,7 @@ the fixtures.
 
 | file | role |
 |---|---|
-| `realdata.py` | The harness: endpoints and skip helpers, the seed catalog (built from real `/resolve` calls), the strategy matrix (19 named strategies), the retrieval cache, the oracle client (`/resolve`, cached on disk), and the independent spellers. CLI: `status`, `catalog`, `fill`, `report`. |
+| `realdata.py` | The harness: endpoints and skip helpers, the seed catalog (built from real `/resolve` calls), the strategy matrix (21 named strategies), the retrieval cache, the oracle client (`/resolve`, cached on disk), the record oracle (`oracle_positions`: the bases at reported record coordinates and string counts, from the source FASTA of mini_refseq, cached like the `/resolve` answers), and the independent spellers. CLI: `status`, `catalog`, `fill`, `report`. |
 | `test_harness_selfcheck.py` | The harness itself: cache consistency; the two spellers agree with each other and with the library. |
 | `test_real_conformance.py` | Conformance of every cached retrieval (9 checks per cell). |
 | `test_real_oracle.py` | The search oracle: every cached retrieval re-checked by `/resolve` (10 areas). |
@@ -96,12 +96,21 @@ python3 realdata.py fill --workers 2       # every (seed, strategy) cell, detail
 python3 realdata.py report
 ```
 
-The catalog has 35 seeds, plus one 3-seed batch per index (38 entries):
+The catalog has 38 seeds, plus one 3-seed batch per index (41 entries):
 
 - **SRA:** 16S windows, random gut-genome 50-mers, and a hub 50-mer carried by 508 runs.
 - **UHGG:** a 16S window, random 100 bp windows, a contig end with its switch target,
   and a window carried by 7 genomes.
-- **mini_refseq:** blaNDM-1, its reverse complement, record windows and a record end.
+- **mini_refseq:** blaNDM-1, its reverse complement, record windows, a record end, and three
+  150 bp windows of an insertion sequence repeated in several records (kind `repeat`,
+  `mini_rep_00..02`: only the trace strategies run on them, `NARROW_KINDS`). A catalog made
+  before them gains them on the next `catalog` run, the other seeds kept.
+
+Record coordinates (feature level 6): `trace_coords` (trace, `output.coordinates` true,
+`max_coordinate_occurrences` "unlimited", radius 2 kb) and `trace_coords_column` (the same on
+column labels: kind `column`) run on every mini_refseq seed; the `trace` strategy pins
+`output.coordinates: false`, so that a library that asks for coordinates by itself
+(`traverse_fetch` on a level-6 server) fetches what the cache holds.
 
 `fill` fetched all 581 cells (SRA 214, UHGG 211, mini_refseq 156) in about 6 minutes.
 `time_tight` cells are not deterministic: their two fetches stop at different points.
@@ -158,6 +167,7 @@ module docstring):
 | `d_annotate` | Recorded label sets equal `/resolve`'s labels at sampled nodes; a cut list is a subset that carries the true total. |
 | `e_direct` | For sampled labels, a route of length `direct_bp` exists on which the label covers every k-mer. |
 | `e_library` | Library only: `routes()` spells a route of length `direct_bp` for every label. |
+| `f_positions` | Record coordinates (cells tagged `coordinates`), against the index's SOURCE records, not the server: the bases at every seed occurrence are the seed, at every run occurrence of every label walk the run's own route bases, at every claim cut at half the arm's depth the claim's own bases (the library's clipping), at every FASTA header interval (1-based closed) the record's; a seed list's total is the seed's count in the label's record(s), an unmarked run's total the count of its chain string, a `lower_bound` run's at most that. A column label's interval is checked in the record(s) whose numbering holds it. |
 
 **The other modules:**
 
@@ -213,11 +223,11 @@ Layout of `../data/traverse/real/`:
 - `catalog.json.gz`: the seeds.
 - per cell `<index>/<cell>.{request,graphlet,full}.json.gz`: the server's exact
   bytes, gzipped.
-- per cell `<index>/<cell>.oracle.json.gz`: the recorded `/resolve` answers. They drop
+- per cell `<index>/<cell>.oracle.json.gz`: the recorded `/resolve` answers (and, for a cell with record coordinates, the record oracle's: per interval the digests of the bases, per string its count). They drop
   the unused `candidates` field, and keep the queried sequence only as its length and
   sha256 (the answer's key binds the full payload).
 
-Every gzipped file is under 60 KB; the whole set is 608 KB. A rebuild with unchanged
+Every gzipped file is under 60 KB; the whole set is 632 KB. A rebuild with unchanged
 inputs is byte-identical.
 
 | cell | graphlet / full (KB gz) | checks run | what it covers |
@@ -238,6 +248,8 @@ inputs is byte-identical.
 | `mini_refseq/mini_ndm1__trace` | 22.3 / 28.5 | 14 | Accession header labels under `support: trace`, keep; verifiable identity; edge-reuse (U) ends. |
 | `mini_refseq/mini_ndm1_rc__switch1` | 8.7 / 12.0 | 16 | blaNDM-1 reverse complement on a basic graph (the other strand): switches between header labels, routes through merges. |
 | `mini_refseq/mini_ndm1__annotate_exh` | 4.4 / 7.0 | 17 | Annotate exhaustive on header labels, checked against `/resolve` discover of kind header. |
+| `mini_refseq/mini_rep_00__trace_coords` | 8.3 / 9.7 | 16 | Record coordinates of header labels (kind `record`) on a repeat window, "unlimited"; `f_positions` from the recorded source-record answers (digests of the bases, string counts). |
+| `mini_refseq/mini_rep_00__trace_coords_column` | 3.2 / 3.4 | 16 | Record coordinates of column labels (kind `column`): the column's k-mer index space, `trace_record_boundaries`. |
 
 "Derived" cells are not in the cache matrix. The cache had no small hairpin (the only
 one is in a 2.6 MB body), no `edge_reuse_rc` end anywhere, and no UHGG cell where a

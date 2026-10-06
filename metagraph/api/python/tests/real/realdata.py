@@ -29,7 +29,11 @@ What lives here:
   * the ORACLE CLIENT: oracle_present / oracle_label_runs from /resolve (the search
     path, which shares no code with the walker), cached under <scratch>/oracle_cache;
   * independent spellers: spell_with_seed(graphlet, arm, leaf) over the parsed G records
-    and spell_full_with_seed(full_result, arm, path_id) over the detail-full JSON.
+    and spell_full_with_seed(full_result, arm, path_id) over the detail-full JSON;
+  * the RECORD ORACLE for record coordinates (oracle_positions): the bases at reported
+    intervals and the occurrence counts of strings, read from the source FASTA of
+    mini_refseq (build/mini_refseq/fasta) -- the index's own input, not the server --
+    cached like the /resolve answers (so the offline fixtures replay them).
 
 CLI (run from anywhere):
 
@@ -87,6 +91,10 @@ DEFAULT_SERVERS = OrderedDict([
 
 HOME = os.path.expanduser('~')
 MINI_REFSEQ = os.path.join(REPO, 'build', 'mini_refseq')
+# the source records of the record oracle, per index: one FASTA per column (file stem =
+# the column name, records in file order), each record's header = its accession. An index
+# without one has no record oracle (its coordinates are null anyway: no k-mer coordinates)
+RECORDS_DIR = {'mini_refseq': os.path.join(MINI_REFSEQ, 'fasta')}
 INDEX_FILES = {
     'sra': {'graph': os.path.join(HOME, 'metagraph-indexes/sra/graph_primary_small.dbg'),
             'annotation': os.path.join(
@@ -534,6 +542,87 @@ def _k(index):
     return int(ident['k']) if ident and ident.get('k') else 31
 
 
+_RECORDS_MEMO = {}
+
+
+def _source_records(index):
+    """{('header', accession): [(0, seq)], ('column', name): [(offset, seq), ...]} of the
+    index's source FASTA, or None without one. A column's offsets are its k-mer index
+    space (DESIGN §18): record i's k-mer j is offset_i + j, offset_{i+1} = offset_i +
+    len_i - k + 1, so record i's bases are numbered [offset_i, offset_i + len_i)."""
+    d = RECORDS_DIR.get(index)
+    if not d or not os.path.isdir(d):
+        return None
+    got = _RECORDS_MEMO.get(d)
+    if got is None:
+        k = _k(index)
+        got = {}
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith('.fa'):
+                continue
+            col, off = [], 0
+            for h, s in read_fasta(os.path.join(d, fn)):
+                s = s.upper()
+                got[('header', h)] = [(0, s)]
+                col.append((off, s))
+                off += max(0, len(s) - k + 1)
+            got[('column', fn[:-3])] = col
+        _RECORDS_MEMO[d] = got
+    return got
+
+
+def _count(hay, needle):
+    """Occurrences of |needle| in |hay|, overlapping ones too (two coordinate chains of
+    a repeat can overlap)."""
+    n, i = 0, hay.find(needle)
+    while i >= 0:
+        n += 1
+        i = hay.find(needle, i + 1)
+    return n
+
+
+def oracle_positions(index, kind, name, slices, needles):
+    """The record oracle (cached like oracle_resolve, keyed by the index identity and
+    the payload): for the label |name| of |kind| ('header' | 'column'), per [start, end)
+    of |slices| the sha256 of the bases there in every source record that holds the whole
+    interval (a header label: its record; a column label: its records in the column's
+    k-mer index space, where a record's last k-1 bases share their numbers with the next
+    record's first: up to two), and per string of |needles| its occurrence count in the
+    label's record(s). Read from the source FASTA (no server); without it, a miss is the
+    harness's require_server (offline: a failure, the fixtures are stale)."""
+    payload = {'positions': {'kind': kind, 'name': name,
+                             'slices': [list(x) for x in slices]},
+               # the needles as the payload's 'sequence': the recorded answer keeps only its
+               # length and digest (offline._slim), the key binds the strings
+               'sequence': '\n'.join(needles)}
+    key = _oracle_key(index, payload)
+    path = os.path.join(ORACLE_DIR, index, key[:2], key + '.json.gz')
+    if os.path.exists(path):
+        try:
+            return _read_json_gz(path)['response']
+        except (OSError, ValueError, KeyError):
+            pass
+    recs = _source_records(index)
+    if recs is None:
+        require_server(index)
+        raise unittest.SkipTest('%s: no source records for the record oracle (%s)'
+                                % (index, RECORDS_DIR.get(index)))
+    target = recs.get((kind, name))
+    if target is None:
+        raise OracleError('%s: no source record for %s label %r' % (index, kind, name))
+    out = {'slices': [], 'counts': []}
+    for s, e in slices:
+        hits = []
+        for off, seq in target:
+            if off <= s and e <= off + len(seq):
+                hits.append(hashlib.sha256(seq[s - off:e - off].encode()).hexdigest())
+        out['slices'].append(hits)
+    for needle in needles:
+        out['counts'].append(sum(_count(seq, needle) for _, seq in target))
+    _write_json_gz(path, {'request': payload, 'response': out})
+    return out
+
+
 def oracle_graph_runs(index, sequence):
     """The k-mer runs [a, b) of |sequence| that are in |index|'s graph (resolve's
     graph_runs; strand-agnostic in the primary regime, forward strand in basic)."""
@@ -767,9 +856,12 @@ class Strategy:
     def applies(self, index, seed, tiers=None):
         """The cell (index, seed, this strategy) is in the matrix. The cache holds the
         full product (the fill takes minutes); |tiers| ('core', 'bulk') restricts it:
-        a 'bulk' seed then gets only the strategies marked bulk (the cheap ones)."""
+        a 'bulk' seed then gets only the strategies marked bulk (the cheap ones). A seed of
+        a NARROW_KINDS kind gets only the strategies listed for it."""
         if self.indexes is not None and index not in self.indexes:
             return False
+        if seed['kind'] in NARROW_KINDS:
+            return self.name in NARROW_KINDS[seed['kind']]
         if seed['kind'] == 'batch':
             return self.batch
         if not self.single:
@@ -783,6 +875,11 @@ class Strategy:
         tier = seed.get('tier')
         return tier in tiers and (tier == 'core' or self.bulk)
 
+
+# seed kinds whose cells are only these strategies: the repeat windows of mini_refseq are
+# there for record coordinates (lists of several occurrences, cuts, switches into live
+# labels), not for the whole matrix
+NARROW_KINDS = {'repeat': ('trace', 'trace_coords', 'trace_coords_column')}
 
 ANNOTATE_RADIUS = {'sra': 100, 'uhgg': 300, 'mini_refseq': 300}
 BEAM20_BP = {'sra': 3000, 'uhgg': 5000, 'mini_refseq': 5000}
@@ -865,9 +962,30 @@ STRATEGIES = OrderedDict((s.name, s) for s in [
                            'output': {'max_branch_events': 1}},
              tags=('constrain', 'cut_events')),
     Strategy('trace', 'support trace (coordinate-consecutive header labels), on_reconverge '
-             'keep (trace refuses merge)',
-             lambda i, s: {'support': 'trace', 'branching': {'on_reconverge': 'keep'}},
+             'keep (trace refuses merge); output.coordinates pinned false, so that a '
+             'library that asks for record coordinates by itself (traverse_fetch, '
+             'feature level 6) fetches what the cache holds',
+             lambda i, s: {'support': 'trace', 'branching': {'on_reconverge': 'keep'},
+                           'output': {'coordinates': False}},
              indexes=('mini_refseq',), tags=('constrain', 'trace', 'keep')),
+    Strategy('trace_coords', 'trace with record coordinates (output.coordinates true, '
+             'max_coordinate_occurrences "unlimited"): the positional oracle f_positions '
+             'checks every occurrence against the source records (feature level 6)',
+             lambda i, s: {'support': 'trace', 'branching': {'on_reconverge': 'keep'},
+                           'bounds': {'max_extension_bp': 2000},
+                           'output': {'coordinates': True,
+                                      'max_coordinate_occurrences': 'unlimited'}},
+             indexes=('mini_refseq',), tags=('constrain', 'trace', 'keep', 'coordinates')),
+    Strategy('trace_coords_column', 'trace on column labels (seed_label_kind column) with '
+             'record coordinates: global column positions (kind column), '
+             'trace_record_boundaries',
+             lambda i, s: {'support': 'trace', 'branching': {'on_reconverge': 'keep'},
+                           'labels': {'seed_label_kind': 'column'},
+                           'bounds': {'max_extension_bp': 2000},
+                           'output': {'coordinates': True,
+                                      'max_coordinate_occurrences': 'unlimited'}},
+             indexes=('mini_refseq',),
+             tags=('constrain', 'trace', 'keep', 'coordinates', 'column_kind')),
     Strategy('time_tight', 'exhaustive radius 2 kb, live-path cap 100000, a tight '
              'time_budget_ms (200 SRA / 50 UHGG / 5 mini) -> walks partial; NOT '
              'deterministic (graphlet and full differ)',
@@ -1166,6 +1284,7 @@ def _catalog_mini(rng, log):
                                   {'file': os.path.join(rdir, f), 'record': h, 'start': a,
                                    'end': a + 200}, res,
                                   '200 bp window cut from a record'))
+    seeds.extend(_repeat_seeds(idx, log))
     # a record end (the right arm leaves the record)
     for f, h, s in sorted(records, key=lambda r: len(r[2])):
         w = s[-200:]
@@ -1177,6 +1296,54 @@ def _catalog_mini(rng, log):
                                       'the last 200 bp of a record'))
             break
     return seeds
+
+
+# 150 bp windows of an insertion sequence that NC_013122.1 holds three times and
+# NZ_CABHKL010000003.1 three to five times (the 6-copy repeat of the coordinates plan, seen
+# from another record): seeds whose coordinate lists hold several occurrences
+REPEAT_WINDOWS = (('NC_013122.1.fa', 'NC_013122.1', 59505),
+                  ('NC_013122.1.fa', 'NC_013122.1', 60104),
+                  ('NC_013122.1.fa', 'NC_013122.1', 59880))
+REPEAT_BP = 150
+
+
+def _repeat_seeds(index, log=print):
+    """The repeat windows (kind 'repeat', NARROW_KINDS: trace strategies only), each
+    checked fully in the graph with its carriers from /resolve."""
+    out = []
+    rdir = QUERY_MATERIAL['mini_records']
+    for i, (fn, rec, start) in enumerate(REPEAT_WINDOWS):
+        path = os.path.join(rdir, fn)
+        try:
+            s = dict(read_fasta(path))[rec][start:start + REPEAT_BP].upper()
+        except (OSError, KeyError):
+            log('  %s: no record %s in %s' % (index, rec, path))
+            continue
+        res = oracle_profile(index, s, kind='header')
+        if _covered(res) and full_carriers(res):
+            out.append(_seed_record(index, 'mini_rep_%02d' % i, 'repeat', 'core', s,
+                                    {'file': path, 'record': rec, 'start': start,
+                                     'end': start + REPEAT_BP}, res,
+                                    'a 150 bp window of an insertion sequence repeated in '
+                                    'several records'))
+    return out
+
+
+def extend_catalog_repeats(log=print):
+    """Add the repeat windows to an existing mini_refseq catalog (the other seeds kept as
+    they are, so that the cached cells stay valid)."""
+    cat = load_catalog()
+    seeds = (cat.get('indexes') or {}).get('mini_refseq')
+    if not seeds or any(s['kind'] == 'repeat' for s in seeds):
+        return cat
+    require_server('mini_refseq')
+    new = _repeat_seeds('mini_refseq', log)
+    batch = [s for s in seeds if s['kind'] == 'batch']
+    cat['indexes']['mini_refseq'] = [s for s in seeds if s['kind'] != 'batch'] + new + batch
+    cat['updated'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+    _write_json(CATALOG_PATH, cat)
+    log('mini_refseq: %d repeat seeds added' % len(new))
+    return cat
 
 
 def _batch_seed(index, seeds):
@@ -1216,6 +1383,9 @@ def build_catalog(indexes=None, *, refresh=False, rng_seed=CATALOG_RNG_SEED, log
         if cat['indexes'].get(index) and not refresh:
             log('%s: catalog present (%d seeds), --refresh to rebuild'
                 % (index, len(cat['indexes'][index])))
+            if index == 'mini_refseq':
+                # a catalog made before the repeat windows existed gains them
+                cat = extend_catalog_repeats(log)
             continue
         require_server(index)
         t0 = time.time()

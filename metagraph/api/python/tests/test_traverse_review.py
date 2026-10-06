@@ -318,10 +318,19 @@ class TestFinding3AnnotateRoutesThroughMerges(unittest.TestCase):
 
     def test_the_constrain_retrieval_of_the_locus_agrees(self):
         # the merge fixture: the same locus and radius in constrain mode (lineages, G
-        # partitions): its run ends have the same route and displayed support
+        # partitions): its run ends have the same route support ...
         merge = T.graphlet('merge')
         want = [r for r in claim_rows(merge.claims('right')) if r[5] != 'merged']
-        self.assertEqual(want, claim_rows(self.g.claims('right')))
+        route = [(n, f, t, k, e) for n, f, t, _, _, k, e in want]
+        self.assertEqual(route, [(n, f, t, k, e) for n, f, t, _, _, k, e
+                                 in claim_rows(self.g.claims('right'))])
+        # ... and the same displayed support once both display the same parent at each
+        # merge: the fixture (feature level 6) stores the parent carried by the most labels
+        # first (R21 (4)) -- at 62 the G allele (b.fa, c.fa, both.fa), which arrived second
+        # and comes second in this older document
+        self.assertNotEqual(want, claim_rows(self.g.claims('right')))
+        level6 = parse(BUBBLES_ANNOTATE_MERGE.replace('G 4,5 62 38 !', 'G 5,4 62 38 !'))
+        self.assertEqual(want, claim_rows(level6.claims('right')))
 
     def test_displayed_evidence_stays_displayed(self):
         g = self.g

@@ -21,7 +21,7 @@ import tempfile
 from array import array
 
 from . import budget as _B
-from . import derive
+from . import coords, derive
 from ._codec import (
     CodecError, GraphletFormatError, LabelSetInterner, QUAL, REASON, REASON_ORDER,
     RESOURCE_CODES, decode_kvalue, decode_pairs, decode_ranges, decode_setexpr,
@@ -902,6 +902,10 @@ def _parse(text, b):
         rd.per_line_bytes = model / max(1, n)
     g = rd.run()
     g.body_digest = digest
+    if g.has_j:
+        # a saved file's coordinates (in its J line's summary) are checked against the
+        # body now that its R records are read (C9: eagerly, never at first use)
+        coords.attach(g, b)
     return g
 
 
@@ -1269,6 +1273,9 @@ def _from_response_checked(result, response, body, b):
     g = parse(body, budget=b)
     g.seed_summary = {k: v for k, v in result.items() if k != 'graphlet'}
     g.envelope = {k: v for k, v in response.items() if k != 'results'}
+    # the record coordinates of the summary against the body, eagerly (C9): an inconsistent
+    # block is a GraphletFormatError here, like a cut body
+    coords.attach(g, b)
     return g
 
 

@@ -23,9 +23,12 @@ DOCUMENTS = {
     'fork': 'both arms split; the radius (10) is below k (15), so both continuations '
             'cross into the seed',
     'merge': 'column labels through two SNP bubbles (merge): partitions '
-             '(labels_via_parent), ambiguous splits with an m closure at each merge, b.fa '
-             'through two non-first-parent merges (R.route_bp != T.route_bp), continuations '
-             'contained in the flank',
+             '(labels_via_parent), ambiguous splits with an m closure at each merge, each '
+             'merge\'s first parent the one carried by the most labels (R21 (4)): at 62 the '
+             'G allele, which arrived second; continuations contained in the flank',
+    'merge_ties': 'the merge locus without c.fa: two labels on each allele, so each merge '
+                  'keeps its first-arrived parent first (a tie, R21 (4)) and b.fa goes '
+                  'through two non-first-parent merges (R.route_bp != T.route_bp)',
     'switch_chain': 'A -> B -> {C, D}: a silent Lw end inside a segment and one at an '
                     'ambiguous split whose switches sit on the children',
     'annotate': 'annotate mode (merge): P runs, cut lists (cap 2), merges with one empty '

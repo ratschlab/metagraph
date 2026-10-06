@@ -48,6 +48,18 @@ Per cached cell and seed result, on a deterministic sample of each arm:
                reconstructed here through any parent.
   e_library    library only: routes(spell=True) spells a route of length direct_bp for
                every label with direct_bp > 0 (expected failures: BUG-ANNOT-ROUTES).
+  f_positions  record coordinates (cells fetched with output.coordinates, DESIGN §18.3),
+               against the index's SOURCE records (realdata.oracle_positions, not the
+               server): the bases at every seed occurrence are the seed; at every run
+               occurrence of every label walk (CoordLabelWalk) they are the run's own
+               route bases; at every claim cut at half the arm's depth (CoordClaim, the
+               library's clipping) the claim's own bases; at every FASTA header interval
+               (1-based closed) the record's bases. Counts: a seed list's total is the
+               seed's occurrence count in the label's record(s); an unmarked run's total
+               is the count of its chain string (the seed and the run's bases for a run
+               entered by the seed, its first to last node for one entered by a switch),
+               a lower_bound run's at most that. A column label's interval is checked in
+               the record(s) whose base numbering holds it whole.
 
 Coordinates (k-mer vs base, design §2.4, §5.1; spec §4.2). A run, a claim or a P run
 [a, b) holds the nodes entered by steps a+1..b, i.e. the k-mers whose newest base is
@@ -80,6 +92,7 @@ METAGRAPH_REAL_ORACLE_CHUNK_BP (bases per /resolve call, default 60000).
 """
 
 import collections
+import hashlib
 import os
 import sys
 import unittest
@@ -119,7 +132,7 @@ DISCOVER_MAX = 1000000
 KNOWN_BUGS = {}
 
 AREAS = ('a_present', 'b_claims', 'b_lost', 'b_walks', 'b_stretch', 'b_maximal', 'c_routes',
-         'd_annotate', 'e_direct', 'e_library')
+         'd_annotate', 'e_direct', 'e_library', 'f_positions')
 
 
 # ---------------------------------------------------------------- small helpers
@@ -309,6 +322,123 @@ class Discover:
         return collections.Counter(n for n, r in self.labels[seq] if holds(r, j))
 
 
+# ---------------------------------------------------------------- record coordinates
+
+def _sha(s):
+    return hashlib.sha256(s.encode()).hexdigest()
+
+
+class Positions:
+    """f_positions for one seed result with record coordinates: what to look up in the
+    source records (per label: the intervals and the strings to count) and what each must
+    be. Built from the graphlet (the library's claims, label walks and FASTA); the
+    lookups run once per label (realdata.oracle_positions, cached)."""
+
+    def __init__(self, index, g):
+        self.index, self.g = index, g
+        self.want = collections.OrderedDict()   # (kind, name) -> [slices], [needles]
+        self.checks = []        # (what, label, slice-or-needle, expected, mode)
+        self.answers = {}
+        c = g.coordinates
+        k = g.k
+        seed = g.seed.sequence
+        S = len(seed)
+        for lid, so in sorted(c.seed.items()):
+            lab = g.labels[lid]
+            for iv in so.intervals:
+                self._slice(lab, iv, seed, ('seed', lid))
+            self._count(lab, seed, so.total, 'eq', ('seed', lid))
+        for side in g.arms:
+            a = g.arms[side]
+            depth = max(1, a.complete_to_bp // 2)
+            own = {}
+            for lab in g.labels:
+                for lw in g.label_walks(lab, side):
+                    rc = lw.coordinates
+                    run = a.runs[lw.run]
+                    own[lw.run] = lw.sequence
+                    for iv in rc.intervals:
+                        self._slice(lab, iv, lw.sequence, (side, 'run', lw.run))
+                    leaves = lw.leaves_below
+                    if not leaves:
+                        continue
+                    mol = R.spell_with_seed(g, side, leaves[0])     # the harness's speller
+                    f, to = run.from_bp, run.to_bp
+                    n = len(mol) - S
+                    if side == 'right':
+                        chain = mol[:S + to] if run.from_label is None \
+                            else mol[S + f + 1 - k:S + to]
+                    else:
+                        chain = mol[n - to:] if run.from_label is None \
+                            else mol[n - to:n - f - 1 + k]
+                    self._count(lab, chain, rc.total, 'le' if rc.lower_bound else 'eq',
+                                (side, 'run', lw.run))
+            for cl in g.claims(side, at_most_bp=depth, strict=False):
+                rc = cl.coordinates
+                d = rc.to_bp - rc.from_bp
+                if not d or cl.run not in own:
+                    continue
+                o = own[cl.run]
+                want = o[:d] if side == 'right' else o[len(o) - d:]
+                for iv in rc.intervals:
+                    self._slice(cl.label, iv, want, (side, 'claim', cl.run, depth))
+            by_name = {l.name: l for l in g.labels if l.kind == 'header'}
+            fasta = g.to_fasta(side).split('\n')
+            for h, bases in zip(fasta[0::2], fasta[1::2]):
+                if ' coords=' not in h:
+                    continue
+                for item in h.split(' coords=')[1].split(' ')[0].split(','):
+                    acc, rng = item.rsplit(':', 1)
+                    s1, e1 = (int(x) for x in rng.split('-'))
+                    self._slice(by_name[acc], (s1 - 1, e1), bases, (side, 'fasta', h[:24]))
+
+    def _key(self, lab):
+        key = (lab.kind, lab.name)
+        return key, self.want.setdefault(key, ([], []))
+
+    def _slice(self, lab, iv, expected, where):
+        key, (slices, _) = self._key(lab)
+        slices.append(tuple(iv))
+        self.checks.append(('slice', key, len(slices) - 1, _sha(expected), where))
+
+    def _count(self, lab, needle, total, mode, where):
+        key, (_, needles) = self._key(lab)
+        needles.append(needle)
+        self.checks.append(('count', key, len(needles) - 1, (total, mode), where))
+
+    def run(self):
+        if self.answers:
+            return
+        for key, (slices, needles) in self.want.items():
+            self.answers[key] = R.oracle_positions(self.index, key[0], key[1], slices,
+                                                   needles)
+
+    def failures(self):
+        """(checked, [what failed]): a slice whose expected bases no record holding the
+        interval has, a count that disagrees; a column interval no single record holds is
+        counted apart (crossing), not a failure."""
+        bad, n, crossing = [], 0, 0
+        for what, key, i, expected, where in self.checks:
+            ans = self.answers[key]
+            if what == 'slice':
+                hits = ans['slices'][i]
+                if not hits and key[0] == 'column':
+                    crossing += 1
+                    continue
+                n += 1
+                if expected not in hits:
+                    bad.append('%s %s %s: the bases at %s are not the expected ones'
+                               % (where, key[0], key[1], self.want[key][0][i]))
+            else:
+                total, mode = expected
+                have = ans['counts'][i]
+                n += 1
+                if (mode == 'eq' and have != total) or (mode == 'le' and total > have):
+                    bad.append('%s %s %s: total %d, the records hold the string %d times (%s)'
+                               % (where, key[0], key[1], total, have, mode))
+        return n, crossing, bad
+
+
 # ---------------------------------------------------------------- the per-cell plan
 
 class Plan:
@@ -341,6 +471,8 @@ class Plan:
         self.extra = Oracle(index, self.k)
         for side in g.arms:
             self._plan_arm(side)
+        # f_positions: only a result with a coordinates block (its own lookups)
+        self.positions = Positions(index, g) if g.coordinates is not None else None
 
     # ------------------------------------------------------------ helpers
 
@@ -636,6 +768,8 @@ class Plan:
             self.trace.run()
         if self.disc is not None:
             self.disc.run()
+        if self.positions is not None:
+            self.positions.run()
 
 
 def annotate_direct_route(a, lid, d):
@@ -1052,6 +1186,28 @@ class _OracleBase(unittest.TestCase):
             self.skipTest('no label with direct_bp > 0')
 
 
+# ---------------------------------------------------------------- f
+
+def _check_f_positions(self, row):
+    n = 0
+    for p in self.plans(row):
+        if p.positions is None:
+            continue
+        checked, crossing, bad = p.positions.failures()
+        n += checked
+        STATS_F['checked'] += checked
+        STATS_F['crossing'] += crossing
+        with self.subTest(result=p.i):
+            self.assertEqual([], bad[:10], '%d of %d positional checks fail' % (len(bad),
+                                                                               checked))
+    if n == 0:
+        self.skipTest('no result with a coordinates block')
+
+
+STATS_F = collections.Counter()
+_OracleBase.check_f_positions = _check_f_positions
+
+
 # ---------------------------------------------------------------- generation
 
 def _applies(area, row):
@@ -1072,6 +1228,8 @@ def _applies(area, row):
         return bases and 'constrain' in modes
     if area == 'd_annotate':
         return bases and 'annotate' in modes
+    if area == 'f_positions':
+        return bases and 'coordinates' in tags
     return False
 
 
@@ -1172,6 +1330,8 @@ class TestOracleMechanics(unittest.TestCase):
             cls = getattr(mod, 'TestOracle_%s' % index)
             names = [m for m in dir(cls) if m.startswith('test_')]
             for area in AREAS:
+                if area == 'f_positions' and not R.cells(index, tag='coordinates'):
+                    continue        # an index without record coordinates (no k-mer ones)
                 self.assertTrue(any(m.endswith('__' + area) for m in names), (index, area))
 
 

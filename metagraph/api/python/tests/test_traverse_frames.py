@@ -42,9 +42,11 @@ class TestFrames(unittest.TestCase):
         from metagraph.traverse.frames import frames
         f = frames(T.body('merge'))
         self.assertEqual(7, len(f['segments']))
-        # both.fa has its kept run and the two runs the merges closed
+        # both.fa has its kept run and the two runs the merges closed; a.fa is displayed
+        # from the merge at 62, b.fa from the one at 36 (each merge's first parent is the
+        # one carried by the most labels, R21 (4))
         self.assertEqual(['c:0', 'c:1', 'c:2', 'c:3', 'c:3', 'c:3'], list(f['runs']['ref']))
-        self.assertEqual([0, 62, 62, 0, 0, 0], list(f['runs']['evidence_from']))
+        self.assertEqual([62, 36, 0, 0, 0, 0], list(f['runs']['evidence_from']))
         self.assertEqual(1, len(f['walks']))
         f = frames(T.body('annotate'))
         self.assertEqual(12, len(f['presence']))

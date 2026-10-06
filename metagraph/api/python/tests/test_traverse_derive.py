@@ -18,13 +18,18 @@ class TestStructure(unittest.TestCase):
     def test_paths_follow_first_parents_in_leaf_order(self):
         g = T.body('merge')
         a = g.arms['right']
-        self.assertEqual([(), (0,), (0,), (1, 2), (3,), (3,), (4, 5)],
+        # the merge at 62 stores its parents majority first (R21 (4), feature level 6): the
+        # G allele (segment 5: b.fa, c.fa, both.fa) arrived second and is the first parent,
+        # so the displayed path passes through it; merge_ties keeps the arrival order
+        self.assertEqual([(), (0,), (0,), (1, 2), (3,), (3,), (5, 4)],
                          [s.parents for s in a.segments])
         self.assertEqual([[1, 2], [3], [3], [4, 5], [6], [6], []],
                          [s.children for s in a.segments])
         self.assertEqual([6], derive.leaves(a))
         (p,) = derive.paths(a)
-        self.assertEqual(([0, 1, 3, 4, 6], 100), (p.segments, p.length_bp))
+        self.assertEqual(([0, 1, 3, 5, 6], 100), (p.segments, p.length_bp))
+        (p,) = derive.paths(T.body('merge_ties').arms['right'])
+        self.assertEqual([0, 1, 3, 4, 6], p.segments)
         for name in ('fork', 'merge', 'annotate', 'caps', 'ambiguous_split'):
             full = T.doc_json(name, 'full')['results'][0]
             g = T.body(name)
@@ -83,23 +88,28 @@ class TestEvents(unittest.TestCase):
         self.assertEqual({1: [2], 2: [3]}, ev)
         g = T.body('merge')
         ev = derive.label_end_events(g.arms['right'])
-        self.assertEqual({6: [0, 1, 2, 3]}, ev)       # runs 4, 5 are closed by merges, not ended
+        # runs 3, 4 (both.fa on the minority parents) are closed by merges, not ended;
+        # run 5 is both.fa's lineage through the first parents
+        self.assertEqual({6: [0, 1, 2, 5]}, ev)
 
     def test_reconverge_events_from_multi_parent_segments(self):
         g = T.body('merge')
-        self.assertEqual({3: (36, [1, 2]), 6: (62, [4, 5])},
+        self.assertEqual({3: (36, [1, 2]), 6: (62, [5, 4])},
                          derive.reconverge_events(g.arms['right']))
+        self.assertEqual({3: (36, [1, 2]), 6: (62, [4, 5])},
+                         derive.reconverge_events(T.body('merge_ties').arms['right']))
 
     def test_end_labels_ascending_with_leaf_extras(self):
         g = T.body('merge')
         ends = derive.end_labels(g.arms['right'], 6)
-        # b.fa and c.fa came in through the second parent of the last merge (62); both.fa
-        # branched at both bubbles
-        self.assertEqual([(0, 0, 0, 0), (1, 1, 0, 62), (2, 2, 0, 62), (3, 3, 2, 0)],
+        # a.fa came in through the second parent of the last merge (62), b.fa through the
+        # second parent of the first (36); c.fa is on both first parents; both.fa branched
+        # at both bubbles and its lineage through the first parents is run 5
+        self.assertEqual([(0, 0, 0, 62), (1, 1, 0, 36), (2, 2, 0, 0), (3, 5, 2, 0)],
                          [(e.label, e.run, e.branches, e.route_bp) for e in ends])
         self.assertEqual([2.0], [e.loss for e in derive.end_labels(
             T.body('switch_chain').arms['right'], 2)])
-        for name in ('merge', 'switch_chain', 'caps', 'linear'):
+        for name in ('merge', 'merge_ties', 'switch_chain', 'caps', 'linear'):
             full = T.doc_json(name, 'full')['results'][0]
             g = T.body(name)
             for side, arm in full['arms'].items():
@@ -256,13 +266,18 @@ class TestContinuations(unittest.TestCase):
 
 class TestEvidence(unittest.TestCase):
     def test_anchored_endpoint_through_two_merges(self):
-        g = T.body('merge')
+        g = T.body('merge_ties')
         a = g.arms['right']
         got = [derive.evidence(a, r) for r in a.runs]
-        # b.fa came through the second parent at 36 and 62, c.fa at 62 only
-        self.assertEqual([(0, 0), (62, 62), (62, 62), (0, 0), (0, 0), (0, 0)], got)
+        # b.fa came through the second parent at 36 and at 62 (ties keep the arrival order)
+        self.assertEqual([(0, 0), (62, 62), (0, 0), (0, 0), (0, 0)], got)
         # R keeps the EARLIEST stamp, T and the evidence the latest
         self.assertEqual(36, a.runs[1].route_bp)
+        # the merge fixture: a.fa through the second parent at 62, b.fa at 36 only (each
+        # merge's first parent is the majority's, R21 (4))
+        a = T.body('merge').arms['right']
+        self.assertEqual([(62, 62), (36, 36), (0, 0), (0, 0), (0, 0), (0, 0)],
+                         [derive.evidence(a, r) for r in a.runs])
 
     def test_switch_moves_the_start_not_the_route(self):
         g = T.body('switch_chain')
@@ -295,7 +310,7 @@ class TestCheckRules(unittest.TestCase):
                          (f['field'], f['kind'], f['decoded'], f['reference']))
 
     def test_invariants(self):
-        g = T.body('merge')
+        g = T.body('merge_ties')
         g.arms['right'].segments[6].leaf.extras[1] = (0.0, 0, 36)   # the earliest stamp
         g.arms['right'].cache.clear()        # derivations cache: a parsed graphlet is immutable
         self.assertTrue(any(f.get('field') == 'route_bp' for f in g.check_rules()))

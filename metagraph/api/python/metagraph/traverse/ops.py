@@ -36,6 +36,7 @@ says so -- a list whose order allows it with its whole rows and a resume token, 
 with comparable 'unknown', everything else with no partial answer.
 """
 
+import bisect
 import collections
 import copy
 import hashlib
@@ -45,6 +46,7 @@ import math
 import sys
 
 from . import budget as _B
+from . import coords as _C
 from . import derive
 from ._codec import REASON, RESOURCE_CODES, UNLIMITED, GraphletFormatError
 from .budget import (
@@ -53,8 +55,9 @@ from .budget import (
 )
 from .model import (
     AmbiguousLabel, ARM_SIDES, BadSelector, Branch, Change, Claim, Comparison,
-    Continuation, IncompatibleContinuations, IncompleteRecording, Label, LabelWalk,
-    NextRequest, Path, SplitPoint, SupportRun, UnknownLabel, UnverifiableLabelName, Walk,
+    Continuation, CoordClaim, CoordLabelWalk, CoordWalk, IncompatibleContinuations,
+    IncompleteRecording, Label, LabelWalk, NextRequest, Path, SplitPoint, SupportRun,
+    UnknownLabel, UnverifiableLabelName, Walk,
 )
 
 
@@ -191,6 +194,27 @@ _CLAIM_BYTES = record_bytes(Claim) + 360
 FLOAT_BYTES = _B.FLOAT
 _WALK_BYTES = record_bytes(Walk) + 3 * LIST + 2 * DICT_KEY + 200
 _LEVERS_LIST = ('narrow_labels', 'narrow_arm')
+# record coordinates (a graphlet with a coordinates block only): what a CoordClaim adds to
+# a claim -- its slot and a clipped RunCoordinates with its interval tuple and ints -- and
+# per occurrence a new (start, end) tuple and its slot (a clip makes new ones)
+_COORD_ROW_BYTES = 8 + record_bytes(_C.RunCoordinates) + TUPLE + 3 * INT
+_COORD_OCC_BYTES = _C._OCC_BYTES + 8
+
+
+def _arm_coords(g, side, b=None):
+    """The arm's RunCoordinates (a tuple indexed by run id), or None: the graphlet carries
+    no coordinates block (or is in annotate mode, which never does). |b|: the parsed index
+    charged at its cold price (once per call)."""
+    if g.mode != 'constrain' or not _C.present(g):
+        return None
+    c = _C.of(g, b)
+    return c.arms.get(side)
+
+
+def _coord_price(rc):
+    """(lwu, bytes) of attaching run coordinates |rc| to a row (clipped or not)."""
+    n = len(rc.intervals)
+    return W_ELEM + _B.W_COORD * n, _COORD_ROW_BYTES + n * _COORD_OCC_BYTES
 
 __all__ = [
     'label', 'labels_matching', 'path_id', 'leaf_segment', 'spell', 'walks', 'claims',
@@ -560,9 +584,13 @@ def _first_paths(arm):
     return got
 
 
-def _run_claim(g, arm, run, cut, exact=True):
+def _run_claim(g, arm, run, cut, exact=True, coords=None):
     """The claim of one run end, or None when the run-start guard drops it at |cut|.
-    |exact|: the arm's label evidence is exact (arm_exact)."""
+    |exact|: the arm's label evidence is exact (arm_exact). |coords|: the arm's
+    RunCoordinates (_arm_coords) -- a CoordClaim then carries the run's occurrences clipped
+    to the cut. None (the default) makes a plain Claim: only the public paths that price
+    coordinates pass them (claims(), walks()); compare() never does, so it never clips
+    coordinates it would not charge (revision 6, decision C-N9)."""
     route_from, ev_from = derive.evidence(arm, run)
     seg = arm.segments[run.segment]
     zero = run.from_bp == run.to_bp
@@ -598,6 +626,16 @@ def _run_claim(g, arm, run, cut, exact=True):
             kind, evidence_from = 'route_only', None
     elif zero:
         evidence_from = None
+    if coords is not None:
+        return CoordClaim(
+            label=g.labels[run.label], arm=arm.side,
+            path_id=_first_paths(arm)[run.segment], segment=run.segment,
+            from_bp=run.from_bp, to_bp=to_bp, route_bp=route_from,
+            evidence_from=evidence_from, kind=kind, reason=reason, qualifier=qualifier,
+            end_class=end_class, entered_by=run.entered_by,
+            from_label=None if run.from_label is None else g.labels[run.from_label],
+            cost=run.cost, loss=loss, branches=branches, support=g.support, exact=exact,
+            run=run.id, coordinates=_C.clip(coords[run.id], arm.side, cut))
     return Claim(
         label=g.labels[run.label], arm=arm.side, path_id=_first_paths(arm)[run.segment],
         segment=run.segment, from_bp=run.from_bp, to_bp=to_bp, route_bp=route_from,
@@ -834,6 +872,11 @@ def claims(g, arm=None, labels=None, at_most_bp=None, strict=True, *, budget=Non
     each DAG RESTRICTED to the depth instead, which is what a retrieval walked to D says
     (_restricted_claims).
 
+    A retrieval with record coordinates (Graphlet.coordinates) gives CoordClaims: each
+    carries its run's occurrences clipped to the claim (.coordinates, a RunCoordinates:
+    where the run's own bases [from_bp, to_bp) lie in its record -- a route_only claim's
+    route too; 0-based half-open on the forward strand, DESIGN §18).
+
     budget= (stage L, budget.py): a stop raises LocalBudgetExceeded whose .partial holds
     the whole claims made so far, in this order, and a resume token (resume=) that goes on
     after the last row; without a budget (the default) no work or allocation budget
@@ -857,10 +900,11 @@ def _claims_plain(g, arm, labels, at_most_bp, strict):
         a = g.arms[side]
         exact = arm_exact(g, side)
         if g.mode == 'constrain':
+            rcs = _arm_coords(g, side)
             for run in a.runs:
                 if wanted is not None and run.label not in wanted:
                     continue
-                c = _run_claim(g, a, run, at_most_bp, exact)
+                c = _run_claim(g, a, run, at_most_bp, exact, rcs)
                 if c is not None:
                     out.append(c)
         else:
@@ -902,17 +946,24 @@ def _claims(g, arm, labels, at_most_bp, strict, b, resume):
                     derive.uses(b, g, a, 'leaves', 'paths', 'path_of_leaf', 'merge_above',
                                 'merge_depth', 'first_paths', 'partition_sets')
                     price = _claim_prices(b, g, a)
+                    m_row = _CLAIM_BYTES
+                    rcs = _arm_coords(g, side, b)
+                    if rcs is not None:
+                        # each claim also carries its run's occurrences
+                        price, m_row = _claim_coord_prices(b, g, a, price, rcs)
                     keep = None if wanted is None else (lambda t: runs[t].label in wanted)
                     b.charge(max(0, len(runs) - start))         # the scan of the runs
                     b.phase = 'rows'
                     paid = start
+                else:
+                    rcs = _arm_coords(g, side)
                 for i in range(start, len(runs)):
                     run = runs[i]
                     if wanted is not None and run.label not in wanted:
                         continue
                     if i >= paid:
-                        paid = _pay_rows(b, price, i, len(runs), keep, _CLAIM_BYTES)
-                    c = _run_claim(g, a, run, at_most_bp, exact)
+                        paid = _pay_rows(b, price, i, len(runs), keep, m_row)
+                    c = _run_claim(g, a, run, at_most_bp, exact, rcs)
                     if c is not None:
                         out.append(c)
                 i = len(runs)
@@ -958,6 +1009,19 @@ def _claim_prices(b, g, a):
                              lambda: [W_ROW + 2 + 3 * md[r.segment] for r in a.runs])
 
 
+def _claim_coord_prices(b, g, a, price, rcs):
+    """(lwu, bytes) per run of a claim that carries its run's coordinates: the claim's
+    price plus the occurrences attached (a structural list, cached on the arm)."""
+    def build():
+        w, m = [], []
+        for p, rc in zip(price, rcs):
+            cw, cm = _coord_price(rc)
+            w.append(p + cw)
+            m.append(_CLAIM_BYTES + cm)
+        return w, m
+    return derive.price_list(b, g, a, 'claim_coord_prices', build)
+
+
 def _restricted_claim_prices(b, g, a):
     md = derive.merge_depth(a)
     return derive.price_list(b, g, a, 'restricted_claim_prices',
@@ -997,7 +1061,9 @@ def walks(g, arm, *, top=None, by='support', labels=None, route_consistent=True,
     (-len(labels_full), -n_alive, -length_bp, path_id); 'length' by (-length_bp,
     path_id); 'loss' by (min end-label loss, -n_alive, -length_bp, path_id); 'id' keeps
     path order. Ranking uses the per-leaf records only; chains, spellings and claims
-    are produced for the walks returned.
+    are produced for the walks returned. A retrieval with record coordinates gives
+    CoordWalks: .coordinates maps each label alive at the leaf (its ref) to the
+    RunCoordinates of its run reaching the leaf, and the claims are CoordClaims.
 
     budget= (stage L): a stop raises LocalBudgetExceeded. With by='id' its .partial holds
     the whole walks made so far and a resume token (resume=); a ranked list never returns
@@ -1243,7 +1309,7 @@ def _walks_at(g, a, path_ids, with_claims, b, out=None):
     return _walk_objects(g, a, rows, with_claims, b, out)
 
 
-def _leaf_claims(g, a, leaves_):
+def _leaf_claims(g, a, leaves_, rcs=None):
     """leaf -> the claims ending at its last node, in claims() order: exactly what
     filtering claims(g, a, strict=False) by (segment in |leaves_|, to_bp = the leaf's end)
     gives, built for those leaves only (the claims of the whole arm cost as much as
@@ -1255,7 +1321,7 @@ def _leaf_claims(g, a, leaves_):
         rbs = derive.runs_by_segment(a)
         for leaf in sorted(leaves_):
             end = segs[leaf].end_bp
-            got = [_run_claim(g, a, a.runs[r], None, exact) for r in rbs[leaf]
+            got = [_run_claim(g, a, a.runs[r], None, exact, rcs) for r in rbs[leaf]
                    if a.runs[r].to_bp == end]
             if got:
                 by_leaf[leaf] = got
@@ -1302,6 +1368,12 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
         segs = a.segments
         md = rbs = ends_n = None
         scan = 0
+        # a retrieval with record coordinates: each walk maps its end labels to their
+        # runs' occurrences, and each claim carries them (charged with the walk)
+        rcs = _arm_coords(g, a.side, b)
+        if rcs is not None:
+            rbs_c = derive.runs_by_segment(a)
+            derive.uses(b, g, a, 'end_labels')
         if with_claims:
             if g.mode == 'constrain':
                 derive.uses(b, g, a, 'merge_above', 'merge_depth', 'first_paths',
@@ -1335,12 +1407,24 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
                         n = ends_n.get(p.leaf, 0)
                         w += n * W_ROW
                     m += n * _CLAIM_BYTES
+                if rcs is not None:
+                    # the end labels' map (its entries refer to the index's records) and,
+                    # with claims, every claim's occurrences at the leaf (at most its runs')
+                    ends = derive.end_labels(a, p.leaf)
+                    w += W_ELEM * len(ends)
+                    m += _B.dict_bytes(len(ends)) + 8
+                    if with_claims:
+                        for r in rbs_c[p.leaf]:
+                            cw, cm = _coord_price(rcs[r])
+                            w += cw
+                            m += cm
             b.charge(w, m)
             out.extend(_walk_objects(g, a, chunk, with_claims))
         return out
     by_leaf = {}
+    rcs = _arm_coords(g, a.side)
     if ranked and with_claims:
-        by_leaf = _leaf_claims(g, a, {x[0].leaf for x in ranked})
+        by_leaf = _leaf_claims(g, a, {x[0].leaf for x in ranked}, rcs)
     # chains and spellings of the walks returned, sharing their common prefixes
     batch = derive.walk_batch(a, [x[0].leaf for x in ranked]) if len(ranked) > 1 else None
     seen = set()
@@ -1366,14 +1450,20 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
             if p.leaf in seen:
                 chain = list(chain)          # a walk asked twice: each Walk owns its list
             seen.add(p.leaf)
-        out.append(Walk(
+        fields = dict(
             path_id=p.id, leaf=p.leaf, segments=chain, length_bp=p.length_bp,
             sequence=sequence, path_reason=REASON[code] if code else None,
             end_reasons=reasons, claims=by_leaf.get(p.leaf, []), labels_full=full,
             n_alive=len(alive_ids),
             complete=(code is None or code not in RESOURCE_CODES)
             and p.length_bp <= a.complete_to_bp,
-            beyond_certified_bp=max(0, p.length_bp - a.complete_to_bp)))
+            beyond_certified_bp=max(0, p.length_bp - a.complete_to_bp))
+        if rcs is None:
+            out.append(Walk(**fields))
+        else:
+            # each label alive at the leaf -> the occurrences of its run reaching the leaf
+            out.append(CoordWalk(**fields, coordinates={
+                g.labels[e.label].ref: rcs[e.run] for e in derive.end_labels(a, p.leaf)}))
     return out
 
 
@@ -1532,6 +1622,9 @@ def label_walks(g, sel, arm=None, *, budget=None, resume=None):
     that chain, the start of the last merge it enters through a non-first parent
     otherwise -- §5.1, as for a run in constrain mode).
 
+    A retrieval with record coordinates gives CoordLabelWalks: .coordinates is the run's
+    RunCoordinates (where its own bases lie in its record).
+
     budget= (stage L): a stop raises LocalBudgetExceeded whose .partial holds the whole
     label walks made so far, in this order, and a resume token (resume=)."""
     b = _B.resolve(budget)
@@ -1598,6 +1691,7 @@ def _label_walks(g, sel, arm, b, resume, with_routes=False):
                 md = derive.merge_depth(a)
                 every = derive.subtree_bounds(a)[0]
                 b.phase = 'rows'
+            rcs = _arm_coords(g, side, b)
             ids = derive.label_runs(a, lab.id)
             for k in range(start, len(ids)):
                 run = a.runs[ids[k]]
@@ -1605,6 +1699,10 @@ def _label_walks(g, sel, arm, b, resume, with_routes=False):
                     w, m = _route_price(a, segs, rd, run.segment, run.to_bp, True)
                     n = every[run.segment]
                     x = b.row_extra
+                    if rcs is not None:
+                        # the run's occurrences, the index's own record (one more slot)
+                        w += W_ELEM + _B.W_COORD * len(rcs[run.id].intervals)
+                        m += 8
                     b.charge(w + 2 + 3 * md[run.segment] + 3 * n
                              + len(segs[run.segment].children) + x[0],
                              m + _LABEL_WALK_BYTES + set_bytes(n) + list_bytes(n) + x[1])
@@ -1619,9 +1717,15 @@ def _label_walks(g, sel, arm, b, resume, with_routes=False):
                             merged_into = c
                 end = 'merged' if run.merged else 'switched' if run.silent \
                     else run.event_reason
-                lw = LabelWalk(run.id, lab, side, run.from_bp, run.to_bp,
-                               derive.evidence(a, run)[1], bases, end,
-                               derive.run_leaves(a, run), merged_into)
+                if rcs is None:
+                    lw = LabelWalk(run.id, lab, side, run.from_bp, run.to_bp,
+                                   derive.evidence(a, run)[1], bases, end,
+                                   derive.run_leaves(a, run), merged_into)
+                else:
+                    lw = CoordLabelWalk(run.id, lab, side, run.from_bp, run.to_bp,
+                                        derive.evidence(a, run)[1], bases, end,
+                                        derive.run_leaves(a, run), merged_into,
+                                        coordinates=rcs[run.id])
                 out.append((lw, route) if with_routes else lw)
             k = len(ids)
     except LocalBudgetExceeded as e:
@@ -2600,6 +2704,10 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         if k in overrides:
             request[k] = overrides.pop(k)
     _deep_merge(strategy, overrides)
+    # the echo carries the retrieval's cap: an override output.coordinates false (the
+    # resource stop's drop_coordinates) would otherwise make every continuation, deepen()
+    # and traverse_continue a 400 (revision 2, C-N6)
+    _C.strip_coordinate_cap(strategy)
     request['strategy'] = strategy
     return request
 
@@ -2814,7 +2922,10 @@ class GraphletView:
         if resume is not None and by != 'id':
             raise ValueError("resume= continues walks(by='id') only: a ranked list is never "
                              "partial")
-        keep = set(self.path_ids.get(a.side, ()))
+        # the view's walks, ascending path ids (built in path order), tested by bisection:
+        # a set of them, built before the call's first charge, was an allocation no budget
+        # admitted (b2fc7816's open item) -- the membership test needs none
+        keep = self.path_ids.get(a.side, ())
         b = _B.resolve(budget)
         if b is None:
             return walks_at(self.backing, a, self._ranked(a, keep, top, by, labels,
@@ -2831,9 +2942,11 @@ class GraphletView:
                 raise
 
     def _ranked(self, a, keep, top, by, labels, route_consistent, min_bp, b):
+        n = len(keep)
         ids = [i for i in rank_walks(self.backing, a, by=by, labels=labels,
                                      route_consistent=route_consistent, min_bp=min_bp,
-                                     budget=b) if i in keep]
+                                     budget=b)
+               if n and keep[min(bisect.bisect_left(keep, i), n - 1)] == i]
         return ids if top is None else ids[:top]
 
     def claims(self, arm=None, at_most_bp=None, strict=True, *, budget=None, resume=None):
@@ -2843,21 +2956,23 @@ class GraphletView:
                                    resume=resume)
 
     def to_fasta(self, arm=None, with_seed=True, orientation='natural', width=None, *,
-                 budget=None):
+                 coordinates=None, budget=None):
         from . import export
         b = _B.resolve(budget)
         if b is not None:
             with b.scope('to_fasta', ('select_walks', 'narrow_arm', 'export_mgt')):
-                return self._to_fasta(export, arm, with_seed, orientation, width, b)
-        return self._to_fasta(export, arm, with_seed, orientation, width, None)
+                return self._to_fasta(export, arm, with_seed, orientation, width, b,
+                                      coordinates)
+        return self._to_fasta(export, arm, with_seed, orientation, width, None, coordinates)
 
-    def _to_fasta(self, export, arm, with_seed, orientation, width, b):
+    def _to_fasta(self, export, arm, with_seed, orientation, width, b, coordinates=None):
         out = []
         for side in self.segments:
             if arm is not None and self.backing.arm(arm).side != side:
                 continue
             out.append(export.to_fasta(self.backing, side, self.path_ids[side], with_seed,
-                                       orientation, width, budget=b))
+                                       orientation, width, coordinates=coordinates,
+                                       budget=b))
         if b is not None:
             n = sum(len(x) for x in out)
             b.charge(n >> 8, STR + n)
@@ -2965,7 +3080,85 @@ _COMPARABLE_RANK = {True: 0, 'qualified': 1, 'unverifiable': 2, 'unknown': 3, Fa
 # understated (lower bound) or overstated (qualified)
 LOWER_BOUND_KINDS = ('label_lists', 'inexact_counts', 'seed_labels', 'switch_sources',
                      'greedy_losses')
+# (and a walked result's derivation limitation, D3: derive.qualifies())
 OVERSTATED_KINDS = ('trace_record_boundaries',)
+
+
+# compare() of retrievals with record coordinates (decision C-N9)
+COORDINATES_NOTE = 'coordinates are not compared (v1)'
+
+
+def _displayed_parent_price(a, b, sides, depth, rules=None):
+    """The lwu _displayed_parent_rules() charges to judge the merges, or None when it judges
+    none (one rule on both sides, or no merge within [0, depth) of a compared arm): an
+    element per merge parent and per run (constrain, the parse's run index) or presence
+    run (annotate) of it, which the carried counts read. compare_cost() prices it too, so
+    that its exact estimate stays exact."""
+    ra, rb = rules or (derive.displayed_parent_rule(a), derive.displayed_parent_rule(b))
+    if ra is not None and ra == rb:
+        return None                     # one rule on both sides
+    n = 0
+    for g in (a, b):
+        for s in sides:
+            arm_ = g.arms[s]
+            rbs = None
+            for x in arm_.segments:
+                if len(x.parents) < 2 or x.from_bp >= depth:
+                    continue
+                if g.mode == 'constrain' and rbs is None:
+                    rbs = derive.runs_by_segment(arm_)
+                for pid in x.parents:
+                    n += 1 + (len(rbs[pid]) if g.mode == 'constrain'
+                              else len(arm_.segments[pid].presence))
+    return W_ELEM * n if n else None
+
+
+def _displayed_parent_rules(a, b, sides, depth, cb=None):
+    """The note of a comparison whose sides may display a merge through different parents,
+    or None. From feature level 6 a merge displays the parent carried by the most labels,
+    before it the first to arrive (R21 (4); derive.displayed_parent_rule(): a side's rule,
+    or not known for a body without its envelope). The displays can differ only where a
+    side that may follow arrival order shows, at a merge within [0, depth) of a compared
+    arm, a parent the level-6 rule would not (derive.majority_first() not True: a later
+    parent carries more labels than the first, or the counts cannot be judged) while the
+    other side may follow the level-6 rule. A side whose merges all show their majority
+    parent displays what either rule would, so two retrievals of one rule, or of any rules
+    whose merges agree with the majority, are not qualified. |cb|: compare()'s budget,
+    charged the carried counts where they are read (an element per merge parent and per
+    run or presence run of it)."""
+    ra, rb = derive.displayed_parent_rule(a), derive.displayed_parent_rule(b)
+    work = _displayed_parent_price(a, b, sides, depth, (ra, rb))
+    if work is None:
+        return None
+    if cb is not None:
+        cb.charge(work)
+
+    def shows_arrival_minority(g):
+        # the side's display differs from the level-6 rule's somewhere (or may: None)
+        return any(derive.majority_first(g, s, depth) is not True for s in sides)
+
+    hit = None
+    for old, rule_old, rule_new in ((a, ra, rb), (b, rb, ra)):
+        if rule_old != 'majority' and rule_new != 'arrival' \
+                and shows_arrival_minority(old):
+            hit = 'a' if old is a else 'b'
+            break
+    if hit is None:
+        return None
+    level = derive.DISPLAYED_PARENT_LEVEL
+
+    def stated(rule, g):
+        if rule is None:
+            return 'not known (no envelope)'
+        lv = derive.feature_level(g)
+        return 'feature level %d' % lv if lv else 'a level before %d' % level
+    return ('the displayed parent at a merge may follow different rules on the two sides '
+            '(%s on a, %s on b; from level %d the parent carried by the most labels, before '
+            'it the first to arrive), and %s shows a merge within the depth through a '
+            'parent carried by fewer labels than another (or one whose counts cannot be '
+            'judged): a walk spelled through it, and the claims keyed by it, may differ '
+            'where the retrieval does not; compare mode labels, or retrievals of one level'
+            % (stated(ra, a), stated(rb, b), level, hit))
 
 
 def _weaker(cur, new):
@@ -2981,7 +3174,7 @@ def _label_evidence_notes(g, sides):
     for lim in g.limitations:
         if lim.arm is not None and lim.arm not in sides:
             continue
-        if lim.kind in LOWER_BOUND_KINDS or lim.kind in OVERSTATED_KINDS:
+        if lim.kind in LOWER_BOUND_KINDS or derive.qualifies(g, lim):
             if lim.kind in seen:
                 continue
             seen.add(lim.kind)
@@ -3025,6 +3218,27 @@ def compare(a, b, *, arm=None, labels=None, mode='claims', budget=None):
     it closes are open claims at the depth, not merged ones (round 3, finding A). Where a
     route cannot be reconstructed through a merge (its lineage in no partition) the
     comparison is 'qualified', never a difference.
+
+    Label evidence and the per-node label limit (R21 (5)): 'qualified' can come from
+    labels.max_labels_per_node alone. A retrieval whose label lists were cut at a node (more
+    labels than the limit, 64 by default: a seed carried by many labels, or a conserved
+    region) states label_evidence lower_bound, and a comparison with it is qualified, never
+    equal -- a cut list cannot tell 'absent' from 'cut'. compare() does not raise the limit
+    for you: fetch both sides again with a larger labels.max_labels_per_node (or name fewer
+    labels) when equality must be decided.
+
+    Record coordinates (decision C-N9) are not compared: two retrievals with them compare
+    exactly as without them, and the answer notes it ('coordinates are not compared (v1)').
+
+    Displayed parents (R21 (4)): from feature level 6 a merge displays the parent carried
+    by the most labels, before it the first to arrive. Claims, walks and prefix_subset are
+    keyed by the displayed bases, so a comparison is 'qualified', and a note says why, when
+    one side may follow the older rule (it states a level below 6, its capabilities state
+    none, or it is a body without its envelope) and shows, at a merge before the depth, a
+    parent carried by fewer labels than another, while the other side may follow the
+    level-6 rule (states 6 or more, or is a body without its envelope); mode labels is not
+    affected. A side whose merges all show their majority parent displays what either rule
+    would.
 
     The cost follows both DAGs up to the depth. Without a budget (the default) no work or
     allocation budget applies; budget= (stage L) never raises for the budget: a stopped
@@ -3123,6 +3337,20 @@ def _compare(a, b, arm, labels, mode, cb, state):
             notes.append('%s arm of a: histories were united at merges' % s)
     if a.support != b.support:
         notes.append('support kinds differ (%s vs %s)' % (a.support, b.support))
+    if _C.present(a) or _C.present(b):
+        # decision C-N9: the record coordinates ride beside the claims, never in their keys,
+        # and are neither clipped nor charged here (revision 6)
+        notes.append(COORDINATES_NOTE)
+    if mode in ('claims', 'walks', 'prefix_subset'):
+        shown = _displayed_parent_rules(a, b, sides, depth, cb)
+        if shown is not None:
+            # R21 (4): which parent a merge displays is the server's choice, and it changed
+            # at feature level 6; claims and walks are keyed by the displayed bases, so the
+            # same trie can spell a walk through a merge differently on the two sides. A
+            # difference there may be the display's, not the retrieval's: qualified, as when
+            # the completeness scopes differ
+            comparable = _weaker(comparable, 'qualified')
+            notes.append(shown)
     if cb is not None and labels is not None:
         _uses_g(cb, a, 'label_index')
         _uses_g(cb, b, 'label_index')
@@ -3307,6 +3535,11 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
         return result(True)
     depth = min(min(a.arms[s].complete_to_bp, b.arms[s].complete_to_bp) for s in sides)
     t.charge(W_ELEM * sum(len(g.arms[s].segments) for g in (a, b) for s in sides))
+    if mode in ('claims', 'walks', 'prefix_subset'):
+        # the carried counts of the merges across the display rule change (R21 (4))
+        w = _displayed_parent_price(a, b, sides, depth)
+        if w:
+            t.charge(w)
     if labels is not None:
         _uses_g(t, a, 'label_index')
         _uses_g(t, b, 'label_index')
@@ -4603,7 +4836,8 @@ def arm_exact(g, side):
         return False
     stated = False
     for lim in g.limitations:
-        if lim.kind in LOWER_BOUND_KINDS or lim.kind in OVERSTATED_KINDS:
+        # a walked result's derivation (D3) overstates like trace_record_boundaries does
+        if lim.kind in LOWER_BOUND_KINDS or derive.qualifies(g, lim):
             stated = True
             if lim.arm is None or lim.arm == side:
                 return False
@@ -4618,7 +4852,9 @@ def evidence_block(g, side=None, view=None):
     (arm_exact): it holds only when the label evidence of every arm the answer covers
     (|side|, or every arm) is complete and none of their recorded lists was cut; the
     outcome's label_evidence beside it is the seed's. |view|: a GraphletView the answer
-    was restricted to (its completeness is qualified 'for the selected labels')."""
+    was restricted to (its completeness is qualified 'for the selected labels'). A
+    retrieval that asked for record coordinates adds `coordinates`: {kind, complete} of
+    its block, or {reason} when it has none."""
     if side is None:
         sides = [s for s in ARM_SIDES if s in g.arms]
     else:
@@ -4640,6 +4876,13 @@ def evidence_block(g, side=None, view=None):
         'outcome': g.outcome.as_dict() if g.outcome is not None else None,
         'limitations': kinds,
     }
+    if _C.requested(g):
+        # only when the request asked for coordinates (C1): every other evidence block is
+        # as it was. The block's kind and completeness (a cut list or a lower-bound run is
+        # complete false), or the reason there is none
+        raw = g.seed_summary['coordinates']
+        out['coordinates'] = {'kind': raw.get('kind'), 'complete': raw.get('complete')} \
+            if isinstance(raw, dict) else {'reason': g.seed_summary.get('coordinates_reason')}
     if view is not None:
         out['view'] = view.view_spec()
         out['qualified'] = 'for the selected labels'
@@ -4650,7 +4893,10 @@ def summary(g, arm=None, max_bytes=2048, *, budget=None):
     """Agent-facing, <= max_bytes of JSON: per-arm status / completeness / counts, the
     top labels by direct_bp, the stated limitations (caveats: kind, knob, limit,
     observed, complete_to_bp and effect; informational ones flagged) and the resource
-    stop with its suggested actions. Under the cap the effect texts go first, then top
+    stop with its suggested actions. A seed whose permitted set was derived from part of
+    it (D3) says so (seed.derivation: {partial, kmers_read, of}); a retrieval that asked
+    for record coordinates states their kind and completeness (coordinates), or the reason
+    it has none. Under the cap the effect texts go first, then top
     labels, then caveats (each step stated). budget= (stage L): a stop raises, with no
     partial."""
     b = _B.resolve(budget)
@@ -4669,6 +4915,9 @@ def _summary(g, arm, max_bytes, b):
         for side in sides:
             derive.uses(b, g, g.arms[side], 'leaves', 'paths')
         text = 600 + sum(300 + len(l.effect) for l in g.limitations)
+        if _C.requested(g) or derive.partial_derivation(g) is not None:
+            # the coordinates entry and the derivation statement (at most ~200 bytes)
+            text += 200
         # per arm the labels ranked: the list and a key tuple per label
         b.charge(len(sides) * (sort_work(n) + 2 * n),
                  len(sides) * (list_bytes(n) + n * (TUPLE + 3 * LIST_ITEM + 2 * INT))
@@ -4683,6 +4932,22 @@ def _summary(g, arm, max_bytes, b):
            'outcome': g.outcome.as_dict(),
            'index': {'ns': g.index_ns, 'verifiable': g.index_fp is not None},
            'arms': {}, 'caveats': []}
+    pd = derive.partial_derivation(g)
+    if pd is not None:
+        # D3 named (R21 (3)): the permitted set was derived from part of the seed, a
+        # superset of its carriers, and the walk stopped at the seed
+        out['seed']['derivation'] = {'partial': True, 'kmers_read': _kv(pd.observed),
+                                     'of': g.seed.num_kmers}
+    if _C.requested(g):
+        raw = g.seed_summary['coordinates']
+        if isinstance(raw, dict):
+            got = {'kind': raw.get('kind'), 'complete': raw.get('complete'),
+                   'max_occurrences': raw.get('max_occurrences')}
+            if raw.get('runs_lower_bound'):
+                got['runs_lower_bound'] = raw['runs_lower_bound']
+            out['coordinates'] = got
+        else:
+            out['coordinates'] = {'reason': g.seed_summary.get('coordinates_reason')}
     for side in sides:
         a = g.arms[side]
         ranked = sorted(range(len(g.labels)),
