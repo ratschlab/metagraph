@@ -4634,8 +4634,9 @@ TEST(GraphletStage3Decode, StatementsFitTheirWidths) {
     for (bool annotate : { false, true }) {
         // 0, 1: a level's row (its demand known), injected; 2 .. 4: work stops; 5: a row whose
         // read alone was refused; 6: the labels a row names (phase traversal); 7: the level's
-        // own lists (phase traversal)
-        for (int variant = 0; variant < 8; ++variant) {
+        // own lists (phase traversal); 8: the labels the rows of a read that is not
+        // budget-aware named (phase traversal, review of 2026-10-06, U03-03)
+        for (int variant = 0; variant < 9; ++variant) {
             SeedResult r;
             Strategy st;
             st.label_mode = annotate ? LabelMode::ANNOTATE : LabelMode::CONSTRAIN;
@@ -4646,11 +4647,12 @@ TEST(GraphletStage3Decode, StatementsFitTheirWidths) {
             q.resource = memory ? ResourceStop::MEMORY : ResourceStop::WORK;
             q.phase = variant < 2 || variant == 5 ? "annotation_decode" : "traversal";
             q.cause = variant < 2 || variant == 5 ? ResourceStop::READ_ROW
-                    : variant == 6 ? ResourceStop::LABEL_NAMES
+                    : variant == 6 || variant == 8 ? ResourceStop::LABEL_NAMES
                     : variant == 7 ? ResourceStop::LEVEL_LISTS : ResourceStop::HEAD;
-            q.row_demand = variant == 5 ? 0 : big;
+            q.row_demand = variant == 5 || variant == 8 ? 0 : big;
             q.left = q.held = q.labels = q.label_bytes = big;
-            q.lower_bound = variant == 5 || variant == 7;
+            q.lower_bound = variant == 5 || variant == 7 || variant == 8;
+            q.names_after_read = variant == 8;
             q.injected = variant == 1;
             q.arm = Arm::RIGHT;
             q.at_bp = big;
@@ -4693,7 +4695,8 @@ struct NamesCase {
     std::string P;
     size_t v = 30;
 };
-NamesCase names_case(size_t n = 300, size_t name_bytes = 4000) {
+// |row_diff| false: a column annotation, whose reads are not budget-aware (format (ii))
+NamesCase names_case(size_t n = 300, size_t name_bytes = 4000, bool row_diff = true) {
     NamesCase c;
     c.P = random_seq(80, 8100);
     std::vector<std::string> seqs { c.P }, labels { "A" };
@@ -4701,8 +4704,13 @@ NamesCase names_case(size_t n = 300, size_t name_bytes = 4000) {
         seqs.push_back(c.P.substr(c.v + 1, 11) + random_seq(15, 8200 + i));
         labels.push_back("B" + std::to_string(i) + std::string(name_bytes, 'x'));
     }
-    c.anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
-            11, seqs, labels, DeBruijnGraph::BASIC);
+    if (row_diff) {
+        c.anno = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+                11, seqs, labels, DeBruijnGraph::BASIC);
+    } else {
+        c.anno = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                11, seqs, labels, DeBruijnGraph::BASIC);
+    }
     return c;
 }
 
@@ -4754,6 +4762,56 @@ TEST(GraphletStage3Review, LabelsThatDoNotFitAreNotARowStop) {
     EXPECT_GT(stopped_at, 0u);
     // the lever works: with one label per node the same budget walks past u (where its 300
     // branches, one new label each, stop it again)
+    const Json::Value fewer = names_request(c, c.P.substr(0, 20), "right", 2, 1)["results"][0];
+    EXPECT_GT(fewer["arms"]["right"]["complete_to_bp"].asUInt64(), stopped_at);
+}
+
+// The review of 2026-10-06, U03-03: on a format whose reads are not budget-aware (a column
+// annotation) a level's rows are read whole and the labels they name are charged after the
+// read. When those labels put the account over the budget the stop is theirs as well
+// (LABEL_NAMES): its message names the labels and their bytes, the need is a lower bound ("at
+// least"), and the levers that name fewer labels are offered. It was stated as a refused head
+// with an exact need — the dictionary's, so raised to it the walk stopped at the same depth
+// again — and without lower_max_labels_per_node, which lets the same budget walk on
+TEST(GraphletStage3Review, LabelsAnUnbudgetedReadNamedAreTheirOwnStop) {
+    const NamesCase c = names_case(300, 4000, false);
+    LabelOracle oracle(*c.anno);
+    ASSERT_FALSE(oracle.decode_charged());
+    const Json::Value out = names_request(c, c.P.substr(0, 20), "right", 2, 1000);
+    const Json::Value &res = out["results"][0];
+    ASSERT_TRUE(res.isMember("resource_stop")) << res.toStyledString().substr(0, 2000);
+    const Json::Value &q = res["resource_stop"];
+    EXPECT_EQ("traversal", q["phase"].asString());
+    EXPECT_EQ("memory", q["resource"].asString());
+    const std::string message = q["message"].asString();
+    EXPECT_NE(std::string::npos, message.find("after reading the next level's annotation: its "
+                                              "rows named 300 new dictionary label(s)"))
+        << message;
+    EXPECT_NE(std::string::npos, message.find("at least the account with them")) << message;
+    // no row was refused: nothing of a row's demand or of bytes left is stated
+    EXPECT_EQ(std::string::npos, message.find("a row that fits")) << message;
+    EXPECT_EQ(std::string::npos, message.find("charged per head")) << message;
+    const auto actions = actions_of(q);
+    for (const char *a : { "raise_memory_budget", "use_graphlet", "lower_max_labels_per_node",
+                           "label_constrained_query", "continue_from_leaves" }) {
+        EXPECT_TRUE(actions.count(a)) << a;
+    }
+    EXPECT_FALSE(actions.count("more_selective_seed"));
+    const uint64_t stopped_at = res["arms"]["right"]["complete_to_bp"].asUInt64();
+    EXPECT_GT(stopped_at, 0u);
+    bool walk_domain = false;
+    for (const Json::Value &l : res["arms"]["right"]["limitations"]) {
+        if (l["kind"].asString() != "walk_domain")
+            continue;
+        walk_domain = true;
+        const std::string effect = l["effect"].asString();
+        EXPECT_NE(std::string::npos, effect.find("did not admit the dictionary labels")) << effect;
+        EXPECT_NE(std::string::npos, effect.find("observed: at least")) << effect;
+        // the account with the labels: 300 names of 4 KB, each priced in every copy
+        EXPECT_GT(l["observed"].asUInt64(), 2u);
+    }
+    EXPECT_TRUE(walk_domain);
+    // the lever works: with one label per node the same budget walks past u
     const Json::Value fewer = names_request(c, c.P.substr(0, 20), "right", 2, 1)["results"][0];
     EXPECT_GT(fewer["arms"]["right"]["complete_to_bp"].asUInt64(), stopped_at);
 }
@@ -5734,6 +5792,48 @@ TEST(GraphletAttempt, UnstartedSeedsAreFailedWithTheStop) {
         EXPECT_EQ(0u, u["per_seed"][2]["work_units"].asUInt64());
         EXPECT_EQ(u["work_units"], u["per_seed"][0]["work_units"]);
         EXPECT_EQ(budgeted, !u["memory"]["soft_excess_bytes"].isNull());
+    }
+}
+
+// A seed never started states labels_from_seed as the seeds of its request that were walked:
+// by the one rule (labels_derived_from_seed), false in annotate mode, which derives no set.
+// It said seed.labels.empty(): true for every annotate seed, beside a walked one's false in
+// the same response (review of 2026-10-06, X-DUP-01)
+TEST(GraphletAttempt, UnstartedSeedsStateLabelsFromSeedAsTheWalked) {
+    const std::vector<BudgetCase> cases = budget_cases();
+    struct Setup {
+        const char *what;
+        Seed seed;
+        std::string strategy;
+        bool from_seed;
+    };
+    const std::vector<Setup> setups {
+        { "explicit", seed_of("AAA", { "C", "D", "E" }), R"({"bounds": {"max_extension_bp": 7}})",
+          false },
+        { "derived", seed_of("AAA"), R"({"bounds": {"max_extension_bp": 7}})", true },
+        { "annotate", seed_of("AAA"),
+          R"({"labels": {"mode": "annotate"}, "bounds": {"max_extension_bp": 5}})", false },
+    };
+    for (const Setup &setup : setups) {
+        const Json::Value one = request_of({ setup.seed }, setup.strategy);
+        CancelAtPoll single(std::numeric_limits<uint64_t>::max());
+        process_traverse_request(one, *cases[0].anno, "", {}, nullptr, single.attempt.get());
+        Json::Value request = one;
+        request["seeds"].append(one["seeds"][0]);
+        request["seeds"].append(one["seeds"][0]);
+        CancelAtPoll cancel(single.calls + 1);
+        const Json::Value out = process_traverse_request(request, *cases[0].anno, "", {},
+                                                         nullptr, cancel.attempt.get());
+        ASSERT_EQ(3u, out["results"].size()) << setup.what;
+        const Json::Value &walked = out["results"][0];
+        ASSERT_FALSE(walked.isMember("resource_stop")) << setup.what << ": " << compact_json(walked);
+        EXPECT_EQ(setup.from_seed, walked["seed"]["labels_from_seed"].asBool()) << setup.what;
+        for (Json::ArrayIndex i = 1; i < 3; ++i) {
+            const Json::Value &r = out["results"][i];
+            ASSERT_EQ("not_started", r["resource_stop"]["phase"].asString()) << setup.what;
+            EXPECT_EQ(walked["seed"]["labels_from_seed"], r["seed"]["labels_from_seed"])
+                << setup.what << " seed " << i;
+        }
     }
 }
 

@@ -562,7 +562,10 @@ class LabelQuery {
     // and caches them with their costs within the byte bound; a run that does not fit
     // ends the warming silently (nothing a later fetch returns depends on it); |pacing|:
     // each run decoded in paced pieces, its stop checked before each (interrupted: the run
-    // is dropped and the warming ends silently)
+    // is dropped and the warming ends silently). The warming also ends at the first run the
+    // cache cannot keep beside the runs this warm cached (it never evicts its own runs:
+    // review of 2026-10-06, U05-01) or cannot keep at all: what was cached before the warm
+    // may be evicted for its first run only
     void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
               ReadPacing *pacing = nullptr);
     // what a copy of |hits| holds (the model of decode_budget.hpp)
@@ -657,10 +660,17 @@ class LabelQuery {
                        annot::matrix::DecodeBudget &budget, NodeHits *hits, uint64_t *peak);
     bool hits_budgeted(const annot::matrix::MultiIntMatrix::RowTuples &row,
                        annot::matrix::DecodeBudget &budget, NodeHits *hits, uint64_t *peak);
+    // What cache_budgeted may evict to keep a call's keys that do not fit beside the cache:
+    // everything (EVICT: a level's read, the walk moving forward; the cache is emptied even
+    // when the keys alone do not fit, as always), everything but only when the keys then fit
+    // (EVICT_IF_KEPT: a warm's first run, which drops only entries from before the warm), or
+    // nothing (KEEP: a warm's later runs, which must not drop the runs before them)
+    enum class Eviction { EVICT, EVICT_IF_KEPT, KEEP };
     // cache the keys of keys[0, n) that are not cached (those a successful budgeted call
-    // decoded: the cache does not change during the call), within the byte bound
-    void cache_budgeted(const node_index *keys, size_t n, const NodeHits *hits,
-                        const KeyCost *costs);
+    // decoded: the cache does not change during the call), within the byte bound; whether
+    // they are cached now
+    bool cache_budgeted(const node_index *keys, size_t n, const NodeHits *hits,
+                        const KeyCost *costs, Eviction eviction = Eviction::EVICT);
 };
 
 
@@ -728,6 +738,8 @@ class LabelRecorder {
                std::vector<NodeLabels> *out, std::vector<KeyCost> *costs, size_t *refused_at,
                const std::function<uint64_t(std::string_view name)> &name_bytes,
                ReadPacing *pacing = nullptr);
+    // as LabelQuery's, the warming ending at the first run the cache cannot keep beside this
+    // warm's runs or at all (U05-01)
     void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
               ReadPacing *pacing = nullptr);
     static uint64_t held_bytes(const NodeLabels &labels);

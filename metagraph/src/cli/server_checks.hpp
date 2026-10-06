@@ -18,13 +18,16 @@ namespace cli {
 
 // Whether the peer of the connected TCP socket |fd| is gone: a non-blocking peek (consuming
 // nothing) finds the connection closed — an orderly close or a half-close (the peer will send
-// nothing more; nginx's default treats it the same) — or reset, or |fd| is no socket. Data
-// waiting (a pipelined request, a trailing CRLF) hides a close behind it from the peek, so then
-// the kernel's TCP state is read (Linux TCP_INFO, macOS TCP_CONNECTION_INFO): CLOSE_WAIT (the
-// FIN arrived) or CLOSED (reset) is gone, otherwise connected. On another platform, or for a
-// socket that is not TCP, data waiting reads "connected" (a close behind it is then not seen
-// until the data is read). Nothing to read yet: connected. An error that says nothing about
-// the peer reads "connected".
+// nothing more; nginx's default treats it the same) — or reset, or |fd| holds no connection (a
+// negative or closed descriptor, or one that is no socket). Data waiting (a pipelined request,
+// a trailing CRLF) hides a close behind it from the peek, so then the kernel's TCP state is
+// read (Linux TCP_INFO, macOS TCP_CONNECTION_INFO): any state past ESTABLISHED is gone — the
+// peer's FIN (CLOSE_WAIT) or reset (CLOSED), and the server's own shutdown at its content
+// timeout (FIN_WAIT1/2 and the states after it), in which nothing can be delivered either —,
+// ESTABLISHED (and SYN_RECV, a TCP Fast Open connection's, which this server does not enable)
+// connected. On another platform, or for a socket that is not TCP, data waiting reads
+// "connected" (a close behind it is then not seen until the data is read). Nothing to read
+// yet: connected. An error that says nothing about the peer reads "connected".
 bool peer_closed(int fd);
 
 // |value| as the server writes it: compact (no indentation) or the default writer's
@@ -44,11 +47,25 @@ std::string json_text(const Json::Value &value, bool compact,
 // object's members in byte order of their names), with "results":[t0,t1,...] between them —
 // byte for byte json_text(envelope with results, true); |check| and |max_gap_ms| as
 // json_text's, the results' texts copied in pieces of at most 64 KiB with a check between
-// them (finding 6: a seed's text of 16 MiB was appended whole, one check after it)
+// them (finding 6: a seed's text of 16 MiB was appended whole, one check after it).
+// |results| is taken by value (the server moves its texts in): the response's exact size is
+// reserved before anything is copied, and each text is freed once copied, so that assembling
+// holds about the response once, not the texts beside a copy that grew by doubling (review
+// of 2026-10-06, C9: up to 3x the text before compression or the transport's copy began)
 std::string assemble_traverse_response(const Json::Value &envelope,
-                                       const std::vector<std::string> &results,
+                                       std::vector<std::string> results,
                                        const std::function<void()> &check = nullptr,
                                        double *max_gap_ms = nullptr);
+
+// |text| compressed by zlib at |level| (1-9), in a gzip container when |gzip|, else a zlib
+// stream; |check| called before each 32 KiB block of output, its exception (after the stream
+// is released) reaching the caller. zlib counts its input in 32 bits: the text is handed over
+// in pieces of at most |max_piece| bytes (0: the most zlib takes, 2^32 - 1), so a text of any
+// size is compressed whole; a text of one piece is compressed exactly as before (|max_piece|
+// below that is for tests)
+std::string compress_string(const std::string &text, int level, bool gzip,
+                            const std::function<void()> &check = nullptr,
+                            size_t max_piece = 0);
 
 // The interval of the checks of json_text and assemble_traverse_response (bytes of text)
 constexpr size_t kDeliveryCheckBytes = size_t(1) << 16;

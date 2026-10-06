@@ -1000,14 +1000,17 @@ int run_server(Config *config) {
         };
         // each seed's result is written as text once built (its tree freed at once, its bytes
         // known to the attempt's delivery reserve); the response is assembled from them, byte
-        // for byte the text of the whole tree
+        // for byte the text of the whole tree. The texts are moved into the assembly, which
+        // frees each once copied: nothing reads them after it, and kept here they lived until
+        // the handler returned, through the compression and the transport's copy (review of
+        // 2026-10-06, C9)
         ResultTexts texts;
         control.write = [&texts, attempt](const Json::Value &envelope,
                                           const std::function<void()> &check) {
             // the longest stretch between two checks (deadline_check, finding 6)
             double gap = 0;
             std::string text = texts.active
-                ? assemble_traverse_response(envelope, texts.texts, check, &gap)
+                ? assemble_traverse_response(envelope, std::move(texts.texts), check, &gap)
                 : json_text(envelope, true, check, &gap);
             attempt->note_delivery_gap_ms(gap);
             return text;

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <sstream>
 #include <thread>
@@ -2831,6 +2832,82 @@ TEST_F(MiniRefSeq, AnnotateMergeRanksParentsByTheirOwnSegment) {
         EXPECT_EQ(3u, path["continuation"]["labels"][0].asUInt64());
     }
     EXPECT_EQ(1u, through);
+}
+
+// The review of 2026-10-06, U05-01 (W11), at the walker: under a memory budget the budget-aware
+// lookahead decoded every run of a warm larger than its cache and evicted its own earlier runs,
+// and the walk decoded the near rows again. On the review's walk (the first 70 bp of
+// NZ_LPPQ01000025.1 to the right, 10,000 bp, constrain) 16 MiB decoded 31-39% more tuple rows
+// than a work budget alone (whose caches have no byte bound) at batch_kmers 2,048-8,192, the
+// walk the same. The warms stop before evicting their own runs now: +11-20% here, held below
+// +25%. What remains is stated, not fixed (SPEC §6.8): a later warm's first run still evicts the
+// cache wholesale, rows earlier warms read ahead that the walk had not reached among them.
+// Evicting the oldest rows first instead kept the label cache full and starved the row-diff
+// path cache that shares its allotment (2.5 times the stored rows read on mini_refseq)
+TEST_F(MiniRefSeq, LookaheadKeepsItsRunsUnderAMemoryBudget) {
+    const std::string fasta = kIndexDir + "/fasta/1296536.fa";
+    std::ifstream in(fasta);
+    if (!in)
+        GTEST_SKIP() << fasta << " not found (scripts/traversal/build_mini_refseq.sh writes it)";
+    std::string line, seed;
+    while (seed.size() < 70 && std::getline(in, line)) {
+        if (line.empty() || line[0] == '>') {
+            if (!seed.empty())
+                break;      // the first record only
+            continue;
+        }
+        seed += line;
+    }
+    ASSERT_GE(seed.size(), 70u);
+    seed.resize(70);
+    // what the work-only walk and the memory-budgeted one must share: everything but the
+    // physical work (timing) and the work units the budgets count differently
+    std::function<void(Json::Value&)> walked = [&](Json::Value &v) {
+        if (v.isObject()) {
+            v.removeMember("timing");
+            v.removeMember("work_units");
+            for (const std::string &name : v.getMemberNames()) {
+                walked(v[name]);
+            }
+        } else if (v.isArray()) {
+            for (Json::Value &e : v) {
+                walked(e);
+            }
+        }
+    };
+    auto walk = [&](size_t batch, bool memory) {
+        Json::Value r;
+        r["seeds"][0]["sequence"] = seed;
+        Json::Value &st = r["strategy"];
+        st["direction"] = "right";
+        st["labels"]["mode"] = "constrain";
+        st["bounds"]["max_extension_bp"] = 10000;
+        if (memory) {
+            st["bounds"]["max_memory_mb"] = 16;
+        } else {
+            st["bounds"]["max_work_units"] = Json::UInt64(1'000'000'000'000);
+        }
+        st["output"]["detail"] = "summary";
+        st["output"]["timing"] = true;
+        st["annotation"]["batch_kmers"] = Json::UInt64(batch);
+        return mtg::cli::process_traverse_request(r, *anno_graph_, "")["results"][0];
+    };
+    for (size_t batch : { 2048, 4096, 8192 }) {
+        Json::Value work = walk(batch, false);
+        Json::Value memory = walk(batch, true);
+        const uint64_t work_rows = work["timing"]["tuple_rows_fetched"].asUInt64();
+        const uint64_t memory_rows = memory["timing"]["tuple_rows_fetched"].asUInt64();
+        ASSERT_GT(work_rows, 20000u) << batch;
+        EXPECT_FALSE(memory.isMember("resource_stop")) << batch;
+        EXPECT_EQ(10000u, memory["arms"]["right"]["complete_to_bp"].asUInt64()) << batch;
+        // at ea285c2e: 36,275, 36,838 and 38,441 against 27,642 (+31%, +33%, +39%)
+        EXPECT_LE(memory_rows * 4, work_rows * 5)
+            << "batch_kmers " << batch << ": " << memory_rows << " tuple rows under 16 MiB, "
+            << work_rows << " under the work budget alone";
+        walked(work);
+        walked(memory);
+        EXPECT_EQ(work["arms"], memory["arms"]) << batch;
+    }
 }
 
 } // namespace

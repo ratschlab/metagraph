@@ -414,6 +414,20 @@ struct Seed {
     std::vector<std::string> labels;
 };
 
+/**
+ * Whether |seed|'s permitted set is derived from the seed itself (SeedResult::labels_from_seed):
+ * in constrain mode, for a seed that names no labels. Never in annotate mode, which walks
+ * without a permitted set although its seeds name no labels either. The one rule for every
+ * result that states labels_from_seed without a finished walk to read it from — a seed failed
+ * by a budget (SeedBudgetError) or by its derivation, and a seed an attempt never started —
+ * so that the results of one request agree with the walked ones, which state what the walk
+ * set (review of 2026-10-06, X-DUP-01: the not-started writer used seed.labels.empty() and
+ * stated true for every annotate seed, where a walked or budget-failed one states false)
+ */
+inline bool labels_derived_from_seed(const Seed &seed, LabelMode mode) {
+    return mode != LabelMode::ANNOTATE && seed.labels.empty();
+}
+
 
 enum class EventType : uint8_t {
     LABEL_END,     // label (lineage) leaves the path: reason
@@ -871,6 +885,12 @@ struct ResourceStop {
     // |demand| is the least the seed was seen to need (part of what it needs was not read
     // because the budget was already exceeded): its statements say "at least"
     bool lower_bound = false;
+    // LABEL_NAMES on a format whose reads are not budget-aware: the level's rows were read
+    // whole and the labels they named charged after the read, which put the account over the
+    // budget — no row was refused, so |row_demand| and |left| say nothing (0), and |demand|
+    // is the account with those labels, a lower bound (review of 2026-10-06, U03-03: stated as
+    // a refused head with an exact need, without the levers that name fewer labels)
+    bool names_after_read = false;
     // MEMORY: the caches' allotments of the budget that |used| and |demand| include (bytes;
     // 0 in the seed phase, which runs before they are charged). They are fractions of the
     // budget, so a demand measured at this budget is not the budget that holds it: the

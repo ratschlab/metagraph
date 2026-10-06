@@ -859,16 +859,24 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     `not_started`, action `retry_attempt`; the `K` knob `attempt_id`); the amounts are integers, so no float is
     priced wider.
   - **The client is gone** (every `/traverse`, with or without `attempt_id`; `/resolve` between its phases —
-    before and after the discovery read and the support fetch, and before the selection): the client closed or
+    before and after the discovery read and the support fetch, every 4,096 k-mers of an explicit-label
+    support pass (*review of 2026-10-06, X-EFFICIENCY-04*), and before the selection): the client closed or
     reset its connection, or half-closed it (a client that half-closes after its request is treated as gone, as
     nginx does by default). Found by a non-blocking peek at the request's socket that consumes nothing (at most
     every 100 ms); where bytes past the request wait on the socket (a pipelined request, a trailing CRLF), which
     hide the close behind them from a peek, the kernel's TCP state is read instead (`TCP_INFO` on Linux,
-    `TCP_CONNECTION_INFO` on macOS: `CLOSE_WAIT` or `CLOSED` is gone; review of the stage-4 backend, F3: such a
-    client was walked to the end and answered into a dead socket) — on another platform such a client is seen
-    only once its bytes are read, i.e. not during the walk. The walk is abandoned where it is (nothing
-    finalised, everything freed), nothing is written and the connection is closed. A walk that outlived the HTTP server's content timeout (900 s, after which it
-    shuts the connection) is stopped by this too, where it used to compute on.
+    `TCP_CONNECTION_INFO` on macOS: every state past `ESTABLISHED` is gone — the peer's FIN (`CLOSE_WAIT`) or
+    reset (`CLOSED`), and the server's own shutdown at its content timeout (`FIN_WAIT1`/`FIN_WAIT2` and the
+    states after them), in which nothing can be delivered either; `SYN_RECV`, a TCP Fast Open connection's
+    state, which this server's listener does not enable, reads connected; review of the stage-4 backend, F3:
+    such a client was walked to the end and answered into a dead socket) — on another platform such a client
+    is seen only once its bytes are read, i.e. not during the walk. A descriptor that holds no connection (closed,
+    or no socket) reads gone. The walk is abandoned where it is (nothing finalised, everything freed), nothing is
+    written and the connection is closed. A walk that outlived the HTTP server's content timeout (900 s at the
+    earliest — the timer runs when an io thread is free —, after which it shuts the connection) is stopped by
+    this too, where it used to compute on: also with bytes waiting, which on Linux the server's own shutdown
+    keeps, so that its state (`FIN_WAIT2`) read connected until the client closed its end *(review of
+    2026-10-06, U13-02: only the peer's states were read)*.
   - **The attempt's bound**, enforced for a request with `attempt_id` (the server's operator bound, derived from
     the per-seed budgets — not a request knob): `bound_ms = min(n_seeds × T + allowance_ms, 899 000)`, T the
     effective per-seed `bounds.time_budget_ms` after the server's clamp (0 when not positive), `allowance_ms` the
@@ -1075,7 +1083,10 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   budget) cut its runs from the globally sorted missing keys; its runs and their pieces are taken in the walk's
   order now, each piece sorted, as the default reads take their chunks (32 independent paths, 2,048 walked rows,
   runs of 8: 31,297 decoder charges against 161,679, the walk-ordered runs alone 28,736). Only what is cached
-  depends on it: a key is admitted and charged by its own costs when a level's fetch reads it. *R9:* the tests of
+  depends on it: a key is admitted and charged by its own costs when a level's fetch reads it. *Review of
+  2026-10-06, U05-01:* such a lookahead ends at the first run the cache cannot keep beside its own runs (a cache
+  of 8 keys: the walk's first run of 8 decoded and kept, 130 charges, where every run was decoded and the last
+  kept; the decoding a memory budget still adds is stated under the refusals below). *R9:* the tests of
   this paragraph (`WalkerDeadlineChunks`) run on a virtual clock (`DecodePacer::test_clock_ms`) that only their slow
   reads advance, so their bounds are exact and they no longer fail under load (0 of 600 executions with 24 busy
   processes; 5 of ~400 before).
@@ -1086,7 +1097,18 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   stays uninterruptible is what the writer does between two pieces: preparing one token (escaping one string
   value, e.g. a graphlet of many MB, before it is copied). The longest time between two checks of a written text is
   measured and added to `deadline_check.observed_max_uninterruptible_ms` (not to `usage`, which states the reads
-  and, from feature level 6, the head pieces).
+  and, from feature level 6, the head pieces). *Delivery memory (review of 2026-10-06, C9):* the response's text
+  is assembled into a string of its exact size, each seed's text freed once copied into it, and the transport's
+  copy is made into a buffer sized once, after the last check. The seeds' texts lived until the handler
+  returned, beside the assembled text and the transport's buffer, both grown by doubling: measured on
+  mini_refseq (n identical seeds, a fresh server each, jemalloc), the server's peak grew by 2.60 bytes per byte
+  of text with gzip and 3.51 without (185 MB of text: 590 and 764 MB), and now by 1.52 and 2.57 (394 and 584
+  MB) — not by one and two: jemalloc keeps the pages of the texts freed during the assembly for a while. No byte
+  changes, and nothing of it is promised: no budget bounds a whole response (§6.8, memory_bound_soft). The
+  compressor takes the text in pieces of at most 2^32 − 1 bytes, zlib's input counter, so a text of 4 GiB or
+  more is compressed whole; it was cut to its size modulo 2^32 and answered 200 *(U13-04; an output change on
+  every route that compresses, a level-6 correction, §10.3)*; a text below 4 GiB is compressed by the same
+  calls, its bytes unchanged.
 - **The deadline record** *(R8; feature level 5; in `timing` only, never in an untimed body)*. Per seed,
   `timing.deadline`: `longest_piece {ms, kind, rows, coordinates}` — the seed's longest uninterruptible piece,
   `kind` one of `read` (an annotation read in one piece), `chunk`, `rest` (the piece that ended a split read),
@@ -1162,7 +1184,34 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     depth-0 state that already reaches the budget before a root's read (the other arm's root, its labels and
     reservation), fail the seed as a depth-0 state (phase `traversal`), without naming the labels or reading the
     row, its need stated as a lower bound ("at least"). The lookahead decodes within what is left and gives up
-    silently. Under a request budget the label caches never exceed their allotments, and the
+    silently; it also ends at the first run the label cache cannot keep beside the runs it cached, or cannot
+    keep at all (only entries cached before it may be evicted, for its first run) *(review of 2026-10-06,
+    U05-01: a lookahead larger than the cache decoded every run and evicted its own earlier runs, keeping the
+    last one or two — 31-39% more rows decoded at `batch_kmers` 2,048-8,192 under 16 MiB, every result the
+    same; only physical work, time and the `timing` counters change)*. **What a memory budget still costs in
+    decoding (physical work, stated, not fixed):** a lookahead's first run still evicts the label cache
+    wholesale when it does not fit beside what is cached, and with it the rows earlier lookaheads read ahead
+    that the walk had not reached yet; the walk decodes those again. On mini_refseq, in walks the budget does
+    not cut, the rows decoded exceed those of the same walk under a work budget alone (whose caches have no
+    byte bound) by up to 20% at 16 MiB (39% before the fix above), 52% at 32 MiB and 32% at 64 MiB (50% and
+    31% before) at `batch_kmers` 2,048-8,192, and by up to 0.9%, 4.3% and 8.0% at the default 64 (unchanged).
+    The fix is not uniformly fewer decodes: of 180 walks under 16-64 MiB (three seeds, both modes, one and
+    two arms, `batch_kmers` 64-8,192) it decoded fewer tuple rows in 24 (up to 47% fewer), more in 10 (up to
+    1.4% more; up to 4.4% more with the stored rows the path cache read), the same in 146, every result the
+    same. Evicting the oldest rows first instead (a lookahead keeping a quarter of the cache) was measured and
+    not taken: it cut the measured walks' tuple rows by 12% but kept the label cache full, and the row-diff
+    path cache, which holds only what the label cache leaves of their allotment (§8.4), read 2.5 times the
+    stored rows. Not changed either: the structural lookahead clears itself when a level's chains (up to
+    `batch_kmers` per head) would pass its allotment (`max_memory_mb` × 512 entries) and builds and reads them
+    again at later levels — on mini_refseq up to 8.4 million tuple rows for walks that decode 10,000-50,000
+    under a work budget alone (4-16 MiB, `batch_kmers` 2,048-8,192), every result the same. On a format whose
+    reads are not budget-aware nothing is refused inside a read, and an annotate level's new dictionary labels
+    are charged after its read: when they put the account over the budget the level is censored at its first
+    head as at a refused read, and the stop names them — phase `traversal`, their number and bytes, the need a
+    lower bound ("at least": the account with them; its heads need more), the levers of a stop by labels *(review of
+    2026-10-06, U03-03: it was stated as a refused head, the dictionary's need as exact, so that raised to it the
+    walk stopped at the same depth again, and without `lower_max_labels_per_node`)*. Under a request budget the
+    label caches never exceed their allotments, and the
     structural lookahead is cleared before a chain would push it past its allotment (counted keys: each key the
     walk consumes once, `annotation.keys_mapped`).
   - The derivation reads 64 k-mers per window whatever `annotation.batch_kmers` is, under a budget or not (§6.1;
@@ -1441,6 +1490,9 @@ is rejected instead (§5).
   account, the level's lists and the rows read before it (a seed-phase failure: beside the seed and what the
   seed phase held — for the derivation the window's earlier rows; a root's: beside the depth-0 state built so
   far); **the labels a row names first** (annotate mode, `traversal`): their number and bytes, the row fitting;
+  on a format whose reads are not budget-aware, **the labels a level's rows named** (annotate mode,
+  `traversal`), charged after the read: their number and bytes and the account they put over the budget, its
+  need stated as a lower bound (*review of 2026-10-06, U03-03*; stated as a refused head before);
   **the level's own lists** (`traversal`): the key and successor lists that left none of the budget for the
   level's read. For a refused read `used` is what the walk held (its account and what the level's fetch held
   beside it), `remaining` the budget minus it, and the `walk_domain`'s `observed` what admitting the refused row
@@ -2303,7 +2355,9 @@ seed phases. The rule changes what is kept only, never a row, a charge or an adm
 (tested across rules, capacities, batches, chunks and cold and warm seeds, T52).
 
 Under a memory budget the label caches get a fixed allotment of it (§5) and **evict wholesale** when they exceed
-it, as without one (a walk moves forward, so recency is not worth tracking). A row evicted and needed again is
+it, as without one (a walk moves forward, so recency is not worth tracking; evicting the oldest rows first was
+measured in the review of 2026-10-06 and starved the path cache, which holds what the label cache leaves of
+the allotment: §6.8). A row evicted and needed again is
 decoded again and charged again when the fetch returns it, like every row (work counts the rows the walk's
 fetches return, §6.8), so the refetching is bounded by the work budget and the deadline, and the memory it
 holds beyond the allotment is observed as `memory_bound_soft`. After a budget stop or a refused admission an annotate dictionary is compacted
@@ -2548,7 +2602,37 @@ the server.
     and `observed_max_uninterruptible_ms` (usage and `deadline_check`) counts head pieces too, so it reads
     larger. **W2** changes only time (a trace
     derivation under a memory budget is linear again). Every other request is answered as by `6897db99` apart
-    from timing (checked on the CLI fixtures and the bench capabilities, T58).
+    from timing (checked on the CLI fixtures and the bench capabilities, T58). **The fixes of the review's P3
+    server items** *(the owner's approval, 2026-10-06; folded into level 6 as corrections: `feature_level` stays 6, and a level-6
+    build before them — `ea285c2e`, the build deployed to staging — states what they correct, so a client keyed on
+    `feature_level` cannot tell the two apart)* change three outputs of requests that ask for nothing new, every
+    other untimed byte being as at `ea285c2e` (T59). **C10**: a seed an attempt never started (`resource_stop.phase:
+    "not_started"`) states `seed.labels_from_seed` by the rule every result of its request states it — false in
+    annotate mode, which derives no set, true for a constrain seed that names no labels — where it stated
+    `seeds[].labels` empty, true for every annotate seed, beside a walked seed's false in the same response.
+    **W9**: on a format whose reads are not budget-aware, an annotate level whose new dictionary labels put the
+    account over `bounds.max_memory_mb` (they are charged after the read, §6.8) is stated as a stop by those labels
+    — `resource_stop.message` names them and their bytes, `actions` gain `lower_max_labels_per_node` and
+    `label_constrained_query`, and the arm's `walk_domain` effect says "did not admit the dictionary labels" with
+    "observed: at least" (in MGT, the `Q` record's actions and message and that `K` record's effect, and so the
+    result's `graphlet_bytes`) — where it was stated as a refused head with an exact need (its `observed`,
+    `used` and where the walk stops are unchanged). **C26**: a response whose text is 4 GiB or more, sent
+    compressed (`Accept-Encoding` gzip or deflate), is the whole text compressed, where it was a well-formed
+    stream of the text's first (size modulo 2^32) bytes answered 200 — on every route that compresses (`/search`,
+    `/align` and `/resolve` as well as `/traverse`: the server's one compressor); a text below 4 GiB is compressed
+    by the same calls as before, its bytes unchanged. The rest changes no untimed byte:
+    **C8** a seed's stop latency is measured at its walk's end only, so `measured_stop_ms` (and the walk-until of
+    later attempts) no longer takes up the time a result was built when the client left during it or a writer
+    refused it (10.5 s recorded for a 400 ms stop; short attempts then walked nothing); **C27** with bytes waiting,
+    a socket past `ESTABLISHED` — the server's own shutdown at its content timeout included — reads gone, so on
+    Linux such a walk is stopped instead of computing on (nothing could be delivered either way), and a descriptor
+    that holds no connection reads gone; **C9** delivering a response
+    holds less beside its text (the peak per byte of text 1.52 with gzip and 2.57 without, against 2.60 and 3.51,
+    §6.8), the bytes unchanged; **W11** a budget-aware lookahead ends at the first run the cache cannot keep beside its
+    own (physical work: the `timing` counters `rows_fetched`, `tuple_rows_fetched`, `coords_mapped`,
+    `cache_hits`, `path_cache` and the times; fewer decodes in most walks it changes, slightly more in some, and
+    what a memory budget still adds is stated in §6.8; §8.3); **W16** `/resolve`'s explicit labels are scattered
+    in one pass, its profiles unchanged, and its client checked every 4,096 k-mers of it (time only).
   - **`schema_version`** is the one request schema the server accepts: 1, with no compatibility window. A future
     change of the request schema adds `request_schema_versions: [..]` to the capabilities and keeps accepting 1 for
     a stated window; a `schema_version` above 1 without that list means a server whose requests a client written
@@ -3018,6 +3102,7 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T56 | shutdown on SIGTERM | Integration `TestTraverseAttempts.test_sigterm_stops_the_server_promptly` (an idle server exits 0 within 5 s; one walking a three-seed attempt stops it at its next poll — nothing written, the connection closed — and exits 0 well within the drain time), `.test_sigterm_while_the_index_loads` (a single-index server whose graph is a FIFO nobody writes, so its load never ends: `ready: false`, 503, and exit 0 within 5 s of the signal) | §10.3 |
 | T57 | D3: a derivation the time budget cut after part of the seed (the owner's decision, feature level 6) | `WalkerDerive.PartialDerivationDeliversTheSetOfTheKmersRead` (virtual clock, 1 ms a row, 70 ms: j = 65 of 110 k-mers — the first window consumed, the second read whole; 70 when later windows followed `batch_kmers` 1 — the superset {A, C} against the whole seed's {A}, arms truncated at 0, under `kmer` and `trace`, no coordinates, `partial derivation`), `.PartialSetThatWouldFailTheSeedFailsAsBefore` (`exhaustive` over the cap, an extra label the superset duplicates, an ambiguous derived header, a depth-0 memory failure: each fails with the time budget "after 65 of 110 k-mers", as before D3; a cap that cuts the superset states it as a superset), `Walker.PartialSetWithAnUnrepresentableNameFailsAsBefore`, `Walker.FailedDerivationIsAStatedOutcome` (the server-lowered budget: walked, `observed` 1), `WalkerDeadlineChunks.DerivationWindowIsPaced` (j = 0 fails), `MiniRefSeq.PartialDerivationOnTheRealIndex` (j = 65 of 370 on a virtual clock; on the real clock partial, failed or derived whole, each stated), `.PartialSupersetIsNotRefusedAsTheWholeSeeds`, `Graphlet.PartialDerivationIsPricedAndBound` (the limitation priced and bound in every detail); integration `test_traverse_partial_derivation_states_its_set`; the fixtures `coords/d3_kmer`, `d3_trace_coordinates` and `d3_memory_stop` (the library's `WALKED_QUALIFIED_CLASS`). The `derivation` limitation's `observed` for `time_budget` has two units — elapsed ms failed, j walked — stated in §7.0 (*review of 2026-10-06, X1*) | §6.1, §7.0 |
 | T58 | the review of 2026-10-06, P2 items (feature level 6) | **W1** `WalkerDerive.WindowIsSixtyFourKmersWhateverBatchKmers` (the reviewer's U01-01 shape: 992 columns, a 195-k-mer derived seed, 100,000 work units — the response at `batch_kmers` 1, 7, 63, 65 and 1,000 equal to the one at 64, a work stop that fails the seed; an unbudgeted `no_carrier` at k-mer 90: `work_seed` and the response equal at 1, 7 and 64). **W2** `.CoordinateStateIsTheSumItReplaced` (16 carriers shrinking to 8 and 4, two compactions, on a column annotation and on a row-diff one: the running total recounted by `WalkerHooks::recount_derivation_state` wherever the state is counted — the soft observation under a memory budget of 4 GiB or 1 MiB, and on the row-diff annotation also `beside`, before every window's budget-aware read, under those budgets and under a work budget alone; without a budget nothing counts it, so that case only checks that the hook changes nothing — the result equal to the run without the recount; a debug build asserts it always; checked to bite with a one-byte drift after a compaction, the row-diff work-only case included) and `.TraceDerivationUnderAMemoryBudgetIsLinear` (200 kbp, 4 carriers: under a budget that never binds within three times the unbudgeted time; the base took 4.1–4.4 s against 0.3 s on the CLI; skipped in a debug build, whose assert recounts the state at every observation — the quadratic cost measured). *(The review of the P2 fixes: this row said the recount ran "without a budget"; GCC rejected an unbraced `EXPECT_EQ` in the first test, `-Werror=dangling-else`, so the changed test files are now compiled with GCC 13 too.)* **W3** `WalkerDeadlineChunks.LookaheadChainsReadTheStops` (a 20,000-k-mer chain on a clock every reading advances by 10 µs: a cancel and a walk-until at 50 ms, unpaced and paced, end the walk by 55 ms where the chain alone takes 200 ms; no head piece longer than 5 ms; `DecodePacer::max_head_ms` in the observation) and `.LookaheadHandsTheWalkUntilToTheAttempt` (the same chain under a control that reads the clock on every 8th poll and on every forced one, as the server's attempt does: unpaced and paced, the walk-until is taken by the lookahead's clock-reading poll and no checkpoint after it answers "no stop"; it fails with the earlier unpaced `ms_left` shortcut). **C20** `GraphletAttempt.WalkUntilStatedIsTheLowestAClockReadingPollSaw` (the reviewer's U11-02 driver: stride 8 states 65,000 where 58,900 was in force between clock-reading polls, stride 1 states 58,900; the `bound` text names the poll that reads the clock). **Texts** `GraphletAttemptRegistry.ReleaseTextsStateTheOverrunAndTheGrounds` (the X2, LRG-R1/R2, C16, C20, C24, C30 and X4 phrases, with and without retention; no "uninterruptible step" in `bound`, `not_after` or `release_rule`, no "first poll after" there or in `delivery_reserve.rule`) and, on a real server, `TestTraverseAttempts.test_release_texts_and_their_grounds` (the same grounds, `deadline_check.rule`'s stop latencies, the duplicate's 409 without "runs once"). The reviewer's reproductions re-run before and after (U01-01, U01-04, U03-01). Byte identity against `6897db99` on the CLI fixtures (`graphlet_fixtures.py --from-cli --check`) and the bench capabilities: only the texts and W1's stated cases differ | §5, §6.1, §6.8, §7.0, §10.3 |
+| T59 | the review of 2026-10-06, P3 server items (level-6 corrections) | **C10** `GraphletAttempt.UnstartedSeedsStateLabelsFromSeedAsTheWalked` (explicit, derived and annotate seeds cancelled after the first: the not-started results state the walked one's value, false in annotate mode); integration `test_wide_index_delivery_reserve_stops_the_walk` (both label modes) and `test_cancel_mid_walk_with_the_client_connected` (annotate: false). **W9** `GraphletStage3Review.LabelsAnUnbudgetedReadNamedAreTheirOwnStop` (a column annotation, a row naming 300 labels of 4 KB at 2 MiB: the labels' message, "observed: at least", `lower_max_labels_per_node` and `label_constrained_query`; one label per node walks past it) and `GraphletStage3Decode.StatementsFitTheirWidths` (its message at the widest values). **C8** `GraphletAttempt.StopLatencyIsMeasuredWhereTheWalkEnds` (the reviewer's timeline: 400 ms kept after a second call 10 s later, abandoned or failed; a walk that ended before its walk-until measures nothing). **C27** `GraphletServer.PeerClosedSeesTheServersOwnShutdown` (the server's own shutdown behind a CRLF and behind a pipelined request, and with nothing waiting; a pipe; a closed descriptor). **C26** `GraphletServer.CompressionTakesTheTextInPieces` (pieces of 1, 7, 32,768 and 65,537 bytes and one short of the text inflate to the whole text in both containers under the check; a text of one piece gives the old bytes; the output change itself, a text of 4 GiB or more, by the reproduction: 2^32 + 10 bytes inflated to 10 at `ea285c2e`). **C9** `GraphletServer.AssemblyReservesTheResponseOnce` (the response's capacity within 16 bytes of its size, members on either side of `results`, with and without checks; the bytes those of the tree). **W11** `LabelOracleBudgeted.LookaheadRunsFollowTheWalk` (a cache of 8 keys: the walk's first run decoded and kept, 130 charges where every run's were at least 28,736; under the byte bound one run kept, the second dropped, the warm ended) and `MiniRefSeq.LookaheadKeepsItsRunsUnderAMemoryBudget` (the review's walk under 16 MiB at `batch_kmers` 2,048, 4,096 and 8,192: the walk of the work budget alone, its tuple rows at most 25% more than that walk's — 33,015, 33,053 and 30,667 against 27,642; `ea285c2e` 36,275, 36,838 and 38,441). **W16** `ResolveCoordTest.ExplicitLabelsGiveTheDiscoverysProfiles` (301 explicit labels, presence and trace, column and row-diff annotations: the discovery's runs, trace breaks and counts). The reproductions re-run before and after: U11-01, U03-03, X-DUP-01, U13-02 (Linux in a container and macOS), U13-04 (2^32 + 10 bytes inflate whole), X-EFFICIENCY-02 (the delivery peak), U05-01 and X-EFFICIENCY-04. Byte identity against `ea285c2e`: the CLI fixtures (`graphlet_fixtures.py --from-cli --check`: up to date), the coordinate snapshots (only time values differ), 238 replays of the mini_refseq bench requests (with memory budgets at `batch_kmers` up to 8,192): no untimed byte differs; both capabilities documents identical | §6.8, §7.0, §10.3 |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 

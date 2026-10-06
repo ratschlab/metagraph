@@ -2432,7 +2432,8 @@ void Walker::fail_seed(ResourceStop::Resource resource, double used, double dema
     account.coordinates = coord_account_;
     const size_t labels = annotate_ ? (recorder_ ? recorder_->labels().size() : 0)
                                     : result_.label_dict.size();
-    throw SeedBudgetError(what, q, account, !annotate_ && seed_.labels.empty(), labels);
+    throw SeedBudgetError(what, q, account,
+                          labels_derived_from_seed(seed_, strategy_.label_mode), labels);
 }
 
 void Walker::fail_depth0(uint64_t need, const Arm *unread, uint64_t labels, uint64_t names) {
@@ -4854,6 +4855,10 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
             // observed now: the fetch may stop the level before it observes anything
             observe_soft(level_soft_);
         }
+        // what the account held before the level's dictionary labels were charged
+        const uint64_t before_names = accounted();
+        const size_t named_before = dict_charged_;
+        const uint64_t base_before = base_;
         if (annotate_) {
             present = fetch_present(arm, keys);
             // the labels the fetch named (observed as soft until here, see fetch_present)
@@ -4862,6 +4867,28 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
             hits = fetch_hits(arm, keys);
         }
         if (expands) {
+            if (mem_limit_ && accounted() > mem_limit_ && before_names <= mem_limit_
+                    && annotate_ && !decode_charged_ && dict_charged_ > named_before) {
+                // The labels the level's rows named put the account over the budget: a format
+                // whose reads are not budget-aware reads the rows whole and charges their new
+                // dictionary labels after the read (a budget-aware read admits them inside it:
+                // read_trip). Stated as what it is — LABEL_NAMES, with the levers that name
+                // fewer labels — and as a lower bound: the level needs at least the account
+                // with them, its heads more. It was stated as a refused head (cause HEAD) with
+                // an exact need, the dictionary's: raised to it, the walk stopped at the same
+                // depth again, and lower_max_labels_per_node, which lets it finish at the
+                // budget it had, was not offered (review of 2026-10-06, U03-03)
+                BudgetTrip t { ResourceStop::MEMORY, static_cast<double>(accounted()) };
+                ResourceStop &d = t.detail;
+                d.cause = ResourceStop::LABEL_NAMES;
+                d.where = ResourceStop::LEVEL;
+                d.names_after_read = true;
+                d.labels = dict_charged_ - named_before;
+                d.label_bytes = base_ - base_before;
+                d.held = accounted() + level_soft_;
+                d.lower_bound = true;
+                throw t;
+            }
             if (mem_limit_ && accounted() > mem_limit_)
                 throw BudgetTrip { ResourceStop::MEMORY, static_cast<double>(accounted()) };
             checkpoint(true);

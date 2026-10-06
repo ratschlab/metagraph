@@ -1069,8 +1069,8 @@ DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudg
     return result;
 }
 
-void LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits *hits,
-                                const KeyCost *costs) {
+bool LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits *hits,
+                                const KeyCost *costs, Eviction eviction) {
     // What the keys decoded by this call add (|fresh|), and what all its keys would hold in an
     // emptied cache (|all|): a duplicate within the call is counted at each position, an
     // overestimate that needs no call-sized set, whose bytes nothing would charge
@@ -1088,14 +1088,27 @@ void LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits
         }
     }
     if (!fresh_count)
-        return;
+        return true;
     // evicted wholesale (a walk moves forward) when they do not fit beside what is cached,
     // keeping this call's keys; not cached at all when they alone exceed the bound: the cache
-    // never exceeds it
+    // never exceeds it. A warm's later run evicts nothing, and its first run evicts only to be
+    // kept (Eviction).
+    // That first run still drops the rows earlier warms read ahead that the walk has not
+    // reached, which the walk then decodes again: the excess over a work budget alone that
+    // SPEC §6.8 states (U05-01, measured with this fix: on mini_refseq up to +20% tuple rows
+    // at 16 MiB and +52% at 32 MiB, batch_kmers 2,048-8,192). Evicting the oldest entries
+    // first (a list in caching order, with a warm keeping a quarter of the cache) cut the
+    // tuple rows by 12% there, but it kept the label cache full, and the row-diff path cache,
+    // which holds only what the label cache leaves of their allotment (make_room), read 2.5
+    // times the stored rows; evicting the oldest half read 2-7% more rows at the default
+    // batch_kmers 64. So the eviction stays wholesale
     if (cache_bytes_ + fresh > max_cache_bytes_ || cache_.size() + fresh_count > max_cache_size_) {
+        const bool kept_alone = all <= max_cache_bytes_ && all_count <= max_cache_size_;
+        if (eviction == Eviction::KEEP || (eviction == Eviction::EVICT_IF_KEPT && !kept_alone))
+            return false;
         clear_cache();
-        if (all > max_cache_bytes_ || all_count > max_cache_size_)
-            return;
+        if (!kept_alone)
+            return false;
         fresh = all;
     }
     // the path cache shares the label cache's bound under a memory budget (make_room)
@@ -1107,6 +1120,7 @@ void LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits
             cache_bytes_ += kCacheEntryBytes + kCostEntryBytes + held_bytes(hits[i]);
         }
     }
+    return true;
 }
 
 bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
@@ -1284,8 +1298,20 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
     size_t previous = 0;
     double previous_ms = 0;
     const size_t run = std::min(kMaxDecodeRun, max_cache_size_);
+    // The warming ends at the first run the cache cannot keep beside the runs this warm cached
+    // (or cannot keep at all), before it is decoded where the count tells, after where only
+    // its bytes do: the runs are in the walk's order, so the runs kept are the nearest. Every
+    // run was decoded before, and one that did not fit evicted the cache wholesale, this
+    // warm's own earlier runs included, or was dropped when it alone exceeded the bound: a
+    // warm larger than the cache decoded every run and kept the last one or two, the farthest,
+    // and the level decoded the near rows again (review of 2026-10-06, U05-01: +31-39% tuple
+    // rows at batch_kmers 2048-8192 under 16 MiB, the same result). Nothing a fetch returns,
+    // admits or charges depends on the cache, so only physical work and time change
+    size_t warmed = 0;          // runs this warm cached
     for (size_t begin = 0; begin < missing.size(); begin += run) {
         const size_t len = std::min(run, missing.size() - begin);
+        if (warmed && cache_.size() + len > max_cache_size_)
+            break;
         const uint64_t at_run = budget.held();
         const uint64_t containers = buffer_bytes(len, sizeof(NodeHits))
                                   + buffer_bytes(len, sizeof(KeyCost));
@@ -1322,7 +1348,11 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
         }
         if (!ok)
             break;      // the lookahead gives up within what is left: nothing depends on it
-        cache_budgeted(missing.data() + begin, len, hits.data(), costs.data());
+        if (!cache_budgeted(missing.data() + begin, len, hits.data(), costs.data(),
+                            warmed ? Eviction::KEEP : Eviction::EVICT_IF_KEPT)) {
+            break;
+        }
+        ++warmed;
         budget.restore(at_run);
     }
     budget.restore(at_entry);
@@ -2087,8 +2117,13 @@ void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budg
     size_t previous = 0;
     double previous_ms = 0;
     const size_t run = std::min(kMaxDecodeRun, max_cache_size_);
+    // as LabelQuery::warm: the warming ends at the first run the cache cannot keep beside this
+    // warm's runs or at all, so that it never evicts its own runs (U05-01)
+    size_t warmed = 0;          // runs this warm cached
     for (size_t begin = 0; begin < missing.size(); begin += run) {
         const size_t len = std::min(run, missing.size() - begin);
+        if (warmed && cache_.size() + len > max_cache_size_)
+            break;
         const uint64_t at_run = budget.held();
         if (!budget.charge(run_bytes_of(len, sizeof(RawRow))))
             break;
@@ -2128,15 +2163,21 @@ void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budg
             bytes += kCacheEntryBytes + kCostEntryBytes + raw_bytes(raw);
             kept += std::max<size_t>(1, raw.kept.size());
         }
+        // evicted wholesale only for the warm's first run and only to keep it (what was
+        // cached before the warm); a later run that does not fit beside, or a run that does
+        // not fit alone, ends the warming
+        const bool kept_alone = bytes <= max_cache_bytes_ && len <= max_cache_size_
+                              && kept <= max_cache_keys_;
         if (cache_bytes_ + bytes > max_cache_bytes_ || cache_.size() + len > max_cache_size_
                 || cached_keys_ + kept > max_cache_keys_) {
+            if (warmed || !kept_alone)
+                break;
             clear_cache();
         }
-        if (bytes <= max_cache_bytes_ && len <= max_cache_size_ && kept <= max_cache_keys_) {
-            for (size_t i = 0; i < len; ++i) {
-                cache_raw(missing[begin + i], std::move(raws[i]), run_costs[i]);
-            }
+        for (size_t i = 0; i < len; ++i) {
+            cache_raw(missing[begin + i], std::move(raws[i]), run_costs[i]);
         }
+        ++warmed;
         budget.restore(at_run);
     }
     budget.restore(at_entry);

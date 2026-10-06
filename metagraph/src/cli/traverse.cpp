@@ -1567,6 +1567,21 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                     + std::to_string(static_cast<uint64_t>(q.limit)) + " bytes for its rows; "
                     + present + "; the lists grow with the level's width, the account with the "
                       "output's detail";
+        } else if (q.cause == ResourceStop::LABEL_NAMES && q.names_after_read) {
+            // a format whose reads are not budget-aware: no row was refused, so there is no
+            // row demand or bytes left to state, and the need is a lower bound (review of
+            // 2026-10-06, U03-03)
+            message = "the memory budget (" + knob + ") stopped the walk at " + where
+                    + " after reading the next level's annotation: its rows named "
+                    + std::to_string(q.labels) + " new dictionary label(s), whose entries and "
+                      "delivery in the requested detail ("
+                    + std::to_string(q.label_bytes) + " bytes) put the walk's account over the "
+                      "budget (" + std::to_string(q.held) + " bytes held with the level's "
+                      "lists); " + present + "; on this annotation's format a level's rows are "
+                      "read whole and the labels they name are charged after the read, so the "
+                      "level needs at least the account with them, its heads more; a lower "
+                      "labels.max_labels_per_node, detail graphlet or a label-constrained query "
+                      "names fewer or cheaper labels";
         } else if (q.cause == ResourceStop::LABEL_NAMES) {
             message = "the memory budget (" + knob + ") stopped the walk at " + where
                     + " while reading the next level's annotation: a row that fits ("
@@ -4796,7 +4811,8 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
     Json::Value sj;
     sj["seed_id"] = seed.seed_id;
     sj["length_bp"] = uint_json(seed.sequence.size());
-    sj["labels_from_seed"] = true;
+    // a derivation is made only for such a seed: true, by the rule every failed writer states
+    sj["labels_from_seed"] = labels_derived_from_seed(seed, st.label_mode);
     rj["seed"] = std::move(sj);
     rj["error"] = e.what();
     Json::Value lims(Json::arrayValue);
@@ -5091,7 +5107,9 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
     Json::Value sj;
     sj["seed_id"] = seed.seed_id;
     sj["length_bp"] = uint_json(seed.sequence.size());
-    sj["labels_from_seed"] = seed.labels.empty();
+    // as a walked or budget-failed seed of the same request states it: false in annotate mode
+    // (review of 2026-10-06, X-DUP-01: seed.labels.empty() said true for every annotate seed)
+    sj["labels_from_seed"] = labels_derived_from_seed(seed, st.label_mode);
     rj["seed"] = std::move(sj);
     rj["error"] = std::string("not started: ") + external_cause(q) + " before this seed began, "
                 + std::to_string(used) + " ms after the request was received; no budget of the "

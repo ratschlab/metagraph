@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <limits>
 #include <map>
+#include <memory>
 #include <random>
 #include <set>
 #include <stdexcept>
@@ -19,6 +21,7 @@
 #include <unistd.h>
 
 #include <json/json.h>
+#include <zlib.h>
 
 #include "cli/server_checks.hpp"
 #include "cli/traverse.hpp"
@@ -259,6 +262,69 @@ TEST(GraphletAttempt, AbandonedWalksAreNotFinished) {
     EXPECT_EQ(seeds, state["usage"]["seeds"]);
     EXPECT_FALSE(state["usage"].isMember("per_seed"));
     EXPECT_NE(std::string::npos, a->stop_summary().find("1 abandoned"));
+}
+
+// The stop latency is measured where a seed's walk ends: its first seed_walked. A second call
+// for the seed comes while its result is built (the client left, or a writer refused it), and
+// the time since the walk-until then includes building, which the reserve prices apart. Taken
+// as a stop, it became the server's measured_stop_ms, and later attempts whose bound was no
+// longer walked nothing (review of 2026-10-06, U11-01: 10.5 s recorded after a 400 ms stop)
+TEST(GraphletAttempt, StopLatencyIsMeasuredWhereTheWalkEnds) {
+    FakeClock clock;
+    AttemptRegistry registry(settings_with(&clock));
+    // the walk-until trips; the walk ends 400 ms later; the client leaves 10 s after that
+    for (const char *second : { "abandoned", "failed" }) {
+        clock.ms = 0;
+        auto a = attempt_of(registry, std::string("late-") + second);
+        a->set_bound(1, 10'000);
+        ASSERT_FALSE(registry.start(a));
+        const double until = a->walk_until_ms();
+        a->seed_started(0);
+        clock.ms = static_cast<int64_t>(std::ceil(until)) + 1;
+        ASSERT_EQ(ExternalStop::ATTEMPT_DEADLINE, a->poll(true));
+        clock.ms = static_cast<int64_t>(std::ceil(until)) + 400;
+        SeedUsage walked;
+        walked.outcome = "partial";
+        walked.stopped_by = "attempt_deadline";
+        a->seed_walked(0, walked);
+        const double stop = clock.ms - until;
+        EXPECT_NEAR(stop, a->own_stop_ms(), 1e-6) << second;
+        clock.ms += 10'000;
+        SeedUsage cut;
+        cut.outcome = second;
+        cut.stopped_by = std::string(second) == "abandoned" ? "client_gone" : "";
+        a->seed_walked(0, cut);
+        EXPECT_NEAR(stop, a->own_stop_ms(), 1e-6) << second;
+        registry.note_stop_latency(a->own_stop_ms());
+        registry.finish(a, "client_gone", 0, std::nullopt);
+        EXPECT_NEAR(stop, registry.measured().stop_ms, 1e-6) << second;
+    }
+    // a walk that ended before its walk-until measures nothing, however late a second call
+    // comes (the reviewer's variant B: 6,000 ms recorded for a walk that never passed it)
+    AttemptRegistry other(settings_with(&clock));
+    clock.ms = 0;
+    auto b = attempt_of(other, "early");
+    b->set_bound(1, 10'000);
+    ASSERT_FALSE(other.start(b));
+    const double until = b->walk_until_ms();
+    b->seed_started(0);
+    clock.ms = static_cast<int64_t>(until) - 2000;
+    EXPECT_EQ(ExternalStop::NONE, b->poll(true));
+    SeedUsage complete;
+    complete.outcome = "complete";
+    b->seed_walked(0, complete);
+    EXPECT_EQ(0.0, b->own_stop_ms());
+    clock.ms = static_cast<int64_t>(until) + 6000;
+    SeedUsage cut;
+    cut.outcome = "abandoned";
+    cut.stopped_by = "client_gone";
+    b->seed_walked(0, cut);
+    EXPECT_EQ(0.0, b->own_stop_ms());
+    other.note_stop_latency(b->own_stop_ms());
+    EXPECT_EQ(0.0, other.measured().stop_ms);
+    EXPECT_TRUE(other.capabilities_json()["delivery_reserve"]["measured_stop_ms"].isNull());
+    // the counters are once per seed, as before
+    EXPECT_EQ(1u, b->usage_json("client_gone")["seeds"]["finished"].asUInt64());
 }
 
 // not_after_ms (pass 5, W1): an integer in [0, 2^53 - 1], with or without attempt_id; a
@@ -1807,6 +1873,46 @@ TEST(GraphletServer, PeerClosedSeesACloseBehindWaitingBytes) {
 #endif
 }
 
+// The server's own shutdown (the HTTP server's content timeout) behind waiting bytes: Linux
+// keeps the bytes, so the peek returns them and the state is FIN_WAIT2, which read "connected"
+// while the client kept its end open — the walk computed on past the timeout (review of
+// 2026-10-06, U13-02). macOS discards them on SHUT_RD: the peek reads the end. Gone on both.
+// A descriptor that holds no connection — not a socket, or closed — is gone too, as the
+// header says (ENOTSOCK and EBADF read "connected" before)
+TEST(GraphletServer, PeerClosedSeesTheServersOwnShutdown) {
+#if defined(__linux__) || defined(__APPLE__)
+    for (const std::string &waiting : { std::string("\r\n"),
+                                        std::string("GET /stats HTTP/1.1\r\nHost: x\r\n\r\n") }) {
+        auto [client, server] = tcp_pair();
+        ASSERT_EQ(static_cast<ssize_t>(waiting.size()),
+                  ::send(client, waiting.data(), waiting.size(), 0));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        EXPECT_FALSE(peer_closed(server)) << "connected, " << waiting.size() << " byte(s) waiting";
+        ::shutdown(server, SHUT_RDWR);
+        // the client keeps its end open: only the server's state tells
+        EXPECT_TRUE(becomes_closed(server)) << "own shutdown behind " << waiting.size()
+                                            << " waiting byte(s)";
+        ::close(client);
+        ::close(server);
+    }
+    {
+        // nothing waiting: the peek reads the end on both platforms (as before)
+        auto [client, server] = tcp_pair();
+        ::shutdown(server, SHUT_RDWR);
+        EXPECT_TRUE(becomes_closed(server)) << "own shutdown, nothing waiting";
+        ::close(client);
+        ::close(server);
+    }
+#endif
+    int pipe_fds[2];
+    ASSERT_EQ(0, ::pipe(pipe_fds));
+    EXPECT_TRUE(peer_closed(pipe_fds[0])) << "not a socket";
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
+    // the descriptor just closed: nothing in this test opens another one before the call
+    EXPECT_TRUE(peer_closed(pipe_fds[0])) << "a closed descriptor";
+}
+
 // The response text is written under the attempt's check, byte for byte what the writer wrote
 // before, and the check's exception stops it
 TEST(GraphletServer, CheckedWriterIsByteIdentical) {
@@ -1881,6 +1987,123 @@ TEST(GraphletServer, DeliveryChecksEvery64KiBOfALargeToken) {
                      if (++calls == 3)
                          throw Stop("stop");
                  }),
+                 Stop);
+    EXPECT_EQ(3u, calls);
+}
+
+// The review of 2026-10-06, C9 (U12-02, U13-03, X-EFFICIENCY-02): the server held 2.5x (gzip) to
+// 3.5x (identity) a /traverse response's text while delivering it — the per-seed texts lived
+// until the handler returned, beside the assembled copy, which grew by doubling. The texts are
+// now moved into the assembly, each freed once copied, and the response is reserved at its exact
+// size: its capacity is its size (no doubling step held an old and a new buffer), and its bytes
+// are unchanged, with and without checks, whichever side of "results" the envelope's members
+// are on
+TEST(GraphletServer, AssemblyReservesTheResponseOnce) {
+    std::mt19937 rng(17);
+    std::vector<std::string> texts;
+    for (size_t i = 0; i < 5; ++i) {
+        Json::Value r;
+        r["seed"]["seed_id"] = "s" + std::to_string(i);
+        r["text"] = std::string(200'000 + rng() % 100'000, static_cast<char>('a' + i));
+        texts.push_back(json_text(r, true));
+    }
+    Json::Value both(Json::objectValue), before(Json::objectValue), after(Json::objectValue);
+    both["algorithm_version"] = "x";
+    both["usage"]["seeds"]["started"] = 5;
+    before["algorithm_version"] = "x";
+    after["timing"]["elapsed_ms"] = 1.5;
+    auto parse = [](const std::string &t) {
+        Json::Value v;
+        std::unique_ptr<Json::CharReader> reader(Json::CharReaderBuilder().newCharReader());
+        std::string errors;
+        EXPECT_TRUE(reader->parse(t.data(), t.data() + t.size(), &v, &errors)) << errors;
+        return v;
+    };
+    for (const Json::Value *envelope : { &both, &before, &after }) {
+        for (size_t n : { size_t(0), size_t(1), texts.size() }) {
+            const std::vector<std::string> some(texts.begin(), texts.begin() + n);
+            Json::Value whole = *envelope;
+            whole["results"] = Json::Value(Json::arrayValue);
+            for (const std::string &t : some) {
+                whole["results"].append(parse(t));
+            }
+            const std::string expected = json_text(whole, true);
+            for (bool checked : { false, true }) {
+                std::vector<std::string> moved = some;
+                size_t checks = 0;
+                const std::string response = checked
+                    ? assemble_traverse_response(*envelope, std::move(moved), [&]() { checks++; })
+                    : assemble_traverse_response(*envelope, std::move(moved));
+                EXPECT_EQ(expected, response) << n << " " << checked;
+                // reserved once at the size written (a string's capacity rounds up by less
+                // than 16 bytes; one doubling step would have left up to the size again)
+                if (n) {
+                    EXPECT_LE(response.capacity(), response.size() + 16) << n << " " << checked;
+                }
+                if (checked && n == texts.size()) {
+                    EXPECT_GE(checks, expected.size() / kDeliveryCheckBytes - 1);
+                }
+            }
+        }
+    }
+}
+
+// zlib counts its input in 32 bits (uInt avail_in): a text of 4 GiB or more was cut to its size
+// modulo 2^32 and the server answered 200 with a well-formed stream of that prefix (review of
+// 2026-10-06, U13-04). compress_string hands the text over in pieces of at most 2^32 - 1 bytes;
+// tested with small pieces, which take the same path: the stream inflates to the whole text
+// across every boundary, in both containers, under the check; a text of one piece is compressed
+// by the same calls as before, so its bytes are those of the whole-text call
+TEST(GraphletServer, CompressionTakesTheTextInPieces) {
+    auto inflate_all = [](const std::string &compressed) {
+        z_stream zs;
+        memset(&zs, 0, sizeof(zs));
+        // 15 + 32: a zlib or a gzip header, whichever the stream has
+        EXPECT_EQ(Z_OK, inflateInit2(&zs, 15 + 32));
+        zs.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(compressed.data()));
+        zs.avail_in = static_cast<uInt>(compressed.size());
+        std::string out;
+        char buffer[65536];
+        int ret;
+        do {
+            zs.next_out = reinterpret_cast<Bytef *>(buffer);
+            zs.avail_out = sizeof(buffer);
+            ret = inflate(&zs, Z_NO_FLUSH);
+            out.append(buffer, sizeof(buffer) - zs.avail_out);
+        } while (ret == Z_OK);
+        EXPECT_EQ(Z_STREAM_END, ret);
+        inflateEnd(&zs);
+        return out;
+    };
+    std::mt19937 rng(5);
+    std::string text;
+    for (size_t i = 0; i < 300'000; ++i) {
+        text.push_back("ACGT{}\":,0123456789"[rng() % 19]);
+    }
+    for (bool gzip : { false, true }) {
+        const std::string whole = compress_string(text, 1, gzip);
+        EXPECT_EQ(text, inflate_all(whole)) << gzip;
+        EXPECT_EQ(whole, compress_string(text, 1, gzip, nullptr, text.size())) << gzip;
+        for (size_t piece : { size_t(1), size_t(7), size_t(32768), size_t(65537),
+                              text.size() - 1 }) {
+            size_t checks = 0;
+            const std::string compressed
+                = compress_string(text, 1, gzip, [&]() { checks++; }, piece);
+            EXPECT_EQ(text, inflate_all(compressed)) << gzip << " " << piece;
+            EXPECT_GT(checks, 0u);
+        }
+        EXPECT_EQ("", inflate_all(compress_string("", 1, gzip, nullptr, 1))) << gzip;
+        EXPECT_EQ("x", inflate_all(compress_string("x", 9, gzip, nullptr, 1))) << gzip;
+    }
+    // a check's exception leaves the call (the stream released) between two blocks
+    struct Stop : std::runtime_error {
+        using std::runtime_error::runtime_error;
+    };
+    size_t calls = 0;
+    EXPECT_THROW(compress_string(text, 1, true, [&]() {
+                     if (++calls == 3)
+                         throw Stop("stop");
+                 }, 1000),
                  Stop);
     EXPECT_EQ(3u, calls);
 }

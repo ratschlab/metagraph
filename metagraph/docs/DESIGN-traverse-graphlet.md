@@ -1,6 +1,7 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.9 (2026-10-06; v5.9 = the P2 fixes of the review of 2026-10-06, folded into feature level 6, §27;
+**Status:** v5.10 (2026-10-06; v5.10 = the P3 server items of the review of 2026-10-06, folded into feature level 6
+as corrections, §28; v5.9 = the P2 fixes of the review of 2026-10-06, folded into feature level 6, §27;
 v5.8 = record coordinates as built, feature level 6, §26, after the review of levels 4–5, §25; v5.7 = the review of pass 5 and the path cache's first reads, §24; v5.6 = pass 5 as implemented, §23; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
@@ -1810,3 +1811,69 @@ SPEC §10.3 states every text and output that changed (T58). The server's half:
 
 The library's half (L1, L2, O1–O3, the reader gaps LRG-G1..G7 and the release verdict, WORK_MODEL 2) is in the
 library's own changes; the two halves state the release rule alike.
+
+# 28. The review of 2026-10-06: its P3 server items, folded into level 6 *(v5.10, 2026-10-06)*
+
+The owner approved the P3 server items of the same review ("Server (affects staging directly): fix them."). Level 6
+is the level of the build deployed to staging (`ea285c2e`), so these are **level-6 corrections**: `feature_level`
+stays 6, SPEC §10.3 states the three outputs of requests that ask for nothing new that change (C10, W9, C26) and
+what else changes, and a client keyed on `feature_level` cannot tell a corrected build from `ea285c2e` (T59).
+
+- **C10, `labels_from_seed` (X-DUP-01).** Four writers of a failed seed's `seed` block set it four ways; the
+  not-started one said `seeds[].labels` empty, true for every annotate seed beside a walked one's false.
+  `labels_derived_from_seed(seed, mode)` (walker.hpp) is the one rule — constrain mode and no labels named — for
+  every result without a finished walk to read it from: a budget failure (`SeedBudgetError`), a failed
+  derivation, a seed never started. An output change in annotate mode only.
+- **W9, the format-(ii) dictionary stop (U03-03).** On a format whose reads are not budget-aware an annotate
+  level's new labels are charged after its read (`charge_dictionary`), and the check after it threw a head's
+  trip: cause HEAD, the dictionary's need as exact, without the levers that name fewer labels. When that charge
+  is what crossed the budget (the account within it before) the trip is LABEL_NAMES at the level, as a lower
+  bound (`ResourceStop::names_after_read`; the message names the labels and their bytes, not a row's demand or
+  bytes left, which do not exist there). `observed`, `used` and the stop's depth are unchanged; the message, the
+  actions and the `walk_domain` effect change (in a graphlet, its `Q` and `K` records and so `graphlet_bytes`).
+  Charging each call's names inside the format-(ii) read, as the budget-aware read does, would stop such a level
+  earlier and change where walks stop: not done.
+- **C8, the measured stop latency (U11-01).** `seed_walked` is called again for a seed whose result was being
+  built when the client left or a writer refused; the second call measured the time since the walk-until, the
+  building included, as stop latency, which became the server's `measured_stop_ms` and shut out later attempts
+  whose bound was no longer. Measured on the first call per seed only. No cap was added (the verdict's option):
+  a long stop measured at a walk's end is a real stop.
+- **C9, delivery memory (U12-02, U13-03, X-EFFICIENCY-02).** The per-seed texts are moved into the assembly,
+  which reserves the response's exact size (the envelope's members after `results` written first) and frees each
+  text once copied; the transport's buffer (the Response's `asio::streambuf`, which grows by doubling) is sized
+  once through `rdbuf()` after the last check, so nothing reaches the transport before every check passed. On
+  mini_refseq the delivery peak per byte of text fell from 2.60 to 1.52 (gzip) and 3.51 to 2.57 (identity).
+  Feeding deflate from the texts, and sending the body in pieces, were left: the first saves little beside the
+  freed texts, the second would commit a 200's header before the last check.
+- **C26, zlib's 32-bit input (U13-04).** `compress_string` hands the text over in pieces of at most 2^32 − 1
+  bytes (`Z_NO_FLUSH`, the last with `Z_FINISH`); a text of one piece makes the same calls as before. An output
+  change: a compressed response of 4 GiB of text or more is the whole text where it was a stream of its first
+  (size modulo 2^32) bytes answered 200, on every route (`process_request` is the server's one compressor).
+- **C27, the server's own shutdown (U13-02).** With bytes waiting, every TCP state past ESTABLISHED reads gone (the
+  content timeout's shutdown left Linux sockets in FIN_WAIT2, read connected); SYN_RECV (TCP Fast Open, not
+  enabled here) stays connected; EBADF and ENOTSOCK read gone, as the header always said.
+- **W11, the budget-aware lookahead (U05-01).** It decoded every run of a warm larger than the cache and evicted
+  its own earlier runs (`cache_budgeted` evicted wholesale); it now stops at the first run the cache cannot keep
+  beside its own runs (by count before decoding, by bytes after), evicting what was cached before it for its
+  first run only. The level's fetch keeps its wholesale eviction. Physical work only: on the reviewer's walks
+  36,275 → 33,015 tuple rows (batch 2,048, 16 MiB), 38,441 → 30,667 (8,192, 16 MiB), 1,149,725 → 258,101 (4,096,
+  8 MiB), every untimed byte the same. Not uniformly fewer decodes, and not the whole excess (as the verification
+  of this round found): of 180 walks on mini_refseq under 16-64 MiB the fix decoded fewer tuple rows in 24,
+  more in 10 (up to 1.4%; 4.4% with the path cache's stored rows), the same in 146. What remains is a later
+  warm's first run, which still evicts wholesale and with it rows earlier warms read ahead that the walk had not
+  reached: up to +20% tuple rows over the walk under a work budget alone at 16 MiB, +52% at 32 MiB, +32% at
+  64 MiB (`batch_kmers` 2,048-8,192; SPEC §6.8 states it). Evicting the oldest entries first (a list through the
+  costs map, a warm keeping a quarter of the cache) was built and measured on a grid of 160 walks: 12% fewer
+  tuple rows (the review's walk +0.4% over the work-budget walk), but the label cache stayed full and the
+  row-diff path cache, which `make_room` gives only what the label cache leaves of the allotment, read 2.5 times
+  the stored rows (`annotation_fetch_ms` +44%); evicting the oldest half read 2-7% more rows (tuple and path
+  rows) in walks at the default `batch_kmers` 64, 2.8 times in one at 2,048. Not taken; the comment at
+  `cache_budgeted` says why.
+  `MiniRefSeq.LookaheadKeepsItsRunsUnderAMemoryBudget` holds the review's walk within 25% of the work-budget
+  walk (+19%, +20%, +11% at 2,048, 4,096, 8,192; `ea285c2e` +31%, +33%, +39%). The structural lookahead's own
+  re-warming of the chains it clears (the reviewer's "related mechanism" at `batch_kmers` near
+  `max_lookahead_`) is not changed: still 5.4 million rows at 8,192 under 8 MiB.
+- **W16, `/resolve` explicit labels (X-EFFICIENCY-04).** One scatter pass over the k-mers replaces the per-label
+  scan (trace: 2,000 labels 3,457 → 262 ms; the same profiles, checked against the discovery's); presence uses
+  the same accumulator instead of a labels × k-mers bitmap; the client is checked every 4,096 k-mers of the pass.
+  The per-k-mer hit copies of `fetch`, the larger memory term with many labels, are the planned label cap's.

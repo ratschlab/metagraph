@@ -99,6 +99,11 @@ static std::vector<KmerInterval> runs_of(const std::vector<bool> &mask) {
     return runs;
 }
 
+// The k-mers between two checkpoints of the explicit labels' support pass: a hit list per
+// k-mer is a few to a few thousand hits, so a gone client is seen within milliseconds, and a
+// check (a peek on its socket) costs nothing beside that
+static constexpr uint64_t kResolveCheckKmers = 4096;
+
 
 namespace {
 
@@ -582,44 +587,47 @@ SupportProfile resolve_support(LabelOracle &oracle,
         auto hits = query_labels.fetch(keys);
         checkpoint();
 
-        // Presence (no coordinates) is scattered in one pass over the k-mers: iterating per
-        // label and scanning each k-mer's hit list would cost O(labels x k-mers x hits),
-        // which at discovery-scale label counts dominates everything else.
-        if (!with_coords) {
-            std::vector<std::vector<bool>> supported(refs.size(),
-                                                     std::vector<bool>(profile.num_kmers, false));
-            for (uint64_t i = 0; i < hits.size(); ++i) {
-                for (const auto &h : hits[i]) {
-                    assert(h.label < refs.size());
-                    supported[h.label][i] = true;
+        // Every label's support from one pass over the k-mers: each hit goes to its label's
+        // accumulator, k-mer by k-mer in ascending order, as a discovery accumulates them.
+        // Under trace the per-label scan this replaces (for each label, every k-mer's hit list
+        // searched for it) cost O(labels x k-mers x hits), an absent label reading every list
+        // whole: 2,000 explicit labels took 5.9 s where the discovery returning the same
+        // profiles took 0.2 s, and nothing polled the client meanwhile (review of 2026-10-06,
+        // X-EFFICIENCY-04). Each label receives the calls the scan made, in the same order, so
+        // the profiles are the same. Presence held a bitmap of labels x k-mers (125 MB for 1,000
+        // labels on 1 M k-mers); the accumulator's runs are runs_of's of that bitmap
+        std::vector<LabelSupport> support(refs.size());
+        std::vector<Coord> scratch;
+        for (uint64_t i = 0; i < hits.size(); ++i) {
+            // a client gone is seen within a few thousand k-mers of the pass, not after it
+            if (i && i % kResolveCheckKmers == 0)
+                checkpoint();
+            for (const auto &h : hits[i]) {
+                assert(h.label < refs.size());
+                LabelSupport &s = support[h.label];
+                if (with_coords) {
+                    // trace-consistent runs: a chain of coordinates increasing by one per
+                    // k-mer. Column labels have coordinates in the column frame, header labels
+                    // in the sequence frame; either way consecutive k-mers must have
+                    // consecutive coords (LabelSupport::add_trace). A label's first hit of the
+                    // k-mer is its one (the scan stopped at it; a query holds a label once)
+                    if (s.last == i)
+                        continue;
+                    s.add_trace(i, h.coords.data(), h.coords.size(), scratch);
+                } else {
+                    // present at the k-mer once, however many hits name it (as its bit was)
+                    if (s.open.end == i + 1)
+                        continue;
+                    s.add(i);
                 }
-            }
-            for (LabelId l = 0; l < refs.size(); ++l) {
-                profile.labels[l].runs = runs_of(supported[l]);
-                profile.labels[l].kmers_supported
-                    = std::count(supported[l].begin(), supported[l].end(), true);
             }
         }
-
-        for (LabelId l = 0; l < refs.size() && with_coords; ++l) {
-            // trace-consistent runs: a chain of coordinates increasing by one per k-mer.
-            // Column labels have coordinates in the column frame, header labels in the
-            // sequence frame; either way consecutive k-mers must have consecutive coords
-            // (LabelSupport::add_trace, k-mer by k-mer)
-            LabelSupport support;
-            std::vector<Coord> scratch;
-            for (uint64_t i = 0; i < hits.size(); ++i) {
-                for (const auto &h : hits[i]) {
-                    if (h.label == l) {
-                        support.add_trace(i, h.coords.data(), h.coords.size(), scratch);
-                        break;
-                    }
-                }
-            }
+        for (LabelId l = 0; l < refs.size(); ++l) {
             LabelProfile &lp = profile.labels[l];
-            lp.runs = support.take_runs();
-            lp.trace_breaks = std::move(support.trace_breaks);
-            lp.kmers_supported = support.traced;
+            lp.runs = support[l].take_runs();
+            // presence keeps none (add records no trace)
+            lp.trace_breaks = std::move(support[l].trace_breaks);
+            lp.kmers_supported = with_coords ? support[l].traced : support[l].kmers;
         }
     }
 

@@ -9,6 +9,7 @@
 #include <random>
 #include <set>
 #include <thread>
+#include <type_traits>
 
 #include "tests/annotation/test_annotated_dbg_helpers.hpp"
 
@@ -1048,9 +1049,13 @@ TEST(LabelOraclePacing, InterruptedReadsChangeNothing) {
 // Review of pass 5, finding 5 (the reviewer's pacing_probe.cpp): the budget-aware lookahead
 // (warm) cut its runs from the globally sorted missing keys, which put rows of as many paths
 // as rows into each run. Its runs are taken in the walk's order now, each piece sorted: on 32
-// independent paths of 64 walked rows each, in runs of 8 (a cache of 8 keys), the decoder's
-// charges are those of decoding the walk-ordered runs (28,736 in the review's measurement)
-// and a third or less of those of the sorted runs (161,679). Counted, not timed
+// independent paths of 64 walked rows each, in runs of 8, the decoder's charges are those of
+// decoding the walk-ordered runs (28,736 in the review's measurement) and a third or less of
+// those of the sorted runs (161,679). Counted, not timed.
+// Review of 2026-10-06, U05-01: a warm larger than the cache decoded every run and evicted
+// its own earlier runs to cache the next (2,048 keys decoded into a cache of 8, the last 8
+// kept); it now ends at the first run the cache cannot keep beside its own, so a cache of 8
+// keys decodes and keeps the walk's first run, the nearest keys, and nothing after it
 TEST(LabelOracleBudgeted, LookaheadRunsFollowTheWalk) {
     std::mt19937 gen(1282);
     std::vector<std::string> seqs, names;
@@ -1099,23 +1104,88 @@ TEST(LabelOracleBudgeted, LookaheadRunsFollowTheWalk) {
     for (const std::string &name : names) {
         labels.push_back(oracle.resolve_label(name));
     }
-    // the warms' own charges: the decoder's for the walk-ordered runs, plus each run's
-    // containers and the hits built (a few per run), far below the sorted runs'
+    // the walk's first run of 8 keys, and the sorted keys' first run
+    const std::vector<node_index> first_walked(walking.begin(), walking.begin() + 8);
+    const std::vector<node_index> first_sorted(sorted.begin(), sorted.begin() + 8);
+    const uint64_t first_walk = charges_of(first_walked);
+    // the cache hits of a budget-aware fetch of keys[begin, end): the keys the warm kept
+    auto kept = [&](auto &cache, size_t begin, size_t end) {
+        const uint64_t before = oracle.counters().cache_hits;
+        DecodeBudget budget;
+        size_t refused_at = 0;
+        std::vector<KeyCost> costs;
+        costs.reserve(end - begin);
+        if constexpr (std::is_same_v<std::decay_t<decltype(cache)>, LabelRecorder>) {
+            std::vector<LabelRecorder::NodeLabels> out;
+            out.reserve(end - begin);
+            EXPECT_TRUE(cache.fetch(walking.data() + begin, end - begin, budget, &out, &costs,
+                                    &refused_at, [](std::string_view) { return 0; }));
+        } else {
+            std::vector<LabelQuery::NodeHits> out;
+            out.reserve(end - begin);
+            EXPECT_TRUE(cache.fetch(walking.data() + begin, end - begin, budget, &out, &costs,
+                                    &refused_at));
+        }
+        return oracle.counters().cache_hits - before;
+    };
+    // the warms' own charges: the decoder's for the walk's first run, plus the run's
+    // containers and the hits built (a few), far below every run's (the whole walk's)
     for (bool recorder : { false, true }) {
         DecodeBudget budget;
+        LabelRecorder rec(oracle, LabelKind::COLUMN, 64, 8);
+        LabelQuery query(oracle, labels, false, LabelOracle::Access::ROWS, 8);
         if (recorder) {
-            LabelRecorder rec(oracle, LabelKind::COLUMN, 64, 8);
             rec.warm(walking, budget, nullptr);
         } else {
-            LabelQuery query(oracle, labels, false, LabelOracle::Access::ROWS, 8);
             query.warm(walking, budget, nullptr);
         }
         std::cerr << (recorder ? "recorder" : "query") << " warm: " << budget.charges()
-                  << " decoder charges; runs cut from the walk " << walk_order
-                  << ", from the sorted keys " << sorted_order << std::endl;
-        EXPECT_GE(budget.charges(), walk_order) << recorder;
-        EXPECT_LT(budget.charges(), walk_order + 64 * (walking.size() / 8)) << recorder;
-        EXPECT_LT(3 * budget.charges(), sorted_order) << recorder;
+                  << " decoder charges; the walk's first run " << first_walk
+                  << ", every run of the walk " << walk_order << ", of the sorted keys "
+                  << sorted_order << std::endl;
+        EXPECT_GE(budget.charges(), first_walk) << recorder;
+        EXPECT_LT(budget.charges(), first_walk + 64) << recorder;
+        EXPECT_LT(10 * budget.charges(), walk_order) << recorder;
+        // the walk's first run is what it kept (in the walk's order: not the sorted keys'
+        // first run), and nothing after it
+        EXPECT_EQ(8u, recorder ? kept(rec, 0, 8) : kept(query, 0, 8)) << recorder;
+        EXPECT_EQ(0u, recorder ? kept(rec, 8, 16) : kept(query, 8, 16)) << recorder;
+        EXPECT_NE(first_walked, first_sorted);
+    }
+    // Under the byte bound only a decoded run's bytes tell whether it fits: runs of 512 keys
+    // into a cache of 4,096 keys whose bytes hold one and a half of them. The first run is
+    // kept, the second decoded and dropped, the warm ends: two runs decoded where every run
+    // was (four), the first kept where the last was
+    for (bool recorder : { false, true }) {
+        uint64_t one_run = 0;
+        {
+            DecodeBudget budget;
+            if (recorder) {
+                LabelRecorder rec(oracle, LabelKind::COLUMN, 64, 512);
+                rec.warm(walking, budget, nullptr);
+                one_run = rec.cache_bytes();
+            } else {
+                LabelQuery query(oracle, labels, false, LabelOracle::Access::ROWS, 512);
+                query.warm(walking, budget, nullptr);
+                one_run = query.cache_bytes();
+            }
+        }
+        ASSERT_GT(one_run, 0u);
+        DecodeBudget budget;
+        LabelRecorder rec(oracle, LabelKind::COLUMN, 64, 4096);
+        LabelQuery query(oracle, labels, false, LabelOracle::Access::ROWS, 4096);
+        if (recorder) {
+            rec.set_max_cache_bytes(one_run * 3 / 2);
+            rec.warm(walking, budget, nullptr);
+            EXPECT_EQ(one_run, rec.cache_bytes());
+        } else {
+            query.set_max_cache_bytes(one_run * 3 / 2);
+            query.warm(walking, budget, nullptr);
+            EXPECT_EQ(one_run, query.cache_bytes());
+        }
+        EXPECT_EQ(512u, recorder ? kept(rec, 0, 512) : kept(query, 0, 512)) << recorder;
+        EXPECT_EQ(0u, recorder ? kept(rec, 512, 1024) : kept(query, 512, 1024)) << recorder;
+        EXPECT_EQ(0u, recorder ? kept(rec, 1536, 2048) : kept(query, 1536, 2048)) << recorder;
     }
 }
 

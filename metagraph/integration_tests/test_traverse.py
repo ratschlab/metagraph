@@ -3711,28 +3711,36 @@ class TestTraverseWideIndex(TestingBase):
         compress what it will deliver, from the walked seed's modelled account. Under rates
         far below this machine's (0.001 MB/s) the reserve exceeds the whole bound at the first
         level: the attempt answers 200 at once, the first seed partial (attempt_deadline), the
-        others not started, and usage states the moved walk-until."""
+        others not started, and usage states the moved walk-until. In both label modes the
+        not-started seeds state labels_from_seed as the walked one: true for these derived
+        seeds, false in annotate mode, which derives no set (review of 2026-10-06, X-DUP-01:
+        a not-started annotate seed stated true)."""
         with self._server('--traverse-delivery-compress-mbps', '0.001',
                           '--traverse-delivery-build-mbps', '0.001') as server:
             caps = requests.get(server.url + '/traverse/capabilities').json()
             self.assertEqual(0.001, caps['attempts']['delivery_reserve']['compress_mbps'])
-            req = self._request('constrain', 20000, attempt_id='reserve-1')
-            req['seeds'] = req['seeds'] * 3
-            t0 = time.time()
-            ret = server.post('traverse', req)
-            took = (time.time() - t0) * 1000
-            self.assertEqual(200, ret.status_code, ret.text[:500])
-            out = ret.json()
-            usage = out['usage']
-            self.assertEqual('deadline', usage['reason'])
-            self.assertLess(took, usage['bound_ms'])
-            self.assertLess(usage['bound']['walk_until_ms'],
-                            usage['bound_ms'] - usage['bound']['allowance_ms'] // 2)
-            first = out['results'][0]
-            self.assertEqual(('attempt', 'attempt_deadline'),
-                             (first['resource_stop']['scope'], first['resource_stop']['resource']))
-            for r in out['results'][1:]:
-                self.assertEqual('not_started', r['resource_stop']['phase'])
+            for mode in ('constrain', 'annotate'):
+                req = self._request(mode, 20000,
+                                    attempt_id='reserve-1' if mode == 'constrain' else 'reserve-a')
+                req['seeds'] = req['seeds'] * 3
+                t0 = time.time()
+                ret = server.post('traverse', req)
+                took = (time.time() - t0) * 1000
+                self.assertEqual(200, ret.status_code, ret.text[:500])
+                out = ret.json()
+                usage = out['usage']
+                self.assertEqual('deadline', usage['reason'], mode)
+                self.assertLess(took, usage['bound_ms'])
+                self.assertLess(usage['bound']['walk_until_ms'],
+                                usage['bound_ms'] - usage['bound']['allowance_ms'] // 2)
+                first = out['results'][0]
+                self.assertEqual(('attempt', 'attempt_deadline'),
+                                 (first['resource_stop']['scope'],
+                                  first['resource_stop']['resource']), mode)
+                for r in out['results'][1:]:
+                    self.assertEqual('not_started', r['resource_stop']['phase'], mode)
+                self.assertEqual([mode == 'constrain'] * 3,
+                                 [r['seed']['labels_from_seed'] for r in out['results']], mode)
         # at the default rates the floor (allowance / 2) holds for this small output
         with self._server() as server:
             ret = server.post('traverse', self._request('constrain', 100, attempt_id='reserve-2'))
@@ -3889,6 +3897,10 @@ class TestTraverseAttempts(TestingBase):
                                  (unstarted['resource_stop']['phase'],
                                   unstarted['resource_stop']['resource'],
                                   unstarted['resource_stop']['actions']))
+                # annotate mode derives no set: false, as the walked seed states it (review of
+                # 2026-10-06, X-DUP-01)
+                self.assertIs(False, unstarted['seed']['labels_from_seed'])
+            self.assertIs(False, first['seed']['labels_from_seed'])
             usage = out['usage']
             self.assertEqual(('cancelled', 'budget-1', 'locus-1'),
                              (usage['reason'], usage['budget_id'], usage['locus_id']))

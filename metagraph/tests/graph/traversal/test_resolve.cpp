@@ -1,5 +1,6 @@
 #include "gtest/gtest.h"
 
+#include <map>
 #include <random>
 
 #include "tests/test_helpers.hpp"
@@ -404,6 +405,71 @@ TYPED_TEST(ResolveCoordTest, TraceRunsAndHeaderDiscovery) {
     t.support = Support::TRACE;
     EXPECT_THROW(resolve_support(oracle_c, q, t), std::invalid_argument);
 #endif
+}
+
+// The review of 2026-10-06, X-EFFICIENCY-04: explicit labels with trace scanned every k-mer's
+// hit list once per label (O(labels x k-mers x hits): 2,000 labels took 5.9 s where the
+// discovery returning the same profiles took 0.2 s). One pass now hands each hit to its label's
+// accumulator, the calls the scan made in the same order: the explicit profiles of a few
+// hundred labels — runs, trace breaks, k-mers supported, under kmer and trace — are the
+// discovery's, and a label absent from the query has none
+TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    // the query holds a repeat (R M R M), so that traces jump where k-mer presence does not
+    const std::string R = random_seq(40, 21), M = random_seq(40, 22);
+    const std::string q = random_seq(150, 23) + R + M + R + M + random_seq(150, 24);
+    std::mt19937 gen(25);
+    std::vector<std::string> seqs, labels;
+    for (size_t i = 0; i < 300; ++i) {
+        // a stretch of the query, some with a second stretch after it, some with a base changed
+        const size_t a = gen() % (q.size() - 40);
+        std::string s = q.substr(a, 20 + gen() % std::min<size_t>(200, q.size() - a - 20));
+        if (i % 3 == 0) {
+            const size_t c = gen() % (q.size() - 40);
+            s += q.substr(c, 20 + gen() % 20);
+        }
+        if (i % 5 == 0)
+            s[gen() % s.size()] = "ACGT"[gen() % 4];
+        seqs.push_back(s);
+        labels.push_back("L" + std::to_string(i));
+    }
+    // a label nowhere in the query
+    seqs.push_back(random_seq(60, 26));
+    labels.push_back("absent");
+    auto anno = build_anno_graph<Graph, Annotation>(kK, seqs, labels, DeBruijnGraph::BASIC, true);
+    LabelOracle oracle(*anno);
+    size_t breaks = 0;
+    for (Support support : { Support::KMER, Support::TRACE }) {
+        ResolveOptions disc;
+        disc.discover = true;
+        disc.discover_max_labels = 1000;
+        disc.support = support;
+        const SupportProfile discovered = resolve_support(oracle, q, disc);
+        ResolveOptions opts;
+        opts.labels = labels;
+        opts.support = support;
+        const SupportProfile explicit_ = resolve_support(oracle, q, opts);
+        ASSERT_EQ(labels.size(), explicit_.labels.size());
+        std::map<std::string, const LabelProfile *> by_name;
+        for (const LabelProfile &lp : explicit_.labels) {
+            by_name[lp.label.name] = &lp;
+        }
+        ASSERT_GT(discovered.labels.size(), 200u);
+        for (const LabelProfile &d : discovered.labels) {
+            const LabelProfile &e = *by_name.at(d.label.name);
+            EXPECT_EQ(d.runs, e.runs) << d.label.name;
+            EXPECT_EQ(d.trace_breaks, e.trace_breaks) << d.label.name;
+            EXPECT_EQ(d.kmers_supported, e.kmers_supported) << d.label.name;
+            breaks += e.trace_breaks.size();
+        }
+        const LabelProfile &absent = *by_name.at("absent");
+        EXPECT_TRUE(absent.runs.empty());
+        EXPECT_EQ(0u, absent.kmers_supported);
+        EXPECT_EQ(discovered.candidates.size(), explicit_.candidates.size());
+    }
+    // the trace jumped somewhere: the comparison covers trace breaks
+    EXPECT_GT(breaks, 0u);
 }
 
 } // namespace

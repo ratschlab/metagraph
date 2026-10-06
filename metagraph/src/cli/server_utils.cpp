@@ -1,7 +1,9 @@
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cerrno>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <optional>
 #include <ostream>
@@ -36,10 +38,8 @@ using mtg::common::logger;
  * the binary data.
  * Source: https://panthema.net/2007/0328-ZLibString.html
  */
-std::string compress_string(const std::string &str,
-                            int compressionlevel = Z_BEST_COMPRESSION,
-                            bool gzip = false,
-                            const std::function<void()> &check = nullptr) {
+std::string compress_string(const std::string &str, int compressionlevel, bool gzip,
+                            const std::function<void()> &check, size_t max_piece) {
     z_stream zs; // z_stream is zlib's control structure
     memset(&zs, 0, sizeof(zs));
 
@@ -50,8 +50,15 @@ std::string compress_string(const std::string &str,
                      Z_DEFAULT_STRATEGY) != Z_OK)
         throw std::runtime_error("deflateInit failed while compressing.");
 
-    zs.next_in = (Bytef *)(str.data());
-    zs.avail_in = str.size(); // set the z_stream's input
+    // zlib counts its input in 32 bits (uInt avail_in): the text is handed over in pieces of
+    // at most that many bytes, the last one with Z_FINISH. Assigned whole, a text of 4 GiB or
+    // more was cut to its size modulo 2^32, and the server answered 200 with a well-formed
+    // stream of that prefix (review of 2026-10-06, U13-04). A text of one piece — every text
+    // below 4 GiB — is compressed by the same calls as before, so its bytes are unchanged
+    const size_t piece_limit = std::numeric_limits<uInt>::max();
+    const size_t piece_max = max_piece ? std::min(max_piece, piece_limit) : piece_limit;
+    const char *next = str.data();
+    size_t left = str.size();
 
     int ret;
     char outbuffer[32768];
@@ -69,15 +76,23 @@ std::string compress_string(const std::string &str,
                 throw;
             }
         }
+        if (!zs.avail_in && left) {
+            // the next piece, once zlib consumed the last one (no input is added after
+            // Z_FINISH: that flush is used only once nothing is left)
+            const size_t piece = std::min(left, piece_max);
+            zs.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(next));
+            zs.avail_in = static_cast<uInt>(piece);
+            next += piece;
+            left -= piece;
+        }
         zs.next_out = reinterpret_cast<Bytef *>(outbuffer);
         zs.avail_out = sizeof(outbuffer);
 
-        ret = deflate(&zs, Z_FINISH);
+        ret = deflate(&zs, left ? Z_NO_FLUSH : Z_FINISH);
 
-        if (outstring.size() < zs.total_out) {
-            // append the block to the output string
-            outstring.append(outbuffer, zs.total_out - outstring.size());
-        }
+        // append the block to the output string (what this call wrote: total_out is a uLong,
+        // 32 bits on some platforms)
+        outstring.append(outbuffer, sizeof(outbuffer) - zs.avail_out);
     } while (ret == Z_OK);
 
     deflateEnd(&zs);
@@ -205,6 +220,36 @@ std::optional<double> parse_qvalue(const std::string &s) {
     return q;
 }
 
+#ifdef ASIO_STANDALONE
+using TransportBuffer = asio::streambuf;
+#else
+using TransportBuffer = boost::asio::streambuf;
+#endif
+
+// Sizes the transport's buffer of |response| for |bytes| at once. Response::write copies the
+// response into the Response's asio::streambuf, which grows 128 bytes at a time through
+// std::vector::resize, that is by doubling: its last step held an old and a new buffer of up
+// to the body's size beside the body (review of 2026-10-06, U13-03: a 68 MB body cost 129 MB
+// in that copy). The pinned Simple-Web-Server has no call to size it; its Response is the
+// std::ostream over that streambuf, so it is reached through rdbuf(). Called after the
+// response's last check, so nothing reaches the transport before every check passed (a 503 at
+// the bound or a client gone still writes nothing). A streambuf of another type (a submodule
+// bump) grows as before
+void reserve_transport(std::ostream &response, size_t bytes) {
+    if (auto *buffer = dynamic_cast<TransportBuffer *>(response.rdbuf()))
+        buffer->prepare(bytes);
+}
+
+// What Response::write puts before the body: the status line, the header fields and the
+// Content-Length it adds, with room to spare (a shortfall would only grow the buffer once)
+size_t response_head_bytes(const SimpleWeb::CaseInsensitiveMultimap &header) {
+    size_t bytes = 256;
+    for (const auto &[name, value] : header) {
+        bytes += name.size() + value.size() + 4;
+    }
+    return bytes;
+}
+
 } // namespace
 
 // The content encoding to send, "" for none (RFC 9110 §12.5.3). Accept-Encoding is a
@@ -272,23 +317,31 @@ bool client_gone(const HttpServer::Request &request) {
     return peer_closed(connection->socket->lowest_layer().native_handle());
 }
 
-// Whether the TCP connection |fd| received the peer's FIN, or was reset, with data still
-// waiting before the end: a peek returns that data, never the end behind it. The kernel's
-// connection state says it (CLOSE_WAIT: the FIN was received; CLOSED: reset). Not a TCP socket,
-// or a platform without the query: false (connected, as before)
+// Whether the TCP connection |fd| is past its established state, with data still waiting
+// before the end: a peek returns that data, never the end behind it. The kernel's connection
+// state says it. A handler's connection leaves ESTABLISHED only by a FIN or a reset of the
+// peer (CLOSE_WAIT, CLOSED) or by the server's own shutdown — the HTTP server's content
+// timeout shuts the connection (FIN_WAIT1/2, CLOSING, TIME_WAIT, LAST_ACK) — and in every one
+// of these no response can be delivered. Only the peer's states were read before: on Linux,
+// whose shutdown keeps the waiting bytes (macOS discards them, so the peek already read the
+// end), a walk that outlived the content timeout with bytes waiting computed on to its end,
+// against the SPEC's "stopped by this too" (review of 2026-10-06, U13-02). SYN_RECV stays
+// connected: an accepted connection is there only under TCP Fast Open, which this server's
+// listener does not enable, and a live client must never read as gone. Not a TCP socket, or a
+// platform without the query: false (connected, as before)
 static bool tcp_peer_finished(int fd) {
 #if defined(__linux__)
     struct tcp_info info;
     socklen_t length = sizeof(info);
     if (::getsockopt(fd, IPPROTO_TCP, TCP_INFO, &info, &length) != 0)
         return false;
-    return info.tcpi_state == TCP_CLOSE_WAIT || info.tcpi_state == TCP_CLOSE;
+    return info.tcpi_state != TCP_ESTABLISHED && info.tcpi_state != TCP_SYN_RECV;
 #elif defined(__APPLE__)
     struct tcp_connection_info info;
     socklen_t length = sizeof(info);
     if (::getsockopt(fd, IPPROTO_TCP, TCP_CONNECTION_INFO, &info, &length) != 0)
         return false;
-    return info.tcpi_state == TCPS_CLOSE_WAIT || info.tcpi_state == TCPS_CLOSED;
+    return info.tcpi_state != TCPS_ESTABLISHED && info.tcpi_state != TCPS_SYN_RECEIVED;
 #else
     (void)fd;
     return false;
@@ -312,7 +365,12 @@ bool peer_closed(int fd) {
         // trailing CRLF was walked to the end and answered with 68 MB into a dead socket)
         return tcp_peer_finished(fd);
     }
-    return errno == ECONNRESET || errno == ENOTCONN || errno == EPIPE || errno == ETIMEDOUT;
+    // EBADF and ENOTSOCK: the descriptor holds no connection (closed, or not a socket), so no
+    // client can be answered through it. They read "connected" before, against this
+    // function's contract (review of 2026-10-06, U13-02); the server's descriptor is always
+    // its connection's socket while the handler holds the request, so this changes no request
+    return errno == ECONNRESET || errno == ENOTCONN || errno == EPIPE || errno == ETIMEDOUT
+        || errno == EBADF || errno == ENOTSOCK;
 }
 
 std::string json_text(const Json::Value &value, bool compact, const std::function<void()> &check,
@@ -335,7 +393,7 @@ std::string json_text(const Json::Value &value, bool compact, const std::functio
 }
 
 std::string assemble_traverse_response(const Json::Value &envelope,
-                                       const std::vector<std::string> &results,
+                                       std::vector<std::string> results,
                                        const std::function<void()> &check,
                                        double *max_gap_ms) {
     Json::Value before(Json::objectValue);
@@ -345,16 +403,40 @@ std::string assemble_traverse_response(const Json::Value &envelope,
             throw std::logic_error("assemble_traverse_response: the envelope holds results");
         (name < "results" ? before : after)[name] = envelope[name];
     }
-    std::string out = json_text(before, true, check, max_gap_ms);      // {...}
-    out.pop_back();
-    if (out.size() > 1)
+    std::string head = json_text(before, true, check, max_gap_ms);     // {...}
+    // the envelope's members after "results" are written first (the usage, the timing: a few
+    // KiB), so that the whole response's size is known before a byte of the results is copied
+    const std::string tail = json_text(after, true, check, max_gap_ms);  // {...}
+    head.pop_back();
+    const bool head_members = head.size() > 1;
+    const bool tail_members = tail.size() > 2;
+    static const std::string kResults = "\"results\":[";
+    // the exact size: `{` and the members before, a comma, "results":[, the texts and their
+    // commas, `]`, then a comma and the members after with their `}`, or the `}` alone. Reserved
+    // at once, the text never grows by doubling, whose last step held an old and a new buffer
+    // of up to its size beside the texts
+    size_t size = head.size() + head_members + kResults.size() + 1
+                + (tail_members ? tail.size() : 1);
+    for (size_t i = 0; i < results.size(); ++i) {
+        size += results[i].size() + (i > 0);
+    }
+    std::string out;
+    out.reserve(size);
+    out += head;
+    std::string().swap(head);
+    if (head_members)
         out += ',';
-    out += "\"results\":[";
+    out += kResults;
+    // each text is freed once copied: what was copied and what is left to copy are the
+    // response once, where the texts stayed alive beside it until the handler returned —
+    // through the compression and the transport's copy (review of 2026-10-06, C9: the server
+    // held 2.5x the text with gzip, 3.5x without; X-EFFICIENCY-02, U12-02, U13-03)
     if (!check) {
         for (size_t i = 0; i < results.size(); ++i) {
             if (i)
                 out += ',';
             out += results[i];
+            std::string().swap(results[i]);
         }
     } else {
         // each text copied in pieces up to the next check (finding 6)
@@ -369,17 +451,20 @@ std::string assemble_traverse_response(const Json::Value &envelope,
                 at += piece;
                 checks.tick();
             }
+            std::string().swap(results[i]);
         }
         checks.finish();
     }
     out += ']';
-    const std::string tail = json_text(after, true, check, max_gap_ms);  // {...}
-    if (tail.size() > 2) {
+    if (tail_members) {
         out += ',';
         out.append(tail, 1, std::string::npos);
     } else {
         out += '}';
     }
+    // the size computed is the size written: a mismatch would only cost a reallocation, never
+    // a byte, so it is asserted where tests run unoptimised
+    assert(out.size() == size);
     return out;
 }
 
@@ -611,6 +696,8 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
         ret = json_str_with_error_msg("Internal server error");
     }
     double processing_time = timer.elapsed();
+    // after the last check: the transport's copy is made into a buffer of its final size
+    reserve_transport(*response, ret.size() + response_head_bytes(header));
     response->write(status, ret, header);
     if (control && control->on_written)
         control->on_written(static_cast<int>(status), ret.size());

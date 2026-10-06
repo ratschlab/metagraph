@@ -504,7 +504,8 @@ void Attempt::seed_walked(size_t index, const SeedUsage &usage) {
     // once per seed: a seed abandoned while its result was built, or refused after its walk,
     // was already counted. A walk the client's departure cut did not finish: it is counted as
     // abandoned, not as finished (review of the stage-4 backend, F5)
-    if (!seeds_[index].walked) {
+    const bool first = !seeds_[index].walked;
+    if (first) {
         if (usage.outcome == "abandoned") {
             seeds_abandoned_++;
         } else {
@@ -514,9 +515,16 @@ void Attempt::seed_walked(size_t index, const SeedUsage &usage) {
     seeds_[index] = usage;
     seeds_[index].started = true;
     seeds_[index].walked = true;
-    // a walk that ended after the walk-until (stopped at a poll after it, or ended between
-    // two of them) measures what the reserve must keep beyond building and compressing
-    if (enforced() && bound_set_) {
+    // A walk that ended after the walk-until (stopped at a poll after it, or ended between two
+    // of them) measures what the reserve must keep beyond building and compressing — at the
+    // walk's end only, the first call for the seed. A second call comes after the walk, while
+    // its result was built (the client left: abandoned; a writer or the seed's refusal: failed),
+    // and the time since the walk-until then includes building, which the reserve prices on
+    // its own: measured as stop latency it became the server's measured_stop_ms (the longest
+    // of its last rate_window attempts), and every later attempt whose bound was no longer than
+    // that build time walked nothing (review of 2026-10-06, U11-01: 10.5 s of building recorded
+    // after a 400 ms stop)
+    if (first && enforced() && bound_set_) {
         const double late = elapsed_ms() - tripped_walk_until_ms_.value_or(walk_until_ms_);
         if (late > 0)
             own_stop_ms_ = std::max(own_stop_ms_, late);
