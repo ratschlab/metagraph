@@ -200,7 +200,7 @@ class TestR3BudgetOverride(unittest.TestCase):
     def expected(self, value):
         base = self.g.next_request(self.side, [self.pid])
         strategy = copy.deepcopy(base['strategy'])
-        ops._deep_merge(strategy, {'budget': value})
+        ops._merge_overrides(strategy, {'budget': value})
         return strategy
 
     def test_the_library(self):

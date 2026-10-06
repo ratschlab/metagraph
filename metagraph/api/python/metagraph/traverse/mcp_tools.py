@@ -99,6 +99,7 @@ import inspect
 import io
 import json
 import os
+import secrets
 import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -108,8 +109,8 @@ from . import coords as _C
 from . import derive, export, ops
 from ._codec import GraphletFormatError
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
-from .client import (AttemptAtBound, ServerInitializing, TraverseError, auto_coordinates,
-                     drop_coordinates_note)
+from .client import (AttemptAtBound, ServerInitializing, TraverseError, _ResponseCut,
+                     auto_coordinates, drop_coordinates_note)
 from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
@@ -827,7 +828,8 @@ class GraphletTools:
     @staticmethod
     def _backend(call, *args):
         """A backend call with its failures as results: an HTTP error with its status
-        (503: with retry_after_s), a transport failure as backend_unreachable."""
+        (503: with retry_after_s), a transport failure as backend_unreachable (a response
+        cut in transfer too, with its own message: the server was reached)."""
         try:
             return call(*args)
         except ServerInitializing as e:
@@ -842,6 +844,12 @@ class GraphletTools:
                                  'for it; a retry needs a new attempt_id') from None
         except TraverseError as e:
             raise ToolError('backend_error', str(e.message), status=e.status) from None
+        except _ResponseCut as e:
+            # the code of a transport failure (no whole answer), not its words: the server
+            # WAS reached and may have run the request, which "could not be reached" denied,
+            # so that a retry looked free (the review of the P3 fixes). The tools send no
+            # attempt_id, so there is no attempt to cancel; the message says what a retry does
+            raise ToolError('backend_unreachable', e.reason) from None
         except OSError as e:
             raise ToolError('backend_unreachable', 'the index server could not be reached: '
                             '%s' % (getattr(e, 'reason', None) or e.strerror
@@ -2166,7 +2174,9 @@ class GraphletTools:
         work or allocation budget: the file is as large as the graphlet makes it. Under
         local limits (stage L) an export either completes or writes no file (L4:
         local_budget_exceeded, never a partial file), and format mgt copies the stored
-        body without a parse -- also of an entry no parse could afford."""
+        body without a parse -- also of an entry no parse could afford. Either way the
+        file is written aside and renamed over |path| once complete: a failed write
+        (io_error) leaves an earlier file at |path| as it was, never a truncated one."""
         call = _CALL.get()
         if call is not None and format == 'mgt':
             return self._export_body(handle, path, what, call)
@@ -2262,10 +2272,13 @@ class GraphletTools:
                 n = _write_text_charged(path, text, call.budget)
             return _Receipt({'path': path, 'bytes': n, 'records': records},
                             ('records', 'bytes'))
-        data = text.encode('utf-8')
-        with open(path, 'wb') as f:
-            f.write(data)
-        return _Receipt({'path': path, 'bytes': len(data), 'records': records},
+        # through a temporary file renamed over the path once complete, as under local
+        # limits: open(path, 'wb') emptied an earlier export at the same path (the default
+        # <handle>.<ext> is the same for every export of a handle) before a byte was
+        # written, and a failed write (a full disk, a quota) left a truncated file there --
+        # a FASTA or GFA cut at a line still reads as complete (G15, the review of 2026-10-06)
+        n = _write_export(path, text.encode('utf-8'))
+        return _Receipt({'path': path, 'bytes': n, 'records': records},
                         ('records', 'bytes'))
 
     def _export_body(self, handle, path, what, call):
@@ -2610,6 +2623,42 @@ def _atomic_open(path):
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(prefix='.export-', dir=d)
     return os.fdopen(fd, 'wb', buffering=_JSON_BUFFER), tmp
+
+
+def _write_export(path, data):
+    """Write the bytes |data| to |path| atomically -> len(data): into a new file beside it
+    (".export-" and a random name), renamed over |path| once complete; a failure leaves
+    |path| as it was (an earlier export intact) and no temporary file. The unbudgeted
+    export's writer: the file gets the permissions open(path, 'wb') gave it -- those of
+    the file it replaces, else the umask's -- where mkstemp() would make it private."""
+    d = os.path.dirname(path)
+    try:
+        mode = os.stat(path).st_mode & 0o7777
+    except OSError:
+        mode = None
+    while True:
+        tmp = os.path.join(d, '.export-' + secrets.token_hex(6))
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+            break
+        except FileExistsError:
+            continue
+    try:
+        if mode is not None:
+            try:
+                os.fchmod(fd, mode)
+            except BaseException:
+                os.close(fd)              # _write_all() closes it otherwise
+                raise
+        _write_all(fd, data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return len(data)
 
 
 def _write_text_charged(path, text, b):

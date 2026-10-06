@@ -56,6 +56,7 @@ refuses it, 409 instance_mismatch, without registering it.
 
 import copy
 import gzip
+import http.client
 import json
 import re
 import urllib.error
@@ -210,6 +211,46 @@ class UnsupportedFeature(ValueError):
                          % (feature, needed, feature_level))
 
 
+class _ResponseCut(ConnectionError):
+    """No whole answer was received: the response was cut in transfer -- the connection
+    closed before its Content-Length (http.client.IncompleteRead: a server drops a
+    connection at its content timeout, a process dies with its buffers unsent, a proxy cuts
+    it) -- or its status line or a header could not be read (another
+    http.client.HTTPException). A ConnectionError, so an OSError like every other
+    transport failure: callers that map those (the tools' backend_unreachable) map this one
+    too, never a bare HTTPException that no handler expects (O35, the review of
+    2026-10-06). Not a TraverseError of the status, even when one was read: a cut 2xx is
+    no server answer, and a cut 409 or 503 body no longer tells its cases apart -- for an
+    attempt the conservative reading is "unanswered" (cancel it, then judge it with
+    release_verdict()). |reason| is the message (what the tools report)."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.reason = message
+        self.status = status
+
+
+def _cut(method, path, e, status=None, attempt_id=None):
+    """The _ResponseCut of http.client.HTTPException |e| raised while |method| |path| was
+    answered (|status|: the HTTP status, when its line was read; |attempt_id|: the
+    request's, when it carried one). The message says the server was reached and may have
+    run the request: the request went out before any answer was read, so a reader of
+    "unreachable" alone would take a retry for free (the review of the P3 fixes)."""
+    what = 'the response to %s %s' % (method, path) if status is None else \
+        'the HTTP %d answer to %s %s' % (status, method, path)
+    if isinstance(e, http.client.IncompleteRead):
+        got = len(e.partial or b'')
+        more = ', %d more expected' % e.expected if e.expected is not None else ''
+        detail = 'cut in transfer (%d bytes read%s)' % (got, more)
+    else:
+        detail = 'unreadable (%s: %s)' % (type(e).__name__, e)
+    then = 'cancel attempt %r, then judge it with release_verdict()' % attempt_id \
+        if attempt_id is not None else 'a retry sends it again'
+    return _ResponseCut('%s was %s: no whole answer was received, but the server was '
+                        'reached and may have run the request (%s)' % (what, detail, then),
+                        status)
+
+
 def _decoded(data, encoding, status):
     """_decode_body(), a body its Content-Encoding does not decode (a truncated gzip or
     deflate stream) a TraverseError of the answer's status: zlib.error and EOFError are no
@@ -280,20 +321,30 @@ class TraverseClient:
                 data = _decoded(data, hdrs.get('content-encoding'), status)
         else:
             req = urllib.request.Request(url, data=body, headers=headers, method=method)
+            status = None
             try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                    status = r.status
-                    hdrs = {k.lower(): v for k, v in r.headers.items()}
-                    raw = r.read()
-                data = _decoded(raw, hdrs.get('content-encoding'), status)
-            except urllib.error.HTTPError as e:
-                status = e.code
-                hdrs = {k.lower(): v for k, v in (e.headers or {}).items()}
                 try:
-                    raw = e.read() or b''
-                finally:
-                    e.close()
-                data = _decoded(raw, hdrs.get('content-encoding'), status)
+                    with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                        status = r.status
+                        hdrs = {k.lower(): v for k, v in r.headers.items()}
+                        raw = r.read()
+                    data = _decoded(raw, hdrs.get('content-encoding'), status)
+                except urllib.error.HTTPError as e:
+                    status = e.code
+                    hdrs = {k.lower(): v for k, v in (e.headers or {}).items()}
+                    try:
+                        raw = e.read() or b''
+                    finally:
+                        e.close()
+                    data = _decoded(raw, hdrs.get('content-encoding'), status)
+            except http.client.HTTPException as e:
+                # a body cut short (IncompleteRead) or an unreadable status line or header:
+                # neither a TraverseError nor an OSError, so it escaped every caller's
+                # mapping (O35). The session= path needs no such case: requests raises its
+                # ChunkedEncodingError (an OSError) for the same cut
+                raise _cut(method, path, e, status,
+                           payload.get('attempt_id') if isinstance(payload, dict) else None) \
+                    from e
         out = None
         if isinstance(data, (bytes, bytearray)):
             try:

@@ -24,15 +24,16 @@ partial text (L4), and save() writes no file; the stop says how many records wer
 """
 
 import json
+from collections.abc import Sized
 from operator import lt as _lt
 
 from . import budget as _B
 from . import coords as _C
 from . import derive
 from ._codec import REASON, UNLIMITED
-from .budget import (DICT_KEY, FLOAT, JSON_ID, LIST, LIST_ITEM, STR, W_ELEM, W_GFA_LINE,
-                     W_NODE, W_PAIR, W_RECORD, W_STEP, LocalBudgetExceeded, dict_bytes,
-                     list_bytes)
+from .budget import (DICT_KEY, FLOAT, ID_SHIFT_PY, JSON_ID, LIST, LIST_ITEM, STR, W_ELEM,
+                     W_GFA_LINE, W_NODE, W_PAIR, W_RECORD, W_STEP, LocalBudgetExceeded,
+                     dict_bytes, list_bytes)
 from .model import ARM_SIDES, MissingEnvelope
 
 _LEVERS = ('select_walks', 'narrow_arm', 'export_mgt')
@@ -697,7 +698,17 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None,
     for side in sides:
         a = g.arms[side]
         rcs = _fasta_rcs(g, side, coordinates)
-        if leaves is not None and not len(leaves):
+        # the walks chosen on THIS arm, read once: a one-shot iterator (a generator, map(),
+        # iter()) has no len(), and the test below raised TypeError on it where the
+        # unbudgeted export had always iterated it (O11, the review of 2026-10-06: an
+        # unbudgeted answer changed). Read per arm, as the selection always was: with
+        # arm=None a one-shot iterator is exhausted by the first arm, the next reads none
+        lv = leaves if leaves is None or isinstance(leaves, Sized) else list(leaves)
+        if bud is not None and lv is not leaves:
+            # the copy of the caller's iterator, charged once it is read: its length is
+            # known only then (budget.py's stated exception for sizes known when built)
+            bud.charge(len(lv) >> ID_SHIFT_PY, list_bytes(len(lv)))
+        if lv is not None and not len(lv):
             # no walk chosen: nothing to resolve, so the arm's paths are not built -- they
             # were, uncharged, and a refused export (stopped at its join) left them behind
             # (the review of the level 4-5 fixes, finding 2)
@@ -707,7 +718,7 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None,
             # are built only once charged, so a refused export leaves none behind
             derive.uses(bud, g, a, 'leaves', 'paths', 'end_labels')
         paths = derive.paths(a)
-        chosen = paths if leaves is None else [paths[ops.path_id(a, x)] for x in leaves]
+        chosen = paths if lv is None else [paths[ops.path_id(a, x)] for x in lv]
         if not chosen:
             continue
         if orientation not in ('natural', 'walk'):

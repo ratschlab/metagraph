@@ -1357,7 +1357,13 @@ builds the resubmittable request: one seed per walk (its continuation, with its 
 named explicitly in ``constrain`` mode), the retrieval's normalized strategy with
 ``direction`` set to the arm, ``bounds.max_extension_bp = bp`` when given, and the
 keyword overrides deep-merged into the strategy (``release``, ``graph`` and
-``graph_path`` go to the request level). In ``constrain`` mode three rules hold:
+``graph_path`` go to the request level). ``labels.change_cost`` is merged as one unit: an
+override that names another ``model`` replaces the retrieval's whole (the server reads only
+the fields of the model it names and refuses any other), one that names the same model, or
+none, updates its fields. ``None`` for a section the strategy holds as an object
+(``labels``, ``labels.change_cost``, ``branching``, ``bounds``, ...) is refused with a
+``ValueError`` naming it -- the server refuses ``null`` there. In ``constrain`` mode three
+rules hold:
 
 * **No route exceeds its original loss budget.** The loss budget is reduced by the
   *largest* terminal loss of the continued labels. A request carries one loss budget
@@ -1382,17 +1388,22 @@ keyword overrides deep-merged into the strategy (``release``, ``graph`` and
   retrieval's permitted labels minus the seeds, each kept that a chain of switches from a
   seed label enters within the budget (what the server accepts: the walk enforces the
   cumulative loss switch by switch). Every label left out is listed in ``left_out``, per
-  continued walk (``walk``), and the notes name the first few, with each that one
+  continued walk (``walk``), and the notes name the first 8, with each that one
   uninterrupted walk could still have entered from a continued label at a lower loss (by a
-  chain through any label of the retrieval, the kept ones included). An override section the
+  chain through any label of the retrieval, the kept ones included) and every continued
+  label that could have: the note grows with the continued labels (``traverse_continue``
+  never cuts a note, so a large one can make its answer ``result_too_large`` until
+  ``max_bytes`` is raised). An override section the
   rebuild reads that is not an object (``labels``, ``labels.change_cost``,
   ``branching``), or a malformed field of it, is refused with a ``ValueError`` naming it.
   The merged ``labels.change_cost`` is checked whole before any of it is used, by the
-  server's rule: ``model`` a string; ``entries``, when present, a list under every model;
-  a constant's ``value`` and a table's ``default`` a finite number >= 0 (the default may
-  also be ``"forbid"``); a table's ``entries`` required, every entry ``[from, to, cost]``
-  with two label names (strings) and a finite cost >= 0 -- the error names the entry
-  (``labels.change_cost.entries[3]``). A ``labels.loss_budget`` override is a finite
+  server's rule: ``model`` a string; only the fields the model reads (``forbid``: ``model``;
+  ``constant``: ``model``, ``value``; ``table``: ``model``, ``default``, ``entries``) --
+  another is refused, as the server's strict parse refuses it; ``entries``, under a model
+  the library does not know, a list; a constant's ``value`` and a table's ``default`` a
+  finite number >= 0 (the default may also be ``"forbid"``); a table's ``entries``
+  required, every entry ``[from, to, cost]`` with two label names (strings) and a finite
+  cost >= 0 -- the error names the entry (``labels.change_cost.entries[3]``). A ``labels.loss_budget`` override is a finite
   number >= 0, a ``branching.max_label_branches`` override an integer >= 0 or
   ``"unlimited"`` (not infinity or NaN). The MCP tool ``traverse_continue`` answers these
   with ``bad_argument``, also with ``execute=False`` and under local limits.
@@ -1751,7 +1762,9 @@ the seed and covers the whole walk: at most 8 (label, occurrence) pairs by label
 start, then ``coords_more=N``, and ``coords_cut=1`` when such a run's list was cut.
 Column labels are left out (their positions are global). ``coordinates=False`` never
 adds the field, ``True`` requires it; a retrieval without coordinates gives exactly the
-records it always did.
+records it always did. ``leaves`` is any iterable of walk ids, a generator too; it is read
+per arm, so with ``arm=None`` on a two-arm graphlet a one-shot iterator is exhausted by the
+left arm and selects nothing on the right one (a list selects on both).
 
 .. graphlet-example: fasta
 
@@ -1887,7 +1900,20 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   claim placed before its own segment is filed by one charged walk of the chains, not an
   uncharged climb per refusal), the store's ``standalone_text()`` and ``save_body()`` (a
   call's base) and ``to_json()`` (its seed block, limitations and ``label_dict``, built
-  uncharged before). A derivation an operation uses (paths, splits, merge
+  uncharged before). The same work model moved the charges of five more, where they
+  under- or over-charged what the call does: ``support_changes()`` (each changed label
+  is charged its reason's whole scan of the walk's chain, not half of it, plus the split
+  check's bisections of the sibling and parent label sets, which were scanned uncharged
+  per label -- 100x under at 20,000 labels -- and its bytes at their measured size),
+  ``walks()`` and ``walks_at(with_claims=True)`` in annotate mode (an index of each leaf's
+  route ends charged once, where every chunk of 32 walks was charged a pass over all of
+  them), the left-out note of ``next_request()`` (its switch searches confined to the
+  names the ``change_cost`` table names plus one stand-in -- the same answer -- and its
+  tests and text charged), ``compare(mode='walks')`` and ``'prefix_subset'`` with
+  ``compare_cost()`` (each segment of the cuts' chains charged once per comparison, not
+  once per cut through it: quadratic on a comb), and the store's ``standalone_text()``
+  and ``save_body()`` (the body's digest check); ``to_fasta(leaves=)`` given a generator
+  charges its copy. A derivation an operation uses (paths, splits, merge
   maps, evidence, label summaries, ...) is charged at its *cold price*, whether a cache
   holds it or not: the same call on the same graphlet with the same budget charges the
   same units and stops at the same row, in any process and whatever earlier calls cached.
@@ -1899,7 +1925,8 @@ default) nothing is budgeted and every answer is byte for byte what it was befor
   ASCII), so in-process it is a soft bound; a hard bound needs process limits. The
   memory limit holds for each call; the work of the calls that share one budget adds
   up (an allowance). One exception to "charged before": a record of output text is
-  charged as soon as it is built (its size is known only then).
+  charged as soon as it is built (its size is known only then), and so are the walk ids
+  a one-shot iterator gives ``to_fasta(leaves=)`` (copied as they are read).
 * ``LocalLimits(work_units=None, memory_mb=None, deadline_s=None)`` holds the limits
   (``None``: unlimited). ``deadline_s`` (elapsed seconds since the budget was made) and
   ``budget.cancel()`` (from another thread) stop a call at its next charge point; they
@@ -2027,9 +2054,28 @@ digits):
   process stored is read from its entry file on first use (by ``get``, ``free``, ``in``
   and ``list()``, which lists the spool's entries), one another process freed or
   expired answers as unknown, and an expiry re-reads the entry file's last use first.
-  An entry whose body is missing expires (``UnknownHandle``, replayable when it kept a
-  request), also when its body is copied without a parse (``body_text``,
-  ``standalone_text``, ``save_body``); an entry file of another library version is read
+  The body's lifecycle is serialized by an exclusive lock of the spool (``fcntl.flock``
+  of ``<spool>/.lock``): a put holds it from the check of its body to the write of its
+  entry, a free or an expiry from its scan of the entry files to the deletion of the
+  body, so a free in one process cannot delete the body of an entry another process is
+  storing (before the lock, three processes storing and freeing one body lost about half
+  of their new handles). Limits: without ``fcntl`` (Windows), or where the spool's file
+  system refuses the lock file or ``flock`` (read-only, some network file systems), only
+  the threads of one store are serialized, and a process of an earlier library version
+  takes no lock, so the race remains against it. ``sweep()`` also deletes a body no entry file names that
+  is more than an hour old (a free that kept it for an entry another process had
+  removed, or a process killed between a body and its entry, left it for good). No body
+  is deleted while an entry file is there but cannot be read (permissions, too many open
+  files, an I/O error): which body it names is unknown, so a free keeps its body and a
+  sweep its old ones until the file can be read or is removed. A body
+  or entry file is written to a temporary name, flushed (``fsync``) and renamed, so a
+  crash leaves the old file or the new one -- macOS's ``fsync`` does not flush the
+  drive's own cache, so there a power loss can still lose the latest writes. A stored
+  body is checked against its digest when it is read (a parse on demand, ``body_text``,
+  ``standalone_text``, ``save_body``) and before a put reuses it; a body that is
+  missing or damaged expires its entry (``UnknownHandle``, replayable when it kept a
+  request), a damaged one is deleted, and the next put of the same body writes it again
+  (a re-fetch or a replay repairs it). An entry file of another library version is read
   for the fields this one knows;
 * with ``parse_limits=LocalLimits(...)`` every parse the store runs (``put``, a parse on
   demand, ``load``) has a fresh budget of those limits. A body whose parse stops is not
@@ -2154,7 +2200,10 @@ The contract:
   stopped is left out and ``summary_stop`` states the stop, and a body whose parse
   stopped is kept unparsed with the stop in ``stop``;
 * files are written to and read from the export directory (default
-  ``<spool>/exports``) only;
+  ``<spool>/exports``) only; an export or a save is written to a temporary file and
+  renamed over its path once complete, with or without local limits, so a failed write
+  (a full disk, a quota) answers ``io_error`` and leaves an earlier file at that path as
+  it was, never a truncated one;
 * failures are results ``{error, message, ...}`` -- a malformed argument too (an arm
   that is not a string, a label list that is not a list, a malformed override of a
   continuation) -- with codes such as ``bad_argument``, ``bad_arm``, ``bad_cursor``, ``unknown_handle`` (with ``replayable``),
@@ -2162,7 +2211,9 @@ The contract:
   ``incomplete_recording``, ``not_in_view``, ``view_unsupported``, ``no_bases``,
   ``path_not_allowed``, ``format_error``, ``io_error``, ``too_large``,
   ``result_too_large``, ``receipt_too_large``, ``backend_error`` (with the HTTP status,
-  and ``retry_after_s`` while the server loads), ``backend_unreachable``,
+  and ``retry_after_s`` while the server loads), ``backend_unreachable`` (also for a
+  response cut in transfer: the server was reached but no whole answer was received, so
+  the request may have run there and a retry sends it again),
   ``not_replayable``, ``seed_failed``, ``index_mismatch``, ``index_unverifiable``,
   ``release_mismatch``, ``unverifiable_label_name``, ``no_coordinates``.
 

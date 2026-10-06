@@ -28,9 +28,11 @@ With a budget, a local call either completes or stops and says so (§21.1):
     (the service's). A budget's memory limit applies to each call on its own; its work
     accumulates across the calls that share it (an analysis allowance).
   * Every charge is admitted before the work or allocation it pays for, with one stated
-    exception: text whose size is known only once it is built -- the lines of dump(), up
-    to 64 at a time, and a label set decoded during a parse -- is charged as soon as it
-    is built, so the account may run that far ahead of the check. The account itself
+    exception: what has a size known only once it is built -- the lines of dump(), up
+    to 64 at a time, a label set decoded during a parse, and the walks a one-shot iterator
+    passes to to_fasta(leaves=) (a generator: copied into a list as it is read, per arm)
+    -- is charged as soon as it is built, so the account may run that far ahead of the
+    check. The account itself
     never exceeds the limit. Cheap loops are admitted in blocks of rows (64) at their
     known prices; a block that does not fit is paid row by row, so a list stops at
     exactly the row it would stop at with a charge per row.
@@ -48,7 +50,9 @@ call leaves only complete caches and a later unbudgeted call answers byte for by
 the stop had not happened.
 
 Not charged (stated in the docs): the store's bookkeeping (refresh, cache_signature,
-cache_bytes, memory_bytes), the HTTP client's decoding of a response, cursor MACs,
+cache_bytes, memory_bytes, its spool lock, and the digest check of a body it parses on
+demand: about 0.8 lwu per 256 bytes, against the parse's 32 per 256), the HTTP client's
+decoding of a response, cursor MACs,
 check_rules(), the tables of frames() (the library calls they make are charged), the MCP
 framework's serialisation of a result, and interpreter work outside the charge points.
 """
@@ -98,7 +102,36 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
 #   * to_json() (O3): the seed block (W_NODE per dropped label, W_PAIR per [from, to] run
 #     of one), the seed-level and arm-level limitations and label_dict (W_NODE each), and
 #     their bytes, before they are built (model 1 built them uncharged).
-# Every other charge is model 1's; unbudgeted answers are unchanged.
+# The P3 items of the same review (library, folded into feature level 6 too) moved more:
+#   * support_changes() (L3): each label that changed is charged its reason's whole scan
+#     of the walk's chain (segments, runs, events) -- model 1 charged half, "on average" --
+#     and, once per change, the split it may have taken (W_STEP per chain segment, W_ELEM
+#     per sibling) and per removed label a bisection of each sibling's entry set and the
+#     parent's end set (W_ELEM and a unit per halving): model 1 charged nothing for the
+#     sets, which were scanned per label (100x under at 20,000 labels, 1000x at 40,000);
+#     its bytes are 729 per changed label (465 in model 1: 0.84-0.93 of the traced peak);
+#   * walks() and walks_at(with_claims=True) in annotate mode (L5): the index of each
+#     leaf's route ends is built once (W_ELEM per route end, the sorts, its bytes) where
+#     every chunk of 32 walks was charged a pass over all of the arm's route ends (W/32 x
+#     E: a 30 M lwu view-class budget stopped at 8,544 of 9,000 walks it now completes);
+#   * next_request()'s left-out note (L7): its switch searches run over the names the
+#     change_cost table names plus one stand-in (the same answer, smaller searches,
+#     charged as such), and the note's reach tests (W_ELEM each) and text are charged --
+#     model 1 charged a search of the whole pool per continued label (18 M lwu at 2,000
+#     labels, 99 k now) and none of the tests or the text;
+#   * compare(mode='walks' / 'prefix_subset') and compare_cost() (L12): each segment of the
+#     cuts' chains is charged its own part of cut_cost once per comparison, and each cut its
+#     anchor's part, its prefix's join and its labels (and the pass's running state, held
+#     for the pass) -- model 1 charged every cut its whole chain's cut_cost (a comb of
+#     4,000 walks: quadratic); the scan of the restricted leaves and the marking of their
+#     chains is W_ELEM + W_STEP per segment (W_ELEM in model 1); a cut's bytes count its
+#     label set and its {label: j} at their bound (in constrain mode the root's entry and
+#     the first piece's labels, where model 1 counted the root's entry for both);
+#   * to_fasta(leaves=<one-shot iterator>) (O11): the copy of the walks it gives (refused
+#     with a TypeError before, so no stop point moved);
+#   * GraphletStore.standalone_text() and save_body() (O17): the body's digest check, one
+#     more lwu per 256 bytes.
+# Every other charge is model 1's; the work model changes no unbudgeted answer.
 WORK_MODEL = 2
 MEMORY_BOUND = 'model'
 # a deadline is read from the clock at most this many lwu apart (about 6.5 ms nominal)

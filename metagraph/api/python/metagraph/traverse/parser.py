@@ -1361,12 +1361,14 @@ def _write_text(text, path):
     return len(data)
 
 
-def _write_all(fd, data):
+def _write_all(fd, data, sync=False):
     """Write the bytes |data| in full to the file descriptor |fd| and close it -- without a
     buffer: they go out in one write, and a buffered file holds io.DEFAULT_BUFFER_SIZE (128
     KiB from Python 3.14, more on a file system with larger blocks) that the stage-L account
     of a save did not charge, which put it below the traced peak on bodies of 10-40 KB (the
-    review of pass 5's memory changes)."""
+    review of pass 5's memory changes). |sync|: the data is flushed to the device (fsync)
+    before the file is closed -- what a write renamed into place needs so that a crash does
+    not leave the new name on an empty or partly written file (the store's spool, O17)."""
     with os.fdopen(fd, 'wb', buffering=0) as f:
         view = memoryview(data)
         while view:
@@ -1375,6 +1377,8 @@ def _write_all(fd, data):
             if not n:
                 raise OSError('%s accepted none of %d bytes' % (f.name, len(view)))
             view = view[n:]
+        if sync:
+            os.fsync(f.fileno())
 
 
 def load(path, *, budget=None):

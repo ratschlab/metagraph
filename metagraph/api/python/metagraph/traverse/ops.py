@@ -41,6 +41,7 @@ import collections
 import copy
 import hashlib
 import heapq
+import itertools
 import json
 import math
 import sys
@@ -1328,36 +1329,52 @@ def _leaf_claims(g, a, leaves_, rcs=None):
                 by_leaf[leaf] = got
         return by_leaf
     # annotate: _annotate_ends() orders by (first walk through the anchor, label, j,
-    # anchor); within one anchor that is (label, j)
-    _, ends = _annotate_route_ends(a)
-    picked = []
-    for l, es in ends.items():
-        for s, j in es:
-            if s in leaves_ and j == segs[s].end_bp:
-                picked.append((s, l, j))
-    picked.sort()
-    for s, l, j in picked:
-        by_leaf.setdefault(s, []).append(
-            _annotate_claim(g, a, l, s, j, _annotate_evidence(a, l, s), None, exact))
+    # anchor); within one anchor that is (label, j) -- each leaf's own ends, read from the
+    # arm's index of them (_annotate_leaf_ends), not from a pass over every route end of
+    # the arm per call (L5: a budgeted walks() made that pass per chunk of 32 walks)
+    ends = _annotate_leaf_ends(a)
+    for s in sorted(leaves_):
+        for l, j in ends.get(s, ()):
+            by_leaf.setdefault(s, []).append(
+                _annotate_claim(g, a, l, s, j, _annotate_evidence(a, l, s), None, exact))
     return by_leaf
 
 
 _WALK_CHUNK = 32
 
 
-def _n_route_ends(a):
-    return sum(len(v) for v in _annotate_route_ends(a)[1].values())
+def _annotate_leaf_ends(a):
+    """Annotate mode: segment -> the route ends at its last node, [(label, j)] sorted (the
+    claims of a walk ending there, in claims() order), from one pass over the arm's route
+    ends (cached beside them)."""
+    got = a.cache.get('annotate_leaf_ends')
+    if got is None:
+        segs = a.segments
+        got = {}
+        ends = _annotate_route_ends(a)[1]
+        # the labels in ascending order: a label has at most one end at a segment's last
+        # node, so each segment's list comes out sorted by (label, j)
+        for l in sorted(ends):
+            for s, j in ends[l]:
+                if j == segs[s].end_bp:
+                    got.setdefault(s, []).append((l, j))
+        a.cache['annotate_leaf_ends'] = got
+    return got
+
+
+def _annotate_leaf_ends_price(b, g, a):
+    """Charge _annotate_leaf_ends() at its cold price (after the route ends it reads): the
+    sort of the labels, a visit per route end, and the index's dict, lists and pairs."""
+    ends = _annotate_route_ends(a)[1]
+    e = sum(len(v) for v in ends.values())
+    b.uses((id(a), 'annotate_leaf_ends'), sort_work(len(ends)) + W_ELEM * e,
+           list_bytes(len(ends)) + dict_bytes(e) + e * (LIST + LIST_ITEM + TUPLE + 16))
 
 
 def _leaf_end_counts(a):
     """Annotate mode: leaf -> the route ends at its last node (its claims in a walk)."""
     segs = a.segments
-    out = {}
-    for es in _annotate_route_ends(a)[1].values():
-        for s, j in es:
-            if segs[s].leaf is not None and j == segs[s].end_bp:
-                out[s] = out.get(s, 0) + 1
-    return out
+    return {s: len(v) for s, v in _annotate_leaf_ends(a).items() if segs[s].leaf is not None}
 
 
 def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
@@ -1368,7 +1385,6 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
         out = [] if out is None else out
         segs = a.segments
         md = rbs = ends_n = None
-        scan = 0
         # a retrieval with record coordinates: each walk maps its end labels to their
         # runs' occurrences, and each claim carries them (charged with the walk)
         rcs = _arm_coords(g, a.side, b)
@@ -1383,13 +1399,15 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
                 rbs = derive.runs_by_segment(a)
             else:
                 _annotate_ends_price(b, g, a)
+                # the index of each leaf's route ends, built once: each chunk reads its own
+                # leaves' (a pass over every route end of the arm per chunk of 32 walks, and
+                # its charge, before: L5, the review of 2026-10-06)
+                _annotate_leaf_ends_price(b, g, a)
                 ends_n = _leaf_end_counts(a)
-                # _leaf_claims() reads every route end of the arm once per chunk
-                scan = _n_route_ends(a)
         b.phase = 'rows'
         for k in range(0, len(ranked), _WALK_CHUNK):
             chunk = ranked[k:k + _WALK_CHUNK]
-            w = scan if ends_n is not None else 0
+            w = 0
             m = 0
             for x in chunk:
                 p = x[0]
@@ -1828,6 +1846,11 @@ def support_changes(g, arm, leaf, *, budget=None):
 
 
 _CHANGE_BYTES = record_bytes(Change) + 2 * LIST + 200
+# per label that changed: its reason dict and its label's dict (with the ref's text), its
+# slot in the added or removed set, the sorted list and the Change's list -- measured 521
+# bytes kept and 636-695 at the peak per label on a split of 2,000-20,000 labels (L3: the
+# account was 465 per label, 0.84-0.93 of the traced peak)
+_REASON_BYTES = 2 * dict_bytes(4) + SET_ITEM + 2 * LIST_ITEM + STR + 16
 
 
 def _support_changes(g, arm, leaf, b):
@@ -1847,7 +1870,10 @@ def _support_changes(g, arm, leaf, b):
     if b is not None:
         derive.uses(b, g, a, 'partition_sets')
         b.phase = 'changes'
-        # the reasons scan the walk's chain (its runs and events) per label that changed
+        # a reason scans the walk's chain -- its segments, their runs and events -- per label
+        # that changed, until it finds the label's: charged at that bound (the added-label
+        # scan never stops early; work model 1 charged half of it, "on average": L3, the
+        # review of 2026-10-06)
         per_label = len(chain) + sum(len(rbs[x]) + len(segs[x].events) for x in chain)
     for run in prof:
         if b is not None:
@@ -1857,21 +1883,51 @@ def _support_changes(g, arm, leaf, b):
         added, removed = cur - prev, prev - cur
         if added or removed:
             if b is not None:
-                # a reason scans the chain's runs and events until it finds the label's:
-                # half of them on average (a structural count, not the scan itself)
                 n = len(added) + len(removed)
-                b.charge(W_ROW + n * (3 + (per_label >> 1)),
-                         _CHANGE_BYTES + n * (LIST_ITEM + dict_bytes(4) + 160))
+                b.charge(W_ROW + n * (3 + per_label), _CHANGE_BYTES + n * _REASON_BYTES)
             out.append(Change(at, _labels(g, added), _labels(g, removed),
-                              _change_reasons(g, a, chain, on_chain, rbs, at, added, removed)))
+                              _change_reasons(g, a, chain, on_chain, rbs, at, added, removed,
+                                              b)))
         prev = cur
     # labels alive at the leaf's last node stay; nothing to report past the end
     return out
 
 
-def _change_reasons(g, a, chain, on_chain, rbs, at, added, removed):
+def _has_id(ids, l):
+    """Whether the ascending label set |ids| (an array('I'): every set the parser makes is
+    sorted, the codec refuses any other) holds |l|: a bisection, where `l in ids` scanned
+    the array from its start."""
+    i = bisect.bisect_left(ids, l)
+    return i < len(ids) and ids[i] == l
+
+
+def _split_point(segs, chain, at, b):
+    """The split a label removed at |at| may have taken: the first segment of the walk's
+    chain that starts there with one parent -> (the parent's end set, [(each other child's
+    entry set, its first base)], the price of testing one label against them); False when
+    there is none. One per Change: the sets were scanned again per removed label (L3)."""
+    if b is not None:
+        b.charge(W_STEP * len(chain))
+    for sid in chain:
+        s = segs[sid]
+        if s.from_bp == at and len(s.parents) == 1:
+            parent = segs[s.parents[0]]
+            k = len(parent.children)
+            if b is not None:
+                b.charge(W_ELEM * k, list_bytes(k) + k * (TUPLE + STR + 8))
+            sibs = [(segs[c].entry, segs[c].walk[:1] if segs[c].walk
+                     else segs[c].first_base or '')
+                    for c in parent.children if c != sid]
+            # a bisection of each set per label: W_ELEM and a unit per halving
+            price = sum(W_ELEM + len(x).bit_length() for x in [parent.end] + [e for e, _ in sibs])
+            return parent.end, sibs, price
+    return False
+
+
+def _change_reasons(g, a, chain, on_chain, rbs, at, added, removed, b=None):
     segs = a.segments
     reasons = []
+    split = None
     for l in sorted(removed):
         why = None
         if g.mode == 'constrain':
@@ -1890,20 +1946,18 @@ def _change_reasons(g, a, chain, on_chain, rbs, at, added, removed):
                 if why:
                     break
         if why is None:
-            for sid in chain:
-                s = segs[sid]
-                if s.from_bp == at and len(s.parents) == 1:
-                    parent = segs[s.parents[0]]
-                    took = sorted({x for c in parent.children if c != sid
-                                   for x in (segs[c].walk[:1] if segs[c].walk
-                                             else segs[c].first_base or '')
-                                   if l in segs[c].entry})
-                    if l in parent.end and took:
-                        # a split only when another branch took the label: on the
-                        # parent's last node and on no child's first node it is
-                        # absent (annotate) or ended, not split
-                        why = {'why': 'split', 'took': took}
-                    break
+            if split is None:
+                split = _split_point(segs, chain, at, b)
+            if split:
+                end, sibs, price = split
+                if b is not None:
+                    b.charge(price)
+                took = sorted({x for entry, bases in sibs for x in bases if _has_id(entry, l)})
+                if took and _has_id(end, l):
+                    # a split only when another branch took the label: on the parent's last
+                    # node and on no child's first node it is absent (annotate) or ended,
+                    # not split
+                    why = {'why': 'split', 'took': took}
         if why is None:
             why = {'why': 'absent' if g.mode != 'constrain' else 'ended'}
         reasons.append(dict(why, label=g.labels[l].as_dict(), change='removed'))
@@ -2176,8 +2230,11 @@ def _check_change_cost(change_cost):
     [["C"], "A", 0.5] raised TypeError from a set membership test, which escaped the tool
     layer's bad_argument (review of pass 5, finding 7), and a malformed entry was skipped
     silently where the server refuses the request. A field that fails is a ValueError
-    naming it. A model the library does not know passes: its callers answer for it. None
-    (no change_cost) is forbid. -> change_cost."""
+    naming it, and so is a field the named model does not read (forbid reads model only,
+    constant model and value, table model, default and entries): the server's Strict
+    parse refuses it as an unknown field (L8, the review of 2026-10-06). A model the
+    library does not know passes: its callers answer for it. None (no change_cost) is
+    forbid. -> change_cost."""
     if change_cost is None:
         return None
     if not isinstance(change_cost, dict):
@@ -2186,11 +2243,20 @@ def _check_change_cost(change_cost):
     if not isinstance(model, str):
         raise ValueError('labels.change_cost.model is "forbid", "constant" or "table", not %r'
                          % (model,))
-    # entries under every model, not only a table's: a budgeted call charges their count
-    # whatever the model (_switch_reach), and {'model': 'forbid', 'entries': True} raised
-    # TypeError from len() there (review of the pass-5 fixes). The server never accepts
-    # entries on another model (Strict), but a constant override deep-merged onto a
-    # table's strategy keeps that table's list, so a list passes here; None reads as none
+    fields = _COST_FIELDS.get(model)
+    if fields is not None:
+        foreign = sorted(k for k in change_cost if k not in fields)
+        if foreign:
+            # a field of another model: what a deep merge of a model change kept (a
+            # constant's value under a table, a table's entries under a constant), which
+            # the server refused while the library called the request valid (L8)
+            raise ValueError('labels.change_cost.%s is not a field of model %r (it reads %s): '
+                             'the server refuses it as an unknown field'
+                             % (foreign[0], model, ', '.join(sorted(fields))))
+    # entries under every model the library does not know too: a budgeted call charges
+    # their count whatever the model (_switch_reach), and {'model': 'forbid', 'entries':
+    # True} raised TypeError from len() there (review of the pass-5 fixes); None reads as
+    # none
     entries = change_cost.get('entries')
     if entries is not None and not isinstance(entries, (list, tuple)):
         raise ValueError('labels.change_cost.entries is a list of [from, to, cost], not %r'
@@ -2217,6 +2283,28 @@ def _check_change_cost(change_cost):
                 raise ValueError('labels.change_cost.entries[%d]: the cost of %r -> %r is a '
                                  'finite number >= 0, not %r' % (i, e[0], e[1], e[2]))
     return change_cost
+
+
+def _check_annotate_cost(change_cost):
+    """The merged labels.change_cost of an annotate-mode continuation, checked as the
+    server reads it: labels are recorded, not filtered, so there is no permitted set and
+    any model but "forbid" is refused there (walker.cpp: a finite change cost conflicts
+    with labels.mode "annotate"), as is a field forbid does not read (the Strict parse).
+    The model is checked first, so no entries of a table are read. None (absent) passes."""
+    if change_cost is None:
+        return
+    model = change_cost.get('model', 'forbid') if isinstance(change_cost, dict) else None
+    if isinstance(model, str) and model != 'forbid':
+        raise ValueError('labels.change_cost.model %r does not apply in labels.mode "annotate" '
+                         '(labels are recorded, not filtered: there is no permitted set); the '
+                         'server refuses any model but "forbid": omit the override' % model)
+    _check_change_cost(change_cost)
+
+
+# the fields each change_cost model reads (traverse.cpp parse_cost: a Strict object whose
+# unread members are refused)
+_COST_FIELDS = {'forbid': frozenset(('model',)), 'constant': frozenset(('model', 'value')),
+                'table': frozenset(('model', 'default', 'entries'))}
 
 
 def _section(strategy, *path):
@@ -2467,6 +2555,87 @@ def _rebuilt_extra(g, seed_labels, budget, strategy, lb=None):
     return extra, dropped, unverifiable
 
 
+# the left-out labels the note of next_request() names (the rest are counted)
+_LEFT_OUT_SHOWN = 8
+
+
+def _left_out_reach(g, cost, mine, budget, dropped, lb=None):
+    """For the left-out note of next_request(): which continued labels |mine| ((label,
+    terminal loss) pairs) reach each of the first _LEFT_OUT_SHOWN labels of |dropped| by a
+    chain of switches through the retrieval's pool within their own remaining budget
+    (budget - loss), and whether any label of |dropped| is so reached. -> ([the reaching
+    labels of each shown one, in |mine| order], any).
+
+    Exactly the note of one _switch_reach() per continued label over the whole pool (L7, the
+    review of 2026-10-06: S searches of the pool, all S results held at once, a membership
+    test per dropped label and continued label; 1.26 s for one walk at 1,000 labels), with
+    the searches confined to the names the change_cost table names (its pairs between
+    labels of the pool) plus ONE name it does not: a name no entry names is reached from the
+    source by the default switch alone -- the first pop (the source, at loss 0) gives it
+    0 + default, and every other chain into it ends with a default switch too, so costs at
+    least as much -- and as an intermediate it gives every other name the default, as each
+    such name does; so one stands for all, and the names the table names get the same
+    smallest chain sums, added in the same order. Under a constant model no name is named:
+    each search is one switch."""
+    model = (cost or {}).get('model', 'forbid')
+    pool = list(dict.fromkeys(l.name for l in g.labels))
+    named = set()
+    if model == 'table':
+        names = set(pool)
+        for e in cost.get('entries') or ():
+            if e[0] in names and e[1] in names:
+                named.add(e[0])
+                named.add(e[1])
+    if lb is not None:
+        # the names read once and the reach tests below: a reach per continued label for
+        # each label shown and each left-out label the table names, one per left-out label
+        n_named_dropped = sum(1 for l in dropped if l.name in named)
+        lb.charge(W_ELEM * (len(pool) + len(dropped) + len(mine)
+                            * (min(len(dropped), _LEFT_OUT_SHOWN) + n_named_dropped)),
+                  set_bytes(len(named)) + 2 * list_bytes(len(pool)) + dict_bytes(len(pool))
+                  + len(mine) * TUPLE)
+    in_table = [x for x in pool if x in named]
+    # the first two names no entry names (a stand-in for each source: not the source)
+    others = list(itertools.islice((x for x in pool if x not in named), 2))
+    reach_of = []
+    for p, x in mine:
+        stand_in = next((u for u in others if u != p.name), None)
+        targets = [t for t in in_table if t != p.name]
+        if stand_in is not None:
+            targets.append(stand_in)
+        r = _switch_reach(cost, [p.name], targets, budget - x, lb=lb) or {}
+        reach_of.append((p, r, stand_in is not None and stand_in in r))
+
+    def reaches(name):
+        if name in named:
+            return [p for p, r, _ in reach_of if p.name != name and name in r]
+        return [p for p, _, rest in reach_of if p.name != name and rest]
+
+    shown = [reaches(l.name) for l in dropped[:_LEFT_OUT_SHOWN]]
+    # a boolean, not a substring test of the note's text: a label NAME holding "reachable
+    # for" claimed a reach that no chain makes
+    any_reach = any(shown)
+    if not any_reach:
+        for l in dropped[_LEFT_OUT_SHOWN:]:
+            if l.name in named and reaches(l.name):
+                any_reach = True
+                break
+        else:
+            # the names no entry names: reached alike, by the continued labels that reach
+            # the stand-in, each one except under its own name
+            rest = {p.name for p, _, ok in reach_of if ok}
+            any_reach = any(l.name not in named and (len(rest) > 1
+                                                     or (rest and l.name not in rest))
+                            for l in dropped[_LEFT_OUT_SHOWN:])
+    if lb is not None:
+        # the note's text of the shown labels: the names of the labels that reach them, each
+        # written by _shown() and joined, the entries joined again into the note
+        k = sum(len(v) for v in shown)
+        n = sum(_shown_bytes(p.name) + 2 for v in shown for p in v)
+        lb.charge(W_ELEM * k + (n >> 4), 3 * (n + STR * _LEFT_OUT_SHOWN) + k * STR)
+    return shown, any_reach
+
+
 def _continuation_seeds(g, a, leaves, lb=None):
     conts = [_continuation(g, a, x, lb) for x in leaves]
     seeds = []
@@ -2532,7 +2701,17 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fal
         is listed in .left_out, per walk (and the first few named in .notes). A
         labels.extra the caller gives in the overrides is sent as given. An override
         section the rebuild reads that is not an object (labels, labels.change_cost,
-        branching), or a malformed field of it, is a ValueError naming it.
+        branching -- None included), or a malformed field of it, is a ValueError naming
+        it; so is None for any section the strategy holds as an object, which the server
+        refuses as null. An override's labels.change_cost that names another model
+        replaces the retrieval's whole; one that names the same model (or none) updates
+        its fields; a field the resulting model does not read is a ValueError naming it
+        (the server's Strict parse refuses it). Other override fields are sent as given:
+        the server answers for them.
+    Annotate mode (labels recorded, not filtered) rebuilds nothing; the overrides merge the
+    same way, and the resulting labels.change_cost is checked too: any model but "forbid"
+    is a ValueError naming it (the server refuses a change cost in that mode), and so is a
+    field forbid does not read.
     A label alive at a leaf that does not cover the continuation's whole tail is not among
     the continuation's labels, so it is not seeded and the continuation may lack its
     lineage: stated in .notes and in .left_out (why 'alive_not_seeded').
@@ -2540,7 +2719,8 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fal
     only when the rebuilt pool is the same for every walk (their continuations carry the
     same labels, or no switch is possible); otherwise IncompatibleContinuations names
     next_requests(), one request per walk. Keyword overrides deep-merge into the
-    strategy; release, graph and graph_path are request-level. Raises MissingEnvelope on
+    strategy (labels.change_cost as described above); release, graph and graph_path are
+    request-level. Raises MissingEnvelope on
     a body-only graphlet. budget= (stage L) a LocalBudget, not the request's loss budget:
     the continuations, the rebuilt labels.extra and the switch searches are charged; a
     stop raises, with no partial. Any other value of budget= is, as before stage L, a
@@ -2625,8 +2805,8 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
             _charge_entry_copy(lb, k_env)
             _charge_entry_copy(lb, k_ov)
         final = copy.deepcopy(strategy)
-        _deep_merge(final, {k: v for k, v in overrides.items()
-                            if k not in ('release', 'graph', 'graph_path')})
+        _merge_overrides(final, {k: v for k, v in overrides.items()
+                                 if k not in ('release', 'graph', 'graph_path')})
         flab = _section(final, 'labels')
         if lb is not None:
             lb.charge(W_ELEM * len(_entries_of(flab.get('change_cost'))))
@@ -2720,27 +2900,22 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
             # (the review of the stage-3 fixes, P3: a chain through a kept extra label was
             # not searched, and the note understated what the continuation may miss)
             mine = _unique_pairs([(l, x) for l, x in zip(c.labels, c.losses) if x != math.inf])
-            pool = [l.name for l in g.labels]
-            reach_of = [(p, _switch_reach(cost, [p.name], pool, budget - x, lb=lb) or {})
-                        for p, x in mine]
-            lost = []
-            for l in dropped:
-                via = [p for p, r in reach_of if l.name in r]
-                lost.append('%s%s' % (_shown(l.name), ' (reachable for %s within its own '
-                                      'remaining budget)' % ', '.join(_shown(p.name)
-                                                                      for p in via)
-                                      if via else ''))
+            via, any_reach = _left_out_reach(g, cost, mine, budget, dropped, lb)
+            lost = ['%s%s' % (_shown(l.name), ' (reachable for %s within its own remaining '
+                                              'budget)' % ', '.join(_shown(p.name) for p in v)
+                              if v else '')
+                    for l, v in zip(dropped, via)]
             notes.append(
                 'labels.extra leaves out %s%s: no chain of switches from a label of the '
                 'continuation enters %s within loss_budget %s, and the server refuses an '
                 'unreachable extra label%s'
-                % (', '.join(lost[:8]) + (' and %d more' % (len(lost) - 8)
-                                          if len(lost) > 8 else ''),
+                % (', '.join(lost) + (' and %d more' % (len(dropped) - 8)
+                                      if len(dropped) > 8 else ''),
                    ' for walk %d' % c.leaf if len(per_walk) > 1 else '',
-                   'it' if len(lost) == 1 else 'them', _num(effective),
+                   'it' if len(dropped) == 1 else 'them', _num(effective),
                    '; one uninterrupted walk could still have entered %s from a label at a '
-                   'lower loss' % ('it' if len(lost) == 1 else 'them')
-                   if any('reachable for' in x for x in lost) else ''))
+                   'lower loss' % ('it' if len(dropped) == 1 else 'them')
+                   if any_reach else ''))
         # Each continued label's own branches at the leaf (T), not C's smallest. The server
         # resets branch state for a new seed, so the allowance is reduced as the loss budget
         # is: by the largest count, conservative for the labels that used fewer (the stage-2
@@ -2817,7 +2992,15 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
             request[k] = overrides.pop(k)
     if lb is not None:
         _charge_entry_copy(lb, k_ov)          # the request's own copy of the override's
-    _deep_merge(strategy, overrides)
+    # the same merge as |final|'s (a model change replaces change_cost; None for an object
+    # section is refused), in annotate mode too
+    _merge_overrides(strategy, overrides)
+    if g.mode == 'annotate':
+        # constrain mode checks the merged cost before its rebuild reads it (|final|);
+        # annotate mode has no rebuild, so its request was built unchecked and the server
+        # refused it (the review of the P3 fixes)
+        labs = strategy.get('labels')
+        _check_annotate_cost(labs.get('change_cost') if isinstance(labs, dict) else None)
     # the echo carries the retrieval's cap: an override output.coordinates false (the
     # resource stop's drop_coordinates) would otherwise make every continuation, deepen()
     # and traverse_continue a 400 (revision 2, C-N6)
@@ -2905,6 +3088,14 @@ def _shown(name, limit=32):
     return repr(name if len(name) <= limit else name[:limit] + '...')
 
 
+def _shown_bytes(name, limit=32):
+    """A bound of the bytes _shown(name) writes, without writing them: its quotes and each
+    of at most limit + 3 characters -- an ASCII one kept or escaped by a backslash, any
+    other escaped as \\U........ at worst."""
+    n = min(len(name), limit + 3)
+    return 2 + (2 * n if name.isascii() else 10 * n)
+
+
 def resubmittable_names(g, labels):
     """The names of |labels| (selectors) as a request would carry them; raises
     UnverifiableLabelName when one may resolve to another label (see continuation)."""
@@ -2915,12 +3106,32 @@ def resubmittable_names(g, labels):
     return [l.name for l in labs]
 
 
-def _deep_merge(dst, src):
-    for k, v in src.items():
-        if isinstance(v, dict) and isinstance(dst.get(k), dict):
-            _deep_merge(dst[k], v)
+def _merge_overrides(strategy, overrides, path='strategy'):
+    """Deep-merge the keyword overrides of next_request() into |strategy| as the server will
+    read the result (L8, the review of 2026-10-06):
+      * labels.change_cost is one unit: an override that names another model replaces the
+        retrieval's whole (a field-by-field merge kept the old model's fields -- a constant's
+        value under a table, a table's default and entries under a constant -- which the
+        server's Strict parse refuses, so no continuation could change its cost model);
+        one that names the same model, or none, updates its fields;
+      * None for a section the strategy holds as an object (labels, labels.change_cost,
+        branching, bounds, ...) is a ValueError naming it: it was read as {} or as forbid
+        by the rebuild and then sent as JSON null, which the server refuses ("expected an
+        object"), dropping the rebuilt labels.extra, loss_budget or max_label_branches."""
+    for k, v in overrides.items():
+        here = '%s.%s' % (path, k)
+        cur = strategy.get(k)
+        if v is None and isinstance(cur, dict):
+            raise ValueError('%s is an object, not None: the server refuses null there (omit '
+                             'the override to keep the retrieval\'s)' % here)
+        if isinstance(v, dict) and isinstance(cur, dict):
+            if here == 'strategy.labels.change_cost' and 'model' in v \
+                    and v['model'] != cur.get('model', 'forbid'):
+                strategy[k] = copy.deepcopy(v)
+            else:
+                _merge_overrides(cur, v, here)
         else:
-            dst[k] = copy.deepcopy(v)
+            strategy[k] = copy.deepcopy(v)
 
 
 # ------------------------------------------------------------------ views
@@ -3361,7 +3572,11 @@ def compare(a, b, *, arm=None, labels=None, mode='claims', budget=None):
     affected. A side whose merges all show their majority parent displays what either rule
     would.
 
-    The cost follows both DAGs up to the depth. Without a budget (the default) no work or
+    The cost follows both DAGs up to the depth -- each segment read once per side (L12: in
+    modes walks and prefix_subset each walk's chain was read again per walk, quadratic on
+    a comb) -- and, in those modes, the walks' spellings to it, which on a deep comb grow
+    as the square of the depth, as an export of its walks does. Without a budget (the
+    default) no work or
     allocation budget applies; budget= (stage L) never raises for the budget: a stopped
     comparison RETURNS comparable 'unknown', equal None, no difference lists and
     local_stop (the stop: resource, phase, how far keying got) -- a one-sided list from a
@@ -3756,34 +3971,37 @@ def _price_restricted_claims(t, g, side, depth):
 
 
 def _price_cuts(t, g, side, depth):
-    """_cuts()'s charges into |t| (the cuts' anchors found as _cuts() finds them);
-    -> the distinct cuts."""
+    """_cuts()'s charges into |t| (the cuts found as _cuts() finds them, and the one pass
+    that makes them priced by _cut_prices(), as _cuts() charges them); -> the distinct
+    cuts."""
     a = g.arms[side]
     segs = a.segments
     derive.uses(t, g, a, 'leaves', 'paths', 'cut_cost',
                 *(('segment_ops',) if g.mode == 'constrain' else ()))
     cost = derive.cut_cost(a, g.mode)
     held = _cut_transient(t, g, a)
-    n0 = len(segs[0].entry) if segs else 0
-    t.charge(W_ELEM * len(segs))
-    cut_bytes = TUPLE + LIST + dict_bytes(n0) + set_bytes(n0) + STR
+    t.charge((W_ELEM + W_STEP) * len(segs))
     if depth <= 0:
         return 1
-    seen = set()
-    for leaf in restricted_leaves(a, depth):
-        m = min(segs[leaf].end_bp, depth)
-        k = None
-        if m:
-            k = leaf
-            while segs[k].from_bp >= m:
-                k = segs[k].parents[0]
-        if (k, m) not in seen:
-            seen.add((k, m))
-            tr = 0 if k is None else held[k]
-            t.charge(W_ELEM + (0 if k is None else cost[k]), cut_bytes + m + tr)
+    plan = _cut_plan(a, depth)
+    pr = _cut_prices(g, a, plan, cost, held)
+    # the pass's charges in the pass's own order, so that the estimate's account rises and
+    # falls as the comparison's does
+    if plan['roots']:
+        t.charge(0, pr['pass'])
+    for step, x, m, _ in _cut_steps(plan, segs):
+        if step == 'cut':
+            w, keep, tr = pr['cut'](x, m)
+            t.charge(w, keep + tr)
             t.release(tr)
+        elif step == 'enter':
+            t.charge(pr['seg'](x), held[x])
+            t.release(held[x])
+    if plan['roots']:
+        t.release(pr['pass'])
+    for _ in plan['rows']:
         t.charge(W_ELEM, TUPLE + 3 * LIST_ITEM)
-    return len(seen)
+    return len(plan['keys'])
 
 
 def _clipped_summary_price(t, g, arm):
@@ -4018,34 +4236,17 @@ def restricted_leaves(arm, depth):
             if s.from_bp < depth and (s.leaf is not None or s.end_bp >= depth)]
 
 
-def _cuts(g, side, depth, memo, cb=None):
-    """[(leaf, m, cut info)] for every leaf of the arm's DAG restricted to [0, depth)
-    (restricted_leaves), m = min(its end, depth). Leaves sharing the segment that holds
-    base m - 1 share one cut: the work is the distinct anchors' chains up to the depth,
-    not every walk's whole chain (B1). Memoized per comparison in |memo|."""
-    key = (id(g), side, depth)
-    got = memo.get(key)
-    if got is not None:
-        return got
-    a = g.arms[side]
+def _cut_plan(a, depth):
+    """The cuts of _cuts() for the DAG restricted to [0, depth) (depth > 0) and the tree one
+    pass makes them in: {rows: [(leaf, k, m)] in restricted_leaves() order, m = min(its
+    end, depth), k the segment holding base m - 1 (None for m = 0); keys: the distinct
+    (k, m), in their first row's order; wanted: k -> its m's; marked: the segments a cut's
+    chain passes through whole (each anchor's first-parent ancestors); kids: segment -> its
+    first-parent children among the marked segments and the anchors, in id order; roots;
+    dep: segment -> the length of its chain}. Structural: _price_cuts() reads the same
+    plan."""
     segs = a.segments
-    infos = {}
-    out = []
-    if cb is not None:
-        # cut_cost reads segment_ops (constrain): charged with it (it was built uncharged)
-        derive.uses(cb, g, a, 'leaves', 'paths', 'cut_cost',
-                    *(('segment_ops',) if g.mode == 'constrain' else ()))
-        cost = derive.cut_cost(a, g.mode)
-        held = _cut_transient(cb, g, a)
-        n0 = len(segs[0].entry) if segs else 0
-        cb.charge(W_ELEM * len(segs))
-        cut_bytes = TUPLE + LIST + dict_bytes(n0) + set_bytes(n0) + STR
-    if depth <= 0:
-        # nothing is certified: one empty cut with the boundary labels, when there is a walk
-        if derive.paths(a):
-            out.append((None, 0, _cut_info(g, a, None, 0)))
-        memo[key] = out
-        return out
+    rows, keys, wanted = [], [], {}
     for leaf in restricted_leaves(a, depth):
         m = min(segs[leaf].end_bp, depth)
         if m == 0:
@@ -4054,18 +4255,256 @@ def _cuts(g, side, depth, memo, cb=None):
             k = leaf                          # holds base m - 1 when it reaches the depth
             while segs[k].from_bp >= m:      # zero-length segments at the leaf's end
                 k = segs[k].parents[0]
-        info = infos.get((k, m))
-        if info is None:
-            if cb is not None:
-                tr = 0 if k is None else held[k]
-                cb.charge(W_ELEM + (0 if k is None else cost[k]), cut_bytes + m + tr)
-            info = infos[(k, m)] = _cut_info(g, a, k, m)
-            if cb is not None:
-                cb.release(tr)
+        rows.append((leaf, k, m))
+        ms = wanted.setdefault(k, [])
+        if m not in ms:
+            ms.append(m)
+            keys.append((k, m))
+    marked = set()
+    for k in wanted:
+        if k is None:
+            continue
+        p = segs[k].parents
+        x = p[0] if p else None
+        while x is not None and x not in marked:
+            marked.add(x)
+            p = segs[x].parents
+            x = p[0] if p else None
+    kids, roots, dep = {}, [], {}
+    # parents come first (segment ids): a node's first parent is marked, so already seen
+    for x in sorted(marked.union(k for k in wanted if k is not None)):
+        p = segs[x].parents
+        if p:
+            kids.setdefault(p[0], []).append(x)
+            dep[x] = dep[p[0]] + 1
+        else:
+            roots.append(x)
+            dep[x] = 1
+    return {'rows': rows, 'keys': keys, 'wanted': wanted, 'marked': marked, 'kids': kids,
+            'roots': roots, 'dep': dep}
+
+
+def _cut_prices(g, a, plan, cost, held):
+    """What _cuts() charges for |plan| (work model 2: L12, the review of 2026-10-06): each
+    segment the pass reads whole once -- its own part of derive.cut_cost (its pieces of
+    displayed support, their sets, the labels supporting it, its bases), with the
+    transient of reading it (held, released) -- and per cut: its anchor's own part when it
+    is read up to the cut only, the prefix joined from the pieces on the chain (a unit per
+    8 pieces, and per 256 bases), its label set and its {label: j} built from the running
+    state (a unit per 2 labels), the cut kept (its tuple, prefix, set and dict) -- and the
+    pass's running state (the intersection, the dropped labels and their undo lists, the
+    pieces and the stack), held for the pass. Work model 1 charged every cut its whole
+    chain's cut_cost: the chains were re-read per cut (quadratic on a comb)."""
+    segs = a.segments
+    n0 = len(segs[0].entry) if segs else 0
+    nodes = list(plan['dep'])
+    if g.mode == 'constrain':
+        ops_ = derive.segment_ops(a)
+        h_inter = max((len(segs[x].entry) + ops_[x] for x in nodes), default=0)
+        h_have = n0 + h_inter
+    else:
+        h_inter = h_have = n0
+    out_bytes = TUPLE + LIST + dict_bytes(h_have) + set_bytes(h_inter) + STR
+    marked = plan['marked']
+    dep = plan['dep']
+
+    def own(x):
+        p = segs[x].parents
+        return cost[x] - (cost[p[0]] if p else 0)
+
+    def cut(k, m):
+        """-> (work, bytes kept, transient bytes released after) of cut (k, m)."""
+        if k is None:
+            return W_ELEM, out_bytes, 0
+        part = 0 if k in marked else own(k)
+        tr = 0 if k in marked else held[k]
+        return (W_ELEM + part + (dep[k] >> 3) + (m >> 8) + ((n0 + h_have) >> 1),
+                out_bytes + m, tr)
+    pass_bytes = set_bytes(h_inter) + dict_bytes(h_have) + h_have * (INT + LIST_ITEM) \
+        + list_bytes(len(nodes)) + len(nodes) * (LIST + TUPLE + 32)
+    return {'seg': own, 'cut': cut, 'pass': pass_bytes}
+
+
+def _cuts(g, side, depth, memo, cb=None):
+    """[(leaf, m, cut info)] for every leaf of the arm's DAG restricted to [0, depth)
+    (restricted_leaves), m = min(its end, depth). Leaves sharing the segment that holds
+    base m - 1 share one cut (B1), and all cuts are made in ONE parents-first pass over
+    their chains (_cut_pass()): each segment's pieces are read once, not once per cut
+    whose chain passes through it (L12, the review of 2026-10-06: a comb of 4,000 walks
+    re-read 16 M segment pieces, and rewrote {label: j} for every supporting label at every
+    piece: 7.9 s for a compare of _wide(500, 400) whose FASTA takes 1 ms). The cut infos are
+    _cut_info()'s, value for value. Memoized per comparison in |memo|."""
+    key = (id(g), side, depth)
+    got = memo.get(key)
+    if got is not None:
+        return got
+    a = g.arms[side]
+    segs = a.segments
+    out = []
+    if cb is not None:
+        # cut_cost reads segment_ops (constrain): charged with it (it was built uncharged)
+        derive.uses(cb, g, a, 'leaves', 'paths', 'cut_cost',
+                    *(('segment_ops',) if g.mode == 'constrain' else ()))
+        cost = derive.cut_cost(a, g.mode)
+        held = _cut_transient(cb, g, a)
+        # the restricted leaves' scan and the marking of their chains (work model 2)
+        cb.charge((W_ELEM + W_STEP) * len(segs))
+    if depth <= 0:
+        # nothing is certified: one empty cut with the boundary labels, when there is a walk
+        if derive.paths(a):
+            out.append((None, 0, _cut_info(g, a, None, 0)))
+        memo[key] = out
+        return out
+    plan = _cut_plan(a, depth)
+    pr = _cut_prices(g, a, plan, cost, held) if cb is not None else None
+    infos = _cut_pass(g, a, plan, cb, pr, held if cb is not None else None)
+    for leaf, k, m in plan['rows']:
         if cb is not None:
             cb.charge(W_ELEM, TUPLE + 3 * LIST_ITEM)
-        out.append((leaf, m, info))
+        out.append((leaf, m, infos[(k, m)]))
     memo[key] = out
+    return out
+
+
+def _cut_steps(plan, segs):
+    """The steps of the pass over plan's tree, in order (depth first, parents first, each
+    node's children in id order): ('cut', k, m, partial) -- the cut (k, m), read up to m on
+    the parent's state when |partial|, else from the state after k -- ('enter', x, None,
+    None) -- segment x read whole -- and ('leave', x, None, None). _cuts() works through
+    them; _price_cuts() charges them in the same order."""
+    wanted, marked, kids = plan['wanted'], plan['marked'], plan['kids']
+    for m in wanted.get(None, ()):
+        yield 'cut', None, m, False
+    stack = [(r, False) for r in reversed(plan['roots'])]
+    while stack:
+        x, leaving = stack.pop()
+        if leaving:
+            yield 'leave', x, None, None
+            continue
+        if x not in marked:
+            # an anchor below which no cut lies: each of its cuts on its parent's state
+            for m in wanted[x]:
+                yield 'cut', x, m, True
+            continue
+        # a segment read whole: first the cuts ending inside it (none, as a rule: a
+        # segment a cut's chain passes through ends before that cut's anchor, so the cut
+        # of its own reaches its end), then its pieces, its cuts and the subtrees below
+        end = segs[x].end_bp
+        for m in wanted.get(x, ()):
+            if m < end:
+                yield 'cut', x, m, True
+        yield 'enter', x, None, None
+        for m in wanted.get(x, ()):
+            if m >= end:
+                yield 'cut', x, m, False
+        stack.append((x, True))
+        for c in reversed(kids.get(x, ())):
+            stack.append((c, False))
+
+
+def _cut_pass(g, a, plan, cb, pr, held):
+    """The cut infos of plan['keys'] -> {(k, m): info}, in one depth-first pass over the
+    first-parent tree of their chains (_cut_steps()): a running state -- the walking-order
+    pieces, the intersection of the displayed support sets, the labels dropped from it
+    with the end of their support -- is extended by each segment's pieces on the way down
+    and restored on the way up (an undo per segment), so a segment is read once for all
+    the cuts below it. A cut (k, m) is its anchor's pieces up to m on its parent's state.
+    Each info is _cut_info(g, a, k, m)'s: (the prefix, None when a segment of the chain
+    has no bases; the labels supporting all of [0, m); {label: j} -- 0 for a root entry
+    label that never supported a piece, the end of the last piece a label supported
+    before it dropped out, min(the last piece's end, m) for those supporting it all) --
+    the {label: j} in another key order (its readers do not depend on it)."""
+    segs = a.segments
+    entry = segs[0].entry if segs else ()
+    constrain = g.mode == 'constrain'
+    st = {'inter': None if constrain else set(entry), 't': 0, 'none': 0}
+    pieces = []
+    dropped = {}
+
+    def apply(x, m):
+        """Extend the state by segment x's pieces up to m (None: all) -> its undo."""
+        s = segs[x]
+        t0 = st['t']
+        init = False
+        drops = []
+        if s.walk is None:
+            st['none'] += 1
+        else:
+            pieces.append(s.walk if m is None or s.end_bp <= m else s.walk[:m - s.from_bp])
+        inter = st['inter']
+        for f, t, labs in _segment_support(g, a, s):
+            if m is not None and f >= m:
+                break
+            if inter is None:
+                inter = st['inter'] = set(labs)
+                init = True
+            else:
+                d = inter - labs
+                if d:
+                    # each label leaves the intersection once on a chain: its support
+                    # ends with the previous piece (0 before any piece)
+                    for l in d:
+                        dropped[l] = st['t']
+                    inter -= d
+                    drops.extend(d)
+            st['t'] = t
+        return (s, init, drops, t0)
+
+    def undo(u):
+        s, init, drops, t0 = u
+        for l in drops:
+            del dropped[l]
+        if init:
+            st['inter'] = None
+        elif drops:
+            st['inter'].update(drops)
+        st['t'] = t0
+        if s.walk is None:
+            st['none'] -= 1
+        else:
+            pieces.pop()
+
+    def info(m):
+        inter = st['inter']
+        have = {l: 0 for l in entry}
+        have.update(dropped)
+        if inter:
+            tm = min(st['t'], m)
+            for l in inter:
+                have[l] = tm
+        return (None if st['none'] else ''.join(pieces),
+                frozenset(inter) if inter else frozenset(), have)
+
+    out = {}
+    undos = {}
+    if cb is not None and plan['roots']:
+        cb.charge(0, pr['pass'])
+    for step, x, m, partial in _cut_steps(plan, segs):
+        if step == 'cut':
+            if cb is not None:
+                w, keep, tr = pr['cut'](x, m)
+                cb.charge(w, keep + tr)
+            if x is None:
+                got = _cut_info(g, a, None, m)
+            elif partial:
+                u = apply(x, m)
+                got = info(m)
+                undo(u)
+            else:
+                got = info(m)
+            if cb is not None:
+                cb.release(tr)
+            out[(x, m)] = got
+        elif step == 'enter':
+            if cb is not None:
+                cb.charge(pr['seg'](x), held[x])
+            undos[x] = apply(x, None)
+            if cb is not None:
+                cb.release(held[x])
+        else:
+            undo(undos.pop(x))
+    if cb is not None and plan['roots']:
+        cb.release(pr['pass'])
     return out
 
 

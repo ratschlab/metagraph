@@ -366,28 +366,36 @@ class TestFinding7UnderLocalBudgets(unittest.TestCase):
                     self.assertLessEqual(_size(out), MIN_MAX_BYTES)
 
     def test_a_list_or_no_entries_is_still_charged_by_its_count(self):
-        # a constant override deep-merged onto a table's strategy keeps the table's list:
-        # valid, and charged by its count (2 lwu per entry in work model 1; 2 W_ELEM, the
-        # check and the build, in work model 2); None reads as no entries
+        # entries are charged by their count before the check reads them (2 lwu per entry
+        # in work model 1; 2 W_ELEM, the check and the build, in work model 2). Under a model
+        # that does not read them they are refused, as the server's Strict parse refuses
+        # them (L8, the review of 2026-10-06): a constant override deep-merged onto a table's
+        # strategy kept that table's list, which passed here and was refused there; an
+        # override that names another model now replaces the cost whole (TestL8 in
+        # test_traverse_review_p3.py)
         def usage(cost):
             b = LocalBudget()
-            got = ops._switch_reach(cost, ['A'], ['B', 'C'], 2, lb=b)
+            try:
+                got = ops._switch_reach(cost, ['A'], ['B', 'C'], 2, lb=b)
+            except ValueError as e:
+                got = str(e)
             return got, b.usage()['work_units']
         base = {'model': 'constant', 'value': 1}
         got0, w0 = usage(base)
         self.assertEqual({'B': 1.0, 'C': 1.0}, got0)
-        self.assertEqual((got0, w0), usage(dict(base, entries=None)))
-        self.assertEqual((got0, w0), usage(dict(base, entries=[])))
         entries = [['A', 'B', 0.5], ['B', 'C', 0.5], ['X', 'Y', 1]]
         per = 2 * ops.W_ELEM
-        self.assertEqual((got0, w0 + per * len(entries)), usage(dict(base, entries=entries)))
-        self.assertEqual((got0, w0 + per * len(entries)),
-                         usage(dict(base, entries=tuple(map(tuple, entries)))))
-        # under forbid nothing is reachable, a list or not
-        self.assertEqual({}, usage({'model': 'forbid', 'entries': entries})[0])
-        req = self.g.next_request('right', [1], budget=LocalBudget(),
-                                  **self.overrides(dict(base, entries=entries)))
-        self.assertIsNotNone(req)
+        for given, k in ((None, 0), ([], 0), (entries, 3), (tuple(map(tuple, entries)), 3)):
+            got, w = usage(dict(base, entries=given))
+            self.assertIn('labels.change_cost.entries is not a field of model', got)
+            self.assertEqual(w0 + per * k, w)
+        for model in ({'model': 'forbid'}, {}):
+            got, w = usage(dict(model, entries=entries))
+            self.assertIn('labels.change_cost.entries is not a field of model', got)
+        with self.assertRaises(ValueError) as e:
+            self.g.next_request('right', [1], budget=LocalBudget(),
+                                **self.overrides(dict(base, entries=entries)))
+        self.assertIn('labels.change_cost.entries', str(e.exception))
 
     def test_max_label_branches_that_is_no_count(self):
         plain = GraphletTools(self.store, {'mini': FakeClient()})

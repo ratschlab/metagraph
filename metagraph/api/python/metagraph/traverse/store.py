@@ -35,19 +35,57 @@ its entry file on first use (get, free, `in`; list() lists the spool's entries),
 another process freed or expired answers as unknown (as an expired, replayable one where
 its tombstone keeps a request), and an expiry re-reads the entry file's last use first. A
 body missing from the spool expires its entry, on a parse and on a copy without one.
+
+The body's lifecycle is serialized across the processes (and the threads of one store) by
+an exclusive lock of the spool (an fcntl.flock of spool/.lock, the review of 2026-10-06,
+O21): a put holds it from the check of its body to the write of its entry file, a free or
+an expiry from its scan of the entry files to the unlink of the body. Without it a free in
+one process could delete a body between another's check of it and the entry naming it --
+the put returned a handle whose body was gone (about half of the handles of three processes
+storing one body in a loop). Limits: a platform without fcntl (Windows), a spool whose
+file system refuses the lock file or flock (read-only; some network file systems: the
+store's _lock.unlocked names the error) has the threads' lock only, and a process of an
+earlier library version sharing the spool takes none, so the race remains against it (and
+the orphan pass below spares a body only by its age).
+A body that no entry file names any more is deleted by sweep() once it is older than
+_ORPHAN_GRACE_S (a free that kept it for an entry another process had already removed, or a
+process killed between a body and its entry, left it for good). Body GC reads each entry
+file of another process once (its digest is cached by name and inode; a free or a sweep
+listed and parsed every such file again, a sweep once per expired entry: O23). Body GC
+deletes nothing while it cannot tell which bodies the entries name: when the entry files
+cannot be listed, or one of them is there but cannot be read (EACCES, EMFILE, EIO) -- a
+free then keeps its body and a sweep its orphans, until the file can be read or is
+removed. An entry file that is no JSON (damaged; no store can read it either) names no
+body.
+
+Damage (O17): a body or entry file is written to a temporary name, flushed to the device
+(fsync) and renamed, so a crash leaves the old file or the new one, never a new name on an
+empty or torn file -- on Linux; macOS's fsync does not flush the drive's own cache
+(F_FULLFSYNC is not used), so a power loss there can still lose the latest writes. A
+stored body is checked against its digest (its name) when it is read -- a parse on demand
+and a copy without one -- and before a put reuses it (once per process and file); a body
+that fails is deleted and its entry expires (replayable when it kept a request), so the
+next put of the same body writes it again. A damaged entry file is skipped as before.
 """
 
 import collections
 import dataclasses
+import errno
 import hashlib
 import json
 import os
 import re
 import secrets
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+try:
+    import fcntl
+except ImportError:          # Windows: the threads' lock only (stated in the module text)
+    fcntl = None
 
 from . import budget as _B
 from . import coords
@@ -236,12 +274,22 @@ def _o_with_delivery(body, start, delivery):
     return None, None, None
 
 
+# a body no entry file names is deleted by sweep() only once it is this old (seconds, by its
+# modification time): a put of a library version without the spool lock writes its body
+# before its entry, and a body it has just written must not be taken for an orphan
+_ORPHAN_GRACE_S = 3600
+_HASH_CHUNK = 1 << 20
+
+
 def _write_atomic(path, data):
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(prefix='.tmp-', dir=d)
     try:
-        # one write, without the 128 KiB buffer a buffered file holds (parser._write_all())
-        _write_all(fd, data)
+        # one write, without the 128 KiB buffer a buffered file holds (parser._write_all()),
+        # flushed before the rename: a rename to a new name is not ordered after the data on
+        # every file system (ext4's delayed allocation), and a crash left the new name on an
+        # empty file -- a body that every later put of the same body reused (O17)
+        _write_all(fd, data, sync=True)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -249,6 +297,93 @@ def _write_atomic(path, data):
         except OSError:
             pass
         raise
+
+
+def _file_sha256(path):
+    """The sha256 of the file at |path| (hex), read in pieces; None when it is gone."""
+    h = hashlib.sha256()
+    try:
+        with open(path, 'rb', buffering=0) as f:
+            while True:
+                chunk = f.read(_HASH_CHUNK)
+                if not chunk:
+                    break
+                h.update(chunk)
+    except FileNotFoundError:
+        return None
+    return h.hexdigest()
+
+
+# a lock file the spool's file system will not create (a read-only spool: nothing can be
+# deleted there either) or a flock it does not support (some network file systems): the
+# store goes on with the threads' lock only, as it did before the spool lock, and says so
+# in unlocked (the module text states the limit)
+_NO_LOCK_FILE = frozenset((errno.EROFS, errno.EACCES, errno.EPERM))
+_NO_FLOCK = frozenset(x for x in (getattr(errno, n, None) for n in (
+    'ENOLCK', 'EOPNOTSUPP', 'ENOTSUP', 'ENOSYS', 'EINVAL')) if x is not None)
+
+
+class _SpoolLock:
+    """The exclusive lock of one spool: an fcntl.flock of spool/.lock (other processes, and
+    other stores of the same spool in this process: a flock belongs to its open file) and
+    an RLock (the threads of this store). Re-entrant within a thread, so a locked step may
+    call another (free -> GC, get -> expire). Two stores of one spool must not nest their
+    locked calls in one thread: the second flock would wait for the first. |unlocked|: why
+    the last hold had no process lock (None: it had one, or the platform has no fcntl)."""
+
+    __slots__ = ('path', '_rlock', '_depth', '_fd', 'unlocked')
+
+    def __init__(self, spool_dir):
+        self.path = os.path.join(spool_dir, '.lock')
+        self._rlock = threading.RLock()
+        self._depth = 0
+        self._fd = None
+        self.unlocked = None
+
+    def __enter__(self):
+        self._rlock.acquire()
+        if self._depth == 0 and fcntl is not None:
+            try:
+                self._fd = self._flock()
+            except BaseException:
+                self._rlock.release()
+                raise
+        self._depth += 1
+        return self
+
+    def _flock(self):
+        """Open and flock the lock file -> its descriptor; None where the file system
+        refuses either (_NO_LOCK_FILE, _NO_FLOCK: noted in unlocked)."""
+        try:
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as e:
+            if e.errno in _NO_LOCK_FILE:
+                self.unlocked = errno.errorcode.get(e.errno, str(e.errno))
+                return None
+            raise
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except BaseException as e:
+            os.close(fd)
+            if isinstance(e, OSError) and e.errno in _NO_FLOCK:
+                self.unlocked = errno.errorcode.get(e.errno, str(e.errno))
+                return None
+            raise
+        self.unlocked = None
+        return fd
+
+    def __exit__(self, *exc):
+        self._depth -= 1
+        try:
+            if self._depth == 0 and self._fd is not None:
+                fd, self._fd = self._fd, None
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(fd)
+        finally:
+            self._rlock.release()
+        return False
 
 
 class GraphletStore:
@@ -273,7 +408,19 @@ class GraphletStore:
         self.max_body_bytes = None if max_body_mb is None else int(max_body_mb * (1 << 20))
         for sub in ('bodies', 'entries', 'tombstones'):
             os.makedirs(os.path.join(spool_dir, sub), exist_ok=True)
+        # the body lifecycle across the processes sharing the spool (O21)
+        self._lock = _SpoolLock(spool_dir)
         self._entries = {}
+        # digest -> the handles of this index whose entries name it: the body GC's own test
+        # (an any() over every entry per freed body before, O23)
+        self._by_digest = {}
+        # entry file name -> (its inode, the digest it names), for the entry files of other
+        # processes: an entry's digest never changes, and a file is only ever replaced
+        # whole (a new inode), so each is read once (O23: read again per freed body)
+        self._foreign = {}
+        # digest -> (inode, mtime_ns, size) of the body file last checked against it (O17:
+        # a put reuses a body once its content is known to be the digest's)
+        self._verified = {}
         self._ram = collections.OrderedDict()     # handle -> (graphlet, bytes, last use)
         self._ram_bytes = 0
         # handle -> (bytes without the caches, the caches' signature when measured)
@@ -285,7 +432,7 @@ class GraphletStore:
                     e = self._read_entry(os.path.join(spool_dir, 'entries', name))
                 except (OSError, ValueError):
                     continue
-                self._entries[e.handle] = e
+                self._index(e)
                 # the accessed time the entry file holds: the disk TTL's staleness test
                 # reads it (VMD-01: unseeded, a handle used more often than every tenth
                 # of the TTL never had its use written, and expired after a restart)
@@ -301,6 +448,25 @@ class GraphletStore:
 
     def _tomb_path(self, handle):
         return os.path.join(self.spool_dir, 'tombstones', handle + '.json')
+
+    def _index(self, e):
+        """Add entry |e| to this process's index (by handle and by the digest it names)."""
+        old = self._entries.get(e.handle)
+        if old is not None:
+            self._unindex(e.handle)
+        self._entries[e.handle] = e
+        self._by_digest.setdefault(e.digest, set()).add(e.handle)
+
+    def _unindex(self, handle):
+        """Remove |handle| from this process's index -> its entry (None: not indexed)."""
+        e = self._entries.pop(handle, None)
+        if e is not None:
+            hs = self._by_digest.get(e.digest)
+            if hs is not None:
+                hs.discard(handle)
+                if not hs:
+                    del self._by_digest[e.digest]
+        return e
 
     def _read_entry(self, path):
         """An entry file -> Entry; ValueError for a file that is no entry (not an object,
@@ -339,6 +505,8 @@ class GraphletStore:
                 return h
 
     def _store_body(self, body):
+        """Make the spool hold |body| -> (digest, bytes). Called under the spool lock, with
+        the entry that names the body written before the lock is let go (O21)."""
         data = utf8_bytes(body)
         if self.max_body_bytes is not None and len(data) > self.max_body_bytes:
             raise StoreLimitExceeded('the graphlet body has %d bytes, over the store limit of '
@@ -346,9 +514,38 @@ class GraphletStore:
                                      % (len(data), self.max_body_bytes))
         digest = hashlib.sha256(data).hexdigest()
         path = self._body_path(digest)
-        if not os.path.exists(path):
+        # an existing file is reused only once its content is the digest's: a crash could
+        # leave it empty or torn, and every later put of the same body -- a re-fetch that
+        # had just validated it -- pointed its new entry at the damaged file (O17)
+        if not self._body_intact(path, digest, len(data)):
             _write_atomic(path, data)
+            self._note_verified(path, digest)
         return digest, len(data)
+
+    def _body_intact(self, path, digest, n):
+        """Whether the body file at |path| holds the |n| bytes of |digest|: its size, then
+        its hash -- read once per process and file (inode, modification time, size), since
+        a body file is only ever replaced whole."""
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return False
+        if st.st_size != n:
+            return False
+        key = (st.st_ino, st.st_mtime_ns, st.st_size)
+        if self._verified.get(digest) == key:
+            return True
+        if _file_sha256(path) != digest:
+            return False
+        self._verified[digest] = key
+        return True
+
+    def _note_verified(self, path, digest):
+        try:
+            st = os.stat(path)
+        except OSError:
+            return
+        self._verified[digest] = (st.st_ino, st.st_mtime_ns, st.st_size)
 
     def _parse_budget(self, parse_budget):
         """The budget a parse of the store runs under: the caller's, else a fresh one of
@@ -409,15 +606,16 @@ class GraphletStore:
         summary = {k: v for k, v in result.items() if k != 'graphlet'}
         if delivery is not None and isinstance(summary.get('outcome'), dict):
             summary['outcome'] = dict(summary['outcome'], delivery=delivery)
-        digest, nbytes = self._store_body(body)
-        now = self.clock()
-        h = self._new_handle()
-        e = Entry(handle=h, request=request, index=ident, envelope=envelope,
-                  seed_summary=summary, digest=digest, bytes=nbytes, created=now,
-                  accessed=now, derived_from=derived_from, delivery=delivery, parent=parent,
-                  parsed=False, store=self)
-        self._write_entry(e)
-        self._entries[h] = e
+        with self._lock:              # from the body's check to its entry's write (O21)
+            digest, nbytes = self._store_body(body)
+            now = self.clock()
+            h = self._new_handle()
+            e = Entry(handle=h, request=request, index=ident, envelope=envelope,
+                      seed_summary=summary, digest=digest, bytes=nbytes, created=now,
+                      accessed=now, derived_from=derived_from, delivery=delivery,
+                      parent=parent, parsed=False, store=self)
+            self._write_entry(e)
+            self._index(e)
         return h
 
     def put_parsed(self, g, body, request, *, source=None, resident=True, delivery=None,
@@ -448,41 +646,51 @@ class GraphletStore:
         """Store the view |g| (a copy of the graphlet of entry |backing| with its view
         spec) WITHOUT dumping its body: the view entry shares the backing entry's stored
         body, which is what dump(g, envelope=False) writes for every body the store holds
-        (stage L: a view costs no copy of the body)."""
-        e = self.get(backing)
-        g.derived_from = derived_from or g.derived_from
-        now = self.clock()
-        h = self._new_handle()
-        ident = self._identity(g)
-        if source is not None:
-            ident['source'] = source
-        v = Entry(handle=h, request=request, index=ident,
-                  envelope=seed_envelope(g.envelope, g.seed_index) if g.envelope else {},
-                  seed_summary=g.seed_summary or {}, digest=e.digest, bytes=e.bytes,
-                  created=now, accessed=now, view=g.view, derived_from=g.derived_from,
-                  delivery=e.delivery, store=self)
-        self._write_entry(v)
-        self._entries[h] = v
+        (stage L: a view costs no copy of the body). The backing body must still be in
+        the spool: when it is gone, the backing entry expires (UnknownHandle)."""
+        with self._lock:
+            # the backing entry read, its body checked and the view's entry written under
+            # one hold of the spool lock: a free of the backing entry in another process
+            # deleted the body before the view's entry named it (O21)
+            e = self.get(backing)
+            if not os.path.exists(self._body_path(e.digest)):
+                self._expire(backing)
+                raise self._unknown(backing)
+            g.derived_from = derived_from or g.derived_from
+            now = self.clock()
+            h = self._new_handle()
+            ident = self._identity(g)
+            if source is not None:
+                ident['source'] = source
+            v = Entry(handle=h, request=request, index=ident,
+                      envelope=seed_envelope(g.envelope, g.seed_index) if g.envelope else {},
+                      seed_summary=g.seed_summary or {}, digest=e.digest, bytes=e.bytes,
+                      created=now, accessed=now, view=g.view, derived_from=g.derived_from,
+                      delivery=e.delivery, store=self)
+            self._write_entry(v)
+            self._index(v)
         self._remember(h, g, now)
         return h
 
     def _put_graphlet(self, g, body, request, source=None, *, resident=True, delivery=None,
                       parent=None):
-        digest, nbytes = self._store_body(body)
-        now = self.clock()
-        h = self._new_handle()
         ident = self._identity(g)
         if source is not None:
             ident['source'] = source
         # the envelope of THIS seed: usage reduced to the totals and its per_seed entry, the
         # rule of a saved file's J line (parser.seed_envelope)
-        e = Entry(handle=h, request=request, index=ident,
-                  envelope=seed_envelope(g.envelope, g.seed_index) if g.envelope else {},
-                  seed_summary=g.seed_summary or {},
-                  digest=digest, bytes=nbytes, created=now, accessed=now, view=g.view,
-                  derived_from=g.derived_from, delivery=delivery, parent=parent, store=self)
-        self._write_entry(e)
-        self._entries[h] = e
+        envelope = seed_envelope(g.envelope, g.seed_index) if g.envelope else {}
+        with self._lock:              # from the body's check to its entry's write (O21)
+            digest, nbytes = self._store_body(body)
+            now = self.clock()
+            h = self._new_handle()
+            e = Entry(handle=h, request=request, index=ident, envelope=envelope,
+                      seed_summary=g.seed_summary or {},
+                      digest=digest, bytes=nbytes, created=now, accessed=now, view=g.view,
+                      derived_from=g.derived_from, delivery=delivery, parent=parent,
+                      store=self)
+            self._write_entry(e)
+            self._index(e)
         if resident:
             self._remember(h, g, now)
         return h
@@ -529,7 +737,7 @@ class GraphletStore:
 
     def _forget(self, handle):
         """Drop |handle| from this process's index and RAM (its files are not touched)."""
-        self._entries.pop(handle, None)
+        self._unindex(handle)
         self._drop_ram(handle)
         self._persisted.pop(handle, None)
 
@@ -544,7 +752,7 @@ class GraphletStore:
             return None
         if e.handle != handle:
             return None
-        self._entries[handle] = e
+        self._index(e)
         self._persisted[handle] = e.accessed
         return e
 
@@ -592,15 +800,9 @@ class GraphletStore:
             return got[0]
         if got is not None:
             self._drop_ram(handle)
-        try:
-            with open(self._body_path(e.digest), 'r', encoding='utf-8', newline='') as f:
-                body = f.read()
-        except FileNotFoundError:
-            # the body is gone (removed outside this store): the entry is expired, so the
-            # handle answers as an expired one -- replayable from its request -- instead
-            # of failing on every use while it stays listed (VMD-04)
-            self._expire(handle)
-            raise self._unknown(handle) from None
+        # the stored body, checked against its digest (O17): decoded as the text file read
+        # it (newline='': the same text)
+        body = self._read_body(handle, e).decode('utf-8')
         # an entry stores {} for none: a graphlet had an envelope when either side holds
         # something (the rule of a J line, parser._attach_j: VPC-05)
         has_env = bool(e.envelope) or bool(e.seed_summary)
@@ -707,72 +909,205 @@ class GraphletStore:
     def free(self, handle):
         """Delete the entry (and its body when no other entry holds it). Freed entries
         are not replayable: the caller asked for them to go."""
-        e = self._live(handle)
-        if e is None:
-            raise self._unknown(handle)
-        self._forget(handle)
-        try:
-            os.unlink(self._entry_path(handle))
-        except OSError:
-            pass
-        self._gc_body(e.digest)
+        with self._lock:
+            e = self._live(handle)
+            if e is None:
+                raise self._unknown(handle)
+            self._forget(handle)
+            try:
+                os.unlink(self._entry_path(handle))
+            except OSError:
+                pass
+            self._gc_bodies((e.digest,))
 
-    def _gc_body(self, digest):
-        if any(x.digest == digest for x in self._entries.values()):
+    def _held_here(self, digest):
+        """Whether an entry of this process's index whose file is still there names body
+        |digest|. One whose file another process removed (freed or expired) is dropped from
+        the index here: it kept the body for good -- a free deleted its body only when no
+        entry of the index named it, stale ones included, and nothing collected it after
+        (U20-08)."""
+        for h in sorted(self._by_digest.get(digest, ())):
+            if os.path.exists(self._entry_path(h)):
+                return True
+            self._forget(h)
+        return False
+
+    def _named_on_disk(self):
+        """The digests the spool's entry files name (each read once: _foreign), or None when
+        the entries cannot be listed or one of them is there but cannot be read (then no
+        body may be deleted). Under the spool lock, so no put is between its body and its
+        entry. This process's entries are read from its index; one whose file is gone is
+        dropped from it (_held_here's rule)."""
+        entries = os.path.join(self.spool_dir, 'entries')
+        named = set()
+        seen = {}
+        mine = set()
+        try:
+            with os.scandir(entries) as it:
+                listing = [(d.name, d.inode()) for d in it if d.name.endswith('.json')]
+        except OSError:
+            return None
+        for name, ino in listing:
+            h = name[:-len('.json')]
+            e = self._entries.get(h)
+            if e is not None:
+                named.add(e.digest)
+                mine.add(h)
+                continue
+            got = self._foreign.get(name)
+            if got is None or got[0] != ino:
+                try:
+                    with open(os.path.join(entries, name), 'r', encoding='utf-8') as f:
+                        j = json.load(f)
+                except FileNotFoundError:
+                    continue              # removed since the listing: it names nothing now
+                except OSError:
+                    # an entry that is there but cannot be read now (EACCES, EMFILE, EIO):
+                    # which body it names is unknown, so this scan deletes none -- read as
+                    # naming nothing, the orphan pass deleted every old body such a live
+                    # entry named (its handle then answered as expired; the review of the
+                    # P3 fixes). The rule of a listing that fails, per file
+                    return None
+                except ValueError:
+                    continue              # no entry (not JSON, not UTF-8): no store reads it
+                d = j.get('digest') if isinstance(j, dict) else None
+                if not isinstance(d, str):
+                    continue
+                got = (ino, d)
+            seen[name] = got
+            named.add(got[1])
+        # the cache keeps the files listed now only: it never outgrows the directory
+        self._foreign = seen
+        for h in [h for h in self._entries if h not in mine]:
+            self._forget(h)
+        return named
+
+    def _gc_bodies(self, digests, *, orphans=False):
+        """Delete each body of |digests| that no entry file names any more -- of this
+        process's index or of another process's, read from the spool -- and with |orphans|
+        every body no entry file names that is older than _ORPHAN_GRACE_S (and every
+        temporary file left there as long). Under the spool lock: the scan of the entry
+        files and the unlinks happen with no put between a body and its entry (O21)."""
+        with self._lock:
+            left = [d for d in dict.fromkeys(digests) if not self._held_here(d)]
+            if not left and not orphans:
+                return
+            named = self._named_on_disk()
+            if named is None:
+                return                    # the entries cannot be read: delete nothing
+            for d in left:
+                if d not in named:
+                    self._unlink_body(d)
+            if orphans:
+                self._sweep_orphans(named)
+
+    def _sweep_orphans(self, named):
+        bodies = os.path.join(self.spool_dir, 'bodies')
+        cutoff = time.time() - _ORPHAN_GRACE_S        # file times are the wall clock's
+        try:
+            with os.scandir(bodies) as it:
+                listing = [d.name for d in it]
+        except OSError:
             return
-        if self._digest_on_disk(digest):
-            return
+        for name in listing:
+            if name.endswith('.mgt') and name[:-len('.mgt')] in named:
+                continue
+            if not (name.endswith('.mgt') or name.startswith('.tmp-')):
+                continue
+            path = os.path.join(bodies, name)
+            try:
+                if os.stat(path).st_mtime >= cutoff:
+                    continue
+                os.unlink(path)
+            except OSError:
+                continue
+            if name.endswith('.mgt'):
+                self._verified.pop(name[:-len('.mgt')], None)
+
+    def _unlink_body(self, digest):
         try:
             os.unlink(self._body_path(digest))
         except OSError:
             pass
+        self._verified.pop(digest, None)
 
-    def _digest_on_disk(self, digest):
-        """Whether an entry file this store has not loaded (another process's, sharing the
-        spool) holds body |digest|: bodies are shared by digest, so freeing one entry
-        deleted the body under another process's entry (VMD-02)."""
-        entries = os.path.join(self.spool_dir, 'entries')
+    def _read_body(self, handle, e):
+        """The bytes of entry |e|'s stored body, checked against its digest: a body that is
+        gone, or whose content is not the digest's (a crash left it empty or torn, O17),
+        expires the entry -- UnknownHandle, replayable when it kept a request -- and a
+        damaged one is deleted, so that the next put of the same body writes it again. A
+        damaged body raised a format error on every use, the entry stayed listed, and a
+        replay or a fresh fetch pointed its new entry at the same file."""
+        path = self._body_path(e.digest)
         try:
-            names = os.listdir(entries)
-        except OSError:
-            return False
-        for name in names:
-            if not name.endswith('.json') or name[:-len('.json')] in self._entries:
-                continue
+            # read at once without a buffer: a buffered file holds io.DEFAULT_BUFFER_SIZE
+            # (128 KiB from Python 3.14) beside the bytes, which no account of
+            # standalone_text() charged (graphlet_export(format=mgt) peaked above its
+            # account on 27 of 34 retrievals)
+            with open(path, 'rb', buffering=0) as f:
+                raw = f.read()
+        except FileNotFoundError:
+            # the body is gone (removed outside this store): the entry is expired, so the
+            # handle answers as an expired one -- replayable from its request -- instead
+            # of failing on every use while it stays listed (VMD-04; a copy without a
+            # parse too: the review of the level 4-5 fixes, finding 4)
+            self._expire(handle)
+            raise self._unknown(handle) from None
+        if hashlib.sha256(raw).hexdigest() == e.digest:
+            return raw
+        with self._lock:
+            # the file itself, under the lock: another put may have just replaced it with
+            # the right content (then it is read again), else it is the damaged one
+            if _file_sha256(path) == e.digest:
+                with open(path, 'rb', buffering=0) as f:
+                    raw = f.read()
+                if hashlib.sha256(raw).hexdigest() == e.digest:
+                    return raw
+            self._unlink_body(e.digest)
+            self._expire(handle)
+        raise self._unknown(handle)
+
+    def _expire(self, handle, *, gc=True):
+        """Expire |handle|: a tombstone keeps its request, its entry file goes, and with |gc|
+        its body when no entry names it any more (a sweep collects the bodies of all it
+        expired at once)."""
+        with self._lock:
+            e = self._unindex(handle)
+            if e is None:
+                return None               # dropped meanwhile (another thread's GC)
+            self._drop_ram(handle)
+            self._persisted.pop(handle, None)
+            tomb = {'handle': handle, 'request': e.request, 'index': e.index,
+                    'expired': self.clock()}
+            _write_atomic(self._tomb_path(handle), json.dumps(tomb).encode('utf-8'))
             try:
-                with open(os.path.join(entries, name), 'r', encoding='utf-8') as f:
-                    j = json.load(f)
-            except (OSError, ValueError):
-                continue
-            if isinstance(j, dict) and j.get('digest') == digest:
-                return True
-        return False
-
-    def _expire(self, handle):
-        e = self._entries.pop(handle)
-        self._drop_ram(handle)
-        self._persisted.pop(handle, None)
-        tomb = {'handle': handle, 'request': e.request, 'index': e.index,
-                'expired': self.clock()}
-        _write_atomic(self._tomb_path(handle), json.dumps(tomb).encode('utf-8'))
-        try:
-            os.unlink(self._entry_path(handle))
-        except OSError:
-            pass
-        self._gc_body(e.digest)
+                os.unlink(self._entry_path(handle))
+            except OSError:
+                pass
+            if gc:
+                self._gc_bodies((e.digest,))
+        return e
 
     def sweep(self):
         """Apply the TTLs now: -> {ram_dropped, expired, tombstones_removed}. A tombstone
         (an expired entry's request, for replay) goes ttl_tomb_s after the expiry, so the
-        spool does not grow without bound."""
+        spool does not grow without bound. The bodies the expired entries named go when no
+        entry file names them any more -- one scan of the entry files for all of them, not
+        one per expired entry (O23) -- and so does every body no entry file names that is
+        older than _ORPHAN_GRACE_S (U20-08: such a body was kept for good)."""
         now = self.clock()
         ram = [h for h, (_, _, used) in self._ram.items() if now - used > self.ttl_ram_s]
         for h in ram:
             self._drop_ram(h)
         expired = [h for h, e in self._entries.items() if now - e.accessed > self.ttl_disk_s
                    and not self._fresher_on_disk(e, now)]
-        for h in expired:
-            self._expire(h)
+        with self._lock:
+            digests = []
+            for h in expired:
+                e = self._expire(h, gc=False)
+                if e is not None:
+                    digests.append(e.digest)
+            self._gc_bodies(digests, orphans=True)
         removed = []
         tombs = os.path.join(self.spool_dir, 'tombstones')
         for name in sorted(os.listdir(tombs)):
@@ -843,23 +1178,11 @@ class GraphletStore:
         return save(g, path)
 
     def body_text(self, handle):
-        """The stored body, as received (no parse)."""
+        """The stored body, as received (no parse), checked against its digest: a body
+        that is gone or damaged expires the entry (_read_body())."""
         e = self.get(handle)
-        # read at once without a buffer: a buffered text file holds io.DEFAULT_BUFFER_SIZE
-        # (128 KiB from Python 3.14) beside the bytes and the text, which no account of
-        # standalone_text() charged (graphlet_export(format=mgt) peaked above its account on
-        # 27 of 34 retrievals). Decoded as the text file did with newline='': the same text
-        try:
-            f = open(self._body_path(e.digest), 'rb', buffering=0)
-        except FileNotFoundError:
-            # the body is gone: the entry expires, as on a parse (graphlet()) -- the copy
-            # without a parse (graphlet_save, graphlet_export(format=mgt) under local
-            # limits) answered io_error and left the entry listed (the review of the level
-            # 4-5 fixes, finding 4: VMD-04 held on the parse path only)
-            self._expire(handle)
-            raise self._unknown(handle) from None
-        with f:
-            return f.read().decode('utf-8')
+        # decoded as the text file did with newline='': the same text
+        return self._read_body(handle, e).decode('utf-8')
 
     def standalone_text(self, handle, *, budget=None):
         """The entry's standalone .mgt text -- H, the entry's J line, the body -- built
@@ -883,8 +1206,9 @@ class GraphletStore:
             # the body read, the slices of it the text is joined from, and the text: three
             # bodies at once (O2: the text was built through a copy of the body after its H
             # line and one more for the O record's delivery, four held where three were
-            # charged -- 30% over the account on an 84 KB body)
-            b.charge(e.bytes >> 8, 3 * (e.bytes + 49))
+            # charged -- 30% over the account on an 84 KB body), and the body's digest check
+            # (O17: sha256 at about 0.8 lwu per 256 bytes on the reference machine)
+            b.charge(2 * (e.bytes >> 8), 3 * (e.bytes + 49))
             if has_env or e.view is not None or e.derived_from is not None:
                 # the J line, not in e.bytes: its text, its copy in the answer and the JSON
                 # encoder's pieces (a list of chunks up to Python 3.11), by the bound
