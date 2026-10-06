@@ -192,20 +192,48 @@ def _check_frame(body):
     return head
 
 
-def _with_delivery(rest, delivery):
-    """The body after its H line with the O record's delivery token replaced (what a
-    parsed model with the entry's delivery dumps)."""
+def _unparsed_head(result, response):
+    """(the body as text, its H record's fields, the index identity it states) of
+    results[i], read WITHOUT a parse -- after the checks that need none (graphlet_bytes and
+    graphlet_lines against the body, the H record, the Z line counting its lines): what
+    put_unparsed() stores, and what an unparsed replay or continuation checks against the
+    entry it derives from before storing anything (O1)."""
+    body = result.get('graphlet')
+    if body is None:
+        raise ValueError('this result carries no graphlet')
+    if isinstance(body, (bytes, bytearray)):
+        body = bytes(body).decode('utf-8')
+    _check_transport(body, result)
+    head = _check_frame(body)
+    ident = {'ns': None if head[13] == '*' else head[13],
+             'fp': None if head[14] == '*' else head[14],
+             'meta_fp': None if head[15] == '*' else head[15],
+             'release': (response or {}).get('release') or None}
+    return body, head, ident
+
+
+def unparsed_identity(result, response):
+    """The index identity {ns, fp, meta_fp, release} a result's H record (and the response's
+    release) states, read without a parse (_unparsed_head())."""
+    return _unparsed_head(result, response)[2]
+
+
+def _o_with_delivery(body, start, delivery):
+    """(where the O record begins in |body|, where it ends, the record with its delivery
+    token replaced -- what a parsed model with the entry's delivery dumps), searched from
+    |start|; (None, None, None) without an O record."""
     code = {'inline': 'i', 'spooled': 's', 'paged': 'p'}[delivery]
-    i = 0
-    while i < len(rest):
-        j = rest.find('\n', i)
-        line = rest[i:j]
-        if line.startswith('O '):
-            f = line.split(' ')
+    i = start
+    while i < len(body):
+        j = body.find('\n', i)
+        if j < 0:
+            j = len(body)
+        if body.startswith('O ', i):
+            f = body[i:j].split(' ')
             f[4] = code
-            return rest[:i] + ' '.join(f) + rest[j:]
+            return i, j, ' '.join(f)
         i = j + 1
-    return rest
+    return None, None, None
 
 
 def _write_atomic(path, data):
@@ -373,17 +401,7 @@ class GraphletStore:
         -- so a body cut in transport is still refused. The entry is marked parsed:
         false: its identity is read from the H record, and the server's per-seed summary
         is kept as it came. A local answer needs a parse that completes first."""
-        body = result.get('graphlet')
-        if body is None:
-            raise ValueError('this result carries no graphlet')
-        if isinstance(body, (bytes, bytearray)):
-            body = bytes(body).decode('utf-8')
-        _check_transport(body, result)
-        head = _check_frame(body)
-        ident = {'ns': None if head[13] == '*' else head[13],
-                 'fp': None if head[14] == '*' else head[14],
-                 'meta_fp': None if head[15] == '*' else head[15],
-                 'release': response.get('release') or None}
+        body, head, ident = _unparsed_head(result, response)
         if source is not None:
             ident['source'] = source
         envelope = seed_envelope({k: v for k, v in response.items() if k != 'results'},
@@ -851,11 +869,21 @@ class GraphletStore:
         into the O record as a parsed model would. The text of an unparsed entry
         (Entry.parsed false) was checked for its frame only (transport, H, Z), never
         validated record by record: a parse of it may still refuse it. budget=: the copy
-        is charged."""
-        e = self.get(handle)
+        is charged (a call of its own: with its base, CALL_BASE)."""
         b = _B.resolve(budget)
+        if b is None:
+            return self._standalone_text(handle, None)
+        with b.scope('standalone_text'):
+            return self._standalone_text(handle, b)
+
+    def _standalone_text(self, handle, b):
+        e = self.get(handle)
         has_env = bool(e.seed_summary) or bool(e.envelope)
         if b is not None:
+            # the body read, the slices of it the text is joined from, and the text: three
+            # bodies at once (O2: the text was built through a copy of the body after its H
+            # line and one more for the O record's delivery, four held where three were
+            # charged -- 30% over the account on an 84 KB body)
             b.charge(e.bytes >> 8, 3 * (e.bytes + 49))
             if has_env or e.view is not None or e.derived_from is not None:
                 # the J line, not in e.bytes: its text, its copy in the answer and the JSON
@@ -869,13 +897,19 @@ class GraphletStore:
         first = body.find('\n')
         if body.startswith('J ', first + 1):
             raise ValueError('the stored body carries a J line')
-        rest = body[first + 1:]
+        # the O record, rewritten in place when the entry records another delivery: the
+        # text is one join of slices of the body around it, never a copy of the body
+        # after its H line first
+        o_at = o_end = new_o = None
         if e.delivery is not None:
-            rest = _with_delivery(rest, e.delivery)
+            o_at, o_end, new_o = _o_with_delivery(body, first + 1, e.delivery)
         last = body.rfind('\n', 0, len(body) - 1) + 1
+        want_j = has_env or e.view is not None or e.derived_from is not None
+        if not want_j:
+            if new_o is None:
+                return body
+            return ''.join((body[:o_at], new_o, body[o_end:]))
         lines = parse_int(body[last:-1].split(' ')[1])
-        if not (has_env or e.view is not None or e.derived_from is not None):
-            return body[:first + 1] + rest
         j = seed_envelope(e.envelope, parse_int(head[11]))
         j['results'] = [{k: v for k, v in (e.seed_summary or {}).items()
                          if k not in ('graphlet', 'graphlet_bytes', 'graphlet_lines')}]
@@ -884,21 +918,30 @@ class GraphletStore:
         if e.derived_from is not None:
             j['derived_from'] = e.derived_from
         jt = json.dumps(j, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
-        cut = rest.rfind('\n', 0, len(rest) - 1) + 1
-        return ''.join((body[:first + 1], 'J ', jt, '\n', rest[:cut], 'Z %d\n' % (lines + 1)))
+        pieces = [body[:first + 1], 'J ', jt, '\n']
+        if new_o is None:
+            pieces.append(body[first + 1:last])
+        else:
+            pieces += [body[first + 1:o_at], new_o, body[o_end:last]]
+        pieces.append('Z %d\n' % (lines + 1))
+        return ''.join(pieces)
 
     def save_body(self, handle, path, *, budget=None):
         """standalone_text() written atomically to |path| (no parse) -> bytes written."""
-        text = self.standalone_text(handle, budget=budget)
         b = _B.resolve(budget)
-        if b is not None:
+        if b is None:
+            data = self._standalone_text(handle, None).encode('utf-8')
+            _write_atomic(os.path.abspath(path), data)
+            return len(data)
+        with b.scope('save_body'):
+            text = self._standalone_text(handle, b)
             # its UTF-8 bytes, made beside it, as graphlet_export(format=mgt) charges them
             # (mcp_tools._write_text_charged()): left out, graphlet_save peaked above its
             # account on 28 of 34 retrievals even once the buffers were gone
             b.charge(0, 2 * (len(text) + 49))
-        data = text.encode('utf-8')
-        _write_atomic(os.path.abspath(path), data)
-        return len(data)
+            data = text.encode('utf-8')
+            _write_atomic(os.path.abspath(path), data)
+            return len(data)
 
     def load(self, path, request=None, *, parse_budget=None, graph=None, graph_path=None):
         """A saved .mgt file -> a new handle (its J line restores envelope and view).

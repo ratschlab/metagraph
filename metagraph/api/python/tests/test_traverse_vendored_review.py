@@ -387,13 +387,26 @@ class TestSavedViews(unittest.TestCase):
 
 # ======================================================================= VMD-06
 
+class _GraphFake(FakeClient):
+    """The fake answering the capabilities of any graph named (the client's own when none),
+    and recording which were asked."""
+
+    def __init__(self):
+        super().__init__()
+        self.caps_asked = []
+
+    def capabilities(self, graph=None, graph_path=None):
+        self.caps_asked.append(graph)
+        return super().capabilities()
+
+
 class TestReplayOnItsGraph(unittest.TestCase):
     GRAPH = 'sra-logan-chunks/007'
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = GraphletStore(self.tmp.name)
-        self.client = FakeClient()
+        self.client = _GraphFake()
         self.client.graph = self.GRAPH
         self.tools = GraphletTools(self.store, {'mini': self.client})
 
@@ -430,9 +443,11 @@ class TestReplayOnItsGraph(unittest.TestCase):
         self.assertEqual(CONTINUATION, self.client.requests[-1]['seeds'][0]['sequence'])
         self.assertEqual(self.GRAPH, self.client.requests[-1]['graph'])
         self.assertEqual(self.GRAPH, self.store.get(done['handle']).request['graph'])
-        # a graph the overrides name wins
+        # a graph the overrides name wins, and its capabilities are the ones checked
+        # against the parent's index before it runs (the review of 2026-10-06, O1)
         self.tools.traverse_continue(h, 'right', 1, overrides={'graph': 'other'})
         self.assertEqual('other', self.client.requests[-1]['graph'])
+        self.assertEqual('other', self.client.caps_asked[-1])
 
 
 # ======================================================================= VMD-01

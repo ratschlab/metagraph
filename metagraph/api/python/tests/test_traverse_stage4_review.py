@@ -5,7 +5,7 @@
        one uninterrupted walk could take, was missed, and the note understated what the
        continuation may miss;
   F4   the attempt-bound 503 (`{error, usage}`, no Retry-After: the attempt ran and its id is
-       used up) was raised as ServerInitializing (a loading index, nothing run), whose
+       refused while the server holds it) was raised as ServerInitializing (a loading index, nothing run), whose
        documented recovery -- retry -- meets a 409; an error's usage was reachable only
        through .body;
   MCP  traverse_capabilities() answered result_too_large at its default ceiling (2048 bytes)

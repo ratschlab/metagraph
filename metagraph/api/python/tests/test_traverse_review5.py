@@ -367,7 +367,8 @@ class TestFinding7UnderLocalBudgets(unittest.TestCase):
 
     def test_a_list_or_no_entries_is_still_charged_by_its_count(self):
         # a constant override deep-merged onto a table's strategy keeps the table's list:
-        # valid, and charged as before (2 lwu per entry); None reads as no entries
+        # valid, and charged by its count (2 lwu per entry in work model 1; 2 W_ELEM, the
+        # check and the build, in work model 2); None reads as no entries
         def usage(cost):
             b = LocalBudget()
             got = ops._switch_reach(cost, ['A'], ['B', 'C'], 2, lb=b)
@@ -378,8 +379,9 @@ class TestFinding7UnderLocalBudgets(unittest.TestCase):
         self.assertEqual((got0, w0), usage(dict(base, entries=None)))
         self.assertEqual((got0, w0), usage(dict(base, entries=[])))
         entries = [['A', 'B', 0.5], ['B', 'C', 0.5], ['X', 'Y', 1]]
-        self.assertEqual((got0, w0 + 2 * len(entries)), usage(dict(base, entries=entries)))
-        self.assertEqual((got0, w0 + 2 * len(entries)),
+        per = 2 * ops.W_ELEM
+        self.assertEqual((got0, w0 + per * len(entries)), usage(dict(base, entries=entries)))
+        self.assertEqual((got0, w0 + per * len(entries)),
                          usage(dict(base, entries=tuple(map(tuple, entries)))))
         # under forbid nothing is reachable, a list or not
         self.assertEqual({}, usage({'model': 'forbid', 'entries': entries})[0])

@@ -6,8 +6,8 @@ live server the same questions):
   - cancel(attempt_id, wait_ms, not_after_ms) sends not_after_ms, and expect_server_instance
     (an explicit one, or 'auto': the server's own) goes out with attempt_id only -- both only
     to a server that states feature_level >= 5, read once from GET /capabilities and never
-    for a request without them (an older server refuses them with a 400, which for a
-    request with attempt_id uses the id up);
+    for a request without them (an older server refuses them with a 400 after it
+    registered the request's attempt_id, refused then while that server retains it);
   - the answers are typed: AttemptAnswer (status, suppression, the 429's reason),
     AttemptConflict (the duplicate's and the tombstoned id's 409, with the suppression),
     InstanceMismatch, AttemptExpired's fields;
@@ -159,7 +159,7 @@ class TestTheGate(unittest.TestCase):
 def _unknown_field(name, usage_of=None):
     """The 400 of a server that does not know |name| (ce949da5's for not_after_ms in a
     cancel, data/traverse/level5); |usage_of|: a request with that attempt_id, whose id the
-    400 used up (it carries the usage)."""
+    server registered before the 400 (it carries the usage)."""
     body = {'error': "request: unknown field '%s'" % name}
     if usage_of is not None:
         body['usage'] = {'attempt_id': usage_of, 'reason': 'error',
@@ -217,7 +217,8 @@ class TestOneServerProcess(unittest.TestCase):
         s.routes[('POST', '/traverse')] = lambda body: (
             _unknown_field('expect_server_instance', body['attempt_id'])
             if 'expect_server_instance' in body else A['traverse_completed'])
-        # the first request to reach the older binary is lost (its 400 used the id up) ...
+        # the first request to reach the older binary is lost (its 400 came after the id was
+        # registered: refused while that binary retains it) ...
         with self.assertRaises(TraverseError) as cm:
             c.traverse([SEED], attempt_id='rec-11', not_after_ms=NAF,
                        expect_server_instance='auto')
@@ -462,12 +463,18 @@ class TestReleaseRule(unittest.TestCase):
         self.check(stopping, self.SENT, 'stopping')
         running = AttemptAnswer({'attempt_id': 'rec-1', 'state': 'running'}, 200, 'attempt')
         self.check(running, self.SENT, 'running')
-        for name, kind in (('traverse_tombstoned', AttemptConflict),
-                           ('traverse_duplicate_finished', AttemptConflict),
-                           ('traverse_instance_mismatch', InstanceMismatch),
-                           ('traverse_expired', AttemptExpired)):
+        # a 409 for a tombstoned id frees nothing; neither does an instance_mismatch (the
+        # duplicate's finished state and an expired 409 release: TestReleaseGrounds409)
+        for name, kind, sent in (
+                ('traverse_tombstoned', AttemptConflict, self.SENT),
+                ('traverse_instance_mismatch', InstanceMismatch,
+                 AttemptSent('rec-3', NAF, '0123456789abcdef'))):
             status, body = A[name]
-            self.check(kind(status, body['error'], body), self.SENT, 'not_a_release_answer')
+            self.check(kind(status, body['error'], body), sent, 'not_a_release_answer')
+        # a 409 about another id (the duplicate of rec-5) says nothing about rec-1
+        status, body = A['traverse_duplicate_finished']
+        self.check(AttemptConflict(status, body['error'], body), self.SENT,
+                   'answer_for_other_attempt')
         self.check(TraverseError(400, 'bad', {'error': 'bad'}), self.SENT,
                    'not_a_release_answer')
         self.check(None, self.SENT, 'no_answer')
@@ -491,8 +498,21 @@ class TestReleaseRule(unittest.TestCase):
         kw = dict(clock_skew_allowance_ms=skew, bound_ms=40000)
         self.check(None, self.SENT, 'no_answer', now_ms=limit, **kw)
         self.check(None, self.SENT, 'clock', True, now_ms=limit + 1, **kw)
+        v = self.check(None, self.SENT, 'clock', True, now_ms=limit + 1, **kw)
+        # the clock takes the attempt as stopped at its bound apart from one uninterruptible
+        # step, whose length has no stated bound (X2): every clock release says so
+        self.assertEqual(('uninterruptible_overrun',), v.assumptions)
+        # an answer saying stopping (or running) past the limit is that step: held by
+        # default (LRG-R4), released with the assumption stated only when asked to
         stopping = AttemptAnswer({'attempt_id': 'rec-1', 'state': 'stopping'}, 200, 'cancel')
-        self.check(stopping, self.SENT, 'clock', True, now_ms=limit + 1, **kw)
+        v = self.check(stopping, self.SENT, 'stopping', now_ms=limit + 1, **kw)
+        self.assertIn('hold_clock_while_running', v.why)
+        running = AttemptAnswer({'attempt_id': 'rec-1', 'state': 'running'}, 200, 'attempt')
+        self.check(running, self.SENT, 'running', now_ms=limit + 10 ** 6, **kw)
+        v = self.check(stopping, self.SENT, 'clock', True, now_ms=limit + 1,
+                       hold_clock_while_running=False, **kw)
+        self.assertEqual(('uninterruptible_overrun',), v.assumptions)
+        self.assertIn('the last answer said stopping', v.why)
         # without not_after_ms the clock releases nothing
         self.check(None, AttemptSent('rec-1'), 'no_answer', now_ms=limit + 10 ** 9, **kw)
 
@@ -505,7 +525,10 @@ class TestReleaseRule(unittest.TestCase):
             # held through not_after_ms + the skew on that process, a copy elsewhere refused
             v = self.check(answer, sent, 'finished', True, attempts=attempts)
             self.assertEqual((), v.assumptions)
-            self.assertEqual((), self.check(answer, sent, 'finished', True).assumptions)
+            # without the attempts block the server's hold is not judged, and the verdict
+            # says so rather than an empty list (O16: () means "held")
+            self.assertEqual(('server_hold_unchecked',),
+                             self.check(answer, sent, 'finished', True).assumptions)
             # the whole document works as well as its attempts block
             self.assertEqual(v, release_verdict(answer, sent, attempts=A['capabilities'][1]))
         v = self.check(resp, AttemptSent('rec-5'), 'finished', True, attempts=attempts)
@@ -519,21 +542,29 @@ class TestReleaseRule(unittest.TestCase):
         # not_after_ms + the skew later than tombstone_max_s after the finish
         finish = release_verdict.__globals__['_finish_ms'](resp.usage)
         far = finish + 1000 * attempts['tombstone_max_s'] - attempts['clock_skew_allowance_ms']
-        self.assertEqual((), self.check(resp, AttemptSent('rec-5', far, INST), 'finished',
-                                        True, attempts=attempts).assumptions)
+
+        def sent_with(naf):
+            # the response of a copy sent with |naf|: its usage echoes it
+            body = copy.deepcopy(A['traverse_completed'][1])
+            body['usage']['not_after_ms'] = naf
+            return TraverseClient.response(body)
+        self.assertEqual((), self.check(sent_with(far), AttemptSent('rec-5', far, INST),
+                                        'finished', True, attempts=attempts).assumptions)
         self.assertEqual(('beyond_tombstone_max',), self.check(
-            resp, AttemptSent('rec-5', far + 1, INST), 'finished', True,
+            sent_with(far + 1), AttemptSent('rec-5', far + 1, INST), 'finished', True,
             attempts=attempts).assumptions)
         # a finish the answer does not state is not taken to be covered
-        bare = TraverseResponse({'usage': {'attempt_id': 'rec-5'}}, [])
+        bare = TraverseResponse({'usage': {'attempt_id': 'rec-5', 'server_instance': INST,
+                                           'not_after_ms': NAF}}, [])
         v = self.check(bare, sent, 'finished', True, attempts=attempts)
         self.assertEqual(('beyond_tombstone_max',), v.assumptions)
         self.assertIn('the finish is not stated', v.why)
-        # once the clock has passed too, its release (which assumes none of them) is given
+        # once the clock has passed too, its release (which assumes only that the
+        # attempt's run past its bound has ended) is given
         skew, cap = attempts['clock_skew_allowance_ms'], attempts['hard_cap_ms']
         v = self.check(resp, AttemptSent('rec-5', NAF), 'clock', True,
                        now_ms=NAF + skew + cap + 1, attempts=attempts)
-        self.assertEqual((), v.assumptions)
+        self.assertEqual(('uninterruptible_overrun',), v.assumptions)
         # the attempts block gives the skew allowance and, as the bound, hard_cap_ms
         self.check(None, sent, 'no_answer', now_ms=NAF + skew + cap, attempts=attempts)
         self.check(None, sent, 'clock', True, now_ms=NAF + skew + cap + 1, attempts=attempts)

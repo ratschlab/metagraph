@@ -50,8 +50,9 @@ from . import coords as _C
 from . import derive
 from ._codec import REASON, RESOURCE_CODES, UNLIMITED, GraphletFormatError
 from .budget import (
-    DICT, DICT_KEY, INT, LIST, LIST_ITEM, SET, SET_ITEM, STR, TUPLE, W_ELEM, W_ROW, W_STEP,
-    LocalBudgetExceeded, Partial, dict_bytes, list_bytes, record_bytes, set_bytes, sort_work,
+    BASE_SHIFT, DICT, DICT_KEY, ID_SHIFT_C, INT, LIST, LIST_ITEM, SET, SET_ITEM, STR, TUPLE,
+    W_ELEM, W_ROW, W_STEP, LocalBudgetExceeded, Partial, dict_bytes, list_bytes, record_bytes,
+    set_bytes, sort_work, str_bytes,
 )
 from .model import (
     AmbiguousLabel, ARM_SIDES, BadSelector, Branch, Change, Claim, Comparison,
@@ -2235,6 +2236,58 @@ def _section(strategy, *path):
     return d
 
 
+# What a change_cost table costs a budgeted next_request() (work model 2; the review of the
+# P2 fixes: with 900 entries the account stayed at the 0-entry figure while the traced peak
+# was 9.8x it, and only 2 lwu per entry were charged). Sizes as CPython makes them:
+# an entry copied by copy.deepcopy() -- its list of three, built by appends (four slots),
+# and its slot in the copied list: 97 B traced per entry -- and the memo's record of it
+# while the copy is built (an int key, its dict slot, both of the dict's tables while it
+# grows, a keep-alive slot: up to 128 B traced), dropped when deepcopy() returns
+_ENTRY_COPY = LIST + 4 * LIST_ITEM + 2 * LIST_ITEM
+_ENTRY_MEMO = INT + 6 * DICT_KEY + 2 * LIST_ITEM
+_W_ENTRY_COPY = 3 * W_ELEM          # measured 0.6 us per entry (3.14, M5 Max)
+# _switch_reach's table: a (from, to) key tuple, its float cost and its dict slot (a dict
+# keeps a third of its slots free); an explicit edge (to, cost) in its source's list; a heap
+# entry (loss, order, name) with its new float and int
+_TABLE_PAIR = TUPLE + 2 * 8 + FLOAT_BYTES + 3 * DICT_KEY
+_EDGE = TUPLE + 2 * 8 + LIST_ITEM
+_HEAP_ITEM = TUPLE + 3 * 8 + FLOAT_BYTES + INT + LIST_ITEM
+# the tuples of one length CPython keeps on its free list once they are freed
+# (PyTuple_MAXFREELIST); a pair is TUPLE + 2 * 8 bytes, 64 on 3.14 with its cached hash
+_FREE_TUPLES = 2000
+
+
+def _entries_of(change_cost):
+    """The entries of a change_cost section as given, () when it has none or is malformed
+    (what _check_change_cost() refuses is refused there, after the charge)."""
+    if isinstance(change_cost, dict):
+        e = change_cost.get('entries')
+        if isinstance(e, (list, tuple)):
+            return e
+    return ()
+
+
+def _override_entries(strategy):
+    """The labels.change_cost entries a strategy, or the keyword overrides of
+    next_request(), carry; () where there are none or a section is not an object."""
+    lab = strategy.get('labels') if isinstance(strategy, dict) else None
+    return _entries_of(lab.get('change_cost')) if isinstance(lab, dict) else ()
+
+
+def _charge_entry_copy(lb, k):
+    """Charge a deep copy of |k| change_cost entries before it is made: its work, the
+    copy (held by the caller until _release_entry_copy()) and the memo deepcopy() drops on
+    return."""
+    if k:
+        lb.charge(_W_ENTRY_COPY * k, list_bytes(k) + k * (_ENTRY_COPY + _ENTRY_MEMO))
+        lb.release(k * _ENTRY_MEMO)
+
+
+def _release_entry_copy(lb, k):
+    if k:
+        lb.release(list_bytes(k) + k * _ENTRY_COPY)
+
+
 def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     """{name: loss} for every name of |targets| that a chain of switches from a name of
     |sources| enters within |budget|, at the cheapest such chain's loss (summed left to
@@ -2250,14 +2303,19 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     pair, _switch_cost, was never called: VOP1-04); None for a model the library does
     not know. A malformed field of a model it knows is a ValueError naming it, raised
     before any entry is used (_check_change_cost)."""
+    if lb is not None:
+        # admitted before the check reads the entries (work model 1 charged 2 per entry
+        # after it, for the check and the table's build together: 1.45x short)
+        n = len(sources) + len(targets)
+        k = len(_entries_of(change_cost))
+        lb.charge(4 * n + 2 * W_ELEM * k, 4 * set_bytes(n) + dict_bytes(n) + n * FLOAT_BYTES)
     # every field is checked before an endpoint enters a set or a cost the arithmetic
     _check_change_cost(change_cost)
-    if lb is not None:
-        n = len(sources) + len(targets)
-        lb.charge(4 * n + 2 * len((change_cost or {}).get('entries') or ()),
-                  4 * set_bytes(n) + dict_bytes(n))
     sources = list(dict.fromkeys(sources))
-    targets = [t for t in dict.fromkeys(targets) if t not in set(sources)]
+    # the set once (L6: it was rebuilt per target, sources x targets steps uncharged -- 0.11 s
+    # of 0.14 s at 3,000 x 3,000 names, 1.8x the charge)
+    src = set(sources)
+    targets = [t for t in dict.fromkeys(targets) if t not in src]
     model = (change_cost or {}).get('model', 'forbid')
     if not sources or model == 'forbid':
         return {}
@@ -2268,10 +2326,24 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     if model != 'table':
         return None
     names = set(sources) | set(targets)
+    if lb is not None:
+        # the table before it is built: a pair per entry between two of the names (counted
+        # first, so that a long table of other labels' pairs is not charged as held), at
+        # most one per two names; what duplicates leave unbuilt is given back after
+        lb.charge(W_STEP * k)
+        bound = min(sum(1 for e in change_cost.get('entries') or ()
+                        if e[0] in names and e[1] in names), len(names) ** 2)
+        lb.charge(0, dict_bytes(bound) + bound * _TABLE_PAIR)
     table = {}
     for e in change_cost.get('entries') or ():
         if e[0] in names and e[1] in names:
             table[(e[0], e[1])] = float(e[2])     # the last entry for a pair wins
+    m = len(table)
+    if lb is not None:
+        lb.release((bound - m) * (DICT_KEY + _TABLE_PAIR))
+        # the explicit edges, a list per source name
+        lb.charge(W_ELEM * m, dict_bytes(len(names)) + len(names) * LIST + m * _EDGE
+                  + len(sources) * _HEAP_ITEM)
     d = change_cost.get('default', 'forbid')
     fallback = math.inf if d == 'forbid' else float(d)
     out_edges = collections.defaultdict(list)
@@ -2279,8 +2351,12 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
         if u != v and c != math.inf:
             out_edges[u].append((v, c))
     # the default is relaxed lazily, as on the server: the names no popped name has given
-    # the default yet; a popped name gives it to each of them it has no explicit entry to
-    pending = set(names) if fallback <= budget else set()
+    # the default yet; a popped name gives it to each of them it has no explicit entry to.
+    # A list in name order, compacted per pop as walker.cpp's `kept` loop does: a set's
+    # order followed PYTHONHASHSEED, and with it the push order of labels at equal loss,
+    # the pop sequence and so the charges below (L1: one call completed under 5 of 12 hash
+    # seeds and stopped under 7; budget.py promises the same units in any process)
+    pending = sorted(names) if fallback <= budget else []
     dist = {x: 0.0 for x in sources}
     heap = [(0.0, i, x) for i, x in enumerate(sorted(sources))]
     heapq.heapify(heap)
@@ -2297,22 +2373,38 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     while heap:
         if lb is not None:
             # a pop, its explicit edges and the names still owed the default (their copy
-            # is dropped before the next pop)
-            lb.charge(4 + len(out_edges.get(heap[0][2], ())) + len(pending),
-                      list_bytes(len(pending)))
+            # is dropped before the next pop), and the heap entries this pop may push: what
+            # it did not push is given back after it, with the entry it popped
+            k_pop = len(out_edges.get(heap[0][2], ())) + len(pending)
+            lb.charge(4 + k_pop, list_bytes(len(pending)) + k_pop * _HEAP_ITEM)
             lb.release(list_bytes(len(pending)))
+            pushed = order
         loss, _, u = heapq.heappop(heap)
-        if u in done or loss > dist[u]:
-            continue
-        done.add(u)
-        if u in sinks:
-            continue
-        for v, c in out_edges.get(u, ()):
-            relax(v, loss + c)
-        for v in list(pending):
-            if v != u and (u, v) not in table:
-                relax(v, loss + fallback)
-                pending.discard(v)
+        if not (u in done or loss > dist[u]):
+            done.add(u)
+            if u not in sinks:
+                for v, c in out_edges.get(u, ()):
+                    relax(v, loss + c)
+                if pending:
+                    kept = []
+                    for v in pending:
+                        if v == u or (u, v) in table:
+                            kept.append(v)  # no default from u to v: a later pop gives it
+                        else:
+                            relax(v, loss + fallback)
+                    pending = kept
+        if lb is not None:
+            lb.release((k_pop - (order - pushed) + 1) * _HEAP_ITEM)
+    if lb is not None:
+        # the table and its edges are dropped on return -- but CPython keeps up to 2,000
+        # freed tuples of each length for reuse (its free list), so the keys' and edges'
+        # pairs stay allocated for the rest of the call (traced: 118 KB after a 900-entry
+        # table): kept in the account once per call, since a later search reuses them
+        held = dict_bytes(m) + m * _TABLE_PAIR + dict_bytes(len(names)) \
+            + len(names) * LIST + m * _EDGE
+        if lb.first('switch_reach_free_tuples'):
+            held -= min(_FREE_TUPLES, 2 * m) * (TUPLE + 3 * 8)
+        lb.release(held)
     return {t: dist[t] for t in targets if dist.get(t, math.inf) <= budget}
 
 
@@ -2328,6 +2420,10 @@ def _rebuilt_extra(g, seed_labels, budget, strategy, lb=None):
     labels left out because their names cannot be verified). The retrieval's original seed
     labels become switch targets too: they were in the original pool."""
     lab = strategy.get('labels') or {}
+    if lb is not None:
+        # the check below reads every entry (work model 2: it was not charged)
+        lb.charge(W_ELEM * len(_entries_of(lab.get('change_cost') if isinstance(lab, dict)
+                                           else None)))
     cost = _check_change_cost(lab.get('change_cost')) or {'model': 'forbid'}
     seed_names = [l.name for l in seed_labels]
     seed_ids = {l.id for l in seed_labels}
@@ -2469,6 +2565,15 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
     # (three arguments without a budget: the tests replace this helper)
     conts, seeds = _continuation_seeds(g, a, leaves) if lb is None \
         else _continuation_seeds(g, a, leaves, lb)
+    # A change_cost table is the one part of the strategy whose size the caller sets: its
+    # entries are copied with the strategy (the request's copy, and the merged one the
+    # labels.extra rebuild reads), and work model 1 charged none of them -- with 900
+    # entries the account stayed at the 0-entry figure while the traced peak was 9.8x it
+    # (the review of the P2 fixes). The rest of the strategy is a fixed handful of fields
+    k_env = len(_override_entries(g.envelope.get('strategy'))) if lb is not None else 0
+    k_ov = len(_override_entries(overrides)) if lb is not None else 0
+    if lb is not None:
+        _charge_entry_copy(lb, k_env)
     strategy = copy.deepcopy(g.envelope.get('strategy') or {})
     strategy.pop('clamped', None)
     strategy['direction'] = a.side
@@ -2514,10 +2619,17 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
                        for l, x in _unique_pairs(pairs)]}
         # the caller's overrides are final: labels.extra is rebuilt against the budget
         # and the cost model the request will carry (a list the caller gives is theirs)
+        if lb is not None:
+            # both copies are held until the call returns (an override's entries replace
+            # the retrieval's in |final| only once they are copied)
+            _charge_entry_copy(lb, k_env)
+            _charge_entry_copy(lb, k_ov)
         final = copy.deepcopy(strategy)
         _deep_merge(final, {k: v for k, v in overrides.items()
                             if k not in ('release', 'graph', 'graph_path')})
         flab = _section(final, 'labels')
+        if lb is not None:
+            lb.charge(W_ELEM * len(_entries_of(flab.get('change_cost'))))
         # the merged cost the request will carry, checked whole even when the caller gives
         # labels.extra (no switch search reads it then, and the server would refuse it)
         _check_change_cost(_section(final, 'labels', 'change_cost') or None)
@@ -2703,12 +2815,17 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
     for k in ('release', 'graph', 'graph_path'):
         if k in overrides:
             request[k] = overrides.pop(k)
+    if lb is not None:
+        _charge_entry_copy(lb, k_ov)          # the request's own copy of the override's
     _deep_merge(strategy, overrides)
     # the echo carries the retrieval's cap: an override output.coordinates false (the
     # resource stop's drop_coordinates) would otherwise make every continuation, deepen()
     # and traverse_continue a 400 (revision 2, C-N6)
     _C.strip_coordinate_cap(strategy)
     request['strategy'] = strategy
+    if lb is not None and g.mode == 'constrain':
+        # |final| is dropped on return; the request's copies stay with the request
+        _release_entry_copy(lb, k_env + k_ov)
     return request
 
 
@@ -2727,11 +2844,15 @@ def next_requests(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fa
                               copy.deepcopy(overrides))
                 for x in leaves]
     out = []
+    k_ov = len(_override_entries(overrides))
     with lb.scope('next_requests', ('select_walks',)):
         for x in leaves:
             with lb.scope('next_request', ('select_walks',)):
+                # each walk's own copy of the overrides, dropped once its request is built
+                _charge_entry_copy(lb, k_ov)
                 out.append(_next_request(g, arm, [x], bp, reduce_budget, reset_branches,
                                          lb, copy.deepcopy(overrides)))
+                _release_entry_copy(lb, k_ov)
     return out
 
 
@@ -3500,8 +3621,8 @@ class _Tally:
 
 def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     """An estimate, before running it, of what compare(a, b, arm=, labels=, mode=) charges
-    a budget (stage L, work model 1): {mode, work_model, work_units: {at_least, estimate},
-    memory_bytes: {at_least, estimate}, exact, phases, unpriced}.
+    a budget (stage L, the current WORK_MODEL): {mode, work_model, work_units: {at_least,
+    estimate}, memory_bytes: {at_least, estimate}, exact, phases, unpriced}.
 
     at_least is what compare() certainly charges once it keys the two sides: the checks,
     the derivations its keyers use (cold price) and the per-run and per-cut charges, all
@@ -3560,10 +3681,22 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                     if g.mode == 'constrain' else n_rows * depth
                 steps = sum(segs[r.segment].depth + 1 for r in arm_.runs) \
                     if g.mode == 'constrain' else n_rows * 4
-                est_w += 2 * W_STEP * steps + (bp >> 8) + 3 * W_ELEM * n_rows + bp // 128
-                # the claims' prefixes (2x their bases, as charged) and their spelling
-                # streamed (derive.walk_iter_bytes(): the kept prefixes, at most the bases)
-                est_m += 2 * n_rows * (STR + TUPLE + LIST + 48 + 2 * STR) + 3 * bp
+                if mode == 'prefix_subset':
+                    # the tree of the claims' chains and the claims filed under their
+                    # anchors (_claim_index(): no prefix is spelled, L2)
+                    est_w += 2 * W_STEP * steps + (bp >> 8) + 3 * W_ELEM * n_rows \
+                        + sort_work(n_rows)
+                    est_m += min(steps, len(segs)) * (SET_ITEM + 2 * DICT_KEY + INT
+                                                     + LIST_ITEM) \
+                        + n_rows * (2 * TUPLE + 5 * 8 + 2 * LIST_ITEM + 2 * DICT_KEY
+                                    + 2 * LIST + INT)
+                else:
+                    est_w += 2 * W_STEP * steps + (bp >> 8) + 3 * W_ELEM * n_rows \
+                        + bp // 128
+                    # the claims' prefixes (2x their bases, as charged) and their spelling
+                    # streamed (derive.walk_iter_bytes(): the kept prefixes, at most the
+                    # bases)
+                    est_m += 2 * n_rows * (STR + TUPLE + LIST + 48 + 2 * STR) + 3 * bp
                 if mode == 'claims':
                     est_w += sort_work(n_rows) + 2 * n_rows + W_ROW * n_rows
                     est_m += 2 * list_bytes(n_rows) + n_rows * (dict_bytes(6) + dict_bytes(2))
@@ -4345,61 +4478,122 @@ def _supported_prefixes(g, sides, depth, memo=None, cb=None):
     return out
 
 
-def _recorded_refusal(g, arm, seq, ref, memo=None):
+def _recorded_refusal(g, arm, seq, ref, memo=None, cb=None):
     """-> (at_bp, reason) of a successor that |g| recorded as not taken by label |ref|
     where walk |seq| (walking order) leaves g's trie: a V refusal (quorum, split limit), a
     blocked successor or a skipped hairpin, on a segment whose chain spells seq up to
     the branch and for the base seq has there. None when nothing was recorded. |memo|:
-    the comparison's, where the event segments' chains are kept as a tree (one omission
-    after another asks about the same ones).
+    the comparison's, where the index of the arm's refusals is kept (one omission after
+    another asks about the same ones). |cb| (stage L): each segment followed and each
+    recorded refusal tested is charged before it is.
 
-    The chains are not spelled: seq is followed down them (_refusal_tree()), and an event
-    at |at| on a segment is on seq's path when the segment's chain matches seq up to |at|.
-    Keeping every event segment's spelling for the comparison held, on a comb with an event
-    at each split, about as much as the walks' whole text."""
+    The chains are not spelled: seq is followed down the tree of the refusals' chains
+    (_refusal_index()), and a refusal at |at| is on seq's path when the chain matches seq
+    up to |at| -- read at the segment that holds base at - 1 of the chain (its anchor), so
+    only the refusals anchored on the segments seq reaches are tested. Every refusal of the
+    arm was tested on every call before (L2: an arm of 32,001 segments was scanned per
+    omission, uncharged, 72x more work than charged); the first recorded one in the
+    arm's order (branch events, then segments' events) still wins."""
     ids = _label_index(g)[0].get(ref)
     if not ids:
         return None
     lid = ids[0]
-    key = ('refusal_tree', id(g), arm.side)
-    tree = None if memo is None else memo.get(key)
-    if tree is None:
-        tree = _refusal_tree(arm)
+    key = ('refusal_index', id(g), arm.side)
+    index = None if memo is None else memo.get(key)
+    if index is None:
+        index = _refusal_index(arm, cb)
         if memo is not None:
-            memo[key] = tree
-    if tree is False:
-        # an event segment's chain lacks bases: no spelling matches seq (a retrieval without
+            memo[key] = index
+    if index is False:
+        # a refusal's chain lacks bases: no spelling matches seq (a retrieval without
         # bases is not compared by its walks)
         return None
+    kids, roots, by_anchor = index
+    if not by_anchor:
+        return None
+    matched = _follow(arm.segments, kids, roots, seq, len(seq), cb)
+    best = None                      # (priority, at_bp, reason)
+    for s, m in matched.items():
+        for prio, at, kind, x in by_anchor.get(s, ()):
+            if best is not None and prio >= best[0]:
+                break                # in priority order: nothing later here can win
+            if cb is not None:
+                cb.charge(W_ELEM)
+            if at >= len(seq) or m < at:
+                continue
+            c = seq[at]
+            if kind == 'V':
+                for r in x.refused:
+                    if cb is not None:
+                        cb.charge(W_ELEM + (len(r.labels) >> ID_SHIFT_C))
+                    if r.char == c and lid in r.labels:
+                        best = (prio, at, r.cause)
+                        break
+            else:
+                if cb is not None:
+                    cb.charge(W_ELEM + (len(x.labels) >> ID_SHIFT_C))
+                if x.char == c and lid in x.labels:
+                    best = (prio, at, REASON[x.reason] if x.type == 'blocked' else 'hairpin')
+            if best is not None and best[0] == prio:
+                break
+    if cb is not None:
+        cb.release(_follow_bytes(len(matched)))
+    return None if best is None else best[1:]
+
+
+def _refusal_index(arm, cb=None):
+    """(kids, roots, {anchor segment: [(priority, at_bp, kind, event)] in priority order})
+    over the refusals _recorded_refusal() reads (V refusals, blocked successors, skipped
+    hairpins) -- the first-parent tree of their chains (_refusal_tree()) and each refusal
+    filed under the segment of its chain that holds base at_bp - 1 (the chain's first
+    segment for at_bp 0: an event before its own segment is filed under the ancestor that
+    holds it) -- or False when one of those chains has a segment without bases. Priority:
+    the arm's order, branch events first. A refusal past its segment's end is on no
+    chain and is left out. |cb| (stage L): the search for the ancestors of events before
+    their segment (_chain_anchors()), where there are any; the rest is charged by the
+    caller."""
+    tree = _refusal_tree(arm)
+    if tree is False:
+        return False
     kids, offs, roots = tree
     segs = arm.segments
-    matched = _follow(segs, kids, roots, seq, len(seq))
+    by_anchor = {}
+    before = []                      # (segment, at_bp, entry) of events before their segment
+    prio = 0
 
-    def on_chain(seg, at):
-        # the chain's bases [0, at) are seq's, and the chain reaches at
-        if at >= len(seq):
-            return False
-        off = offs[seg]
-        if off + len(segs[seg].walk) < at:
-            return False
-        if at >= off:
-            # seq was followed into seg exactly when its chain before seg is seq's
-            return matched.get(seg, -1) >= at
-        w = derive.walk_bases(arm, seg)          # an event before its segment: not seen
-        return w[:at] == seq[:at]
+    def add(seg, at, kind, x):
+        nonlocal prio
+        prio += 1
+        if offs[seg] + len(segs[seg].walk) < at:
+            return
+        if offs[seg] <= at:
+            by_anchor.setdefault(seg, []).append((prio, at, kind, x))
+        else:
+            before.append((seg, at, (prio, at, kind, x)))
 
     for be in arm.branch_events:
-        if not on_chain(be.segment, be.at_bp):
-            continue
-        for r in be.refused:
-            if r.char == seq[be.at_bp] and lid in r.labels:
-                return be.at_bp, r.cause
-    for s in arm.segments:
+        add(be.segment, be.at_bp, 'V', be)
+    for s in segs:
         for ev in s.events:
             if ev.type == 'blocked' or (ev.type == 'hairpin' and not ev.followed):
-                if on_chain(s.id, ev.at_bp) and ev.char == seq[ev.at_bp] and lid in ev.labels:
-                    return ev.at_bp, REASON[ev.reason] if ev.type == 'blocked' else 'hairpin'
-    return None
+                add(s.id, ev.at_bp, 'E', ev)
+    if before:
+        # An event whose at_bp lies before its own segment (the parser does not check it,
+        # the server never writes one) is filed under an ancestor. Each was found by a climb
+        # of its chain, one uncharged step per ancestor and per event: a deep comb with such
+        # events took O(events x depth), 10x its charge (the review of the L2 fix). One walk
+        # of the tree finds them all, charged, and the lists they join are put back in the
+        # arm's order
+        got = _chain_anchors(kids, roots, offs, before, cb)
+        joined = set()
+        for (_, _, entry), a in zip(before, got):
+            by_anchor.setdefault(a, []).append(entry)
+            joined.add(a)
+        if cb is not None:
+            cb.charge(sort_work(sum(len(by_anchor[a]) for a in joined)))
+        for a in joined:
+            by_anchor[a].sort()      # by priority: unique, so nothing else is compared
+    return kids, roots, by_anchor
 
 
 def _refusal_tree(arm):
@@ -4408,10 +4602,17 @@ def _refusal_tree(arm):
     events, blocked successors, skipped hairpins), or False when one of those chains has a
     segment without bases."""
     segs = arm.segments
+    return _chain_tree(segs, {be.segment for be in arm.branch_events}
+                       | {s.id for s in segs for ev in s.events
+                          if ev.type == 'blocked' or (ev.type == 'hairpin' and not ev.followed)})
+
+
+def _chain_tree(segs, targets):
+    """({segment: its first-parent children}, {segment: the length of its chain's bases
+    before it}, [roots]) over the first-parent chains of |targets|, or False when one of
+    those chains has a segment without bases."""
     on = set()
-    for x in ({be.segment for be in arm.branch_events}
-              | {s.id for s in segs for ev in s.events
-                 if ev.type == 'blocked' or (ev.type == 'hairpin' and not ev.followed)}):
+    for x in targets:
         while x not in on:
             on.add(x)
             if segs[x].walk is None:
@@ -4433,18 +4634,67 @@ def _refusal_tree(arm):
     return kids, offs, roots
 
 
-def _follow(segs, kids, roots, seq, lim):
+def _chain_anchors(kids, roots, offs, asks, cb=None):
+    """[the deepest segment of the chain root -> |segment| whose offset is at most |at|, for
+    each (segment, at, ...) of |asks|] (at >= 0, so a root at least) -- the segment of the
+    tree (kids, offs, roots: _chain_tree()) that holds base |at| of that chain, or the
+    chain's last segment that starts at it. One walk of the tree down from its roots, the
+    chain to the current segment kept with its offsets, and one bisection per ask: O(tree +
+    asks x log depth), where a climb per ask was O(asks x depth). |cb| (stage L): a step per
+    segment of the tree and a bisection per ask, and the walk's stack, chain and answer,
+    charged before the walk (the stack and the chain are dropped after it)."""
+    n = len(offs)
+    by_seg = {}
+    for i, (seg, at) in enumerate((q[0], q[1]) for q in asks):
+        by_seg.setdefault(seg, []).append((i, at))
+    if cb is not None:
+        held = 3 * list_bytes(n) + n * (TUPLE + 2 * 8)
+        cb.charge(W_STEP * n + W_ELEM * len(asks) * max(1, n.bit_length()),
+                  held + list_bytes(len(asks)) + dict_bytes(len(by_seg))
+                  + len(asks) * (TUPLE + 2 * 8 + LIST_ITEM))
+    out = [None] * len(asks)
+    chain_off, chain_seg = [], []
+    stack = [(r, 0) for r in reversed(roots)]
+    while stack:
+        s, d = stack.pop()
+        del chain_off[d:], chain_seg[d:]
+        chain_off.append(offs[s])
+        chain_seg.append(s)
+        for i, at in by_seg.get(s, ()):
+            j = bisect.bisect_right(chain_off, at) - 1
+            out[i] = chain_seg[j if j > 0 else 0]
+        ks = kids.get(s)
+        if ks:
+            stack.extend((c, d + 1) for c in reversed(ks))
+    if cb is not None:
+        cb.release(held + dict_bytes(len(by_seg)) + len(asks) * (TUPLE + 2 * 8 + LIST_ITEM))
+    return out
+
+
+def _follow_bytes(n):
+    """What _follow() holds per segment it followed (its entry in the answer)."""
+    return n * (DICT_KEY + 2 * INT)
+
+
+def _follow(segs, kids, roots, seq, lim, cb=None):
     """{segment: the length of seq's prefix its chain spells, its own bases included} for
     every segment of the tree (kids, roots) whose chain BEFORE it is seq's (bases [0,
     lim)): seq followed down the tree, a segment's bases compared only where its parent
-    matched in full."""
+    matched in full. |cb| (stage L): each segment charged before it is compared -- its
+    bases (two slices of them, dropped at once) and its entry in the answer, which the
+    caller releases (_follow_bytes()) once it drops the answer."""
     out = {}
     stack = [(r, 0) for r in roots]
     while stack:
         s, off = stack.pop()
-        n = _match_len(segs[s].walk, seq, off, lim)
+        w = segs[s].walk
+        if cb is not None:
+            hi = max(0, min(len(w), lim - off))
+            cb.charge(W_ELEM + (hi >> BASE_SHIFT), 2 * str_bytes(hi) + _follow_bytes(1))
+            cb.release(2 * str_bytes(hi))
+        n = _match_len(w, seq, off, lim)
         out[s] = off + n
-        if n == len(segs[s].walk) and off + n < lim:
+        if n == len(w) and off + n < lim:
             stack.extend((c, off + n) for c in kids.get(s, ()))
     return out
 
@@ -4511,6 +4761,80 @@ def _restricted_tree(arm, depth):
     return kids, roots
 
 
+def _claim_index(arm, rows, cb=None):
+    """The claims |rows| of one arm of |a| as prefix_subset() looks them up: (kids, roots,
+    {ref: {anchor: ([to_bp ascending], [(to_bp, row, claim) of the first row at it])}},
+    {ref: (0, row, claim) of the first claim at to_bp 0}) -- the first-parent tree of the
+    claims' chains (_chain_tree()) and each claim filed under the segment of its chain that
+    holds its last base (to_bp - 1). A claim's prefix -- its chain's bases [0, to_bp) -- is
+    a prefix of a walk exactly when the walk, followed down the tree (_follow()), matches
+    that segment's chain at least to to_bp. A ValueError (derive.NO_BASES) where a chain
+    lacks bases: every walk of |a| holds them here (the caller compares no side without).
+    |cb| (stage L): the search for the anchors of claims whose to_bp lies before their
+    segment (_chain_anchors()), where there are any; the rest is charged by the caller."""
+    segs = arm.segments
+    tree = _chain_tree(segs, {c.segment for c in rows})
+    if tree is False:
+        raise ValueError(derive.NO_BASES)
+    kids, offs, roots = tree
+    by_ref, zero = {}, {}
+    before = []                      # (segment, to_bp - 1, row) of claims before their segment
+    for i, c in enumerate(rows):
+        ref = c.label.ref
+        if c.to_bp <= 0:
+            zero.setdefault(ref, (0, i, c))
+            continue
+        x = c.segment
+        if offs[x] >= c.to_bp:
+            # its last base before its own segment: an ancestor holds it, found below by
+            # one walk of the tree (a climb per claim was O(claims x depth), uncharged)
+            before.append((x, c.to_bp - 1, i))
+            continue
+        at, first = by_ref.setdefault(ref, {}).setdefault(x, ([], {}))
+        if c.to_bp not in first:
+            first[c.to_bp] = (c.to_bp, i, c)       # rows in order: the first one wins
+    if before:
+        for (_, _, i), x in zip(before, _chain_anchors(kids, roots, offs, before, cb)):
+            c = rows[i]
+            at, first = by_ref.setdefault(c.label.ref, {}).setdefault(x, ([], {}))
+            cur = first.get(c.to_bp)
+            if cur is None or i < cur[1]:
+                first[c.to_bp] = (c.to_bp, i, c)   # filed late: the first row still wins
+    for anchors in by_ref.values():
+        for x, (at, first) in anchors.items():
+            ks = sorted(first)
+            anchors[x] = (ks, [first[k] for k in ks])
+    return kids, roots, by_ref, zero
+
+
+def _best_claim(index, matched, ref, cb=None):
+    """-> (to_bp, row, claim) of the claim of |ref| whose prefix is the longest prefix of
+    the walk that |matched| (_follow() over the index's tree) followed -- the first in row
+    order among equals -- or None: what the scan of every claim of the label found
+    (seq.startswith(prefix), the longest, the first), by following the walk's chain."""
+    _, _, by_ref, zero = index
+    best = zero.get(ref)
+    anchors = by_ref.get(ref)
+    if anchors:
+        # the smaller of the two sides is iterated: the label's anchors or the segments
+        # the walk reached
+        pairs = ((x, matched[x]) for x in anchors if x in matched) \
+            if len(anchors) <= len(matched) else \
+            ((x, m) for x, m in matched.items() if x in anchors)
+        if cb is not None:
+            cb.charge(W_ELEM * min(len(anchors), len(matched)))
+        for x, m in pairs:
+            ks, entries = anchors[x]
+            if cb is not None:
+                cb.charge(W_ELEM * max(1, len(ks).bit_length()))
+            j = bisect.bisect_right(ks, m) - 1
+            if j >= 0:
+                e = entries[j]
+                if best is None or e[0] > best[0] or (e[0] == best[0] and e[1] < best[1]):
+                    best = e
+    return best
+
+
 def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, state=None):
     memo = {} if memo is None else memo
     state = {} if state is None else state
@@ -4532,50 +4856,64 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
         cb.phase = 'prefix_scan'
         cb.charge(sort_work(len(pa)) + sort_work(len(pb)), list_bytes(len(pa) + len(pb)))
     violations = []
+    ordered = {}
     for side, seq, ref in sorted(pa):
+        cand = ordered.get((side, ref))
+        if cand is None:
+            # the label's supported prefixes in order, once: the strings beginning with seq
+            # are a run of that order starting where seq would be inserted, so one bisection
+            # and one startswith decide (every prefix was tested with startswith per walk
+            # before, L2 (1): 40M calls on a wide pair)
+            got = supported.get((side, ref), ())
+            if cb is not None:
+                cb.charge(sort_work(len(got)) * (1 + (depth >> 9)), list_bytes(len(got)))
+            cand = ordered[(side, ref)] = sorted(got)
         if cb is not None:
-            cand = supported.get((side, ref), ())
-            cb.charge(W_ELEM + len(cand) * (1 + (len(seq) >> 9)), dict_bytes(3) + STR + len(seq))
-        if not any(w.startswith(seq) for w in supported.get((side, ref), ())):
+            steps = 1 + max(1, len(cand).bit_length())
+            cb.charge(W_ELEM + steps * (1 + (len(seq) >> 9)), dict_bytes(3) + STR + len(seq))
+        i = bisect.bisect_left(cand, seq)
+        if not (i < len(cand) and cand[i].startswith(seq)):
             violations.append({'arm': side, 'walk': _natural(side, seq), 'ref': ref})
     omissions = []
-    a_claims = {}
+    claim_index = {}
     for side in sides:
         arm = a.arms[side]
         rows = [c for c in _restricted_claims(a, side, depth, inexact, cb)
                 if c.kind != 'merged']
         if rows and cb is not None:
-            _charge_spellings(cb, arm, {c.segment for c in rows})
-            # per row its (prefix, claim, arm) and the prefix; per (arm, label) key its
-            # tuple, its dict slot and its list (a label per row on a wide arm: the key's
-            # share was missing, 0.8x the rows' traced bytes)
-            keys = len({c.label.ref for c in rows})
-            cb.charge(W_ELEM * 2 * len(rows),
-                      len(rows) * (TUPLE + 2 * LIST_ITEM + STR) + sum(c.to_bp for c in rows)
-                      + keys * (TUPLE + 2 * DICT_KEY + LIST + 4 * LIST_ITEM))
-        # every walk of |a| holds bases here (the caller compares no side without them),
-        # so a missing spelling raises as _walk_prefix() would; the prefixes are kept in
-        # the rows' order, which decides the longest match among equals below
-        prefixes = _claim_prefixes(arm, rows, strict=True) if rows else []
-        for c, prefix in zip(rows, prefixes):
-            a_claims.setdefault((side, c.label.ref), []).append((prefix, c, arm))
+            # the tree of the claims' chains (no bases: the walks are followed down it, not
+            # spelled) and per claim its entry under its label and anchor, the anchors'
+            # sorted lists and the per-label dicts (a claim each at most)
+            _charge_chain_tree(cb, arm, {c.segment for c in rows})
+            cb.charge(W_ELEM * 3 * len(rows) + sort_work(len(rows)),
+                      len(rows) * (TUPLE + 3 * 8 + 2 * LIST_ITEM + 2 * DICT_KEY + 2 * LIST
+                                   + INT + TUPLE + 2 * 8)
+                      + len({c.label.ref for c in rows}) * (DICT + DICT_KEY + TUPLE))
+        claim_index[side] = _claim_index(arm, rows, cb) if rows else None
     if cb is not None:
         cb.phase = 'omissions'
         n_refusal = {s: len(a.arms[s].branch_events)
                      + sum(len(x.events) for x in a.arms[s].segments) for s in sides}
         n_leaves = {s: len(restricted_leaves(a.arms[s], depth)) for s in sides}
         cb.charge(W_ELEM * sum(len(a.arms[s].segments) for s in sides))
+    followed = None                 # (side, seq, the claims' tree followed by seq)
     for side, seq, ref in sorted(pb):
         if (side, seq, ref) in pa:
             continue
         if cb is not None:
-            cand = a_claims.get((side, ref), ())
-            cb.charge(W_ROW + len(cand) * (1 + (len(seq) >> 9)), dict_bytes(5) + STR + len(seq))
+            cb.charge(W_ROW, dict_bytes(5) + STR + len(seq))
+        index = claim_index.get(side)
         best = None
-        for prefix, c, arm in a_claims.get((side, ref), ()):
-            if seq.startswith(prefix) and (best is None or len(prefix) > len(best[0])):
-                best = (prefix, c, arm)
-        if best is not None and len(best[0]) >= len(seq):
+        if index is not None:
+            if followed is None or followed[:2] != (side, seq):
+                # pb is in (side, seq, ref) order: one walk is followed once for all its
+                # labels, and the answer of the walk before is dropped first
+                if cb is not None and followed is not None:
+                    cb.release(_follow_bytes(len(followed[2])))
+                followed = (side, seq, _follow(a.arms[side].segments, index[0], index[1],
+                                               seq, len(seq), cb))
+            best = _best_claim(index, followed[2], ref, cb)
+        if best is not None and best[0] >= len(seq):
             continue                 # a covers the whole walk under this label
         entry = {'arm': side, 'walk': _natural(side, seq), 'ref': ref}
         arm = a.arms[side]
@@ -4585,22 +4923,27 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
                 # the refusal is looked up by the label's id: a's name/ref index (it was
                 # built uncharged, the level-5 batch's under-accounted cross pair)
                 _uses_g(cb, a, 'label_index')
-                # a's recorded refusals and the divergence of every restricted walk of a
-                # (a base at a time); the trees of their chains once per comparison
+                # a's recorded refusals indexed once per comparison (their chains' tree and
+                # each refusal under its anchor), then per omission the segments seq
+                # reaches and the refusals anchored there (_recorded_refusal() charges them)
                 if cb.first((id(arm), 'refusal_spellings')):
                     _charge_chain_tree(cb, arm, {be.segment for be in arm.branch_events}
                                        | {x.id for x in arm.segments if x.events})
-                if cb.first((id(arm), 'divergence_spellings', depth)):
-                    _charge_chain_tree(cb, arm, restricted_leaves(arm, depth))
-                cb.charge(2 * n_refusal[side]
-                          + n_leaves[side] * (1 + (min(depth, len(seq)) >> 1)))
+                    cb.charge(W_ELEM * n_refusal[side],
+                              n_refusal[side] * (TUPLE + 4 * 8 + LIST_ITEM + DICT_KEY + LIST))
             # the label went on along another successor in a: the reason, when there
             # is one, is a recorded refusal of b's successor (V, or a blocked or skipped
             # E), not a claim
-            got = _recorded_refusal(a, arm, seq, ref, memo)
+            got = _recorded_refusal(a, arm, seq, ref, memo, cb)
             if got is not None:
                 entry['at_bp'], entry['reason'] = got
             else:
+                if cb is not None:
+                    # the divergence of every restricted walk of a (a base at a time), the
+                    # tree of their chains once per comparison
+                    if cb.first((id(arm), 'divergence_spellings', depth)):
+                        _charge_chain_tree(cb, arm, restricted_leaves(arm, depth))
+                    cb.charge(n_leaves[side] * (1 + (min(depth, len(seq)) >> 1)))
                 div = _divergence(arm, seq, depth, memo)
                 if ev_to is not None and div is not None and div >= ev_to:
                     # beyond the evidence boundary: the refusal may have been dropped
@@ -4608,7 +4951,7 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
                 else:
                     entry['reason'] = 'unexplained'
         else:
-            prefix, c, arm = best
+            _, _, c = best
             entry['at_bp'] = c.to_bp
             entry['reason'] = c.qualifier or c.reason or c.kind
             if _open_at(c, depth):
@@ -4616,6 +4959,8 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
             elif ev_to is not None and c.to_bp >= ev_to and c.reason is None:
                 entry['reason'] = 'unexplained_capped'
         omissions.append(entry)
+    if cb is not None and followed is not None:
+        cb.release(_follow_bytes(len(followed[2])))
     return violations, omissions
 
 

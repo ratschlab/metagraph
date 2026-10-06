@@ -8,7 +8,7 @@ With a budget, a local call either completes or stops and says so (§21.1):
 
   * WORK is counted in local work units (lwu): a deterministic, weighted count of the
     model elements an operation's algorithm visits and of the rows and text it produces
-    (work model 1, WORK_MODEL; 1 lwu is about 0.1 us of CPython 3.11 on the reference
+    (work model 2, WORK_MODEL; 1 lwu is about 0.1 us of CPython 3.11 on the reference
     machine). It is not CPU time. Units are charged at the COLD PRICE (L1): a derivation an
     operation uses (paths, splits, merge maps, evidence, label summaries, ...) is charged at
     its structural price on every call, whether a cache holds it or not, so the same call
@@ -65,12 +65,46 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
            'local_budget', 'unbudgeted', 'current', 'WORK_MODEL', 'DEADLINE_POLL',
            'MEMORY_BOUND']
 
-WORK_MODEL = 1
+# Work model 2 (the review of 2026-10-06, P2 items L1, L2, O2, O3; library only, folded
+# into feature level 6). What a call charges moved from work model 1 where it was not
+# deterministic or not conservative -- a stop point of model 1 is not one of model 2 for:
+#   * next_request()/next_requests() with a change_cost table (L1): the labels owed the
+#     default switch cost are walked in name order, as walker.cpp does, so the pops and
+#     their charge are the same in every process (model 1 charged what the hash seed's set
+#     order gave: 587 to 643 lwu on the review's 8 x 8 table); and the table is charged
+#     (the review of these fixes: the account stayed at the 0-entry figure, 9.8x short of
+#     the traced peak at 900 entries, and the work 3-10x short): each copy of its entries
+#     (the merged strategy, the request's, next_requests()' per walk: 3 W_ELEM and their
+#     bytes per entry, the copy's memo while it is built), each check of them (W_ELEM per
+#     entry), and per switch search the check and the build (W_ELEM each per entry), the
+#     count of its pairs (W_STEP per entry), its edges (W_ELEM each), and the bytes of its
+#     table, edges and heap entries and of the reached labels' losses (the review's 8 x 8
+#     table: 587 + 360 lwu);
+#   * compare(mode='prefix_subset') (L2): b's supported prefixes are sorted once per arm
+#     and label and bisected per walk (one unit per supported prefix before); a's claims
+#     are filed in the tree of their chains (spelled as prefixes before); an omission is
+#     charged W_ROW, each segment its walk is followed through (W_ELEM + 1 per 512 bases),
+#     each anchor or bisection of its label (W_ELEM) and each recorded refusal tested
+#     there (W_ELEM + 1 per 32 label ids), after a's refusals were indexed once per
+#     comparison (W_ELEM each) -- model 1 charged 2 per event of the arm per omission and
+#     scanned every segment uncharged (32,001 segments: 72x the work charged); the
+#     divergence of a's walks is charged only where it is computed; a refusal or claim
+#     whose position lies before its own segment (a body the server never writes) is
+#     filed under its ancestor by one walk of the chains' tree (W_STEP per segment, a
+#     bisection per refusal or claim, and the sort of the lists they join), not by an
+#     uncharged climb per refusal (16,000 such events on a 16,000-deep comb: 44x);
+#   * GraphletStore.standalone_text() and save_body() (O2): a call of their own, so their
+#     base (W_CALL, CALL_BASE) is charged once like every other call's;
+#   * to_json() (O3): the seed block (W_NODE per dropped label, W_PAIR per [from, to] run
+#     of one), the seed-level and arm-level limitations and label_dict (W_NODE each), and
+#     their bytes, before they are built (model 1 built them uncharged).
+# Every other charge is model 1's; unbudgeted answers are unchanged.
+WORK_MODEL = 2
 MEMORY_BOUND = 'model'
 # a deadline is read from the clock at most this many lwu apart (about 6.5 ms nominal)
 DEADLINE_POLL = 65536
 
-# ------------------------------------------------------------------ work model 1
+# ------------------------------------------------------------------ the weights
 # lwu per element; 1 lwu ~ 0.1 us of CPython 3.11 on the reference machine (Apple M5 Max).
 # Changing a weight moves stop points: it needs a new WORK_MODEL.
 W_LINE = 48            # an MGT record line parsed (+ 1 lwu per 8 bytes of it)
@@ -89,9 +123,12 @@ ID_SHIFT_PARSE = 1     # label ids decoded during a parse: 1 lwu per 2
 BASE_SHIFT = 9         # bases spelled or copied: 1 lwu per 512
 TEXT_SHIFT = 4         # text written (JSON, sizes measured): 1 lwu per 16 bytes
 # an occurrence of record coordinates validated, clipped or written (feature level 6). No
-# input of an earlier level has one, so adding the weight moves no existing stop point:
-# WORK_MODEL stays 1
+# input of an earlier level has one, so adding the weight moved no stop point of work
+# model 1
 W_COORD = 2
+# a [from, to] pair written into a JSON list (to_json()'s runs of a dropped label, work
+# model 2)
+W_PAIR = 2
 
 # ------------------------------------------------------------------ the size model
 # CPython sizes, the larger of 3.10-3.14 where they differ (an ASCII str's header is 49

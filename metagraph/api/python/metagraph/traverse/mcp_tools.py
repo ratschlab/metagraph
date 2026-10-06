@@ -115,7 +115,7 @@ from .model import (
     UnknownLabel, UnverifiableLabelName,
 )
 from .parser import _write_all, utf8_bytes
-from .store import StoreLimitExceeded, UnknownHandle
+from .store import StoreLimitExceeded, UnknownHandle, unparsed_identity
 
 __all__ = ['GraphletTools', 'ToolError', 'ToolLimits', 'TOOL_CLASS', 'tool_names',
            'DEFAULT_MAX_BYTES', 'SEQUENCE_MAX_BYTES', 'CAPABILITIES_MAX_BYTES',
@@ -817,7 +817,8 @@ class GraphletTools:
                             status=e.status, retry_after_s=e.retry_after,
                             hint='the index is still loading: retry later') from None
         except AttemptAtBound as e:
-            # registered and run: its id is used up, so it is no loading server to retry
+            # registered and run (a retry under its id is refused while the server holds
+            # the id, and runs again after): no loading server to retry
             raise ToolError('backend_error', str(e.message), status=e.status,
                             hint='the attempt reached the duration bound the server enforces '
                                  'for it; a retry needs a new attempt_id') from None
@@ -1176,7 +1177,7 @@ class GraphletTools:
             # client's graph -- the one its capabilities, checked next, describe -- as
             # deepen() and build_request() send it (VMD-06: it was posted without one)
             req = _with_graph(req, client)
-            identity = self._check_same_index(client, ident, allow_unverified_index)
+            identity = self._check_same_index(client, ident, allow_unverified_index, req)
         response = self._backend(client.traverse_raw, req)
         results = response.get('results') or []
         if not results:
@@ -1201,7 +1202,14 @@ class GraphletTools:
         except LocalBudgetExceeded as e:
             # stage L (L3): the parse stopped on its budget -- the body is kept, after
             # the checks that need no parse, as an unparsed entry (never a graphlet until
-            # a parse completes); it can always be exported as it is (format mgt)
+            # a parse completes); it can always be exported as it is (format mgt). A
+            # replay's identity is checked against what answered first, as a parsed one
+            # is: the H record states it without a parse (O1: the budget decided whether
+            # an index_mismatch was seen)
+            if identity is not None:
+                identity = _weakest(identity, _same_index(
+                    ident, unparsed_identity(result, response), 'the replay',
+                    allow_unverified_index))
             return self._keep_unparsed(e, name, req, result, response, nbytes, spooled,
                                        keep, identity, limit, coord_note=coord_note)
         if identity is not None:
@@ -1331,11 +1339,20 @@ class GraphletTools:
                 return u.request, u.index
             raise
 
-    def _check_same_index(self, client, ident, allow_unverified=False):
+    def _check_same_index(self, client, ident, allow_unverified=False, req=None):
         """A replay or a continuation runs against the same index as its entry: the
         backend's capabilities must state the entry's identity (_same_index) before
-        anything is submitted. -> the identity statement for the result."""
-        caps = self._backend(client.capabilities)
+        anything is submitted. -> the identity statement for the result. |req|: the request
+        about to be sent -- the capabilities read are those of the graph it names (O1: a
+        continuation with overrides={'graph': ...} was checked against the client's own
+        graph and run on another); a request on the client's own graph asks as before."""
+        graph = (req or {}).get('graph') or None
+        graph_path = (req or {}).get('graph_path') or None
+        if graph_path is not None or (graph is not None
+                                      and graph != getattr(client, 'graph', None)):
+            caps = self._backend(client.capabilities, graph, graph_path)
+        else:
+            caps = self._backend(client.capabilities)
         return _same_index(ident, {'ns': caps.get('index_ns') or None,
                                    'fp': caps.get('index_fp') or None,
                                    'meta_fp': caps.get('index_meta_fp') or None,
@@ -1417,7 +1434,7 @@ class GraphletTools:
         # a continuation is derived from its parent only on the parent's index: checked
         # against the capabilities before submitting, and against what answered before
         # the parent/child link is stored
-        identity = self._check_same_index(client, ident, allow_unverified_index)
+        identity = self._check_same_index(client, ident, allow_unverified_index, req)
         optional = ('loss_budget_labels', 'summary', 'evidence')
         _check_receipt(_Receipt(dict({'handle': 'g_' + '0' * 12, 'parent': parent,
                                       'identity': identity}, **stated), optional),
@@ -1433,6 +1450,13 @@ class GraphletTools:
             nbytes = result.get('graphlet_bytes')
             if nbytes is None:
                 nbytes = len(utf8_bytes(result['graphlet']))
+            # the parent link is stored only when what answered is the parent's index, as
+            # for a parsed continuation: its H record says so without a parse (O1: a
+            # continuation answered from another index was stored with verified true and
+            # its parent link, which a later export wrote into the J record)
+            identity = _weakest(identity, _same_index(
+                ident, unparsed_identity(result, response), 'the continuation',
+                allow_unverified_index))
             got = self._keep_unparsed(e, name, dict(req), result, response, nbytes, False,
                                       True, identity, max_bytes or self.max_bytes,
                                       parent=parent, derived_from=handle)

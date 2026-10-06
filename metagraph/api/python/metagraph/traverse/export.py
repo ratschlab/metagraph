@@ -9,9 +9,13 @@ runs[].segment/branches/loss, segments[].labels_via_parent (merges), hairpin `fo
 revisit `length_bp`/`same_distance`, label_dict[].column/seq_id.
 
 Resources: without a budget (the default) the exports run with no work or allocation
-budget. Their output is as large as the graphlet makes it (to_fasta() spells every chosen
-walk's whole chain: quadratic in the walk on a comb-shaped trie); an MCP tool's max_bytes
-bounds the bytes RETURNED, not this computation or its peak allocation. Their peak is
+budget. Their output is as large as the graphlet makes it, and on a comb-shaped trie two of
+them are quadratic in the walk: to_fasta() spells every chosen walk's whole chain, and
+to_json() -- like the server's detail "full", which it reproduces -- lists every path's
+whole chain of segment ids (paths[].segments): n splits make n paths of up to n segments
+each, so its text grows as n^2 (the search service measured about 3.4 bytes x n^2 of JSON).
+An MCP tool's max_bytes bounds the bytes RETURNED, not this computation or its peak
+allocation; graphlet_export(format="mgt") is linear (the body as it is). Their peak is
 about twice their text: the walks are spelled as a stream (derive.walk_iter()), each
 dropped once its record is written, and the final line feed is joined with the records
 rather than added to the joined text (a copy of all of it). With budget=
@@ -26,8 +30,9 @@ from . import budget as _B
 from . import coords as _C
 from . import derive
 from ._codec import REASON, UNLIMITED
-from .budget import (DICT_KEY, FLOAT, JSON_ID, LIST, LIST_ITEM, STR, W_GFA_LINE, W_NODE,
-                     W_RECORD, W_STEP, LocalBudgetExceeded, dict_bytes, list_bytes)
+from .budget import (DICT_KEY, FLOAT, JSON_ID, LIST, LIST_ITEM, STR, W_ELEM, W_GFA_LINE,
+                     W_NODE, W_PAIR, W_RECORD, W_STEP, LocalBudgetExceeded, dict_bytes,
+                     list_bytes)
 from .model import ARM_SIDES, MissingEnvelope
 
 _LEVERS = ('select_walks', 'narrow_arm', 'export_mgt')
@@ -53,6 +58,53 @@ __all__ = ['to_json', 'normalize_result', 'limitation_json', 'to_fasta', 'to_gfa
 def value_json(v):
     """A typed K value as JSON: the knob's own type, "unlimited" for u."""
     return 'unlimited' if v is UNLIMITED else v
+
+
+def _limitation_price(lim):
+    """(lwu, bytes) of limitation_json(lim): a node, its dict."""
+    return W_NODE, dict_bytes(6 + len(lim.extra)) + LIST_ITEM
+
+
+def _envelope_price(g):
+    """(lwu, bytes) of the parts of to_json() built outside the arms -- the seed block
+    (the seed labels' list, a dict per dropped label with a [from, to] list per run), the
+    seed-level limitations, the outcome and label_dict -- and per arm side those of its
+    limitations and its header dicts (frontier, labels per node, evidence, cap trigger):
+    -> (lwu, bytes, {side: (lwu, bytes)}). A structural derivation of the graphlet, cached;
+    to_json() charges it at its cold price (one pass over the dropped labels, limitations
+    and labels) on every call. O3: these were built before the first charge, so 10,000
+    dropped labels of 40 runs each (a traced peak of 34.5 MB) completed under memory_mb=1."""
+    got = g.cache.get('json_envelope_price')
+    if got is None:
+        nsl = g.seed.num_seed_labels
+        nd = len(g.dropped)
+        runs = sum(len(d.runs) for d in g.dropped)
+        n = len(g.labels)
+        w = W_NODE * (2 + nd + n) + W_PAIR * runs
+        m = dict_bytes(16) + dict_bytes(12) + dict_bytes(4) + list_bytes(nsl) \
+            + list_bytes(nd) + nd * (dict_bytes(4) + LIST) \
+            + runs * (LIST + 3 * LIST_ITEM) + list_bytes(n) + n * dict_bytes(4)
+        arms = {}
+        for lim in g.limitations:
+            lw, lm = _limitation_price(lim)
+            if lim.arm is None:
+                w += lw
+                m += lm
+            else:
+                aw, am = arms.get(lim.arm, (0, 0))
+                arms[lim.arm] = (aw + lw, am + lm)
+        m += LIST
+        for side in g.arms:
+            aw, am = arms.get(side, (0, 0))
+            arms[side] = (aw + 5 * W_NODE, am + LIST + dict_bytes(20) + 4 * dict_bytes(6))
+        got = g.cache['json_envelope_price'] = (w, m, arms)
+    return got
+
+
+def _uses_envelope_price(bud, g):
+    bud.uses((id(g), 'json_envelope_price'),
+             W_ELEM * (len(g.dropped) + len(g.limitations) + len(g.labels) + 1), 64)
+    return _envelope_price(g)
 
 
 def limitation_json(lim):
@@ -151,6 +203,8 @@ def _arm_json(g, arm, bud=None, done=None):
         derive.uses(bud, g, arm, 'leaves', 'paths', 'splits', 'end_labels', 'label_end_events')
         bud.phase = 'records'
         ends = derive.label_end_events(arm)
+        # the arm's header dicts and its limitations, before they are built (O3)
+        bud.charge(*_uses_envelope_price(bud, g)[2].get(arm.side, (0, 0)))
     j = {'status': arm.status,
          'frontier_remaining': {'live_paths': arm.frontier.live_paths,
                                 'live_labels': arm.frontier.live_labels,
@@ -346,6 +400,12 @@ def to_json(g, *, budget=None):
 
 def _to_json(g, bud, done=None):
     g.require_envelope('to_json()')
+    if bud is not None:
+        # the seed block, the seed-level limitations, the outcome and label_dict, charged
+        # before they are built (O3: their account was missing however many labels were
+        # dropped -- the server lists every explicit request label it could not use)
+        w, m, _ = _uses_envelope_price(bud, g)
+        bud.charge(w, m)
     meta = g.seed_summary.get('seed', {})
     nsl = g.seed.num_seed_labels
     seed = {

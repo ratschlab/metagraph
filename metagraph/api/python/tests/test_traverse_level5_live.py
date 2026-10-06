@@ -210,7 +210,15 @@ class TestLevel5Live(unittest.TestCase):
         with self.assertRaises(AttemptConflict) as cm:
             self.c.traverse([SEED], STRATEGY, attempt_id=aid, not_after_ms=naf,
                             expect_server_instance='auto')
-        self.assertEqual(('finished', False), (cm.exception.state, cm.exception.tombstoned))
+        e = cm.exception
+        self.assertEqual(('finished', False, aid), (e.state, e.tombstoned, e.attempt_id))
+        # ... and its attempt object, the id's state, is a finished state (LRG-R1), with the
+        # finished attempt's usage (LRG-G4): the server's own "tombstone": null reads as
+        # absent (C23)
+        self.assertEqual(resp.usage['work_units'], e.usage['work_units'])
+        v = release_verdict(e, e.sent, attempts=self.main.doc['attempts'])
+        self.assertEqual((True, False, 'finished', ()),
+                         (v.release, v.early, v.code, v.assumptions), v.why)
 
     def test_instance_mismatch_and_expired(self):
         with self.assertRaises(InstanceMismatch) as cm:
@@ -223,6 +231,46 @@ class TestLevel5Live(unittest.TestCase):
         self.assertEqual((1, self.c.server_instance()),
                          (cm.exception.not_after_ms, cm.exception.server_instance))
         self.assertGreater(cm.exception.server_time_ms, 1)
+        # an expired 409 releases (LRG-R2): nothing of the id was registered here
+        attempts = self.main.doc['attempts']
+        v = release_verdict(cm.exception, cm.exception.sent, attempts=attempts)
+        self.assertEqual((True, False, 'expired', ('sent_without_expect_server_instance',)),
+                         (v.release, v.early, v.code, v.assumptions), v.why)
+        # without a skew to compare the 409's margin with, the clock's step back below
+        # not_after_ms is assumed, stated (the review of the P2 fixes)
+        v = release_verdict(cm.exception, cm.exception.sent)
+        self.assertEqual(('server_clock_step_back', 'sent_without_expect_server_instance'),
+                         v.assumptions, v.why)
+        aid = _id('late-pinned')
+        with self.assertRaises(AttemptExpired) as cm:
+            self.c.traverse([SEED], STRATEGY, attempt_id=aid, not_after_ms=1,
+                            expect_server_instance='auto')
+        v = release_verdict(cm.exception, cm.exception.sent, attempts=attempts)
+        self.assertEqual(('expired', ()), (v.code, v.assumptions), v.why)
+        # the reviewer's probe: a request just late (a margin of a few ms against the
+        # server's clock_skew_allowance_ms) holds later copies off only while the server's
+        # clock does not step back below not_after_ms -- the server's release_rule says so,
+        # and the release states it
+        with self.assertRaises(AttemptExpired) as cm:
+            self.c.traverse([SEED], STRATEGY, attempt_id=_id('just-late'),
+                            not_after_ms=_now_ms() - 1, expect_server_instance='auto')
+        margin = cm.exception.server_time_ms - cm.exception.not_after_ms
+        self.assertLessEqual(margin, self.skew)
+        v = release_verdict(cm.exception, cm.exception.sent, attempts=attempts)
+        self.assertEqual((True, 'expired', ('server_clock_step_back',)),
+                         (v.release, v.code, v.assumptions), v.why)
+        self.assertIn('(%d ms) is the step it survives' % margin, v.why)
+        if 'An expired 409' in attempts['release_rule']:
+            # a server whose release_rule states the expired ground (the 2026-10-06 texts;
+            # bin_6897db99's does not) states this assumption with it
+            self.assertIn('clock does not step back below not_after_ms',
+                          attempts['release_rule'])
+        # a held id is refused as held before its expiry (C24): that 409 is not 'expired'
+        done = _id('held')
+        naf = _now_ms() + 60000
+        self.c.traverse([SEED], STRATEGY, attempt_id=done, not_after_ms=naf)
+        with self.assertRaises(AttemptConflict):
+            self.c.traverse([SEED], STRATEGY, attempt_id=done, not_after_ms=1)
 
     def test_the_429s(self):
         naf = _now_ms() + 60000

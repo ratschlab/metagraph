@@ -129,10 +129,11 @@ reason is in ``errors``. Non-2xx answers raise ``TraverseError`` (``status``,
 ``message``, ``body``, and ``usage`` for a request with ``attempt_id``); a server still
 loading its index raises ``ServerInitializing`` (a 503 with ``retry_after``: nothing was
 run), and an attempt stopped at its duration bound while its response was built raises
-``AttemptAtBound`` (a 503 with ``usage``: it ran and its id is used up, so it is not
-retried under the same ``attempt_id``). ``capabilities()`` and ``resolve()`` call the other two routes
-(on a multi-graph server ``capabilities(graph=..., graph_path=...)`` describes one of its
-indexes), ``server_capabilities()`` reads the server-wide document (``GET /capabilities``:
+``AttemptAtBound`` (a 503 with ``usage``: it ran, so it is not retried under the same
+``attempt_id`` -- refused while the server holds the id, it would run again after that).
+``capabilities()`` and ``resolve()`` call the other two routes (on a multi-graph server
+``capabilities(graph=..., graph_path=...)`` describes one of its indexes),
+``server_capabilities()`` reads the server-wide document (``GET /capabilities``:
 the routes and features, ``feature_level``, the mode and graph names, the attempts),
 ``traverse_raw(request)`` sends a request you built yourself, and ``api_path`` is for a
 server behind a proxy prefix.
@@ -174,9 +175,15 @@ answer as a dict, a 404 included (``state`` ``finished`` or ``unknown``): a canc
 id the server does not know tombstones it (``tombstone: True``), refusing that id for the
 retention period, so nothing runs under it there in that time; when the server already
 holds its maximum of tombstones it answers 429 with ``tombstone: False`` and promises
-nothing (the cancel can be retried). An
-id runs once per server process (a second request with it is a 409). A client that
-closes its connection stops its traversal: nothing is written. ``not_after_ms=`` (Unix
+nothing (the cancel can be retried). A request with an id the server still holds is
+refused (409): while that id's attempt runs, while it is retained after it finished
+(``retention_s``, ``retention_count``) and, for an attempt sent with ``not_after_ms``,
+until the server's clock passes ``not_after_ms`` + ``clock_skew_allowance_ms`` (at most
+``tombstone_max_s`` after it finished or after its latest refused copy). After that -- at
+once with ``retention_s`` 0, and on a restarted process -- a request with the id runs
+again: a ledger that must not see a request run twice sends ``not_after_ms`` and
+``expect_server_instance`` (below). A client that closes its connection stops its
+traversal: nothing is written. ``not_after_ms=`` (Unix
 epoch ms, with or without ``attempt_id``) is the instant after which the request must not
 be started: a server whose clock has passed it when the request arrives refuses it, and the
 client raises ``AttemptExpired`` (a 409 with ``state: "expired"``: nothing ran, nothing was
@@ -212,10 +219,12 @@ holds no tombstones. Two request fields close both gaps, and the capabilities'
 Both fields are sent only to a server that states ``feature_level`` 5 or more, read from
 ``GET /capabilities`` (``client.server_feature_level()``; or pass ``feature_level=`` to
 the client) and never for a request without them: a server below level 5 refuses the
-fields with a 400, and a 400 to a request with ``attempt_id`` has already used that id
-up. Below level 5 a cancel goes out without ``not_after_ms`` (it still stops the attempt)
-and ``'auto'`` is left out; an explicit instance raises ``UnsupportedFeature`` (a
-``ValueError``) before anything is sent.
+fields with a 400 after it registered the ``attempt_id``, so a request with that id is
+refused (409) while that server retains it (``retention_s``, ``retention_count``; below
+level 5 nothing holds it longer) and runs again after that. Below level 5 a cancel goes
+out without ``not_after_ms`` (it still stops the attempt) and ``'auto'`` is left out; an
+explicit instance raises ``UnsupportedFeature`` (a ``ValueError``) before anything is
+sent.
 
 What the client read is kept per server process. It is read again after an answer names
 another ``server_instance`` (the server restarted at the same address), after an
@@ -223,7 +232,8 @@ another ``server_instance`` (the server restarted at the same address), after an
 ``expect_server_instance`` as an unknown field (an older binary now answers there). A
 cancel refused that way is sent again at once without ``not_after_ms``: the 400 stopped
 nothing. A request with ``expect_server_instance`` that is the first to reach a replaced
-process cannot be saved: an older binary uses its ``attempt_id`` up with that 400, so a
+process cannot be saved: an older binary registers its ``attempt_id`` before it answers
+that 400 (the id is refused while that server retains it and runs again after that), so a
 ledger that rolls servers back calls ``client.refresh_capabilities()`` first.
 
 What went out is stated: ``response.sent`` and the ``.sent`` of any exception
@@ -234,50 +244,110 @@ cancel) are an ``AttemptSent(attempt_id, not_after_ms, expect_server_instance)``
 carries the body it sent (``answer.sent``).
 
 The answers are typed. ``cancel()`` and ``attempt()`` return an ``AttemptAnswer``: the
-server's JSON (a ``dict``, as before) with its HTTP ``status``, ``state``,
-``tombstone``, the 429's ``reason`` (``tombstones_full``: the server holds its maximum,
-``answer.retryable``; ``no_suppression``: it keeps no tombstones) and ``suppression``, a
-``Suppression(suppressed_until_ms, not_after_ms, covers_admission,
-covers_admission_reason)`` on every tombstone answer of a level-5 server
-(``covers_admission`` true: no copy of that request can start on this
-``server_instance``; else the reason, ``no_not_after_ms`` or ``beyond_tombstone_max``).
+server's JSON (a ``dict``, as before) with its HTTP ``status``, ``attempt_id``,
+``state`` and ``server_instance`` (at the top level, else in a cancel's ``attempt``
+object), ``tombstone``, the 429's ``reason`` (``tombstones_full``: the server holds its
+maximum, ``answer.retryable``; ``no_suppression``: it keeps no tombstones), ``usage``
+(what a finished attempt consumed: a cancel's in its ``attempt`` object, GET's at the
+top level) and ``suppression``, a ``Suppression(suppressed_until_ms, not_after_ms,
+covers_admission, covers_admission_reason)`` on every tombstone answer of a level-5
+server (``covers_admission`` true: no copy of that request can start on this
+``server_instance``; false with the reason, ``no_not_after_ms`` or
+``beyond_tombstone_max``; ``None`` when the answer does not state it as a JSON bool).
+The readers take the wire as written: an instant is an integer (a bool or a float reads
+as ``None``), an instance a string, and a key whose value is ``null`` reads as absent.
 A request refused because its ``attempt_id`` is held raises ``AttemptConflict`` (409:
-running, retained, held after it finished, or tombstoned -- ``tombstoned``, with the
-``suppression`` judged against the refused request's own ``not_after_ms``; the refusal
-extends the tombstone), and ``AttemptExpired`` states ``not_after_ms``,
-``server_time_ms`` and ``server_instance``.
+running, retained, held after it finished, or tombstoned): ``attempt`` is that id's state
+as ``attempt()`` would read it (``{}`` when the body's is not an object), with its
+``attempt_id``, ``state``, ``usage`` (a finished attempt's: what it consumed; the refused
+copy consumed nothing) and ``server_instance`` and ``tombstoned`` (falling back to the
+body's top level); a tombstoned id's ``suppression`` is judged against the refused
+request's own ``not_after_ms``, and the refusal extends the hold. ``AttemptExpired``
+states ``not_after_ms``, ``server_time_ms``, ``server_instance`` and ``attempt_id``.
+``classify_409(body, sent=None)`` gives the exception a decoded 409 stands for, as the
+client raises it: the ``attempt`` object's state first, then a top-level ``expired``,
+then ``instance_mismatch`` -- an ``InstanceMismatch`` only for a request that named
+``expect_server_instance`` (``sent``), else a plain ``TraverseError``.
+
+``metagraph.traverse.client`` and ``from metagraph.traverse import release_verdict``
+load only the HTTP client and the attempt readers (``metagraph.traverse.attempts``), not
+the parser, the model or the local operations: the package loads each name on first use.
 
 ``release_verdict(answer, sent, *, now_ms=None, clock_skew_allowance_ms=None,
-bound_ms=None, attempts=None)`` applies the ``release_rule`` exactly and returns a
-``ReleaseVerdict`` (``release``, ``early``, ``code``, ``why``, ``assumptions``; true as a
-``bool`` when ``release``). ``attempts`` is the capabilities' attempts block; it supplies
-``clock_skew_allowance_ms`` and, as the bound, ``hard_cap_ms`` when they are not given:
+bound_ms=None, attempts=None, hold_clock_while_running=True)`` applies the
+``release_rule`` and returns a ``ReleaseVerdict`` (``release``, ``early``, ``code``,
+``why``, ``assumptions``; true as a ``bool`` when ``release``). ``attempts`` is the
+capabilities' attempts block; it supplies ``clock_skew_allowance_ms`` and, as the bound,
+``hard_cap_ms`` when they are not given. An answer about another ``attempt_id`` than the
+one sent, or one that names none, releases nothing:
 
 * **early** (``code: 'tombstone'``) only on a 404 with ``tombstone: true`` and
   ``covers_admission: true`` (a cancel's or ``GET /traverse/attempt``'s) from the
   ``server_instance`` the attempt was sent to with ``expect_server_instance``, judged
-  against exactly the ``not_after_ms`` it was sent with. An attempt sent without either
-  field is never released early on a tombstone.
+  against exactly the ``not_after_ms`` it was sent with, and held at least until that
+  ``not_after_ms`` + ``clock_skew_allowance_ms`` (``suppressed_until_ms``: the server's
+  own condition for ``covers_admission``, checked again with the ledger's allowance --
+  without one, against ``not_after_ms``). An attempt sent without either field is never
+  released early on a tombstone.
 * otherwise on a **finished** state (``code: 'finished'``: the response, an error that
-  carries the attempt's ``usage``, a cancel's or ``attempt()``'s ``state: finished``),
-  or once the ledger's clock (``now_ms``) passes ``not_after_ms +
-  clock_skew_allowance_ms + bound_ms`` (``code: 'clock'``).
-* a finished release is the rule's either way, but the server holds a finished id
-  against a replay only for an attempt sent with ``not_after_ms``, until
+  carries the attempt's ``usage``, a cancel's or ``attempt()``'s ``state: finished``, or
+  the ``attempt`` object of the 409 that refused a copy of the request -- the id's state
+  -- saying ``finished``);
+* on an **expired** 409 (``code: 'expired'``) for the attempt as sent (its
+  ``not_after_ms``, and its ``server_instance`` when it was pinned): the server checks the
+  id against what it holds before the expiry, so no copy of the attempt was registered
+  there when it was judged, and none can start there later while the server's clock does
+  not step back below ``not_after_ms`` (its check is strict). The 409's
+  ``server_time_ms - not_after_ms`` is the step that survives: where it is within
+  ``clock_skew_allowance_ms`` (the step every release assumes the clock may take), or
+  cannot be judged (no ``server_time_ms``, no allowance given), the release states
+  ``server_clock_step_back``. It settles nothing: an earlier copy may have run, finished
+  and left retention;
+* or once the ledger's clock (``now_ms``) passes ``not_after_ms +
+  clock_skew_allowance_ms + bound_ms`` (``code: 'clock'``). The clock takes every copy of
+  the attempt as stopped at its bound, but the server compares the bound only at its
+  delivery checks: past it the attempt runs on until its next delivery check (then the
+  503) or its handler's return -- the rest of the piece it was in when the bound passed
+  (a read's chunk, a head, the mapping of a seed's k-mers) and, when its walk had not
+  stopped by then, the walk up to its next poll that reads the clock, the stopped seed's
+  finalisation and the building of its result up to the first delivery check --, a run of
+  no stated length (``deadline_check``; ``observed_max_uninterruptible_ms`` is an
+  observation, not a margin). Every clock release states that assumption
+  (``uninterruptible_overrun``), and while the last answer
+  says the attempt is ``running`` or ``stopping`` -- a cancel's 200, ``attempt()``, or a
+  409's ``attempt`` -- the clock releases nothing (``hold_clock_while_running``, the
+  default: read its state again and release on finished); with
+  ``hold_clock_while_running=False`` it releases, stating the assumption.
+* a finished or expired release is the rule's either way, but the server holds a finished
+  id against a replay only for an attempt sent with ``not_after_ms``, until
   ``not_after_ms + clock_skew_allowance_ms`` and at most ``tombstone_max_s`` after the
-  finish, on that process. Where the release instead assumes that no copy of the request
-  arrives later, ``assumptions`` names why: ``sent_without_not_after_ms``,
-  ``no_retention`` (``retention_s`` 0), ``beyond_tombstone_max``,
-  ``sent_without_expect_server_instance`` (a copy reaching a restarted process). The two
-  about the server are judged only when ``attempts`` is given. When the clock has passed
-  as well, the ``clock`` release is returned, which assumes none of them.
+  finish (or after its latest refused copy), on that process. Where the release instead
+  assumes that no copy of the request arrives later, ``assumptions`` names why:
+  ``sent_without_not_after_ms``, ``server_hold_unchecked`` (no ``attempts`` block was
+  given: the server's hold is not judged), ``no_retention`` (``retention_s`` 0),
+  ``no_finished_hold`` (the block states no ``tombstone_max_s``: a server below feature
+  level 5 holds a finished id only while it is retained), ``beyond_tombstone_max``,
+  ``other_server_instance`` or ``server_instance_not_stated`` (the finish is not that of
+  the process the attempt was pinned to), ``other_copy_not_held`` (the finished copy was
+  sent with another ``not_after_ms``), ``sent_without_expect_server_instance`` (a copy
+  reaching a restarted process), and for an expired release ``server_clock_step_back``
+  (above). When the clock has passed as well, the ``clock`` release is returned instead,
+  which assumes only ``uninterruptible_overrun``.
 * nothing else releases, and ``code`` names the first condition not met:
-  ``not_tombstoned`` (a 429), ``stopping`` / ``running``, ``no_tombstone``,
-  ``sent_without_not_after_ms``, ``sent_without_expect_server_instance``,
-  ``no_suppression_stated`` (a server below level 5), ``covers_admission_false``,
-  ``other_server_instance``, ``other_not_after_ms``, ``answer_for_other_attempt``,
-  ``not_a_release_answer`` (a 409 -- held, tombstoned, expired, ``instance_mismatch``
-  -- or an error before the attempt was registered), ``no_answer``.
+  ``answer_for_other_attempt``, ``not_tombstoned`` (a 429), ``stopping`` / ``running``,
+  ``no_tombstone``, ``sent_without_not_after_ms``,
+  ``sent_without_expect_server_instance``, ``no_suppression_stated`` (a server below
+  level 5), ``covers_admission_unstated``, ``covers_admission_false``,
+  ``other_server_instance``, ``other_not_after_ms``, ``suppression_short``,
+  ``not_a_release_answer`` (a 409 for a tombstoned id, an ``instance_mismatch``, or an
+  error before the attempt was registered), ``no_answer``.
+
+Assumed by every release, as by the ``release_rule``: the ledger's clock is within
+``clock_skew_allowance_ms`` of the server's, the server's clock does not step back by more
+than that, nothing between them rewrites a request's ``attempt_id``, ``not_after_ms`` or
+``expect_server_instance``, and no copy of the request reaches another server that serves
+the same ledger (a server knows only its own tombstones and holds); the clock release
+assumes besides that the attempt's run past its bound has ended by then (above).
 
 .. code-block:: python
 
@@ -704,12 +774,17 @@ one). Each has ``kind``, ``knob`` (the request field, relative to ``strategy``),
      - seed
      - label_evidence (qualified), in a walked result
      - ``bounds.time_budget_ms``: the time budget ran out while the permitted set was
-       derived from the seed, after ``observed`` of its k-mers (feature level 5+). The
-       labels carrying the k-mers read were taken -- a superset of those carrying the
-       whole seed -- and the walk stopped at the seed (``complete_to_bp`` 0, walks
-       ``partial``). ``summary()`` names the case (``seed.derivation``). A seed whose
-       derivation failed outright has no graphlet; its result states the same kind and
-       qualifies nothing.
+       derived from the seed, after ``observed`` of its k-mers (feature level 6;
+       builds ``7aaee760`` to ``67bef367`` carry it while stating level 5 and are never
+       deployed). The labels carrying the k-mers read were taken -- a superset of those
+       carrying the whole seed -- and the walk stopped at the seed (``complete_to_bp`` 0,
+       walks ``partial``). ``summary()`` names the case (``seed.derivation``,
+       ``kmers_read``).
+       A level-5 server fails such a seed instead (walks ``failed``, ``observed`` in
+       elapsed ms). A seed whose derivation failed outright has no graphlet; its result
+       states the same kind, with ``observed`` in elapsed ms (the limit's unit), and
+       qualifies nothing: one kind, two units -- k-mers read in a walked result, ms in a
+       failed one -- told apart by whether the seed was walked.
    * - ``coordinates``
      - seed
      - none (decision C2, provisional)
@@ -1799,9 +1874,20 @@ says so -- never a shorter answer that could be read as complete. Without one (t
 default) nothing is budgeted and every answer is byte for byte what it was before.
 
 * **Work** is counted in local work units (lwu): a deterministic, weighted count of the
-  model elements an operation visits and of the rows and text it makes (work model 1;
+  model elements an operation visits and of the rows and text it makes (work model 2;
   1 lwu is about 0.1 us of CPython 3.11 on the reference machine, so 30 M lwu is about
-  3 s nominal). It is not CPU time. A derivation an operation uses (paths, splits, merge
+  3 s nominal). It is not CPU time. Work model 2 (feature level 6) moved the charges of
+  four calls from model 1, where they were not deterministic or not conservative, so
+  their stop points moved: ``next_request()`` with a ``change_cost`` table (the labels
+  owed the default cost are walked in name order: the same charge in every process; and
+  the table is charged -- each copy and check of its entries, and per switch search its
+  pairs, edges and heap -- where the account had stayed at the figure of a table without
+  entries), ``compare(mode='prefix_subset')`` (charged per segment a walk is followed
+  through and per recorded refusal tested, which were scanned uncharged; a refusal or
+  claim placed before its own segment is filed by one charged walk of the chains, not an
+  uncharged climb per refusal), the store's ``standalone_text()`` and ``save_body()`` (a
+  call's base) and ``to_json()`` (its seed block, limitations and ``label_dict``, built
+  uncharged before). A derivation an operation uses (paths, splits, merge
   maps, evidence, label summaries, ...) is charged at its *cold price*, whether a cache
   holds it or not: the same call on the same graphlet with the same budget charges the
   same units and stops at the same row, in any process and whatever earlier calls cached.
@@ -1890,7 +1976,7 @@ answers as on a fresh model.
 
 .. code-block:: text
 
-   6 True 1
+   6 True 2
    work claims rows True True
    True
    unknown None work keys:a

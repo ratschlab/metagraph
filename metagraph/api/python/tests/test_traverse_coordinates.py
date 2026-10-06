@@ -754,7 +754,8 @@ class TestClient(unittest.TestCase):
                 c.build_request(['A'], st, coordinates=bad)
             with self.assertRaises(ValueError, msg=repr(bad)):
                 c.build_request(['A'], TRACE, coordinates=bad, max_coordinate_occurrences=5)
-        # a cap the server would refuse (400, an attempt_id used up) is refused before
+        # a cap the server would refuse (400, after it registered an attempt_id) is refused
+        # before anything is sent
         for bad in (0, -1, True, 1.5, 'all', (1 << 64) - 1):
             with self.assertRaises(ValueError, msg=repr(bad)):
                 c.build_request(['A'], TRACE, coordinates=True, max_coordinate_occurrences=bad)

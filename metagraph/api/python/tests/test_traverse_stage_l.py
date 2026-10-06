@@ -238,6 +238,57 @@ print(json.dumps(out, sort_keys=True))
         self.assertEqual(got[0], got[1])
         self.assertEqual(got[0], got[2])
 
+    def test_switch_reach_under_other_hash_seeds(self):
+        # T-L3 for next_request() with a change_cost table (L1): _switch_reach walked the
+        # names owed the default in a set's order, so labels at equal loss were pushed, popped
+        # and charged in an order PYTHONHASHSEED chose -- the review's call completed under 5
+        # of 12 seeds and stopped under 7. The answer and every charge must be the same
+        script = r'''
+import json, sys
+sys.path.insert(0, %r); sys.path.insert(0, %r)
+import traverse_testlib as T
+from metagraph.traverse import LocalBudget, LocalBudgetExceeded, ops
+out = {}
+cost = {'model': 'table', 'default': 0.25, 'entries': [['C', 'B', 9], ['A', 'B', 9]]}
+full = LocalBudget()
+req = T.graphlet('switch_chain').next_request('right', [1], budget=full,
+                                              labels={'change_cost': cost})
+out['request'] = [dict(req), list(req.notes), full.used_work, full.peak_bytes]
+for limit in (349, full.used_work - 1, full.used_work):
+    b = LocalBudget(work_units=limit)
+    try:
+        T.graphlet('switch_chain').next_request('right', [1], budget=b,
+                                                labels={'change_cost': cost})
+        out[str(limit)] = ['built', b.used_work]
+    except LocalBudgetExceeded as e:
+        out[str(limit)] = e.stop.as_dict()
+X = ['X%%d' %% i for i in range(8)]
+Y = ['Y%%d' %% i for i in range(8)]
+table = {'model': 'table', 'default': 1,
+         'entries': [['S', x, 9] for x in X] + [[y, x, 9] for y in Y for x in X]}
+b = LocalBudget()
+with b.scope('probe'):
+    got = ops._switch_reach(table, ['S'], X + Y + ['T0'], 3.0, lb=b)
+out['reach'] = [sorted(got.items()), b.used_work, b.peak_bytes]
+print(json.dumps(out, sort_keys=True))
+''' % (API, HERE)
+        got = []
+        for seed in ('0', '1', '2', '7', '12345'):
+            env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONDONTWRITEBYTECODE='1')
+            p = subprocess.run([sys.executable, '-c', script], capture_output=True,
+                               text=True, env=env, timeout=600)
+            self.assertEqual(0, p.returncode, p.stderr[-2000:])
+            got.append(json.loads(p.stdout))
+        for other in got[1:]:
+            self.assertEqual(got[0], other)
+        # the charge the sorted order gives (the review's fixed copy: 587 under every seed,
+        # and 360 more for the 72-entry table in work model 2 -- the check and the build at
+        # W_ELEM per entry, the count of its pairs at W_STEP, its 72 edges at W_ELEM: the
+        # review of the P2 fixes found the table's memory and most of its work uncharged)
+        self.assertEqual(587 + 360, got[0]['reach'][1])
+        self.assertEqual(['built', got[0]['request'][2]],
+                         got[0][str(got[0]['request'][2])])
+
 
 class TestCachesAfterAStop(unittest.TestCase):
     """T-L7: a stop leaves only complete cache entries: the unbudgeted answer afterwards is
@@ -871,7 +922,8 @@ class TestTools(unittest.TestCase):
             loc = out['local']
             self.assertTrue(loc['complete'], (name, loc))
             self.assertGreater(loc['usage']['work_units'], 0, name)
-            self.assertEqual((1, 'model'), (loc['work_model'], loc['memory_bound']))
+            # work model 2 (the review of 2026-10-06: L1, L2, O2, O3 moved charges)
+            self.assertEqual((2, 'model'), (loc['work_model'], loc['memory_bound']))
             cls = TOOL_CLASS[name]
             self.assertEqual(getattr(ToolLimits(), cls).as_dict(), loc['limits'])
         for name in ('traverse_capabilities', 'graphlet_list', 'graphlet_free'):

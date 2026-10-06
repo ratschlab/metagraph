@@ -1,0 +1,127 @@
+{
+ "attempts": {
+  "allowance_ms": 10000,
+  "client_check_ms": 100,
+  "clock_skew_allowance_ms": 2000,
+  "content_timeout_s": 900,
+  "fields": [
+   "attempt_id",
+   "budget_id",
+   "locus_id",
+   "not_after_ms"
+  ],
+  "hard_cap_ms": 899000,
+  "retention_count": 10000,
+  "retention_s": 3600
+ },
+ "feature_level": 4,
+ "get_finished": [
+  200,
+  {
+   "attempt_id": "rec4-1",
+   "bound_ms": 12000,
+   "cancel_requested_at": null,
+   "deadline_at": "2026-10-06T17:29:35.276Z",
+   "elapsed_ms": 5,
+   "finished_at": "2026-10-06T17:29:23.280Z",
+   "not_after_ms": 1791307823275,
+   "reason": "completed",
+   "received_at": "2026-10-06T17:29:23.276Z",
+   "response": {
+    "bytes": 2496,
+    "status": 200,
+    "written": true
+   },
+   "seeds": {
+    "abandoned": 0,
+    "finished": 1,
+    "requested": 1,
+    "started": 1
+   },
+   "server_instance": "9f3e26f889d5d3fd",
+   "state": "finished",
+   "stop_requested_at": null,
+   "stop_requested_by": null,
+   "stopped_at": "2026-10-06T17:29:23.280Z",
+   "usage": {
+    "attempt_id": "rec4-1",
+    "bound": {
+     "allowance_ms": 10000,
+     "capped_by": null,
+     "enforced": true,
+     "seeds": 1,
+     "time_budget_ms": 2000.0,
+     "walk_until_ms": 7000
+    },
+    "bound_ms": 12000,
+    "elapsed_ms": 5,
+    "memory": {
+     "held_bound_bytes": null,
+     "peak_admitted_bytes": 560068,
+     "soft_excess_bytes": null
+    },
+    "not_after_ms": 1791307823275,
+    "observed_max_uninterruptible_ms": 1,
+    "reason": "completed",
+    "received_at": "2026-10-06T17:29:23.276Z",
+    "seeds": {
+     "abandoned": 0,
+     "finished": 1,
+     "requested": 1,
+     "started": 1
+    },
+    "server_instance": "9f3e26f889d5d3fd",
+    "stopped_at": "2026-10-06T17:29:23.280Z",
+    "work_units": 2270
+   }
+  }
+ ],
+ "not_after_ms": 1791307823275,
+ "now_ms": 1791307763275,
+ "recorded": "level-4 server_query (f667d775, bin_f667d775) on build/mini_refseq, default settings; the attempts block without its delivery_reserve object (O20: a block that states no tombstone_max_s)",
+ "usage": {
+  "attempt_id": "rec4-1",
+  "bound": {
+   "allowance_ms": 10000,
+   "capped_by": null,
+   "enforced": true,
+   "seeds": 1,
+   "time_budget_ms": 2000.0,
+   "walk_until_ms": 7000
+  },
+  "bound_ms": 12000,
+  "elapsed_ms": 5,
+  "memory": {
+   "held_bound_bytes": null,
+   "peak_admitted_bytes": 560068,
+   "soft_excess_bytes": null
+  },
+  "not_after_ms": 1791307823275,
+  "observed_max_uninterruptible_ms": 1,
+  "per_seed": [
+   {
+    "elapsed_ms": 3,
+    "final_bytes": 557092,
+    "index": 0,
+    "outcome": "complete",
+    "peak_admitted_bytes": 560068,
+    "refused_bytes": null,
+    "soft_excess_bytes": null,
+    "stopped_by": null,
+    "work_seed": 720,
+    "work_units": 2270
+   }
+  ],
+  "reason": "completed",
+  "received_at": "2026-10-06T17:29:23.276Z",
+  "seeds": {
+   "abandoned": 0,
+   "finished": 1,
+   "requested": 1,
+   "started": 1
+  },
+  "server_instance": "9f3e26f889d5d3fd",
+  "stopped_at": "2026-10-06T17:29:23.280Z",
+  "work_units": 2270
+ }
+}

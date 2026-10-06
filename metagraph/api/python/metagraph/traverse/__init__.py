@@ -11,7 +11,10 @@ Nothing here reads the graph; deepening is a new backend traversal that the libr
 prepares (next_request) and the client runs.
 
 Stdlib only. pandas is imported lazily by frames.frames() alone, so
-`import metagraph.traverse` works without it.
+`import metagraph.traverse` works without it. The package's names are loaded on first use
+(PEP 562): `import metagraph.traverse.client` or `from metagraph.traverse import
+release_verdict` loads the HTTP client and the attempt readers (attempts.py) only, not the
+parser, the model or the local operations.
 
 Every local operation takes budget= (stage L, metagraph.traverse.budget): a LocalBudget of
 work units and a modelled memory account under which a call completes or stops and says
@@ -25,24 +28,38 @@ default -- nothing is budgeted and every answer is what it always was.
         print(w.path_id, w.length_bp, [l.name for l in w.labels_full])
 """
 
-from ._codec import CodecError, GraphletFormatError, UNLIMITED
-from .model import (
-    AmbiguousLabel, Arm, BadSelector, Change, Claim, Comparison, Continuation, CoordClaim,
-    CoordLabelWalk, CoordWalk, Graphlet, IncompatibleContinuations, IncompleteRecording,
-    Label, LabelWalk, MissingEnvelope, NextRequest, Segment, Run, SupportRun, UnknownLabel,
-    Walk,
-)
-from .coords import Coordinates, RunCoordinates, SeedOccurrences
-from .parser import (FORMAT_VERSION, dump, from_response, is_canonical, load, parse, save,
-                     seed_envelope, standalone_text)
-from .ops import GraphletView
-from .budget import (LocalBudget, LocalBudgetExceeded, LocalLimits, LocalStop, Partial,
-                     local_budget)
-from .client import (AttemptAnswer, AttemptAtBound, AttemptConflict, AttemptExpired,
-                     AttemptSent, InstanceMismatch, ReleaseVerdict, ServerInitializing,
-                     Suppression, TraverseClient, TraverseError, TraverseResponse,
-                     UnsupportedFeature, release_verdict)
-from .store import Entry, GraphletStore, StoreLimitExceeded, UnknownHandle
+import importlib
+
+# name -> the module that defines it. Loaded on first use (PEP 562): `from metagraph.traverse
+# import release_verdict` (or TraverseClient) loads the light modules attempts.py and client.py
+# only -- no parser, model or operation (LRG-G7: the search service's API side dispatches and
+# releases attempts and must not pay for the library's local processing) -- while every name
+# below keeps working as an attribute, in `from ... import`, and in `import *`.
+_NAMES = {
+    '_codec': ('CodecError', 'GraphletFormatError', 'UNLIMITED'),
+    'model': ('AmbiguousLabel', 'Arm', 'BadSelector', 'Change', 'Claim', 'Comparison',
+              'Continuation', 'CoordClaim', 'CoordLabelWalk', 'CoordWalk', 'Graphlet',
+              'IncompatibleContinuations', 'IncompleteRecording', 'Label', 'LabelWalk',
+              'MissingEnvelope', 'NextRequest', 'Segment', 'Run', 'SupportRun',
+              'UnknownLabel', 'Walk'),
+    'coords': ('Coordinates', 'RunCoordinates', 'SeedOccurrences'),
+    'parser': ('FORMAT_VERSION', 'dump', 'from_response', 'is_canonical', 'load', 'parse',
+               'save', 'seed_envelope', 'standalone_text'),
+    'ops': ('GraphletView',),
+    'budget': ('LocalBudget', 'LocalBudgetExceeded', 'LocalLimits', 'LocalStop', 'Partial',
+               'local_budget'),
+    'attempts': ('AttemptAnswer', 'AttemptAtBound', 'AttemptConflict', 'AttemptExpired',
+                 'AttemptSent', 'InstanceMismatch', 'ReleaseVerdict', 'ServerInitializing',
+                 'Suppression', 'TraverseError', 'TraverseResponse', 'classify_409',
+                 'release_verdict'),
+    'client': ('TraverseClient', 'UnsupportedFeature'),
+    'store': ('Entry', 'GraphletStore', 'StoreLimitExceeded', 'UnknownHandle'),
+}
+_HOME = {name: mod for mod, names in _NAMES.items() for name in names}
+# the package's modules, also reachable as attributes before anything imported them
+# (metagraph.traverse.ops after `import metagraph.traverse`, as when this file imported them)
+_MODULES = frozenset(('_codec', 'attempts', 'budget', 'client', 'coords', 'derive', 'export',
+                      'frames', 'mcp_tools', 'model', 'ops', 'parser', 'store'))
 
 __all__ = [
     'FORMAT_VERSION', 'parse', 'dump', 'is_canonical', 'load', 'save', 'from_response',
@@ -57,8 +74,24 @@ __all__ = [
     'TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
     'AttemptAtBound', 'AttemptExpired', 'AttemptConflict', 'InstanceMismatch',
     'UnsupportedFeature', 'AttemptAnswer', 'AttemptSent', 'Suppression', 'ReleaseVerdict',
-    'release_verdict', 'GraphletStore', 'Entry', 'UnknownHandle',
+    'release_verdict', 'classify_409', 'GraphletStore', 'Entry', 'UnknownHandle',
     'StoreLimitExceeded',
     'LocalBudget', 'LocalLimits', 'LocalStop', 'LocalBudgetExceeded', 'Partial',
     'local_budget',
 ]
+
+
+def __getattr__(name):
+    mod = _HOME.get(name)
+    if mod is not None:
+        value = getattr(importlib.import_module('.' + mod, __name__), name)
+    elif name in _MODULES:
+        value = importlib.import_module('.' + name, __name__)
+    else:
+        raise AttributeError('module %r has no attribute %r' % (__name__, name))
+    globals()[name] = value             # once: later lookups never reach __getattr__
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__))

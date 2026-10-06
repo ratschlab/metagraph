@@ -41,6 +41,8 @@ from . import budget as _B
 from . import derive
 from ._codec import MAX_U64, UNLIMITED, GraphletFormatError, tok as _tok
 from .budget import DICT, DICT_KEY, INT, TUPLE, W_ELEM, record_bytes
+# defined in the light client (LRG-G7: importing the client loads no model), named here too
+from .client import strip_coordinate_cap  # noqa: F401
 
 __all__ = ['Coordinates', 'RunCoordinates', 'SeedOccurrences', 'KINDS', 'REASONS',
            'present', 'requested', 'of', 'reason', 'validate', 'attach', 'clip',
@@ -536,16 +538,7 @@ def attach(g, b=None):
 
 # ------------------------------------------------------------------ requests
 
-def strip_coordinate_cap(strategy):
-    """|strategy| (in place) without output.max_coordinate_occurrences unless its
-    output.coordinates is true: the server refuses the cap without coordinates (400,
-    decision C-N6), so the library never sends it alone -- build_request(), next_request()
-    (whose request carries the retrieval's echo, cap included) and the tools' requests
-    (revision 2: dropping coordinates through a continuation keeps working)."""
-    out = strategy.get('output') if isinstance(strategy, dict) else None
-    if isinstance(out, dict) and out.get('coordinates') is not True:
-        out.pop('max_coordinate_occurrences', None)
-    return strategy
+# strip_coordinate_cap(): imported above from the client
 
 
 # ------------------------------------------------------------------ clipping
