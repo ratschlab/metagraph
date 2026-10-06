@@ -826,6 +826,12 @@ class Walker {
     // walk's head pieces there; once only, and on every way out of run() (failures too)
     void begin_setup();
     void end_setup(double until_ms = -1);
+    // A head piece ends where the walk reads its clock for a stop (R8): the walk since the
+    // previous such reading, |now_ms| on the seed's clock, its reads excluded (they are pieces
+    // of their own), noted (DecodePacer::note_head) and the next one started; nothing while the
+    // seed phase is open (its pieces are setup pieces). Called by checkpoint() and by the
+    // lookahead's polls (prefetch), which read the clock between two checkpoints
+    void note_head(double now_ms);
     // A stop requested from outside the walk (AttemptControl::poll): NONE without a control.
     // A client that is gone throws AttemptAborted here, abandoning the walk.
     ExternalStop external_stop();
@@ -1621,33 +1627,67 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         return !first && !std::binary_search(live_columns.begin(), live_columns.end(), c);
     };
 
-    // The derivation fetches in sub-batches of at most this many k-mers, whatever
-    // |batch_kmers| the caller asked for: batching the row reconstruction is what makes a
-    // long seed fast, but a sub-batch is reconstructed BEFORE the intersection or the
-    // clock can stop it, so the work that can be wasted has to stay bounded.
-    // The FIRST sub-batch is always kMaxChunk wide, whatever batch_kmers says: it is the
-    // window in which the cheapest row is chosen and the candidate guard below is
-    // applied, and whether a seed is accepted must not depend on a fetch-size knob.
+    // The derivation fetches in sub-batches (windows) of exactly this many k-mers (the last
+    // one shorter), whatever |batch_kmers| the caller asked for: batching the row
+    // reconstruction is what makes a long seed fast, but a window is reconstructed BEFORE the
+    // intersection or the clock can stop it, so the work that can be wasted has to stay
+    // bounded. The first window is the one in which the cheapest row is chosen and the
+    // candidate guard below is applied, and whether a seed is accepted must not depend on a
+    // fetch-size knob. Every window is charged as one charge before its k-mers are consumed,
+    // so its width also places the work comparisons, `largest_charge` and, after an early
+    // no_carrier, `work_seed`: those must not depend on the knob either. Before the review of
+    // 2026-10-06 (W1) the later windows of a read that is not budget-aware were
+    // clamp(batch_kmers, 1, 64) wide, and a work-budgeted derived seed walked partial at
+    // batch_kmers 1 and 7 and failed at 64; the cost of the fixed width is at most 63 rows
+    // read past an early no_carrier. A window's rows are held at once, and the soft observation
+    // under a memory budget counts them (observe() below), so at batch_kmers below 64 that
+    // observation changed with W1 too — usage.memory.soft_excess_bytes and held_bound_bytes,
+    // the per-seed soft excess, memory_bound_soft's observed where it crosses a MiB — to the
+    // count of the 64 rows the derivation now holds (stated with level 6, SPEC §10.3)
     constexpr size_t kMaxChunk = 64;
-    // With the budget-aware reads (stage 3) a sub-batch is a read that may be refused
-    // whole, so its width is fixed whatever batch_kmers says: whether the seed phase fits
-    // must not depend on a fetch-size knob (the derived set never does)
-    const size_t chunk = decode_charged_ ? kMaxChunk
-                                         : std::clamp<size_t>(strategy_.batch_kmers, 1, kMaxChunk);
-    // the derivation's own state, as the soft observation below counts it
-    auto state_bytes = [&]() {
-        uint64_t bytes = (live.capacity() + next.capacity()) * sizeof(Key)
-                       + cur.capacity() * sizeof(cur[0]) + flat.capacity() * sizeof(flat[0]);
-        for (const auto &at : coords_at) {
-            bytes += sizeof(at) + at.size() * sizeof(at[0]);
-            for (const auto &entry : at) {
-                bytes += entry.second.size() * sizeof(Coord);
-            }
+    // The derivation's state is recounted in full at every observation in a debug build (an
+    // assert), and in a Release build when a test hook asks for it
+#ifdef NDEBUG
+    const bool recount_state = hooks_ && hooks_->recount_derivation_state;
+#else
+    const bool recount_state = true;
+#endif
+    // The bytes of |coords_at| as the soft observation counts them — every k-mer's vector
+    // (consumed or not), its entries and their coordinates — kept as a running total, updated
+    // where an entry is added or dropped. Summing |coords_at| at every observation walked all
+    // M k-mers' vectors and every kept entry, at every window and twice per observation:
+    // O(M / 64 x M x (1 + L)) for L carriers, 51 s for a 100 kbp trace seed under a memory
+    // budget that never bound (the review of 2026-10-06, W2). The total must equal that sum
+    // EXACTLY: it decides what a budget-aware window may read (`beside`, a stop) and what
+    // memory_bound_soft states, so every update below mirrors one term of the sum
+    using CoordsAt = std::vector<std::pair<Key, SmallVector<Coord>>>;
+    auto bytes_of = [](const CoordsAt &at) {
+        uint64_t bytes = at.size() * sizeof(at[0]);
+        for (const auto &entry : at) {
+            bytes += entry.second.size() * sizeof(Coord);
         }
         return bytes;
     };
-    for (size_t begin = 0, width = kMaxChunk; begin < keys.size(); begin += width, width = chunk) {
-        const size_t end = std::min(keys.size(), begin + width);
+    uint64_t coords_bytes = coords_at.size() * sizeof(CoordsAt);
+    // the derivation's own state, as the soft observation below counts it
+    auto state_bytes = [&]() {
+        const uint64_t bytes = (live.capacity() + next.capacity()) * sizeof(Key)
+                             + cur.capacity() * sizeof(cur[0]) + flat.capacity() * sizeof(flat[0])
+                             + coords_bytes;
+        if (recount_state) {
+            // the full sum the running total replaces
+            uint64_t recount = coords_at.size() * sizeof(CoordsAt);
+            for (const auto &at : coords_at) {
+                recount += bytes_of(at);
+            }
+            assert(recount == coords_bytes);
+            if (recount != coords_bytes)
+                throw std::logic_error("the derivation's coordinate bytes drifted from their sum");
+        }
+        return bytes;
+    };
+    for (size_t begin = 0; begin < keys.size(); begin += kMaxChunk) {
+        const size_t end = std::min(keys.size(), begin + kMaxChunk);
         std::vector<Row> rows;
         rows.reserve(end - begin);
         for (size_t i = begin; i < end; ++i) {
@@ -1931,13 +1971,24 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             }
 
             next.clear();
-            if (trace_)
+            if (trace_) {
+                // each k-mer is consumed once, so its vector is empty here; subtracted all
+                // the same, so that the total stays the sum whatever the order
+                coords_bytes -= bytes_of(coords_at[i]);
                 coords_at[i].clear();
+            }
+            // the entry just added to |coords_at[i]|, as bytes_of counts it
+            auto added = [&]() {
+                coords_bytes += sizeof(coords_at[i][0])
+                              + coords_at[i].back().second.size() * sizeof(Coord);
+            };
             if (first) {
                 for (auto &e : cur) {
                     next.push_back(e.first);
-                    if (trace_)
+                    if (trace_) {
                         coords_at[i].emplace_back(e.first, std::move(e.second));
+                        added();
+                    }
                 }
             } else {
                 for (size_t a = 0, b = 0; a < live.size() && b < cur.size(); ) {
@@ -1947,8 +1998,10 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                         ++b;
                     } else {
                         next.push_back(live[a]);
-                        if (trace_)
+                        if (trace_) {
                             coords_at[i].emplace_back(live[a], std::move(cur[b].second));
+                            added();
+                        }
                         ++a;
                         ++b;
                     }
@@ -1985,6 +2038,9 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 // factor of two of the keys that can still matter.
                 for (size_t j : done) {
                     auto &v = coords_at[j];
+                    // the pass already walks |v|: its bytes before and after it, so that
+                    // the running total drops exactly what the pass dropped
+                    coords_bytes -= bytes_of(v);
                     size_t w = 0;
                     for (size_t a = 0, b = 0; a < v.size() && b < live.size(); ) {
                         if (v[a].first < live[b]) {
@@ -2001,6 +2057,7 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                     }
                     v.resize(w);
                     v.shrink_to_fit();
+                    coords_bytes += bytes_of(v);
                 }
                 compacted_at = live.size();
             }
@@ -3459,6 +3516,17 @@ void Walker::end_setup(double until_ms) {
     head_reads_ms_ = pacer.read_ms;
 }
 
+void Walker::note_head(double now_ms) {
+    if (setup_open_)
+        return;
+    DecodePacer &pacer = oracle_.pacer();
+    const double reads = pacer.read_ms;
+    if (head_clock_ms_ >= 0)
+        pacer.note_head((now_ms - head_clock_ms_) - (reads - head_reads_ms_));
+    head_clock_ms_ = now_ms;
+    head_reads_ms_ = reads;
+}
+
 void Walker::checkpoint(bool force) {
     // the walk's first checkpoint ends its seed phase (end_setup)
     if (setup_open_)
@@ -3482,16 +3550,9 @@ void Walker::checkpoint(bool force) {
     if (!force && used < next_check_)
         return;
     next_check_ = used + kWorkCheckInterval;
-    {
-        // the walk since the clock was last read here, its reads excluded (they are pieces
-        // of their own): one head's processing, or a few (R8)
-        const double now = elapsed_ms();
-        const double reads = oracle_.pacer().read_ms;
-        if (head_clock_ms_ >= 0)
-            oracle_.pacer().note_piece("head", (now - head_clock_ms_) - (reads - head_reads_ms_));
-        head_clock_ms_ = now;
-        head_reads_ms_ = reads;
-    }
+    // the walk since the clock was last read for a stop, its reads excluded: one head's
+    // processing, or a few (R8)
+    note_head(elapsed_ms());
     // The deadline needs the clock, so it is read before every head and at least every
     // interval, so that one wide level cannot overrun it by more than that. Never at depth
     // 0: a zero budget means "no extension", and the boundary check in run() is what ends
@@ -4155,13 +4216,47 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
     // refseq33m); only timing and the physical counters can tell the difference
     if (time_exceeded())
         return;
+    // The chains' graph steps and key mappings run between two checkpoints, so they read the
+    // stops themselves (the review of 2026-10-06, W3): before, only the seed's own deadline
+    // ended a chain, and a level's chains — up to items x min(batch_kmers, the radius left)
+    // graph steps, then one keys_of_path per chain — ran unpolled: at batch_kmers 60,000 a
+    // cancel was seen 1.5 to 11.8 s late and a walk-until passed by 0.6 to 6 s (an HTTP 503 at
+    // the bound), while observed_max_uninterruptible_ms said 1 ms. Now the stops are read
+    // every kLookaheadPollSteps graph steps of the whole lookahead and before each chain's key
+    // mapping: the seed's deadline, and the attempt's (a cancel, its walk-until, a gone
+    // client) with the poll that also reads the clock (AttemptControl::poll_now), the same
+    // tests as a paced read's. A stop ends the lookahead at once: the chain being built is
+    // dropped (its keys are not mapped) and nothing is read, since past a stop no later level
+    // consumes the cache — the next head's checkpoint, or at depth 0 run() before depth 1,
+    // stops the walk on the same stop, which the poll here made sticky (a cancel or a
+    // walk-until is kept by the attempt; the seed's deadline is the clock's). The attempt's
+    // stops are read only through poll_now, paced or not: it is the poll that hands a passed
+    // walk-until to the attempt (request_stop, stopped_at). Before the review of the P2 fixes
+    // the unpaced lookahead stopped on ms_left() <= 0 without that poll, so nothing recorded
+    // the stop and the next checkpoint's poll, which reads the clock only every poll_stride-th
+    // time, let the walk run up to poll_stride - 1 more heads. Nothing depends on the cache, so
+    // only timing and the physical counters (direct_reads, the row reads' counters in `timing`)
+    // can differ, and only on a walk that a stop ends. Each poll ends a head piece (note_head),
+    // so the observation counts the stretches between them
+    ReadPacing *pace = pacing(Deadline::WALK);
+    auto stopped = [&]() {
+        note_head(elapsed_ms());
+        if (pace)
+            return pace->stop();
+        // the paced stop's own tests (ReadPacing::stop under Deadline::WALK)
+        if (time_exceeded())
+            return true;
+        return control_ && control_->poll_now && control_->poll_now() != ExternalStop::NONE;
+    };
+    size_t steps = 0;                        // graph steps since the last poll
     std::vector<node_index> warm_keys;
     std::vector<node_index> chain_curs;      // nodes whose successors were enumerated
     std::vector<Lookahead> chain_entries;    // their lookahead entries
     std::vector<node_index> chain_nodes;     // single successors, in walking order
     std::string window;                      // spelling of |chain_nodes|, natural orientation
     std::string kmer, next_kmer;
-    for (size_t i = 0; i < items.size(); ++i) {
+    bool stop = false;
+    for (size_t i = 0; i < items.size() && !stop; ++i) {
         if (succs[i].size() != 1)
             continue;
         node_index cur = succs[i][0].node;
@@ -4191,9 +4286,18 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
                 break;
             // the graph steps of a chain are not free either (about 0.65 ms a first-touch node
             // on refseq33m, 1,000 per chain at batch_kmers 1000): a chain stops at the seed's
-            // deadline, as its read does (the entries it made are kept; nothing depends on them)
-            if (n > 0 && time_exceeded())
+            // deadline, as its read does — read at every step, as before — and at the polls
+            if (n > 0 && time_exceeded()) {
+                stop = true;
                 break;
+            }
+            if (++steps == kLookaheadPollSteps) {
+                steps = 0;
+                if (stopped()) {
+                    stop = true;
+                    break;
+                }
+            }
             Lookahead la;
             la.succs = enumerate(arm, cur, kmer);
             chain_curs.push_back(cur);
@@ -4214,6 +4318,11 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             }
             chain_nodes.push_back(nxt);
             cur = nxt;
+        }
+        // a chain's keys are mapped in one call, as long as the chain: polled before it
+        if (stop || (!chain_nodes.empty() && stopped())) {
+            stop = true;
+            break;
         }
         if (!chain_nodes.empty()) {
             std::vector<node_index> keys;
@@ -4248,13 +4357,14 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             arm.lookahead.emplace(chain_curs[j], std::move(chain_entries[j]));
         }
     }
-    if (!warm_keys.empty()) {
+    if (!stop && !warm_keys.empty()) {
         // Under a deadline the lookahead's read is paced too; a deadline that stops it ends
         // the warming silently, and the next head's checkpoint, which reads the same deadline,
         // stops the walk there, where the whole read would have: nothing depends on the cache.
         // Also at depth 0, where no head checks the deadline: run() reads it before depth 1,
-        // so the roots' lookahead read past it was never consumed (the efficiency pass)
-        ReadPacing *pace = pacing(Deadline::WALK);
+        // so the roots' lookahead read past it was never consumed (the efficiency pass). The
+        // read's pacing is the one the chains polled with (pacing() returned it unused: a poll
+        // that found no stop leaves it as new)
         if (decode_charged_) {
             // within what is left beside the level's rows; a read that does not fit ends the
             // warming silently (budget-aware results never depend on what is cached)
@@ -6281,8 +6391,8 @@ SeedResult Walker::run() {
     } else if (walk_end_ms > head_clock_ms_) {
         // the walk after the last reading of the clock, to its stop or end, its reads excluded:
         // the last head piece, which no checkpoint after it notes
-        oracle_.pacer().note_piece("head", (walk_end_ms - head_clock_ms_)
-                                           - (oracle_.pacer().read_ms - head_reads_ms_));
+        oracle_.pacer().note_head((walk_end_ms - head_clock_ms_)
+                                  - (oracle_.pacer().read_ms - head_reads_ms_));
     }
     if (annotate_) {
         // the labels met along either arm, in the order first seen

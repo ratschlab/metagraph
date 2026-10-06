@@ -22,6 +22,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/hash/dbg_sshash.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/unix_tools.hpp"
@@ -5447,10 +5448,11 @@ TEST(WalkerCoordinates, DenialAroundSwitchesAndSplitsKeepsTheSideTable) {
 
 // D3 (the owner's decision of 2026-10-04): a derived seed whose time budget runs out after j of
 // its n k-mers delivers the set derived from those j — on a virtual clock, deterministically:
-// the first window (64 rows) and then one row per window (batch_kmers 1) at 1 ms a row, under a
-// budget of 70 ms, read 70 k-mers. C carries the seed's first 70 k-mers only: the whole seed
-// derives {A}, the partial derivation {A, C} — a superset, stated — and the walk stops at the
-// seed. Under trace the set is taken as derived (no coordinate continuity checked, no step taken)
+// at 1 ms a row under a budget of 70 ms, the first window (64 rows, to 64 ms) is consumed, the
+// second (the last 46 rows, to 110 ms) read, and its first k-mer is the last: j = 65 (70 when
+// later windows followed batch_kmers 1, before the review of 2026-10-06, W1: a window is 64
+// k-mers whatever the knob). C carries the seed's first 70 k-mers only: the whole seed derives
+// {A}, the partial derivation {A, C} — a superset, stated — and the walk stops at the seed. Under trace the set is taken as derived (no coordinate continuity checked, no step taken)
 // and reports no coordinates ("partial derivation"); a budget spent before the first k-mer still
 // fails the seed (DerivationWindowIsPaced)
 TEST(WalkerDerive, PartialDerivationDeliversTheSetOfTheKmersRead) {
@@ -5467,7 +5469,7 @@ TEST(WalkerDerive, PartialDerivationDeliversTheSetOfTheKmersRead) {
         Seed seed;
         seed.sequence = S;
         Strategy st;
-        st.batch_kmers = 1;
+        st.batch_kmers = 1;     // the knob no longer changes the windows (W1)
         st.time_budget_ms = 70;
         st.seed_label_kind = LabelKind::COLUMN;
         st.coordinates = true;
@@ -5478,7 +5480,7 @@ TEST(WalkerDerive, PartialDerivationDeliversTheSetOfTheKmersRead) {
         const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
         const std::string what = trace ? "trace" : "kmer";
         ASSERT_TRUE(r.derivation_partial) << what;
-        EXPECT_EQ(70u, r.derivation_partial->kmers_read) << what;
+        EXPECT_EQ(65u, r.derivation_partial->kmers_read) << what;
         EXPECT_GE(r.derivation_partial->elapsed_ms, 70.0) << what;
         ASSERT_EQ(2u, r.num_seed_labels) << what;
         EXPECT_EQ("A", r.label_dict[0].name);
@@ -5513,7 +5515,9 @@ TEST(WalkerDerive, PartialDerivationDeliversTheSetOfTheKmersRead) {
 // is delivered as a walk or not at all: whatever fails the seed after it fails it as before D3,
 // with the time budget (after 70 of 110 k-mers), whatever the check — `exhaustive` over the cap,
 // an extra label the superset duplicates, an ambiguous derived header, a depth-0 state the
-// memory budget does not hold. The same requests with an unhurried budget walk with {A}
+// memory budget does not hold. The same requests with an unhurried budget walk with {A}. (After
+// 65 k-mers since the review of 2026-10-06, W1: the second window is 64 k-mers wide whatever
+// batch_kmers is, so it is read whole before its first k-mer finds the budget spent)
 TEST(WalkerDerive, PartialSetThatWouldFailTheSeedFailsAsBefore) {
     const auto b = clean_blocks({ 120, 30 }, 113);
     const std::string &S = b[0];     // 110 k-mers
@@ -5586,7 +5590,7 @@ TEST(WalkerDerive, PartialSetThatWouldFailTheSeedFailsAsBefore) {
         } catch (const SeedDerivationError &e) {
             EXPECT_EQ(SeedDerivationError::TIME_BUDGET, e.cause()) << c.name << ": " << e.what();
             EXPECT_EQ("The time budget (bounds.time_budget_ms) ran out while deriving the permitted "
-                      "set from the seed, after 70 of 110 k-mers; name the labels explicitly or "
+                      "set from the seed, after 65 of 110 k-mers; name the labels explicitly or "
                       "shorten the seed", std::string(e.what())) << c.name;
             EXPECT_EQ(70.0, e.limit()) << c.name;
             EXPECT_GE(e.observed(), 70.0) << c.name;
@@ -5618,7 +5622,7 @@ TEST(WalkerDerive, PartialSetThatWouldFailTheSeedFailsAsBefore) {
     oracle.test_read_hook = slow_rows(clock, 1000);
     const SeedResult r = traverse_seed(oracle, seed, cut, LabelChangeCost::forbid());
     ASSERT_TRUE(r.derivation_partial);
-    EXPECT_EQ(70u, r.derivation_partial->kmers_read);
+    EXPECT_EQ(65u, r.derivation_partial->kmers_read);
     ASSERT_EQ(1u, r.num_seed_labels);
     EXPECT_EQ(1u, r.labels_dropped);
     EXPECT_EQ(2u, r.labels_supporting_total);
@@ -5660,6 +5664,390 @@ TEST(Walker, PartialSetWithAnUnrepresentableNameFailsAsBefore) {
     EXPECT_FALSE(whole.isMember("error")) << whole["error"].asString();
     ASSERT_EQ(1u, whole["seed"]["labels"].size());
     EXPECT_EQ("A", whole["seed"]["labels"][0].asString());
+}
+
+// What varies between two runs of one request whatever the walk did: the echo of
+// annotation.batch_kmers (the knob the tests vary) and the attempt's clock readings
+void strip_volatile(Json::Value *v) {
+    if (v->isObject()) {
+        for (const char *key : { "batch_kmers", "elapsed_ms", "received_at", "stopped_at",
+                                 "server_instance", "observed_max_uninterruptible_ms",
+                                 "timing" }) {
+            v->removeMember(key);
+        }
+        for (const std::string &key : v->getMemberNames()) {
+            strip_volatile(&(*v)[key]);
+        }
+    } else if (v->isArray()) {
+        for (Json::Value &e : *v) {
+            strip_volatile(&e);
+        }
+    }
+}
+
+// The review of 2026-10-06, W1 (repro U01-01): on a format whose reads are not budget-aware
+// the derivation's later windows were clamp(batch_kmers, 1, 64) k-mers wide, and each window is
+// one charge before its k-mers are consumed, so the work comparisons, `largest_charge`, the
+// outcome and `work_seed` followed the knob — 992 columns, a 195-k-mer derived seed, 100,000
+// work units: walks partial at batch_kmers 1 and 7 (largest charges 129,000 and 124,000),
+// failed at 64; unbudgeted, a no_carrier at k-mer 90 charged 639 units at 1 and 1,152 at 64.
+// Every window is 64 k-mers now: the responses are equal at 1, 7 and 64, the echo of the knob
+// apart, and at 64 (and above) they are what they were
+TEST(WalkerDerive, WindowIsSixtyFourKmersWhateverBatchKmers) {
+    const std::string record = random_seq(400, 7);
+    const std::string seed = record.substr(0, 195 + kK - 1);
+    std::vector<std::string> seqs, labels;
+    for (size_t i = 0; i < 992; ++i) {
+        seqs.push_back(record);
+        labels.push_back("r" + std::to_string(i));
+    }
+    auto wide = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels);
+    auto run = [](const graph::AnnotatedDBG &anno, const std::string &sequence,
+                  const std::string &bounds, size_t batch) {
+        Json::Value r;
+        r["attempt_id"] = "w1";    // the usage block states work_seed
+        r["seeds"][0]["seed_id"] = "s";
+        r["seeds"][0]["sequence"] = sequence;
+        r["strategy"] = parse_json(R"({"direction": "right", "bounds": )" + bounds
+                                   + R"(, "output": {"detail": "full", "timing": false}})");
+        r["strategy"]["annotation"]["batch_kmers"] = Json::UInt64(batch);
+        Json::Value out = cli::process_traverse_request(r, anno, "", cli::TraverseLimits());
+        strip_volatile(&out);
+        return out;
+    };
+    const std::string budgeted = R"({"max_extension_bp": 50, "max_work_units": 100000})";
+    const Json::Value at64 = run(*wide, seed, budgeted, 64);
+    const Json::Value &res = at64["results"][0];
+    // the case bites: the window charges are compared within the seed phase
+    ASSERT_TRUE(res.isMember("resource_stop")) << res.toStyledString();
+    EXPECT_EQ("work", res["resource_stop"]["resource"].asString());
+    EXPECT_EQ("failed", res["outcome"]["walks"].asString());
+    for (size_t batch : { 1, 7, 63, 65, 1000 }) {
+        EXPECT_EQ(at64, run(*wide, seed, budgeted, batch)) << "batch_kmers " << batch;
+    }
+
+    // a seed no label carries in full: A holds its first 90 k-mers, B its k-mers 60 on, so the
+    // intersection is empty at k-mer 90, inside the second window (k-mers 64 to 127), and the
+    // seed's work is both windows' rows whatever batch_kmers is
+    const std::string s = random_seq(131 + kK - 1, 11);
+    auto split = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            kK, { s.substr(0, 90 + kK - 1), s.substr(60) }, { "A", "B" });
+    const std::string unbudgeted = R"({"max_extension_bp": 10})";
+    const Json::Value nc64 = run(*split, s, unbudgeted, 64);
+    ASSERT_EQ("failed", nc64["results"][0]["outcome"]["walks"].asString());
+    ASSERT_NE(std::string::npos, nc64["results"][0]["error"].asString().find("k-mer 90 of 131"))
+        << nc64["results"][0]["error"].asString();
+    const uint64_t work_seed = nc64["usage"]["per_seed"][0]["work_seed"].asUInt64();
+    EXPECT_GT(work_seed, 8u * 64);
+    for (size_t batch : { 1, 7 }) {
+        const Json::Value nc = run(*split, s, unbudgeted, batch);
+        EXPECT_EQ(work_seed, nc["usage"]["per_seed"][0]["work_seed"].asUInt64())
+            << "batch_kmers " << batch;
+        EXPECT_EQ(nc64, nc) << "batch_kmers " << batch;
+    }
+}
+
+// A seed carried in full by |full| of the records and the rest carrying only prefixes of it
+// (|prefixes| lengths in bp), each record its own column, with coordinates: under trace a
+// derivation keeps every consumed k-mer's live coordinates (|coords_at|) and compacts them as the
+// intersection halves. |row_diff|: a row-diff annotation, whose reads are budget-aware under a
+// request budget (the window's read is then admitted within what is left `beside` the state)
+struct ShrinkingCarriers {
+    std::string seed;
+    std::unique_ptr<graph::AnnotatedDBG> anno;
+    ShrinkingCarriers(size_t k, size_t length, size_t full,
+                      const std::vector<size_t> &prefixes, uint32_t rng, bool row_diff = false) {
+        seed = random_seq(length, rng);
+        std::vector<std::string> seqs, labels;
+        for (size_t i = 0; i < full; ++i) {
+            seqs.push_back(seed);
+            labels.push_back("full" + std::to_string(i));
+        }
+        for (size_t i = 0; i < prefixes.size(); ++i) {
+            seqs.push_back(seed.substr(0, prefixes[i]));
+            labels.push_back("prefix" + std::to_string(i));
+        }
+        anno = row_diff
+            ? build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(
+                    k, seqs, labels, DeBruijnGraph::BASIC, true)
+            : build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+                    k, seqs, labels, DeBruijnGraph::BASIC, true);
+    }
+};
+
+Strategy trace_derivation(uint64_t max_memory_bytes) {
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.support = Support::TRACE;
+    st.merge_reconverge = false;
+    st.seed_label_kind = LabelKind::COLUMN;
+    st.max_extension_bp = 10;
+    st.time_budget_ms = 600'000;
+    st.max_memory_bytes = max_memory_bytes;
+    return st;
+}
+
+// The review of 2026-10-06, W2: the derivation's coordinate bytes are a running total now, and
+// they must be EXACTLY the sum they replace — they decide what a budget-aware window may read
+// beside the seed (`beside`) and what memory_bound_soft states. A debug build asserts it
+// wherever the state is counted; here the test hook recounts it in this Release build, across
+// the first window, the later ones and two compactions (16 carriers, 8 of them for the first
+// 1,000 bp only, 4 more for the first 2,500: 16 -> 8 and 8 -> 4 both compact). The state is
+// counted only under a request budget: by the soft observation under a memory budget (both
+// formats), and by `beside` before every window's read on a row-diff annotation, whose reads are
+// budget-aware under any request budget (a work budget alone included) — the one place where
+// the total decides a stop. Without a budget nothing counts it, so that case only checks that
+// the hook changes nothing (the review of the P2 fixes: T58 said it recounted there)
+TEST(WalkerDerive, CoordinateStateIsTheSumItReplaced) {
+    std::vector<size_t> prefixes(8, 1000);
+    prefixes.insert(prefixes.end(), 4, 2500);
+    for (bool row_diff : { false, true }) {
+        const ShrinkingCarriers f(kK, 3000, 4, prefixes, 31, row_diff);
+        struct Budget {
+            uint64_t memory;
+            uint64_t work;
+        };
+        for (const Budget budget : { Budget { 0, 0 }, Budget { uint64_t(1) << 32, 0 },
+                                     Budget { uint64_t(1) << 20, 0 },
+                                     Budget { 0, uint64_t(1) << 40 } }) {
+            const std::string what = std::string(row_diff ? "row_diff" : "column")
+                                   + ", memory " + std::to_string(budget.memory)
+                                   + ", work " + std::to_string(budget.work);
+            Strategy st = trace_derivation(budget.memory);
+            st.max_work_units = budget.work;
+            Seed seed;
+            seed.sequence = f.seed;
+            WalkerHooks hooks;
+            hooks.recount_derivation_state = true;
+            LabelOracle checked(*f.anno), plain(*f.anno);
+            // the row-diff case reads the windows budget-aware (`beside`) under any budget
+            ASSERT_EQ(row_diff, checked.decode_charged()) << what;
+            std::string a, b;
+            try {
+                const SeedResult r = traverse_seed(checked, seed, st, LabelChangeCost::forbid(),
+                                                   "", &hooks);
+                // braces: EXPECT_EQ expands to an if/else, which GCC's -Werror=dangling-else
+                // rejects
+                if (budget.memory != uint64_t(1) << 20) {
+                    EXPECT_EQ(4u, r.num_seed_labels) << what;
+                }
+                a = serialize(r);
+            } catch (const std::exception &e) {
+                // the recount's own error fails the test; a memory stop is compared below
+                if (std::string(e.what()).find("drifted from their sum") != std::string::npos) {
+                    ADD_FAILURE() << what << ": " << e.what();
+                    continue;
+                }
+                a = e.what();
+            }
+            try {
+                b = serialize(traverse_seed(plain, seed, st, LabelChangeCost::forbid()));
+            } catch (const std::exception &e) {
+                b = e.what();
+            }
+            EXPECT_EQ(a, b) << what;
+        }
+    }
+}
+
+// The review of 2026-10-06, W2 (repro U01-04): summing the coordinates at every observation made
+// a trace derivation under a memory budget quadratic in the seed — 100 kbp, 4 carriers, a budget
+// that never binds: 51 s against 160 ms without it at batch_kmers 1, 0.45 s against 0.05 s at
+// 64; 200 kbp about four times that. With the running total the budget costs about nothing: the
+// budgeted derivation stays within three times the unbudgeted one (each the best of three runs,
+// with 250 ms for a loaded machine)
+TEST(WalkerDerive, TraceDerivationUnderAMemoryBudgetIsLinear) {
+#ifndef NDEBUG
+    // A debug build recounts the whole state wherever it is counted (the assert that the running
+    // total is the sum), which is exactly the quadratic cost measured here, and only under the
+    // budget: the comparison would fail by construction (and take minutes at -O0)
+    GTEST_SKIP() << "the debug build recounts the derivation's state at every observation";
+#endif
+    const ShrinkingCarriers f(31, 200'000, 4, {}, 5);
+    Seed seed;
+    seed.sequence = f.seed;
+    auto best_ms = [&](uint64_t budget) {
+        double best = std::numeric_limits<double>::infinity();
+        for (int i = 0; i < 3; ++i) {
+            LabelOracle oracle(*f.anno);
+            const auto start = std::chrono::steady_clock::now();
+            const SeedResult r = traverse_seed(oracle, seed, trace_derivation(budget),
+                                               LabelChangeCost::forbid());
+            const double ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - start).count();
+            EXPECT_EQ(4u, r.num_seed_labels);
+            best = std::min(best, ms);
+        }
+        return best;
+    };
+    const double unbudgeted = best_ms(0);
+    const double budgeted = best_ms(uint64_t(4) << 30);
+    std::cerr << "trace derivation of 200 kbp, 4 carriers: " << unbudgeted << " ms, under a "
+              << "memory budget " << budgeted << " ms" << std::endl;
+    EXPECT_LE(budgeted, 3 * unbudgeted + 250);
+}
+
+// A clock that every reading advances by |tick_ms|: the lookahead's graph steps read it (the
+// seed's deadline, at every step), so a chain takes virtual time in proportion to its length,
+// on a loaded machine as on a quiet one
+struct TickingClock : VirtualClock {
+    double tick_ms;
+    explicit TickingClock(double tick) : tick_ms(tick) {}
+    std::function<double()> ticking() const {
+        auto m = ms;
+        const double t = tick_ms;
+        return [m, t]() { return *m += t; };
+    }
+};
+
+// The review of 2026-10-06, W3 (repro U03-01): the lookahead's chains ran between two
+// checkpoints and read only the seed's own deadline, so a cancel or the attempt's walk-until
+// that fell into a long chain was seen after it — at batch_kmers 60,000 1.5 to 11.8 s late, a
+// walk-until passed by 0.6 to 6 s (HTTP 503 at the bound) — and observed_max_uninterruptible_ms
+// counted reads only (1 ms). Here one unbranched tail of 20,000 k-mers is enumerated in one
+// chain (batch_kmers 20,000) on a clock every reading advances by 10 us, about 200 ms of virtual
+// time for the chain: a cancel at 50 ms, and a walk-until at 50 ms, are seen within one poll
+// interval of graph steps (kLookaheadPollSteps) — without pacing, and with a paced read's
+// pacing — and the walk stops there, where before it stopped after the chain (>= 200 ms). The
+// head pieces are counted (DecodePacer::max_head_ms, the attempt's
+// observed_max_uninterruptible_ms): between two polls, a fraction of a millisecond, where the
+// unpolled chain was one head piece of >= 200 ms
+TEST(WalkerDeadlineChunks, LookaheadChainsReadTheStops) {
+    const size_t k = 31;
+    const std::string record = random_seq(40 + 20'000 + k, 909);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(k, { record }, { "r" });
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.batch_kmers = 20'000;
+    st.max_extension_bp = 20'000;
+    st.time_budget_ms = 600'000;
+    Seed seed;
+    seed.sequence = record.substr(0, 40);
+    seed.labels = { "r" };
+    struct Run {
+        SeedResult result;
+        double end_ms = 0;
+        double max_head_ms = 0;
+        double max_uninterruptible_ms = 0;
+    };
+    auto run = [&](double target_ms, StopAt *stop, const TickingClock &clock) {
+        LabelOracle oracle(*anno);
+        oracle.pacer().target_ms = target_ms;
+        oracle.pacer().test_clock_ms = clock.ticking();
+        Run r;
+        r.result = traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "", nullptr,
+                                 stop ? &stop->control : nullptr);
+        r.end_ms = clock.now();
+        r.max_head_ms = oracle.pacer().max_head_ms;
+        r.max_uninterruptible_ms = oracle.pacer().max_uninterruptible_ms();
+        return r;
+    };
+    // without a stop: the whole tail is walked, and no head piece spans the chain
+    {
+        TickingClock clock(0.01);
+        const Run r = run(0, nullptr, clock);
+        EXPECT_EQ(ArmResult::COMPLETE, r.result.arms[kRight].status);
+        EXPECT_GE(r.end_ms, 200);            // the chain's steps read the clock at every step
+        EXPECT_GT(r.max_head_ms, 0);
+        EXPECT_LT(r.max_head_ms, 5) << "a head piece spans the chain";
+        EXPECT_GE(r.max_uninterruptible_ms, r.max_head_ms);
+    }
+    for (double target : { 0.0, 10.0 }) {
+        for (ExternalStop kind : { ExternalStop::CANCELLED, ExternalStop::ATTEMPT_DEADLINE }) {
+            const std::string what = std::string(kind == ExternalStop::CANCELLED ? "cancel"
+                                                                                 : "walk-until")
+                                   + (target > 0 ? ", paced" : ", unpaced");
+            TickingClock clock(0.01);
+            // a cancel's walk-until is far away; the walk-until stop's is its own instant
+            StopAt stop(clock, 50, kind, kind == ExternalStop::CANCELLED ? 600'000 : -1);
+            const Run r = run(target, &stop, clock);
+            ASSERT_TRUE(r.result.resource_stop) << what;
+            EXPECT_EQ(kind == ExternalStop::CANCELLED ? ResourceStop::CANCELLED
+                                                      : ResourceStop::ATTEMPT_DEADLINE,
+                      r.result.resource_stop->resource) << what;
+            // the stop, a poll interval of steps and the walk's end: not the chain's 200 ms
+            EXPECT_LE(r.end_ms, 50 + 5) << what;
+            EXPECT_LT(r.result.arms[kRight].complete_to_bp, 20'000u) << what;
+            EXPECT_LT(r.max_head_ms, 5) << what;
+        }
+    }
+}
+
+// An attempt's control as Attempt::poll is (traverse_attempts.cpp): a stop, once set, is
+// returned by every poll; a poll reads the clock — and so compares the walk-until |until_ms|
+// and sets the stop — only every |stride|-th time, or when forced (poll_now, which restarts the
+// count). |late_polls| counts the walk's polls (checkpoints) that answered no stop although the
+// walk-until had passed, read on the clock without advancing it
+struct StridedWalkUntil {
+    double until_ms;
+    uint32_t stride;
+    VirtualClock clock;
+    double start;
+    uint32_t polls = 0;
+    bool tripped = false;
+    size_t late_polls = 0;
+    AttemptMeter meter;
+    AttemptControl control;
+    StridedWalkUntil(const VirtualClock &clock, double until, uint32_t stride)
+          : until_ms(until), stride(stride), clock(clock), start(clock.now()) {
+        control.poll = [this]() {
+            const ExternalStop stop = poll(false);
+            if (stop == ExternalStop::NONE && this->clock.now() - start >= until_ms)
+                ++late_polls;
+            return stop;
+        };
+        control.poll_now = [this]() { return poll(true); };
+        control.ms_left = [this]() { return until_ms - (this->clock.now() - start); };
+        control.elapsed_ms = [this]() { return this->clock.now() - start; };
+        control.bound_ms = until_ms;
+        control.meter = &meter;
+    }
+    ExternalStop poll(bool force) {
+        if (!tripped && (force || ++polls >= stride)) {
+            polls = 0;
+            if (clock.now() - start >= until_ms)
+                tripped = true;
+        }
+        return tripped ? ExternalStop::ATTEMPT_DEADLINE : ExternalStop::NONE;
+    }
+};
+
+// The review of the P2 fixes (W3's unpaced branch): without pacing (--traverse-chunk-target-ms
+// 0) the lookahead stopped on ms_left() <= 0 without the poll that hands the walk-until to the
+// attempt, so nothing recorded the stop, and the next head's checkpoint, whose poll reads the
+// clock only every poll_stride-th time (8 on the server), let the walk run up to 7 more heads
+// past the walk-until — each cutting its own lookahead again. The control here strides as the
+// server's attempt does; a walk-until that falls inside the chain is now taken by the
+// lookahead's poll_now, so no checkpoint after it answers "no stop": the walk stops at the next
+// head, paced or not
+TEST(WalkerDeadlineChunks, LookaheadHandsTheWalkUntilToTheAttempt) {
+    const size_t k = 31;
+    const std::string record = random_seq(40 + 20'000 + k, 909);
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(k, { record }, { "r" });
+    Strategy st;
+    st.direction = Strategy::RIGHT;
+    st.batch_kmers = 20'000;
+    st.max_extension_bp = 20'000;
+    st.time_budget_ms = 600'000;
+    Seed seed;
+    seed.sequence = record.substr(0, 40);
+    seed.labels = { "r" };
+    for (double target : { 0.0, 10.0 }) {
+        const std::string what = target > 0 ? "paced" : "unpaced";
+        TickingClock clock(0.01);
+        StridedWalkUntil attempt(clock, 50, 8);
+        LabelOracle oracle(*anno);
+        oracle.pacer().target_ms = target;
+        oracle.pacer().test_clock_ms = clock.ticking();
+        const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid(), "",
+                                           nullptr, &attempt.control);
+        ASSERT_TRUE(r.resource_stop) << what;
+        EXPECT_EQ(ResourceStop::ATTEMPT_DEADLINE, r.resource_stop->resource) << what;
+        EXPECT_TRUE(attempt.tripped) << what;
+        EXPECT_EQ(0u, attempt.late_polls) << what << ": checkpoints walked on past the walk-until";
+        EXPECT_LE(clock.now(), 50 + 5) << what;
+        EXPECT_LT(r.arms[kRight].complete_to_bp, 20'000u) << what;
+    }
 }
 
 } // namespace

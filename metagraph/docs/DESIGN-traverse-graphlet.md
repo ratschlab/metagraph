@@ -1,7 +1,7 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.8 (2026-10-05; v5.8 = record coordinates as built, feature level 6, §26, after the review of
-levels 4–5, §25; v5.7 = the review of pass 5 and the path cache's first reads, §24; v5.6 = pass 5 as implemented, §23; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
+**Status:** v5.9 (2026-10-06; v5.9 = the P2 fixes of the review of 2026-10-06, folded into feature level 6, §27;
+v5.8 = record coordinates as built, feature level 6, §26, after the review of levels 4–5, §25; v5.7 = the review of pass 5 and the path cache's first reads, §24; v5.6 = pass 5 as implemented, §23; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
 are advertised only after the corresponding exhaustion and concurrency tests pass). Draft history: v5 (2026-10-02), revised after four external design reviews (of v1 `9fc93893`, v2 `23d109fc`,
 v3 `91bda3e9`, v4 `e92f72cf`) and the owner's guarantee requirement; changes are listed in §12 (v2), §13 (v3), §15
@@ -569,7 +569,7 @@ event kept while capped label lists make its summaries lower bounds). Per seed r
 |---|---|---|
 | `walks` | `complete` · `partial` · `failed` | `complete` only when no walk-class limitation applies: every requested arm is complete to the radius **per path** (keep, or merge where no history was united) and no carrier of the seed was dropped; `partial`: any of `walk_domain`, `scope` with at least one merge, `seed_labels` applies — a valid certified prefix whose limits the `limitations` state; `failed`: no valid traversal exists (structured reason in `limitations`/`resource_stop`) |
 | `branch_diagnostics` | `complete` · `cut` | every branch decision and refusal is reported; `cut`: only before each arm's `evidence.complete_to_bp` (`branch_events`) |
-| `label_evidence` | `complete` · `lower_bound` · `qualified` | `complete` only when no label-class limitation applies; `lower_bound`: evidence may be *missing* or understated — cut lists (`label_lists`, `inexact_counts`), dropped carriers (`seed_labels`), a cut switch-source list (`switch_sources`), greedy losses (`greedy_losses`); `qualified`: something reported may be *overstated* — a column-label trace across a record boundary (`trace_record_boundaries`); `qualified` wins when both apply |
+| `label_evidence` | `complete` · `lower_bound` · `qualified` | `complete` only when no label-class limitation applies; `lower_bound`: evidence may be *missing* or understated — cut lists (`label_lists`, `inexact_counts`), dropped carriers (`seed_labels`), a cut switch-source list (`switch_sources`), greedy losses (`greedy_losses`); `qualified`: something reported may be *overstated* — a column-label trace across a record boundary (`trace_record_boundaries`), or a permitted set derived from part of the seed (a `derivation` on a walked result: D3, feature level 6, §26; *review of 2026-10-06, X1*); `qualified` wins when both apply |
 | `delivery` | `inline` · `spooled` · `paged` | the body is in the response; `spooled`: complete in the spool behind the handle, the response holds the summary; `paged`: delivered in pages. Independent of `walks`, so a partial traversal can be spooled |
 
 *(v5.2, the owner's rule)* **Conservative by construction**: each dimension is `complete` only when no limitation of
@@ -636,7 +636,7 @@ or not; the ledger **reconciles** reserved against used on the response, and **r
 cancellation, or on lease expiry when a response is lost (the attempt is then charged its full reservation, since
 its spending is unknown). The backend enforces the locus scope per request; the ledger enforces the rest.
 
-*(v5.1)* **Charging work and releasing capacity are separate operations.** Consumed work is charged when the response (or the lease expiry) settles the attempt; occupied capacity — the worker slot and the memory reservation — is released only once the backend has actually stopped: on its response, or after the lease, which is only a valid release point because the backend enforces the same deadline itself (the request's `time_budget_ms` plus the server's hard request timeout, so an attempt cannot outlive its lease). A cancellation the backend has not acknowledged releases nothing.
+*(v5.1)* **Charging work and releasing capacity are separate operations.** Consumed work is charged when the response (or the lease expiry) settles the attempt; occupied capacity — the worker slot and the memory reservation — is released only once the backend has actually stopped: on its response, or after the lease, which is only a valid release point because the backend enforces the same deadline itself (the request's `time_budget_ms` plus the server's hard request timeout, so an attempt cannot outlive its lease). A cancellation the backend has not acknowledged releases nothing. *(Review of 2026-10-06, X2: as built, the bound is compared only at the delivery checks, so an attempt outlives it by its run up to the next one — the rest of the piece the bound fell into and, when its walk had not stopped, the walk up to its next poll that reads the clock, the stopped seed's finalisation and the building up to that check —, whose length has no stated bound (§27; "one uninterruptible step" understated it, the review of the fixes found); the lease is a valid release point under that stated assumption, and an answer of `running` or `stopping` past it shows that run still going.)*
 
 **No silent semantic changes.** Enabling a beam, dropping labels, raising a cut, switching `on_reconverge` or the
 support kind changes the question or the evidence; none of them is ever applied as a resource measure. When the
@@ -1133,7 +1133,9 @@ confirmed finding is fixed; MGT v1 is unchanged (no record, field or token). The
   `expect_server_instance` naming that instance; an attempt sent without `not_after_ms` is never released early;
   otherwise only on a finished state or after `not_after_ms + clock_skew_allowance_ms + bound_ms`. Assumed: clocks
   within the skew, no rewriting of the request's ids, and no copy reaching another server that serves the same
-  ledger. The ledger's sentence is corrected: after `not_after_ms` + skew an unanswered attempt **cannot start
+  ledger. *(Completed at feature level 6, §27: the 409 refusing a copy as a finished-state source, the `expired`
+  409 as a release ground, and the clock release's own assumption — the attempt past its bound apart from its
+  run up to its next delivery check, whose length has no stated bound.)* The ledger's sentence is corrected: after `not_after_ms` + skew an unanswered attempt **cannot start
   subsequently** (it may already be running; `bound_ms` covers that), not "never started".
 - **Retention settings (finding 4).** `--traverse-attempt-retention-s -1` started, stated 2⁶⁴ − 1 s, and expired every
   tombstone at once. The retention seconds, the count and the tombstone cap are bounded integers (a year; ten
@@ -1223,7 +1225,10 @@ confirmed finding is fixed; MGT v1 is unchanged (no record, field or token). The
     `expect_server_instance`) ran again. A finished attempt sent with `not_after_ms` is now held, its id refused,
     until its `not_after_ms` + skew (within `tombstone_max_s` of the finish, and extended by a refused copy's later
     `not_after_ms`), past its retention if need be, among the tombstones and on both clocks. Held attempts are never
-    dropped early, so `retention_count` does not bound them; `tombstone_max_s` does (stated). Without `not_after_ms`
+    dropped early, so `retention_count` does not bound them; `tombstone_max_s` does (stated). *(Review of
+    2026-10-06, C30: not quite — every refused copy, an identical replay included, extends the hold to
+    `tombstone_max_s` from its own arrival, so the finishes and the refused copies within `tombstone_max_s` bound
+    them; the texts say so from feature level 6, the behaviour, conservative for replay safety, is unchanged.)* Without `not_after_ms`
     nothing bounds a replay: the release rule states that a finished state then assumes no copy arrives after the
     attempt left retention (and with retention 0, after it finished).
   - *Off by one at the expiry (minor).* The tombstone ended when the wall clock read `suppressed_until_ms` exactly,
@@ -1267,7 +1272,10 @@ contract (finding 6) and one design disagreement with the plan (X-R3). Findings 
 (`metagraph.traverse`) and are fixed by its half of this pass; this section notes the server's (1, 3, 6), the plan
 revisions and a corrected benchmark statement. No request or response field is added and `feature_level` stays
 5: what changes is physical work (finding 1), values in `timing` (finding 3) and two capabilities texts
-(finding 6). Each fix has a regression test made from the reviewer's probe (SPEC T53); untimed responses are
+(finding 6). *(Review of 2026-10-06, X1: true of these fixes, not of the builds they were made on: `7aaee760`
+had put D3 and the first `output.coordinates` fields into the server, unconditionally, while it stated level 5,
+so `7aaee760`..`67bef367` answer a derived seed whose time budget runs out mid-derivation with a walk where
+`dcc0cebd` failed it, under the same level digit. None was deployed; none may be. Level 6 states both, §26.)* Each fix has a regression test made from the reviewer's probe (SPEC T53); untimed responses are
 byte-identical to `7aaee760`.
 
 - **The path cache allocated before admission (finding 1).** `RowDiffCache::insert` copied (or flattened) the
@@ -1306,7 +1314,7 @@ byte-identical to `7aaee760`.
   piece `setup` 9.8 ms against `read` 1.28 ms. The 9.8 ms span left is the seed id over the 2,500 names (their sort
   and FNV-1a over 2.6 MB, part of its definition), linear in the names' bytes and now stated rather than hidden.
   `usage.observed_max_uninterruptible_ms` stays the longest decoded piece (reads only, as stated in §6.8 of the
-  SPEC); a setup piece is in the deadline record only. Timing only: no untimed byte changes, the walk's logic
+  SPEC; head pieces join them at feature level 6, §27); a setup piece is in the deadline record only. Timing only: no untimed byte changes, the walk's logic
   is untouched (the pieces are notes; `head_clock_ms_` is set at the seed phase's end instead of at the first
   checkpoint, which only adds a piece of about 0 ms there).
 - **The finished-state release across a restart (finding 6).** The capabilities required instance pinning for
@@ -1726,3 +1734,79 @@ then exit 0 within 5 s of the signal).
   library's check (`derive.carried_labels`) with it.
 - The owner's pending decision of review 6: whether `setup` pieces count toward `observed_max_uninterruptible_ms`.
 - M4 on staging; then C2 (an outcome class for `coordinates`) at the first external review of level 6.
+
+# 27. The review of 2026-10-06: its P2 items, folded into level 6 *(v5.9, 2026-10-06)*
+
+A three-day review of `278a53dd..67bef367` (report `CODE_REVIEW_metagraph_2026-10-06.md`, 189 items, no P1) found
+ten P2 items. Level 6 was deployed nowhere, so the owner folded their fixes into it: `feature_level` stays 6, and
+SPEC §10.3 states every text and output that changed (T58). The server's half:
+
+- **X1, the D3 contract.** D3 went into the server at `7aaee760` with no contract while the level said 5 (§25's
+  note). Level 6 had stated most of it; the sentences still false are corrected (SPEC §6.1 step 4, §7.0's
+  `label_evidence` and `derivation` rows, T30c, a T-row for the D3 tests, §14 above, §25, the level 4–5 review
+  request). **The owner's decision:** the `derivation` limitation's `observed` for `time_budget` keeps two units —
+  the elapsed ms on a failed seed, j, the k-mers read, on a walked one — told apart by the result's shape and
+  stated with both units; no wire change within level 6 (a field such as `kmers_read`, or a cause of its own,
+  would be one).
+- **X2, the release rule.** The bound is enforced cooperatively, and only the delivery checks compare it (every
+  4096 objects of a result or of the MGT text, every 64 KiB of text, between compression blocks, before the
+  transport); the walk's polls compare the walk-until, which lies below it, and only one poll in `poll_stride`
+  (8) reads the clock, besides the forced ones (between seeds, before a paced read's chunk, in the lookahead). So
+  an attempt runs past its bound until its next delivery check: the rest of the piece the bound fell into (a
+  read's chunk, a head, the mapping of a seed's k-mers, the seed phase, a finalisation, a gap between delivery
+  checks) and, when its walk had not stopped, the walk up to its next clock-reading poll (up to 7 heads), the
+  stopped seed's finalisation and the building of its result up to the first check. No piece has a stated bound
+  (`max_uninterruptible_ms` null, decision 3c-N5) — on a 6.94 Mbp seed GET answered `running` 2.7 s past the
+  clock release's instant. The texts said "covers it" and "as stopped". Now `attempts.bound`, `not_after` and
+  `release_rule`, `deadline_check.rule`, SPEC §5, §6.8 and §10.3 say that the attempt is past its bound apart
+  from that run, whose length has no stated bound; that an answer of `running` or `stopping` past the instant
+  shows it; and the Assumed list names that run and the other server that serves the same ledger. Text only.
+  The library holds the clock release while the last answer said `running` or `stopping`, by default (LRG-R4).
+  *(The first version of these texts said "one uninterruptible step"; the review of the fixes showed several
+  pieces run past the bound, and that the walk-until is seen only by a poll that reads the clock.)*
+- **The search service's release parity (LRG-R1, R2), text only.** The 409 refusing a copy carries the id's state
+  as GET answers it, so its `finished` is a finished state (with the same replay conditions). An `expired` 409 is a
+  release ground: the id's registration is checked before the expiry, under one lock, so no copy was running or
+  registered on that `server_instance` and none can start there later; it settles nothing (an earlier copy may
+  have run and left retention), and it assumes the server's clock does not step back below `not_after_ms`. With
+  them, on the same strings: the refusal order (C24), the hold that refused copies extend (C30), the
+  `expect_server_instance` pattern and its 400 (X4), the content-timeout cap (C16, also in the `attempt_deadline`
+  statements and the 503 message) and "the lowest walk-until seen" (C20).
+- **W1.** A derivation's windows are 64 k-mers whatever `annotation.batch_kmers` is. Each window is one work charge
+  before its k-mers are consumed, so the later windows' width, `clamp(batch_kmers, 1, 64)` on a format whose reads
+  are not budget-aware, placed the work comparisons: a work-budgeted derived seed walked partial at `batch_kmers`
+  1 and failed at 64. An output change for `batch_kmers` below 64 with a derived seed, stated with level 6 —
+  also, on a format whose reads are not budget-aware, the soft memory observation under a memory budget, since a
+  later window holds 64 rows where it held `batch_kmers` (`soft_excess_bytes`, `held_bound_bytes`, the per-seed
+  soft excess, `memory_bound_soft`'s `observed`; the review of the fixes found it unstated).
+- **W2.** The derivation's coordinate bytes (`coords_at`, under trace) are a running total instead of a sum over
+  every consumed k-mer at every observation, which made a trace derivation under any memory budget quadratic
+  (51 s against 0.16 s for 100 kbp). The total equals the sum exactly — it decides `beside` and
+  `memory_bound_soft` — which a debug build asserts and a test hook checks in Release, on a row-diff annotation
+  through `beside` too (the one place where the total decides a stop). The timing test is skipped in a debug
+  build, whose assert recounts the state at every observation.
+- **W3.** The lookahead's chains ran between two checkpoints and read only the seed's own deadline; at
+  `batch_kmers` 60,000 a cancel was seen 1.5–11.8 s late and a walk-until passed by 0.6–6 s. They now read the
+  attempt's stop every 16 graph steps and before each chain's key mapping (`kLookaheadPollSteps`), a stop ends
+  the lookahead, and each poll ends a head piece. The attempt's stops are read through the poll that reads the
+  clock (`poll_now`), paced or not: it records a passed walk-until with the attempt, so the next checkpoint
+  stops the walk (the first version, unpaced, stopped the lookahead on `ms_left()` without that poll, and the walk
+  ran up to 7 more heads to the next clock-reading poll). `observed_max_uninterruptible_ms` counts head pieces as well as
+  reads (and, in `deadline_check`, the delivery gaps), and `deadline_check.rule` names what stays unpolled: a
+  chain's key mapping, a read's preparation before its first chunk (its cache lookups and the ordering of its
+  keys: 90–260 ms for the 1 to 3.8 million keys of a lookahead in the reviewer's fixture, now the longest
+  head piece there), the lookahead's clearing, the seed phase's own processing (D12). Whether setup pieces
+  should count toward the observation stays the owner's open decision of review 6 (§26.9); they are not counted.
+
+- **The review of the fixes (server half), folded into level 6 as well.** The overrun texts above (X2), the
+  walk-until seen only by a poll that reads the clock (C20: SPEC §6.8 and §7.3, `attempts.bound`,
+  `delivery_reserve.rule`, pinned with the server's stride 8 by a unit test of the reviewer's U11-02 driver), the
+  unpaced lookahead's stop (W3 above), the W1 soft observation (above), the W2 timing test skipped in a debug
+  build, and the duplicate's 409, which said "within the retention period: an attempt runs once" — false for an
+  id held past its retention, and the D3 overclaim — and now says the id "is running, or retained or held after
+  it finished, on this server (…): it is not run while so"; the cancel's 429 `tombstones_full`, which embeds the
+  retention text, is named among the changed texts. An unbraced `EXPECT_EQ` failed GCC's
+  `-Werror=dangling-else`: the changed test files are compiled with GCC 13 now, not only `src/`.
+
+The library's half (L1, L2, O1–O3, the reader gaps LRG-G1..G7 and the release verdict, WORK_MODEL 2) is in the
+library's own changes; the two halves state the release rule alike.

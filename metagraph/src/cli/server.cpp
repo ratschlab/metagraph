@@ -1023,11 +1023,11 @@ int run_server(Config *config) {
             }
         };
         control.on_written = [&](int status, std::optional<size_t> bytes) {
-            // the longest single annotation read of any /traverse (deadline_check), and the
+            // the longest read or head piece of any /traverse walk (deadline_check), and the
             // slowest build rate and smallest account per text byte measured on its large seeds
             // (the delivery reserve; the latter without the record coordinates' share, so
             // that an output with them measures what the same output without them would)
-            attempts.note_uninterruptible(attempt->max_read_ms());
+            attempts.note_uninterruptible(attempt->max_uninterruptible_ms());
             attempts.note_uninterruptible(attempt->max_delivery_gap_ms());
             attempts.note_build_rate(attempt->own_build_mbps());
             attempts.note_account_per_text_byte(attempt->delivery_detail(),
@@ -1060,10 +1060,12 @@ int run_server(Config *config) {
             // usage)
             attempt->set_ids(attempt_ids(json));
             if (attempt->managed()) {
-                // an attempt runs once per server process: a second request with a running or
-                // retained id is refused, without usage (it would be reconciled against the
+                // an id does not run twice at once, nor again while it is retained or held, on
+                // this server process: a second request with a running, retained, held or
+                // tombstoned id is refused, without usage (it would be reconciled against the
                 // other attempt); and one whose not_after_ms has passed is not started at all
-                // (its ledger may already have released it), also without usage
+                // (its ledger may already have released it), also without usage. Once its
+                // retention and hold are over the id runs again (the review of 2026-10-06, D3)
                 if (auto refused = attempts.start(attempt)) {
                     if (refused->instance_mismatch) {
                         logger->info("[Server] Attempt {} (request {}): not started, {}",
@@ -1085,10 +1087,13 @@ int run_server(Config *config) {
                                         "cancelled before this request arrived (tombstoned: "
                                       + attempts.retention_text() + "): it is not run";
                     } else {
+                        // not "within the retention period: an attempt runs once" (before the
+                        // review of the P2 fixes): a finished id is also refused while held past
+                        // its retention, and runs again once neither keeps it (D3)
                         body["error"] = "attempt_id '" + attempt->ids().attempt_id + "' is "
-                                        "running or was used on this server within the "
-                                        "retention period (" + attempts.retention_text()
-                                      + "): an attempt runs once";
+                                        "running, or retained or held after it finished, on "
+                                        "this server (" + attempts.retention_text()
+                                      + "): it is not run while so; its state is in attempt";
                     }
                     body["attempt"] = std::move(refused->body);
                     throw HttpError(409, std::move(body));
@@ -1234,21 +1239,45 @@ int run_server(Config *config) {
             "(max_uninterruptible_ms: null, and it stays null: checkpoints inside reads bound "
             "the index operations of a piece, not its wall time, which page faults and "
             "scheduling leave open); observed_max_uninterruptible_ms is the longest "
-            "single piece of this process, a whole read far from its deadline included, an "
-            "observation, not a bound. A chunked read returns exactly what one read would (the "
+            "single piece of this process (below), a whole read far from its deadline included, "
+            "an observation, not a bound. A chunked read returns exactly what one read would (the "
             "same rows, caches and counters) unless the deadline stops it, and a stopped read "
             "censors the walk at the read (the unchunked walk ran it to its end, past the "
-            "deadline, before its next check). The text of each seed's result and of the "
-            "response is written under the attempt's delivery check every 64 KiB, a larger "
+            "deadline, before its next check). The lookahead's chains (graph steps along "
+            "unbranched runs, up to min(annotation.batch_kmers, the radius left) per head of a "
+            "level) read the same deadlines every {} graph steps and before each chain's key "
+            "mapping, and a stop ends the lookahead there. The text of each seed's result and of "
+            "the response is written under the attempt's delivery check every 64 KiB, a larger "
             "piece copied in pieces up to the next check; the preparation of one token (one "
             "JSON value, e.g. a graphlet string of many MB, is escaped whole before it is "
             "copied) is not interrupted, and the longest time between two such checks is part "
             "of observed_max_uninterruptible_ms. Not chunked: /resolve, the mapping of a "
-            "seed's k-mers, a head's processing (checked every work_check_interval units), a "
-            "seed's finalisation and summary, the building of a seed's JSON tree between the "
-            "attempt's delivery checks (every 4096 objects), and the transport; "
-            "chunk_target_ms 0: one piece per read",
-            pacer.far_factor, pacer.far_factor, pacer.first_rows, pacer.rest_factor);
+            "seed's k-mers, the seed phase's own processing (resolving and checking the named "
+            "labels, linear in their bytes, which no server limit caps), a head's processing "
+            "(checked every work_check_interval units), a chain's key mapping (one call, at most "
+            "annotation.batch_kmers nodes), a read's preparation before its first chunk (its "
+            "cache lookups and the ordering of its keys in the walk's order, n log n in them: a "
+            "lookahead read has up to a level's heads x batch_kmers keys), the lookahead's "
+            "clearing once it outgrows its bound (linear in its entries), a seed's finalisation "
+            "and summary, the building of a "
+            "seed's JSON tree between the attempt's delivery checks (every 4096 objects), and "
+            "the transport; chunk_target_ms 0: one piece per read. "
+            "observed_max_uninterruptible_ms counts the reads and chunks, the head pieces (the "
+            "walk between two readings of the clock for a stop, its reads excluded: a lookahead's "
+            "chains between their polls included) and the delivery gaps; it leaves out the "
+            "mapping of a seed's k-mers, the seed phase's own processing, a derivation's steps "
+            "and a seed's finalisation (each seed's timing.deadline.longest_piece names its "
+            "longest piece of any kind). A cancel is therefore seen up to one piece late; a "
+            "walk-until at the first poll that reads the clock after it (one in {} of a walk's "
+            "polls — the one before a head —, every poll before a paced read's chunk or in the "
+            "lookahead, and the poll before each seed), so up to {} heads later; and the "
+            "attempt's bound, which only the delivery checks compare, is passed by the "
+            "processing up to the next of them: the rest of the piece it fell into and, when the "
+            "walk had not stopped, the walk up to that poll, the stopped seed's finalisation and "
+            "the building up to the next delivery check (attempts.bound)",
+            pacer.far_factor, pacer.far_factor, pacer.first_rows, pacer.rest_factor,
+            graph::traversal::kLookaheadPollSteps, attempts.settings().poll_stride,
+            attempts.settings().poll_stride > 0 ? attempts.settings().poll_stride - 1 : 0);
         return d;
     };
 

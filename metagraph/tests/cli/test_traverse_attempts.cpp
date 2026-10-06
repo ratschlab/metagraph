@@ -1,7 +1,9 @@
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <map>
 #include <random>
 #include <set>
@@ -642,6 +644,76 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     g->set_bound(1, 30'000);
     g->progress(40 * 1'000'000ull);
     EXPECT_NEAR(reserve(1e6 / 404e3 + 1e6 / 104e3, 300), g->reserve_ms(), 1e-6);
+}
+
+// usage.bound.walk_until_ms, when no walk-until stopped the walk, is the lowest walk-until that
+// a poll READING THE CLOCK compared with: every poll_stride-th poll of a walk, every forced poll
+// (between seeds, before a paced read's chunk, in the lookahead). A lower one that the reserve
+// set at a level's end and that only polls not reading the clock saw is not stated — the rule
+// "a value no poll read bounded no walk" (review of pass 5, F4). The review of 2026-10-06 (C20,
+// U11-02) found the texts claiming "the lowest in force while a seed was walked"; this pins the
+// code's rule with the server's stride (8) as the corrected texts state it. The reviewer's
+// driver: one head per level and one non-forced poll before each; at the end of level 8 the
+// seed's estimated text jumps from 1 MB to 40 MB (walk-until 65,000 -> 58,900); the clock-reading
+// poll was the 8th (level 7), so levels 9-11 are walked under 58,900 with polls that do not read
+// the clock, and the delivered seed raises the walk-until again: stride 8 states 65,000, stride 1
+// (every poll reads the clock) 58,900
+TEST(GraphletAttempt, WalkUntilStatedIsTheLowestAClockReadingPollSaw) {
+    for (uint32_t stride : { 8u, 1u }) {
+        FakeClock clock;
+        AttemptSettings s = settings_with(&clock);
+        s.allowance_ms = 10'000;
+        s.poll_stride = stride;
+        s.delivery_compress_mbps = 50;
+        s.delivery_build_mbps = 5;
+        s.delivery_stop_ms = 100;
+        s.account_per_text_byte_json = 20;
+        s.account_per_text_byte_graphlet = 40;
+        AttemptRegistry registry(s);
+        auto a = attempt_of(registry, "u11-02-" + std::to_string(stride));
+        a->set_delivery_detail("full");
+        a->set_bound(2, 30'000);           // bound 70,000 ms, floor 65,000
+        ASSERT_FALSE(registry.start(a));
+        double lowest_in_force = std::numeric_limits<double>::infinity();
+        // seed 0: one head per level, its poll before it
+        EXPECT_EQ(ExternalStop::NONE, a->poll(true));
+        a->seed_started(0);
+        for (int level = 0; level < 12; ++level) {
+            clock.ms += 1000;
+            EXPECT_EQ(ExternalStop::NONE, a->poll());
+            lowest_in_force = std::min(lowest_in_force, a->walk_until_ms());
+            a->progress(level >= 8 ? 20 * 40'000'000ull : 20 * 1'000'000ull);
+            if (level + 1 < 12)
+                lowest_in_force = std::min(lowest_in_force, a->walk_until_ms());
+        }
+        EXPECT_NEAR(58'900, lowest_in_force, 1e-6);
+        a->seed_walked(0, SeedUsage());
+        a->note_delivered(40'000'000, 1.0, 20 * 40'000'000ull);
+        EXPECT_EQ(65'000, a->walk_until_ms());
+        // seed 1: a small walk
+        clock.ms += 10;
+        EXPECT_EQ(ExternalStop::NONE, a->poll(true));
+        a->seed_started(1);
+        for (int level = 0; level < 3; ++level) {
+            clock.ms += 1000;
+            EXPECT_EQ(ExternalStop::NONE, a->poll());
+            a->progress(20 * 100'000ull);
+        }
+        a->seed_walked(1, SeedUsage());
+        a->note_delivered(100'000, 0.01);
+        a->walk_ended();
+        EXPECT_EQ(stride == 8 ? 65'000u : 58'900u,
+                  a->usage_json("completed")["bound"]["walk_until_ms"].asUInt64())
+            << "poll_stride " << stride;
+    }
+    // the texts state the clock-reading polls, not "every poll" (C20)
+    FakeClock clock;
+    AttemptRegistry registry(settings_with(&clock));
+    const std::string bound = registry.capabilities_json()["bound"].asString();
+    EXPECT_NE(std::string::npos, bound.find("its first poll that reads the clock after it"))
+        << bound;
+    EXPECT_NE(std::string::npos, bound.find("not a lower one in force only between two such "
+                                            "polls")) << bound;
 }
 
 // The delivery reserve's coordinate share (C3, plan revision 3): the walked seed's record
@@ -1329,6 +1401,116 @@ TEST(GraphletAttemptRegistry, AFinishedStateIsReplaySafeOnlyWhenPinned) {
     AttemptRegistry none(settings_with(&clock, 0));
     EXPECT_NE(std::string::npos, none.capabilities_json()["release_rule"].asString().find(
             "a copy sent with expect_server_instance is still refused by a restarted process"));
+}
+
+// The review of 2026-10-06 (X2, the search service's release parity LRG-R1/R2, and C16, C20,
+// C24, C30, X4 on the same strings), text only: the clock release takes the attempt as stopped
+// at its bound, which it is apart from what it runs past it until its next delivery check, of
+// no stated length (the review of the P2 fixes: not "one uninterruptible step", since only the
+// delivery checks compare the bound), and an answer of running or stopping past that instant
+// shows that run; the 409 refusing a copy
+// carries the id's state as GET answers it, so its finished state is a finished state; an
+// expired 409 releases, because the id's registration is checked before the expiry (the order
+// the not_after text states), and settles nothing; refused copies extend a finished attempt's
+// hold; expect_server_instance has the ids' pattern and a 400; the bound names its cap and the
+// walk-until it states. With retention and without
+TEST(GraphletAttemptRegistry, ReleaseTextsStateTheOverrunAndTheGrounds) {
+    FakeClock clock;
+    for (uint64_t retention_s : { uint64_t(60), uint64_t(0) }) {
+        AttemptRegistry registry(settings_with(&clock, retention_s));
+        const Json::Value caps = registry.capabilities_json();
+        const std::string what = "retention_s " + std::to_string(retention_s);
+        auto has = [&](const char *field, const char *phrase) {
+            EXPECT_NE(std::string::npos, caps[field].asString().find(phrase))
+                << what << ", " << field << ": " << phrase;
+        };
+        for (const char *phrase : { "the cap whatever the seeds' budgets (usage.bound.capped_by: "
+                                    "content_timeout when it applied)",
+                                    "the walk stops at its first poll that reads the clock "
+                                    "after it",
+                                    "else the lowest walk-until seen: the lowest that such a "
+                                    "poll compared with",
+                                    "not a lower one in force only between two such polls",
+                                    "The bound itself is compared only at the delivery checks",
+                                    "past it the attempt runs on until its next delivery check "
+                                    "(then the 503) or its handler's return",
+                                    "when its walk had not stopped by then, the walk up to its "
+                                    "next poll that reads the clock, the stopped seed's "
+                                    "finalisation and the building of its result up to the "
+                                    "first delivery check",
+                                    "a run of no stated length" }) {
+            has("bound", phrase);
+        }
+        // the overrun is not one step (the review of the P2 fixes)
+        for (const char *field : { "bound", "not_after", "release_rule" }) {
+            EXPECT_EQ(std::string::npos, caps[field].asString().find("uninterruptible step"))
+                << what << ", " << field;
+            EXPECT_EQ(std::string::npos, caps[field].asString().find("first poll after"))
+                << what << ", " << field;
+        }
+        EXPECT_EQ(std::string::npos, caps["delivery_reserve"]["rule"].asString()
+                                             .find("first poll after")) << what;
+        for (const char *phrase : { "It is the last of the refusals, all made under one lock",
+                                    "a request naming another expect_server_instance is refused "
+                                    "first (409 instance_mismatch)",
+                                    "whatever its not_after_ms (the duplicate's 409",
+                                    "so an expired 409 means that no attempt with that id existed "
+                                    "on this server_instance when it was judged",
+                                    "cannot start subsequently",
+                                    "as past its bound once its clock passes that + bound_ms — "
+                                    "apart from what it runs past its bound, up to its next "
+                                    "delivery check, a run of no stated length" }) {
+            has("not_after", phrase);
+        }
+        EXPECT_EQ(std::string::npos, caps["not_after"].asString().find("as stopped once")) << what;
+        for (const char *phrase : { "a string matching id_pattern",
+                                    "checked first (ahead of a duplicate id and of not_after_ms)",
+                                    "and the field without attempt_id are a 400 naming the field, "
+                                    "without usage" }) {
+            has("instance", phrase);
+        }
+        for (const char *phrase : { "the 409 refusing a copy of the request whose attempt — the "
+                                    "id's state, as GET answers it, with its attempt_id and "
+                                    "server_instance — says state finished",
+                                    "on an expired 409 (below)",
+                                    "An expired 409 (state: expired) for an attempt sent with "
+                                    "exactly that not_after_ms",
+                                    "checks the id's registration (running, retained, held, "
+                                    "tombstoned) before the expiry, under one lock",
+                                    "It settles nothing",
+                                    "the 409's server_time_ms - not_after_ms is the step it "
+                                    "survives",
+                                    "The clock release takes the attempt as stopped",
+                                    "past its bound apart from what it runs past it until its "
+                                    "next delivery check",
+                                    "a run of no stated length",
+                                    "still answers running or stopping after that instant shows "
+                                    "that run still going",
+                                    "a 409 whose attempt says running or stopping or is a "
+                                    "tombstone, and a 409 instance_mismatch release nothing",
+                                    "no copy of the request reaches another server that serves "
+                                    "the same ledger",
+                                    "for the clock release, that the attempt's run past its "
+                                    "bound has ended by then",
+                                    // kept
+                                    "replay-safe only as stated next",
+                                    "not_after_ms + clock_skew_allowance_ms + bound_ms" }) {
+            has("release_rule", phrase);
+        }
+        if (retention_s) {
+            for (const char *phrase : { "at most tombstone_max_s after it finished or after its "
+                                        "latest refused copy",
+                                        "their number is at most the finishes and refused copies "
+                                        "within tombstone_max_s" }) {
+                has("release_rule", phrase);
+            }
+            EXPECT_EQ(std::string::npos, caps["release_rule"].asString().find(
+                    "tombstone_max_s bounds how many are held")) << what;
+            EXPECT_NE(std::string::npos,
+                      registry.retention_text().find("after it finished or after its latest "
+                                                     "refused copy")) << what;
+        }
+    }
 }
 
 // Review of the pass-5 fixes, finding 2: with clock_skew_ms 0 a cancel's covers_admission

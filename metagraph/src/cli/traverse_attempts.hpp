@@ -113,9 +113,10 @@ struct AttemptSettings {
     uint64_t tombstone_max_s = 86'400;
     // the client's connection is checked at most this often (ms)
     uint64_t client_check_ms = 100;
-    // the clock (the bound, the client check's interval) is read at every |poll_stride|-th poll
-    // of the walk only: a poll comes before every head, and the stop flag alone is read at every
-    // one (tests set 1)
+    // the clock (the walk-until, the client check's interval) is read at every
+    // |poll_stride|-th poll of the walk only, and at every forced poll: a poll comes before
+    // every head, and the stop flag alone is read at every one (tests set 1). The bound itself
+    // is compared only by check_delivery
     uint32_t poll_stride = 8;
     // the clock (tests inject one)
     std::function<std::chrono::steady_clock::time_point()> clock;
@@ -143,8 +144,9 @@ struct AttemptSettings {
     double delivery_build_mbps = 10;
     double account_per_text_byte_json = 30;
     double account_per_text_byte_graphlet = 50;
-    // The walk does not stop at its walk-until but at the first poll after it — after a chunk
-    // of an annotation read, the heads between two readings of the clock — and its stopped
+    // The walk does not stop at its walk-until but at the first poll that reads the clock after
+    // it — after a chunk of an annotation read, a lookahead's poll, the heads between two
+    // readings of the clock (one poll in poll_stride reads it) — and its stopped
     // seed is finalised before its text is built: the time from the walk-until to the walk's
     // end assumed until the server measured a longer one (ms; the server sets chunk_target_ms
     // + 950; review of pass 5, F3: a walk stopped 124 ms after its walk-until left its delivery
@@ -315,8 +317,9 @@ class Attempt {
     // POST /traverse/cancel: records when it was asked, then request_stop(CANCELLED)
     bool cancel();
     // the handler's poll, at the walker's checkpoints and between seeds: the stop flag, and at
-    // every poll_stride-th poll (or with |force|: between seeds) the bound (enforced only) and
-    // the client's connection (at most every client_check_ms). Records the first poll that
+    // every poll_stride-th poll (or with |force|: between seeds, before a paced read's chunk,
+    // in the lookahead) the walk-until (enforced only) and the client's connection (at most
+    // every client_check_ms). Records the first poll that
     // returns a stop: when the walk stopped.
     graph::traversal::ExternalStop poll(bool force = false);
     // while the response is built and written: the client's connection (AttemptAborted) and
@@ -338,10 +341,12 @@ class Attempt {
     void seed_not_started(size_t index, const SeedUsage &usage);
     // the seed's outcome once its result is built, and its elapsed time with the building
     void seed_delivered(size_t index, const std::string &outcome, double elapsed_ms);
-    // The longest single annotation read of the request so far (ms: one uninterruptible piece
-    // of its walks, LabelOracle::pacer()), stated in usage as observed_max_uninterruptible_ms
-    void note_max_read_ms(double ms);
-    double max_read_ms() const;
+    // The longest uninterruptible piece of the request's walks so far (ms; an annotation read
+    // or chunk, or a head piece — the walk between two readings of the clock for a stop,
+    // DecodePacer::max_uninterruptible_ms; head pieces since the review of 2026-10-06, W3),
+    // stated in usage as observed_max_uninterruptible_ms
+    void note_max_uninterruptible_ms(double ms);
+    double max_uninterruptible_ms() const;
     // The longest time between two delivery checks while a seed's text or the response was
     // written (json_text's max_gap_ms: e.g. the preparation of one large token), which the
     // server adds to deadline_check.observed_max_uninterruptible_ms (not to usage)
@@ -418,7 +423,7 @@ class Attempt {
     size_t seeds_started_ = 0;
     size_t seeds_walked_ = 0;
     size_t seeds_abandoned_ = 0;                      // walks the client's departure cut
-    double max_read_ms_ = 0;                          // note_max_read_ms
+    double max_uninterruptible_ms_ = 0;               // note_max_uninterruptible_ms
     double max_delivery_gap_ms_ = 0;                  // note_delivery_gap_ms
     // the delivery reserve's state (the handler's thread; written under |mutex_|)
     std::string detail_;

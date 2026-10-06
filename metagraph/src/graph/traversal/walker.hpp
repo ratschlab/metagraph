@@ -246,6 +246,13 @@ struct DeliveryCosts {
 // (ResourceAccount::largest_charge).
 constexpr uint64_t kWorkCheckInterval = 65536;
 
+// The graph steps of the structural lookahead (§8.3) after which it reads the seed's deadline
+// and the attempt's stop again: its chains run between two checkpoints, up to
+// min(batch_kmers, the radius left) steps per head of a level, and charge no units while they
+// are enumerated, so the work interval never polls them (the review of 2026-10-06, W3).
+// Stated by the server's deadline_check rule
+constexpr size_t kLookaheadPollSteps = 16;
+
 struct Strategy {
     enum Direction { BOTH, LEFT, RIGHT };
     enum Order { BREADTH_FIRST, LOWEST_LOSS_FIRST, MOST_SUPPORTED_FIRST };
@@ -1187,6 +1194,11 @@ struct WalkerHooks {
     // after every level of an arm (its merges and beam done): the arm, the level's depth
     // and the accounted memory total — what a budget must admit to complete that level
     std::function<void(Arm, uint64_t, uint64_t)> level;
+    // a derived seed's state is recounted in full at every observation and compared with the
+    // running total the derivation keeps (std::logic_error on a difference): what a debug
+    // build asserts, so that a Release build's tests check that the total is the sum it
+    // replaced (the review of 2026-10-06, W2)
+    bool recount_derivation_state = false;
 };
 
 /**

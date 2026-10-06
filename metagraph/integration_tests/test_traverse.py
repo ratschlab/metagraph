@@ -4438,6 +4438,91 @@ class TestTraverseAttempts(TestingBase):
                              (refused.json()['state'], refused.json()['expect_server_instance'],
                               refused.json()['server_instance']))
 
+    def test_release_texts_and_their_grounds(self):
+        """The review of 2026-10-06 (X2, X4, C16, C20, C24, C30, and the search service's release
+        parity LRG-R1/R2), text only: the capabilities state what an attempt runs past its bound
+        (up to its next delivery check, not one step: the review of the P2 fixes) and the clock
+        release's assumption that it ended, the 409 refusing a copy as a finished-state source,
+        the expired 409 as a release ground, the refusal order, the expect_server_instance
+        pattern and the lookahead's polls; the duplicate's 409 no longer says "an attempt runs
+        once" (D3: an id runs again once it is neither retained nor held). On a real server the
+        grounds hold as stated: a copy of a finished request gets the 409 carrying the id's
+        state as GET answers it (finished, its attempt_id and server_instance), also with a
+        not_after_ms already past (registration before expiry); a fresh id past its not_after_ms
+        gets the expired 409 and was never registered; an empty expect_server_instance is a 400
+        without usage."""
+        with self._Server(self) as server:
+            caps = requests.get(server.url + '/traverse/capabilities').json()
+            att, rule = caps['attempts'], caps['deadline_check']['rule']
+            instance = att['server_instance']
+            for field, phrase in (
+                    ('bound', 'past it the attempt runs on until its next delivery check'),
+                    ('bound', 'the walk stops at its first poll that reads the clock after it'),
+                    ('bound', 'content_timeout when it applied'),
+                    ('bound', 'else the lowest walk-until seen'),
+                    ('not_after', 'It is the last of the refusals, all made under one lock'),
+                    ('not_after', 'apart from what it runs past its bound, up to its next '
+                                  'delivery check, a run of no stated length'),
+                    ('instance', 'a string matching id_pattern'),
+                    ('release_rule', 'the 409 refusing a copy of the request whose attempt'),
+                    ('release_rule', 'An expired 409 (state: expired) for an attempt sent with '
+                                     'exactly that not_after_ms'),
+                    ('release_rule', 'It settles nothing'),
+                    ('release_rule', 'still answers running or stopping after that instant'),
+                    ('release_rule', 'no copy of the request reaches another server that serves '
+                                     'the same ledger'),
+                    ('release_rule', 'after it finished or after its latest refused copy')):
+                self.assertIn(phrase, att[field], field)
+            for field in ('bound', 'not_after', 'release_rule'):
+                self.assertNotIn('uninterruptible step', att[field], field)
+            self.assertIn('read the same deadlines every 16 graph steps', rule)
+            self.assertIn("a chain's key mapping", rule)
+            self.assertIn("the attempt's bound, which only the delivery checks compare", rule)
+            self.assertIn('a walk-until at the first poll that reads the clock after it (one in 8',
+                          rule)
+
+            not_after = int(time.time() * 1000) + 60000
+            req = self._request(1, radius=10, attempt_id='grounds-1', not_after_ms=not_after,
+                                expect_server_instance=instance)
+            first = server.post('traverse', req)
+            self.assertEqual(200, first.status_code, first.text[:500])
+            for copy_not_after in (not_after, int(time.time() * 1000) - 1000):
+                copy_req = dict(req, not_after_ms=copy_not_after)
+                refused = server.post('traverse', copy_req)
+                self.assertEqual(409, refused.status_code, refused.text[:500])
+                body = refused.json()
+                self.assertNotIn('usage', body)
+                self.assertIn('it is not run while so', body['error'])
+                self.assertNotIn('runs once', body['error'])
+                self.assertEqual('finished', body['attempt']['state'])
+                self.assertEqual('grounds-1', body['attempt']['attempt_id'])
+                self.assertEqual(instance, body['attempt']['server_instance'])
+                # the id's state, as GET answers it
+                state = server.state('grounds-1').json()
+                self.assertEqual(state['state'], body['attempt']['state'])
+                self.assertEqual(state['usage']['work_units'], body['attempt']['usage']['work_units'])
+
+            past = int(time.time() * 1000) - 1000
+            expired = server.post('traverse', self._request(1, radius=10, attempt_id='grounds-2',
+                                                            not_after_ms=past,
+                                                            expect_server_instance=instance))
+            self.assertEqual(409, expired.status_code, expired.text[:500])
+            body = expired.json()
+            self.assertEqual('expired', body['state'])
+            self.assertEqual(past, body['not_after_ms'])
+            self.assertGreater(body['server_time_ms'], past)
+            self.assertEqual(instance, body['server_instance'])
+            self.assertNotIn('usage', body)
+            self.assertEqual(404, server.state('grounds-2').status_code)
+
+            for bad in ('', 'a/b', 'x' * 129):
+                ret = server.post('traverse', self._request(1, radius=10, attempt_id='grounds-3',
+                                                            expect_server_instance=bad))
+                self.assertEqual(400, ret.status_code, (bad, ret.text[:300]))
+                self.assertIn('expect_server_instance', ret.json()['error'])
+                self.assertNotIn('usage', ret.json())
+            self.assertEqual(404, server.state('grounds-3').status_code)
+
     def test_concurrent_attempts_with_cancels(self):
         """Sixteen attempts at once, half of them cancelled: each response and each state
         agree on what stopped it."""

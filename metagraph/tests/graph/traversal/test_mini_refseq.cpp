@@ -2571,9 +2571,12 @@ TEST(MiniRefSeqWide, DISABLED_CoordinateReserveOnTheWideFixture) {
 }
 
 // D3 on the real index: a derived seed whose time budget runs out during its derivation. On a
-// virtual clock (1 ms a row; the first window of 64 rows, then one row per window): j = 70 of the
-// seed's k-mers are read, and the seed is delivered with their set — partial, label evidence
-// qualified, a derivation limitation stating j of n — stopped at the seed. On the real clock, a
+// virtual clock (1 ms a row; windows of 64 rows whatever batch_kmers is, W1 of the review of
+// 2026-10-06): the first window is consumed by 64 ms, the second read whole to 128 ms, and its
+// first k-mer finds the 70 ms budget spent: j = 65 of the seed's k-mers are read (70 when the
+// later windows were one row at batch_kmers 1), and the seed is delivered with their set —
+// partial, label evidence qualified, a derivation limitation stating j of n — stopped at the
+// seed. On the real clock, a
 // staging-like budget of 1 ms: either that, with j >= 1, or (nothing read) the failure as before
 TEST_F(MiniRefSeq, PartialDerivationOnTheRealIndex) {
     const std::string seed = query_.substr(0, 400);    // 370 k-mers
@@ -2589,10 +2592,10 @@ TEST_F(MiniRefSeq, PartialDerivationOnTheRealIndex) {
         s.sequence = seed;
         const SeedResult r = traverse_seed(oracle, s, st, LabelChangeCost::forbid());
         ASSERT_TRUE(r.derivation_partial);
-        EXPECT_EQ(70u, r.derivation_partial->kmers_read);
+        EXPECT_EQ(65u, r.derivation_partial->kmers_read);
         EXPECT_EQ(0u, r.arms[0].complete_to_bp);
         EXPECT_EQ(0u, r.arms[1].complete_to_bp);
-        // the set of the first 70 k-mers holds every carrier of the whole seed
+        // the set of the first 65 k-mers holds every carrier of the whole seed
         Strategy whole;
         LabelOracle fresh(*anno_graph_);
         const SeedResult all = traverse_seed(fresh, s, whole, LabelChangeCost::forbid());
@@ -2607,11 +2610,11 @@ TEST_F(MiniRefSeq, PartialDerivationOnTheRealIndex) {
         const Json::Value &d = j["limitations"][0];
         EXPECT_EQ("derivation", d["kind"].asString());
         EXPECT_EQ("time_budget", d["cause"].asString());
-        EXPECT_EQ(70u, d["observed"].asUInt64());
+        EXPECT_EQ(65u, d["observed"].asUInt64());
         // n is the seed's num_kmers (and in the effect): no field beyond a failed derivation's
         EXPECT_FALSE(d.isMember("num_kmers"));
         EXPECT_EQ(370u, j["seed"]["num_kmers"].asUInt64());
-        EXPECT_NE(std::string::npos, d["effect"].asString().find("after 70 of 370 k-mers"));
+        EXPECT_NE(std::string::npos, d["effect"].asString().find("after 65 of 370 k-mers"));
     }
     size_t partial = 0, failed = 0, derived = 0;
     for (int i = 0; i < 5; ++i) {

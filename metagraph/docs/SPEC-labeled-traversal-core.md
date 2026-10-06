@@ -327,8 +327,11 @@ to a header).
   stage 4, backend half — the ledger itself lives in the search service): top-level `attempt_id`, `budget_id`
   and `locus_id`, each optional, each a string matching `^[A-Za-z0-9._:-]{1,128}$`. A request with
   `attempt_id` is an **attempt** of a ledger that reserved an allowance for it: the server registers it while it
-  runs; an id runs **once** per server process — a second request with an id that is running or still retained
-  (§10.3) is refused with 409 and runs nothing —; it can be cancelled by id (`POST /traverse/cancel`) and its
+  runs; an id does not run twice at once on a server process, nor again while it is retained or held there — a
+  second request with an id that is running, retained, held or tombstoned (§10.3) is refused with 409 and runs
+  nothing; once its retention and hold are over (at once with `retention_s` 0) a request with the id runs again
+  *(review of 2026-10-06, D3: "an id runs once per server process" was read as unconditional)* —; it can be
+  cancelled by id (`POST /traverse/cancel`) and its
   state read (`GET /traverse/attempt/{attempt_id}`, also by a worker other than the one that sent it); every
   response to it carries a response-level `usage` block (§7.3), its 4xx/5xx answers after the request was read
   included; and the server enforces a duration bound on it (§6.8). `budget_id` and `locus_id` are echoed in
@@ -344,22 +347,35 @@ to a header).
   must not be **started**. A ledger that has no answer for an attempt treats it as one that **cannot start
   subsequently** once its own clock passes `not_after_ms + attempts.clock_skew_allowance_ms` (§10.3) — an
   unanswered request may already be running, which the attempt's bound covers *(review of pass 5: "never
-  started" claimed more than the check gives)* —, and as stopped once
-  it passes that plus the attempt's `bound_ms`; the server makes that safe by refusing, when the
+  started" claimed more than the check gives)* —, and as past its bound once it passes that plus the attempt's
+  `bound_ms`, **apart from what it runs past its bound up to its next delivery check, a run whose length has no
+  stated bound** (§6.8, the attempt's bound and the stated limits; §10.3, the release rule's clock release)
+  *(review of 2026-10-06, X2: "as stopped" left that run out; the review of its fixes: it is not one
+  uninterruptible step, since only the delivery checks compare the bound)*. The
+  server makes the first of these safe — the start, not the run — by refusing, when the
   request's handler starts, a request whose `not_after_ms` is earlier than its clock: **409**
   `{error, state: "expired", not_after_ms, server_time_ms, attempt_id?, budget_id?, locus_id?,
   server_instance}` (the ids as given), nothing run and nothing registered — no `usage`, and a later
   `GET /traverse/attempt/{id}` answers 404 (a later copy of the request is expired too). The check is
   strict: no allowance is added (the skew is the ledger's to add), and a request whose instant has
   not passed runs whatever happens afterwards (it is a start deadline, not a run deadline: the
-  attempt's bound limits the run). An id that is running, retained or tombstoned is answered first
-  (the duplicate's 409, which carries `attempt`), so an `expired` 409 always means that no attempt
-  with that id exists on that `server_instance`. A fraction, a sign, a string or a value above
+  attempt's bound limits the run). The refusals are made in one order, under one lock: an
+  `expect_server_instance` naming another process first (`instance_mismatch`), then an id that is
+  running, retained, held or tombstoned (the duplicate's 409, which carries `attempt`, whatever the
+  request's `not_after_ms`; a held or tombstoned id's refusal extends that hold, §10.3), the expiry
+  last — so an `expired` 409 always means that no attempt with that id existed on that
+  `server_instance` when the request was judged, and no copy can start there later while its clock
+  does not step back below `not_after_ms` (a release ground, §10.3). The capabilities' `not_after`
+  text states this order *(review of 2026-10-06, C24)*. A fraction, a sign, a string or a value above
   2⁵³ − 1 is a 400 naming the field, without `usage`. It is echoed as `usage.not_after_ms` and in the
   attempt's state, only when given. The CLI applies the same check (the 409 body on stdout, exit
   status 1). `/resolve` does not accept it (400, unknown field).
 - **`expect_server_instance`** *(review of pass 5; with `attempt_id` only)*: the `server_instance` (§10.3) the
-  request is meant for, a string compared as given. A process whose own `server_instance` is another refuses it
+  request is meant for, a string matching the ids' pattern `^[A-Za-z0-9._:-]{1,128}$` (as every
+  `server_instance` does), compared as given. Any other value — null, a non-string, `""`, more than 128
+  characters, another character — is a 400 naming the field, without `usage`: nothing runs and nothing is
+  registered (refusing `""` keeps a request from being un-pinned; the capabilities' `instance` text states it,
+  *review of 2026-10-06, X4*). A process whose own `server_instance` is another refuses it
   before anything runs or is registered: **409** `{error, state: "instance_mismatch", expect_server_instance,
   server_instance, attempt_id, budget_id?, locus_id?, not_after_ms?}` (checked first, ahead of a duplicate id and
   of `not_after_ms`). Tombstones (§10.3, `POST /traverse/cancel`) and the holds of finished attempts live in
@@ -367,8 +383,9 @@ to a header).
   finished request would otherwise run there; a ledger that releases capacity early on a tombstone, or on a
   finished state before `not_after_ms + clock_skew_allowance_ms + bound_ms` (§10.3, the release rule), sends its
   attempts with this field *(the finished state: review of levels 4–5, finding 6)*. Without
-  `attempt_id` it is a 400 naming the field. The CLI, whose instance is its own and random, refuses any value
-  (the 409 body on stdout, exit status 1). `/resolve` does not accept it (400, unknown field).
+  `attempt_id` it is a 400 naming the field. The CLI, whose instance is its own and random, refuses any
+  well-formed value (the 409 body on stdout, exit status 1; a malformed one gets the 400's error output, exit
+  status 1). `/resolve` does not accept it (400, unknown field).
 - `direction`: `both | left | right`. `support`: `kmer | trace` (`trace` rejected unless coordinates are indexed
   and the regime is basic).
 - **`seeds[].labels` is optional.** Omitting it is the default and realizes the design note's
@@ -468,15 +485,21 @@ to a header).
    looked at: deriving costs no extra annotation reads over validating a given list. (With header labels the
    coordinates of the still-live columns are mapped to sequence ids per k-mer; after the first k-mer only columns
    that still carry a candidate are touched, so the work shrinks with the intersection.) The intersection is taken
-   incrementally and the seed is rejected as soon as it is empty. Rows are reconstructed in sub-batches of at most
-   64 k-mers (the batch is what makes a long seed fast), so an empty intersection stops the scan within one
-   sub-batch rather than at the exact k-mer; `rows_requested` counts the rows actually CONSUMED, which is what the
+   incrementally and the seed is rejected as soon as it is empty. Rows are reconstructed in windows of 64 k-mers
+   (the last one shorter; the batch is what makes a long seed fast), so an empty intersection stops the scan within
+   one window rather than at the exact k-mer; `rows_requested` counts the rows actually CONSUMED, which is what the
    derivation read, not what the batch fetched.
    The pass starts from the **cheapest row among the seed's first 64 k-mers**, not from k-mer 0: that one row is
    the only one no intersection has narrowed yet, so starting at k-mer 0 would make the peak cost an accident of
-   where the caller cut the seed. The window is 64 k-mers **whatever `annotation.batch_kmers` is** (only the later
-   sub-batches follow the knob): the cheapest-row choice and the guard below decide whether a seed is accepted,
-   and acceptance must not depend on a fetch-size setting (§6.8). The order does not change the result (an
+   where the caller cut the seed. **Every window is 64 k-mers whatever `annotation.batch_kmers` is**: the
+   cheapest-row choice and the guard below decide whether a seed is accepted, and each window is one work charge
+   before its k-mers are consumed (§6.8), so its width also places the work comparisons, `largest_charge`, the
+   outcome under a work budget and, after an early `no_carrier`, `work_seed` — none of which may depend on a
+   fetch-size setting (§6.8). *(Feature level 6, the review of 2026-10-06, W1: on a format whose reads are not
+   budget-aware the later windows followed the knob, `clamp(batch_kmers, 1, 64)` k-mers wide, and a work-budgeted
+   derived seed of 195 k-mers over 992 columns walked partial at `batch_kmers` 1 and 7 and failed at 64; an
+   unbudgeted `no_carrier` at k-mer 90 charged 639 units at 1 and 1,152 at 64. The fixed width costs at most 63
+   rows read past an early `no_carrier`.)* The order does not change the result (an
    intersection is commutative and the set stays ascending by `(column, seq_id)`), and a seed whose cheapest row
    in that window still has more annotation entries (columns plus k-mer coordinates — an upper bound on its
    labels) than the derivation will materialise is refused up front (a seed of exactly k bp has no intersection
@@ -508,7 +531,13 @@ to a header).
    that one label (and `/resolve` + `/select` remain the way to freeze a reproducible subset).
    **Per-seed failure.** Deriving can fail for reasons the caller cannot act on, because it named no labels at all:
    nothing carries the seed in full, the derived names are ambiguous, the first row is too wide, or the time budget
-   ran out mid-derivation. One failure of the same shape is not a derivation's: a seed whose labels — the
+   ran out before the derivation consumed its first k-mer. A time budget that runs out after 1 ≤ j < n of the
+   seed's n k-mers does **not** fail the seed (D3, feature level 6; *review of 2026-10-06, X1*: this sentence
+   listed every mid-derivation timeout as a failure): the seed is walked with the set of the labels carrying the
+   j k-mers read — a superset of the whole seed's carriers — truncated at `complete_to_bp` 0, `walks: partial`,
+   `label_evidence: qualified`, a `derivation` limitation first with `observed` = j (§7.0, the `derivation` row),
+   unless that superset would fail the seed in another way, which then fails it with the time budget as before
+   D3. One failure of the same shape is not a derivation's: a seed whose labels — the
    `label_dict` of either mode (an `annotate` dictionary is complete only after the walk) or a `dropped_labels`
    entry — include a name that is not valid UTF-8 (names come from FASTA headers and file names) is **refused**
    with cause `unrepresentable_label_name`, whether or not its labels were named. No output carries such a name
@@ -771,7 +800,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   charged before a comparison can fail the seed** (review of the stage-2 recheck, P2: charged row by row, a
   failure left the rest of a decoded batch uncharged): the validation reads, under a work budget, in calls grown
   from one key, doubling, each holding about `W` units at the widest row read so far (its hits, coordinates and,
-  budget-aware, dependency rows), each call one charge; the derivation's window (64 k-mers under a budget,
+  budget-aware, dependency rows), each call one charge; the derivation's window (64 k-mers whatever
+  `annotation.batch_kmers` is, §6.1,
   held at once to choose its cheapest row) is one charge as soon as it is read — a window found `too_wide`
   is added to the seed's work without a comparison, so that `too_wide` stays the stated cause and the work it
   decoded is still the seed's (`work_seed`, the usage's `work_units`; review of the stage-3 fixes, P3: such a
@@ -846,11 +876,23 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     on the attempt's clock, which starts when the server read the request's header (time queued before that,
     every server thread busy, is not in it: §10.3). The seeds stop being walked at
     `bound_ms − max(allowance_ms / 2, reserve_ms)` (`attempt_deadline`, as above; the seeds left are
-    `not_started`) — the walk-until, which moves with the reserve; the walk stops at its first poll after it —
+    `not_started`) — the walk-until, which moves with the reserve; the walk stops at its first poll **that reads
+    the clock** after it (one in `poll_stride` — 8 — of a walk's polls, the one before a head; every poll before
+    a paced read's chunk or in the lookahead; the poll before each seed), so up to 7 heads after it, while a
+    cancel is seen at the next poll of any kind —
     leaving the rest to deliver what was walked; the response is built and written under the
     bound — checked every 4096 objects of the JSON tree and of the MGT text, every 64 KiB of the JSON text,
     between compression blocks and once before it is handed to the transport — and one not ready by the bound
-    is not written: 503 with `usage` (reason `deadline`).
+    is not written: 503 with `usage` (reason `deadline`). **The bound itself is compared only at those delivery
+    checks** (the walk's polls compare the walk-until, below it), so past the bound the attempt runs on until
+    its next delivery check (then the 503) or its handler's return: the rest of the piece it was in when the
+    bound passed and, when its walk had not stopped by then, the walk up to its next poll that reads the clock,
+    the stopped seed's finalisation and the building of its result up to the first delivery check — several of
+    the unpolled pieces of the stated limits below, a run whose length has no stated bound; a ledger's clock
+    release takes the attempt as stopped at its bound and assumes that run ended (§10.3, the release rule)
+    *(review of 2026-10-06, X2; the review of its fixes: "one uninterruptible step" understated it — on the
+    reviewer's 6.94 Mbp seed the k-mer mapping, the seed phase up to its first poll and the failed result's
+    building ran past the bound, and GET answered `running` 2,720 ms past the clock release's instant)*.
     **The delivery reserve** (pass 5): `reserve_ms = 1.25 × ((T + E) / (compress_mbps × 1000) + E / (build_mbps
     × 1000)) + stop_ms`, T the exact bytes of the text of the seeds finished so far (the server writes each seed's result
     as compact text once it is built and assembles the response from those texts — byte for byte the text of
@@ -886,8 +928,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     alone stopped the walk of a 403 MB SRA response at 2.3 s of its 35 s walk-until (account 35.6 GB, 88 per
     text byte, estimated at 20); measured, they hold it to its own needs. The factor 1.25 is a margin for rates
     that vary between responses, and `stop_ms` the time from the walk-until to the walk's end — the walk stops
-    at its first poll after the walk-until (after a chunk of an annotation read, or the heads between two
-    readings of the clock), then finalises the stopped seed: `delivery_reserve.stop_ms`
+    at its first poll that reads the clock after the walk-until (after a chunk of an annotation read, a
+    lookahead's poll, or the heads between two readings of the clock), then finalises the stopped seed: `delivery_reserve.stop_ms`
     (`--traverse-chunk-target-ms` + 950; + 200 before feature level 4: SRA attempts stopped 352 ms after their
     walk-until on a quiet fresh server in the efficiency pass and 1,001 ms on a loaded one, once 1,699 ms under
     load in pass 5 on a 400 MB result — a finalisation that grows with the result is covered by the 1.25 margin as
@@ -899,8 +941,12 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     time a response the model fitted exactly was a 503 about half the time (review of pass 5, F3: a walk that
     stopped 124 ms after its walk-until left the delivery 1,277 ms of the 1,401 ms reserved, 98 ms short).
     `usage.bound.walk_until_ms` states, when the walk-until stopped the walk, the walk-until in force then;
-    otherwise the lowest in force while a seed was walked (the floor, `bound_ms − allowance_ms / 2`, when the
-    reserve never exceeded it then; the one computed once the last seed's text is written bounds no walk);
+    otherwise the lowest walk-until seen: the lowest that a poll reading the clock compared with — every 8th
+    poll of a walk, every poll before a paced read's chunk or in the lookahead, and the poll before each seed —
+    (the floor, `bound_ms − allowance_ms / 2`, when no such poll saw the reserve above it; the one computed once
+    the last seed's text is written bounds no walk); a lower walk-until in force only between two such polls (the
+    reserve moves at every level's end) is not stated *(review of 2026-10-06, C20: "the lowest in force" claimed
+    every value)*;
     `usage.stopped_at` is when the walk saw the stop. The traversal routes compress at zlib level
     `--traverse-compression-level` (default 1; the other routes keep 9): on 10 real responses (541 MB of JSON)
     level 1 wrote 630 MB/s against level 9's 153 MB/s (graphlet bodies 51–64 MB/s at level 9) for 1.8 times
@@ -918,18 +964,31 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     lost whole for want of time: the reserve stops the walk early enough to deliver what was walked, with the
     rest stated (`attempt_deadline`, `not_started`). The reserve can stop a large attempt earlier than before
     pass 5; what it did not walk is stated, as any stop.
-    **Stated limits**: one uninterruptible step can run past the bound by its own length: one chunk of an
+    **Stated limits** — the uninterruptible pieces, each of which a stop waits out (a cancel is seen after
+    the piece it falls into, a walk-until after the pieces up to the next poll that reads the clock, the bound
+    after those up to the next delivery check, above): one chunk of an
     annotation read (at least one row; no bound on one row's decode exists before stage 3c, so
     `deadline_check.max_uninterruptible_ms` is null — and it stays null after stage 3c-ii, whose checkpoints bound
     index operations, not time: page faults and scheduling leave the time open (decision 3c-N5) —, and
     `usage.observed_max_uninterruptible_ms` states the
-    longest single piece the attempt decoded), or a read decoded whole because it was predicted to end well
-    before the walk-until, whose rows were more than 64 times slower than any read before (*chunked
-    deadlines*, below); the mapping of the seed's k-mers to nodes before its validation,
+    longest read, chunk or head piece of the attempt's walks, below), or a read decoded whole because it was
+    predicted to end well before the walk-until, whose rows were more than 64 times slower than any read before
+    (*chunked deadlines*, below); the mapping of the seed's k-mers to nodes before its validation,
     which is not polled (up to `--traverse-max-seed-bp` = 100 000 k-mers on the server, unbounded in the CLI;
-    review of the stage-4 backend, F7); a head's processing between two work checks; a seed's finalisation and
-    summary (linear in its admitted result); the building of the response between two delivery checks; and the
-    transport, which sends the written bytes after the handler returned (the content timeout bounds that).
+    review of the stage-4 backend, F7); the seed phase's own processing — resolving the named labels, their
+    duplicate check, the extra labels, the seed id, the depth-0 state — linear in the bytes of the labels named,
+    which no server limit caps; a head's processing between two work checks; the lookahead's chains (§8.3)
+    between their polls — every 16 graph steps and before each chain's key mapping, which is one call over at
+    most `annotation.batch_kmers` nodes — and its clearing once it outgrows its bound (1,000,000 entries without
+    a budget; linear in its entries, at most a level's heads × `min(batch_kmers, the radius left)`); a read's
+    preparation before its first chunk — its cache lookups and the ordering of its keys in the walk's order, n log
+    n in its keys (a lookahead read's are up to a level's heads × `batch_kmers`: 90–260 ms for the 1 to 3.8 million
+    keys of the reviewer's W3 fixture, the longest head piece there once its chains were polled); a seed's
+    finalisation and summary (linear in its admitted result); the building of the response between two delivery
+    checks; and the transport, which sends the written bytes after the handler returned (the content timeout
+    bounds that). *(Review of 2026-10-06, W3: the chains read only the seed's own deadline; at `batch_kmers`
+    60,000 a cancel was seen 1.5–11.8 s late and a walk-until passed by 0.6–6 s, an HTTP 503 at the bound, while
+    `observed_max_uninterruptible_ms` said 1 ms. D12: the seed phase's processing was missing here.)*
 - **Chunked deadlines** (pass 5; `LabelOracle::pacer`, `ReadPacing`). Under a deadline — the seed's
   `bounds.time_budget_ms` where the walk reads it (depth > 0, as a checkpoint does; in a derivation, a positive
   budget, as the derivation reads it after every k-mer) and, for a request with `attempt_id`, the attempt's
@@ -953,7 +1012,19 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   depth, depth 0 included, its chains' graph steps stop at it, and it is skipped once the budget has passed
   *(efficiency pass)*: run() reads that budget before depth 1 and a head's checkpoint before the other arm's next
   head, so a lookahead read past it is never consumed (before, a chain's steps and the roots' lookahead read ran
-  in full: 2.2 s on a 250 ms budget on refseq33m, 1.3 s of it graph steps of 1,000-node chains). A chunked read **returns exactly what one read returns**: its
+  in full: 2.2 s on a 250 ms budget on refseq33m, 1.3 s of it graph steps of 1,000-node chains). **The chains
+  read the attempt's stop too** *(feature level 6, the review of 2026-10-06, W3)*: they run between two
+  checkpoints and charge no units while they are enumerated, so every 16 graph steps of the level's lookahead
+  (`kLookaheadPollSteps`) and before each chain's key mapping they read the seed's deadline and, for a request
+  with `attempt_id`, a cancel, the walk-until and a gone client (the poll that reads the clock, as before a
+  paced read's chunk); a stop ends the lookahead there — the chain being built is dropped, nothing is read —
+  and the next head's checkpoint (at depth 0 run(), before depth 1) stops the walk on it: the lookahead reads
+  the attempt's stops only through that clock-reading poll, which records a passed walk-until with the
+  attempt, so the checkpoint's poll returns it whatever its stride *(the review of the P2 fixes: without
+  pacing, `--traverse-chunk-target-ms` 0, the lookahead stopped on the walk-until without that poll, and the
+  walk ran up to 7 more heads before a poll that read the clock stopped it)*. Nothing depends on
+  the cache, so a walk no stop ends is unchanged; one a stop ends differs only in timing and the physical
+  counters of reads it no longer makes. A chunked read **returns exactly what one read returns**: its
   counting (`annotation.rows_requested`, the cache hits), its cache's eviction and its result are decided once
   for the whole read and only the decoding is split (a budget-aware read admits every key against its
   standalone demand, so its runs may be cut anywhere), so a request that no deadline stops is byte-identical
@@ -974,15 +1045,24 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   window found `too_wide`. One chunk stays uninterruptible: at least one row, and no bound on one row's decode
   exists before stage 3c (selected-label decoding) — `deadline_check.max_uninterruptible_ms: null`, which stays
   null once stage 3c-ii's checkpoints bound the operations of a read (decision 3c-N5);
-  `deadline_check.observed_max_uninterruptible_ms` is the longest single piece the server process decoded (a
-  whole read far from its deadline included: how late a cancel can be seen), and
-  `usage.observed_max_uninterruptible_ms` the attempt's: observations, not bounds. **Stated limits**: a read
+  `deadline_check.observed_max_uninterruptible_ms` is the longest single piece the server process saw — a read
+  or chunk (a whole read far from its deadline included), a **head piece** (the walk between two readings of
+  the clock for a stop, its reads excluded, the lookahead's chains between their polls included; feature level
+  6, the review of 2026-10-06, W3: only reads were counted before) or a gap between two delivery checks: how
+  late a cancel can be seen —, and `usage.observed_max_uninterruptible_ms` the attempt's reads and head pieces:
+  observations, not bounds. Neither counts the mapping of a seed's k-mers, the seed phase's own processing, a
+  derivation's steps or a seed's finalisation (each seed's `timing.deadline.longest_piece` names its longest
+  piece of any kind), so neither is a margin a ledger can add (§10.3, the release rule). **Stated limits**: a read
   decoded whole because it was predicted to end before 1/64 of the time left overruns the deadline when its rows
   are more than 64 times slower than any the request read before; the rest of a split read, when its rows are
   more than 4 times slower than its chunk's. **Not chunked**: `/resolve`
-  (stage 3b), the mapping of a seed's k-mers, a head's processing (checked every `work_check_interval` units),
-  a seed's finalisation and summary, the response's building between two delivery checks (every 64 KiB of text
-  and every 4,096 objects of a seed's tree; one token's preparation in between), and the transport.
+  (stage 3b), the mapping of a seed's k-mers, the seed phase's own processing (linear in the bytes of the
+  labels named), a head's processing (checked every `work_check_interval` units), a lookahead chain's key
+  mapping (one call, at most `batch_kmers` nodes; the chain's graph steps are polled, above), a read's
+  preparation before its first chunk (its cache lookups and the ordering of its keys, n log n in them) and the
+  lookahead's clearing once it outgrows its bound, a seed's finalisation and summary, the response's building
+  between two delivery checks (every 64 KiB of text and every 4,096 objects of a seed's tree; one token's
+  preparation in between), and the transport.
   `--traverse-chunk-target-ms 0` decodes every read in one piece, as before pass 5. Measured on the fan-out
   index of `TestTraverseWideIndex` (1,024 header labels, one lookahead read of about 66,000 rows), on a loaded
   M5 Max, budgets of 50, 100, 200 and 500 ms: with a column annotation, which the previous build overran by up to
@@ -1005,7 +1085,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   one 16 MiB string value was appended whole, one check after it, in the writing and in the assembly alike. What
   stays uninterruptible is what the writer does between two pieces: preparing one token (escaping one string
   value, e.g. a graphlet of many MB, before it is copied). The longest time between two checks of a written text is
-  measured and added to `deadline_check.observed_max_uninterruptible_ms` (not to `usage`, which states the reads).
+  measured and added to `deadline_check.observed_max_uninterruptible_ms` (not to `usage`, which states the reads
+  and, from feature level 6, the head pieces).
 - **The deadline record** *(R8; feature level 5; in `timing` only, never in an untimed body)*. Per seed,
   `timing.deadline`: `longest_piece {ms, kind, rows, coordinates}` — the seed's longest uninterruptible piece,
   `kind` one of `read` (an annotation read in one piece), `chunk`, `rest` (the piece that ended a split read),
@@ -1084,8 +1165,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     silently. Under a request budget the label caches never exceed their allotments, and the
     structural lookahead is cleared before a chain would push it past its allotment (counted keys: each key the
     walk consumes once, `annotation.keys_mapped`).
-  - Under a request budget the derivation reads 64 k-mers per sub-batch whatever `annotation.batch_kmers` is,
-    and holds the sub-batch's rows at once (its window, in which it chooses the cheapest row). The window's
+  - The derivation reads 64 k-mers per window whatever `annotation.batch_kmers` is, under a budget or not (§6.1;
+    feature level 6), and holds the window's rows at once (in the first it chooses the cheapest row). The window's
     distinct rows are read in runs, a run that does not fit retried in halves, every row admitted against its
     standalone demand beside the rows read before it. A window whose rows do not fit together fails the seed,
     and the statement names the refused row's seed k-mer and demand (or that its read alone did not fit), what
@@ -1281,7 +1362,7 @@ is rejected instead (§5).
   |---|---|---|
   | `walks` | `complete` \| `partial` \| `failed` | `complete` only when no walk-class limitation applies: every requested arm has `status: complete` (`complete_to_bp == bounds.max_extension_bp`) **per path** (keep, or merge where no merge united a history) and no carrier of the seed was left out. `partial`: a valid certified prefix whose limits are stated — a `walk_domain` (an arm was truncated or pruned), a `scope` with `observed > 0` (a merge united histories: the walks are complete for the united-history rule, not per path) or a `seed_labels` limitation (the walks only a cut carrier carries are missing). `failed`: no traversal — the permitted set could not be derived (§6.1 step 4): the result has no `arms`, an `error`, and a `derivation` limitation; or a request budget does not hold the seed itself (§5, request budgets): no `arms`, an `error`, a seed-level `walk_domain` naming the budget's knob and a `resource_stop`; or a stop from outside the walk reached the seed in its seed phase or before it started (§6.8: a cancel, the attempt's bound): the same shape, the `walk_domain` naming `attempt_id`, the `resource_stop` with `scope: "attempt"` (`phase: "not_started"` for a seed never started) |
   | `branch_diagnostics` | `complete` \| `cut` | `cut`: a `branch_events` limitation — some arm's `evidence.complete` is `false`, and branch decisions and refusals at or beyond `evidence.complete_to_bp` are not reported |
-  | `label_evidence` | `complete` \| `lower_bound` \| `qualified` | `lower_bound`: evidence may be *missing or understated* — recorded lists were cut (`label_lists`, `inexact_counts`: annotate mode's `label_summary` and the counts flagged `exact: false` are lower bounds), carriers of the seed were cut (`seed_labels`), a `max_switch_sources` cut may have raised a loss or missed a switch entry (`switch_sources`), or losses were re-minimised greedily (`greedy_losses`). `qualified`: something reported may be *overstated* — a column-label trace cannot see a record boundary (`trace_record_boundaries`); `qualified` wins when both apply |
+  | `label_evidence` | `complete` \| `lower_bound` \| `qualified` | `lower_bound`: evidence may be *missing or understated* — recorded lists were cut (`label_lists`, `inexact_counts`: annotate mode's `label_summary` and the counts flagged `exact: false` are lower bounds), carriers of the seed were cut (`seed_labels`), a `max_switch_sources` cut may have raised a loss or missed a switch entry (`switch_sources`), or losses were re-minimised greedily (`greedy_losses`). `qualified`: something reported may be *overstated* — a column-label trace cannot see a record boundary (`trace_record_boundaries`), or the permitted set was derived from part of the seed (a `derivation` on a walked result, D3, feature level 6: it may hold labels the whole seed would exclude); `qualified` wins when both apply |
   | `delivery` | `inline` | the whole result is in this response; `spooled` / `paged` are reserved for the graphlet delivery path (`DESIGN-traverse-graphlet.md` §14) |
 
   **Conservative by construction** (`DESIGN-traverse-graphlet.md` §14, v5.2): each axis is computed from the
@@ -1323,7 +1404,7 @@ is rejected instead (§5).
 | `server_clamp` | seed | an entry of `strategy.clamped` bound this seed: a lowered derived-set cap that cut its set, a lowered time budget that tripped, a budget raised from zero (the walk ran under it), or a memory or work budget at the server's maximum (§10, R16) that stopped its walk or failed the seed | the clamped field | the requested value (`limit` is the effective one) |
 | `memory_bound_soft` | seed | `bounds.max_memory_mb` is set: something is always held beyond the admitted account. **(i) On an annotation whose reads are budget-aware** (§6.8; `ResourceAccount::decode_charged`) the reads are charged inside the decoder, and the statement names only what is still uncharged: a level's key and successor lists and its fetched rows until its heads are processed, the seed phase's intersection and hits, the dictionary a failed seed's depth-0 state built, a failed result's echo of `seed_id` (named in the effect, review of the stage-2 recheck, design answer 5), an index-wide header lookup that the first request needing it builds (not observed: charging it would make a result depend on the server's history), and the label dictionary's first table (about 1.5 KB per request) with the transient copy while its list grows (not observed). **(ii) Other formats**: the budget is enforced on the modelled state and output, but the annotation rows the seed phase and each level decode (with an annotate dictionary's growth and a cache beyond its allotment), and a failed result's echo of `seed_id`, are held before they can be charged. Neither is a hard request-wide memory bound (§6.8). In no outcome class | `bounds.max_memory_mb` | the largest excess over the budget seen of what was held beyond the admitted account, MiB rounded up (0: none), observed wherever it is held and before any check after it can stop the walk, so a stop inside a fetch still states what the fetch held; the admitted account itself never exceeds the budget. Observed once a level's key and successor lists are built, after every call of a level's fetch (with the call's raw rows in (ii)) and at a refused read (with the rows read before it), at **every head admission** (the account the head needs with the level's lists and fetched rows beside it), after the roots' rows and the lookahead's warming, and over the seed phase's rows and intersection (after each sub-batch is read and again once it is consumed; each fetch call of the label validation before its charge, which can fail the seed; under `trace` the validation's peak — the hits, every label's live coordinate set and both arms' boundary coordinates — before anything can fail the seed, review of the stage-2 recheck, P2). In (ii) the decoder's own transient buffers are not counted (the materialised rows are). Also on a seed a budget failed — what its depth-0 state built before the admission refused it (the dictionary's labels with their names in every copy, the caches) is observed first — on a seed whose derivation failed (what the derivation's rows held), and on every failed or refused seed what its result's echo of the request's `seed_id` holds beyond the budget (§5) |
 | `coordinates` | seed | `output.coordinates` is true and an occurrence list — a seed label's or a run's — was cut at the cap to its first occurrences by start (each cut list states `occurrences_total`; the block `complete: false`). In no outcome class (decision C2) | `output.max_coordinate_occurrences` | the largest true count of a cut list; the extra field `lists_cut` counts the lists cut |
-| `derivation` | failed seed; a walked seed whose set was derived from part of it (D3) | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode). **D3** *(the owner's decision, feature level 6)*: a derived seed whose time budget runs out after 1 ≤ j < n of its k-mers is delivered as a walked result, without `error`, when nothing else would fail it — the set of the labels carrying the j k-mers read (a superset of the whole seed's carriers; `labels_from_seed`, `labels_supporting_total` its size), every requested arm truncated at `complete_to_bp` 0 (`cap_trigger` `time_budget`), this limitation first with `cause: time_budget` and `observed` = j, no `num_kmers` field, `outcome.walks: partial` and `label_evidence: qualified`; j = 0, or a superset that would fail the seed in any other way, fails as before | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: elapsed ms; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
+| `derivation` | failed seed; a walked seed whose set was derived from part of it (D3) | the permitted set could not be derived (`outcome.walks: failed`); `cause` names why, `server_limit` is added when the server clamped the knob; also a seed refused for a label name that is not UTF-8 (`unrepresentable_label_name`, §6.1 step 4, either mode). **D3** *(the owner's decision, feature level 6)*: a derived seed whose time budget runs out after 1 ≤ j < n of its k-mers is delivered as a walked result, without `error`, when nothing else would fail it — the set of the labels carrying the j k-mers read (a superset of the whole seed's carriers; `labels_from_seed`, `labels_supporting_total` its size), every requested arm truncated at `complete_to_bp` 0 (`cap_trigger` `time_budget`), this limitation first with `cause: time_budget` and `observed` = j, no `num_kmers` field, `outcome.walks: partial` and `label_evidence: qualified`; j = 0, or a superset that would fail the seed in any other way, fails as before | per `cause`: `no_carrier` → `seeds[].sequence`; `no_trace_carrier` → `support` (`limit: "trace"`); `too_wide` → `seeds[].sequence`; `time_budget` → `bounds.time_budget_ms`; `ambiguous_header` → `labels.seed_label_kind` (`limit: "header"`); `over_seed_label_cap` (`exhaustive`) → `labels.max_seed_labels`; `unrepresentable_label_name` → the knob that avoids recording the label: `labels.mode` (`limit: "annotate"`) in annotate mode, `labels.seed_label_kind` (`limit: "header"`) for a derived header label, `labels.extra` (`limit`: its labels) for an extra one, else `seeds[].labels` (`limit`: the labels named or derived) | `no_carrier`: the seed k-mers read when no candidate was left (`limit`: the seed's k-mers); `no_trace_carrier`: the labels carrying every k-mer by presence; `too_wide`: annotation entries of the narrowest of the first 64 k-mers (`limit`: 64 · `max_seed_labels`, at least 65 536); `time_budget`: **two units** — on a failed seed the elapsed ms (a number), on a walked seed (D3) j, the k-mers read (an integer; n is the seed's `num_kmers`, and the effect says "after j of n k-mers"): one `kind`, `cause` and `knob`, told apart by the result's shape (walked: `arms`, no `error`), which the owner kept rather than change the wire within level 6 *(review of 2026-10-06, X1; in an MGT `K` record j is written `i:j`, an elapsed time `f:`)*; `ambiguous_header`: the header (under `bounds.max_memory_mb` one longer than 256 bytes as a bounded prefix with its length, column and sequence id, §5); `over_seed_label_cap`: the carriers; `unrepresentable_label_name`: the names that are not UTF-8 (the effect names the first by column and sequence id, never its bytes) |
 
 ```json
 "outcome": {"walks": "complete", "branch_diagnostics": "cut", "label_evidence": "complete", "delivery": "inline"},
@@ -1697,14 +1778,22 @@ attempt) nor a 400 for a malformed id:
   (the effective per-seed budget) + `allowance_ms`, `capped_by: "content_timeout"` when the HTTP server's cap
   applied, `walk_until_ms` where the seeds stop being walked — `bound_ms − max(allowance_ms / 2, the delivery
   reserve)`, which moves with the reserve (pass 5, §6.8): when it stopped the walk, its value then (the walk
-  stopped at its first poll after it, `stopped_at`); otherwise the lowest value in force while a seed was walked,
-  which is `bound_ms − allowance_ms / 2` when the reserve never exceeded that floor —, `enforced` (false in the CLI). A request that failed before it was parsed states `seeds: 0`,
+  stopped at its first poll that read the clock after it, `stopped_at`); otherwise the lowest walk-until seen:
+  the lowest that a poll reading the clock compared with — every 8th poll of a walk, every poll before a paced
+  read's chunk or in the lookahead, and the poll before each seed —, which is `bound_ms − allowance_ms / 2` when
+  no such poll saw the reserve above that floor; a lower one in force only between two such polls is not stated
+  *(review of 2026-10-06, C20: "the lowest in force while a seed was walked" claimed every value; pinned with
+  the server's stride by `GraphletAttempt.WalkUntilStatedIsTheLowestAClockReadingPollSaw`)* —, `enforced` (false
+  in the CLI). A request that failed before it was parsed states `seeds: 0`,
   `time_budget_ms: null` and the cap.
 - `not_after_ms` (pass 5): the request's own, echoed only when it gave one (§5).
-- `observed_max_uninterruptible_ms` (pass 5; every response with `usage`): the longest single piece of
-  annotation decoding of the attempt's walks — a chunk of a split read, or a read decoded whole because its
-  deadline was far (§6.8, chunked deadlines) — whole ms rounded up: how late a stop could have come. An
-  observation of this attempt, not a bound.
+- `observed_max_uninterruptible_ms` (pass 5; every response with `usage`): the longest single uninterruptible
+  piece of the attempt's walks — a chunk of a split read, a read decoded whole because its deadline was far
+  (§6.8, chunked deadlines), or, from feature level 6, a head piece (the walk between two readings of the clock
+  for a stop, its reads excluded; the lookahead's chains between their polls included: the review of 2026-10-06,
+  W3) — whole ms rounded up: how late a stop could have come in them. An observation of this attempt, not a bound
+  and not a margin: the mapping of a seed's k-mers, the seed phase's own processing, a derivation's steps and a
+  seed's finalisation are not in it (§6.8).
 - Number types: every count, byte amount and duration in `usage` is an integer (ms rounded up), except
   `bound.time_budget_ms`, a number as the request's knob is.
 - `seeds`: `requested`; `started`; `finished` — the seeds whose walk ended (complete, partial or failed),
@@ -2352,9 +2441,14 @@ the server.
     `--traverse-chunk-target-ms`, an integer in [0, 2⁵³ − 1]; 0: reads are not chunked), `max_uninterruptible_ms`
     (null: no bound on one row's decode exists before stage 3c, and it stays null after stage 3c-ii, whose
     checkpoints bound index operations, not time — decision 3c-N5, §6.8), `observed_max_uninterruptible_ms`
-    (integer: the longest single piece of annotation decoding of any `/traverse` in this process's lifetime — a
-    chunk, or a read decoded whole far from its deadline — an observation) and `rule` (§6.8, chunked deadlines, as
-    text, with the factors 64 and 4 and the first chunk of 8 rows).
+    (integer: the longest single uninterruptible piece of any `/traverse` in this process's lifetime — a chunk, a
+    read decoded whole far from its deadline, a head piece (from feature level 6: the walk between two readings
+    of the clock for a stop, the lookahead's chains between their polls included, W3) or a gap between two
+    delivery checks — an observation, which leaves out the mapping of a seed's k-mers, the seed phase's own
+    processing, a derivation's steps and a seed's finalisation, §6.8) and `rule` (§6.8, chunked deadlines, as
+    text, with the factors 64 and 4, the first chunk of 8 rows, from feature level 6 the lookahead's polls every
+    16 graph steps, the steps left unpolled, what the observation counts, and how late a cancel, a walk-until and
+    the attempt's bound are seen).
   - **`feature_level`** — what the server offers beyond the base contract, monotonic and only ever extended, so a
     client states a feature as `feature_level >= n` (`DESIGN-traverse-graphlet.md` §21: each pass that adds
     capabilities fields or routes bumps it by one; `schema_version` stays the request schema version). Absent or
@@ -2400,7 +2494,12 @@ the server.
     capabilities' `attempts.release_rule` and `attempts.instance` texts (a finished state is replay-safe only for
     an attempt pinned with `expect_server_instance`, §10.3), the values in `timing` (the deadline record's
     `setup` pieces and its last `head` piece, `seed_phase_ms` and `seed_fetch_ms` to the first checkpoint, §6.8)
-    and physical work (the path cache admits a row before copying it, §8.4). **6** (record coordinates,
+    and physical work (the path cache admits a row before copying it, §8.4). **Builds `7aaee760`..`67bef367`
+    are not level 5** although they state it: they carry D3 (below) and accept the first `output.coordinates`
+    fields, so a client keyed on `feature_level` cannot tell them from a level-5 build — `dcc0cebd` answers
+    `walks: failed` to a derived seed whose time budget runs out after part of it, `67bef367` `walks: partial`
+    with `label_evidence: qualified`, both stating 5. None was deployed (staging ran `32959610`), and none may
+    be *(review of 2026-10-06, X1)*. **6** (record coordinates,
     `DESIGN-traverse-graphlet.md` §26): `output.coordinates` and `output.max_coordinate_occurrences` (§5) with the
     `coordinates` block or null form per seed (§7.1), the `coordinates` limitation and its K record (§7.0, §7.5),
     the action `drop_coordinates`, the probe's `coordinates` block,
@@ -2415,7 +2514,41 @@ the server.
     `parents` / `labels_via_parent` and on a tie which lineage continues, all `on_reconverge: merge`; not in
     `tree` and `full` detail under a memory budget, where a head reserves its displayed chain's delivery and a
     merge keeps the arrival order, so no budget's stop moves — T55, DESIGN §26.8), and the server's
-    **shutdown on SIGTERM** (below). The server states 6 from this level's commit.
+    **shutdown on SIGTERM** (below). The server states 6 from this level's commit. **The fixes of the review of
+    2026-10-06** (its P2 items; level 6 was deployed nowhere, so they are folded into it and `feature_level`
+    stays 6) change: the capabilities texts `attempts.bound`, `attempts.not_after`, `attempts.instance` and
+    `attempts.release_rule` — what an attempt runs past its bound (up to its next delivery check: the rest of
+    the piece the bound fell into, the walk up to its next poll that reads the clock, the stopped seed's
+    finalisation and the building up to that check) and the clock release's assumption that it ended (X2), the
+    409 refusing a copy as a finished-state source and the `expired` 409 as a release ground (LRG-R1/R2), the
+    refusal order (C24), the `expect_server_instance` pattern and its 400 (X4), the hold that refused copies
+    extend (C30), the content-timeout cap (C16), the walk-until stated and the poll that reads the clock (C20) —,
+    `attempts.delivery_reserve.rule` (the walk stops at its first poll that reads the clock after the
+    walk-until, C20) and `deadline_check.rule` (the lookahead's polls, the steps left unpolled, what the
+    observation counts, how late a cancel, a walk-until and the bound are seen: W3, D12, X2); the texts of the
+    attempt routes' 404/409/429 errors that state the retention (C30: the 404 of an unknown id, the 409s of a
+    duplicate and of a tombstoned id, the cancel's 429 `tombstones_full`), the duplicate's 409 also no longer
+    saying "an attempt runs once" (D3: "is running, or retained or held after it finished, on this server
+    (…): it is not run while so"), of an `attempt_deadline` statement (the arm's `walk_domain` effect,
+    `resource_stop.message`, a not-started seed's `error`) and of the 503 at the bound (C16: they name the
+    content-timeout cap); and three outputs. **W1**: a derivation's windows are 64 k-mers whatever
+    `annotation.batch_kmers` is (§6.1), so a request with a derived seed and `batch_kmers` below 64 can change
+    where its seed phase's work is compared — its outcome, its `resource_stop` and `largest_charge` under a work
+    budget, its `work_seed` and `usage.work_units` (an early `no_carrier`), its `rows_requested` — and a D3
+    seed's j, and, on a format whose reads are not budget-aware, its soft memory observation under a memory
+    budget, since a later window now holds 64 rows where it held `batch_kmers` (`usage.memory.soft_excess_bytes`
+    and `held_bound_bytes`, the per-seed `soft_excess_bytes`, `memory_bound_soft`'s `observed` where it crosses a
+    MiB: on the reviewer's 5,000 bp trace seed at 1 MiB and `batch_kmers` 1, 393,256 and 1,441,832 bytes before,
+    400,800 and 1,449,376 now, the values at 64 — the more accurate count of what is held); at `batch_kmers` 64
+    (the default) and above nothing changes. **W3**: the lookahead's chains read the attempt's stop and the
+    seed's deadline every 16 graph steps and before each chain's key mapping (§6.8), through the poll that reads
+    the clock and records a passed walk-until with the attempt (paced or not), so an attempt that a cancel or
+    its walk-until stops inside a lookahead stops sooner (its timing values, `usage.stopped_at`, the physical
+    counters of reads it no longer makes, and where its walk is censored) — a walk no stop ends is unchanged;
+    and `observed_max_uninterruptible_ms` (usage and `deadline_check`) counts head pieces too, so it reads
+    larger. **W2** changes only time (a trace
+    derivation under a memory budget is linear again). Every other request is answered as by `6897db99` apart
+    from timing (checked on the CLI fixtures and the bench capabilities, T58).
   - **`schema_version`** is the one request schema the server accepts: 1, with no compatibility window. A future
     change of the request schema adds `request_schema_versions: [..]` to the capabilities and keeps accepting 1 for
     a stated window; a `schema_version` above 1 without that list means a server whose requests a client written
@@ -2587,7 +2720,9 @@ the server.
   - `POST /traverse` with `attempt_id`: 200 with `usage` (complete, partial, failed seeds, cancelled); 400 with
     `{error, usage}` for a request error after the attempt was registered (a bad strategy, an unknown label or
     graph, too many seeds, an unreachable extra label, …); 400 with `{error}` alone for a malformed id, a malformed
-    `not_after_ms`, or `budget_id`/`locus_id` without `attempt_id`; **409** with `{error, attempt}` (the other
+    `not_after_ms`, a malformed `expect_server_instance` (§5: the ids' pattern), or `budget_id`, `locus_id` or
+    `expect_server_instance` without `attempt_id` *(the last two: review of 2026-10-06, X4)*; **409** with
+    `{error, attempt}` (the other
     attempt's state, no `usage`) when the id is running, retained, held past its retention (below), or tombstoned
     by a cancel (a tombstone's `attempt` carries its suppression, judged against this request's own `not_after_ms`
     alone — absent when it has none: then `covers_admission` is false, `no_not_after_ms` — and the refusal extends
@@ -2645,19 +2780,25 @@ the server.
     `clock_skew_allowance_ms` after a tombstone expired can make a copy's `not_after_ms` lie in the future again
     (exactly: the hold ends once the clock reads later than `not_after_ms` + skew, and the strict check admits a
     copy only while it reads at most `not_after_ms`; the assumption the ledger's skew allowance makes anyway).
-  - **The release rule** (normative; the capabilities' `release_rule`, feature level 5): a ledger may release an
+  - **The release rule** (normative; the capabilities' `release_rule`, feature level 5; its grounds completed
+    at feature level 6 by the review of 2026-10-06 — X2, and the search service's release parity, LRG-R1/R2 —
+    as text only: what the server does is unchanged): a ledger may release an
     attempt's capacity **before it finished only** on a 404 with `tombstone: true` **and** `covers_admission:
     true` from the same `server_instance`, for an attempt it sent with **exactly that `not_after_ms`** and with
     `expect_server_instance` equal to that `server_instance` (a copy reaching a restarted process is then refused,
     `instance_mismatch`). An attempt sent without `not_after_ms`, or without `expect_server_instance`, is never
     released early on a tombstone. Otherwise it releases only on a finished state (`GET /traverse/attempt`, a
-    cancel's 404 or 200 with `state: "finished"`, or the response), or once its own clock passes `not_after_ms +
-    clock_skew_allowance_ms + bound_ms`. **A finished state** promises that the request does not run again on this
+    cancel's 404 or 200 with `state: "finished"`, the 409 refusing a copy of the request whose `attempt` — the
+    id's state as `GET` answers it, with its `attempt_id` and `server_instance` — says `state: "finished"`, or the
+    response), on an `expired` 409 (below), or once its own clock passes `not_after_ms +
+    clock_skew_allowance_ms + bound_ms` (the clock release, below). **A finished state** promises that the request does not run again on this
     process (and, pinned, anywhere; below): a finished attempt's id stays refused (409, its state) while it is
     retained (`retention_s`, `retention_count`) and, for an attempt sent with `not_after_ms`, until this server's
-    clock reads later than `not_after_ms + clock_skew_allowance_ms`, at most `tombstone_max_s` after it finished —
-    past its retention if need be, **held** among the tombstones (on both clocks, as a tombstone; a refused copy with a later
-    `not_after_ms` extends it within the cap). *(Review of the pass-5 fixes, finding 1: with `retention_s` 1, or
+    clock reads later than `not_after_ms + clock_skew_allowance_ms`, at most `tombstone_max_s` after it finished
+    **or after its latest refused copy** — past its retention if need be, **held** among the tombstones (on both
+    clocks, as a tombstone; a copy refused with its own `not_after_ms`, an identical replay included, extends the
+    hold to that + `clock_skew_allowance_ms`, at most `tombstone_max_s` from the copy's arrival: *review of
+    2026-10-06, C30*, "at most `tombstone_max_s` after it finished" left the refused copies out). *(Review of the pass-5 fixes, finding 1: with `retention_s` 1, or
     `retention_count` 1 and one later finish, a replay of a finished request — same `attempt_id`, `not_after_ms`
     and `expect_server_instance` — arrived after the ledger had released on the finished state and ran again.)*
     **The hold is the process's, in memory:** a restarted process (a new `server_instance`) holds none, and a copy
@@ -2675,14 +2816,44 @@ the server.
     one sent **without** `not_after_ms`, or with one beyond `tombstone_max_s` of its finish, assumes that no copy of
     the request arrives after the attempt left retention; with `retention_s` 0 nothing is kept, and a finished
     state assumes that no copy arrives after it (a pinned copy is still refused by a restarted process). Held
-    attempts are not bounded by `retention_count` (they are never dropped early): their number is at most the finishes within
-    `tombstone_max_s`, so `--traverse-attempt-tombstone-max-s` bounds their memory. A 429 and a cancel's 200 with
-    `state: "stopping"` release nothing.
+    attempts are not bounded by `retention_count` (they are never dropped early): their number is at most the
+    finishes and refused copies within `tombstone_max_s`, so `--traverse-attempt-tombstone-max-s` and the rate of
+    refused copies bound their memory (copies that keep arriving keep an id held, and held attempts count toward
+    `retention_count` for the tombstones of unknown ids: 429 `tombstones_full`).
+    **An `expired` 409** (`state: "expired"`) for an attempt sent with exactly that `not_after_ms` — from the
+    `server_instance` it named in `expect_server_instance`, when it named one — **releases** it: the server checks
+    the id's registration (running, retained, held, tombstoned) before the expiry, under one lock (§5), so no copy
+    of the request was running or registered on that `server_instance` when it was judged, and none can start
+    there later. It **settles nothing**: an earlier copy may have run, finished and left retention, and its usage
+    is then unknown. It assumes that this server's clock does not step back below `not_after_ms` (the 409 states
+    `server_time_ms`; `server_time_ms − not_after_ms` is the step it survives, and once that exceeds
+    `clock_skew_allowance_ms` the step is the one assumed below) and, for an attempt sent without
+    `expect_server_instance`, that no copy of the request reaches another server at the same address while it
+    could still be admitted there *(LRG-R2: the search service releases on it; the rule's list omitted it)*.
+    **The clock release** takes the attempt as stopped once the ledger's clock passes `not_after_ms +
+    clock_skew_allowance_ms + bound_ms`: it is then past its bound **apart from what it runs past it until its
+    next delivery check** — the rest of the piece the bound fell into and, when its walk had not stopped, the
+    walk up to its next poll that reads the clock, the stopped seed's finalisation and the building up to that
+    check (§6.8, the attempt's bound) —, **a run whose length has no stated bound**
+    (`deadline_check.max_uninterruptible_ms` is null, and `observed_max_uninterruptible_ms`, which leaves out the
+    mapping of a seed's k-mers, the seed phase's own processing and a seed's finalisation, is an observation, not
+    a margin). A `GET /traverse/attempt` that still answers `running` or `stopping` after that instant shows that
+    run still going: a ledger that must not let two attempts overlap keeps polling while it answers so, or adds
+    a margin of its own. *(Review of 2026-10-06, X2: one 6.94 Mbp seed, allowance 0, skew 0, bound 1,500 ms —
+    GET answered `running` up to 2,720 ms past the ledger's release instant, and the POST ended in a 503 at
+    4,542 ms, while `observed_max_uninterruptible_ms` said 0–1 ms: the k-mer mapping is not observed. Its fixes
+    first said "one uninterruptible step"; that run is several pieces, the review of the fixes found. The
+    library's `release_verdict` holds the clock release while the last answer said `running` or `stopping`, by
+    default.)*
+    A 429, a cancel's 200 with `state: "stopping"`, a 409 whose `attempt` says `running` or `stopping` or is a
+    tombstone, and a 409 `instance_mismatch` release nothing.
     Assumed, not checked: the ledger's clock is within `clock_skew_allowance_ms` of this server's, this server's
     clock does not step back by more than that, nothing between the ledger and the server rewrites a request's
-    `attempt_id`, `not_after_ms` or `expect_server_instance`, and no copy of the request reaches **another
-    server** that serves the same ledger (a server knows only its own tombstones; `expect_server_instance`
-    refuses such a copy only where it names that server's instance).
+    `attempt_id`, `not_after_ms` or `expect_server_instance`, no copy of the request reaches **another
+    server** that serves the same ledger (a server knows only its own tombstones and holds;
+    `expect_server_instance` refuses such a copy only where it names that server's instance), and, for the clock
+    release, that the attempt's run past its bound has ended by then. The capabilities' `release_rule`
+    states all of these (the last two from feature level 6).
   - `GET /traverse/attempt/{attempt_id}`: **200** with the attempt's state, **404** `{error, attempt_id,
     state: "unknown", server_instance}` (and for a tombstoned id `tombstone: true` with its suppression, as the
     cancel states it; reading it does not extend it) once it is no longer
@@ -2714,7 +2885,7 @@ the server.
     `--traverse-attempt-retention` of them (10 000, oldest dropped first; a running attempt is never dropped);
     GET answers 404 after that and the id may be used again — unless the attempt was sent with `not_after_ms`:
     its id is then **held** (GET 200, a request with it 409) until `not_after_ms + clock_skew_allowance_ms`
-    within `tombstone_max_s` of its finish (the release rule, above). Tombstones are held **at least**
+    within `tombstone_max_s` of its finish or of its latest refused copy (the release rule, above). Tombstones are held **at least**
     `retention_s` and, for a `not_after_ms` a cancel or a refused copy names, until it + the skew allowance
     within `tombstone_max_s` (above); a cancel of an unknown id is tombstoned only while fewer than
     `retention_count` tombstones and held attempts are held. Every attempt is logged when it is
@@ -2818,7 +2989,7 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T29 | trace support | Coord fixture with two occurrences of R in one accession: `kmer` support follows both continuations as one label; `trace` keeps them apart and ends with `trace_break` at a coordinate jump; a cross-record boundary stops with `trace_break` even with consecutive global coordinates | Cross-record boundary |
 | T30 | derived seed labels | Seed carried in full by 2 of 3 labels, `labels` omitted: derives exactly those 2, `labels_from_seed`, results identical to naming them; `max_seed_labels` truncation reports counts + digest and does NOT drop them; empty intersection rejected; `extra` on top of a derived set; coordinate fixture: header kind derives accessions, column kind the column, `trace` holds the derived set to coordinate continuity; mini-refseq: the whole blaNDM gene with no labels derives the 19 full-length carriers and traverses identically to the explicit run | Hit-labelled seed |
 | T30b | derived-set cost and usability | 25 labels, one carrying only a prefix: the derived set and the same list named explicitly agree field by field, and `labels_supporting_total` equals the kept count for the explicit list too; `bounds.time_budget_ms` stops the derivation (which runs before the walk's clock check) while leaving an explicit request a truncated walk; 100 decoy records sharing only the seed's first k-mer: the intersection starts from the cheapest row of the first batch, so `coords_mapped` stays at two per k-mer instead of paying for that row; the same accession in two columns makes a derived `header` set ambiguous and is refused naming the header and `seed_label_kind`, while the `column` kind and an explicit `ACC1` still work; under `trace`, a set that halves outside the first batch (8 carriers of the first 100 k-mers, 2 of the rest) still reports the coordinates the explicit run finds, i.e. the retained per-k-mer coordinates survive being compacted; mini-refseq: derived and explicit agree on dropped labels, label summary, runs, access path and the row/key counters | Hit-labelled seed |
-| T30c | per-seed derivation failure | Three seeds, the middle one carried in full by no label: HTTP 200 / exit 0 with `{"seed": {...}, "outcome": {"walks": "failed", …}, "error": …, "limitations": [derivation]}` in its place (cause `no_carrier`, knob `seeds[].sequence`) and the other two traversed with their own `outcome` (`Walker.FailedDerivationIsAStatedOutcome`, also `over_seed_label_cap` and `time_budget` with `server_limit`); the same seed with an EXPLICIT label list still fails the whole request; `max_seed_labels` out of `[1, 100000]` is a parse error; a seed over `--traverse-max-seed-bp` and more than `--traverse-max-seeds` seeds are 400s; `max_seed_labels` above `--traverse-max-seed-labels` is clamped and reported | Hit-labelled seed |
+| T30c | per-seed derivation failure | Three seeds, the middle one carried in full by no label: HTTP 200 / exit 0 with `{"seed": {...}, "outcome": {"walks": "failed", …}, "error": …, "limitations": [derivation]}` in its place (cause `no_carrier`, knob `seeds[].sequence`) and the other two traversed with their own `outcome` (`Walker.FailedDerivationIsAStatedOutcome`, also `over_seed_label_cap`; a time budget the server lowered so far that it runs out after the derivation's first k-mer is, from feature level 6, not a failure but D3's walked result — `partial/complete/qualified`, `observed` 1 k-mer, `server_limit` — and a budget spent before the first k-mer still fails the seed, `WalkerDeadlineChunks.DerivationWindowIsPaced`, T57; *review of 2026-10-06, X1*: this row named `time_budget` among the failures it asserts); the same seed with an EXPLICIT label list still fails the whole request; `max_seed_labels` out of `[1, 100000]` is a parse error; a seed over `--traverse-max-seed-bp` and more than `--traverse-max-seeds` seeds are 400s; `max_seed_labels` above `--traverse-max-seed-labels` is clamped and reported | Hit-labelled seed |
 | T31 | trie oracle (§6.9) | `test_trie.cpp`: annotate records what constrain filters; the exhaustive preset refuses conflicting knobs; a tripped cap reports `complete_to_bp` and the partial level is excluded; cut recorded lists are reported and break the oracle; `TrieOracle` (4 graph × annotation pairs, 3 modes): `claims(A) == E` for 5 permitted sets on both arms, tuned runs are prefix-subsets with a reason for every omission, merged routes are sound | — |
 | T32 | records model, edge and non-edge cases | `test_trie_cases.cpp` + `test_trie_reference.hpp` + `test_trie_checks.hpp`, two graph × annotation pairs, three modes, both arms, every case three ways (records ⇔ T ⇔ A with end reasons) plus single-label union, derived == explicit and the recurrence at budget 0: linear; seed at record start / end / the whole record; radius 0, 1, 2, |R|−1, |R|, |R|+1 (a head at the radius is `max_extension_bp`, not `dead_end`); fork; unequal bubble (+ merged routes); nested bubbles; one-base tip at the seed boundary; homopolymer self-loop (3 walks, never the record's); cycle junction; circle (`rejoined_seed` on both arms); repeat in two records plus a chimera; seed twice in one record (the walk runs through the k−1 junction k-mers before `rejoined_seed`); seed spanning a bubble (the other label is dropped, nothing else changes); an unlabeled region (recorded empty, `label_lost` at its edge); a reverse-complement record (not a carrier in basic, the second fork branch in canonical/primary); hairpin skip and follow; even-k palindromic node; 100 labels (default cap cuts the lists and the oracle says so; uncapped the contract holds); unmasked DBGSuccinct ('$' never recorded); 16 random fixtures at k = 7 | Cycle / self-loop, Reverse complements |
 | T33 | switching vs the §6.3 recurrence | `OneSwitch`: forbid ends A in Y; budget 1 spells P·Y·Z under B at loss 1 switched at |P·Y|, budget 0 reports `loss_budget` needed 1; `TwoSwitches`: budget 1 cuts A's walk at |P·Y·Z| needing 2, budget 2 spells P·Y·Z·W under C at loss 2, B's walk needs one; leaves, losses and switch events equal the recurrence over the records | Sample-switching chain |
@@ -2845,6 +3016,8 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T54 | record coordinates (feature level 6) | Walker: `WalkerCoordinates.*` (exact intervals on both arms against a per-base scan, a split's partition, switch-entered runs and their lower bounds, zero-length runs, cap cuts with true counts, column kind, `chains_ended` and its inheritance, work and walk independent of coordinates, memory stops no deeper, denials and attempt stops keeping the side table). Request and JSON: `GraphletCoordinates.*` (the 400s, null reasons in their order, the echo resubmittable, one block in every detail, the K record only where a list was cut and the stripped response equal to the opt-out one, the delivery model bounding the block at 20-digit positions, `drop_coordinates` on memory stops), `.CoordinateTextIsExactAndBoundedByItsAccount` (142 results: the text less `coordinates_text_bytes` is the stripped result's, a graphlet's K and Q tokens and its counts' digits included; the account less the coordinate share is the opt-out walk's; the share ≥ 12 × the text), `.CoordinateAccountBoundsItsText` (each part at its widest: 14.9 the least ratio), `.AttemptsMeasureTheSameRatioWithCoordinates` (the server's path on 1.3 MB seeds: the attempt's measured ratio equal with and without coordinates), `.CapabilitiesBlockFollowsTheIndex` (the probe's block per index: `supported` = `supports_trace`, `kinds` with and without a CoordToHeader and none without coordinates, the cap's default, the record-end sentence; never in the per-request capabilities); `GraphletAttempt.ReserveCountsCoordinateText`, `.CoordinatesLeaveTheServersRatioUnchanged`. Real index: `MiniRefSeq.CoordinatesAgainstTheSourceRecords` (39 cells × caps 1, 16, "unlimited": the blaNDM gene, its reverse complement, three 200-bp windows and two repeat windows under limits 0, 2, the exhaustive preset and the switch cells of every recorded switch request's seed — constant 0.5 and 1, loss budget 2, limits 0 and 2, to their 3,000 bp, a run of each seed's ending past 1,000 bp —, column labels with and without a switch to 3,000 bp: 9,498 runs, 5,508 switch-entered, 48 lower bounds (27 strictly below the string count), 10,696 occurrences whose bases are the run's, 326 lists cut, 3 column intervals in a record's last k − 1 bases read as the next record's), `.CoordinatesKeepTheResponseUnderThePathCache` (144 comparisons over budgets, batches, cache capacities and chunk targets), `.CoordinateShareIsExact` (60 results, every detail and cap: the opt-in text less the coordinates' is the opt-out text). Measurements (disabled tests, DESIGN §26): `MiniRefSeq.DISABLED_CoordinatesDepthAtTheStop` (M1, the D4 gate on mini_refseq, with what completing takes and the column cells under the refseq33m projection), `MiniRefSeqWide.DISABLED_CoordinatesDepthByRegime` (M1 by regime: the column fixtures of `scripts/traversal/make_column_coord_fixtures.sh`, 16 chains a run, and the wide fixture's column and header labels), `MiniRefSeqWide.DISABLED_CoordinateReserveOnTheWideFixture` (M2, `scripts/traversal/make_wide_coord_fixture.sh`). Integration `test_api_coordinates`, `test_api_capabilities` (the probe's block, not in the per-request capabilities, `max_uninterruptible_ms` null), `test_api_server_capabilities` (`coordinate_account_per_text_byte` 12, an integer), `test_multi_probe_describes_one_pair`. Byte identity against level 5 (67bef367): opt-out requests identical apart from the digit, timing and R21 (4) | §5, §6.8, §7.0, §7.1, §7.5, §10.3 |
 | T55 | the first parent of a merge (R21 (4)) | `WalkerTest.MergeIsSpelledThroughTheParentWithTheMostLabels` (three graph types × modes: the majority route (two labels) through either branch is the first parent, in constrain and annotate mode, the path spelled through it, the minority's label routed at the merge, losses unchanged); `WalkerTest.MergeKeepsTheArrivalOrderWhereTheBudgetChargesTheChain` (three graph types × modes: with the chain charged (`tree` / `full`) under a memory budget the route that arrived first is first whichever labels it carries; without the budget or without the chain charge, the majority); `MiniRefSeq.MemoryStopsDoNotDependOnTheDisplayedParent` (win200_03 right at 8 and 2 MiB in `tree`, `full` and `graphlet`: level 5's `complete_to_bp`; the budgeted `tree` response's merges in arrival order) and `.AnnotateMergeRanksParentsByTheirOwnSegment` (the annotate rule pinned as it stands on a nested merge of the real cache's `mini_win200_02__annotate_merge`: the 5-bp merged parent of 6 labels first before the 32-bp one of 5, its walk upstream through 4 labels, the path's continuation carried by label 3); the CLI fixtures `merge` (the 62 merge's majority arrived second: its parents and partition swapped, a.fa now routed at 62, b.fa at 36 only) and `merge_ties` (the same locus without c.fa: ties keep the arrival order and show `R:route_split`); the byte-identity differences against level 5 classified (DESIGN §26: every differing request is `on_reconverge: merge`, and equal once parents, partitions, chains, continuations, run tables and the end labels' run / route_bp are canonicalised; no budgeted stop moves) | §7.1 |
 | T56 | shutdown on SIGTERM | Integration `TestTraverseAttempts.test_sigterm_stops_the_server_promptly` (an idle server exits 0 within 5 s; one walking a three-seed attempt stops it at its next poll — nothing written, the connection closed — and exits 0 well within the drain time), `.test_sigterm_while_the_index_loads` (a single-index server whose graph is a FIFO nobody writes, so its load never ends: `ready: false`, 503, and exit 0 within 5 s of the signal) | §10.3 |
+| T57 | D3: a derivation the time budget cut after part of the seed (the owner's decision, feature level 6) | `WalkerDerive.PartialDerivationDeliversTheSetOfTheKmersRead` (virtual clock, 1 ms a row, 70 ms: j = 65 of 110 k-mers — the first window consumed, the second read whole; 70 when later windows followed `batch_kmers` 1 — the superset {A, C} against the whole seed's {A}, arms truncated at 0, under `kmer` and `trace`, no coordinates, `partial derivation`), `.PartialSetThatWouldFailTheSeedFailsAsBefore` (`exhaustive` over the cap, an extra label the superset duplicates, an ambiguous derived header, a depth-0 memory failure: each fails with the time budget "after 65 of 110 k-mers", as before D3; a cap that cuts the superset states it as a superset), `Walker.PartialSetWithAnUnrepresentableNameFailsAsBefore`, `Walker.FailedDerivationIsAStatedOutcome` (the server-lowered budget: walked, `observed` 1), `WalkerDeadlineChunks.DerivationWindowIsPaced` (j = 0 fails), `MiniRefSeq.PartialDerivationOnTheRealIndex` (j = 65 of 370 on a virtual clock; on the real clock partial, failed or derived whole, each stated), `.PartialSupersetIsNotRefusedAsTheWholeSeeds`, `Graphlet.PartialDerivationIsPricedAndBound` (the limitation priced and bound in every detail); integration `test_traverse_partial_derivation_states_its_set`; the fixtures `coords/d3_kmer`, `d3_trace_coordinates` and `d3_memory_stop` (the library's `WALKED_QUALIFIED_CLASS`). The `derivation` limitation's `observed` for `time_budget` has two units — elapsed ms failed, j walked — stated in §7.0 (*review of 2026-10-06, X1*) | §6.1, §7.0 |
+| T58 | the review of 2026-10-06, P2 items (feature level 6) | **W1** `WalkerDerive.WindowIsSixtyFourKmersWhateverBatchKmers` (the reviewer's U01-01 shape: 992 columns, a 195-k-mer derived seed, 100,000 work units — the response at `batch_kmers` 1, 7, 63, 65 and 1,000 equal to the one at 64, a work stop that fails the seed; an unbudgeted `no_carrier` at k-mer 90: `work_seed` and the response equal at 1, 7 and 64). **W2** `.CoordinateStateIsTheSumItReplaced` (16 carriers shrinking to 8 and 4, two compactions, on a column annotation and on a row-diff one: the running total recounted by `WalkerHooks::recount_derivation_state` wherever the state is counted — the soft observation under a memory budget of 4 GiB or 1 MiB, and on the row-diff annotation also `beside`, before every window's budget-aware read, under those budgets and under a work budget alone; without a budget nothing counts it, so that case only checks that the hook changes nothing — the result equal to the run without the recount; a debug build asserts it always; checked to bite with a one-byte drift after a compaction, the row-diff work-only case included) and `.TraceDerivationUnderAMemoryBudgetIsLinear` (200 kbp, 4 carriers: under a budget that never binds within three times the unbudgeted time; the base took 4.1–4.4 s against 0.3 s on the CLI; skipped in a debug build, whose assert recounts the state at every observation — the quadratic cost measured). *(The review of the P2 fixes: this row said the recount ran "without a budget"; GCC rejected an unbraced `EXPECT_EQ` in the first test, `-Werror=dangling-else`, so the changed test files are now compiled with GCC 13 too.)* **W3** `WalkerDeadlineChunks.LookaheadChainsReadTheStops` (a 20,000-k-mer chain on a clock every reading advances by 10 µs: a cancel and a walk-until at 50 ms, unpaced and paced, end the walk by 55 ms where the chain alone takes 200 ms; no head piece longer than 5 ms; `DecodePacer::max_head_ms` in the observation) and `.LookaheadHandsTheWalkUntilToTheAttempt` (the same chain under a control that reads the clock on every 8th poll and on every forced one, as the server's attempt does: unpaced and paced, the walk-until is taken by the lookahead's clock-reading poll and no checkpoint after it answers "no stop"; it fails with the earlier unpaced `ms_left` shortcut). **C20** `GraphletAttempt.WalkUntilStatedIsTheLowestAClockReadingPollSaw` (the reviewer's U11-02 driver: stride 8 states 65,000 where 58,900 was in force between clock-reading polls, stride 1 states 58,900; the `bound` text names the poll that reads the clock). **Texts** `GraphletAttemptRegistry.ReleaseTextsStateTheOverrunAndTheGrounds` (the X2, LRG-R1/R2, C16, C20, C24, C30 and X4 phrases, with and without retention; no "uninterruptible step" in `bound`, `not_after` or `release_rule`, no "first poll after" there or in `delivery_reserve.rule`) and, on a real server, `TestTraverseAttempts.test_release_texts_and_their_grounds` (the same grounds, `deadline_check.rule`'s stop latencies, the duplicate's 409 without "runs once"). The reviewer's reproductions re-run before and after (U01-01, U01-04, U03-01). Byte identity against `6897db99` on the CLI fixtures (`graphlet_fixtures.py --from-cli --check`) and the bench capabilities: only the texts and W1's stated cases differ | §5, §6.1, §6.8, §7.0, §10.3 |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 

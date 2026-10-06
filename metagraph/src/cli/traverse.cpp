@@ -772,10 +772,14 @@ static bool is_external_stop(const ResourceStop &q) {
 static const char* external_cause(const ResourceStop &q) {
     return q.resource == ResourceStop::CANCELLED
         ? "the attempt was cancelled (POST /traverse/cancel)"
+        // the bound as enforced: capped at attempts.hard_cap_ms, the content timeout less one
+        // second (the review of 2026-10-06, C16: a request of 30 or more default seeds was told
+        // the uncapped sum). An effect is priced at 640 bytes (DeliveryCosts), so the cap is
+        // named by its capabilities field rather than spelled out
         : "the attempt reached the time at which the server stops walking it (the duration "
-          "bound it enforces, the seeds' time budgets plus its allowance, less the larger of "
-          "half the allowance and the delivery reserve, kept for the delivery; see "
-          "usage.bound.walk_until_ms)";
+          "bound it enforces, the seeds' time budgets plus its allowance (at most hard_cap_ms), "
+          "less the larger of half the allowance and the delivery reserve, kept for the "
+          "delivery; see usage.bound.walk_until_ms)";
 }
 
 // The request field a resource stop answers to (§6.7) and its value; a beam's width is
@@ -2007,7 +2011,11 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
         // The time budget ran out while the permitted set was derived, after part of the seed
         // (decision D3): the set of the k-mers read is a superset of the whole seed's carriers,
         // so a label here may not carry the whole seed — label evidence qualified (outcome_of) —
-        // and the walk stopped at the seed. Observed: the k-mers read, of num_kmers
+        // and the walk stopped at the seed. Observed: j, the k-mers read (an integer), of
+        // num_kmers — NOT the elapsed ms that the same (kind, cause, knob) observes on a seed
+        // whose derivation failed (derivation_out_of_time; a number). One triple, two units:
+        // the owner's decision of 2026-10-06 (X1) keeps the wire as level 6 has it and states
+        // both units, told apart by the result's shape (walked: arms, no `error`); SPEC §7.0
         const uint64_t read = r.derivation_partial->kmers_read;
         Json::Value d = limitation(
                 "derivation", "bounds.time_budget_ms", Json::Value(st.time_budget_ms),
@@ -5414,8 +5422,8 @@ Json::Value process_traverse_request(const Json::Value &json,
                           std::optional<uint64_t> refused = std::nullopt) {
             if (!attempt)
                 return;
-            // the longest single read so far (usage, and the server's deadline_check)
-            attempt->note_max_read_ms(oracle.pacer().max_read_ms);
+            // the longest read or head piece so far (usage, and the server's deadline_check)
+            attempt->note_max_uninterruptible_ms(oracle.pacer().max_uninterruptible_ms());
             SeedUsage usage;
             usage.outcome = outcome;
             usage.stopped_by = stopped_by;

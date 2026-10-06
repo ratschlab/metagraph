@@ -156,14 +156,14 @@ At level 4, first-touch reads regressed (fixed in level 5, as above). Explicit /
 - `unit_tests` is not GCC `-Werror` clean in 3 test files; this was already so at the base. `src/` is clean.
 - Stage L accounts are conservative, up to about 12× the peak on some operations. Budgeted overhead is 0–16% on millisecond calls. The time calibration was done on a loaded machine.
 - /resolve costs +24% / +48% CPU on queries that repeat wide rows beyond 256 MiB (synthetic index), and up to +14% on 3 kb header discovery.
-- Held finished attempts are bounded by `tombstone_max_s`, not by `retention_count`.
+- Held finished attempts are bounded by `tombstone_max_s`, not by `retention_count`. *(Corrected by the review of 2026-10-06, C30: every refused copy of the request extends the hold to `tombstone_max_s` from its own arrival, so the finishes and the refused copies within `tombstone_max_s` bound them; level 6's texts say so.)*
 - The attribution of the staging 9.3 s to the header index is not yet confirmed on staging, because level 5 is not deployed.
 - The server ignores SIGTERM; `docker stop` waits its full timeout.
 - Owner decisions since your last review:
   - a derived seed that runs out of time returns a partial result if anything was derived;
   - the displayed walk at merges follows the parent carried by the most labels;
   - `compare()` above 64 labels is explained in the MCP layer.
-  These land with level 6.
+  These land with level 6. *(Corrected by the review of 2026-10-06, X1: the first was already in the build under review — `7aaee760` put D3 into the server, ungated, while it stated level 5, so `7aaee760`..`67bef367` answer such a seed with a partial walk where `dcc0cebd` failed it, under the same level digit; none was deployed, and none may be. Level 6 states D3, SPEC §6.1, §7.0 and §10.3.)*
 
 ## How to verify
 

@@ -1,6 +1,7 @@
 #ifndef __TRAVERSAL_LABEL_ORACLE_HPP__
 #define __TRAVERSAL_LABEL_ORACLE_HPP__
 
+#include <algorithm>
 #include <chrono>
 #include <functional>
 #include <limits>
@@ -107,6 +108,21 @@ struct DecodePacer {
     UninterruptiblePiece longest;
     double read_ms = 0;
     void note_piece(const char *kind, double ms, uint64_t rows = 0, uint64_t coordinates = 0);
+    // A "head" piece (the walk between two readings of the clock for a stop, its reads
+    // excluded), noted as note_piece does and kept apart as the longest of the request, as
+    // |max_read_ms| keeps the reads': the attempt states the larger of the two as
+    // observed_max_uninterruptible_ms. A head is as uninterruptible as a read — a cancel or a
+    // walk-until that falls inside it is seen only at its end — and before the review of
+    // 2026-10-06 (W3) only reads were counted: a lookahead's 60,000-node chains ran 2 s to
+    // 11 s unpolled while the observation said 1 ms
+    double max_head_ms = 0;
+    void note_head(double ms) {
+        note_piece("head", ms);
+        max_head_ms = std::max(max_head_ms, ms);
+    }
+    // the longest read or head piece of the request (ms): what an attempt observes as its
+    // longest uninterruptible piece of walking (the delivery's gaps are the server's)
+    double max_uninterruptible_ms() const { return std::max(max_read_ms, max_head_ms); }
     // The seed phase's own processing (review of levels 4-5, finding 3). While a setup is open
     // (the walker opens it at a seed's start and closes it at the walk's first checkpoint, or at
     // its stop or end, or on its way out), every piece noted first notes the time between the end
