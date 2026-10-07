@@ -26,7 +26,9 @@ is a proposal from the MetaGraph side to weigh, adopt, change or reject.
 
 ## 1. What exists on the MetaGraph side
 
-All on branch `gr/labeled-traversal` of `ratschlab/metagraph`. The normative document is
+All on branch `gr/labeled-traversal` of `ratschlab/metagraph`. The wire contract you build on is
+`~/git/services/metagraph/metagraph/docs/SPEC-pattern-search.md` (contract version 1, frozen; its §16 lists what
+the review of 2026-10-07 changed). The normative design is
 `~/git/services/metagraph/metagraph/docs/DESIGN-pattern-search.md` (v6, approved for phased implementation after six
 external reviews). Read: §2 goals, §3 semantics (scope, graph context vs occurrence, counts with relations,
 strand), §5.2 the count-first modes and the `withheld` reasons, §4.3 "The label-free path first", §5.6 the
@@ -40,14 +42,16 @@ proposed, §13 the increments.
 **What a request says.** A list of patterns (`dna` | `iupac`, later `protein`), a `mode`
 (`count` | `all_or_count` | `partial`), a `scope` (`suffix` | `any_offset`; `long` is implied for patterns longer
 than k), `strands`, caps (`max_contexts`, `max_steps`, `time_budget_ms`, …), and an `output.labels` projection:
-`none` (the label-free path), later `all` and `predicate_only`.
+`none` (the label-free path), `all` (since milestone 3), later `predicate_only` (5b).
 
 **What an answer says.** Per pattern: every count as `{value, relation, unit}` with
 `relation ∈ {exact, at_least, bounds, unknown}` and `unit ∈ {graph_contexts, anchors, paths, placed_occurrences,
 labels}`; `work` (ranges visited, steps); `stop`; `withheld` with its reason when results are not returned;
 `retrieval_complete`; `absence_scope`; `determinism`; `notes`; and `results`, one entry per **graph context**
-(a k-mer, or a path for long patterns) with `kmer`, `instance`, `offset`, `strand`, `node`, `row` and, when
-labels were asked for, `labels` with placed occurrences and per-label `support`.
+(a k-mer, or a path for long patterns) with `kmer`, `instance`, `offset`, `strand` on BASIC hosts
+(`index.strand_stated: true`) or `orientation` (forward / reverse / palindromic) on canonical and primary hosts
+(counts `by_strand` or `by_orientation` likewise), `node`, `row` and, when labels were asked for, `labels` with
+placed occurrences and per-label `support`.
 
 **Two facts a tool must not blur.** A graph context is one k-mer of the graph, not a physical occurrence: a
 k-mer present in ten records of a column is one context. And a `count` answer, or a `labels: none` answer, says
@@ -57,8 +61,9 @@ filter.
 **Capabilities.** The `pattern` block is carried by **both** `GET /capabilities` (under `features` and
 `routes`, as the other features) and `GET /traverse/capabilities` — the document your probe already reads, which
 today carries `attempts`, `coordinates` and `deadline_check` and no feature list — so one cached probe serves
-both. The block: `modes`, `projections` (the list the host offers **now**: `["none"]` at milestone 1, `all` and
-`predicate_only` once milestone 3 lands; gate the label projections on this list, never on a milestone number),
+both. The block: `modes`, `projections` (the list the host offers **now**: `["none"]` at milestone 1,
+`["none", "all"]` since milestone 3, `predicate_only` with 5b; gate the label projections on this list, never on
+a milestone number),
 scopes per graph mode, the caps and floors, `placement` and `support` the index can give, `mask`,
 `annotation: budgeted | unbudgeted`, `pattern_contract_version` (accept a higher version and read fields by
 presence, as you did for feature level 6; refuse only a lower or a missing one). A host without the block has
@@ -69,12 +74,12 @@ no route.
 | backend milestone | content | state |
 |---|---|---|
 | 1 | count (`mode: count`) and the label-free extraction (`all_or_count` / `partial` with `labels: none`): k-mers, offsets, strands, node and row ids; exact DNA and IUPAC; both strands; `suffix` and `any_offset`; single-graph servers; the capabilities block; `metagraph pattern` CLI | running now; contract freezes on its commit |
-| 3 | `labels: all`: label discovery and placement (record, 1-based position, strand) on BASIC indexes with record mapping | next |
+| 3 | `labels: all`: label discovery and placement (record, 1-based position, strand) on BASIC indexes with record mapping | in the build (SPEC §14), with fixtures |
 | 4 | patterns longer than k (extension), per-label `support`, `require_support` | after 3 |
 | 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | after 4 |
 | 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
 | 7 | this service's job type (the backend's Python client methods are deferred until needed) | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
-| mask | refseq33m-experimental's graph has no `.edgemask` file, and the route needs one (DESIGN §4): before the route answers on staging the owner runs `metagraph transform --mask-dummy` once on mex (offline, no change to node ids or annotation), or the server starts with `--pattern-build-mask`; until then the host states `mask: absent` and the job answers `mask_required` | before the owner's `update.sh` that enables the route |
+| mask | refseq33m-experimental's graph has no `.edgemask` file, and the route needs one (DESIGN §4): before the route answers on staging the owner runs `metagraph transform --mask-dummy` once on mex, on the host rather than in the 128 GiB container (it holds a transient bit vector of edges + 1 bits, about 78 GB, beside the graph). Node ids, rows and the annotation stay; but `/stats` `graph.nodes` becomes the k-mer count, a `.bloom` beside the graph starts loading, and with `--index-manifest` the manifest is regenerated before `update.sh` restarts the server, after which `index_fp` changes: the service sees a new index identity. `--pattern-build-mask` (the mask built in memory at every start-up, with `--threads-each` threads, before any route answers) is for small indexes, not for refseq33m. Until then the host states `mask: absent` and the job answers `mask_required` | before the owner's `update.sh` that enables the route |
 | fixtures | with milestone 1's freeze commit, as for level 6: the capabilities block on both routes, one answer per mode and per `withheld` reason, an error slot, from the mini index, under `api/python/tests/data/traverse/pattern/`, so your unit tests do not wait for a host | with milestone 1 |
 
 Staging (`refseq33m-experimental`, a BASIC index with record mapping) gets the route when the owner runs
@@ -103,10 +108,13 @@ capabilities block are what to build on.
    match and normal search need to share the pool inside async and inside the sync server"): the per-database
    queues, `META_DB_CAPS` and the distributed semaphore count search, pattern and traversal calls against one cap
    per database server (the cap search uses today, e.g. 15 on sra-logan-chunks). The server has one request pool
-   (`-p` / `--threads-each`) for every route and reserves nothing per route; the engine needs nothing beyond
-   "at most cap concurrent calls per database server across all routes", and its memory is bounded per request
-   by `max_memory_mb`. The traversal jobs' separate per-host tokens move into the same semaphore (your
-   follow-up).
+   (`-p`) for every route, the GET capabilities routes included, and reserves nothing per route, so the cap per
+   host must stay below the server's `-p` (`-p` ≥ cap + 1; a probe that waits on a full pool is not a dead host).
+   The engine needs nothing beyond "at most cap concurrent calls per database server across all routes"; a
+   request's memory is bounded on the label-free path by the caps (`partial` and `all_or_count` keep about
+   `max_contexts` descriptors, `count` the search frontier; on an even-k primary index up to `max_steps` × 88
+   bytes; SPEC §7.6) and with `labels: all` by `max_memory_mb`. The traversal jobs' separate per-host tokens move
+   into the same semaphore (your follow-up).
 5. **(required)** Caps at submit, never truncation afterwards: `max_contexts`, `max_patterns`, `time_budget_ms`
    above the service's ceilings are refused with a 400 naming the field (the strategy validator's rule: refuses,
    never lowers). An answer is passed through whole; cutting it on the way out would falsify
@@ -114,7 +122,8 @@ capabilities block are what to build on.
 6. **(required)** Served only for databases whose host carries the `pattern` block (§1) with a contract version
    the service knows or a higher one; a lower or missing version, or no block, answers `pattern_unsupported` with
    the host's feature list, as `traversal_disabled` does. Label projections are offered exactly when the host's
-   `projections` list has them. The probe that reads capabilities already exists (`app/traversal/probe.py`).
+   `projections` list has them, and every request sends `output.labels` explicitly (SPEC §1; the default is
+   `none` in contract version 1). The probe that reads capabilities already exists (`app/traversal/probe.py`).
 7. **(required)** The answer passed through with the service's additions only: `database`, the untrusted-data
    notice on label and record strings, the standard error envelope. **Never** sum per-shard label counts into one
    number, never drop `relation`, `withheld`, `retrieval_complete` or `absence_scope`, never add labels of its own.
@@ -122,11 +131,12 @@ capabilities block are what to build on.
    the index that contains the pattern, at one offset and orientation — not a record, not an occurrence, not a
    hit; a k-mer present in ten samples is one context.
 8. **(required)** The submit and results tools' docstrings explain the three things an agent acts on:
-   `withheld: count_above_threshold` (narrow the pattern, scope or strand), `withheld: discovery_budget` (a more
-   informative pattern; a filter does not help), `withheld: annotation_budget` (ask for the count or
-   `labels: none`, or a narrower pattern); that `count` first, then `labels: none`, is the cheap way to look at a
-   new pattern; they use the service's existing strand vocabulary, and say that canonical and primary indexes
-   report contexts only — no strand, no position.
+   `withheld: count_above_threshold` (narrow the pattern, scope or strand), `withheld: discovery_budget` (shorten
+   or move an N run inside the pattern, or restrict the strands, SPEC §7.5; a filter does not help),
+   `withheld: annotation_budget` (ask for the count or `labels: none`, or a narrower pattern); that `count` first,
+   then `labels: none`, is the cheap way to look at a new pattern; they use the service's existing strand
+   vocabulary, and say that canonical and primary indexes report contexts only — `orientation` instead of a
+   strand, no position.
 9. A stored answer keeps its `determinism`; a `time_limited` one is marked as not reproducible where the
    service shows it.
 10. Rate limits and the anonymous budget as for the other jobs. Patterns are query data under the same privacy
@@ -142,11 +152,17 @@ the CLI and a direct caller get) and the server cap `--pattern-max-time-ms` is *
 timeout, with room for serialising and compressing a large answer. Budgets exactly like search: the service
 sends `time_budget_ms` equal to the host's cap (600 s) unless the caller asks for less, and its 1,200 s client
 timeout (`META_CALL_TIMEOUT_SECS`) stays above it. The deadline keeps its value under a job: it bounds a runaway
-`any_offset` DFS per task, and the finalisation reserve is unchanged, so a stopped task still answers with
-counts. Nothing in the engine assumes a short run: the clock is read every 4,096 steps whatever the budget; the
-memory account is bounded by `max_memory_mb` and the retained descriptors by their caps, not by time;
-`max_steps` (default 10⁸ per shard) is the other bound and is raised with the budget. The cost of a long call is
-the request-pool slot it holds, counted by the shared per-database cap of item 4.
+`any_offset` DFS per task, and the time kept back for writing the answer grows with what the answer holds (SPEC
+§7.6), so a stopped task still answers with counts. Nothing in the engine assumes a short run: the clock is read
+every 4,096 steps (and every 64 released contexts) whatever the budget; the retained descriptors are bounded by
+their caps, not by time, and `max_memory_mb` bounds the labelled retrieval; `max_steps` is the host's
+(`--pattern-max-steps`, default 10⁸ per request, per shard from milestone 6): a request cannot raise it (a
+larger value is lowered and listed in `limits.clamped`), and it does not grow with `time_budget_ms`, so with a
+600 s budget it, not the deadline, usually stops a long discovery (`stop: max_steps`, `withheld:
+discovery_budget`). The cost of a long call is the request-pool slot it holds, counted by the shared
+per-database cap of item 4; the server stops a `/pattern` request whose client has closed (or half-closed) its
+connection at its next clock reading and writes nothing, so a task the service cancels frees the backend's slot
+once its HTTP connection is closed.
 
 ## 4. Constraints
 

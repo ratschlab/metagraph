@@ -4,7 +4,11 @@
 §21), after five design reviews (v1: nine findings, §16; v2: eight and a resource policy, §17; v3: seven and
 four contract corrections, §18; v4: six findings and three corrections on the predicate extension, §19; v5: six
 findings and one naming decision, §20; all confirmed against the code). Written from a read-only check of the code at
-`804731aa` (gr/labeled-traversal). Nothing is implemented. Line numbers are pointers, not anchors.
+`804731aa` (gr/labeled-traversal); its line numbers point there, as pointers, not anchors. Implemented since on
+that branch: milestone 1 (increments 0–2), milestone 1b (§13), increment 3 and the engine part of increment 4 (not
+yet served by the route). `SPEC-pattern-search.md` is the contract as built; where this design and the build
+differ, its §13 says how and why, and the review of 2026-10-07 corrected the sentences below that the build did
+not keep.
 
 Companion documents: `NOTE-mismatch-search.md` (bounded mismatches: a later increment on the same engine, §12),
 `SPEC-labeled-traversal-core.md` (`/resolve` and `/traverse`, whose conventions for caps, truncation statements,
@@ -84,8 +88,12 @@ never matches a record's N symbol (DNA5 builds, `alphabets.hpp:81`); the unconst
 | `protein` | a string over the 20 amino acids (no stop, no ambiguity codes in v1) | 3 per residue; the codon automaton of the residue (§6) |
 
 A pattern's **information** is Σ log2(4 / |set_i|) bits over its positions (for a peptide, log2(64 / codons) per
-residue). For a pattern longer than k the **anchor window's** information, over positions [0, k), is stated
-separately: a highly informative suffix does not make an `N…N` anchor cheap.
+residue). For a pattern longer than k the information of each searched orientation's **anchor window** (positions
+[0, k) of P, and of rc(P) when the reverse orientation is searched) is stated separately, and the least of them
+gates (§5.3): a highly informative suffix does not make an `N…N` anchor cheap. Information is not cost, for any
+L: a run of N inside a searched window costs about min(4^run, edges / 4^a) ranges per level, a being the
+specified bases before it in that window, whatever the bits; a run at the start of a window costs nothing on a
+`$ACGT` graph, where the engine skips it (§5.3).
 
 **Scope.** A request names what it counts and finds:
 - `suffix` (L ≤ k): the k-mers whose last L symbols instantiate the pattern — every occurrence that starts at
@@ -174,13 +182,41 @@ refseq33m-experimental's graph has one today** (`build/mini_refseq/graph_k31.dbg
 have it, stated in the capabilities as `pattern.mask: file | built_at_load | absent`:
 - `file`: the `.edgemask` written by `metagraph build`, or once, offline, by a new `metagraph transform
   --mask-dummy` that calls the build's own `mask_dummy_kmers(threads, false)` (no pruning: node ids and the
-  annotation stay valid) and writes the file; the cost is the dummy-tree traversal
-  (`BOSS::mark_source_dummy_edges` → `traverse_dummy_edges`, proportional to the dummy edges, at most k − 1 per
-  record) plus the sink pass. This is the one-time step for staging, run by the owner on mex before the route
-  answers there.
+  annotation stay valid) and writes the file. The cost (review of 2026-10-07, D1-02, M1-01, X-EFFICIENCY-06):
+  - **memory**: an uncompressed bit vector of edges + 1 bits beside the loaded graph, alive until its compressed
+    copy is built: about 78 GB for refseq33m's 6.27 × 10^11 edges;
+  - **time**: the dummy-tree traversal (`BOSS::mark_source_dummy_edges` → `traverse_dummy_edges`, proportional
+    to the dummy edges, at most k − 1 per record, the one part `-p` speeds up), the sink pass (O(sinks), a select
+    over W = $; before the review it read every edge's W on one thread: hours on refseq33m by extrapolation), and word-level
+    passes over the vector (its flip and its compression). On 2 × 10^7 edges the marking took 2 ms (0.19 s on a
+    STAT and 5.0 s on a SMALL graph before the sink pass changed); at refseq33m's size it has not been run, and
+    the 78 GB, loading the graph and the word-level passes are what it costs.
+  - **where**: on the host, not inside the 128 GiB container, with `--mmap` so that the graph's pages are mapped
+    rather than read into RAM.
+
+  This is the one-time step for staging, run by the owner on mex before the route answers there. What it
+  changes beyond the route:
+  - every loader of the graph reads the `.edgemask` from then on, the build already deployed included: node ids,
+    rows and what `/search`, `/align`, `/resolve` and `/traverse` find stay as they were, but `GET /stats`
+    `graph.nodes` becomes the k-mer count, and a `.bloom` beside the graph is loaded from then on;
+  - a server started with `--index-manifest` refuses to start until the manifest lists the new file, and the
+    index identity `index_fp` that every route states changes (clients that key on it see a new index). So the
+    order is: `transform --mask-dummy`, regenerate the manifest (`scripts/traversal/index_manifest.py`; it hashes
+    the bundle again, about 650 GiB, unless its batch mode, `--server-csv`, is given the unchanged files'
+    digests with `--digests`), then `update.sh`, which restarts the container even without a new commit;
+  - the mask is read when the graph is loaded: a server running when the file is written answers
+    `mask_required` until it is restarted;
+  - the mask is trusted as written (not checked at load): `metagraph extend` on a masked graph writes a mask
+    that marks its new dummy edges valid (`DBGSuccinct::add_sequence`, its TODO), and counts on such a graph can
+    be overstated, `exact` included. An extended graph is masked again with `transform --mask-dummy --force`
+    before the route serves it (§15).
 - `built_at_load`: a server started with `--pattern-build-mask` builds the same mask in memory when the file is
-  absent; for small indexes and the tests, not for a 362 GB graph on every restart.
-- `absent`: the route answers `mask_required` and names the two remedies.
+  absent, with `--threads-each` threads on `server_query` (`-p` in the `pattern` CLI), at every start-up and
+  before any route answers (the same transient vector, so for small indexes and the tests — "small" meaning few
+  edges, not the SMALL state —, not for a 362 GB graph on every restart). No file changes: `index_fp` stays,
+  `/stats` changes, and `mask: built_at_load` tells the two apart.
+- `absent`: the route answers `mask_required` and names the two remedies, and that the server must be restarted
+  once the file exists.
 The test setup builds the mini index's mask with the `transform` step.
 
 ### 4.1 Phase 1: anchors and contexts, by range narrowing (reused from the seeder)
@@ -212,9 +248,12 @@ count   = plain + marked − |{ e ∈ [first, last] : valid[e] = 0 and W[e] ∈ 
 The first three lines are O(1). The last term is zero when `invalid` is zero (the common case: a node range for
 a pattern suffix contains a source-dummy node only when some record prefix ends with that suffix). Otherwise it
 is a **scan** of the range's invalid edges through `valid.select0`, charged to `max_steps` one step per edge and
-checked against the deadline like every other loop; it is real work, not a rank. With R = plain + marked, I the
-range's invalid edges, s of them scanned and t of those matching, an interrupted scan leaves the range with
-`lower = max(0, R − t − (I − s))` (every unscanned invalid edge might match) and `upper = R − t`. The count of
+checked against the deadline like every other loop; it is real work, not a rank. With R = plain + marked, J the
+range's invalid edges whose `W` is not the sentinel (a sink dummy never carries c), s of them scanned and t of
+those matching, an interrupted scan leaves the range with `lower = max(0, R − t − (J − s))` (every unscanned such
+edge might match) and `upper = R − t`; as built, the engine scans the candidates instead when they are fewer than
+the invalid edges (either resolves the count exactly), and a range at an offset where a palindromic k-mer is
+possible on an even-k wrapped PRIMARY graph is scanned for its palindromes (SPEC §7.6). The count of
 the whole pattern is `exact` only when every range's scan completed; when a scan was interrupted but every
 range of every branch, offset and strand was discovered, it is `bounds` (the sums of the ranges' lower and upper
 values); when discovery itself was interrupted, it is `at_least` over what was explored, since an undiscovered
@@ -230,7 +269,8 @@ that contains Q at any offset**:
 
 - offset p with p + L ≤ k − 1 (Q inside the node): the nodes whose suffix is Q·X with |X| = k − 1 − p − L, found
   by continuing the DFS from the Q leaves with **every real symbol** for |X| more steps (the seeder's loop,
-  unchanged: on a DNA5 build the flank admits N, so `ACNTA` at k = 5 is found for `AC` at offset 0); **all** valid
+  unchanged: on a DNA5 build the flank admits N, so `ACNTA` at k = 5 is meant to be found for `AC` at offset 0 —
+  design intent: no DNA5 build has run the route, §15); **all** valid
   edges leaving those nodes are such k-mers, counted by `valid.rank1(last) − valid.rank1(first − 1)`, which also
   excludes sink dummies;
 - offset p = k − L (Q is the suffix): the `W` rule above.
@@ -238,7 +278,8 @@ that contains Q at any offset**:
 Discovering the flank ranges is **branching work, even for an exact DNA pattern**, and it is not bounded by the
 suffix count: with k = 5 and the record `ACGTT`, the motif `AC` has zero suffix anchors and one context at offset
 0. The engine therefore counts the ranges it visits (`ranges_visited`) against `max_steps`, and the answer reports
-them; no closed-form bound is claimed. Per offset the counts are exact once its ranges are discovered. This is
+them; no closed-form bound is claimed. Per offset the counts are exact once discovery completed (version 1 tracks
+no per-offset completeness under a discovery stop: every per-offset count is then `at_least`). This is
 what makes the completeness claim hold without dummies (§5.1), at the price of context counts that are not
 occurrence counts, which the answer states per unit (§3).
 
@@ -258,8 +299,10 @@ Three graph modes, told apart by `get_mode()` and the wrapper:
   - `any_offset`: if rc(x) is stored, it contains rc(Q) at offset k − L − p, so the searches of Q and rc(Q), each
     over all offsets, together find every retained instance. Complete for presence and contexts.
   - `suffix`: Q as the suffix of x is rc(Q) as the **prefix** of the stored rc(x), and a prefix is not a BOSS
-    suffix range (runtime-verified by the review: PRIMARY stores `ACGA`, the wrapper exposes `TCGT`, and `CGT`
-    is found neither as stored suffix `CGT` nor as stored suffix `ACG`). v1 does not offer `suffix` on wrapped
+    suffix range (for the record `ACGA` at k = 4 this build's PRIMARY graph stores `TCGT`, and the wrapper
+    exposes `ACGA` as the virtual k-mer; `CGA`, the suffix of the virtual k-mer, is found neither as stored
+    suffix `CGA` nor as stored suffix `TCG`; PatternSearch.SuffixOnWrappedPrimary checks which orientation is
+    stored and asks the virtual k-mer's suffix). v1 does not offer `suffix` on wrapped
     PRIMARY graphs: the request answers `scope_unsupported: suffix_on_primary` and names `any_offset`; a later
     prefix lookup with orientation conversion may lift this (§12).
   - `long`: phase 1 runs on the base BOSS for **Q[0, k) and for rc(Q[0, k))** — the reverse complement of the
@@ -295,7 +338,9 @@ beside them). `max_steps` bounds the DFS together with phase 1's `ranges_visited
 
 A later optimisation (§12): when the anchor window carries little information (a leading `N…N`), anchor on the
 most informative k-window inside the pattern and verify in both directions (`call_incoming_kmers` for the left
-part). v1 anchors on [0, k) and states the anchor window's bits.
+part). v1 anchors each oriented pattern on its own [0, k); it states the bits of P[0, k)
+(`anchor_information_bits`) and of the least informative searched window (`min_anchor_information_bits`, an
+addition of the review of 2026-10-07), which the information floor gates on (SPEC §7.7).
 
 ### 4.3 Labels, coordinates and placement (reused from the traversal, not from the aligner)
 
@@ -303,7 +348,9 @@ part). v1 anchors on [0, k) and states the anchor window's bits.
 `output.labels: none` returns the contexts themselves — k-mer, instance, offset, strand, the graph node id and
 the annotation row id (`AnnotatedDBG`'s graph-to-annotation mapping, so the row can be named later), and for
 `long` the path — without reading one annotation row: counting and extraction stay graph work, bounded by
-`max_steps`, the deadline and `max_contexts`, and the memory account holds only the contexts and the answer.
+`max_steps`, the deadline (read within 4,096 steps or 64 released contexts) and `max_contexts` (`partial` retains
+only what it can release); version 1 has no memory account on this path, its memory being bounded by those caps
+(SPEC §7.6).
 It is available on every backend (no `decode_charged` requirement) and every graph mode (on canonical indexes
 the contexts come without placement, as everywhere). It is the cheap retrieval: labels cost a row decode per
 context, and most follow-up questions — seed `/traverse`, inspect the variants, choose rows — need the k-mers,
@@ -412,7 +459,7 @@ plus an explicit opt-in for the traversal's "deliver what was built" convention:
 
 | mode | what happens |
 |---|---|
-| `count` | discover and count the contexts (or anchors and paths) in the requested scope. **Without a predicate** no annotation row is decoded, and completed interval descriptors are **discarded** as they are counted, so the memory account bounds only the DFS frontier and broad patterns can be counted. **With a predicate** (§5.6) the answer carries the raw and the selected counts: descriptors are retained up to `max_predicate_contexts`, the predicate pass reads annotation under its budgets and the backend restrictions of §4.3, and still no result is returned |
+| `count` | discover and count the contexts (or anchors and paths) in the requested scope. **Without a predicate** no annotation row is decoded, and completed interval descriptors are **discarded** as they are counted, so the memory account bounds only the DFS frontier and broad patterns can be counted (as built: except the ranges awaiting a deferred scan, none in the common case but on an even-k wrapped PRIMARY graph one per range at a palindrome-capable offset, up to `max_steps` of 88 bytes, SPEC §7.6). **With a predicate** (§5.6) the answer carries the raw and the selected counts: descriptors are retained up to `max_predicate_contexts`, the predicate pass reads annotation under its budgets and the backend restrictions of §4.3, and still no result is returned |
 | `all_or_count` (default) | the count, with the interval descriptors **retained while retrieval is still possible**: without a predicate until the raw count exceeds `max_contexts`, with a predicate until it exceeds `max_predicate_contexts` (20,000 raw contexts may select 5); past that they are discarded and counting continues within the compute budget; retrieval of **all** requested results only if the completed aggregate count — the selected count when there is a predicate — is within the retrieval threshold and the retrieval finishes on every shard; otherwise the counts alone, with the reason |
 | `partial` | the count, then retrieval up to the caps with what was built delivered and every cut stated — an agent that wants the first results of a large set asks for it explicitly |
 
@@ -426,7 +473,10 @@ the table says. For `long` the phases differ: **anchors** are always kept throug
 (they are what the extension starts from) and discarded once every anchor has been extended or the admission
 failed; **completed paths** are discarded at once in an unfiltered `count`, kept up to `max_paths` for ordinary
 retrieval, and kept up to `max_predicate_contexts` when a predicate follows. `stop_at_threshold: true` ends the
-current phase as soon as its own threshold is crossed and names it. Without a predicate the thresholds are
+current phase's discovery as soon as the running lower bound of what it counted crosses its own threshold, and
+names it; the deferred scans (§4.1) do not consult it (the owner's decision of 2026-10-07), so a count that
+crosses the threshold only in them, or on an even-k wrapped PRIMARY graph only in the union of the two base
+searches, ends `exact` with `count_above_threshold`. Without a predicate the thresholds are
 `anchors` (`max_anchors`), `paths` (`max_paths`) and `contexts` (`max_contexts`). With a predicate the raw
 phases stop at `max_predicate_contexts` (`raw_contexts` or `raw_paths`; anchors still at `max_anchors`), and
 only the `selected` phase stops at `max_contexts` or `max_paths`: a raw count above the retrieval threshold is
@@ -451,7 +501,7 @@ shared budget.
 |---|---|
 | aggregate counting completes within the threshold; retrieval finishes on every shard | exact graph counts, all requested results, `retrieval_complete: true` |
 | aggregate counting completes above the threshold | exact graph counts, results withheld (`withheld: count_above_threshold`) |
-| the threshold is crossed and `stop_at_threshold` is set | `at_least` counts, results withheld (`withheld: threshold_crossed`) |
+| the running lower bound crosses the threshold in discovery and `stop_at_threshold` is set | `at_least` counts, results withheld (`withheld: threshold_crossed`) |
 | range or path discovery reaches `max_steps` or the deadline | `at_least`, `bounds` or `unknown` counts, results withheld (`withheld: discovery_budget`) |
 | graph counts complete, but a shard's annotation or output budget is exceeded, an anchor's labels are truncated, or a row is refused | exact graph counts, results withheld with the reason and the shard (`withheld: annotation_budget` with `rows_refused`, `anchor_labels_truncated`, or `output_budget`) |
 
@@ -462,13 +512,18 @@ act on each.
 
 ### 5.3 Budgets, the deadline and loading
 
-**The deadline.** One per request, started when the request is parsed and compared at every phase boundary and
-inside every loop (the range DFS, the mask scans and the extension every 4,096 steps, the paced reads at their
-run boundaries as in `/resolve` and `/traverse`, serialisation every 4,096 objects). The route keeps a
-**finalisation reserve** (`--pattern-finalize-ms`, default 250 ms, stated in the capabilities): the count answer
-of every pattern is maintained incrementally during the search, so that when the deadline less the reserve
-passes, the route stops all work and serialises the counts it has, with `stop: {phase, shard}`,
-`withheld: deadline` and the relations of §3. If serialisation itself overruns the reserve, the answer is the
+**The deadline.** One per request, started when the request is parsed and compared at the start of every
+pattern and before every release, and inside every loop: the range DFS, the deferred scans and the extension
+every 4,096 steps (one step count, so the boundary from discovery to the scans has no reading of its own); the
+release every 4,096 descriptors prepared and edges examined, and every 64 contexts handed to the route, as
+`all_or_count`'s delivery of its buffered release; the paced reads at their run boundaries as in `/resolve` and
+`/traverse`, and before the labels of each context are built; serialisation every 4,096 objects. The route keeps
+a **finalisation reserve** (`--pattern-finalize-ms`, default 250 ms, stated in the capabilities) and, as built,
+more: the time it estimates writing the answer built so far will take, from the bytes of its results and the
+configured delivery rates (SPEC §7.6, as `/traverse`'s delivery reserve). The count answer of every pattern is
+maintained incrementally during the search, so that when the deadline less that time passes, the route stops all
+work, early enough for the answer it holds, and serialises it, with `stop: {phase, shard}`, `withheld: deadline`
+and the relations of §3. If serialisation itself overruns the reserve, the answer is the
 explicit outcome 503 `deadline`, as a `/traverse` attempt past its bound; nothing partial is sent as if whole.
 
 **Resident indexes only.** The route serves the graphs resident in the process (mmap or RAM, as loaded at
@@ -491,15 +546,17 @@ given a fixed allotment of the share through `set_max_cache_bytes` and evicting 
 dictionaries of discovery; (3) the retained descriptors of §5.2; (4) the deduplication state of §5.4; (5) the
 contexts and labels built for the answer and the buffered response text; and (6) the `DecodeBudget` for the
 reads, charged against what the rest has left. A fetch is admitted against the account's remainder, not on its
-own; what any item would push over the share is a stated memory stop.
+own; what any item would push over the share is a stated memory stop. (As built, increment 3: the account is a
+deterministic model of the labelled retrieval of `output.labels: all`, SPEC §14.4; the label-free path has no
+account, its descriptors being bounded by the caps, SPEC §7.6.)
 
 | cap | default | server flag | what is stated |
 |---|---|---|---|
-| `min_information_bits` | 24 (≈ 12 specified bases) | `--pattern-min-information-bits` | gates **discovery** for `iupac`, `protein`, `any_offset` and `long` (its anchor window); an exact `dna` `suffix` count is always admitted, however short: one range, a few ranks, and a scan of the range's invalid edges when it has any, charged like any step |
+| `min_information_bits` | 24 (≈ 12 specified bases) | `--pattern-min-information-bits` | gates **discovery** for patterns with an ambiguity code, `protein`, `any_offset` and `long` (every searched orientation's anchor window, §3); an exact pattern (every position one base, whatever its kind) in `suffix` scope is always admitted, however short: one range, a few ranks, and a scan of the range's invalid edges when it has any, charged like any step |
 | `max_contexts` | 10,000 per pattern, all offsets and both strands, aggregate over shards | `--pattern-max-contexts` | the retrieval threshold of `all_or_count`; the count is always returned with its relation |
 | `max_anchors` (`long`) | 1,000 | `--pattern-max-anchors` | the extension threshold; `withheld: anchors_above_threshold` |
 | `max_paths` (`long`) | 1,000 | `--pattern-max-paths` | the retrieval threshold on completed paths; `candidates_examined` |
-| `max_steps` | 100,000,000 range, scan or edge steps per shard (a range step is a few rank operations, so this is of the order of the default time budget) | `--pattern-max-steps` | `ranges_visited`, `steps`, the phase that hit it |
+| `max_steps` | 100,000,000 range, scan or edge steps per shard (measured in RAM at 0.2–0.7 µs a step on the mini index and on random graphs of 0.5 and 2 billion edges, an M-series Mac: 10^8 steps take 20–75 s; unmeasured on a deployed mmapped index until the benchmark of §13 increment 6; which of this cap and the time budget stops a heavy request first depends on the machine and its load; a request cannot raise it) | `--pattern-max-steps` | `ranges_visited`, `steps`, the phase that hit it |
 | `max_labels_per_anchor` | 64 | `--pattern-max-labels-per-anchor` | `anchors_truncated` with the cap and each row's total |
 | `max_predicate_contexts` (§5.6) | 100,000 per pattern | `--pattern-max-predicate-contexts` | the compute admission of a predicate pass; `withheld: predicate_above_threshold` with the unfiltered count |
 | `max_predicate_work` (§5.6) | the oracle's units, default as `max_annotation_work` | `--pattern-max-predicate-work` | `selection.tested` as `at_least`, `withheld: predicate_budget` |
@@ -508,12 +565,19 @@ own; what any item would push over the share is a stated memory stop.
 | `max_memory_mb` | 256 per request, split per shard | `--pattern-max-memory-mb` | `memory.stop` with the phase and the shard |
 | `max_labels` | 1,000 | `--pattern-max-labels` | `labels` count with its relation; labels kept by (contexts desc, column asc), as `/search`'s top-N; `partial` only (`all_or_count` returns all or none) |
 | `max_occurrences_per_label` | 16 | `--pattern-max-occurrences` | `occurrences` count per label with its relation; `partial` only |
-| `time_budget_ms` | 60,000 (the owner, 2026-10-07: "5 s is not sufficient in general"; some `/search` calls take longer today, and this is the more complex function) | `--pattern-max-time-ms`, default **600,000**: under the 900 s content timeout with room for serialisation and compression; the service sends an explicit budget per task under it | `stop: time` with the phase and the shard; the finalisation reserve inside it. Nothing in the engine assumes a short run: the clock is read every 4,096 steps whatever the budget, the memory account is bounded by `max_memory_mb` and the retained descriptors by their caps, not by time, and a long call costs the one server thread it holds |
+| `time_budget_ms` | 60,000 (the owner, 2026-10-07: "5 s is not sufficient in general"; some `/search` calls take longer today, and this is the more complex function) | `--pattern-max-time-ms`, default **600,000**: under the 900 s content timeout with room for serialisation and compression (at most 899,000 on `server_query`, the content timeout less 1 s); the service sends an explicit budget per task under it | `stop: time` with the phase and the shard; the finalisation reserve inside it. Nothing in the engine assumes a short run: the clock is read every 4,096 steps (and 64 released contexts) whatever the budget; the retained descriptors are bounded by their caps, not by time; `max_memory_mb` bounds the labelled retrieval (there is no memory account on the label-free path in version 1); `max_steps` does not grow with the budget, so a long budget is usually ended by steps first; and a long call costs the one server thread it holds |
 
 Why information rather than length, and why only as a gate: expected suffix anchors ≈ (k-mers in the graph) ×
 2^−bits. On a 50-billion-k-mer graph a 16-mer expects about 12 per strand, a 12-mer about 3,000, a 10-mer about
 48,000. That is a planning heuristic; what bounds a run is the range work and the deadline, which is why
-`count` is always available and `max_steps` is the real admission for discovery.
+`count` is always available and `max_steps` is the real admission for discovery. The range work is set by
+where a pattern's N runs sit, not by its bits (review of 2026-10-07, X-EFFICIENCY-01): a run costs about
+min(4^run, edges / 4^a) ranges per level, a being the specified bases before it in the searched window, so a
+40-bit pattern with a leading N^11 cost 8.6 million steps on the mini index where its 20-mer alone costs 61. As
+built, a run at the start of a searched window is skipped on a `$ACGT` graph (the rest of the window is searched
+with its offsets shifted: the same contexts), and a pattern's base searches run cheapest first by this
+estimate, so that a budget stop leaves the cheaper orientation complete; a run inside the pattern stays a cost,
+and an internal anchor (§12) is what would remove it.
 
 Low-complexity patterns are not refused: they are legitimate questions, the caps bound them, and
 `is_low_complexity` (`aligner_seeder_methods.cpp:22`) marks them in `notes` so the reader knows why the counts
@@ -665,8 +729,8 @@ boundary (§4.1), and need `record_verified` support for a record claim.
   "scope": "any_offset",
   "strands": "both",
   "stop_at_threshold": false,
-  "max_contexts": 10000, "max_anchors": 1000, "max_paths": 1000, "max_steps": 1000000,
-  "max_labels_per_anchor": 64, "max_annotation_work": null, "max_memory_mb": 256, "time_budget_ms": 5000,
+  "max_contexts": 10000, "max_anchors": 1000, "max_paths": 1000, "max_steps": 100000000,
+  "max_labels_per_anchor": 64, "max_annotation_work": null, "max_memory_mb": 256, "time_budget_ms": 60000,
   "max_labels": 1000, "max_occurrences_per_label": 16,
   "allow_unbudgeted_annotation": false,
   "require_support": null,
@@ -677,7 +741,9 @@ boundary (§4.1), and need `record_verified` support for a record claim.
 }
 ```
 
-`predicate` is optional (§5.6); without it `output.labels` defaults to `all`, and the predicate caps are unused.
+The values are illustrative (here the defaults of §5.3). `predicate` is optional (§5.6); without it
+`output.labels` defaults to `all`, and the predicate caps are unused (as built, the default is `none`, frozen for
+contract version 1: SPEC §1, §13).
 `output.labels: none` is the label-free path (§4.3): contexts with k-mers, offsets, strands, node and row ids,
 no annotation read; it is the cheapest retrieval and the one a client should ask for first.
 
@@ -810,7 +876,9 @@ a **job** (submit → status → results), as it wraps `/search` and the travers
 
 **Server.** `POST /pattern` goes through `process_request` like `/search` (compact JSON, gzip when accepted,
 `kContentTimeoutS` 900 s, `server.cpp:52`). The route's own deadline (default 60 s, cap `--pattern-max-time-ms`
-600 s, finalisation reserve inside it, §5.3) stays under that wall with room for serialisation and compression.
+600 s, at most 899 s on `server_query`; finalisation reserve inside it, §5.3) stays under that wall with room for
+serialisation and compression. As `/resolve` and `/traverse`, it stops a request whose client has left, or that
+runs at shutdown, at its next clock reading and writes nothing (a half-close counts as gone).
 
 **No Python client yet** (the owner, 2026-10-07: "write it lazily, when we need it"; unused code is weight to
 maintain). Nothing calls one: the search service has its own HTTP client, agents reach the route through the
@@ -834,10 +902,16 @@ the chunked databases needs milestone 6, whose `graphs` selection keeps exactly 
 - admission by the queue, **shared with search and traversal** (the owner: "they use essentially the same
   resources: load an index and access it"): the service's per-database queues, `META_DB_CAPS` and its distributed
   semaphore count search, pattern and traversal calls against **one** cap per database server, and on the server
-  side the one request pool (`-p` / `--threads-each`) serves `/search`, `/pattern`, `/traverse` and `/resolve`
-  alike — no per-route pool, no reservation. The engine needs nothing beyond "at most cap concurrent calls per
-  database server across all routes"; its memory is bounded per request by `max_memory_mb`, so the server's
-  worst case for pattern calls is cap × that;
+  side the one request pool (`-p`; `--threads-each` is the threads within a request) serves `/search`,
+  `/pattern`, `/traverse` and `/resolve` alike — no per-route pool, no reservation. Every route, the GET
+  capabilities routes included, runs on those `-p` threads: with `-p` long calls in flight the probe waits up to
+  their budgets, so the cap stays below `-p` (`-p` ≥ cap + 1, as `SPEC-labeled-traversal-core.md` "Deployment"
+  requires for traversals), and a full pool is not a dead host. The engine needs nothing beyond "at most cap
+  concurrent calls per database server across all routes"; a request's memory is bounded with `output.labels:
+  all` by `max_memory_mb`, and on the label-free path by the caps (about `max_contexts` descriptors in `partial`
+  and `all_or_count`, the DFS frontier in `count`, and in every mode on an even-k PRIMARY index up to
+  `max_steps` × 88 bytes of ranges awaiting their palindrome check; SPEC §7.6), so the server's worst case for
+  pattern calls is cap × the larger;
 - caps at admission, never truncation afterwards: `max_contexts`, `max_patterns` and `time_budget_ms` above the
   service's ceilings are refused with a 400 naming the field; an answer is passed through whole, since cutting it
   would falsify `retrieval_complete`; the backend called from the API process on the thread pool
@@ -887,9 +961,12 @@ job-originated call holds no client connection, so a long budget costs only the 
 - **Golden gate for alignment:** before the first change, record the outputs of every
   `integration_tests/test_align.py` case (8 tests × graph representations, DNA5 included), of `test_query.py`'s
   `align` cases and of `tests/annotation/test_aligner_labeled.cpp` as fixtures; the gate compares byte for byte
-  after every increment.
+  after every increment. As run (milestone 1 and the review's fixes): on a DNA4 build only — no DNA5 build was
+  made —, by scripts kept outside the repository (a manual gate, not in CI).
 - The seeder's seed lists on the test graphs are captured once (a small gtest dumping `SuffixSeeder` seeds for
-  the mini graphs, a DNA5 graph among them) and compared after the `allowed` change.
+  the mini graphs, a DNA5 graph among them) and compared after the `allowed` change. As built, the unit test
+  `PatternSearch.SuffixToPrefixDefaultUnchanged` checks instead that the seeder's calls (without a symbol set)
+  visit the same nodes in the same order as before, on DNA4 graphs.
 - `/align` and `/search` with `align: true` answer byte-identically on the fixture requests (the byte-identity
   harness of the traversal work, `scripts/traversal/bench_traverse.py --compare`, with an alignment request set).
 
@@ -910,7 +987,10 @@ job-originated call holds no client connection, so a long budget costs only the 
 - **Tolerant best-hit search on `/align`:** IUPAC rows in the extender's score table
   (`aligner_extender_methods.cpp:38-59`) plus `min_seed_length` per request and the labeled aligner on the server
   route. Best hits, not every carrier; a separate item.
-- **Internal anchors for `long`:** anchor on the most informative k-window and verify both ways.
+- **Internal anchors:** for `long`, anchor on the most informative k-window and verify both ways; for L ≤ k,
+  start the search after an N run inside the pattern, so that the run is matched on narrow ranges (as built, a run
+  at the start of a window is skipped on `$ACGT`, but a run inside costs about min(4^run, edges / 4^a) ranges per
+  level, §5.3).
 - **Placement on canonical indexes** for `long` from coordinate steps, shared with `/search`'s `query_coords`.
 - **Queue path** in the search service for batches and archive-wide scans.
 
@@ -920,26 +1000,34 @@ job-originated call holds no client connection, so a long budget costs only the 
    oracles, because no single one validates both counting units: a **graph-walk oracle** that enumerates the
    built graph's k-mers and paths directly (every k-mer containing the pattern at each offset, every path
    spelling a long pattern), giving the expected raw graph contexts; and a **record-scan oracle** that scans the
-   records' retained islands as strings, both strands, with the pattern as a regex or the codon sets, giving the
-   expected placed occurrences and verified supports. At k = 3 the records `ACG` and `CGT` make the graph path
+   records' retained islands as strings, both strands, matching the pattern position by position through the
+   test's own IUPAC table (the bases of each code; the reverse complement and palindromy derived from it, never
+   from the engine's `Pattern`) or the codon sets, giving the expected placed occurrences and verified supports.
+   (As built: the graph-walk oracle shares the valid-edge mask, `in_graph`, and the node ids with the engine; the
+   record-scan oracle shares neither. The IUPAC semantics are pinned by the unit suite's own table for all 15
+   codes, `IUPACTableAgainstTheOracles`, by the integration oracle for R, Y, S, W, N, and by the frozen fixtures
+   for Y, M, V, W, N.) At k = 3 the records `ACG` and `CGT` make the graph path
    `ACGT` and no record occurrence: the first oracle expects one context, the second none, and the engine must
    match both. Each oracle lists its expectations with the exact count per unit. It starts
    with the reviews' counterexamples: a record start whose dummy chain is pruned (`TACGAT` then `ACGA`, `AC`);
    the length-k lookup (`AAC` at k = 3); a motif with one plain and two marked matching edges; a sink dummy `AC$`
    inside a range and a source dummy leaving one; an interrupted mask scan with its bounds; a graph loaded
-   without its mask (refused); the DNA5 flank (`ACNTA`, `AC` at offset 0); a DNA4 island shorter than k
+   without its mask (refused); the DNA5 flank (`ACNTA`, `AC` at offset 0; written under `_DNA5_GRAPH`, run once
+   by hand on a DNA5 build of the engine and its tests, not in CI: CI builds DNA and Protein only); a DNA4 island shorter than k
    (`AAAAANACNCCCCC`, `AC`: not covered, not claimed); zero suffix anchors with a prefix context (`ACGTT`, `AC`);
    the cross-record path (`ACG`, `CGT` at coordinates 0, 1); the double occurrence in one k-mer (`ACGAC`, `AC`);
    the record-local offset (`ACGTA`, `CCCCC`, `TA`); a repeated k-mer within one record (one context, several
    occurrences); two equal-length records with hits at equal local coordinates (`seq_id` tells them apart); a
-   palindrome (`ACGT`) counted once; a `suffix` query on a wrapped PRIMARY graph (`ACGA` stored, `CGT` asked:
-   refused for `suffix`, found by `any_offset`); a reverse hit of a pattern longer than k on a wrapped PRIMARY
+   palindrome (`ACGT`) counted once; a `suffix` query on a wrapped PRIMARY graph (record `ACGA`, `TCGT` stored,
+   `CGA` asked, the suffix of the virtual k-mer only: refused for `suffix`, found by `any_offset` at the virtual
+   node, offset k − L); a reverse hit of a pattern longer than k on a wrapped PRIMARY
    graph (`AACG` at k = 3, anchored through rc(`AAC`)); an anchor without a completed path (`AAAC` with `AAA`
    present); two shards of 6,000 contexts against a threshold of 10,000 (withheld on the aggregate); a shard
    whose retrieval fails (withheld everywhere); an anchor with more labels than `max_labels_per_anchor`; a native
-   CANONICAL graph (presence only); an unbudgeted backend (count only); a refused row; a deadline inside
-   serialisation (counts answered within the reserve) and one past it (503); a palindromic anchor window on a
-   wrapped PRIMARY graph (`ACGTA` at k = 4: one anchor, one extension) and an IUPAC window with some palindromic
+   CANONICAL graph (presence only); an unbudgeted backend (count only); a refused row; the deadline around the
+   work and its answer (as built: a time stop before any work, the work time passing after the work — exact,
+   `determinism: full` —, the deadline read in the middle of the assembly, and past the deadline: 503); a
+   palindromic anchor window on a wrapped PRIMARY graph (`ACGTA` at k = 4: one anchor, one extension) and an IUPAC window with some palindromic
    instances; a pruned middle k-mer (`ACG`, `GTA` kept, `CGT` pruned at k = 3: `ACGTA` not found, both bases
    covered); a path verified in one label and only intersected in another (per-label support); a request with
    `require_support: record_verified` on an index without record mapping (refused); a sequence of fetches whose
@@ -951,6 +1039,12 @@ job-originated call holds no client connection, so a long budget costs only the 
    `W` rule with marked edges, the exact counts, `POST /pattern` on a single-graph server answering counts, the
    finalisation reserve, capabilities. The early milestone: a server that counts correctly before any annotation
    is read.
+1b. **The edge mask's tooling and `/resolve`'s deadline** (after milestone 1's contract froze, 2026-10-07): the
+   mask handling of increment 1 landed as its own milestone — `metagraph transform --mask-dummy`,
+   `--pattern-build-mask` and `mask: built_at_load`, the `mask_required` message naming both remedies — with no
+   field of the pattern contract changed; and `/resolve` accepts `bounds.time_budget_ms` with a finalisation
+   reserve, as this route's deadline, because the search service runs `/resolve` as a job
+   (`SPEC-labeled-traversal-core.md` §4.5).
 2. **IUPAC, both strands, `any_offset`, graph modes, and the label-free extraction.** The `allowed` callback;
    the two oriented searches with the palindrome rule; the flank ranges with every real symbol and
    `ranges_visited`; native CANONICAL; wrapped PRIMARY with `suffix` refused and `any_offset` complete; and
@@ -1005,7 +1099,7 @@ block on both capabilities routes with milestone 1; the route's default `time_bu
 2. The route's own default mode (`all_or_count`, this draft) and default scope (`any_offset` for L ≤ k; `suffix`
    is the cheaper alternative and always states `absence_scope`).
 3. Defaults: the information floor (24 bits, discovery only), `max_contexts` (10,000), `max_anchors` and
-   `max_paths` (1,000), `max_labels_per_anchor` (64), `max_steps` (10⁶ per shard), `max_memory_mb` (256 per
+   `max_paths` (1,000), `max_labels_per_anchor` (64), `max_steps` (10⁸ per shard, §5.3), `max_memory_mb` (256 per
    request), the finalisation reserve (250 ms); all server policy.
 4. Whether `label_intersection` labels are returned for `long` without `require_support`, or only counted. This
    draft returns them, each marked with its `support`.
@@ -1026,7 +1120,7 @@ block on both capabilities routes with milestone 1; the route's default `time_bu
 - A `suffix` answer covers only occurrences starting at record position ≥ k − L (`absence_scope: suffix_only`).
 - Absence of a label is claimed only with `retrieval_complete: true`; a `count` answer claims nothing about labels.
 - A label's path for `long` without record mapping is not a proof of one record (`support: label_intersection`).
-- A pattern's N never matches a record's N symbol; flanks do.
+- A pattern's N never matches a record's N symbol; flanks do (DNA5 builds only, untested: below).
 - The engine needs the succinct graph representation with its edge mask (the `.edgemask` file, or built at load
   with `--pattern-build-mask`); other representations, or a graph without a mask, answer 400 with the reason.
 - Budgeted retrieval exists only on the row-diff family with the budgeted decode; elsewhere `count` only, or
@@ -1038,6 +1132,38 @@ block on both capabilities routes with milestone 1; the route's default `time_bu
 - Support is per label: `record_verified` only on a BASIC index with coordinates and record mapping; elsewhere
   `label_intersection`, and `none(A)` means only that A does not annotate every k-mer of the path.
 - Predicates name annotation columns only; records inside a column are not addressable in v1.
+
+Limitations of the build, found or confirmed by the review of 2026-10-07 and stated in the SPEC:
+- **DNA5** (`$ACGTN`) graphs are accepted but unvalidated in version 1: no DNA5 server or CLI has been built or
+  run, and CI builds DNA and Protein only. The oracle suite is DNA5-aware; its DNA5 branches ran once, by hand,
+  on a DNA5 build of the engine and its two unit-test files (the integration of the review's fixes, 2026-10-07:
+  79 of 79 PatternSearch and PatternSearchFixes tests passed, after two test expectations were corrected to the
+  stated behaviour). On an odd-k wrapped PRIMARY DNA5 graph a k-mer with N at its centre between complementary
+  flanks (`ACNGT`) equals its reverse complement; `CanonicalDBG` exposes it at two node ids, and the engine counts
+  and releases it twice (that run confirms it: 2 + 2 for `AC` in `ACNGT` at k = 5). A leading N run is
+  searched there, not skipped (§7.8 of the SPEC).
+  (The owner decided on 2026-10-07 to refuse pattern search on DNA5 builds until a DNA5 build passes; this build
+  does not refuse it yet.)
+- **The mask is trusted as written** (§4): `extend` on a masked graph writes a mask with valid dummy edges, and
+  counts on it can be overstated, `exact` included; such a graph is masked again before it is served. (The owner
+  decided on 2026-10-07 to refuse such a mask at load, a new reason `mask_invalid`; not in this build.)
+- **N runs inside a pattern** cost about min(4^run, edges / 4^a) ranges per level whatever the bits (§5.3); only
+  a run at the start of a searched window is skipped, and only on `$ACGT`. Internal anchors (§12) would remove
+  the rest.
+- **O(L) per pattern** (parsing, its bits, its palindrome test, the low-complexity note) is inside the deadline
+  but charged no step and interrupted by no clock reading: many very long patterns can make a request's 503 come
+  after its `time_budget_ms`.
+- **The time kept back for the answer** grows with what the answer holds, at configured delivery rates (10 and
+  50 MB/s, `/traverse`'s starting values), not rates measured on the host: on a fast host a request with many
+  results stops its work earlier than it needed to (on an M-series Mac, a 2 s request of 15 patterns with 19,283
+  contexts each stopped its work after about 0.3 s, and writing what it held took about 0.13 s). Measuring the
+  rates on the server, as `/traverse`'s attempts do, is open.
+- **What CI does not check**: CI runs the unit suites, the integration tests that build their own graphs
+  (`TestPatternSynthetic`) and the fixture bodies against the SPEC (`TestPatternFixtureBodies`). The fixtures
+  against the binary, the byte identity of `/search`, `/align` and an unbudgeted `/resolve` against the base
+  build, the oracle comparisons on the mini index and the alignment golden gate (§11) run only on a developer
+  machine (`$METAGRAPH_REQUIRE_GUARDS=1` makes a run without their inputs fail instead of skip); a DNA5 build
+  runs in no CI job (it ran once by hand, above).
 
 ## 16. Changes in v2 (the first review's findings)
 

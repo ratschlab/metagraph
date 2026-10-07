@@ -6,8 +6,10 @@ mask: `transform --mask-dummy`, `--pattern-build-mask`, `mask: built_at_load`, t
 both remedies) added no field. **Increment 3** (2026-10-07, after `bd44e597`; `src/cli/pattern_retrieval.cpp`)
 adds the projection `output.labels: "all"` to contract version 1 — additions only (§1): its request fields, answer
 fields and values are in the tables below and described in §14; every answer to a request that does not ask for
-it is byte for byte the milestone-1b build's; §15 lists what changed since `bd44e597`. Checked against the
-fixture bodies of §11, which this build answered.
+it is byte for byte the milestone-1b build's; §15 lists what changed since `bd44e597`. **The review of
+2026-10-07** (milestones 1 and 1b) corrected this document sentence by sentence and changed some answers;
+§16 lists every change (one new field, `min_anchor_information_bits`; no field changes meaning). Checked
+against the fixture bodies of §11, which this build answered.
 **Scope:** the server route `POST /pattern`, the `pattern` block of `GET /capabilities` and
 `GET /traverse/capabilities`, and the CLI `metagraph pattern` (same answers).
 **Normative design:** `DESIGN-pattern-search.md` (v6 + §22). This spec states what milestone 1 serves of it, field
@@ -32,9 +34,10 @@ other client. Source references are to this checkout (paths relative to `metagra
     `unavailable_reason` as "not understood": pass it through, claim nothing from it;
   - gate every option on the capabilities block (§10), never on a milestone number;
   - send `output.labels` explicitly. Its default is stated in the capabilities (`default_projection`) and is
-    `"none"` in version 1, also now that `"all"` is served (increment 3): a request that names no projection is
-    answered as before, without reading any annotation. The design's default (`"all"`, design §7.1) would change
-    what an omitted field means, so it waits for a version that says so.
+    **frozen at `"none"` for version 1** (the owner's decision of 2026-10-07), also now that `"all"` is served
+    (increment 3): a request that names no projection is answered as before, without reading any annotation.
+    The design's default (`"all"`, design §7.1) would change what an omitted field means, so a server whose
+    default were `"all"` would state a higher version.
 - **Messages are prose.** `error` texts and slot `message`s are for people and may change; clients act on
   `code`.
 
@@ -47,6 +50,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | kinds `dna`, `iupac`, `protein` (§3) | `dna`, `iupac`; `protein` is 400 `later_increment` |
 | scopes `suffix`, `any_offset`, `long` (§3) | all; `long` counts anchors only, extracts nothing (§7.7) |
 | graph modes BASIC, native CANONICAL, wrapped PRIMARY (§4.1) | all three; `suffix` refused per pattern on PRIMARY |
+| alphabets `$ACGT`, `$ACGTN` (§3) | both accepted; `$ACGTN` (DNA5) is served but has never been run as a server or CLI, and none is in CI (§8.2) |
 | labels, placement, occurrences (§4.3) | read only with `output.labels: "all"` in a retrieval mode (increment 3, §14): labels on every index, placement on BASIC indexes with coordinates; otherwise none read and their counts `unknown` |
 | per-label `support` for paths, `require_support` (§4.3) | later (milestone 4); a context of L ≤ k has `support: "kmer"` |
 | multi-graph servers (§8) | 400 `later_increment`; the block says `multi_graph_later_increment` |
@@ -65,21 +69,37 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | information bits | Σ log2(4 / \|set_i\|) over the positions: 2 per exact base, 1 per two-base code, log2(4/3) ≈ 0.415 per three-base code, 0 per N. |
 | node | the graph's id of a context's k-mer: the BOSS edge index on a DBGSuccinct, the `CanonicalDBG` wrapper id on a wrapped PRIMARY graph (§7.10). |
 | row | the annotation row of the context's k-mer, named without reading it (§7.10). |
-| step | one range evaluation of the discovery, or one edge examined by a mask scan (design §4.1); the unit of `max_steps`. |
+| step | one range evaluation of the discovery, or one item of a deferred scan: an edge examined among a range's masked edges or its candidates (design §4.1), or on an even-k wrapped PRIMARY graph the palindrome check of one context (§7.6); the unit of `max_steps`. |
 
 ## 3. Transport
 
-- `POST /pattern` with a JSON body; the answer is compact JSON, gzip or deflate when the request's
-  `Accept-Encoding` asks for it (zlib level `--traverse-compression-level`, 1 by default, so that compression
-  fits the finalisation reserve). Error bodies are never compressed.
-- The route runs on the server's one request pool (`-p` / `--threads-each`), shared with `/search`, `/align`,
-  `/resolve` and `/traverse` (design §9). The server's content timeout is 900 s; the route's own deadline is
-  `time_budget_ms` (§7.6), at most 600 s by default.
+- `POST /pattern` with a JSON body: one RFC 8259 JSON text, with unique member names in every object, nothing
+  after it (no second value, no comment, no trailing comma) and nested at most 1,000 deep; anything else is 400
+  `invalid_request` (§5). The answer is compact JSON, gzip or deflate when the request's `Accept-Encoding` asks
+  for it (zlib level `--traverse-compression-level`, 1 by default, to keep compression short; the time to write
+  and compress the answer is kept back from the work, §7.6). Error bodies are never compressed.
+- The route runs on the server's request pool (`-p`; `--threads-each` is not a pool: it sets the threads used
+  within one request and at load), shared with `/search`, `/align`, `/resolve` and `/traverse` (design §9).
+  Every route, `GET /capabilities` and `GET /traverse/capabilities` included, runs on these `-p` threads: with
+  `-p` long calls in flight, a further call — a capabilities probe too — waits up to their `time_budget_ms`. A
+  deployment therefore keeps its concurrent long calls below `-p` (`-p` ≥ cap + 1, as
+  `SPEC-labeled-traversal-core.md` "Deployment" requires for traversals), and a client does not take a full pool
+  for a dead host.
+- The server's content timeout is 900 s; the route's own deadline is `time_budget_ms` (§7.6), at most 600 s by
+  default and at most 899,000 ms on `server_query` whatever the flag (the content timeout less 1 s for the
+  transport: a larger `--pattern-max-time-ms` refuses to start).
+- **A request whose client has left is not answered.** A client that closed, reset or half-closed its
+  connection (one that half-closes after sending its request is treated as gone, as on `/traverse`), or a
+  request running when the server shuts down: the work ends at the engine's next clock reading (§7.6), the
+  writing at its next check, and nothing is written. A request abandoned while it waited for a thread is dropped
+  at its first such reading or check.
 - Single-graph servers only (`server_query -i GRAPH -a ANNOTATION`). A multi-graph server (`server_query
   GRAPHS.csv`) answers every `/pattern` request with 400 `later_increment` (§6).
 - `metagraph pattern -i GRAPH -a ANNOTATION [--json] REQUEST.json ...` answers each request file as the server
   would, under the same `--pattern-*` flags: the answer on stdout; a refusal's body on stdout and exit status 1.
-  Answers equal the server's except `timing`.
+  A request file that fails otherwise gets the body the server's 400 without a code has (`{"error": …}`, §6),
+  likewise with exit status 1, and the next file is still answered. Answers equal the server's except `timing`
+  and what a time stop touched (without `--json` the CLI's indented text counts twice in the estimate of §7.6).
 
 ## 4. The request
 
@@ -92,7 +112,7 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `mode` | `"count"` \| `"all_or_count"` \| `"partial"` | `"all_or_count"` | §7.5 |
 | `scope` | `"suffix"` \| `"any_offset"` | `"any_offset"` | a pattern longer than k is searched as `long` whatever is named (§7.7) |
 | `strands` | `"both"` \| `"forward"` \| `"reverse"` | `"both"` | `forward` searches P, `reverse` rc(P); a palindrome is searched once whatever is named (§7.3) |
-| `stop_at_threshold` | boolean | `false` | stop a pattern's discovery once its count passes its threshold (§7.5) |
+| `stop_at_threshold` | boolean | `false` | stop a pattern's discovery once its running lower bound passes its threshold (§7.5); checked in discovery only, so a pattern can still end `exact` above its threshold with no stop |
 | `max_contexts` | integer ≥ 0 | `caps.max_contexts` (10,000) | per pattern; above the cap: lowered and listed in `limits.clamped` |
 | `max_anchors` | integer ≥ 0 | `caps.max_anchors` (1,000) | per pattern, L > k: the `stop_at_threshold` threshold; lowered like `max_contexts` |
 | `max_steps` | integer ≥ 1 | `caps.max_steps` (10⁸) | per **request**: the patterns spend one budget in request order (§7.6); lowered like `max_contexts` |
@@ -128,7 +148,10 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 - Neither or both of `dna` and `iupac`, or a value that is not a string, is 400 `invalid_request`.
 - A string with another character (U, `-`, `.`, whitespace; an IUPAC code in a `dna` pattern) or an empty
   string is answered in the pattern's slot with `bad_alphabet` (§8.9); the other patterns are answered.
-- No length cap: a pattern longer than k costs only its anchor window (§7.7).
+- No length cap: a pattern longer than k is charged steps for its anchor windows only (§7.7); parsing it, its
+  `information_bits`, its palindrome test and its `low_complexity_pattern` note cost O(L) time inside the
+  deadline that no step charges and no clock reading interrupts (a few ns per base; many long patterns can
+  therefore end in a 503 after `time_budget_ms`).
 - `protein` is 400 `later_increment` (design §6).
 
 ### 4.3 `output`
@@ -158,8 +181,10 @@ list also held `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, 
 | `--pattern-max-anchors` | 1,000 | `max_anchors` (default = cap) | lowered, listed |
 | `--pattern-max-steps` | 100,000,000 | `max_steps` (default = cap) | lowered, listed |
 | `--pattern-default-time-ms` | 60,000 | `time_budget_ms` when omitted | — |
-| `--pattern-max-time-ms` | 600,000 | `time_budget_ms` | lowered to the cap (not to the default), listed |
-| `--pattern-finalize-ms` | 250 | — (the reserve inside every budget, §7.6) | — |
+| `--pattern-max-time-ms` | 600,000 | `time_budget_ms` | lowered to the cap (not to the default), listed; on `server_query` the flag is at most 899,000 (§3) |
+| `--pattern-finalize-ms` | 250 | — (the floor of the time kept back from the work for writing the answer, inside every budget, §7.6) | — |
+| `--pattern-delivery-build-mbps` | 10 | — (the rate, MB/s, at which the answer's JSON text is assumed to be built and written, §7.6) | — |
+| `--pattern-delivery-compress-mbps` | 50 | — (the rate, MB/s, at which it is assumed to be compressed, §7.6) | — |
 | `--pattern-min-information-bits` | 24 | — (the floor, §7.8) | — |
 | `--pattern-max-patterns` | 16 | length of `patterns` | refused (400), never cut |
 | `--pattern-max-labels-per-anchor` | 64 | `max_labels_per_anchor` (default = cap) | lowered, listed |
@@ -169,8 +194,11 @@ list also held `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, 
 | `--pattern-max-occurrences` | 16 | `max_occurrences_per_label` (default = cap) | lowered, listed |
 | `--traverse-chunk-target-ms` | 50 | — (not a cap: the annotation reads under the deadline are decoded in chunks of about this duration, as `/traverse`'s) | — |
 
-The capabilities state every value in force (`caps`, `default_time_budget_ms`, `finalize_reserve_ms`), and every
-answer echoes the effective ones (`limits`, §8.3). A clamp is never silent: `limits.clamped` lists it. The
+The capabilities state every value in force (`caps`, `default_time_budget_ms`, `finalize_reserve_ms`; the two
+delivery rates in `caps_rule`), and every answer echoes the effective ones (`limits`, §8.3). The delivery rates
+are starting estimates, conservative on the hosts measured (§7.6); an operator who raises
+`--pattern-max-contexts` or `--pattern-max-patterns`, or serves on a slow or busy host, lowers them or raises
+`--pattern-finalize-ms`. A clamp is never silent: `limits.clamped` lists it. The
 service refuses values above its own ceilings at submit (`PROMPT-search-service-pattern.md` §3.1 item 5); the
 server lowers them, so that a direct caller is not refused for a budget the host can give in part.
 
@@ -180,7 +208,8 @@ A request is refused by the first check it fails, in this order:
 
 1. multi-graph server: 400 `later_increment`, whatever the body;
 2. the single index still loading: 503, no `code` (§6);
-3. the body is not JSON: 400 `invalid_request`;
+3. the body is not one RFC 8259 JSON text (§3: a comment, a trailing comma, anything after the value, a
+   duplicated member name, nesting deeper than 1,000): 400 `invalid_request`;
 4. the graph (`PatternSearch::support`): 400 with the graph's reason (`mask_required`, …), whatever the body asks;
 5. the body is not an object: 400 `invalid_request`;
 6. a later-increment field (§4.4, top level) or `in_ram`, in the alphabetical order of the body's field names;
@@ -206,19 +235,21 @@ The body is `{"error": <message>, "code": <code>}`, except the 503 during loadin
 
 | status | `code` | when | what a client does |
 |---|---|---|---|
-| 400 | `invalid_request` | not JSON, not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"` | fix the request |
+| 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"` | fix the request |
 | 400 | `later_increment` | a field or value of §4.4; a multi-graph server | wait for the increment the capabilities will announce |
 | 400 | `resident_only` | `in_ram`, any value: the route never loads an index inside a request (design §5.3) | drop `in_ram` |
-| 400 | `mask_required` | the graph was loaded without its dummy-edge mask (`.edgemask`); without it every dummy edge would count as a k-mer | the host's operator creates the mask (`metagraph transform --mask-dummy`, or `--pattern-build-mask` at start-up; design §4); the capabilities say `mask: absent` meanwhile |
+| 400 | `mask_required` | the graph was loaded without its dummy-edge mask (`.edgemask`); without it every dummy edge would count as a k-mer | the host's operator creates the mask (`metagraph transform --mask-dummy` once, then restarts the server: the mask is read when the graph is loaded; or `--pattern-build-mask` at start-up, for graphs with few edges; design §4); the capabilities say `mask: absent` meanwhile |
 | 400 | `representation_unsupported` | not a succinct graph (nor a PRIMARY one wrapped in `CanonicalDBG`), or k < 2 | none: this host has no pattern search |
 | 400 | `primary_unwrapped` | a PRIMARY graph not wrapped in `CanonicalDBG` (the server always wraps; CLI or embedding misuse) | none |
 | 400 | `alphabet_unsupported` | the graph's alphabet is neither `$ACGT` nor `$ACGTN` | none |
 | 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or disk annotation; only the row-diff family has one) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4), or ask for `labels: "none"` or mode `count` |
-| 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | retry with a larger budget, or narrow the request |
+| 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
 | 503 | (none) | the single index is still loading (`Retry-After: 60`); every route answers so | retry later |
 
 An unexpected failure (a server bug) is answered as every route answers it: 400 `{"error": …}` without a
-`code` (500 `Internal server error` for a non-standard exception).
+`code` (500 `Internal server error` for a non-standard exception). One such failure is stated: an
+`all_or_count` release that disagrees with its `exact` count (§7.5) fails the request this way rather than be
+answered as complete; it has been seen only with a mask that breaks the engine's assumption (§10.2, `mask`).
 
 ## 7. Semantics
 
@@ -273,14 +304,23 @@ Every count is `{value, relation, unit}` (design §3):
 | relation | meaning | `value` |
 |---|---|---|
 | `exact` | the discovery behind it completed: no step, time or threshold stop touched it | the count |
-| `at_least` | a stop interrupted discovery; an undiscovered branch, offset or strand has no upper bound | the sum of the lower bounds of what was explored |
-| `bounds` | every range of every branch, offset and orientation was discovered; only scans of masked edges were interrupted; `lower` ≤ true ≤ `upper` | `lower` |
+| `at_least` | a stop interrupted discovery; an undiscovered branch, offset or strand has no upper bound | the sum of the lower bounds of what was explored (0 for a search the stop met at its first step) |
+| `bounds` | every range of every branch, offset and orientation was discovered; only the deferred scans (§7.6) were interrupted; `lower` ≤ true ≤ `upper` | `lower` |
 | `unknown` | the phase never ran: after a stop, or not in this increment | `null` |
 
 - `bounds` carries `lower` and `upper`; no other relation does. `bounds` stays `bounds` when `lower` = `upper`.
 - Sums (a total over offsets or strands) take the weakest relation: `unknown` + `unknown` = `unknown`;
   `unknown` + anything else = `at_least`; `at_least` + anything = `at_least`; `bounds` + `bounds` or `exact` =
   `bounds`; `exact` + `exact` = `exact` (`pattern_search.hpp`, `Count::operator+=`).
+- A search whose discovery was entered is `at_least` even when the stop refused its very first step (`at_least`
+  0); one the stop came before is `unknown`.
+- After a stop in discovery every per-offset count of the interrupted search is `at_least`: version 1 does not
+  track which offsets were completely discovered before the stop. The mixed answers that do occur: a per-strand
+  (or per-orientation) count `exact` beside an `at_least` total, and some per-offset counts `exact` beside a
+  `bounds` total (a stop in a deferred scan).
+- Counts are computed by the discovery and the deferred scans, before any release, and never from it: under
+  `at_least` or `bounds`, `returned` (and the results at one offset) may exceed `counts.contexts.value` (or that
+  offset's).
 - A count is never promoted by assumption: anchors say nothing about paths, contexts nothing about occurrences.
 - Units: `graph_contexts`, `anchors`, `paths`, `placed_occurrences`, `labels`. `labels` and `placed_occurrences`
   are `unknown` unless `output.labels: "all"` read them in a retrieval mode (§14.6).
@@ -290,32 +330,35 @@ Every count is `{value, relation, unit}` (design §3):
 | mode | results | `retrieval_complete` |
 |---|---|---|
 | `count` | none: the entry has no `withheld`, `returned`, `cut` or `results` | always `false` (a count returns no context) |
-| `all_or_count` | every context, only when discovery completed with an `exact` total ≤ `max_contexts`; otherwise none, `withheld` says why | `true` iff every context was returned |
-| `partial` | the first `max_contexts` contexts in answer order (§7.9) among those discovered, also after a step or threshold stop; `cut` says why the list is shorter than the pattern's contexts | `true` iff every context was returned |
+| `all_or_count` | every context, only when discovery completed with an `exact` total ≤ `max_contexts` and the contexts were handed to the route before the work time passed (§7.6); otherwise none, `withheld` says why | `true` iff the answer proves every context was returned: the count `exact` and equal to `returned` |
+| `partial` | the first `max_contexts` contexts in answer order (§7.9) among those discovered, also after a step or threshold stop; `cut` says why the list may be shorter than the pattern's contexts | `true` iff the answer proves every context was returned (an `exact` count equal to `returned`); after any stop it is `false` and `cut` is stated, even when the list happens to hold every context |
 
 `withheld.reason` (results absent; `returned: 0`, `results: []`):
 
 | reason | when | the count | what to change |
 |---|---|---|---|
 | `count_above_threshold` | `all_or_count`: discovery completed, `exact` total > `max_contexts` | `exact` | narrow the pattern, scope or strand; or `partial` |
-| `threshold_crossed` | `all_or_count`, `stop_at_threshold`, L ≤ k: discovery stopped once the count passed `max_contexts` | `at_least` | as above |
-| `discovery_budget` | `all_or_count`, L ≤ k: `max_steps` reached in discovery or a mask scan | `at_least` or `bounds` | a more informative pattern or a narrower scope; a filter does not help |
-| `deadline` | `all_or_count`, L ≤ k: the work time passed in discovery or a mask scan, or in the release (which is all or nothing) | as stopped | a larger `time_budget_ms`, or as for `discovery_budget` |
+| `threshold_crossed` | `all_or_count`, `stop_at_threshold`, L ≤ k: discovery stopped once its running lower bound passed `max_contexts`. The bound lags the count by the masked edges not yet scanned and, on an even-k wrapped PRIMARY graph, by the palindromic k-mers both base searches may find; the deferred scans do not consult the threshold. So the stop can come late or not at all, and a pattern above its threshold can end `exact` with `count_above_threshold` (the owner's decision of 2026-10-07: the threshold is checked in discovery only) | `at_least` | as above |
+| `discovery_budget` | `all_or_count`, L ≤ k: `max_steps` reached in discovery or a deferred scan | `at_least` or `bounds` | shorten or split an N run inside the pattern, add specified bases before it, or restrict `strands` to the orientation in which more specified bases precede it: the cost is set by where N runs sit, not by the bits (§7.8); the scope hardly changes it; a filter does not help |
+| `deadline` | `all_or_count`, L ≤ k: the work time passed in discovery or a deferred scan, or in the release or while its contexts were handed to the route (all or nothing: a deadline during the hand-over withholds all of them, the counts kept) | as stopped | a larger `time_budget_ms`, or as for `discovery_budget` |
 | `paths_later_increment` | either retrieval mode, L > k, unless the anchors are `exact` 0 (§7.7); whatever stopped the anchors is in `stop` | the anchors' | nothing yet: paths arrive with milestone 4 |
 | `annotation_budget` | increment 3, `all_or_count`, `labels: "all"`: a row the memory account refused (`rows_refused`), or the reads stopped at `max_annotation_work` | `exact` | raise `max_memory_mb` or `max_annotation_work`, narrow the pattern, or `partial` |
 | `anchor_labels_truncated` | increment 3, `all_or_count`, `labels: "all"`: a row carried more labels than `max_labels_per_anchor` (`anchors_truncated` lists each, with its total) | `exact` | raise `max_labels_per_anchor` to the largest total, or `partial` |
 | `output_budget` | increment 3, `all_or_count`, `labels: "all"`: the memory account could not hold the answer (the contexts' descriptors or the labels and occurrences built for them) | `exact` | raise `max_memory_mb`, narrow the pattern, or `partial` |
 
-With `labels: "all"`, `deadline` also names a time stop of the annotation reads (`stop.phase` `label_discovery`
-or `placement`); the graph count is then still the discovery's.
+With `labels: "all"`, `deadline` also names a time stop of the annotation reads or of the output of the labels
+(`stop.phase` `label_discovery`, `placement` or `output`); the graph count is then still the discovery's.
+
+An `all_or_count` release that disagrees with its `exact` count is never published: the request fails as a
+server bug (§6).
 
 `cut.reason` (`partial`, neither complete nor withheld; `results` holds what was released):
 
 | reason | when |
 |---|---|
 | `max_contexts` | discovery completed (or stopped at the threshold) with more contexts than `max_contexts`: the first `max_contexts` in answer order |
-| `max_steps` | discovery stopped at `max_steps`: the first `max_contexts` of those discovered |
-| `time` | the work time passed: in discovery nothing is released (its membership would depend on the machine, `returned: 0`); in the release, what was released before |
+| `max_steps` | discovery or a deferred scan stopped at `max_steps`: the first `max_contexts` of those discovered |
+| `time` | the work time passed: in discovery nothing is released (its membership would depend on the machine, `returned: 0`); in the release, what was released before (the clock is read every 64 contexts handed to the route, §7.6). Also the cut of a pattern already stopped by `max_steps` or the threshold whose release met the work time (§7.6: `stop` keeps the first stop) |
 | `max_memory` | increment 3, `labels: "all"`: the memory account held the descriptors of only the first `returned` contexts (`partial`'s descriptors take at most half of the account, §14.4; the list's length; it replaces the engine's `max_contexts` cut when both cut) |
 
 `max_anchors` is a value of `cut.reason` reserved for a later increment's release of anchors; version 1 never
@@ -325,31 +368,76 @@ releases anchors.
 
 - **One budget per request** (design §5.3): `max_steps` and the deadline are spent by the patterns in request
   order. A stop is sticky: every later pattern answers `unknown` counts with the same `stop` (phase
-  `discovery`), `work` zero, and in a retrieval mode the matching `withheld` or `cut`. `stop_at_threshold` is not
-  a budget stop: it ends only its own pattern.
+  `discovery`), `work` zero, and in a retrieval mode the matching `withheld` or `cut` (in `partial`, also after
+  a `max_steps` stop, a later pattern says `cut: time` and `determinism: time_limited` when the work time has
+  passed before its empty release). `stop_at_threshold` is not a budget stop: it ends only its own pattern.
 - **The deadline** starts when the request's body is parsed (time spent in the server's queue is not in it).
-  Work stops at `time_budget_ms − finalize_reserve_ms`; the counts kept up to date during the search are then
-  written in the reserve. The clock is read at every phase and pattern boundary and at least every 4,096 steps
-  or released edges.
+  Work stops at `time_budget_ms − finalize_reserve_ms − E`, E being the estimated time to write the answer
+  built so far: E = 1.25 × (B / (b × 1000) + B / (c × 1000)) ms for B bytes of compact JSON text of the results
+  built (with `labels: "all"` the label objects about to be built are counted in B, and once more at the rate
+  b, before they are built), b and c the delivery rates in MB/s (`--pattern-delivery-build-mbps` 10,
+  `--pattern-delivery-compress-mbps` 50; `caps_rule` states the rule with the values in force). E is read with
+  the work time at every reading, so it grows as results are built: about 0.15 ms per KB of results at the
+  defaults, 2.8 s for 16 × 10,000 results (18.4 MB of text, which an M-series Mac wrote and gzipped in 0.3–0.45 s:
+  the rates are conservative starting estimates, not measurements of the host). The answer — the counts kept up
+  to date during the search and every result released — is then written in the time left, so that a request
+  stopped by time still answers with its counts. `finalize_reserve_ms` is the floor that covers what E does not
+  model: the work done past the work time until the next reading, assembling the counts, and the transport.
+- **Where the work time is read** (and, on the server, whether the client has left, §3):
+  - at the start of every pattern, and before every release;
+  - at every multiple of 4,096 steps charged (discovery, the deferred scans and, for L > k, the extension share
+    one step count, so the boundary from discovery to the deferred scans has no reading of its own);
+  - in the release: every 4,096 range descriptors it prepares and every 4,096 edges it examines;
+  - every 64 contexts handed to the route — in `partial`'s release and in `all_or_count`'s delivery of its
+    buffered release — since each costs the route a k-mer spelling (k − 1 graph steps) and its result object;
+  - with `labels: "all"`: before each annotation read and between its chunks (§14.4), and before the labels of
+    each context are built for the answer.
+
+  Work therefore ends within one such stride after the work time. Not read: the O(L) handling of each pattern's
+  text (§4.2).
 - **503 `deadline`.** The answer is assembled, serialised and compressed under the same deadline, read every
   4,096 entries and results while it is assembled, every 64 KiB of text while it is written, between
   compression blocks, and once more before it is handed to the transport. If it cannot be written by
   `time_budget_ms`, the answer is 503 `deadline` and nothing partial is sent.
-- `stop` names where the work stopped: `{phase, reason}` with phase `discovery` (the range search), `mask_scan`
-  (the deferred scans of masked edges, the only phase whose stop can leave `bounds`) or `extraction` (the
-  release, after discovery), and reason `max_steps`, `time`, `max_contexts` or `max_anchors` (the last two:
-  `stop_at_threshold`). Increment 3 (`labels: "all"`) adds the phases `label_discovery` (the first read, §14.2),
-  `placement` (the second) and `output` (the descriptors and labels the account holds for the answer), and the
-  reasons `max_annotation_work` and `max_memory` (§14.4); the engine's stop, when there is one, is the one
-  stated.
-- `work` per pattern: `ranges_visited` (range evaluations), `mask_scans` (ranges whose scan began), `steps`
-  (every step charged: `ranges_visited` plus the edges scanned). The `steps` of all patterns sum to at most
-  `max_steps`.
+- `stop` names **the first stop that touched the pattern**: `{phase, reason}` with phase `discovery` (the range
+  search), `mask_scan` (the deferred scans: a range's masked edges, and on an even-k wrapped PRIMARY graph the
+  palindrome check of every context at an offset where a palindromic k-mer can hold the pattern; the only phase
+  whose stop can leave `bounds`) or `extraction` (the release, and `all_or_count`'s delivery of it to the
+  route), and reason `max_steps`, `time`, `max_contexts` or `max_anchors` (the last two: `stop_at_threshold`).
+  A later stop does not replace it: in `partial`, a pattern stopped by `max_steps` or by its threshold is still
+  released, and a time stop in that release shows only as `cut: time` and `determinism: time_limited`, `stop`
+  keeping the earlier reason (the owner's decision of 2026-10-07). Increment 3 (`labels: "all"`) adds the phases
+  `label_discovery` (the first read, §14.2), `placement` (the second) and `output` (the descriptors and labels
+  built for the answer), and the reasons `max_annotation_work` and `max_memory` (§14.4); `output` is stopped by
+  `max_memory` or by `time` (§14.4); the engine's stop, when there is one, is the one stated.
+- `work` per pattern: `ranges_visited` (range evaluations), `mask_scans` (ranges whose deferred scan began),
+  `steps` (every step charged: `ranges_visited` plus the items the deferred scans examined). The `steps` of all
+  patterns sum to at most `max_steps`. On an even-k wrapped PRIMARY graph the deferred scans check every context
+  at a palindrome-capable offset, one k-mer spelling each, so an `any_offset` count there costs time and steps
+  linear in those contexts (`index.graph_mode` and `index.k` tell a client so).
+- **Memory.** The label-free path (mode `count`, or `output.labels: "none"`) has no memory account in version
+  1; what a request holds is bounded by the caps:
+  - the DFS frontier, O(k × alphabet) per base search;
+  - the ranges whose count awaits a deferred scan, 88 bytes each: none in the common case; on an even-k wrapped
+    PRIMARY graph one per range at a palindrome-capable offset, so up to `max_steps` of them for a short or
+    degenerate pattern;
+  - `all_or_count`: a 24-byte descriptor per range with contexts while the running lower bound is ≤
+    `max_contexts` (about `max_contexts` of them), none once it is above;
+  - `partial`: only the descriptors that can hold one of the first `max_contexts` contexts in answer order —
+    about `max_contexts`, plus the ranges straddling the cut-off (O(k) per base search) and those whose count
+    awaits a scan; between two compactions at most 4,096 or twice the number kept at the last one; none with
+    `max_contexts` 0. The release indexes them with 40 bytes each;
+  - the results built for the answer: at most `max_contexts` per pattern.
+
+  With `output.labels: "all"`, `max_memory_mb` bounds the labelled retrieval (§14.4).
 
 ### 7.7 Patterns longer than k
 
-- Scope `long`, whatever was requested. `anchor_information_bits` states the bits of the anchor window
-  [0, k); the information floor gates on it (§7.8).
+- Scope `long`, whatever was requested. Each searched orientation anchors on its own window: `forward` (and a
+  palindrome) on P[0, k), `reverse` on rc(P)[0, k), whose bits are those of P[L − k, L).
+  `anchor_information_bits` states the bits of P[0, k), whatever the strands; `min_anchor_information_bits`
+  states the bits of the least informative searched window — the lower of the two with `strands: "both"` — and
+  the information floor gates on it (§7.8).
 - `counts.anchors` counts the anchors (unit `anchors`, by strand or orientation); `counts.paths` is `unknown`,
   except `exact` 0 when the anchors are `exact` 0 (no path starts without an anchor: a derivation, not a
   promotion). `counts.contexts` is absent.
@@ -360,11 +448,26 @@ releases anchors.
 ### 7.8 The information floor
 
 - A pattern below `caps.min_information_bits` (24 by default, about 12 specified bases) is answered in its
-  slot with `information_below_floor` and costs no step. For L > k the anchor window's bits count.
+  slot with `information_below_floor` and costs no step. For L > k every searched orientation's anchor window
+  must reach the floor (§7.7; the least of them is `min_anchor_information_bits`): P + N^k is refused with
+  `strands` `both` or `reverse` (the message names the reverse orientation's window), N^k + P is answered with
+  `strands: "reverse"`.
 - Exempt: an exact pattern (every position one base, whatever its kind) in `suffix` scope, however short: one
   range, a few ranks.
-- Low-complexity patterns are not refused; an exact one that sdust flags carries the note
-  `low_complexity_pattern`.
+- The floor is a planning heuristic, not a cost bound. A searched window is matched from its first position on
+  the widest ranges, so the cost is set by where its N runs sit, whatever the pattern's bits: a run of N costs
+  about min(4^run, edges / 4^a) ranges per level, a being the specified bases before it in that orientation's
+  window. So a run at the end of a window is cheap, and a run at its start (for `forward` a leading run of P,
+  for `reverse` a trailing one) would be the most expensive: on a `$ACGT` graph the engine skips it and searches
+  the rest of the window with its offsets shifted, which gives the same contexts; on `$ACGTN` (a pattern's N
+  never matches the graph's N) it is searched as given. A run inside the pattern stays expensive in both
+  orientations when few specified bases precede it on either side; `discovery_budget` (§7.5) says what to
+  change.
+
+  A pattern's base searches run cheapest first by that estimate, so that a budget stop leaves the cheaper
+  orientation complete and the other interrupted (§7.9).
+- Low-complexity patterns are not refused; an exact one that sdust flags over its whole text carries the note
+  `low_complexity_pattern` (for L > k the flag can come from bases outside the anchor windows).
 
 ### 7.9 Ordering and determinism
 
@@ -373,7 +476,8 @@ releases anchors.
   `palindromic`/`=`) (design §5.5, "BOSS edge order, then by offset"; the orientation separates the two
   contexts an IUPAC pattern can have at one offset).
 - `strands` (entry): the orientations searched, forward before reverse; `["="]` or `["palindromic"]` for a
-  palindrome.
+  palindrome. This is the order of the plan, not of the work: the base searches run cheapest first (§7.8), so
+  after a budget stop the reverse orientation can be `exact` and the forward one `at_least`.
 - `notes`: `low_complexity_pattern`, `strand_unknown_canonical`, `paths_later_increment`, then increment 3's
   `annotation_unbudgeted`, `record_bounds_unknown` or `annotation_not_read`, in that order.
 - `limits.clamped`: `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, then increment 3's
@@ -385,9 +489,9 @@ releases anchors.
   as strings (`"10"` before `"2"`).
 - **Determinism.** The same request on the same index under the same caps gives the same answer, byte for byte
   apart from `timing`, including which contexts a cut kept, because every budget is spent in a fixed order. The
-  exception is a time stop: the entry it touched and every answered entry after it state
-  `determinism: "time_limited"`; their counts, `work` and released contexts depend on the machine. A 503
-  `deadline` depends on the machine too.
+  exception is a time stop: the entry it touched (also when it shows only as `cut: time`, §7.6) and every
+  answered entry after it state `determinism: "time_limited"`; their counts, `work` and released contexts depend
+  on the machine. A 503 `deadline` depends on the machine too.
 
 ### 7.10 Node and row ids
 
@@ -395,9 +499,11 @@ releases anchors.
   CANONICAL), the wrapper id on a wrapped PRIMARY graph (a stored k-mer's id, or that plus the wrapper's offset
   for a virtual reverse complement).
 - `row` is the annotation row the k-mer is annotated in, named without reading it: `node − 1` on BASIC; on
-  PRIMARY the stored k-mer's (`get_base_node(node) − 1`); on native CANONICAL the canonical k-mer's (the
-  annotation key of every route), so that a k-mer and its reverse complement share one row. `null` if the k-mer
-  has no row in the annotation (never expected on a compatible index; stated rather than guessed).
+  PRIMARY the stored k-mer's (`get_base_node(node) − 1`); on native CANONICAL the canonical k-mer's — in
+  MetaGraph's sense: of the k-mer and its reverse complement the one with the smaller BOSS edge index, not the
+  lexicographically smaller one — minus 1 (the annotation key of every route), so that a k-mer and its reverse
+  complement share one row. `null` if the k-mer has no row in the annotation (never expected on a compatible
+  index; stated rather than guessed).
 - Both are **opaque** to clients and valid only per (host, `index.index_fp` or `index.release`, graph). A later
   increment takes row ids back ("labels for given rows", design §12); a client keeps them as given.
 
@@ -426,7 +532,7 @@ releases anchors.
 | `release` | string | the server's `--index-release` (`""` when not set) |
 | `k` | integer | the graph's k |
 | `graph_mode` | `"basic"` \| `"canonical"` \| `"primary"` | §7.3 |
-| `alphabet` | `"$ACGT"` \| `"$ACGTN"` | the BOSS alphabet, sentinel first |
+| `alphabet` | `"$ACGT"` \| `"$ACGTN"` | the BOSS alphabet, sentinel first. `$ACGTN` (DNA5) is served but untested in version 1: no DNA5 server or CLI has been built or run, and CI builds DNA and Protein only (the engine's unit suites, DNA5 branches included, passed once on a DNA5 build of the engine and its tests, by hand, 2026-10-07; not in CI). Known: on a DNA5 wrapped PRIMARY graph with odd k, a stored k-mer equal to its reverse complement (N at its centre between complementary flanks, e.g. `ACNGT` at k = 5) is counted and released twice |
 | `strand_stated` | boolean | `true` on BASIC: contexts carry `strand`, counts `by_strand` |
 
 ### 8.3 `limits`
@@ -438,7 +544,7 @@ releases anchors.
 | `max_anchors` | integer | effective |
 | `max_steps` | integer | effective, for the whole request |
 | `time_budget_ms` | number | effective |
-| `finalize_reserve_ms` | number | the reserve inside it |
+| `finalize_reserve_ms` | number | the reserve inside it: the floor of the time kept back from the work for the answer (§7.6) |
 | `min_information_bits` | number | the floor |
 | `max_patterns` | integer | the server's |
 | `stop_at_threshold` | boolean | as requested |
@@ -478,7 +584,8 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 | `pattern` | string | answered, engine refusal | the pattern in upper case |
 | `length` | integer | answered, engine refusal | L |
 | `information_bits` | number | answered, engine refusal | §2 |
-| `anchor_information_bits` | number \| null | answered, engine refusal | L > k: the bits of [0, k); else `null` |
+| `anchor_information_bits` | number \| null | answered, engine refusal | L > k: the bits of the anchor window P[0, k), whatever the strands searched (§7.7); else `null` |
+| `min_anchor_information_bits` | number \| null | answered, engine refusal | L > k: the bits of the least informative searched anchor window, the information floor's operand (§7.7, §7.8: P[0, k) for `forward` or a palindrome, rc(P)[0, k) — the bits of P[L − k, L) — for `reverse`, the lower of the two for `both`); else `null`. Added by the review of 2026-10-07 (§16) |
 | `error` | object (§8.9) | refusals only | `{code, message}` |
 | `mode` | string | answered | the request's mode |
 | `scope` | `"suffix"` \| `"any_offset"` \| `"long"` | answered | §7.2 |
@@ -486,7 +593,7 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 | `palindromic` | boolean | answered | P = rc(P) |
 | `counts` | object (§8.6) | answered | |
 | `work` | object (§8.7) | answered | |
-| `stop` | object \| null | answered | §7.6; `null` when the pattern's work completed |
+| `stop` | object \| null | answered | §7.6: the first stop that touched the pattern; `null` when the pattern's work completed |
 | `retrieval_complete` | boolean | answered | §7.5; the one flag that licenses an absence claim over graph contexts (never over labels) |
 | `withheld` | object \| null | answered, retrieval modes | `{reason}` (§7.5) |
 | `returned` | integer | answered, retrieval modes | the length of `results` |
@@ -548,7 +655,7 @@ An anchors count is a count with `by_strand` or `by_orientation` besides (unit `
 | field | type | meaning |
 |---|---|---|
 | `ranges_visited` | integer | range evaluations (one step each) |
-| `mask_scans` | integer | ranges whose scan of masked edges began; 0 in the common case |
+| `mask_scans` | integer | ranges whose deferred scan began (§7.6): a range's masked edges — 0 on BASIC, CANONICAL and odd-k PRIMARY graphs unless masked edges lie among the candidates — and, on an even-k wrapped PRIMARY graph, the palindrome check of each range at a palindrome-capable offset (about one per such range) |
 | `steps` | integer | every step this pattern charged |
 | `annotation_rows` | integer | increment 3, `labels: "all"`: the rows this pattern's reads returned (both steps) |
 | `annotation_units` | integer | likewise: the work units they cost (§14.4) |
@@ -598,14 +705,14 @@ It costs no step.
 | `code` | when | the slot carries |
 |---|---|---|
 | `bad_alphabet` | a character outside the kind's alphabet, or an empty pattern (the message names the first offending 0-based position) | `id`, `kind`, `error` |
-| `information_below_floor` | below the floor for its scope (§7.8) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `error` |
+| `information_below_floor` | below the floor for its scope (§7.8) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `error` |
 | `scope_unsupported` | `scope: "suffix"` on a wrapped PRIMARY graph, L ≤ k (§7.2) | as above |
 
 ### 8.10 Notes
 
 | note | meaning |
 |---|---|
-| `low_complexity_pattern` | an exact pattern that sdust flags (T = 20, W = 64, the seeder's parameters): why its counts may be large |
+| `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows |
 | `strand_unknown_canonical` | a CANONICAL or PRIMARY graph: orientations, not strands |
 | `paths_later_increment` | L > k: anchors counted, paths neither extended nor extracted |
 | `annotation_unbudgeted` | increment 3: the labels were read without the budget-aware decode (`allow_unbudgeted_annotation`): no memory bound on the reads themselves (what they returned is in the account), the deadline checked between chunks of keys |
@@ -650,12 +757,12 @@ It costs no step.
 | field | type | version 1 | meaning |
 |---|---|---|---|
 | `pattern_contract_version` | integer | 1 | §1 |
-| `available` | boolean \| null | | `true`: `/pattern` answers on this graph; `false`: it never will (`unavailable_reason`); `null`: the index is loading |
+| `available` | boolean \| null | | `true`: `/pattern` answers on this graph; `false`: not on this graph as loaded (`unavailable_reason`): `mask_required` clears when the server is restarted after the mask exists (or with `--pattern-build-mask`), `multi_graph_later_increment` with the increment that serves multi-graph servers; the other reasons are permanent for this graph; `null`: the index is loading |
 | `unavailable_reason` | string \| null | | `mask_required`, `representation_unsupported`, `primary_unwrapped`, `alphabet_unsupported`, `multi_graph_later_increment`; `null` when available or loading |
 | `modes` | list | `["count", "all_or_count", "partial"]` | §7.5 |
 | `default_mode` | string | `"all_or_count"` | an omitted `mode` |
 | `projections` | list | `["none", "all"]` | the `output.labels` values served **now**; gate label projections on this list (`"all"` since increment 3; `["none"]` before) |
-| `default_projection` | string | `"none"` | an omitted `output.labels` (§1) |
+| `default_projection` | string | `"none"` | an omitted `output.labels`; frozen for version 1 (§1) |
 | `projections_later_increment` | list | `["predicate_only"]` | refused with `later_increment` today (`["all", "predicate_only"]` before increment 3) |
 | `default_occurrences` | boolean | `true` | increment 3: an omitted `output.occurrences` with `labels: "all"` |
 | `kinds` | list | `["dna", "iupac"]` | pattern kinds served |
@@ -672,12 +779,12 @@ It costs no step.
 | `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label` |
 | `default_time_budget_ms` | number | 60,000 | the budget of a request that names none, below `caps.time_budget_ms` |
 | `finalize_reserve_ms` | number | 250 | §7.6 |
-| `caps_rule` | string | | the clamp rule in prose |
+| `caps_rule` | string | | in prose: the clamp rule (which caps are request fields' maxima, `max_patterns` and `min_information_bits`) and the rule of the time kept back for the answer with the delivery rates in force (§7.6) |
 | `graph_mode` | string \| null | | `basic`, `canonical`, `primary` |
 | `k` | integer \| null | | |
-| `alphabet` | string \| null | | `$ACGT` or `$ACGTN` |
+| `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN` untested in version 1, §8.2) |
 | `strand_stated` | boolean \| null | | `true` on BASIC |
-| `mask` | string \| null | | `file`: the `.edgemask` loaded beside the graph; `built_at_load`: built in memory at start-up (`--pattern-build-mask`, milestone 1b); `absent`: the route answers `mask_required` |
+| `mask` | string \| null | | `file`: the `.edgemask` loaded beside the graph, trusted as written (below); `built_at_load`: built in memory at start-up (`--pattern-build-mask`, milestone 1b); `absent`: the route answers `mask_required` |
 | `placement` | string \| null | | the placement `output.labels: "all"` gives on this index (`record`, `global`, `none`, `none_canonical`, §14.3; before increment 3: what a later increment could give) |
 | `support` | string \| null | | the best per-label support of a path (`record_verified`, `label_intersection`; milestone 4); a context of L ≤ k has `kmer` |
 | `annotation` | string \| null | | `budgeted` (row-diff with budgeted decode) or `unbudgeted`: the reads of `output.labels: "all"` (§14.4; `unbudgeted` needs `allow_unbudgeted_annotation`); `count` and `none` never read it |
@@ -685,6 +792,21 @@ It costs no step.
 The graph fields (`graph_mode` to `annotation`) are `null` while the index loads; when the graph is not
 recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; `placement`, `support` and
 `annotation` are `null` if the annotation could not be described.
+
+**The mask, for a client** (the operator's side is design §4):
+- It is read when the graph is loaded: an `.edgemask` written beside a running server changes nothing until
+  the server restarts.
+- Once a graph has its `.edgemask`, every loader reads it, on every route: node ids, rows and what `/search`,
+  `/align`, `/resolve` and `/traverse` find stay as they were, but `GET /stats` `graph.nodes` becomes the
+  graph's k-mer count (the dummy edges no longer counted), and on a server with `--index-manifest` the index
+  identity `index_fp`, which every route states, changes (the manifest must be regenerated to list the file; a
+  `.bloom` beside the graph is then loaded and listed too). A client that keys anything on `index_fp` sees a new
+  index. `--pattern-build-mask` writes no file: `index_fp` stays, `/stats` changes, and `mask: built_at_load`
+  tells the two apart.
+- A `file` mask is trusted as written: it is not checked at load. `metagraph extend` on a masked graph writes a
+  mask that marks the new dummy edges valid, and the counts on such a graph can be overstated, `exact`
+  included; an extended graph must be masked again (`metagraph transform --mask-dummy --force`) before it is
+  served. A mask written by `build --mask-dummy`, `transform --mask-dummy` or `--pattern-build-mask` is correct.
 
 <!-- schema: capabilities_multi -->
 | field | type | meaning |
@@ -697,7 +819,8 @@ recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; 
 
 - No block, or a version below 1: no pattern search on this host (`pattern_unsupported` on the service).
 - `available: false`: the host has the route but not for this graph; `unavailable_reason` says why (the
-  `mask_required` host becomes available once its operator creates the mask).
+  `mask_required` host becomes available once its operator creates the mask and restarts the server: re-probe
+  after a restart).
 - `available: null`: ask again after the load.
 - Offer a projection, kind or scope only when its list has it; send values within `caps`.
 - `output.labels: "all"`: offer it where `projections` has it; on `annotation: "unbudgeted"` it needs
@@ -711,28 +834,45 @@ recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; 
 `scripts/traversal/pattern_fixtures.py` from a server of this build on copies of the mini index
 (`build/mini_refseq`, a BASIC index of refseq33m's format at k = 31: its graph given the `.edgemask` by
 `metagraph transform --mask-dummy`, as a host gets it; served as built for `mask: absent`, and with
-`--pattern-build-mask` for `mask: built_at_load`; served with `--no-coord-mapping` for `placement: global`), and a
-PRIMARY index of two of its record files (a column annotation: `annotation: unbudgeted`). `index.json` states each
+`--pattern-build-mask` for `mask: built_at_load`; served with `--no-coord-mapping` for `placement: global`), a
+PRIMARY index of two of its record files (a column annotation: `annotation: unbudgeted`), and a hash graph of one
+of its records (a graph the engine does not recognise: `representation_unsupported`). `index.json` states each
 fixture's server, method, path and status; `README.md` says in one line what each shows. They cover the
 capabilities on both routes (each `mask` value: `file`, `built_at_load`, `absent`; multi-graph; PRIMARY), each
 mode, each `withheld` and `cut` reason, both scopes and every strand setting, IUPAC patterns, a palindrome, a
-pattern longer than k, the three error slots, the clamps, and every whole-request refusal (two 503 bodies are
-hand-made: no server produces them on demand). Increment 3 adds `labels_all` (record placement within the
-threshold: 9 columns, 42 placed occurrences of the blaNDM-1 forward primer, equal to a scan of the mini's FASTA),
+pattern longer than k, the three error slots, the clamps, the relation `bounds` with a stop in a deferred scan
+(`max_steps_bounds`, `max_steps_bounds_withheld`), a `max_steps` stop whose release then met the work time
+(`max_steps_then_time`: `stop` keeps the first stop, the time shows as `cut: time` and `time_limited`, §7.6), a
+graph the engine does not recognise
+(`*_representation_unsupported` on both capabilities routes, `representation_unsupported`), and every
+whole-request refusal a server of this build gives (two 503 bodies are hand-made: no server produces them on
+demand; their `request.json` is illustrative, and a live server answers it 200). Two codes have no fixture: `primary_unwrapped` (`server_query` and the CLI always wrap a PRIMARY
+graph; only an embedding can reach it) and `alphabet_unsupported` (no graph of another alphabet loads in this
+build). Increment 3 adds `labels_all` (record placement within the threshold: 9 columns, 42 placed occurrences
+of the blaNDM-1 forward primer, equal to a scan of the mini's FASTA),
 `labels_all_withheld` (above the threshold: nothing read), `labels_all_truncated` and
 `labels_all_truncated_partial` (`max_labels_per_anchor` 2), `labels_all_partial` (the label and occurrence cuts),
+`labels_all_work_budget` and `labels_all_work_budget_partial` (a stop at `max_annotation_work`),
 `labels_all_global` (no record mapping), `labels_all_count` (mode `count`: `annotation_not_read`),
 `annotation_unbudgeted` (the 400 on the PRIMARY index's column annotation) and `labels_all_unbudgeted` (the same
 with `allow_unbudgeted_annotation`); `later_increment_labels` now asks for `"predicate_only"` (`"all"` is served).
 
 - `pattern_fixtures.py --check` regenerates them and compares: bodies byte for byte, except
   `timing.elapsed_ms` (and every other `timing` value of an entry: `label_discovery_ms`, `placement_ms`),
-  `server_instance` and the counts and work of a `time_limited` entry, which vary between runs. The labelled
-  answers' `work.annotation_units` and `work.memory_bytes` are deterministic (§14.4) and compared.
+  `server_instance` and the counts and work of the first `time_limited` entry of an answer (and, when the
+  clock cut its release, its `returned` and `results`), which vary between runs (the later ones, stopped by the
+  same budget, are compared as they are). The labelled answers'
+  `work.annotation_units` and `work.memory_bytes` are deterministic (§14.4) and compared.
 - `api/python/tests/test_pattern_fixtures.py` validates every answer against the field lists of §§6, 8 and 10
-  (the tables marked `schema`), so that this document, the fixtures and the server cannot drift apart silently.
+  (the tables marked `schema`) and the rules that tie the fields together (sums and relations, one budget per
+  request, clamps, the floor, a complete list against its counts), so that this document, the fixtures and
+  the server cannot drift apart silently.
 - `integration_tests/test_pattern.py` (`TestPatternFixtures`) runs `--check` with the binary under test, so a
-  build whose `/pattern` or capabilities answers differ from the stored bodies fails its own integration tests.
+  build whose `/pattern` or capabilities answers differ from the stored bodies fails its own integration tests,
+  on a machine with `build/mini_refseq` (or `$METAGRAPH_MINI_REFSEQ`). CI has neither the mini index nor a base
+  binary: of these checks it runs only `TestPatternFixtureBodies` (the body validation above); the classes that
+  need them are skipped there (and counted as passed by `main.py`), and `$METAGRAPH_REQUIRE_GUARDS=1` makes such
+  a run fail instead of skip.
 
 ## 12. What changes in later increments
 
@@ -758,13 +898,13 @@ The design's §7 is a draft of the full contract; milestone 1 built the followin
 
 | design | built and frozen | why |
 |---|---|---|
-| §7.1: `output.labels` defaults to `all` | the default is the capabilities' `default_projection`, `"none"` in milestone 1 | `all` is not served; the owner's instruction for milestone 1. Stated in every answer (`output`) and in the capabilities; clients send it explicitly (§1) |
-| §7.2: `by_offset`, `by_strand` and `suffix` as plain numbers in the example | full counts `{value, relation, unit}` | every count carries its relation (design §3); a per-offset count can be `exact` while the total is `at_least` |
+| §7.1: `output.labels` defaults to `all` | the default is the capabilities' `default_projection`, frozen at `"none"` for version 1 (a default of `"all"` would raise the version) | `all` was not served in milestone 1 (the owner's instruction), and an omitted field must keep its meaning (the owner's decision of 2026-10-07). Stated in every answer (`output`) and in the capabilities; clients send it explicitly (§1) |
+| §7.2: `by_offset`, `by_strand` and `suffix` as plain numbers in the example | full counts `{value, relation, unit}` | every count carries its relation (design §3): a per-strand count can be `exact` while the total is `at_least`, a per-offset count `exact` while the total is `bounds`; after a stop in discovery every per-offset count is `at_least` (§7.4) |
 | §5.2, §5.3: `withheld: <reason>`, `stop: {phase, shard}` | `withheld: {reason}`, `stop: {phase, reason}` | objects leave room for the shard (milestone 6); the stop's reason is what an agent turns |
 | §7.2: no `returned`, no `cut` | `returned` and `cut: {reason}` in the retrieval modes | `partial` states every cut (design §5.2) |
 | §7.2: identity per result (`graph`, `index_fp`, `release`) | one top-level `index` | single graph; per-result identity arrives with milestone 6 |
-| §7.2: `placement` per entry | not in the entry; the capabilities' `placement` states what a later increment could give | nothing is placed in version 1 |
-| §7.2: `work.annotation_rows`, `work.memory_bytes`; `timing.phase1_ms`, … | `work: {ranges_visited, mask_scans, steps}`; `timing: {elapsed_ms}` | no annotation read and no memory account in version 1 |
+| §7.2: `placement` per entry | in the entry only with `output.labels: "all"` (increment 3, §14.3); the capabilities' `placement` states what this index gives | nothing is placed without labels |
+| §7.2: `work.annotation_rows`, `work.memory_bytes`; `timing.phase1_ms`, … | `work: {ranges_visited, mask_scans, steps}`, with `output.labels: "all"` also `annotation_rows`, `annotation_units`, `memory_bytes` (increment 3); `timing: {elapsed_ms}`, with labels also `label_discovery_ms`, `placement_ms` | no annotation read and no memory account on the label-free path (its memory is bounded by the caps, §7.6) |
 | §7.2: `strands: ["+", "-"]` on every index | strand symbols on BASIC, orientation names elsewhere | no strand is known on canonical indexes (design §3) |
 | §5.5: contexts in BOSS edge order, then offset | then orientation | an IUPAC pattern and its reverse complement can share one (k-mer, offset) |
 | §7.1: whole-request 400s named generically | codes `invalid_request`, `later_increment`, `resident_only`, `mask_required`, the graph reasons; 503 `deadline` | one envelope `{error, code}` |
@@ -772,6 +912,8 @@ The design's §7 is a draft of the full contract; milestone 1 built the followin
 | §7.3: the block's fields | as §10.2, plus `available`, `unavailable_reason`, `default_*`, `*_later_increment`, `caps_rule`, `long_patterns` | a client gates on what is served now and sees what is coming |
 | §4: `mask: file \| built_at_load \| absent` | as designed: `file` \| `absent` at `b570800d`, `built_at_load` added by milestone 1b | `--pattern-build-mask` landed with 1b, no field changed |
 | §5.3: `max_steps` per shard | per request (one shard) | single graph; per-shard shares with milestone 6 |
+| §5.3: the floor exempts "an exact `dna` `suffix` count" | an exact pattern of either kind (every position one base: an `iupac` string without ambiguity codes too) in `suffix` scope (§7.8) | the cost is the same one range whatever the kind |
+| §3, §5.3: the anchor window [0, k) of a pattern longer than k | each searched orientation's window, the least informative one gating and stated in `min_anchor_information_bits` (`anchor_information_bits` stays P[0, k)'s; §7.7) | the reverse orientation anchors on P's last k positions (review of 2026-10-07) |
 | §7.2 (increment 3): a label's placed occurrences in `occurrences` | `occurrence_list` (the list) beside `occurrences` (its count `{value, relation, unit}`, as in `by_label`) | one name, one type: `occurrences` is a count everywhere in the answer |
 | §7.2 (increment 3): `column` and `properties` by `get_label_as_json` | `column` is the annotation column's label as stored; no `properties` | the label is not parsed (a label with `;` or `=` stays whole); a later version may add `properties` |
 | §7.2 (increment 3): `by_label` `contexts`, `contexts_suffix` as numbers | counts `{value, relation, unit: graph_contexts}` | a label's count is `at_least` when a row was cut or refused |
@@ -904,10 +1046,13 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
   at the widest row read so far; the budget is checked before each read, so the last one can pass it by about a
   row. The stop: `stop {label_discovery | placement, max_annotation_work}`, the rows not read `labels_status:
   "not_read"`, `all_or_count` withheld (`annotation_budget`); the request's later patterns read nothing.
-- **The deadline.** The reads are work (§7.6): the work time is checked before each read and, within a read,
-  between its chunks (paced at `--traverse-chunk-target-ms`, as `/traverse`'s reads; an interrupted read returns
-  nothing). A time stop: `stop {label_discovery | placement, time}`, `determinism: time_limited`, `all_or_count`
-  withheld (`deadline`), `partial` returns what was read; the later patterns answer as after any time stop (§7.6).
+- **The deadline.** The reads and the output of the labels are work (§7.6): the work time is checked before each
+  read and, within a read, between its chunks (paced at `--traverse-chunk-target-ms`, as `/traverse`'s reads; an
+  interrupted read returns nothing), and before the labels of each context are built for the answer, with the
+  labels about to be built counted in the estimate E of §7.6. A time stop of the reads: `stop {label_discovery |
+  placement, time}`; of the output: `stop {output, time}`. Either way `determinism: time_limited`, `all_or_count`
+  withheld (`deadline`), and `partial` returns what was read, a context whose labels were read but not built
+  with `labels_status: "output_budget"`; the later patterns answer as after any time stop (§7.6).
 - **Determinism.** Apart from `timing` and a time stop, the labels, the cuts, the stops, `annotation_units` and
   `memory_bytes` depend only on the index and the request.
 
@@ -925,9 +1070,9 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
 
 - **Each result** (a released context) gains `support: "kmer"`, `labels_status`, `labels_total` and `labels`.
   `labels_status`: `complete` (every label of the row), `truncated` (§14.2), `refused` (§14.4), `not_read` (a stop
-  came first, or `all_or_count` stopped reading at a refused row), `output_budget` (read, but the account could
-  not hold its labels in the answer). `labels` is `null` unless the row was read and held, and then lists the
-  context's labels in label order.
+  came first, or `all_or_count` stopped reading at a refused row), `output_budget` (read, but the answer could
+  not hold its labels: the memory account, or with `stop {output, time}` the time to write them). `labels` is
+  `null` unless the row was read and held, and then lists the context's labels in label order.
 - **Label order** (design §5.5): (contexts desc, column asc), over the returned contexts — `by_label`'s order.
 - **`partial`'s lists.** `max_labels`: `by_label` and every result list the first `max_labels` labels of the label
   order (`labels_cut`); the counts count all of them. `max_occurrences_per_label`: each listed label lists the
@@ -1060,3 +1205,93 @@ Contract version 1 stays: every change below adds (§1).
   capabilities bodies of single-graph servers (the additions above), `later_increment_labels` (now
   `"predicate_only"`), `README.md`, `index.json`; `--check` blanks every `timing` value of an entry. Every other
   fixture is unchanged.
+
+## 16. Changed after the review of 2026-10-07
+
+The critical review of milestones 1 and 1b (2026-10-07) found no false count in a configuration a host can
+reach, but budgets that did not hold, limitations left unstated and sentences of this document that the code
+did not keep. The fixes below change answers; the finding ids are the review's. This document was corrected
+where it overstated the build (§§1–4, 6, 7.4–7.10, 8, 10, 11, 13, 14): every such sentence now says what the code
+does. Unchanged: `/search`, `/align`, `/traverse`, `/resolve` without `bounds.time_budget_ms`, `column_labels`
+and `/stats` (byte for byte apart from `timing`), the alignment, and every answer not named below.
+
+**Contract version 1 stays: additions only.**
+- **New field** `min_anchor_information_bits` (every answered entry and every `information_below_floor` or
+  `scope_unsupported` slot; `null` for L ≤ k): the bits of the least informative searched anchor window, the one
+  the information floor now gates on (§7.7, §7.8; X-GUARANTEES-01). `anchor_information_bits` keeps its meaning,
+  the bits of P[0, k), whatever the strands (the owner's decision of 2026-10-07). The two differ only with
+  `strands: "reverse"`, or `"both"` when P's last k positions carry fewer bits than its first k. Every fixture
+  answer with a pattern entry carries the new field; no other value of theirs changed.
+- `labels_status: "output_budget"` now also covers a time stop in the output of the labels (`stop {output,
+  time}`), where it meant the memory account alone (X-EFFICIENCY-04); `stop` tells the two apart. The owner
+  accepted this as within version 1 (2026-10-07).
+
+**Answers that change:**
+- **The floor for L > k** (X-GUARANTEES-01): with `strands` `both` (the default) or `reverse`, a pattern whose
+  reverse window is below the floor is refused (`information_below_floor`, the message naming the reverse
+  orientation's window, `min_anchor_information_bits` its bits); before, it ran, often to `max_steps` (P + N^31
+  at k = 31). With `strands: "reverse"`, N^k + P is answered; before, it was refused. The refusal of a
+  low-information reverse window stays (the owner's decision of 2026-10-07).
+- **N runs** (X-EFFICIENCY-01): on `$ACGT` graphs a run of N at the start of a searched window is not searched
+  (§7.8): `work.steps` and `ranges_visited` of such patterns fall (N^12 + `TACAGAGCGACG` on the mini: 69 steps,
+  was 20,151,974); counts and results are the same when `exact`, but under a step or time stop the `at_least`
+  and `bounds` values differ (more is found per step). The base searches run cheapest first: under a stop a
+  degenerate pattern can now answer its cheap orientation `exact` and the other `at_least`, where the forward one
+  was `at_least` and the reverse one `unknown`; `strands` still lists the plan's order.
+- **`all_or_count`, the delivery to the route** (R1-01, X-EFFICIENCY-02, C1-02, D1-06, E4-02,
+  X-GUARANTEES-03): when the work time passes while the released contexts are handed to the route, the answer is
+  200 with the `exact` counts, `withheld: deadline`, `returned` 0, `results: []`, `stop {extraction, time}`,
+  `determinism: time_limited`; before, a complete answer past the work time or a 503.
+- **`partial`, the release** (E4-03): a time stop in the release comes within 64 contexts handed to the route;
+  before, within 4,096 examined edges.
+- **`partial`, what is kept** (E4-01, X-EFFICIENCY-03, X-GUARANTEES-02): only the descriptors that can be
+  released (§7.6, "Memory"), and the release's set-up reads the clock: requests whose set-up overran the
+  deadline (a 503) now answer 200, complete or `cut: time`; the peak memory of a broad pattern falls (AC at
+  `max_contexts` 1 on the masked mini, floor 0: 1,660 MB to 58 MB). Lists and work are otherwise unchanged.
+- **The time kept back for the answer** (X-EFFICIENCY-04, R1-04): the work stops earlier by the estimate E of
+  §7.6. A retrieval request that buffered many results and used to end in a 503 now answers 200 with a time stop;
+  the pattern it stopped, and every pattern after it, can report `at_least` or `unknown` counts where the work
+  would have gone on to `exact`; `partial` says `cut: time`, `all_or_count` `withheld: deadline`. With
+  `labels: "all"` a time stop of the reads can come earlier, and the output of the labels can stop by time
+  (`stop {output, time}`; §14.4). In mode `count`, and for answers with few results, E is a few ms.
+- **`stop_at_threshold` on an even-k wrapped PRIMARY graph** (E2-02): the running lower bound adds the two base
+  searches less the possible palindromes, where it took the larger: the stop fires earlier, or at all. Answers
+  that were `exact` above the threshold with no stop can now be `at_least` with `stop {discovery, max_contexts}`
+  and `withheld: threshold_crossed` (`cut: max_contexts` in `partial`), with less work. No other graph mode
+  changes.
+- **`partial` on an even-k wrapped PRIMARY graph after a discovery stop** (E2-01): the palindromic stored k-mers
+  only the reverse-complement search reached are released too: more contexts, so that the list holds every
+  context the counts credit unless `max_contexts` cuts it.
+- **A release that disagrees with its count** (T1-02, E2-04): `all_or_count` fails the request (§6) instead of
+  answering `retrieval_complete: true` with fewer results; seen only with a mask that breaks the engine's
+  assumption (§10.2).
+- **A client that left, or a shutdown** (R2-02, X-CONCURRENCY-01, the owner's decision): nothing is written
+  (§3); before, the request ran to its stop and wrote into the closed connection. A half-close counts as gone.
+- **Request parsing** (R1-02, R1-03, R2-01): bodies the server answered 200 — with a comment, a trailing comma,
+  content after the value, or a duplicated member name (whose last value won silently: `max_steps` 1 then 100000
+  gave 100000, unlisted) — and bodies nested deeper than 1,000 (a 400 without a code) are now 400
+  `invalid_request`. No fixture's request changes. The CLI answers every request file: one that fails
+  unexpectedly gets `{"error": …}` and the run goes on (it aborted before).
+- **Time caps** (R1-05): `server_query` refuses to start with `--pattern-max-time-ms` above 899,000 (§3).
+- **Messages** (prose, §1): `mask_required` adds "; the mask is read when the graph is loaded: restart the server
+  once the .edgemask exists" (C1-06); the 503 `deadline` message states a fractional budget as given
+  ("1000.5 ms", was "1000 ms"; T3-07); a reverse window below the floor is named (above).
+- **Capabilities** (both routes): `caps_rule` rewritten (R2-04, X-EFFICIENCY-04): it names the nine clamped
+  caps, says that `max_patterns` and `min_information_bits` are not request fields' maxima, and states the rule
+  of §7.6 with the delivery rates in force. No field is added or removed.
+- **Server flags**: `--pattern-delivery-build-mbps` (10) and `--pattern-delivery-compress-mbps` (50) are new;
+  `--pattern-finalize-ms` is now the floor of the time kept back (§4.5).
+- **Fixtures** (§11): new `capabilities_representation_unsupported`,
+  `traverse_capabilities_representation_unsupported`, `representation_unsupported`, `max_steps_bounds`,
+  `max_steps_bounds_withheld`, `max_steps_then_time` (C1-03: `stop` keeping a `max_steps` stop, the release's
+  time shown as `cut: time` and `time_limited`, and the sticky stop after it); every pattern entry gains
+  `min_anchor_information_bits`; changed: the capabilities bodies (`caps_rule`), `mask_required` (the message),
+  `deadline` and `deadline_partial` (the heavy pattern is now `GG` + N^19 + `TTGGCGATCT`, the old one having
+  become cheap; at L = 31 its `by_offset` has one key), `README.md`, `index.json`; `--check` now compares every
+  `time_limited` entry after an answer's first, and blanks the `returned` and `results` of that first entry when
+  the clock cut its release (`max_steps_then_time`).
+- **No answer changes** (stated for completeness): the deleted per-offset completion rule was never in effect
+  (T1-04: no offset was `exact` after a discovery stop before either); the dummy-edge mask is built faster with
+  the same bytes (D1-02, M1-02); an `.edgemask` that exists but cannot be opened is now named in the log, by
+  the loader's warning and by the start-up note (which said "no dummy-edge mask" and named a remedy `transform`
+  refuses; M1-03).
