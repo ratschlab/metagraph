@@ -1,0 +1,4 @@
+{
+ "code": "annotation_unbudgeted",
+ "error": "pattern: output.labels \"all\" reads the annotation, and this index's annotation has no budget-aware decode (only the row-diff family has one): its reads would run without a memory bound. Set allow_unbudgeted_annotation: true to read it anyway (the answer then says annotation: unbudgeted), or ask for output.labels \"none\" or mode count"
+}

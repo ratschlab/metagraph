@@ -1,5 +1,6 @@
 """The POST /pattern fixture bodies (data/traverse/pattern/, written by
-scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, contract version 1:
+scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, contract version 1
+(milestone 1, and increment 3's output.labels "all", SPEC §14):
 
   - the field lists: every table of the SPEC marked `<!-- schema: NAME -->` names exactly the
     fields SCHEMA[NAME] below knows, so that the SPEC and this check cannot drift apart;
@@ -42,19 +43,28 @@ UNITS = ('graph_contexts', 'anchors', 'paths', 'placed_occurrences', 'labels')
 GRAPH_MODES = ('basic', 'canonical', 'primary')
 STRAND_SYMBOLS = {'forward': '+', 'reverse': '-', 'palindromic': '='}
 STRAND_KEYS = {'+': '+', '-': '-', '=': 'both'}
-STOP_PHASES = ('discovery', 'mask_scan', 'extraction')
-STOP_REASONS = ('max_steps', 'time', 'max_contexts', 'max_anchors')
+# increment 3 (output.labels "all", SPEC §14) adds the annotation phases and reasons
+ANNOTATION_PHASES = ('label_discovery', 'placement', 'output')
+STOP_PHASES = ('discovery', 'mask_scan', 'extraction') + ANNOTATION_PHASES
+STOP_REASONS = ('max_steps', 'time', 'max_contexts', 'max_anchors', 'max_annotation_work',
+                'max_memory')
 WITHHELD = ('count_above_threshold', 'threshold_crossed', 'discovery_budget', 'deadline',
-            'paths_later_increment')
-CUT = ('max_contexts', 'max_steps', 'time', 'max_anchors')
-NOTES = ('low_complexity_pattern', 'strand_unknown_canonical', 'paths_later_increment')
+            'paths_later_increment', 'annotation_budget', 'anchor_labels_truncated',
+            'output_budget')
+CUT = ('max_contexts', 'max_steps', 'time', 'max_anchors', 'max_memory')
+NOTES = ('low_complexity_pattern', 'strand_unknown_canonical', 'paths_later_increment',
+         'annotation_unbudgeted', 'record_bounds_unknown', 'annotation_not_read')
 SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported')
 REFUSALS = ('invalid_request', 'later_increment', 'resident_only', 'mask_required',
-            'representation_unsupported', 'primary_unwrapped', 'alphabet_unsupported', 'deadline')
+            'representation_unsupported', 'primary_unwrapped', 'alphabet_unsupported', 'deadline',
+            'annotation_unbudgeted')
 UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped',
                'alphabet_unsupported', 'multi_graph_later_increment')
 MASKS = ('file', 'built_at_load', 'absent')
 PLACEMENTS = ('record', 'global', 'none', 'none_canonical')
+# an entry's placement (increment 3): the index's, or not_requested (output.occurrences false)
+ENTRY_PLACEMENTS = PLACEMENTS + ('not_requested',)
+LABELS_STATUS = ('complete', 'truncated', 'refused', 'not_read', 'output_budget')
 SUPPORTS = ('record_verified', 'label_intersection')
 ANNOTATIONS = ('budgeted', 'unbudgeted')
 ORIENTATION_RANK = {'+': 0, '-': 1, '=': 2, 'forward': 0, 'reverse': 1, 'palindromic': 2}
@@ -63,7 +73,9 @@ ORIENTATION_RANK = {'+': 0, '-': 1, '=': 2, 'forward': 0, 'reverse': 1, 'palindr
 # decide when each is present; this is the list the SPEC's tables must name exactly.
 SCHEMA = {
     'request': ['patterns', 'mode', 'scope', 'strands', 'stop_at_threshold', 'max_contexts',
-                'max_anchors', 'max_steps', 'time_budget_ms', 'output'],
+                'max_anchors', 'max_steps', 'time_budget_ms', 'output',
+                'max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb', 'max_labels',
+                'max_occurrences_per_label', 'allow_unbudgeted_annotation'],
     'request_pattern': ['id', 'dna', 'iupac'],
     'request_output': ['labels', 'occurrences', 'paths'],
     'refusal': ['error', 'code'],
@@ -73,21 +85,26 @@ SCHEMA = {
               'strand_stated'],
     'limits': ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms',
                'finalize_reserve_ms', 'min_information_bits', 'max_patterns',
-               'stop_at_threshold', 'clamped'],
+               'stop_at_threshold', 'max_labels_per_anchor', 'max_annotation_work',
+               'max_memory_mb', 'max_labels', 'max_occurrences_per_label',
+               'allow_unbudgeted_annotation', 'clamped'],
     'clamped': ['field', 'requested', 'effective'],
-    'timing': ['elapsed_ms'],
+    'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms'],
     'entry': ['id', 'kind', 'pattern', 'length', 'information_bits', 'anchor_information_bits',
               'error', 'mode', 'scope', 'strands', 'palindromic', 'counts', 'work', 'stop',
               'retrieval_complete', 'withheld', 'returned', 'cut', 'results', 'absence_scope',
-              'determinism', 'notes', 'timing'],
+              'determinism', 'notes', 'timing', 'placement', 'annotation', 'by_label',
+              'rows_refused', 'anchors_truncated', 'labels_cut', 'occurrences_cut'],
     'counts': ['contexts', 'anchors', 'paths', 'labels', 'occurrences'],
     'count': ['value', 'relation', 'unit', 'lower', 'upper'],
     'contexts_count': ['suffix', 'by_offset', 'by_strand', 'by_orientation'],
     'anchors_count': ['by_strand', 'by_orientation'],
-    'work': ['ranges_visited', 'mask_scans', 'steps'],
+    'work': ['ranges_visited', 'mask_scans', 'steps', 'annotation_rows', 'annotation_units',
+             'memory_bytes'],
     'stop': ['phase', 'reason'],
     'reason': ['reason'],
-    'result': ['kmer', 'instance', 'offset', 'strand', 'orientation', 'node', 'row'],
+    'result': ['kmer', 'instance', 'offset', 'strand', 'orientation', 'node', 'row', 'support',
+               'labels_status', 'labels_total', 'labels'],
     'error': ['code', 'message'],
     'capabilities': ['pattern_contract_version', 'available', 'unavailable_reason', 'modes',
                      'default_mode', 'projections', 'default_projection',
@@ -96,8 +113,17 @@ SCHEMA = {
                      'strands', 'default_strands', 'graph_cleaned', 'records_shorter_than_k',
                      'resident_only', 'caps', 'default_time_budget_ms', 'finalize_reserve_ms',
                      'caps_rule', 'graph_mode', 'k', 'alphabet', 'strand_stated', 'mask',
-                     'placement', 'support', 'annotation'],
+                     'placement', 'support', 'annotation', 'default_occurrences'],
     'capabilities_multi': ['pattern_contract_version', 'available', 'unavailable_reason'],
+    # increment 3 (SPEC §14)
+    'anchor_truncated': ['kmer', 'row', 'cap', 'total'],
+    'occurrence': ['seq_id', 'record', 'strand', 'nt_coords', 'nt_length'],
+    'occurrence_global': ['kmer_coord', 'offset', 'strand'],
+    'row_refused': ['kmer', 'row', 'phase', 'reason', 'needed_bytes', 'available_bytes'],
+    'label': ['column', 'support', 'occurrences', 'occurrence_list'],
+    'by_label': ['graph', 'column', 'contexts', 'contexts_suffix', 'occurrences'],
+    'labels_cut': ['reason', 'returned'],
+    'occurrences_cut': ['reason', 'labels'],
 }
 ENTRY_DESCRIPTION = ['id', 'kind', 'pattern', 'length', 'information_bits',
                      'anchor_information_bits']
@@ -105,8 +131,13 @@ ENTRY_ANSWERED = ENTRY_DESCRIPTION + ['mode', 'scope', 'strands', 'palindromic',
                                       'work', 'stop', 'retrieval_complete', 'absence_scope',
                                       'determinism', 'notes', 'timing']
 ENTRY_RETRIEVAL = ['withheld', 'returned', 'cut', 'results']
+# output.labels "all" in a retrieval mode (increment 3)
+ENTRY_LABELS = ['placement', 'annotation', 'by_label', 'rows_refused', 'anchors_truncated',
+                'labels_cut', 'occurrences_cut']
+LIMITS_LABELS = ['max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb', 'max_labels',
+                 'max_occurrences_per_label']
 CAPS = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms', 'min_information_bits',
-        'max_patterns']
+        'max_patterns'] + LIMITS_LABELS
 
 
 def load(*path):
@@ -225,8 +256,14 @@ class Checker:
         self.ok(a['pattern_contract_version'] == 1, 'pattern_contract_version')
         mode = request.get('mode', 'all_or_count')
         self.ok(a['mode'] == mode, 'mode', f'{a["mode"]!r}, the request asks {mode!r}')
+        asked = request.get('output', {})
+        labelled = mode != 'count' and asked.get('labels') == 'all'
         if mode == 'count':
             self.ok(a['output'] is None, 'output', 'null in mode count')
+        elif labelled:
+            self.ok(a['output'] == {'labels': 'all',
+                                    'occurrences': asked.get('occurrences', True)},
+                    'output', repr(a['output']))
         else:
             self.ok(a['output'] == {'labels': 'none'}, 'output', repr(a['output']))
 
@@ -242,7 +279,16 @@ class Checker:
                 'index.strand_stated', 'true exactly on basic graphs')
 
         limits = a['limits']
-        self.keys(limits, SCHEMA['limits'], 'limits')
+        # the annotation limits only in the answers that read annotation (increment 3)
+        self.keys(limits, [f for f in SCHEMA['limits']
+                           if labelled or f not in LIMITS_LABELS + ['allow_unbudgeted_annotation']],
+                  'limits')
+        if labelled:
+            for f in LIMITS_LABELS:
+                self.ok(is_int(limits[f]) and limits[f] >= 0, 'limits.' + f)
+            self.ok(limits['allow_unbudgeted_annotation']
+                    is request.get('allow_unbudgeted_annotation', False),
+                    'limits.allow_unbudgeted_annotation')
         for f in ('max_contexts', 'max_anchors', 'max_steps', 'max_patterns'):
             self.ok(is_int(limits[f]) and limits[f] >= 0, 'limits.' + f)
         self.ok(limits['max_steps'] >= 1, 'limits.max_steps')
@@ -253,7 +299,7 @@ class Checker:
         self.ok(limits['stop_at_threshold'] is request.get('stop_at_threshold', False),
                 'limits.stop_at_threshold')
         self.ok(isinstance(limits['clamped'], list), 'limits.clamped')
-        order = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms']
+        order = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms'] + LIMITS_LABELS
         clamped = []
         for i, c in enumerate(limits['clamped']):
             path = f'limits.clamped[{i}]'
@@ -262,15 +308,17 @@ class Checker:
             self.ok(is_num(c['requested']) and is_num(c['effective'])
                     and c['requested'] > c['effective'], path, 'requested above effective')
             self.ok(request.get(c['field']) == c['requested'], path, 'the value asked for')
-            self.ok(limits[c['field']] == c['effective'], path, 'the effective limit')
+            if c['field'] in limits:
+                self.ok(limits[c['field']] == c['effective'], path, 'the effective limit')
             clamped.append(c['field'])
         self.ok(clamped == [f for f in order if f in clamped], 'limits.clamped', 'order')
-        for f in order:
+        echoed = [f for f in order if f in limits]
+        for f in echoed:
             if f in request and f not in clamped:
                 self.ok(limits[f] == request[f], 'limits.' + f, 'a value under its cap is kept')
         if capabilities is not None:
             caps = capabilities['caps']
-            for f in order:
+            for f in echoed:
                 if f not in request:
                     expected = capabilities['default_time_budget_ms'] \
                         if f == 'time_budget_ms' else caps[f]
@@ -288,14 +336,19 @@ class Checker:
         for i, (entry, asked) in enumerate(zip(a['patterns'], request['patterns'])):
             self.entry(entry, asked, request, a, f'patterns[{i}]')
 
-    def timing(self, t, path):
-        self.keys(t, SCHEMA['timing'], path)
-        self.ok(is_num(t['elapsed_ms']) and t['elapsed_ms'] >= 0, path + '.elapsed_ms')
+    def timing(self, t, path, labelled=False):
+        self.keys(t, SCHEMA['timing'] if labelled else ['elapsed_ms'], path)
+        for k, v in t.items():
+            self.ok(is_num(v) and v >= 0, f'{path}.{k}')
 
     def entry(self, e, asked, request, a, path):
         k = a['index']['k']
         strand_stated = a['index']['strand_stated']
         mode = a['mode']
+        labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
+        # the request named the labels (or an annotation field) and this answer reads none
+        named = (request.get('output', {}).get('labels') == 'all'
+                 or any(f in request for f in LIMITS_LABELS + ['allow_unbudgeted_annotation']))
         self.ok(set(e) <= set(SCHEMA['entry']), path, f'fields outside the SPEC: '
                 f'{sorted(set(e) - set(SCHEMA["entry"]))}')
         self.ok(e['id'] == asked.get('id'), path + '.id', 'echoed')
@@ -322,7 +375,8 @@ class Checker:
                         'refused above the floor')
             return
 
-        expected = ENTRY_ANSWERED + (ENTRY_RETRIEVAL if mode != 'count' else [])
+        expected = ENTRY_ANSWERED + (ENTRY_RETRIEVAL if mode != 'count' else []) \
+            + (ENTRY_LABELS if labelled else [])
         self.keys(e, expected, path)
         self.description(e, text, k, path)
         self.ok(e['mode'] == mode, path + '.mode')
@@ -377,12 +431,16 @@ class Checker:
             self.by_orientation(c, e, strand_stated, 'graph_contexts', path + '.counts.contexts')
             total = c
         for f, unit in (('labels', 'labels'), ('occurrences', 'placed_occurrences')):
-            self.ok(counts[f] == {'value': None, 'relation': 'unknown', 'unit': unit},
-                    f'{path}.counts.{f}', 'nothing of the annotation is read in version 1')
+            if labelled:
+                self.count(counts[f], unit, f'{path}.counts.{f}')
+            else:
+                self.ok(counts[f] == {'value': None, 'relation': 'unknown', 'unit': unit},
+                        f'{path}.counts.{f}', 'no annotation is read without labels "all"')
 
         # work, stop, determinism, notes
         w = e['work']
-        self.keys(w, SCHEMA['work'], path + '.work')
+        self.keys(w, SCHEMA['work'] if labelled else ['ranges_visited', 'mask_scans', 'steps'],
+                  path + '.work')
         self.ok(all(is_int(v) and v >= 0 for v in w.values()), path + '.work')
         self.ok(w['steps'] >= w['ranges_visited'], path + '.work', 'steps >= ranges_visited')
         stop = e['stop']
@@ -390,8 +448,11 @@ class Checker:
             self.keys(stop, SCHEMA['stop'], path + '.stop')
             self.one_of(stop['phase'], STOP_PHASES, path + '.stop.phase')
             self.one_of(stop['reason'], STOP_REASONS, path + '.stop.reason')
-            self.ok(total['relation'] != 'exact' or stop['phase'] == 'extraction',
+            self.ok(total['relation'] != 'exact'
+                    or stop['phase'] in ('extraction',) + ANNOTATION_PHASES,
                     path + '.stop', 'a stop in discovery leaves no exact count')
+            self.ok(stop['phase'] not in ANNOTATION_PHASES or labelled, path + '.stop.phase',
+                    'an annotation phase without labels "all"')
             if stop['reason'] == 'max_steps':
                 self.ok(w['steps'] <= a['limits']['max_steps'], path + '.work.steps')
         else:
@@ -402,14 +463,26 @@ class Checker:
             self.ok(e['determinism'] == 'time_limited', path + '.determinism',
                     'a time stop is not deterministic')
         if e['determinism'] == 'time_limited':
-            self.ok(stop is not None and stop['reason'] == 'time', path + '.stop')
+            # (with labels "all", a time stop of the reads after a step stop of the engine:
+            # the engine's stop is the one stated)
+            self.ok(stop is not None and (stop['reason'] == 'time' or labelled), path + '.stop')
         self.ok(isinstance(e['notes'], list) and all(n in NOTES for n in e['notes']),
                 path + '.notes', repr(e['notes']))
         self.ok(e['notes'] == [n for n in NOTES if n in e['notes']], path + '.notes', 'order')
         self.ok(('strand_unknown_canonical' in e['notes']) is (not strand_stated),
                 path + '.notes', 'strand_unknown_canonical exactly where no strand is known')
         self.ok(('paths_later_increment' in e['notes']) is (L > k), path + '.notes')
-        self.timing(e['timing'], path + '.timing')
+        self.ok(('annotation_not_read' in e['notes']) is (named and not labelled),
+                path + '.notes', 'annotation_not_read exactly where labels were named, not read')
+        if labelled:
+            self.ok(('annotation_unbudgeted' in e['notes'])
+                    is (e['annotation'] == 'unbudgeted'), path + '.notes')
+            self.ok(('record_bounds_unknown' in e['notes']) is (e['placement'] == 'global'),
+                    path + '.notes')
+        else:
+            self.ok(not {'annotation_unbudgeted', 'record_bounds_unknown'} & set(e['notes']),
+                    path + '.notes')
+        self.timing(e['timing'], path + '.timing', labelled)
 
         if mode == 'count':
             self.ok(e['retrieval_complete'] is False, path + '.retrieval_complete',
@@ -434,6 +507,7 @@ class Checker:
         k = a['index']['k']
         strand_stated = a['index']['strand_stated']
         mode = a['mode']
+        labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
         L = len(text)
         results = e['results']
         self.ok(isinstance(results, list) and e['returned'] == len(results), path + '.returned',
@@ -459,7 +533,10 @@ class Checker:
                 self.ok(total['value'] == 0, path, 'a long pattern is complete only without '
                         'anchors')
         elif e['withheld'] is None and mode == 'partial':
-            self.ok(e['cut'] is not None, path + '.cut',
+            labels_stated = labelled and (
+                e['rows_refused'] or e['anchors_truncated'] or e['stop'] is not None
+                or e['labels_cut'] is not None or e['occurrences_cut'] is not None)
+            self.ok(e['cut'] is not None or labels_stated, path + '.cut',
                     'an incomplete partial list states its cut')
         if mode == 'all_or_count':
             self.ok(e['retrieval_complete'] or e['withheld'] is not None, path,
@@ -476,7 +553,9 @@ class Checker:
         order = []
         for i, r in enumerate(results):
             rp = f'{path}.results[{i}]'
-            self.keys(r, ['kmer', 'instance', 'offset', key, 'node', 'row'], rp)
+            self.keys(r, ['kmer', 'instance', 'offset', key, 'node', 'row']
+                      + (['support', 'labels_status', 'labels_total', 'labels'] if labelled
+                         else []), rp)
             self.ok(isinstance(r['kmer'], str) and len(r['kmer']) == k
                     and set(r['kmer']) <= set('ACGTN'), rp + '.kmer')
             self.ok(is_int(r['offset']) and 0 <= r['offset'] <= k - L, rp + '.offset')
@@ -494,6 +573,105 @@ class Checker:
             order.append((r['node'], r['offset'], ORIENTATION_RANK[r[key]]))
         self.ok(order == sorted(order) and len(set(order)) == len(order), path + '.results',
                 'ordered by (node, offset, orientation), each context once')
+        if labelled:
+            self.labels(e, total, L, a, path)
+
+    def labels(self, e, total, L, a, path):
+        """output.labels "all" (SPEC §14): the label fields, their values and the rules that tie
+        them to retrieval_complete, withheld and the counts."""
+        k = a['index']['k']
+        mode = a['mode']
+        self.one_of(e['placement'], ENTRY_PLACEMENTS, path + '.placement')
+        if a['index']['graph_mode'] != 'basic':
+            self.ok(e['placement'] in ('none_canonical', 'not_requested'), path + '.placement')
+        self.one_of(e['annotation'], ANNOTATIONS, path + '.annotation')
+        records = e['placement'] == 'record'
+        placed = e['placement'] in ('record', 'global')
+        for i, t in enumerate(e['anchors_truncated']):
+            tp = f'{path}.anchors_truncated[{i}]'
+            self.keys(t, SCHEMA['anchor_truncated'], tp)
+            self.ok(t['cap'] == a['limits']['max_labels_per_anchor'] and t['total'] > t['cap'],
+                    tp, 'cut at the cap')
+        for i, x in enumerate(e['rows_refused']):
+            xp = f'{path}.rows_refused[{i}]'
+            self.keys(x, SCHEMA['row_refused'], xp)
+            self.one_of(x['phase'], ('label_discovery', 'placement'), xp + '.phase')
+            self.ok(x['reason'] == 'max_memory', xp + '.reason')
+        for f, schema in (('labels_cut', 'labels_cut'), ('occurrences_cut', 'occurrences_cut')):
+            if e[f] is not None:
+                self.keys(e[f], SCHEMA[schema], f'{path}.{f}')
+                self.ok(mode == 'partial' and not e['retrieval_complete'], f'{path}.{f}',
+                        'only partial cuts its lists, and a cut answer is not complete')
+        if e['withheld'] is not None:
+            self.ok(e['by_label'] is None, path + '.by_label', 'null when withheld')
+            for f in ('labels', 'occurrences'):
+                self.ok(e['counts'][f]['relation'] == 'unknown', f'{path}.counts.{f}',
+                        'nothing published when withheld')
+            return
+        self.ok(isinstance(e['by_label'], list), path + '.by_label')
+        if e['retrieval_complete']:
+            self.ok(not e['rows_refused'] and not e['anchors_truncated'], path,
+                    'complete: nothing refused or truncated')
+            self.ok(e['counts']['labels']['relation'] == 'exact', path + '.counts.labels')
+            self.ok(e['counts']['occurrences']['relation'] == ('exact' if records else 'unknown'),
+                    path + '.counts.occurrences')
+        if not records:
+            self.ok(e['counts']['occurrences']['relation'] == 'unknown',
+                    path + '.counts.occurrences', 'placed occurrences need a record mapping')
+        if e['counts']['labels']['relation'] == 'exact':
+            self.ok(e['counts']['labels']['value'] == len(e['by_label'])
+                    or e['labels_cut'] is not None, path + '.counts.labels',
+                    'every label in by_label')
+        keys = []
+        for i, b in enumerate(e['by_label']):
+            bp = f'{path}.by_label[{i}]'
+            self.keys(b, SCHEMA['by_label'], bp)
+            self.ok(b['graph'] == a['index']['index_ns'], bp + '.graph')
+            self.count(b['contexts'], 'graph_contexts', bp + '.contexts')
+            self.count(b['contexts_suffix'], 'graph_contexts', bp + '.contexts_suffix')
+            self.count(b['occurrences'], 'placed_occurrences', bp + '.occurrences')
+            self.ok(b['contexts']['value'] >= 1, bp + '.contexts')
+            keys.append((-b['contexts']['value'], b['column']))
+        self.ok(keys == sorted(keys), path + '.by_label', '(contexts desc, column asc)')
+        rank = {b['column']: i for i, b in enumerate(e['by_label'])}
+        for i, r in enumerate(e['results']):
+            rp = f'{path}.results[{i}]'
+            self.ok(r['support'] == 'kmer', rp + '.support')
+            self.one_of(r['labels_status'], LABELS_STATUS, rp + '.labels_status')
+            read = r['labels_status'] in ('complete', 'truncated')
+            self.ok((r['labels_total'] is None) is (r['labels_status'] in ('refused', 'not_read')),
+                    rp + '.labels_total')
+            if not read:
+                self.ok(r['labels'] is None, rp + '.labels', 'null unless read')
+                continue
+            self.ok(isinstance(r['labels'], list), rp + '.labels')
+            listed = [label['column'] for label in r['labels']]
+            self.ok(all(c in rank for c in listed), rp + '.labels', 'labels of by_label')
+            self.ok(listed == sorted(listed, key=rank.get), rp + '.labels', 'label order')
+            if r['labels_status'] == 'complete' and e['labels_cut'] is None:
+                self.ok(len(listed) == r['labels_total'], rp + '.labels', 'every label')
+            for j, label in enumerate(r['labels']):
+                lp = f'{rp}.labels[{j}]'
+                self.keys(label, ['column', 'support'] + (['occurrences'] if records else [])
+                          + (['occurrence_list'] if placed else []), lp)
+                self.ok(label['support'] == 'kmer', lp + '.support')
+                if records:
+                    self.count(label['occurrences'], 'placed_occurrences', lp + '.occurrences')
+                if not placed or label['occurrence_list'] is None:
+                    continue
+                for n, o in enumerate(label['occurrence_list']):
+                    op = f'{lp}.occurrence_list[{n}]'
+                    strand = r.get('strand')
+                    if records:
+                        self.keys(o, SCHEMA['occurrence'], op)
+                        m = re.fullmatch(r'(\d+)-(\d+)', o['nt_coords'])
+                        self.ok(m and int(m.group(2)) == int(m.group(1)) + L - 1
+                                and int(m.group(1)) >= 1 + r['offset']
+                                and int(m.group(2)) <= o['nt_length'], op + '.nt_coords')
+                    else:
+                        self.keys(o, SCHEMA['occurrence_global'], op)
+                        self.ok(o['offset'] == r['offset'], op + '.offset')
+                    self.ok(o['strand'] == strand, op + '.strand', 'the context\'s')
 
     # ------------------------------------------------------------- capabilities
 
@@ -618,7 +796,8 @@ class TestPatternFixtures(unittest.TestCase):
                     self.refusal(check, f, answer)
 
     def request_200(self, check, request):
-        """A request the server answered uses only the SPEC's fields."""
+        """A request the server answered uses only the SPEC's fields (and, but in mode count,
+        output.labels "none" or "all")."""
         check.ok(set(request) <= set(SCHEMA['request']), 'request', sorted(request))
         for i, p in enumerate(request['patterns']):
             check.ok(set(p) <= set(SCHEMA['request_pattern']), f'request.patterns[{i}]')
@@ -711,7 +890,9 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(set(MODES), seen['mode'])
         self.assertEqual(set(SCOPES), seen['scope'])
         self.assertEqual({'both', 'forward', 'reverse'}, seen['strands'])
-        self.assertEqual(set(WITHHELD), seen['withheld'])
+        # output_budget and the cut max_memory need more contexts than the mini's patterns
+        # give at max_memory_mb 1 (the unit tests show them, tests/cli/test_pattern_retrieval)
+        self.assertEqual(set(WITHHELD) - {'output_budget'}, seen['withheld'])
         self.assertEqual({'max_contexts', 'max_steps', 'time'}, seen['cut'])
         self.assertEqual(set(SLOT_ERRORS), seen['slot'])
         self.assertEqual({'basic', 'primary'}, seen['graph_mode'])
@@ -720,7 +901,8 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertLessEqual({('discovery', 'max_steps'), ('discovery', 'time'),
                               ('discovery', 'max_contexts')}, seen['stop'])
         self.assertEqual({'invalid_request', 'later_increment', 'resident_only', 'mask_required',
-                          'deadline', 'initializing'}, seen['refusal'])
+                          'deadline', 'initializing', 'annotation_unbudgeted'}, seen['refusal'])
+        self.assertLessEqual({('label_discovery', 'max_annotation_work')}, seen['stop'])
 
     def test_hand_made_bodies_are_the_codes(self):
         """The two hand-made 503 bodies are written by the code as stored here."""

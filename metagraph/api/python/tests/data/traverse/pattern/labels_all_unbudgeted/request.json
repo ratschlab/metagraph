@@ -5,6 +5,7 @@
   }
  ],
  "output": {
-  "labels": "predicate_only"
- }
+  "labels": "all"
+ },
+ "allow_unbudgeted_annotation": true
 }

@@ -1,0 +1,14 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "mode": "partial",
+ "max_contexts": 3,
+ "max_labels": 2,
+ "max_occurrences_per_label": 1,
+ "output": {
+  "labels": "all"
+ }
+}

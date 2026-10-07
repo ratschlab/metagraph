@@ -1,0 +1,4338 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": false,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "all",
+  "occurrences": true
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "anchors_truncated": [],
+   "annotation": "budgeted",
+   "by_label": [
+    {
+     "column": "1296536",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 24
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    },
+    {
+     "column": "158836",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 24
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    },
+    {
+     "column": "287",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 24
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    },
+    {
+     "column": "470",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 24
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    },
+    {
+     "column": "562",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 24
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    },
+    {
+     "column": "573",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 24
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    },
+    {
+     "column": "72407",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 24
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    },
+    {
+     "column": "546",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    },
+    {
+     "column": "615",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    }
+   ],
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "10": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "11": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "5": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "6": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "7": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "8": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "9": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 12
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 12
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "unit": "graph_contexts",
+     "value": 24
+    },
+    "labels": {
+     "relation": "exact",
+     "unit": "labels",
+     "value": 9
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": null,
+   "information_bits": 40.0,
+   "kind": "dna",
+   "labels_cut": null,
+   "length": 20,
+   "mode": "all_or_count",
+   "notes": [
+    "record_bounds_unknown"
+   ],
+   "occurrences_cut": null,
+   "palindromic": false,
+   "pattern": "GGTTTGGCGATCTGGTTTTC",
+   "placement": "global",
+   "results": [
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "CCAACGGTTTGGCGATCTGGTTTTCCGCCAG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3676,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21166,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153340,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 569,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034356,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9195,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47365,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58756,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139162,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147082,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245977,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503391,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506632,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604406,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71383,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110958,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116486,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133617,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361898,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402868,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516967,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138349,
+         "offset": 5,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224017,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7923,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71453,
+         "offset": 5,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 482091,
+     "offset": 5,
+     "row": 482090,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GCGAGCTGGCGGAAAACCAGATCGCCAAACC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14649,
+         "offset": 11,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163544,
+         "offset": 11,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2670,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733457,
+         "offset": 11,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62122,
+         "offset": 11,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303773,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405781,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487777,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516368,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529048,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551897,
+         "offset": 11,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243813,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300831,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308466,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435293,
+         "offset": 11,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306682,
+         "offset": 11,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465037,
+         "offset": 11,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 1537963,
+     "offset": 11,
+     "row": 1537962,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "CGAGCTGGCGGAAAACCAGATCGCCAAACCG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14650,
+         "offset": 10,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163545,
+         "offset": 10,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2671,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733458,
+         "offset": 10,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62123,
+         "offset": 10,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303774,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405782,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487778,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516369,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529049,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551898,
+         "offset": 10,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243814,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300832,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308467,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435294,
+         "offset": 10,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306683,
+         "offset": 10,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465038,
+         "offset": 10,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 1943332,
+     "offset": 10,
+     "row": 1943331,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "ACCAACGGTTTGGCGATCTGGTTTTCCGCCA",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3675,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21165,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153339,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 568,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034355,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9194,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47364,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58755,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139161,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147081,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245976,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503390,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506631,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604405,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71382,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110957,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116485,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133616,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361897,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402867,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516966,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138348,
+         "offset": 6,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224016,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7922,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71452,
+         "offset": 6,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 2319945,
+     "offset": 6,
+     "row": 2319944,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GAAAACCAGATCGCCAAACCGTTGGTCGCCA",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14660,
+         "offset": 0,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163555,
+         "offset": 0,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2681,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733468,
+         "offset": 0,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62133,
+         "offset": 0,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303784,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405792,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487788,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516379,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529059,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551908,
+         "offset": 0,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243824,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300842,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308477,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435304,
+         "offset": 0,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306693,
+         "offset": 0,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465048,
+         "offset": 0,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 2385040,
+     "offset": 0,
+     "row": 2385039,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "GCGACCAACGGTTTGGCGATCTGGTTTTCCG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3672,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21162,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153336,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 565,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034352,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9191,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47361,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58752,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139158,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147078,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245973,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503387,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506628,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604402,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71379,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110954,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116482,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133613,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361894,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402864,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516963,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138345,
+         "offset": 9,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224013,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7919,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71449,
+         "offset": 9,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 2662100,
+     "offset": 9,
+     "row": 2662099,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "AACGGTTTGGCGATCTGGTTTTCCGCCAGCT",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3678,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21168,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153342,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 571,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034358,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9197,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47367,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58758,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139164,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147084,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245979,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503393,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506634,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604408,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71385,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110960,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116488,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133619,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361900,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402870,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516969,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138351,
+         "offset": 3,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224019,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7925,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71455,
+         "offset": 3,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 2722993,
+     "offset": 3,
+     "row": 2722992,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "GACCAACGGTTTGGCGATCTGGTTTTCCGCC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3674,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21164,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153338,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 567,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034354,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9193,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47363,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58754,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139160,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147080,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245975,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503389,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506630,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604404,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71381,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110956,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116484,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133615,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361896,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402866,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516965,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138347,
+         "offset": 7,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224015,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7921,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71451,
+         "offset": 7,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 2973226,
+     "offset": 7,
+     "row": 2973225,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GGAAAACCAGATCGCCAAACCGTTGGTCGCC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14659,
+         "offset": 1,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163554,
+         "offset": 1,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2680,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733467,
+         "offset": 1,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62132,
+         "offset": 1,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303783,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405791,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487787,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516378,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529058,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551907,
+         "offset": 1,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243823,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300841,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308476,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435303,
+         "offset": 1,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306692,
+         "offset": 1,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465047,
+         "offset": 1,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 3146103,
+     "offset": 1,
+     "row": 3146102,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "CGGTTTGGCGATCTGGTTTTCCGCCAGCTCG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3680,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21170,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153344,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 573,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034360,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9199,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47369,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58760,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139166,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147086,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245981,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503395,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506636,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604410,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71387,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110962,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116490,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133621,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361902,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402872,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516971,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138353,
+         "offset": 1,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224021,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7927,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71457,
+         "offset": 1,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 3837526,
+     "offset": 1,
+     "row": 3837525,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GCGGAAAACCAGATCGCCAAACCGTTGGTCG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14657,
+         "offset": 3,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163552,
+         "offset": 3,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2678,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733465,
+         "offset": 3,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62130,
+         "offset": 3,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303781,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405789,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487785,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516376,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529056,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551905,
+         "offset": 3,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243821,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300839,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308474,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435301,
+         "offset": 3,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306690,
+         "offset": 3,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465045,
+         "offset": 3,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 4013167,
+     "offset": 3,
+     "row": 4013166,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "GGCGACCAACGGTTTGGCGATCTGGTTTTCC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3671,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21161,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153335,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 564,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034351,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9190,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47360,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58751,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139157,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147077,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245972,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503386,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506627,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604401,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71378,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110953,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116481,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133612,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361893,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402863,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516962,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138344,
+         "offset": 10,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224012,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7918,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71448,
+         "offset": 10,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 4164061,
+     "offset": 10,
+     "row": 4164060,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "CAACGGTTTGGCGATCTGGTTTTCCGCCAGC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3677,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21167,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153341,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 570,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034357,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9196,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47366,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58757,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139163,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147083,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245978,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503392,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506633,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604407,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71384,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110959,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116487,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133618,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361899,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402869,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516968,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138350,
+         "offset": 4,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224018,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7924,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71454,
+         "offset": 4,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 4334403,
+     "offset": 4,
+     "row": 4334402,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GAGCTGGCGGAAAACCAGATCGCCAAACCGT",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14651,
+         "offset": 9,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163546,
+         "offset": 9,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2672,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733459,
+         "offset": 9,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62124,
+         "offset": 9,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303775,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405783,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487779,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516370,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529050,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551899,
+         "offset": 9,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243815,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300833,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308468,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435295,
+         "offset": 9,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306684,
+         "offset": 9,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465039,
+         "offset": 9,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 4765208,
+     "offset": 9,
+     "row": 4765207,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "CGACCAACGGTTTGGCGATCTGGTTTTCCGC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3673,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21163,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153337,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 566,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034353,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9192,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47362,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58753,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139159,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147079,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245974,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503388,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506629,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604403,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71380,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110955,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116483,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133614,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361895,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402865,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516964,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138346,
+         "offset": 8,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224014,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7920,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71450,
+         "offset": 8,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 5028121,
+     "offset": 8,
+     "row": 5028120,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "GGTTTGGCGATCTGGTTTTCCGCCAGCTCGC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3681,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21171,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153345,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 574,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034361,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9200,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47370,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58761,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139167,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147087,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245982,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503396,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506637,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604411,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71388,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110963,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116491,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133622,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361903,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402873,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516972,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138354,
+         "offset": 0,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224022,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7928,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71458,
+         "offset": 0,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 5423830,
+     "offset": 0,
+     "row": 5423829,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "CGGAAAACCAGATCGCCAAACCGTTGGTCGC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14658,
+         "offset": 2,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163553,
+         "offset": 2,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2679,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733466,
+         "offset": 2,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62131,
+         "offset": 2,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303782,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405790,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487786,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516377,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529057,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551906,
+         "offset": 2,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243822,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300840,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308475,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435302,
+         "offset": 2,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306691,
+         "offset": 2,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465046,
+         "offset": 2,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 5502499,
+     "offset": 2,
+     "row": 5502498,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "TGGCGGAAAACCAGATCGCCAAACCGTTGGT",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14655,
+         "offset": 5,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163550,
+         "offset": 5,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2676,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733463,
+         "offset": 5,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62128,
+         "offset": 5,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303779,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405787,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487783,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516374,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529054,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551903,
+         "offset": 5,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243819,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300837,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308472,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435299,
+         "offset": 5,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306688,
+         "offset": 5,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465043,
+         "offset": 5,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 6273210,
+     "offset": 5,
+     "row": 6273209,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "CTGGCGGAAAACCAGATCGCCAAACCGTTGG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14654,
+         "offset": 6,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163549,
+         "offset": 6,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2675,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733462,
+         "offset": 6,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62127,
+         "offset": 6,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303778,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405786,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487782,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516373,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529053,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551902,
+         "offset": 6,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243818,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300836,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308471,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435298,
+         "offset": 6,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306687,
+         "offset": 6,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465042,
+         "offset": 6,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 6768728,
+     "offset": 6,
+     "row": 6768727,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "ACGGTTTGGCGATCTGGTTTTCCGCCAGCTC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3679,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21169,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153343,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 572,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034359,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9198,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47368,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58759,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139165,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147085,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245980,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503394,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506635,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604409,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71386,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110961,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116489,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133620,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361901,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402871,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516970,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138352,
+         "offset": 2,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224020,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7926,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71456,
+         "offset": 2,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 7363060,
+     "offset": 2,
+     "row": 7363059,
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "AGCTGGCGGAAAACCAGATCGCCAAACCGTT",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14652,
+         "offset": 8,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163547,
+         "offset": 8,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2673,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733460,
+         "offset": 8,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62125,
+         "offset": 8,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303776,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405784,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487780,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516371,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529051,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551900,
+         "offset": 8,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243816,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300834,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308469,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435296,
+         "offset": 8,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306685,
+         "offset": 8,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465040,
+         "offset": 8,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 7691279,
+     "offset": 8,
+     "row": 7691278,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GGCGGAAAACCAGATCGCCAAACCGTTGGTC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14656,
+         "offset": 4,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163551,
+         "offset": 4,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2677,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733464,
+         "offset": 4,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62129,
+         "offset": 4,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303780,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405788,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487784,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516375,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529055,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551904,
+         "offset": 4,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243820,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300838,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308473,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435300,
+         "offset": 4,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306689,
+         "offset": 4,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465044,
+         "offset": 4,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 7943023,
+     "offset": 4,
+     "row": 7943022,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GCTGGCGGAAAACCAGATCGCCAAACCGTTG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 14653,
+         "offset": 7,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 163548,
+         "offset": 7,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 2674,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 1733461,
+         "offset": 7,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 62126,
+         "offset": 7,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 303777,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 405785,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 487781,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 516372,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 529052,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 551901,
+         "offset": 7,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 243817,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 300835,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 308470,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 435297,
+         "offset": 7,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 306686,
+         "offset": 7,
+         "strand": "-"
+        },
+        {
+         "kmer_coord": 465041,
+         "offset": 7,
+         "strand": "-"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 8195025,
+     "offset": 7,
+     "row": 8195024,
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GGTTTGGCGATCTGGTTTTC",
+     "kmer": "TGGCGACCAACGGTTTGGCGATCTGGTTTTC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "kmer_coord": 3670,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "kmer_coord": 21160,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 153334,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "kmer_coord": 563,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 6034350,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "kmer_coord": 9189,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 47359,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "kmer_coord": 58750,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 139156,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 147076,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 245971,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 503385,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 506626,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 604400,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71377,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 110952,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 116480,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 133611,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 361892,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 402862,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 516961,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "kmer_coord": 138343,
+         "offset": 11,
+         "strand": "+"
+        },
+        {
+         "kmer_coord": 224011,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "kmer_coord": 7917,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "kmer_coord": 71447,
+         "offset": 11,
+         "strand": "+"
+        }
+       ],
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "node": 8328133,
+     "offset": 11,
+     "row": 8328132,
+     "strand": "+",
+     "support": "kmer"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 24,
+   "rows_refused": [],
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.293167,
+    "label_discovery_ms": 0.447292,
+    "placement_ms": 0.253917
+   },
+   "withheld": null,
+   "work": {
+    "annotation_rows": 48,
+    "annotation_units": 24440,
+    "mask_scans": 0,
+    "memory_bytes": 209916,
+    "ranges_visited": 122,
+    "steps": 122
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 1.441208
+ }
+}

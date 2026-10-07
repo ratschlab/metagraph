@@ -4,7 +4,8 @@
    "dna": "GGTTTGGCGATCTGGTTTTC"
   }
  ],
+ "max_contexts": 10,
  "output": {
-  "labels": "predicate_only"
+  "labels": "all"
  }
 }

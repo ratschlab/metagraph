@@ -9,8 +9,9 @@ Regenerate with `pattern_fixtures.py`, verify with `pattern_fixtures.py --check`
 `api/python/tests/test_pattern_fixtures.py` validates every answer against the SPEC's
 field lists.
 
-Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms`,
-`server_instance`, and the counts and work of a `determinism: time_limited` pattern.
+Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms`
+(and every `timing` value of a pattern), `server_instance`, and the counts and work of
+a `determinism: time_limited` pattern.
 Paths under the generator's work directory read `{work}/...`. Two fixtures are
 HAND-MADE (no server produces them on demand); their text is the code's.
 
@@ -47,9 +48,20 @@ HAND-MADE (no server produces them on demand); their text is the code's.
 - `long` (POST /pattern, 200, masked): L > k in all_or_count: anchors counted, paths unknown, withheld paths_later_increment; with no anchor the empty answer is complete (anchors and paths exact 0)
 - `primary_any_offset` (POST /pattern, 200, primary): a PRIMARY index: results carry orientation (forward, reverse) instead of strand, by_orientation instead of by_strand, note strand_unknown_canonical; node is the wrapper id
 - `primary_suffix` (POST /pattern, 200, primary): scope suffix on a PRIMARY index: error slot scope_unsupported (a virtual suffix is a stored prefix); any_offset is complete there
+- `labels_all` (POST /pattern, 200, masked): output.labels "all" within the threshold: every context with its labels (column, support kmer) and their placed occurrences (seq_id, record, strand, 1-based nt_coords, nt_length; the record mapping of the .seqs first, the offset after), by_label (contexts desc, column asc) with the deduplicated occurrences, counts.labels and counts.occurrences exact, placement record, annotation budgeted; the absent primer: complete, exact zeros
+- `labels_all_withheld` (POST /pattern, 200, masked): output.labels "all" above the threshold: the count is not admitted, no annotation row is read (work.annotation_rows 0), withheld count_above_threshold, labels and occurrences unknown, by_label null
+- `labels_all_truncated` (POST /pattern, 200, masked): max_labels_per_anchor 2 below the rows' 9 labels: all_or_count withholds (anchor_labels_truncated) and lists each truncated anchor (kmer, row, cap, total) so that the cap to ask for is known
+- `labels_all_truncated_partial` (POST /pattern, 200, masked): the same cap in mode partial: every context returned, its labels_status "truncated" with labels_total 9 and the first 2 labels (ascending column), the counts at_least, retrieval_complete false
+- `labels_all_partial` (POST /pattern, 200, masked): mode partial with the label caps: the first 3 contexts (cut max_contexts), the first 2 labels in label order (labels_cut), each label's first occurrence of its union (occurrences_cut); the counts over the returned contexts, at_least
+- `labels_all_work_budget` (POST /pattern, 200, masked): max_annotation_work 1: the first read passes the budget, the reads stop (stop {label_discovery, max_annotation_work}), all_or_count withholds (annotation_budget); the budget is the request's: the next pattern reads nothing
+- `labels_all_work_budget_partial` (POST /pattern, 200, masked): the same stop in mode partial: every context returned, the row read first with its labels, the others labels_status "not_read" (labels null); counts at_least, retrieval_complete false
+- `labels_all_global` (POST /pattern, 200, masked_no_map): coordinates without the record mapping (--no-coord-mapping): placement global, each label's occurrence_list holds (kmer_coord, offset, strand), nothing is placed in a record (counts.occurrences unknown), note record_bounds_unknown
+- `labels_all_count` (POST /pattern, 200, masked): mode count with output.labels "all": counted, no annotation read, output null, the note annotation_not_read says the projection had no effect
+- `annotation_unbudgeted` (POST /pattern, 400, primary): 400 annotation_unbudgeted: output.labels "all" on an annotation without the budget-aware decode (a column annotation), unless the request allows it
+- `labels_all_unbudgeted` (POST /pattern, 200, primary): the same with allow_unbudgeted_annotation: labels read without a memory bound on the reads (annotation unbudgeted, note annotation_unbudgeted); a PRIMARY index places nothing (placement none_canonical)
 - `unknown_field` (POST /pattern, 400, masked): 400 invalid_request: a field nothing reads is refused, never ignored
 - `too_many_patterns` (POST /pattern, 400, masked): 400 invalid_request: more patterns than the server's max_patterns (16): a list is refused, never cut
-- `later_increment_labels` (POST /pattern, 400, masked): 400 later_increment: output.labels "all" (labels read from the annotation) is not served yet (capabilities projections)
+- `later_increment_labels` (POST /pattern, 400, masked): 400 later_increment: output.labels "predicate_only" (the labels a predicate names) is not served yet (capabilities projections_later_increment; "all" is served since increment 3)
 - `later_increment_graphs` (POST /pattern, 400, masked): 400 later_increment: the request field graphs (multi-graph selection) is refused by name, whatever its value
 - `resident_only` (POST /pattern, 400, masked): 400 resident_only: in_ram, whatever its value (the route never loads an index)
 - `mask_required` (POST /pattern, 400, unmasked): 400 mask_required: the graph has no dummy-edge mask, whatever the request asks

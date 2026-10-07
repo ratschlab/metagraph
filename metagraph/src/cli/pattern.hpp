@@ -2,16 +2,17 @@
 #define __METAGRAPH_CLI_PATTERN_HPP__
 
 /**
- * POST /pattern and `metagraph pattern`: count, and extract without reading any annotation,
- * the graph contexts of short motifs and IUPAC patterns (docs/DESIGN-pattern-search.md,
- * increments 0-2). The engine is graph::pattern::PatternSearch
- * (src/graph/alignment/pattern_search.hpp); this file turns its results into the JSON of the
- * route's contract (pattern_contract_version 1):
+ * POST /pattern and `metagraph pattern`: count and extract the graph contexts of short motifs
+ * and IUPAC patterns, and read their labels (docs/DESIGN-pattern-search.md, increments 0-3).
+ * The engine is graph::pattern::PatternSearch (src/graph/alignment/pattern_search.hpp), the
+ * labelled retrieval PatternRetrieval (pattern_retrieval.hpp); this file turns their results
+ * into the JSON of the route's contract (pattern_contract_version 1):
  *  - modes count, all_or_count and partial; the two retrieval modes with output.labels "none"
- *    only (the label-free path, §4.3): contexts with k-mer, instance, offset, strand, node and
- *    row ids, and no annotation row read anywhere;
- *  - single-graph servers only; no placement, no predicate, no extension beyond k (a pattern
- *    longer than k has its anchors counted and nothing extracted).
+ *    (the label-free path, §4.3: contexts with k-mer, instance, offset, strand, node and row
+ *    ids, no annotation row read) or "all" (increment 3: each context's labels, placed where
+ *    the index can place them, under the annotation budgets);
+ *  - single-graph servers only; no predicate, no extension beyond k (a pattern longer than k
+ *    has its anchors counted and nothing extracted).
  * Everything a later increment adds is refused (400 "later_increment"), never ignored: the
  * owner's guarantee rule, nothing weakened silently.
  */
@@ -25,6 +26,7 @@
 #include <json/json.h>
 
 #include "graph/alignment/pattern_search.hpp"
+#include "pattern_retrieval.hpp"
 
 
 namespace mtg {
@@ -78,6 +80,17 @@ struct PatternLimits {
     double min_information_bits = 24;
     // patterns per request: above it the request is refused (a list is not cut)
     uint64_t max_patterns = 16;
+    // the labelled retrieval (output.labels "all", increment 3; §4.3, §5.3): the labels kept
+    // per row, the annotation work (the oracle's units), the request's memory account (MiB),
+    // and partial's lists of labels per pattern and of occurrences per label
+    uint64_t max_labels_per_anchor = 64;
+    uint64_t max_annotation_work = 100'000'000;
+    uint64_t max_memory_mb = 256;
+    uint64_t max_labels = 1'000;
+    uint64_t max_occurrences_per_label = 16;
+    // not a cap: the annotation reads under the deadline are decoded in chunks of about this
+    // many ms (the server's --traverse-chunk-target-ms, as /traverse's reads); 0: one piece
+    double chunk_target_ms = 50;
 };
 
 PatternLimits pattern_limits(const Config &config);
@@ -110,8 +123,9 @@ Json::Value parse_pattern_body(const std::string &content);
  * that tests stop at a chosen instant); |delivery|, when given, receives it for the writing
  * of the answer. |identity| (may be null) states the index in the answer's `index`. Throws
  * PatternRefusal for a whole-request refusal, 503 "deadline" included when the answer could
- * not be assembled by the deadline; refused patterns are answered in their slots. Never reads
- * an annotation row.
+ * not be assembled by the deadline; refused patterns are answered in their slots. Reads
+ * annotation rows only for output.labels "all" in a retrieval mode (PatternRetrieval);
+ * |hooks| (tests): a record mapping instead of the index's, a hook on every read.
  */
 Json::Value process_pattern_request(
         const Json::Value &json,
@@ -120,7 +134,8 @@ Json::Value process_pattern_request(
         const std::string &release,
         const IndexIdentity *identity = nullptr,
         PatternDelivery *delivery = nullptr,
-        const std::function<graph::pattern::Deadline::Clock::time_point()> &clock = nullptr);
+        const std::function<graph::pattern::Deadline::Clock::time_point()> &clock = nullptr,
+        const RetrievalHooks *hooks = nullptr);
 
 // The same with the caps (pattern_limits) and the release (--index-release) of |config|
 Json::Value process_pattern_request(const Json::Value &json,
@@ -134,8 +149,9 @@ Json::Value process_pattern_request(const Json::Value &json,
  * can answer /pattern (available: true | false | null while the single index loads, with the
  * reason when false), the modes, projections, kinds, scopes and strands, the caps and the
  * finalisation reserve, and what the graph is (mode, k, alphabet, mask) and what its
- * annotation could give a later increment (placement, support, annotation). |anno_graph| is
- * null while the index loads; |multi_graph| servers answer only that they are not served yet.
+ * annotation gives the labelled retrieval (placement, support, annotation: budgeted or
+ * unbudgeted). |anno_graph| is null while the index loads; |multi_graph| servers answer only
+ * that they are not served yet.
  */
 Json::Value pattern_capabilities_json(const graph::AnnotatedDBG *anno_graph,
                                       const PatternLimits &limits, bool multi_graph);

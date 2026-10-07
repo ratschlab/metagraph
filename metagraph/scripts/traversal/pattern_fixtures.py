@@ -21,15 +21,20 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
              memory at start-up (capabilities mask: built_at_load)
   multi      a multi-graph server (graphs CSV) carrying the masked copy as `mini_refseq`
   primary    a PRIMARY index of the mini's NDM-carrying records (562.fa, 573.fa), served
-             wrapped in CanonicalDBG: orientations instead of strands, no suffix scope
+             wrapped in CanonicalDBG: orientations instead of strands, no suffix scope; its
+             column annotation has no budget-aware decode (annotation: unbudgeted)
+  masked_no_map
+             the masked copy served with --no-coord-mapping: coordinates without the record
+             mapping (output.labels "all" places nothing: placement global)
 
 Two fixtures are HAND-MADE (index.json "hand_made": true): the 503 bodies a server cannot be
 made to produce on demand (an answer that overran its finalisation reserve; a request during
 the index load). Their text is the code's (src/cli/pattern.cpp PatternDelivery::check,
 server_utils.cpp process_request) and the unit test checks it against the source.
 
-Volatile values: every answer is stored as the server wrote it, but `timing.elapsed_ms`, the
-per-process `server_instance`, and the counts and work of a `determinism: time_limited`
+Volatile values: every answer is stored as the server wrote it, but `timing.elapsed_ms` (and
+every other `timing` value of a pattern), the per-process `server_instance`, and the counts and
+work of a `determinism: time_limited`
 pattern depend on the run; --check blanks them on both sides, and a regeneration keeps a file
 whose blanked content did not change (so that rerunning does not churn the files). Paths
 under the work directory are written as {work}/... (they would otherwise name a temporary
@@ -140,6 +145,20 @@ def field(name, value):
     def run(entry):
         check(entry.get(name) == value, (name, entry.get(name)))
     return run
+
+
+def counted(name, relation, value=None):
+    """counts.<name> (labels, occurrences) with |relation| (and |value| when given)."""
+    def run(entry):
+        c = entry['counts'][name]
+        check(c['relation'] == relation and (value is None or c['value'] == value), (name, c))
+    return run
+
+
+def labelled(entry):
+    """output.labels "all": every result carries its labels read in full."""
+    for r in entry['results']:
+        check(r['labels_status'] == 'complete' and isinstance(r['labels'], list), r)
 
 
 def slot_error(code):
@@ -415,6 +434,103 @@ FIXTURES = [
          'stored prefix); any_offset is complete there',
          entries(slot_error('scope_unsupported'))),
 
+    # ---------------------------------------------------------------- labels (increment 3)
+    post('labels_all', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F'), p(ABSENT_20, ident='absent')],
+          'output': {'labels': 'all'}}, 200,
+         'output.labels "all" within the threshold: every context with its labels (column, '
+         'support kmer) and their placed occurrences (seq_id, record, strand, 1-based '
+         'nt_coords, nt_length; the record mapping of the .seqs first, the offset after), '
+         'by_label (contexts desc, column asc) with the deduplicated occurrences, counts.labels '
+         'and counts.occurrences exact, placement record, annotation budgeted; the absent '
+         'primer: complete, exact zeros',
+         entries(expect_all(exact(24), complete, labelled, counted('labels', 'exact', 9),
+                            counted('occurrences', 'exact', 42), field('placement', 'record')),
+                 expect_all(exact(0), complete, counted('labels', 'exact', 0),
+                            counted('occurrences', 'exact', 0)))),
+    post('labels_all_withheld', 'masked',
+         {'patterns': [p(NDM_F)], 'max_contexts': 10, 'output': {'labels': 'all'}}, 200,
+         'output.labels "all" above the threshold: the count is not admitted, no annotation '
+         'row is read (work.annotation_rows 0), withheld count_above_threshold, labels and '
+         'occurrences unknown, by_label null',
+         entries(expect_all(exact(24), withheld('count_above_threshold'),
+                            counted('labels', 'unknown'), field('by_label', None)))),
+    post('labels_all_truncated', 'masked',
+         {'patterns': [p(NDM_F)], 'max_labels_per_anchor': 2, 'output': {'labels': 'all'}},
+         200,
+         'max_labels_per_anchor 2 below the rows\' 9 labels: all_or_count withholds '
+         '(anchor_labels_truncated) and lists each truncated anchor (kmer, row, cap, total) '
+         'so that the cap to ask for is known',
+         entries(expect_all(exact(24), withheld('anchor_labels_truncated'),
+                            lambda e: check(len(e['anchors_truncated']) == 24,
+                                            e['anchors_truncated'])))),
+    post('labels_all_truncated_partial', 'masked',
+         {'patterns': [p(NDM_F)], 'mode': 'partial', 'max_labels_per_anchor': 2,
+          'output': {'labels': 'all'}}, 200,
+         'the same cap in mode partial: every context returned, its labels_status '
+         '"truncated" with labels_total 9 and the first 2 labels (ascending column), the '
+         'counts at_least, retrieval_complete false',
+         entries(expect_all(counted('labels', 'at_least'), field('retrieval_complete', False),
+                            lambda e: check(all(r['labels_status'] == 'truncated'
+                                                for r in e['results']), e['results'])))),
+    post('labels_all_partial', 'masked',
+         {'patterns': [p(NDM_F)], 'mode': 'partial', 'max_contexts': 3, 'max_labels': 2,
+          'max_occurrences_per_label': 1, 'output': {'labels': 'all'}}, 200,
+         'mode partial with the label caps: the first 3 contexts (cut max_contexts), the first '
+         '2 labels in label order (labels_cut), each label\'s first occurrence of its union '
+         '(occurrences_cut); the counts over the returned contexts, at_least',
+         entries(expect_all(cut('max_contexts'), field('returned', 3),
+                            lambda e: check(e['labels_cut']['reason'] == 'max_labels'
+                                            and e['occurrences_cut'] is not None, e)))),
+    post('labels_all_work_budget', 'masked',
+         {'patterns': [p(NDM_F), p(NDM_R)], 'max_annotation_work': 1,
+          'output': {'labels': 'all'}}, 200,
+         'max_annotation_work 1: the first read passes the budget, the reads stop (stop '
+         '{label_discovery, max_annotation_work}), all_or_count withholds (annotation_budget); '
+         'the budget is the request\'s: the next pattern reads nothing',
+         entries(expect_all(exact(24), withheld('annotation_budget'),
+                            field('stop', {'phase': 'label_discovery',
+                                           'reason': 'max_annotation_work'})),
+                 expect_all(withheld('annotation_budget'),
+                            lambda e: check(e['work']['annotation_rows'] == 0, e['work'])))),
+    post('labels_all_work_budget_partial', 'masked',
+         {'patterns': [p(NDM_F)], 'mode': 'partial', 'max_annotation_work': 1,
+          'output': {'labels': 'all'}}, 200,
+         'the same stop in mode partial: every context returned, the row read first with its '
+         'labels, the others labels_status "not_read" (labels null); counts at_least, '
+         'retrieval_complete false',
+         entries(expect_all(field('returned', 24), counted('labels', 'at_least'),
+                            field('stop', {'phase': 'label_discovery',
+                                           'reason': 'max_annotation_work'}),
+                            lambda e: check(any(r['labels_status'] == 'not_read'
+                                                for r in e['results']), e['results'])))),
+    post('labels_all_global', 'masked_no_map',
+         {'patterns': [p(NDM_F)], 'output': {'labels': 'all'}}, 200,
+         'coordinates without the record mapping (--no-coord-mapping): placement global, each '
+         'label\'s occurrence_list holds (kmer_coord, offset, strand), nothing is placed in a '
+         'record (counts.occurrences unknown), note record_bounds_unknown',
+         entries(expect_all(exact(24), complete, field('placement', 'global'),
+                            field('notes', ['record_bounds_unknown']),
+                            counted('occurrences', 'unknown')))),
+    post('labels_all_count', 'masked',
+         {'patterns': [p(NDM_F)], 'mode': 'count', 'output': {'labels': 'all'}}, 200,
+         'mode count with output.labels "all": counted, no annotation read, output null, the '
+         'note annotation_not_read says the projection had no effect',
+         entries(expect_all(exact(24), field('notes', ['annotation_not_read'])))),
+    post('annotation_unbudgeted', 'primary',
+         {'patterns': [p(NDM_F)], 'output': {'labels': 'all'}}, 400,
+         '400 annotation_unbudgeted: output.labels "all" on an annotation without the '
+         'budget-aware decode (a column annotation), unless the request allows it',
+         refused('annotation_unbudgeted')),
+    post('labels_all_unbudgeted', 'primary',
+         {'patterns': [p(NDM_F)], 'output': {'labels': 'all'},
+          'allow_unbudgeted_annotation': True}, 200,
+         'the same with allow_unbudgeted_annotation: labels read without a memory bound on the '
+         'reads (annotation unbudgeted, note annotation_unbudgeted); a PRIMARY index places '
+         'nothing (placement none_canonical)',
+         entries(expect_all(exact(24), complete, field('annotation', 'unbudgeted'),
+                            field('placement', 'none_canonical')))),
+
     # ---------------------------------------------------------------- whole-request refusals
     post('unknown_field', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'bogus': 1}, 400,
@@ -426,9 +542,10 @@ FIXTURES = [
          'refused, never cut',
          refused('invalid_request')),
     post('later_increment_labels', 'masked',
-         {'patterns': [p(NDM_F)], 'output': {'labels': 'all'}}, 400,
-         '400 later_increment: output.labels "all" (labels read from the annotation) is not '
-         'served yet (capabilities projections)',
+         {'patterns': [p(NDM_F)], 'output': {'labels': 'predicate_only'}}, 400,
+         '400 later_increment: output.labels "predicate_only" (the labels a predicate names) '
+         'is not served yet (capabilities projections_later_increment; "all" is served since '
+         'increment 3)',
          refused('later_increment')),
     post('later_increment_graphs', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [INDEX_NAME]}, 400,
@@ -487,6 +604,9 @@ SERVERS = {
                ' --index-name ' + PRIMARY_NAME + ' --index-release ' + INDEX_RELEASE
                + '  (a PRIMARY graph of ' + ' and '.join(PRIMARY_RECORDS)
                + ' at k = 31 with --mask-dummy, column annotation by file name)',
+    'masked_no_map': 'server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/' + MINI_ANNO
+                     + ' --no-coord-mapping --index-name ' + INDEX_NAME + ' --index-release '
+                     + INDEX_RELEASE + '  (the masked copy, its .seqs not loaded)',
 }
 
 
@@ -616,6 +736,9 @@ def server_args(name, mini, work):
     if name == 'multi':
         # one name and one manifest describe one index: a multi-graph server takes neither
         return [os.path.join(work, 'graphs.csv'), '--index-release', INDEX_RELEASE]
+    if name == 'masked_no_map':
+        return ['-i', os.path.join(masked, MINI_GRAPH), '-a', os.path.join(masked, MINI_ANNO),
+                '--no-coord-mapping'] + ident
     if name == 'primary':
         primary = os.path.join(work, 'primary')
         return ['-i', os.path.join(primary, 'graph.dbg'),
@@ -677,7 +800,9 @@ def blanked(answer):
             a['timing']['elapsed_ms'] = BLANK
         for e in a['patterns']:
             if isinstance(e.get('timing'), dict):
-                e['timing']['elapsed_ms'] = BLANK
+                # elapsed_ms, and with output.labels "all" label_discovery_ms, placement_ms
+                for k in e['timing']:
+                    e['timing'][k] = BLANK
             if e.get('determinism') == 'time_limited':
                 # where the clock stopped the search: how far it got
                 e['counts'] = blank_count(e['counts'])
@@ -705,8 +830,9 @@ def readme(fixtures):
         '`api/python/tests/test_pattern_fixtures.py` validates every answer against the SPEC\'s',
         'field lists.',
         '',
-        'Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms`,',
-        '`server_instance`, and the counts and work of a `determinism: time_limited` pattern.',
+        'Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms`',
+        '(and every `timing` value of a pattern), `server_instance`, and the counts and work of',
+        'a `determinism: time_limited` pattern.',
         'Paths under the generator\'s work directory read `{work}/...`. Two fixtures are',
         'HAND-MADE (no server produces them on demand); their text is the code\'s.',
         '',

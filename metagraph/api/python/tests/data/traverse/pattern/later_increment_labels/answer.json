@@ -1,4 +1,4 @@
 {
  "code": "later_increment",
- "error": "request.output.labels: \"all\" (labels read from the annotation) in a later increment; this increment serves \"none\""
+ "error": "request.output.labels: \"predicate_only\" (the labels a predicate names) in a later increment; this increment serves \"none\" and \"all\""
 }

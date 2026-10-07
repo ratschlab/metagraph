@@ -185,6 +185,15 @@ class Config {
     uint64_t pattern_finalize_ms = 250;
     // patterns per request (a longer list is refused, not cut)
     uint64_t pattern_max_patterns = 16;
+    // output.labels "all" (increment 3, §5.3): the labels kept per row (more are stated as a
+    // truncated anchor), the annotation work per request (the oracle's units: 8 per row, 1
+    // per entry and coordinate, and the rows' row-diff dependencies), the request's memory
+    // account (MiB), and partial's lists: labels per pattern, occurrences per label
+    uint64_t pattern_max_labels_per_anchor = 64;
+    uint64_t pattern_max_annotation_work = 100'000'000;
+    uint64_t pattern_max_memory_mb = 256;
+    uint64_t pattern_max_labels = 1'000;
+    uint64_t pattern_max_occurrences = 16;
     // server_query (-i / -a) and pattern: a succinct graph loaded without its .edgemask gets
     // the same dummy-edge mask built in memory before it is served (§4, mask: built_at_load),
     // for small indexes and tests; a large one is given the file once by transform --mask-dummy

@@ -492,6 +492,21 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--pattern-max-patterns")) {
             exact_ms(argv[i], get_value(i), &pattern_max_patterns);
             i++;
+        } else if (!strcmp(argv[i], "--pattern-max-labels-per-anchor")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_labels_per_anchor);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-annotation-work")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_annotation_work);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-memory-mb")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_memory_mb);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-labels")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_labels);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-occurrences")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_occurrences);
+            i++;
         } else if (!strcmp(argv[i], "--pattern-build-mask")) {
             pattern_build_mask = true;
         } else if (!strcmp(argv[i], "--force")) {
@@ -796,6 +811,16 @@ Config::Config(int argc, char *argv[]) {
         std::cerr << "Error: --pattern-max-steps and --pattern-max-patterns must be at least 1, "
                      "and --pattern-default-time-ms above --pattern-finalize-ms and at most "
                      "--pattern-max-time-ms" << std::endl;
+        print_usage_and_exit = true;
+    }
+    // the labelled retrieval's caps (increment 3): a row keeps at least one label, a read
+    // needs work and memory; the memory account in bytes must fit 64 bits (2^40 MiB)
+    if ((identity == PATTERN || identity == SERVER_QUERY)
+            && (pattern_max_labels_per_anchor < 1 || pattern_max_annotation_work < 1
+                || pattern_max_memory_mb < 1 || pattern_max_memory_mb > (uint64_t(1) << 40))) {
+        std::cerr << "Error: --pattern-max-labels-per-anchor, --pattern-max-annotation-work and "
+                     "--pattern-max-memory-mb must be at least 1, and --pattern-max-memory-mb "
+                     "at most 2^40" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -1229,7 +1254,7 @@ if (advanced) {
             fprintf(stderr, "\t\t\tannotation labels (JSON request files)\n\n");
 
             fprintf(stderr, "\tpattern\t\tcount and extract the graph contexts of short DNA or IUPAC\n");
-            fprintf(stderr, "\t\t\tpatterns, without reading annotation (JSON request files)\n\n");
+            fprintf(stderr, "\t\t\tpatterns, and read their labels (JSON request files)\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
@@ -1711,6 +1736,11 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
             fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops this long before the deadline [250]\n");
             fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
+            fprintf(stderr, "\t   --pattern-max-labels-per-anchor [INT] \tdefault and maximum of max_labels_per_anchor: labels kept per row with output.labels all (more: a truncated anchor) [64]\n");
+            fprintf(stderr, "\t   --pattern-max-annotation-work [INT] \tdefault and maximum of max_annotation_work per request (annotation work units) [100000000]\n");
+            fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
+            fprintf(stderr, "\t   --pattern-max-labels [INT] \tdefault and maximum of max_labels: labels listed per pattern in mode partial [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
             fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask (small graphs; else transform --mask-dummy once) [off]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
@@ -1766,6 +1796,11 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
             fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops this long before the deadline [250]\n");
             fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
+            fprintf(stderr, "\t   --pattern-max-labels-per-anchor [INT] \tdefault and maximum of max_labels_per_anchor: labels kept per row with output.labels all (more: a truncated anchor) [64]\n");
+            fprintf(stderr, "\t   --pattern-max-annotation-work [INT] \tdefault and maximum of max_annotation_work per request (annotation work units) [100000000]\n");
+            fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
+            fprintf(stderr, "\t   --pattern-max-labels [INT] \tdefault and maximum of max_labels: labels listed per pattern in mode partial [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
             fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask (small graphs; else transform --mask-dummy once) [off]\n");
         } break;
     }

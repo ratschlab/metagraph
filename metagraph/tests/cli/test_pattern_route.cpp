@@ -128,10 +128,22 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"mode\": \"labels\"}", 400, "invalid_request" },
         { "{" + p + ", \"max_steps\": 0}", 400, "invalid_request" },
         { "{" + p + ", \"time_budget_ms\": 250}", 400, "invalid_request" },
-        { "{" + p + ", \"output\": {\"labels\": \"all\"}}", 400, "later_increment" },
+        // labels "all" (increment 3) on a column annotation: no budget-aware decode
+        { "{" + p + ", \"output\": {\"labels\": \"all\"}}", 400, "annotation_unbudgeted" },
+        { "{" + p + ", \"output\": {\"labels\": \"all\"}, \"allow_unbudgeted_annotation\": "
+          "true}", 200, "" },
+        // mode count reads no annotation, whatever the projection
+        { "{" + p + ", \"mode\": \"count\", \"output\": {\"labels\": \"all\"}}", 200, "" },
         { "{" + p + ", \"mode\": \"count\", \"output\": {\"labels\": \"predicate_only\"}}",
           400, "later_increment" },
-        { "{" + p + ", \"output\": {\"occurrences\": true}}", 400, "later_increment" },
+        // occurrences are placed per label: they need labels "all"
+        { "{" + p + ", \"output\": {\"occurrences\": true}}", 400, "invalid_request" },
+        { "{" + p + ", \"max_labels_per_anchor\": 0}", 400, "invalid_request" },
+        { "{" + p + ", \"max_memory_mb\": 0}", 400, "invalid_request" },
+        { "{" + p + ", \"max_annotation_work\": 0}", 400, "invalid_request" },
+        { "{" + p + ", \"max_labels\": -1}", 400, "invalid_request" },
+        { "{" + p + ", \"allow_unbudgeted_annotation\": 1}", 400, "invalid_request" },
+        { "{" + p + ", \"max_labels\": 0, \"max_occurrences_per_label\": 0}", 200, "" },
         { "{" + p + ", \"predicate\": null}", 400, "later_increment" },
         { "{\"patterns\": [{\"protein\": \"MK\"}]}", 400, "later_increment" },
         { "{" + p + ", \"in_ram\": true}", 400, "resident_only" },
@@ -308,8 +320,22 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("basic", caps["graph_mode"].asString());
     EXPECT_EQ(kK, caps["k"].asUInt64());
     EXPECT_EQ("none", caps["default_projection"].asString());
+    // increment 3: the projection "all" is served; predicate_only is still to come
+    ASSERT_EQ(2u, caps["projections"].size());
+    EXPECT_EQ("none", caps["projections"][0].asString());
+    EXPECT_EQ("all", caps["projections"][1].asString());
+    ASSERT_EQ(1u, caps["projections_later_increment"].size());
+    EXPECT_EQ("predicate_only", caps["projections_later_increment"][0].asString());
+    EXPECT_TRUE(caps["default_occurrences"].asBool());
     EXPECT_EQ(4.0, caps["caps"]["min_information_bits"].asDouble());
+    EXPECT_EQ(64u, caps["caps"]["max_labels_per_anchor"].asUInt64());
+    EXPECT_EQ(100000000u, caps["caps"]["max_annotation_work"].asUInt64());
+    EXPECT_EQ(256u, caps["caps"]["max_memory_mb"].asUInt64());
+    EXPECT_EQ(1000u, caps["caps"]["max_labels"].asUInt64());
+    EXPECT_EQ(16u, caps["caps"]["max_occurrences_per_label"].asUInt64());
     EXPECT_EQ("none", caps["placement"].asString());
+    // a column annotation: no budget-aware decode
+    EXPECT_EQ("unbudgeted", caps["annotation"].asString());
 
     // loading: nothing about the graph is known yet
     caps = pattern_capabilities_json(nullptr, limits(), false);

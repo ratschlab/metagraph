@@ -1,0 +1,14 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  },
+  {
+   "dna": "CGGAATGGCTCATCACGATC"
+  }
+ ],
+ "max_annotation_work": 1,
+ "output": {
+  "labels": "all"
+ }
+}

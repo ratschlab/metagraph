@@ -4,7 +4,9 @@
    "dna": "GGTTTGGCGATCTGGTTTTC"
   }
  ],
+ "mode": "partial",
+ "max_annotation_work": 1,
  "output": {
-  "labels": "predicate_only"
+  "labels": "all"
  }
 }

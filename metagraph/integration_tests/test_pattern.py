@@ -20,10 +20,12 @@ from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
 """
 End-to-end tests of POST /pattern and `metagraph pattern` (docs/DESIGN-pattern-search.md,
-increments 0-2): the counts of the graph contexts of exact DNA and IUPAC patterns, and their
+increments 0-3): the counts of the graph contexts of exact DNA and IUPAC patterns, their
 label-free extraction (output.labels "none": k-mer, instance, offset, strand, node and row ids,
-no annotation read), checked against PYTHON ORACLES over the very records each index was built
-from — never against the engine itself.
+no annotation read), and their labels (output.labels "all", increment 3: the columns carrying
+each context and, on the mini index with its .seqs, every placed occurrence: record, seq_id,
+1-based position, strand), checked against PYTHON ORACLES over the very records each index was
+built from — never against the engine itself.
 
 A graph context is (strand, k-mer, offset): a k-mer of the graph that contains the oriented
 pattern at that offset (§3). On a BASIC graph the k-mers are those of the records as deposited
@@ -63,7 +65,10 @@ FIXTURES_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
 # the server's defaults (--pattern-* flags; §5.3, the owner's budgets of 2026-10-07): each cap
 # is its field's maximum and default, but time_budget_ms defaults to 60 s under a 600 s cap
 DEFAULT_CAPS = {'max_contexts': 10000, 'max_anchors': 1000, 'max_steps': 100000000,
-                'time_budget_ms': 600000, 'min_information_bits': 24, 'max_patterns': 16}
+                'time_budget_ms': 600000, 'min_information_bits': 24, 'max_patterns': 16,
+                # output.labels "all" (increment 3)
+                'max_labels_per_anchor': 64, 'max_annotation_work': 100000000,
+                'max_memory_mb': 256, 'max_labels': 1000, 'max_occurrences_per_label': 16}
 DEFAULT_TIME_MS = 60000
 DEFAULT_FINALIZE_MS = 250
 
@@ -335,6 +340,11 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         fastas = sorted(glob.glob(os.path.join(MINI_DIR, 'fasta', '*.fa')))
         cls.records = Records.from_fasta(fastas)
         cls.k = MINI_K
+        # the annotation's columns: one per FASTA file (annotate --anno-filename, renamed to
+        # the file's stem, the taxid), its records in file order — their seq_id in the .seqs
+        cls.columns = {os.path.basename(f)[:-len('.fa')]: list(read_fasta(f)) for f in fastas}
+        cls.column_records = {c: Records([(c, name, seq) for name, seq in recs])
+                              for c, recs in cls.columns.items()}
 
         cls.fastas = fastas
         # whatever build/mini_refseq holds, it must hold it still when the tests are done
@@ -545,13 +555,20 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             ({'patterns': p, 'time_budget_ms': DEFAULT_FINALIZE_MS}, 'invalid_request',
              'time_budget_ms'),
             ({'patterns': p, 'stop_at_threshold': 'yes'}, 'invalid_request', 'stop_at_threshold'),
-            ({'patterns': p, 'output': {'labels': 'all'}}, 'later_increment', 'labels'),
+            ({'patterns': p, 'output': {'labels': 'predicate_only'}}, 'later_increment',
+             'labels'),
             ({'patterns': p, 'mode': 'count', 'output': {'labels': 'predicate_only'}},
              'later_increment', 'labels'),
-            ({'patterns': p, 'output': {'occurrences': True}}, 'later_increment', 'occurrences'),
+            # occurrences are placed per label (increment 3): they need labels "all"
+            ({'patterns': p, 'output': {'occurrences': True}}, 'invalid_request', 'occurrences'),
             ({'patterns': p, 'output': {'paths': True}}, 'later_increment', 'paths'),
             ({'patterns': p, 'predicate': {'any': ['562']}}, 'later_increment', 'predicate'),
-            ({'patterns': p, 'max_labels': None}, 'later_increment', 'max_labels'),
+            ({'patterns': p, 'max_paths': None}, 'later_increment', 'max_paths'),
+            ({'patterns': p, 'max_labels': None}, 'invalid_request', 'max_labels'),
+            ({'patterns': p, 'max_labels_per_anchor': 0}, 'invalid_request',
+             'max_labels_per_anchor'),
+            ({'patterns': p, 'allow_unbudgeted_annotation': 'yes'}, 'invalid_request',
+             'allow_unbudgeted_annotation'),
             ({'patterns': p, 'graphs': ['x']}, 'later_increment', 'graphs'),
             ({'patterns': [{'protein': 'MKV'}]}, 'later_increment', 'protein'),
             ({'patterns': p, 'in_ram': False}, 'resident_only', 'in_ram'),
@@ -627,8 +644,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         expected = {
             'pattern_contract_version': 1, 'available': True, 'unavailable_reason': None,
             'modes': ['count', 'all_or_count', 'partial'], 'default_mode': 'all_or_count',
-            'projections': ['none'], 'default_projection': 'none',
-            'projections_later_increment': ['all', 'predicate_only'],
+            'projections': ['none', 'all'], 'default_projection': 'none',
+            'projections_later_increment': ['predicate_only'], 'default_occurrences': True,
             'kinds': ['dna', 'iupac'], 'scopes': ['suffix', 'any_offset'],
             'default_scope': 'any_offset', 'long_patterns': 'anchors_counted',
             'strands': ['both', 'forward', 'reverse'], 'graph_mode': 'basic', 'k': self.k,
@@ -812,6 +829,232 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertCount(absent['counts']['paths'], 0, unit='paths')
         self.assertTrue(absent['retrieval_complete'])
         self.assertIsNone(absent['withheld'])
+
+    # ------------------------------------------------------------ labels (increment 3)
+
+    NDM_F = 'GGTTTGGCGATCTGGTTTTC'   # blaNDM-1 forward primer: its k-mers carry 7 to 9 taxa
+
+    def placed_oracle(self, pattern):
+        """{(column, seq_id, 1-based start, strand)}: every occurrence of the oriented pattern
+        in every record of the FASTA files (a regex scan; the mini's records hold no N)."""
+        out = set()
+        for column, recs in self.columns.items():
+            for seq_id, (_, seq) in enumerate(recs):
+                for strand, q in Records.oriented(pattern, 'both', True):
+                    for m in pattern_regex(q).finditer(seq.upper()):
+                        out.add((column, seq_id, m.start() + 1, strand))
+        return out
+
+    def contexts_by_column(self, pattern):
+        out = {c: r.contexts(pattern, self.k) for c, r in self.column_records.items()}
+        return {c: x for c, x in out.items() if x}
+
+    def assertLabelled(self, entry, pattern):
+        """output.labels "all", complete, record placement: every context with exactly the
+        columns whose records hold its k-mer; every placed occurrence the FASTA scan's, its
+        record's own k-mer at the occurrence being the context's (the record first, the offset
+        after); by_label and the counts exact."""
+        L, k = len(pattern), self.k
+        by_column = self.contexts_by_column(pattern)
+        expected = set().union(*by_column.values()) if by_column else set()
+        self.assertCompleteRetrieval(entry)
+        self.assertEqual(('record', 'budgeted'), (entry['placement'], entry['annotation']))
+        self.assertEqual(([], []), (entry['rows_refused'], entry['anchors_truncated']))
+        self.assertEqual(len(expected), len(entry['results']))
+        rank = {b['column']: i for i, b in enumerate(entry['by_label'])}
+        unions = {}
+        for r in entry['results']:
+            context = (r['strand'], r['kmer'], r['offset'])
+            self.assertIn(context, expected)
+            columns = {c for c, x in by_column.items() if context in x}
+            self.assertEqual(('kmer', 'complete', len(columns)),
+                             (r['support'], r['labels_status'], r['labels_total']))
+            listed = [label['column'] for label in r['labels']]
+            self.assertEqual(columns, set(listed), r['kmer'])
+            # each result's labels in the label order of by_label
+            self.assertEqual(sorted(listed, key=rank.get), listed)
+            for label in r['labels']:
+                self.assertEqual('kmer', label['support'])
+                occ = label['occurrence_list']
+                self.assertCount(label['occurrences'], len(occ), unit='placed_occurrences')
+                self.assertTrue(occ)
+                for o in occ:
+                    name, seq = self.columns[label['column']][o['seq_id']]
+                    self.assertEqual((name, len(seq), r['strand']),
+                                     (o['record'], o['nt_length'], o['strand']))
+                    a, b = (int(x) for x in o['nt_coords'].split('-'))
+                    self.assertEqual(a + L - 1, b)
+                    start = a - 1 - r['offset']
+                    self.assertEqual(r['kmer'], seq[start:start + k].upper(), o)
+                    unions.setdefault(label['column'], set()).add((o['seq_id'], a, o['strand']))
+        placed = {(c, i, a, st) for c, x in unions.items() for i, a, st in x}
+        self.assertEqual(self.placed_oracle(pattern), placed)
+        # by_label: every column once, (contexts desc, column asc), exact
+        self.assertEqual(set(by_column), set(rank))
+        keys = [(-b['contexts']['value'], b['column']) for b in entry['by_label']]
+        self.assertEqual(sorted(keys), keys)
+        for b in entry['by_label']:
+            c = b['column']
+            self.assertIsNone(b['graph'])
+            self.assertCount(b['contexts'], len(by_column[c]))
+            self.assertCount(b['contexts_suffix'], sum(1 for x in by_column[c] if x[2] == k - L))
+            self.assertCount(b['occurrences'], len(unions[c]), unit='placed_occurrences')
+        self.assertCount(entry['counts']['labels'], len(by_column), unit='labels')
+        self.assertCount(entry['counts']['occurrences'], len(placed), unit='placed_occurrences')
+
+    def test_labels_all_against_the_fasta(self):
+        patterns = [self.NDM_F, self.p16, self.p14, self.iupac16, self.pal12, self.absent16]
+        request = {'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
+                                for p in patterns], 'output': {'labels': 'all'}}
+        out = self.pattern(self.server, request)
+        self.assertEqual({'labels': 'all', 'occurrences': True}, out['output'])
+        for x in ('max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb',
+                  'max_labels', 'max_occurrences_per_label'):
+            self.assertEqual(DEFAULT_CAPS[x], out['limits'][x], x)
+        self.assertFalse(out['limits']['allow_unbudgeted_annotation'])
+        for entry, p in zip(out['patterns'], patterns):
+            with self.subTest(pattern=p):
+                c = entry['counts']['contexts']
+                self.assertEqual(('exact', len(self.contexts(p))), (c['relation'], c['value']))
+                self.assertLabelled(entry, p)
+                self.assertGreater(entry['work']['memory_bytes'], 0)
+        ndm = out['patterns'][0]
+        self.assertGreater(len(ndm['by_label']), 1)
+        # the absent pattern: complete, exact zeros, nothing read
+        absent = out['patterns'][-1]
+        self.assertEqual(([], 0), (absent['by_label'], absent['work']['annotation_rows']))
+        # deterministic: the same request, the same labels and occurrences
+        again = self.pattern(self.server, request)
+        self.assertEqual(untimed(out), untimed(again))
+
+    def test_labels_all_withheld_truncated_and_partial(self):
+        p = self.NDM_F
+        n = len(self.contexts(p))
+        # above the threshold: not admitted, nothing read
+        entry = self.pattern(self.server, {'patterns': [{'dna': p}], 'max_contexts': n - 1,
+                                           'output': {'labels': 'all'}})['patterns'][0]
+        self.assertEqual({'reason': 'count_above_threshold'}, entry['withheld'])
+        self.assertEqual(0, entry['work']['annotation_rows'])
+        self.assertIsNone(entry['by_label'])
+        self.assertUnknownLabels(entry)
+        # a per-anchor cap below the rows' labels: withheld, every cut anchor stated
+        by_column = self.contexts_by_column(p)
+        entry = self.pattern(self.server, {'patterns': [{'dna': p}], 'max_labels_per_anchor': 2,
+                                           'output': {'labels': 'all'}})['patterns'][0]
+        self.assertEqual({'reason': 'anchor_labels_truncated'}, entry['withheld'])
+        self.assertEqual([], entry['results'])
+        totals = {}
+        for c in set().union(*by_column.values()):
+            totals[c[1]] = sum(1 for x in by_column.values() if c in x)
+        got = {t['kmer']: (t['cap'], t['total']) for t in entry['anchors_truncated']}
+        self.assertEqual({kmer: (2, t) for kmer, t in totals.items() if t > 2}, got)
+        # partial: the first labels of each cut row, the counts at_least
+        entry = self.pattern(self.server, {'patterns': [{'dna': p}], 'mode': 'partial',
+                                           'max_labels_per_anchor': 2,
+                                           'output': {'labels': 'all'}})['patterns'][0]
+        self.assertIsNone(entry['withheld'])
+        self.assertFalse(entry['retrieval_complete'])
+        for r in entry['results']:
+            self.assertEqual(('truncated', totals[r['kmer']], 2),
+                             (r['labels_status'], r['labels_total'], len(r['labels'])))
+            # the first two in ascending column order... of the annotation's column ids,
+            # which are not the names' order: only membership is checked
+            self.assertLessEqual({x['column'] for x in r['labels']},
+                                 {c for c, x in by_column.items()
+                                  if (r['strand'], r['kmer'], r['offset']) in x})
+        self.assertEqual('at_least', entry['counts']['labels']['relation'])
+        # partial's lists: labels and occurrences cut, the cuts stated, the counts whole
+        full = self.pattern(self.server, {'patterns': [{'dna': p}],
+                                          'output': {'labels': 'all'}})['patterns'][0]
+        entry = self.pattern(self.server, {'patterns': [{'dna': p}], 'mode': 'partial',
+                                           'max_labels': 3, 'max_occurrences_per_label': 2,
+                                           'output': {'labels': 'all'}})['patterns'][0]
+        self.assertEqual({'reason': 'max_labels', 'returned': 3}, entry['labels_cut'])
+        self.assertEqual('max_occurrences_per_label', entry['occurrences_cut']['reason'])
+        self.assertEqual(full['by_label'][:3], entry['by_label'])
+        self.assertEqual(full['counts'], entry['counts'])
+        self.assertFalse(entry['retrieval_complete'])
+        listed = {}
+        for r in entry['results']:
+            for label in r['labels']:
+                for o in label['occurrence_list']:
+                    listed.setdefault(label['column'], set()).add(
+                        (o['seq_id'], o['nt_coords'], o['strand']))
+        self.assertEqual({b['column'] for b in full['by_label'][:3]}, set(listed))
+        for column, x in listed.items():
+            self.assertLessEqual(len(x), 2, column)
+
+    def test_labels_all_count_mode_and_projection_none(self):
+        """Mode count reads no annotation whatever the projection, and says so; an annotation
+        field with output.labels "none" likewise; both answer the counts as without them."""
+        plain = self.pattern(self.server, {'patterns': [{'dna': self.p16}], 'mode': 'count'})
+        out = self.pattern(self.server, {'patterns': [{'dna': self.p16}], 'mode': 'count',
+                                         'output': {'labels': 'all'}})
+        self.assertIsNone(out['output'])
+        self.assertEqual(['annotation_not_read'], out['patterns'][0]['notes'])
+        out['patterns'][0]['notes'] = []
+        self.assertEqual(untimed(plain), untimed(out))
+        none = self.pattern(self.server, {'patterns': [{'dna': self.p16}]})
+        out = self.pattern(self.server, {'patterns': [{'dna': self.p16}], 'max_memory_mb': 1})
+        self.assertEqual(['annotation_not_read'], out['patterns'][0]['notes'])
+        out['patterns'][0]['notes'] = []
+        self.assertEqual(untimed(none), untimed(out))
+
+    def test_labels_all_cli_answers_as_the_server(self):
+        request = {'patterns': [{'dna': self.NDM_F}, {'iupac': self.iupac16}, {'dna': self.p40}],
+                   'mode': 'partial', 'max_contexts': 9, 'max_labels': 4,
+                   'output': {'labels': 'all'}}
+        server_out = self.pattern(self.server, request)
+        path = os.path.join(self.tempdir.name, 'request_labels.json')
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
+                                                       '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
+
+    def test_labels_all_without_record_mapping(self):
+        """--no-coord-mapping: coordinates without the .seqs. Each label lists the column
+        coordinate of the context's k-mer (kmer_coord) and the offset, placed nowhere; no
+        occurrence count is claimed (note record_bounds_unknown)."""
+        server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno, '--no-coord-mapping'],
+                        os.path.join(self.tempdir.name, 'server_no_map.log'))
+        try:
+            caps = server.get('capabilities').json()['pattern']
+            self.assertEqual('global', caps['placement'])
+            entry = self.pattern(server, {'patterns': [{'dna': self.NDM_F}],
+                                          'output': {'labels': 'all'}})['patterns'][0]
+        finally:
+            server.stop()
+        self.assertEqual('global', entry['placement'])
+        self.assertEqual(['record_bounds_unknown'], entry['notes'])
+        self.assertTrue(entry['retrieval_complete'])
+        self.assertCount(entry['counts']['occurrences'], None, 'unknown', 'placed_occurrences')
+        by_column = self.contexts_by_column(self.NDM_F)
+        self.assertCount(entry['counts']['labels'], len(by_column), unit='labels')
+        # the k-mers' column coordinates: each record's k-mers numbered from its column's
+        # running count, in file order
+        starts = {}
+        for column, recs in self.columns.items():
+            s, at = [], 0
+            for _, seq in recs:
+                s.append(at)
+                at += len(seq) - self.k + 1
+            starts[column] = s
+        seen = 0
+        for r in entry['results']:
+            for label in r['labels']:
+                self.assertNotIn('occurrences', label)
+                recs = self.columns[label['column']]
+                for o in label['occurrence_list']:
+                    seen += 1
+                    self.assertEqual((r['offset'], r['strand']), (o['offset'], o['strand']))
+                    c = o['kmer_coord']
+                    j = max(i for i, s in enumerate(starts[label['column']]) if s <= c)
+                    local = c - starts[label['column']][j]
+                    self.assertEqual(r['kmer'], recs[j][1][local:local + self.k].upper())
+        self.assertGreater(seen, 0)
 
     # ------------------------------------------------------------ the CLI
 
@@ -1106,6 +1349,45 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                              p['scopes'])
             self.assertEqual(mode == 'basic', p['strand_stated'])
             self.assertEqual('none' if mode == 'basic' else 'none_canonical', p['placement'])
+
+    def test_labels_all_on_unbudgeted_annotations(self):
+        """A column annotation has no budget-aware decode: output.labels "all" is refused
+        (annotation_unbudgeted) unless the request allows the unbudgeted reads; then each
+        context carries the records (--anno-header columns) holding its k-mer — on CANONICAL
+        and PRIMARY graphs its k-mer or the reverse complement — and nothing is placed."""
+        for mode, server in self.servers.items():
+            stated = mode == 'basic'
+            request = {'patterns': [{'dna': 'ACGAC'}, {'dna': 'GAATTC'}],
+                       'output': {'labels': 'all'}}
+            ret = server.post('pattern', request)
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertEqual('annotation_unbudgeted', ret.json()['code'])
+            self.assertIn('allow_unbudgeted_annotation', ret.json()['error'])
+            out = self.pattern(server, dict(request, allow_unbudgeted_annotation=True))
+            self.assertTrue(out['limits']['allow_unbudgeted_annotation'])
+            for entry, p in zip(out['patterns'], ('ACGAC', 'GAATTC')):
+                with self.subTest(mode=mode, pattern=p):
+                    self.assertCompleteRetrieval(entry)
+                    self.assertEqual('unbudgeted', entry['annotation'])
+                    self.assertIn('annotation_unbudgeted', entry['notes'])
+                    self.assertEqual('none' if stated else 'none_canonical', entry['placement'])
+                    self.assertCount(entry['counts']['occurrences'], None, 'unknown',
+                                     'placed_occurrences')
+                    labels = {}
+                    for r in entry['results']:
+                        kmer = r['kmer']
+                        names = self.records.names_with_kmer(kmer)
+                        if not stated:
+                            names |= self.records.names_with_kmer(revcomp(kmer))
+                        got = {x['column'] for x in r['labels']}
+                        self.assertEqual(names, got, kmer)
+                        self.assertEqual(len(names), r['labels_total'])
+                        for x in r['labels']:
+                            self.assertEqual({'column', 'support'}, set(x))
+                            labels[x['column']] = labels.get(x['column'], 0) + 1
+                    self.assertCount(entry['counts']['labels'], len(labels), unit='labels')
+                    self.assertEqual(labels, {b['column']: b['contexts']['value']
+                                              for b in entry['by_label']})
 
     def test_multi_graph_server(self):
         d = self.tempdir.name

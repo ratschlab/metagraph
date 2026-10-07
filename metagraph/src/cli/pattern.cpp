@@ -27,23 +27,26 @@ using graph::DeBruijnGraph;
 namespace {
 
 /**
- * The projection of an omitted output.labels in this increment. The design's default is
- * "all" (§7.1), which needs annotation and is a later increment; the owner's instruction for
- * this milestone is that an omitted projection means "none", the one served. It is stated in
- * every answer (`output`) and in the capabilities (`default_projection`), so a client never
- * has to assume it; a later increment that serves "all" changes it together with the
- * capabilities.
+ * The projection of an omitted output.labels. The design's default is "all" (§7.1); the
+ * owner's instruction for milestone 1 was that an omitted projection means "none", and
+ * contract version 1 keeps it so now that "all" is served (increment 3): a request that named
+ * no projection is answered byte for byte as before, without reading any annotation. It is
+ * stated in every answer (`output`) and in the capabilities (`default_projection`), so a
+ * client never has to assume it.
  */
 constexpr const char *kDefaultProjection = "none";
 
 // Request fields of later increments (§7.1): refused by name, any value (null included),
 // rather than reported as unknown, so that the answer says what to wait for
 const char *const kLaterIncrementFields[] = {
-    "max_paths", "max_labels_per_anchor", "max_annotation_work", "max_memory_mb",
-    "max_labels", "max_occurrences_per_label", "allow_unbudgeted_annotation",
-    "require_support", "predicate", "max_predicate_contexts", "max_predicate_work",
-    "graphs", "genetic_code", "budget_split",
+    "max_paths", "require_support", "predicate", "max_predicate_contexts",
+    "max_predicate_work", "graphs", "genetic_code", "budget_split",
 };
+
+// The note of an entry whose request named the labels (output.labels "all", or an
+// annotation field) but whose answer reads none: mode count reads no annotation (§5.2), and
+// neither does output.labels "none"; the fields were checked and had no effect
+constexpr const char kNoteAnnotationNotRead[] = "annotation_not_read";
 
 // The JSON objects built between two readings of the answer's deadline (§5.3:
 // "serialisation every 4,096 objects")
@@ -126,6 +129,12 @@ struct ParsedRequest {
     double time_budget_ms = 0;
     // {field, requested, effective} per request value lowered to its cap
     Json::Value clamped = Json::Value(Json::arrayValue);
+    // output.labels "all" (increment 3)
+    bool labels_all = false;
+    // the request named the labels: output.labels "all" or an annotation field
+    bool annotation_named = false;
+    // the effective annotation limits (used with labels_all in a retrieval mode)
+    RetrievalLimits retrieval;
 };
 
 void note_clamped(Json::Value *clamped, const char *field, Json::Value requested,
@@ -246,22 +255,34 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             if (!v.isString())
                 throw invalid(o.path("labels") + ": expected a string");
             const std::string labels = v.asString();
-            if (labels == "all" || labels == "predicate_only") {
+            if (labels == "predicate_only") {
                 // even in mode count, where no projection applies: the request names a
                 // reading of the annotation this increment cannot do
-                throw later(o.path("labels") + ": \"" + labels + "\" (labels read from the "
-                            "annotation) in a later increment; this increment serves \"none\"");
+                throw later(o.path("labels") + ": \"" + labels + "\" (the labels a predicate "
+                            "names) in a later increment; this increment serves \"none\" and "
+                            "\"all\"");
             }
-            if (labels != "none")
+            if (labels != "none" && labels != "all")
                 throw invalid(o.path("labels") + ": expected one of none|all|predicate_only");
+            req.labels_all = labels == "all";
+            req.annotation_named |= req.labels_all;
         }
-        for (const char *key : { "occurrences", "paths" }) {
-            if (!o.has(key))
-                continue;
-            if (!o.raw(key).isBool())
-                throw invalid(o.path(key) + ": expected a boolean");
-            if (o.raw(key).asBool())
-                throw later(o.path(key) + ": true in a later increment");
+        if (o.has("occurrences")) {
+            if (!o.raw("occurrences").isBool())
+                throw invalid(o.path("occurrences") + ": expected a boolean");
+            // placed occurrences are the labels' (§4.3): without labels there is nothing
+            // to place
+            if (o.raw("occurrences").asBool() && !req.labels_all) {
+                throw invalid(o.path("occurrences") + ": true needs output.labels \"all\" "
+                              "(occurrences are placed per label)");
+            }
+            req.retrieval.occurrences = o.raw("occurrences").asBool();
+        }
+        if (o.has("paths")) {
+            if (!o.raw("paths").isBool())
+                throw invalid(o.path("paths") + ": expected a boolean");
+            if (o.raw("paths").asBool())
+                throw later(o.path("paths") + ": true in a later increment");
         }
         o.finish();
     }
@@ -312,6 +333,31 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             req.time_budget_ms = t;
         }
     }
+
+    // the annotation caps (increment 3, §5.3): accepted with any projection and mode, used
+    // by output.labels "all" in a retrieval mode (elsewhere stated: annotation_not_read)
+    for (const char *key : { "max_labels_per_anchor", "max_annotation_work", "max_memory_mb",
+                             "max_labels", "max_occurrences_per_label",
+                             "allow_unbudgeted_annotation" }) {
+        req.annotation_named |= f.has(key);
+    }
+    RetrievalLimits &r = req.retrieval;
+    r.max_labels_per_anchor = capped_integer(f, "max_labels_per_anchor",
+                                             limits.max_labels_per_anchor, 1, &req.clamped);
+    r.max_annotation_work = capped_integer(f, "max_annotation_work", limits.max_annotation_work,
+                                           1, &req.clamped);
+    r.max_memory_bytes = capped_integer(f, "max_memory_mb", limits.max_memory_mb, 1,
+                                        &req.clamped) << 20;
+    r.max_labels = capped_integer(f, "max_labels", limits.max_labels, 0, &req.clamped);
+    r.max_occurrences_per_label = capped_integer(f, "max_occurrences_per_label",
+                                                 limits.max_occurrences_per_label, 0,
+                                                 &req.clamped);
+    if (f.has("allow_unbudgeted_annotation")) {
+        if (!f.raw("allow_unbudgeted_annotation").isBool())
+            throw invalid(f.path("allow_unbudgeted_annotation") + ": expected a boolean");
+        r.allow_unbudgeted = f.raw("allow_unbudgeted_annotation").asBool();
+    }
+    r.chunk_target_ms = limits.chunk_target_ms;
 
     f.finish();
     return req;
@@ -389,10 +435,12 @@ Json::Value error_json(const std::string &code, const std::string &message) {
 /**
  * The answer's entry for one pattern (§7.2). |results| holds the JSON
  * of the contexts enumerate() released (empty after count()); it is published only when the
- * engine withheld nothing, and moved into the entry.
+ * engine withheld nothing, and moved into the entry. |released| is the number of contexts the
+ * engine released: results.size(), or more with output.labels "all" when the memory account
+ * admitted only the first of them (their objects not built; apply_labels states the cut).
  */
 Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
-                       bool strand_stated, Json::Value results) {
+                       bool strand_stated, Json::Value results, uint64_t released) {
     Json::Value e;
     e["id"] = spec.id;
     e["kind"] = to_string(spec.kind);
@@ -460,9 +508,9 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
         const Extraction &x = *result->extraction;
         if (x.withheld) {
             results = Json::Value(Json::arrayValue);
-        } else if (results.size() != x.returned) {
+        } else if (released != x.returned || results.size() > released) {
             throw std::logic_error("pattern: the engine released "
-                                   + std::to_string(results.size()) + " contexts and stated "
+                                   + std::to_string(released) + " contexts and stated "
                                    + std::to_string(x.returned));
         }
         // every context of the pattern is in results: an absence claim over graph contexts
@@ -521,6 +569,12 @@ PatternLimits pattern_limits(const Config &config) {
     limits.finalize_ms = static_cast<double>(config.pattern_finalize_ms);
     limits.min_information_bits = config.pattern_min_information_bits;
     limits.max_patterns = config.pattern_max_patterns;
+    limits.max_labels_per_anchor = config.pattern_max_labels_per_anchor;
+    limits.max_annotation_work = config.pattern_max_annotation_work;
+    limits.max_memory_mb = config.pattern_max_memory_mb;
+    limits.max_labels = config.pattern_max_labels;
+    limits.max_occurrences_per_label = config.pattern_max_occurrences;
+    limits.chunk_target_ms = static_cast<double>(config.traverse_chunk_target_ms);
     return limits;
 }
 
@@ -550,7 +604,8 @@ Json::Value process_pattern_request(
         const std::string &release,
         const IndexIdentity *identity,
         PatternDelivery *delivery,
-        const std::function<Deadline::Clock::time_point()> &clock) {
+        const std::function<Deadline::Clock::time_point()> &clock,
+        const RetrievalHooks *hooks) {
     // the request's one deadline starts here, its body parsed (§5.3)
     const std::function<Deadline::Clock::time_point()> now
             = clock ? clock : std::function<Deadline::Clock::time_point()>(&Deadline::Clock::now);
@@ -577,6 +632,26 @@ Json::Value process_pattern_request(
     const bool strand_stated = support.strand_stated;
     const uint64_t num_rows = anno_graph.get_annotator().num_objects();
 
+    // output.labels "all" in a retrieval mode reads the annotation (increment 3, §4.3): on
+    // the budget-aware path, or unbudgeted by the request's explicit opt-in
+    const bool read_labels = req.labels_all && mode != Mode::COUNT;
+    std::optional<PatternRetrieval> retrieval;
+    if (read_labels) {
+        retrieval.emplace(anno_graph, support.mode, req.retrieval, budget, hooks);
+        if (!retrieval->description().budgeted && !req.retrieval.allow_unbudgeted) {
+            throw PatternRefusal(400, "annotation_unbudgeted",
+                                 "pattern: output.labels \"all\" reads the annotation, and this "
+                                 "index's annotation has no budget-aware decode (only the "
+                                 "row-diff family has one): its reads would run without a "
+                                 "memory bound. Set allow_unbudgeted_annotation: true to read "
+                                 "it anyway (the answer then says annotation: unbudgeted), or "
+                                 "ask for output.labels \"none\" or mode count");
+        }
+    }
+    // the graph's name in by_label (the index's --index-name; null without one)
+    const Json::Value graph_name = identity && !identity->name.empty()
+            ? Json::Value(identity->name) : Json::Value();
+
     /**
      * One released context as its JSON result (§7.2, output.labels none), built in the engine's
      * callback: spelling the k-mer is graph work, done while the engine still reads the
@@ -586,7 +661,8 @@ Json::Value process_pattern_request(
      * graphs; on a native CANONICAL graph the canonical k-mer's (the annotation key of every
      * route, LabelOracle::key_of), since the other orientation's row carries no labels.
      */
-    auto context_json = [&](const Context &c, size_t length) {
+    auto context_json = [&](const Context &c, size_t length,
+                            RetrievalContext *collected = nullptr) {
         Json::Value r;
         std::string kmer = graph.get_node_sequence(c.node);
         if (kmer.size() != k || c.offset + length > k) {
@@ -600,6 +676,15 @@ Json::Value process_pattern_request(
             graph.map_to_nodes(kmer, [&](DeBruijnGraph::node_index n) { key = n; });
         }
         r["instance"] = kmer.substr(c.offset, length);
+        if (collected) {
+            // what the labelled retrieval reads: the row's key, the k-mer naming it
+            collected->orientation = c.orientation;
+            collected->offset = c.offset;
+            collected->kmer = kmer;
+            collected->key = key != DeBruijnGraph::npos
+                                && AnnotatedDBG::graph_to_anno_index(key) < num_rows
+                    ? key : DeBruijnGraph::npos;
+        }
         r["kmer"] = std::move(kmer);
         r["offset"] = c.offset;
         if (strand_stated) {
@@ -617,23 +702,53 @@ Json::Value process_pattern_request(
     };
 
     Json::Value entries(Json::arrayValue);
-    std::vector<std::pair<std::optional<Result>, Json::Value>> answered;
+    struct Answered {
+        std::optional<Result> result;
+        Json::Value results;
+        // the contexts the engine released (results.size(), or more when the memory account
+        // of output.labels "all" admitted only the first of them)
+        uint64_t released = 0;
+        // output.labels "all": the pattern's labels, read in the work phase
+        std::optional<LabelsAnswer> labels;
+    };
+    std::vector<Answered> answered;
     answered.reserve(req.patterns.size());
     for (const PatternSpec &spec : req.patterns) {
-        Json::Value results(Json::arrayValue);
-        std::optional<Result> result;
+        Answered a;
+        a.results = Json::Value(Json::arrayValue);
         if (spec.pattern) {
             if (mode == Mode::COUNT) {
-                result = search.count(*spec.pattern, req.request, budget);
+                a.result = search.count(*spec.pattern, req.request, budget);
+            } else if (!read_labels) {
+                const size_t length = spec.pattern->length();
+                a.result = search.enumerate(*spec.pattern, req.request, budget,
+                                            [&](const Context &c) {
+                    a.results.append(context_json(c, length));
+                });
+                a.released = a.results.size();
             } else {
                 const size_t length = spec.pattern->length();
-                result = search.enumerate(*spec.pattern, req.request, budget,
-                                          [&](const Context &c) {
-                    results.append(context_json(c, length));
+                std::vector<RetrievalContext> collected;
+                retrieval->begin_release(mode);
+                a.result = search.enumerate(*spec.pattern, req.request, budget,
+                                            [&](const Context &c) {
+                    ++a.released;
+                    // the context's descriptor is charged to the memory account before its
+                    // object is built; after the first that does not fit none is built
+                    if (!retrieval->admit_context())
+                        return;
+                    collected.emplace_back();
+                    a.results.append(context_json(c, length, &collected.back()));
                 });
+                // the labels of what was released (nothing when it was withheld), work
+                // still: the reads end where the deadline's work time does (§5.3)
+                if (!a.result->refusal && a.result->extraction) {
+                    a.labels = retrieval->retrieve(collected, a.released, length, mode,
+                                                   *a.result->extraction, graph_name);
+                }
             }
         }
-        answered.emplace_back(std::move(result), std::move(results));
+        answered.push_back(std::move(a));
     }
     const double elapsed_ms = deadline.elapsed_ms();
 
@@ -641,14 +756,24 @@ Json::Value process_pattern_request(
     // kDeliveryStride objects (the writing and the compression then check it too)
     uint64_t objects = 0;
     for (size_t i = 0; i < req.patterns.size(); ++i) {
-        auto &[result, results] = answered[i];
-        objects += 1 + results.size();
+        Answered &a = answered[i];
+        objects += 1 + a.results.size();
+        if (a.labels)
+            objects += a.labels->result_fields.size();
         if (delivery && objects >= kDeliveryStride) {
             delivery->check();
             objects = 0;
         }
-        entries.append(entry_json(req.patterns[i], result ? &*result : nullptr, mode,
-                                  strand_stated, std::move(results)));
+        Json::Value entry = entry_json(req.patterns[i], a.result ? &*a.result : nullptr, mode,
+                                       strand_stated, std::move(a.results), a.released);
+        if (a.labels) {
+            apply_labels(&entry, std::move(*a.labels), mode);
+        } else if (req.annotation_named && !read_labels && entry.isMember("notes")) {
+            // the labels were asked for (or bounded) and none are read here: said, not
+            // ignored (mode count, or output.labels "none")
+            entry["notes"].append(kNoteAnnotationNotRead);
+        }
+        entries.append(std::move(entry));
     }
 
     Json::Value out;
@@ -656,8 +781,11 @@ Json::Value process_pattern_request(
     out["mode"] = to_string(mode);
     if (mode == Mode::COUNT) {
         out["output"] = Json::Value();
-    } else {
+    } else if (!read_labels) {
         out["output"]["labels"] = "none";
+    } else {
+        out["output"]["labels"] = "all";
+        out["output"]["occurrences"] = req.retrieval.occurrences;
     }
 
     Json::Value index;
@@ -681,6 +809,17 @@ Json::Value process_pattern_request(
     l["min_information_bits"] = number_json(limits.min_information_bits);
     l["max_patterns"] = uint_json(limits.max_patterns);
     l["stop_at_threshold"] = req.request.stop_at_threshold;
+    if (read_labels) {
+        // the annotation limits, in the answers that read annotation only (the others answer
+        // as before increment 3)
+        const RetrievalLimits &r = req.retrieval;
+        l["max_labels_per_anchor"] = uint_json(r.max_labels_per_anchor);
+        l["max_annotation_work"] = uint_json(r.max_annotation_work);
+        l["max_memory_mb"] = uint_json(r.max_memory_bytes >> 20);
+        l["max_labels"] = uint_json(r.max_labels);
+        l["max_occurrences_per_label"] = uint_json(r.max_occurrences_per_label);
+        l["allow_unbudgeted_annotation"] = r.allow_unbudgeted;
+    }
     l["clamped"] = std::move(req.clamped);
     out["limits"] = std::move(l);
 
@@ -707,9 +846,11 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
 
     p["modes"] = strings_json({ "count", "all_or_count", "partial" });
     p["default_mode"] = to_string(Mode::ALL_OR_COUNT);
-    p["projections"] = strings_json({ "none" });
+    p["projections"] = strings_json({ "none", "all" });
     p["default_projection"] = kDefaultProjection;
-    p["projections_later_increment"] = strings_json({ "all", "predicate_only" });
+    p["projections_later_increment"] = strings_json({ "predicate_only" });
+    // output.occurrences with output.labels "all": placed where the index can place
+    p["default_occurrences"] = true;
     p["kinds"] = strings_json({ "dna", "iupac" });
     p["kinds_later_increment"] = strings_json({ "protein" });
     p["default_scope"] = to_string(Scope::ANY_OFFSET);
@@ -732,6 +873,12 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     caps["time_budget_ms"] = number_json(limits.max_time_ms);
     caps["min_information_bits"] = number_json(limits.min_information_bits);
     caps["max_patterns"] = uint_json(limits.max_patterns);
+    // the labelled retrieval's (output.labels "all", increment 3)
+    caps["max_labels_per_anchor"] = uint_json(limits.max_labels_per_anchor);
+    caps["max_annotation_work"] = uint_json(limits.max_annotation_work);
+    caps["max_memory_mb"] = uint_json(limits.max_memory_mb);
+    caps["max_labels"] = uint_json(limits.max_labels);
+    caps["max_occurrences_per_label"] = uint_json(limits.max_occurrences_per_label);
     p["caps"] = std::move(caps);
     // the budget of a request that names none: unlike the other caps, below the maximum
     p["default_time_budget_ms"] = number_json(limits.default_time_ms);
@@ -776,18 +923,16 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     }
     p["scopes"] = std::move(scopes);
 
-    // what the annotation could give a later increment's labelled retrieval (none of it is
-    // served now): placement and support need BASIC coordinates (and the .seqs mapping for
-    // records), the budgeted reads a row-diff annotation (§4.3)
+    // what the annotation gives the labelled retrieval (output.labels "all"): placement and
+    // support need BASIC coordinates (and the .seqs mapping for records), the budgeted reads
+    // a row-diff annotation (§4.3); support is the best per-label support of a later
+    // increment's paths
     try {
         const graph::traversal::LabelOracle oracle(*anno_graph);
-        const bool basic = support.mode == GraphMode::BASIC;
-        const bool coords = oracle.has_coordinates();
-        const bool records = coords && oracle.coord_to_header();
-        p["placement"] = !basic ? "none_canonical" : records ? "record" : coords ? "global"
-                                                                                 : "none";
-        p["support"] = basic && records ? "record_verified" : "label_intersection";
-        p["annotation"] = oracle.decode_charged() ? "budgeted" : "unbudgeted";
+        const AnnotationDescription d = describe_annotation(oracle, support.mode);
+        p["placement"] = d.placement;
+        p["support"] = d.support;
+        p["annotation"] = d.budgeted ? "budgeted" : "unbudgeted";
     } catch (const std::exception &e) {
         // stated as unknown (null) rather than failing the capabilities
         logger->warn("[Server] pattern capabilities: the annotation could not be described: {}",
