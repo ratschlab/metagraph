@@ -44,7 +44,8 @@ struct IndexIdentity;
 /**
  * A refusal of a whole /pattern request: the HTTP status and the body {"error", "code"}
  * (400 invalid_request, later_increment, resident_only, mask_required and the other graph
- * support reasons; 503 deadline). The server answers it as is (HttpError); the CLI writes the
+ * support reasons of route_support, alphabet_untested and mask_invalid among them; 503
+ * deadline). The server answers it as is (HttpError); the CLI writes the
  * same body and exits 1. A refusal of one pattern is not this: it is the `error` of that
  * pattern's slot in a 200 answer.
  */
@@ -105,6 +106,24 @@ struct PatternLimits {
 };
 
 PatternLimits pattern_limits(const Config &config);
+
+/**
+ * The alphabet half of the route's support decision, a pure function of the graph's BOSS
+ * alphabet (owner decision #4 of 2026-10-07, review I26): "" for "$ACGT" (served),
+ * "alphabet_untested" for "$ACGTN" (the engine supports it, but the route does not serve it
+ * until a DNA5 build passes the pattern tests), "alphabet_unsupported" for any other.
+ */
+std::string alphabet_refusal(const std::string &alphabet);
+
+/**
+ * Whether /pattern and `metagraph pattern` serve |graph|: the engine's PatternSearch::support,
+ * narrowed by the route's own reasons, "alphabet_untested" (alphabet_refusal; it takes
+ * precedence over mask_required, as alphabet_unsupported does) and "mask_invalid" (a mask
+ * that marks an edge with W = $ valid, found once at load: check_mask_at_load; review of
+ * 2026-10-07, I17, owner decision #6). Its reason is the 400 refusal's code and the
+ * capabilities' unavailable_reason. The engine itself keeps serving $ACGTN (its tests).
+ */
+graph::pattern::GraphSupport route_support(const graph::DeBruijnGraph &graph);
 
 /**
  * What the transport of one /pattern answer needs from its processing: the request's

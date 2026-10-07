@@ -1,0 +1,225 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": false,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 1,
+  "max_occurrences_per_label": 16,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "all",
+  "occurrences": true
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "anchors_truncated": [],
+   "annotation": "budgeted",
+   "by_label": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "10": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "11": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "12": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "13": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "14": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "15": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "16": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "17": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "18": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "19": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "5": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "6": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "7": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "8": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "9": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 940
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 888
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 92
+     },
+     "unit": "graph_contexts",
+     "value": 1828
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "repeat",
+   "information_bits": 24.0,
+   "kind": "dna",
+   "labels_cut": null,
+   "length": 12,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "occurrences_cut": null,
+   "palindromic": false,
+   "pattern": "GCGGCGGCGGCG",
+   "placement": "record",
+   "results": [],
+   "retrieval_complete": false,
+   "returned": 0,
+   "rows_refused": [],
+   "scope": "any_offset",
+   "stop": {
+    "phase": "output",
+    "reason": "max_memory"
+   },
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 9.62625,
+    "label_discovery_ms": 0.0,
+    "placement_ms": 0.0
+   },
+   "withheld": {
+    "reason": "output_budget"
+   },
+   "work": {
+    "annotation_rows": 0,
+    "annotation_units": 0,
+    "mask_scans": 0,
+    "memory_bytes": 1048124,
+    "ranges_visited": 5442,
+    "steps": 5442
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 9.66425
+ }
+}

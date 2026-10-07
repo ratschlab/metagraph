@@ -508,8 +508,10 @@ TEST(PatternSearchFixes, LeadingNRunIsNotSearched) {
         const auto kmers = served_kmers(*graph);
         // a core taken from the graph, so that it has contexts
         const std::string core = kmers[100].second.substr(3, 6);
+        // (owner decision #8: runs at both ends at once too, L = k and L < k)
         for (const std::string &text : { "NNNNNNNN" + core, core + "NNNNNNNN",
-                                        "NNNNN" + core, "NNNNNNNNN" + core }) {
+                                        "NNNNN" + core, "NNNNNNNNN" + core,
+                                        "NNNN" + core + "NNNNN", "NNN" + core + "NNN" }) {
             for (Strands strands : { Strands::BOTH, Strands::FORWARD, Strands::REVERSE }) {
                 for (Scope scope : { Scope::ANY_OFFSET, Scope::SUFFIX }) {
                     if (scope == Scope::SUFFIX && mode == DeBruijnGraph::PRIMARY)
@@ -778,13 +780,14 @@ TEST(PatternSearchFixes, ReleaseDisagreeingWithTheCountThrows) {
     Budget count_budget = budget_of();
     Result counted = engine.count(pattern, request, count_budget);
     ASSERT_EQ(Relation::EXACT, counted.contexts->total.relation);
-    // the premise: the release finds fewer than the exact count claims
+    // partial, its cap above the count, releases fewer than the exact count too: it fails the
+    // same way rather than state the short list as cut at max_contexts (owner decision #9 of
+    // 2026-10-07, also in partial)
     Request partial = request;
     partial.mode = Mode::PARTIAL;
     Budget partial_budget = budget_of();
     Result listed;
-    std::vector<Ctx> found = released_by(engine, pattern, partial, partial_budget, &listed);
-    ASSERT_LT(found.size(), counted.contexts->total.value);
+    EXPECT_THROW(released_by(engine, pattern, partial, partial_budget, &listed), std::logic_error);
 
     Budget budget = budget_of();
     std::vector<Ctx> received;

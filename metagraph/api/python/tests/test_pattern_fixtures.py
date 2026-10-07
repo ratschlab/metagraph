@@ -1068,9 +1068,10 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(set(MODES), seen['mode'])
         self.assertEqual(set(SCOPES), seen['scope'])
         self.assertEqual({'both', 'forward', 'reverse'}, seen['strands'])
-        # output_budget and the cut max_memory need more contexts than the mini's patterns
-        # give at max_memory_mb 1 (the unit tests show them, tests/cli/test_pattern_retrieval)
-        self.assertEqual(set(WITHHELD) - {'output_budget'}, seen['withheld'])
+        # output_budget from labels_all_output_budget (a GCG repeat whose 1,828 contexts fill
+        # the smallest account, max_memory_mb 1); the cut max_memory only in partial, which no
+        # fixture requests at that size (tests/cli/test_pattern_retrieval shows it)
+        self.assertEqual(set(WITHHELD), seen['withheld'])
         self.assertEqual({'max_contexts', 'max_steps', 'time'}, seen['cut'])
         self.assertEqual(set(SLOT_ERRORS), seen['slot'])
         self.assertEqual({'basic', 'primary'}, seen['graph_mode'])

@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "dna": "GCGGCGGCGGCG",
+   "id": "repeat"
+  }
+ ],
+ "max_memory_mb": 1,
+ "max_contexts": 10000,
+ "output": {
+  "labels": "all"
+ }
+}

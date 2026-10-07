@@ -175,6 +175,11 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"allow_unbudgeted_annotation\": 1}", 400, "invalid_request" },
         { "{" + p + ", \"max_labels\": 0, \"max_occurrences_per_label\": 0}", 200, "" },
         { "{" + p + ", \"predicate\": null}", 400, "later_increment" },
+        // owner decision #13: long_search is reserved for increment 4 (paths opt-in), refused
+        // by name whatever its value, the default "anchors" included
+        { "{" + p + ", \"long_search\": \"paths\"}", 400, "later_increment" },
+        { "{" + p + ", \"long_search\": \"anchors\"}", 400, "later_increment" },
+        { "{" + p + ", \"long_search\": null}", 400, "later_increment" },
         { "{\"patterns\": [{\"protein\": \"MK\"}]}", 400, "later_increment" },
         { "{" + p + ", \"in_ram\": true}", 400, "resident_only" },
         { "{" + p + ", \"output\": {\"labels\": \"none\", \"paths\": false}}", 200, "" },
@@ -227,6 +232,11 @@ TEST(PatternRoute, RefusalOrder) {
         // 6, alphabetical: graphs < in_ram; in_ram < max_paths
         { "{" + p + ", \"in_ram\": true, \"graphs\": []}", "later_increment", "request.graphs" },
         { "{" + p + ", \"in_ram\": true, \"max_paths\": 1}", "resident_only", "request.in_ram" },
+        // (in_ram < long_search; long_search before the patterns)
+        { "{" + p + ", \"in_ram\": true, \"long_search\": \"paths\"}", "resident_only",
+          "request.in_ram" },
+        { "{\"patterns\": \"x\", \"long_search\": \"anchors\"}", "later_increment",
+          "request.long_search" },
         // 7 before 8
         { "{\"patterns\": [], \"mode\": \"x\"}", "invalid_request", "request.patterns" },
         // within 7: protein, id, exactly one of dna / iupac, its type, an unknown field
@@ -776,6 +786,49 @@ TEST(PatternRoute, GraphsTheEngineDoesNotServe) {
                                 "placement", "support", "annotation" }) {
             EXPECT_TRUE(caps[f].isNull()) << code << " " << f;
         }
+    }
+}
+
+// Owner decision #4 of 2026-10-07 (review I26): /pattern and `metagraph pattern` serve $ACGT
+// graphs only; $ACGTN is refused as alphabet_untested (400, and the capabilities' reason) until
+// a DNA5 build passes the pattern tests, while the engine keeps its DNA5 paths. A DNA4 build
+// cannot load a DNA5 graph, so the decision is pinned as the pure function of the alphabet it
+// is, and through the route on this build's own alphabet (refused on a DNA5 build)
+TEST(PatternRoute, AlphabetRefusal) {
+    EXPECT_EQ("", alphabet_refusal("$ACGT"));
+    EXPECT_EQ("alphabet_untested", alphabet_refusal("$ACGTN"));
+    for (const char *other : { "", "ACGT", "$ACGTNacgt", "$ACGTX", "$ACDEFGHIKLMNPQRSTVWYX" }) {
+        EXPECT_EQ("alphabet_unsupported", alphabet_refusal(other)) << other;
+    }
+
+    auto g = tiny();
+    const pattern::GraphSupport engine = pattern::PatternSearch::support(g->get_graph());
+    const pattern::GraphSupport route = route_support(g->get_graph());
+    // the engine serves both alphabets; the route only $ACGT
+    ASSERT_TRUE(engine.supported) << engine.reason;
+    const std::string expected = alphabet_refusal(engine.alphabet);
+    EXPECT_EQ(expected.empty(), route.supported);
+    EXPECT_EQ(expected, route.reason);
+    const Json::Value caps = pattern_capabilities_json(g.get(), limits(), false);
+    if (expected.empty()) {
+        EXPECT_EQ("$ACGT", engine.alphabet);
+        EXPECT_TRUE(caps["available"].asBool());
+        EXPECT_EQ(std::make_pair(200, std::string()),
+                  refusal(*g, "{\"patterns\": [{\"dna\": \"AACG\"}]}"));
+    } else {
+        EXPECT_EQ("alphabet_untested", expected);
+        std::string error;
+        EXPECT_EQ(std::make_pair(400, expected),
+                  refusal(*g, "{\"patterns\": [{\"dna\": \"AACG\"}]}", &error));
+        EXPECT_NE(std::string::npos, error.find("not served on the $ACGTN alphabet until a "
+                                                "DNA5 build passes the pattern tests")) << error;
+        EXPECT_FALSE(caps["available"].asBool());
+        EXPECT_EQ(expected, caps["unavailable_reason"].asString());
+        // a recognised graph: what it is stays stated
+        EXPECT_EQ("basic", caps["graph_mode"].asString());
+        EXPECT_EQ(engine.alphabet, caps["alphabet"].asString());
+        EXPECT_EQ("file", caps["mask"].asString());
+        EXPECT_EQ(2u, caps["scopes"].size());
     }
 }
 

@@ -41,9 +41,11 @@ namespace {
 constexpr const char *kDefaultProjection = "none";
 
 // Request fields of later increments (§7.1): refused by name, any value (null included),
-// rather than reported as unknown, so that the answer says what to wait for
+// rather than reported as unknown, so that the answer says what to wait for. long_search
+// (owner decision #13 of 2026-10-07): the opt-in of increment 4's paths ("paths"; "anchors"
+// the answer of today), reserved: refused whatever its value until the paths are served
 const char *const kLaterIncrementFields[] = {
-    "max_paths", "require_support", "predicate", "max_predicate_contexts",
+    "long_search", "max_paths", "require_support", "predicate", "max_predicate_contexts",
     "max_predicate_work", "graphs", "genetic_code", "budget_split",
 };
 
@@ -396,8 +398,21 @@ std::string support_message(const GraphSupport &support) {
         return "pattern: a PRIMARY graph is served only wrapped in CanonicalDBG";
     }
     if (support.reason == "alphabet_unsupported") {
-        return "pattern: the graph's alphabet '" + support.alphabet + "' is neither $ACGT nor "
-               "$ACGTN";
+        return "pattern: the graph's alphabet '" + support.alphabet + "' is not $ACGT (a DNA4 "
+               "build; $ACGTN, a DNA5 build, is not served yet either)";
+    }
+    if (support.reason == "alphabet_untested") {
+        return "pattern: the graph's alphabet is $ACGTN (a DNA5 build): the pattern search is "
+               "not served on the $ACGTN alphabet until a DNA5 build passes the pattern tests "
+               "(its DNA5 code has not been run in a test yet); serve a $ACGT (DNA4) graph";
+    }
+    if (support.reason == "mask_invalid") {
+        return "pattern: the graph's dummy-edge mask (.edgemask) marks dummy edges with W = $ "
+               "valid (as `metagraph extend` on a masked graph used to write it, or a stale "
+               "mask): counts on it would take dummy edges for k-mers and could be claimed "
+               "exact while too large; rebuild the mask with `metagraph transform --mask-dummy "
+               "--force <graph>.dbg` (writes the .edgemask beside the graph; node ids and "
+               "annotation unchanged) and restart the server";
     }
     return "pattern: the graph is not supported (" + support.reason + ")";
 }
@@ -560,6 +575,37 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
 } // namespace
 
 
+std::string alphabet_refusal(const std::string &alphabet) {
+    if (alphabet == "$ACGT")
+        return "";
+    // owner decision #4 of 2026-10-07 (review I26): the engine counts on $ACGTN, but no DNA5
+    // build has run its tests; the route serves it once one passes
+    if (alphabet == "$ACGTN")
+        return "alphabet_untested";
+    return "alphabet_unsupported";
+}
+
+GraphSupport route_support(const DeBruijnGraph &graph) {
+    GraphSupport support = PatternSearch::support(graph);
+    // the alphabet before the mask, as the engine orders alphabet_unsupported before
+    // mask_required: no mask makes a DNA5 graph served
+    if (support.supported || support.reason == "mask_required") {
+        const std::string refusal = alphabet_refusal(support.alphabet);
+        if (!refusal.empty()) {
+            support.supported = false;
+            support.reason = refusal;
+            return support;
+        }
+    }
+    // a mask that marks a W = $ edge valid (review of 2026-10-07, I17; owner decision #6),
+    // found once at load (check_mask_at_load)
+    if (support.supported && mask_invalid_at_load(graph)) {
+        support.supported = false;
+        support.reason = "mask_invalid";
+    }
+    return support;
+}
+
 Json::Value PatternRefusal::body() const {
     Json::Value b;
     b["error"] = what();
@@ -670,8 +716,8 @@ Json::Value process_pattern_request(
     const DeBruijnGraph &graph = anno_graph.get_graph();
 
     // the graph first: no request is answerable on a graph the engine
-    // cannot count on, whatever it asks
-    const GraphSupport support = PatternSearch::support(graph);
+    // cannot count on (or the route does not serve), whatever it asks
+    const GraphSupport support = route_support(graph);
     if (!support.supported)
         throw PatternRefusal(400, support.reason, support_message(support));
 
@@ -996,13 +1042,16 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     }
 
     const DeBruijnGraph &graph = anno_graph->get_graph();
-    const GraphSupport support = PatternSearch::support(graph);
+    const GraphSupport support = route_support(graph);
     p["available"] = support.supported;
     p["unavailable_reason"] = support.supported ? Json::Value() : Json::Value(support.reason);
     p["k"] = uint_json(graph.get_k());
-    // the engine recognised the representation (only its mask or alphabet is missing)
+    // the engine recognised the representation (only its mask or alphabet is missing, or
+    // not served: alphabet_untested, mask_invalid)
     const bool recognised = support.supported || support.reason == "mask_required"
-                                || support.reason == "alphabet_unsupported";
+                                || support.reason == "alphabet_unsupported"
+                                || support.reason == "alphabet_untested"
+                                || support.reason == "mask_invalid";
     if (!recognised)
         return p;
     p["graph_mode"] = to_string(support.mode);

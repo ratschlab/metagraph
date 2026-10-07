@@ -14,6 +14,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
 #include "common/threads/threading.hpp"
+#include "common/unix_tools.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "cli/config/config.hpp"
@@ -33,6 +34,28 @@ namespace {
 // allocated at its address must not pass for it (the unit tests load many graphs).
 std::mutex built_masks_mutex;
 std::vector<std::weak_ptr<const DBGSuccinct>> built_masks;
+
+// The graphs whose mask check_mask_at_load found invalid (weak references, as above)
+std::vector<std::weak_ptr<const DBGSuccinct>> invalid_masks;
+
+// Whether |registry| holds |graph| (or the PRIMARY graph its CanonicalDBG wraps); prunes the
+// expired entries. The caller holds built_masks_mutex.
+bool registered(std::vector<std::weak_ptr<const DBGSuccinct>> *registry,
+                const DeBruijnGraph &graph) {
+    const DeBruijnGraph *base = &graph;
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
+        base = &canonical->get_graph();
+    bool found = false;
+    for (auto it = registry->begin(); it != registry->end(); ) {
+        if (auto held = it->lock()) {
+            found |= held.get() == base;
+            ++it;
+        } else {
+            it = registry->erase(it);
+        }
+    }
+    return found;
+}
 
 } // namespace
 
@@ -71,20 +94,35 @@ void build_mask_at_load(const std::shared_ptr<DeBruijnGraph> &graph, bool stdout
 }
 
 bool mask_built_at_load(const DeBruijnGraph &graph) {
-    const DeBruijnGraph *base = &graph;
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
-        base = &canonical->get_graph();
     std::lock_guard<std::mutex> lock(built_masks_mutex);
-    bool built = false;
-    for (auto it = built_masks.begin(); it != built_masks.end(); ) {
-        if (auto held = it->lock()) {
-            built |= held.get() == base;
-            ++it;
-        } else {
-            it = built_masks.erase(it);
-        }
-    }
-    return built;
+    return registered(&built_masks, graph);
+}
+
+uint64_t check_mask_at_load(const std::shared_ptr<DeBruijnGraph> &graph, bool stdout_reserved) {
+    auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
+    if (!dbg_succ || !dbg_succ->get_mask() || mask_built_at_load(*graph))
+        return 0;
+
+    Timer timer;
+    const uint64_t valid_sentinels = dbg_succ->count_valid_sentinel_edges();
+    logger->log(stdout_reserved ? spdlog::level::trace : spdlog::level::info,
+                "Dummy-edge mask checked for the pattern search in {:.3f} s: {} edges with "
+                "W = $ marked valid", timer.elapsed(), valid_sentinels);
+    if (!valid_sentinels)
+        return 0;
+
+    logger->warn("The dummy-edge mask (.edgemask) marks {} dummy edges with W = $ valid (a mask "
+                 "written by `metagraph extend` on a masked graph, or a stale one): the pattern "
+                 "search answers mask_invalid. Remedy: rebuild the mask with `metagraph "
+                 "transform --mask-dummy --force <graph>.dbg` and restart", valid_sentinels);
+    std::lock_guard<std::mutex> lock(built_masks_mutex);
+    invalid_masks.emplace_back(dbg_succ);
+    return valid_sentinels;
+}
+
+bool mask_invalid_at_load(const DeBruijnGraph &graph) {
+    std::lock_guard<std::mutex> lock(built_masks_mutex);
+    return registered(&invalid_masks, graph);
 }
 
 std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const Config &config) {
@@ -100,6 +138,11 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const
         auto graph = load_critical_dbg(path);
         // here, in the loading thread: while the annotation loads, and before the graph is
         // shared with anyone, so that nothing ever sees it without the mask
+        if (serves_pattern) {
+            // a mask read from its file is checked once, here, before the graph is shared
+            // (mask_invalid, review of 2026-10-07, I17); one built at load is not
+            check_mask_at_load(graph, cli);
+        }
         if (build_mask) {
             build_mask_at_load(graph, cli);
         } else if (serves_pattern) {

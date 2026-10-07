@@ -49,6 +49,24 @@ void build_mask_at_load(const std::shared_ptr<graph::DeBruijnGraph> &graph,
 bool mask_built_at_load(const graph::DeBruijnGraph &graph);
 
 /**
+ * The check of a mask the pattern search is served on (review of 2026-10-07, I17; owner
+ * decision #6): counts the edges with W = $ that |graph|'s mask marks valid
+ * (DBGSuccinct::count_valid_sentinel_edges, O(number of W = $ edges)), and when there are any,
+ * logs the remedy and records |graph| as one whose mask is invalid (mask_invalid_at_load): the
+ * pattern search then refuses it (mask_invalid), since its counts would take those dummies
+ * for k-mers and could be claimed exact while too large. Done once, in the loading thread,
+ * for the graph the pattern search serves (async_load_critical_dbg); a mask built at load is
+ * correct by construction and not checked. Returns the count (0: none, or no mask, or not
+ * succinct). |stdout_reserved| as for build_mask_at_load.
+ */
+uint64_t check_mask_at_load(const std::shared_ptr<graph::DeBruijnGraph> &graph,
+                            bool stdout_reserved = false);
+
+// Whether check_mask_at_load found |graph|'s mask invalid. |graph| is the served graph: a
+// DBGSuccinct, or the CanonicalDBG that wraps a PRIMARY one.
+bool mask_invalid_at_load(const graph::DeBruijnGraph &graph);
+
+/**
  * Start loading the graph and the AnnotatedDBG in parallel. Returns futures
  * for both. The annotated DBG future resolves to nullptr when no annotation
  * is configured.

@@ -426,7 +426,9 @@ DBGSuccinct::count_edges_with_last_symbol(node_index first, node_index last,
     // source dummies): a mask that marks some W = $ edge valid while the range holds as many
     // other invalid edges makes invalid_non_sentinel too small by their number, and a lower
     // bound or an exact count built on it too large. Only a range with fewer invalid edges
-    // than sentinel edges shows the violation here; its discount is then dropped.
+    // than sentinel edges shows the violation here; its discount is then dropped. The pattern
+    // search refuses such a mask before it counts on it (mask_invalid: checked once per load
+    // with count_valid_sentinel_edges; review of 2026-10-07, I17, owner decision #6).
     uint64_t sentinel = count_symbol(static_cast<BOSS::TAlphabet>(BOSS::kSentinelCode));
     assert(sentinel <= result.invalid);
     result.invalid_non_sentinel = sentinel <= result.invalid
@@ -434,6 +436,30 @@ DBGSuccinct::count_edges_with_last_symbol(node_index first, node_index last,
         : result.invalid;
 
     return result;
+}
+
+uint64_t DBGSuccinct::count_valid_sentinel_edges() const {
+    if (!valid_edges_)
+        return 0;
+
+    const BOSS &boss = *boss_graph_;
+    const auto &W = boss.get_W();
+    assert(W.size() == boss.num_edges() + 1);
+    uint64_t valid = 0;
+    // the occurrences of $ and of its marked form in W[1..num_edges] (position 0 holds a
+    // placeholder 0, no edge), enumerated by select as BOSS::mark_sink_dummy_edges does:
+    // O(occurrences) selects on the wavelet tree, not a read of W at every edge
+    for (BOSS::TAlphabet s : { static_cast<BOSS::TAlphabet>(BOSS::kSentinelCode),
+                               static_cast<BOSS::TAlphabet>(BOSS::kSentinelCode
+                                                            + boss.alph_size) }) {
+        const uint64_t occurrences = W.rank(s, W.size() - 1);
+        for (uint64_t r = W.rank(s, 0) + 1; r <= occurrences; ++r) {
+            const uint64_t i = W.select(s, r);
+            assert(i >= 1 && i < W.size() && W[i] == s);
+            valid += (*valid_edges_)[i];
+        }
+    }
+    return valid;
 }
 
 node_index DBGSuccinct::next_edge_with_last_symbol(node_index from, node_index last,

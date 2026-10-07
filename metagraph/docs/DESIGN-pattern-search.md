@@ -206,10 +206,12 @@ have it, stated in the capabilities as `pattern.mask: file | built_at_load | abs
     digests with `--digests`), then `update.sh`, which restarts the container even without a new commit;
   - the mask is read when the graph is loaded: a server running when the file is written answers
     `mask_required` until it is restarted;
-  - the mask is trusted as written (not checked at load): `metagraph extend` on a masked graph writes a mask
-    that marks its new dummy edges valid (`DBGSuccinct::add_sequence`, its TODO), and counts on such a graph can
-    be overstated, `exact` included. An extended graph is masked again with `transform --mask-dummy --force`
-    before the route serves it (§15).
+  - the mask is checked once when the graph is loaded for the one known defect (the owner's decision of
+    2026-10-07): `metagraph extend` on a masked graph used to write a mask that marks its new dummy edges valid
+    (`DBGSuccinct::add_sequence`, its TODO), and counts on such a graph could be overstated, `exact` included. A
+    mask that marks a W = `$` edge valid makes the route answer `mask_invalid` (capabilities `available: false`)
+    until the graph is masked again with `transform --mask-dummy --force` and the server restarted; `extend`
+    now rebuilds the mask of a masked graph (§15). Beyond that check the mask is trusted as written.
 - `built_at_load`: a server started with `--pattern-build-mask` builds the same mask in memory when the file is
   absent, with `--threads-each` threads on `server_query` (`-p` in the `pattern` CLI), at every start-up and
   before any route answers (the same transient vector, so for small indexes and the tests — "small" meaning few
@@ -799,7 +801,10 @@ One entry per pattern, in request order. Every count is `{value, relation, unit}
 ```
 
 - **A result is a graph context, and it always carries its k-mer** (`kmer`, the k bases of the anchor, read with
-  `get_node_sequence`; for `long`, the spelled sequence of the whole path, L bases, and `anchor_kmer`), the
+  `get_node_sequence`; for `long`, a path, the new fields `sequence`, the spelled sequence of the whole path, L
+  bases, and `anchor_kmer`, its anchor's k bases — never `kmer`, which keeps its contract-version-1 meaning, a
+  context's k-mer; paths only for a request with `long_search: "paths"`, an opt-in: the owner's decision of
+  2026-10-07, SPEC §12), the
   pattern instance it matched (`instance`, the L bases at `offset`, which for an IUPAC pattern or a peptide names
   the variant and the codons), its `offset` and its strand or orientation. The k-mer is the row's identity: on
   indexes without placement it is the only handle the agent gets, and every reported k-mer is a valid seed for
@@ -845,8 +850,10 @@ malformed request is a 400 for the whole; a request whose finalisation reserve i
 resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. The same `pattern`
 block is carried by `GET /traverse/capabilities` (`server.cpp:1340-1370`), the document the search service's
 probe reads, which today has `attempts`, `coordinates` and `deadline_check` and no feature list: one cached probe
-then serves both. A client gates on the block, accepts a higher contract version reading fields by presence,
-and offers the label projections exactly when the block's `projections` list has them (§9).
+then serves both. A client gates on the block (a contract version it implements, and `available: true`; SPEC
+§1, §10.3: since the outside review of 2026-10-07 a higher version is refused, not read by presence), reads
+fields by presence within it, and offers the label projections exactly when the block's `projections` list has
+them (§9).
 
 ## 8. Multi-graph servers
 
@@ -892,8 +899,10 @@ service's tools, and the tests call the route directly. When a user needs it, it
 leaf split (one task per (database, graph chunk, pattern chunk of at most the host's `max_patterns`)), the same
 semaphore, per-database caps, 1,200 s client timeout, status, results, CSV, S3, lock and retention; the worker
 calls `POST /pattern` instead of `POST /search`, skips scoring, truncation and enrichment for that kind, and
-stores contexts as result rows with the per-pattern summary per task. The merged view takes the weakest relation
-per count, `retrieval_complete` only when every task's is true, `withheld` and `stop` per task. A chunked database on the service side is many **graphs on one multi-graph
+stores contexts as result rows with the per-pattern summary per task. The merged view adds counts with the
+relation algebra of SPEC §7.4 (`exact` 7 + `unknown` = `at_least` 7; `bounds` [3, 5] + `exact` 7 = `bounds`
+[10, 12]), never sums label counts across tasks, and states `retrieval_complete` only when every contributing
+task's is true; `withheld` and `stop` per task (the PROMPT, §3.1 item 2). A chunked database on the service side is many **graphs on one multi-graph
 server process**, selected per task through the request's `graphs: ["{label}-{i}/{N}"]` as `/search` selects a
 shard today; the job type is built and tested on refseq33m-experimental (one graph) with milestone 1, and serving
 the chunked databases needs milestone 6, whose `graphs` selection keeps exactly `/search`'s names and semantics
@@ -1058,7 +1067,8 @@ job-originated call holds no client connection, so a long budget costs only the 
    modes, `retrieval_complete` and the `withheld` reasons; the CLI subcommand. Integration test
    `integration_tests/test_pattern.py` on the mini index: placed occurrences equal a regex scan over
    `build/mini_refseq`'s FASTA (record, 1-based position, strand), counts per unit exact.
-4. **`long`.** The extension DFS, anchor-window bits, the two thresholds, per-label `support` with record bounds and `require_support`, the
+4. **`long`.** Opt-in per request (`long_search: "paths"`; without it the anchor-only answer of version 1 stays;
+   the owner's decision of 2026-10-07, SPEC §12). The extension DFS, anchor-window bits, the two thresholds, per-label `support` with record bounds and `require_support`, the
    anchor mapping on wrapped PRIMARY graphs, the peptide state across the k boundary; tests with patterns
    spanning two and three k-mers, the cross-record path the bounds check must reject, the anchor without a path,
    and the reverse hit.
@@ -1134,19 +1144,21 @@ block on both capabilities routes with milestone 1; the route's default `time_bu
 - Predicates name annotation columns only; records inside a column are not addressable in v1.
 
 Limitations of the build, found or confirmed by the review of 2026-10-07 and stated in the SPEC:
-- **DNA5** (`$ACGTN`) graphs are accepted but unvalidated in version 1: no DNA5 server or CLI has been built or
-  run, and CI builds DNA and Protein only. The oracle suite is DNA5-aware; its DNA5 branches ran once, by hand,
+- **DNA5** (`$ACGTN`) graphs are refused by the route and the CLI (`alphabet_untested`, capabilities
+  `available: false`; the owner's decision of 2026-10-07) until a DNA5 build passes the pattern tests; the engine
+  itself still supports them. No DNA5 server or CLI has been built or run, and CI builds DNA and Protein only. The oracle suite is DNA5-aware; its DNA5 branches ran once, by hand,
   on a DNA5 build of the engine and its two unit-test files (the integration of the review's fixes, 2026-10-07:
   79 of 79 PatternSearch and PatternSearchFixes tests passed, after two test expectations were corrected to the
   stated behaviour). On an odd-k wrapped PRIMARY DNA5 graph a k-mer with N at its centre between complementary
   flanks (`ACNGT`) equals its reverse complement; `CanonicalDBG` exposes it at two node ids, and the engine counts
   and releases it twice (that run confirms it: 2 + 2 for `AC` in `ACNGT` at k = 5). A leading N run is
-  searched there, not skipped (§7.8 of the SPEC).
-  (The owner decided on 2026-10-07 to refuse pattern search on DNA5 builds until a DNA5 build passes; this build
-  does not refuse it yet.)
-- **The mask is trusted as written** (§4): `extend` on a masked graph writes a mask with valid dummy edges, and
-  counts on it can be overstated, `exact` included; such a graph is masked again before it is served. (The owner
-  decided on 2026-10-07 to refuse such a mask at load, a new reason `mask_invalid`; not in this build.)
+  searched there, not skipped (§7.8 of the SPEC). These are the items a DNA5 build must settle before the
+  refusal is lifted.
+- **A mask with a valid W = `$` edge is refused** (§4; the owner's decision of 2026-10-07): `extend` on a masked
+  graph used to write a mask with valid dummy edges, on which counts could be overstated, `exact` included. Such
+  a mask is found once at load and answered `mask_invalid` (capabilities `available: false`) until the graph is
+  masked again (`transform --mask-dummy --force`) and the server restarted; `extend` now rebuilds the mask of a
+  masked graph. Beyond that check the mask is trusted as written.
 - **N runs inside a pattern** cost about min(4^run, edges / 4^a) ranges per level whatever the bits (§5.3); only
   a run at the start of a searched window is skipped, and only on `$ACGT`. Internal anchors (§12) would remove
   the rest.

@@ -623,6 +623,41 @@ FIXTURES = [
          entries(expect_all(exact(24), complete, field('placement', 'global'),
                             field('notes', ['record_bounds_unknown']),
                             counted('occurrences', 'unknown')))),
+    # GPT review 1 of the SPEC (2026-10-07), #11: the cases no fixture showed
+    post('labels_all_partial_exact_cut', 'masked',
+         {'patterns': [p(NDM_F)], 'mode': 'partial', 'max_labels': 2,
+          'max_occurrences_per_label': 1, 'output': {'labels': 'all'}}, 200,
+         'exact counts beside cut lists: mode partial returns every context (24, no cut) and '
+         'reads every row, so counts.labels (9) and counts.occurrences (42) stay exact while '
+         'max_labels 2 cuts by_label (labels_cut max_labels) and max_occurrences_per_label 1 '
+         'each label\'s occurrence list (occurrences_cut); retrieval_complete false',
+         entries(expect_all(exact(24), field('returned', 24), field('cut', None),
+                            counted('labels', 'exact', 9), counted('occurrences', 'exact', 42),
+                            field('retrieval_complete', False),
+                            lambda e: check(e['labels_cut']['reason'] == 'max_labels'
+                                            and e['occurrences_cut'] is not None, e)))),
+    post('labels_all_mixed_slots', 'masked',
+         {'patterns': [p(NDM_F, ident='ok'), p('ACGUACGTACGTACGTACGT', ident='bad'),
+                       p(NDM_F11, ident='floor'), p(ABSENT_20, ident='absent')],
+          'output': {'labels': 'all'}}, 200,
+         'successful and refused slots in one retrieval request (all_or_count, labels "all"): '
+         'the error slots (bad_alphabet, information_below_floor) carry only id, kind and '
+         'error, spend nothing, and the slots around them are answered in full, labelled',
+         entries(expect_all(exact(24), complete, labelled, counted('labels', 'exact', 9)),
+                 slot_error('bad_alphabet'), slot_error('information_below_floor'),
+                 expect_all(exact(0), complete, counted('labels', 'exact', 0)))),
+    # (the one below rests on the memory model of SPEC
+    # §14.4; its expect fails loudly if the account stops elsewhere. No fixture shows a refused
+    # row: on the mini every row is far smaller than the smallest account (1 MB), so rows_refused
+    # is covered by the unit tests PatternRetrieval.* only)
+    post('labels_all_output_budget', 'masked',
+         {'patterns': [p('GCGGCGGCGGCG', 'dna', 'repeat')], 'max_memory_mb': 1,
+          'max_contexts': 10000, 'output': {'labels': 'all'}}, 200,
+         'the memory account (max_memory_mb 1, the smallest) holds the 1,828 contexts of a '
+         'GCG repeat but not the labels and placed occurrences built for them: stop {output, '
+         'max_memory}, all_or_count withholds (output_budget), the contexts count exact',
+         entries(expect_all(exact(1828), withheld('output_budget'),
+                            field('stop', {'phase': 'output', 'reason': 'max_memory'})))),
     post('labels_all_count', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'output': {'labels': 'all'}}, 200,
          'mode count with output.labels "all": counted, no annotation read, output null, the '

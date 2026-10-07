@@ -14,6 +14,7 @@
 #include "../test_helpers.hpp"
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "cli/augment.hpp"
 #include "cli/build.hpp"
 #include "cli/config/config.hpp"
 #include "cli/load/load_annotated_graph.hpp"
@@ -396,6 +397,117 @@ TEST(PatternMask, CapabilitiesAndRefusal) {
             EXPECT_EQ(e.body()["error"].asString(), message);
         }
     }
+}
+
+// Review of 2026-10-07, I17 (E1-02, E3-02), owner decision #6: a mask that marks an edge with
+// W = $ valid, as DBGSuccinct::add_sequence writes on a masked graph (what `metagraph extend`
+// wrote), made the pattern search claim a too-large count exact (CG: exact 3 where the graph
+// holds 2). Such a mask is found once at load (O(W = $ edges)) and refused, mask_invalid, in
+// the capabilities and with a 400 naming the remedy; `metagraph extend` now rebuilds the mask
+// of its output, and removes a mask left beside it that is not its graph's
+TEST(PatternMask, MaskWithAValidSentinelIsRefused) {
+    const std::string dir = test_dump_dir() + "/pattern_mask_invalid";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::vector<std::string> records = { "ACGTTGCA", "ACGTTGAC" };
+    std::ofstream(dir + "/s1.fa") << ">r1\n" << records[0] << "\n";
+    std::ofstream(dir + "/s2.fa") << ">r2\n" << records[1] << "\n";
+    const std::string base = dir + "/g1";
+    ASSERT_EQ(0, build_graph(make_config({ "build", "--mask-dummy", "--in-ram", "-k", "4",
+                                           "-o", base, dir + "/s1.fa" }).get()));
+    EXPECT_EQ(0u, load(base + ".dbg")->count_valid_sentinel_edges());
+
+    // the mask add_sequence writes: every inserted edge valid, the new sink dummy GAC$ too
+    {
+        auto extended = load(base + ".dbg");
+        extended->switch_state(mtg::graph::boss::BOSS::State::DYN);
+        extended->add_sequence(records[1]);
+        ASSERT_GT(extended->count_valid_sentinel_edges(), 0u);
+        extended->serialize(dir + "/bad");
+        ASSERT_TRUE(fs::exists(dir + "/bad.edgemask"));
+        // the same graph re-masked: none
+        extended->mask_dummy_kmers(1, false);
+        EXPECT_EQ(0u, extended->count_valid_sentinel_edges());
+    }
+
+    // `metagraph extend` writes the mask transform --mask-dummy would build for its output
+    ASSERT_EQ(0, augment_graph(make_config({ "extend", "-i", base + ".dbg", "-o", dir + "/ext",
+                                             dir + "/s2.fa" }).get()));
+    {
+        auto ext = load(dir + "/ext.dbg");
+        ASSERT_NE(nullptr, ext->get_mask());
+        EXPECT_EQ(0u, ext->count_valid_sentinel_edges());
+        auto remasked = std::make_shared<DBGSuccinct>(2);
+        ASSERT_TRUE(remasked->load_without_mask(dir + "/ext.dbg"));
+        mask_dummy_edges(remasked.get(), 1);
+        expect_same_mask(*remasked, *ext);
+        // the k-mers of the records, no dummy
+        std::set<std::string> kmers;
+        for (const std::string &r : records) {
+            for (size_t i = 0; i + 4 <= r.size(); ++i) {
+                kmers.insert(r.substr(i, 4));
+            }
+        }
+        EXPECT_EQ(kmers.size(), ext->num_nodes());
+    }
+    // an input without a mask: a mask left beside the output by another graph is removed
+    fs::copy_file(base + ".dbg", dir + "/nomask.dbg");
+    fs::copy_file(base + ".edgemask", dir + "/ext2.edgemask");
+    ASSERT_EQ(0, augment_graph(make_config({ "extend", "-i", dir + "/nomask.dbg", "-o",
+                                             dir + "/ext2", dir + "/s2.fa" }).get()));
+    EXPECT_TRUE(fs::exists(dir + "/ext2.dbg"));
+    EXPECT_FALSE(fs::exists(dir + "/ext2.edgemask"));
+
+    // served through the loader of the server and the CLI
+    auto annotate_all = [&](const std::string &graph_path, const std::string &anno) {
+        auto graph = load(graph_path);
+        annot::ColumnCompressed<> annotation(graph->max_index());
+        std::vector<uint64_t> rows(graph->max_index());
+        std::iota(rows.begin(), rows.end(), 0);
+        annotation.add_labels(rows, { "records" });
+        annotation.serialize(anno);
+    };
+    annotate_all(dir + "/bad.dbg", dir + "/bad.column.annodbg");
+    annotate_all(dir + "/ext.dbg", dir + "/ext.column.annodbg");
+    std::ofstream(dir + "/request.json") << "{}";
+    auto served = [&](const std::string &name) {
+        return initialize_annotated_dbg(*make_config({ "pattern", "-i", dir + "/" + name + ".dbg",
+                                                       "-a", dir + "/" + name + ".column.annodbg",
+                                                       dir + "/request.json" }));
+    };
+    auto bad = served("bad");
+    auto good = served("ext");
+    EXPECT_TRUE(mask_invalid_at_load(bad->get_graph()));
+    EXPECT_FALSE(mask_invalid_at_load(good->get_graph()));
+
+    PatternLimits limits;
+    limits.min_information_bits = 0;
+    const Json::Value bad_caps = pattern_capabilities_json(bad.get(), limits, false);
+    EXPECT_FALSE(bad_caps["available"].asBool());
+    EXPECT_EQ("mask_invalid", bad_caps["unavailable_reason"].asString());
+    EXPECT_EQ("file", bad_caps["mask"].asString());
+    EXPECT_EQ("basic", bad_caps["graph_mode"].asString());
+    EXPECT_TRUE(pattern_capabilities_json(good.get(), limits, false)["available"].asBool());
+
+    const Json::Value json = parse_pattern_body(
+            "{\"patterns\": [{\"dna\": \"CG\"}], \"mode\": \"count\", \"scope\": \"any_offset\"}");
+    try {
+        process_pattern_request(json, *bad, limits, "");
+        ADD_FAILURE() << "a graph with an invalid mask was searched";
+    } catch (const PatternRefusal &e) {
+        EXPECT_EQ(400, e.status());
+        EXPECT_EQ("mask_invalid", e.code());
+        const std::string message = e.what();
+        EXPECT_NE(std::string::npos,
+                  message.find("metagraph transform --mask-dummy --force <graph>.dbg"))
+                << message;
+    }
+    // the extended graph's own mask answers the truth: CG (its own reverse complement) in
+    // ACGT and CGTT
+    const Json::Value answer = process_pattern_request(json, *good, limits, "");
+    ASSERT_EQ(1u, answer["patterns"].size());
+    EXPECT_EQ("exact", answer["patterns"][0]["counts"]["contexts"]["relation"].asString());
+    EXPECT_EQ(2u, answer["patterns"][0]["counts"]["contexts"]["value"].asUInt64());
 }
 
 } // namespace

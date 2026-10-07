@@ -2147,6 +2147,19 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                            (*callback)(c);
                            ++extraction.returned;
                        }, true)) {
+                // an exact count and a release run to its end must agree, as in all_or_count
+                // (owner decision #9 of 2026-10-07, I09): min(count, cap) contexts, else the
+                // list would be stated complete short of the count, or cut by a cap it did
+                // not reach
+                if (exact && (extraction.returned > total->value
+                                || (extraction.returned < total->value
+                                        && extraction.returned < max_released))) {
+                    throw std::logic_error("pattern: " + std::to_string(extraction.returned)
+                                           + " contexts released of "
+                                           + std::to_string(total->value)
+                                           + " counted exactly (cap "
+                                           + std::to_string(max_released) + ")");
+                }
                 if (exact && extraction.returned == total->value) {
                     extraction.complete = true;
                 } else {

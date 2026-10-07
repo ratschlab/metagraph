@@ -104,7 +104,9 @@ class DBGSuccinct : public DeBruijnGraph {
      * guarantees (build/transform --mask-dummy, --pattern-build-mask), that every dummy
      * edge, every edge with W = $ included, is 0 in it. A mask that marks a dummy valid (as
      * DBGSuccinct::add_sequence on a masked graph writes for the dummies it inserts, see its
-     * TODO) makes them count it as a k-mer.
+     * TODO) makes them count it as a k-mer. Of that premise the pattern search checks the
+     * W = $ half once per load (count_valid_sentinel_edges; refused as mask_invalid); a
+     * source dummy marked valid is not detected (`metagraph extend` re-masks its output).
      */
 
     // The valid edges of the range: the k-mers leaving its nodes (two ranks).
@@ -144,6 +146,17 @@ class DBGSuccinct : public DeBruijnGraph {
 
     // The first invalid (dummy or pruned) edge in [from, last]; npos if there is none.
     node_index next_invalid_edge(node_index from, node_index last) const;
+
+    /**
+     * The edges with W = $ (plain or marked: the sink dummies and the main dummy edge 1) that
+     * the mask marks valid, which the primitives above assume none is (see their comment).
+     * 0 for every mask mask_dummy_kmers builds; positive for a mask that add_sequence updated
+     * (`metagraph extend` on a masked graph before it re-masked, or a stale or foreign
+     * .edgemask of the right size). O(number of W = $ edges) selects on W, never a pass over
+     * all edges: meant to run once per load (the pattern search refuses such a mask,
+     * mask_invalid). 0 when there is no mask.
+     */
+    uint64_t count_valid_sentinel_edges() const;
 
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()

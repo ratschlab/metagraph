@@ -20,25 +20,33 @@
  * answers do not change until it opts in.
  *
  * Wiring the route for `long` (a follow-up; the route is not edited by increment 4's engine
- * work). In src/cli/pattern.cpp:
- *  1. parse_request: accept "max_paths" (refused by name as later_increment today; capped
- *     like max_anchors, by a new --pattern-max-paths) into req.request.max_paths, and set
- *     req.request.extend_paths = true;
- *  2. entry_json, the `anchors` branch: counts.paths = count_json(anchors->paths) as today,
- *     plus paths["candidates_examined"] = anchors->candidates_examined, the per-strand split
- *     put_orientations(&paths, anchors->paths_by_orientation, strand_stated), and
- *     paths["extension"] = to_string(anchors->extension); work["extension_edges"] =
- *     result->work.extension_edges; timing["extension_ms"] = result->extension_ms;
- *  3. context_json: for a released path (!c.path.empty()) write kmer = c.sequence (the L
- *     spelled bases, §7.2), instance = c.sequence, anchor_kmer =
- *     graph.get_node_sequence(c.node), offset 0, and with output.paths the node ids c.path
+ * work). The paths are OPT-IN per request (owner decision #13 of 2026-10-07; SPEC §12), an
+ * addition under contract version 1: a request without the option keeps today's anchor-only
+ * answer. In src/cli/pattern.cpp:
+ *  1. parse_request: accept the request field "long_search" (reserved: refused by name as
+ *     later_increment today, whatever its value): "anchors" (the default) leaves
+ *     extend_paths false; "paths" sets req.request.extend_paths = true and admits
+ *     "max_paths" (refused by name today; capped like max_anchors, by a new
+ *     --pattern-max-paths) into req.request.max_paths;
+ *  2. entry_json, the `anchors` branch, with long_search "paths": counts.paths =
+ *     count_json(anchors->paths) as today, plus paths["candidates_examined"] =
+ *     anchors->candidates_examined, the per-strand split put_orientations(&paths,
+ *     anchors->paths_by_orientation, strand_stated), and paths["extension"] =
+ *     to_string(anchors->extension); work["extension_edges"] = result->work.extension_edges;
+ *     timing["extension_ms"] = result->extension_ms;
+ *  3. context_json: a released path (!c.path.empty()) is written with NEW fields, never
+ *     `kmer`, which keeps its meaning (the k-mer of a graph context): sequence = c.sequence
+ *     (the L spelled bases, §7.2), anchor_kmer = graph.get_node_sequence(c.node) (the k-base
+ *     anchor), instance = c.sequence, offset 0, and with output.paths the node ids c.path
  *     (rows: AnnotatedDBG::graph_to_anno_index(search.base_node(n)) per node); the check
  *     `c.offset + length > k` applies to L <= k contexts only;
- *  4. capabilities: long_patterns "paths", max_paths among the caps. The SPEC's milestone
- *     table (increment 4) announces what then changes for L > k, count mode included:
- *     counts.paths becomes known, the note and the withheld reason paths_later_increment
- *     no longer appear (they are never produced with extend_paths), and
- *     anchors_above_threshold, stop phase "extension" and reason "max_paths" can appear.
+ *  4. capabilities: advertise the option (long_search values "anchors", "paths"; max_paths
+ *     among the caps); long_patterns keeps describing the default answer. For a request
+ *     with long_search "paths", L > k, count mode included: counts.paths becomes known, the
+ *     note and the withheld reason paths_later_increment do not appear (never produced with
+ *     extend_paths), and anchors_above_threshold, stop phase "extension" and reason
+ *     "max_paths" can appear. A request without it keeps counts.paths unknown and
+ *     paths_later_increment, as today.
  * Everything else (the withheld reasons, the cut, retrieval_complete, the stop and its phase)
  * flows through the existing Extraction and Stop fields with the values added below
  * (Withheld::ANCHORS_ABOVE_THRESHOLD, StopReason::MAX_PATHS, StopPhase::EXTENSION).
@@ -348,8 +356,9 @@ struct Request {
      * Context::sequence) instead of withholding PATHS_LATER_INCREMENT, and the note
      * paths_later_increment is not set. False (the default): increments 1-2, unchanged —
      * anchors counted, paths UNKNOWN (EXACT 0 without anchors), nothing extended or
-     * released for L > k, no extension step charged. Not a JSON field: the route sets it
-     * when it serves `long` (see "Wiring the route" at the top of this file).
+     * released for L > k, no extension step charged. Not a JSON field: the route will set it
+     * for a request with long_search "paths" (opt-in, owner decision #13; see "Wiring the
+     * route" at the top of this file); every other request keeps it false.
      */
     bool extend_paths = false;
     /**
@@ -565,7 +574,9 @@ struct GraphSupport {
     // DBGSuccinct, nor a CanonicalDBG over a PRIMARY one), "primary_unwrapped" (a PRIMARY
     // DBGSuccinct not wrapped in CanonicalDBG), "alphabet_unsupported" (the BOSS alphabet is
     // not "$ACGT" or "$ACGTN"), "mask_required" (no valid-edge mask: without it every edge,
-    // dummies included, would count as a k-mer, §4)
+    // dummies included, would count as a k-mer, §4). The route narrows it further
+    // (cli::route_support): "alphabet_untested" ($ACGTN, not served until a DNA5 build passes
+    // the pattern tests) and "mask_invalid" (a mask marking a W = $ edge valid)
     std::string reason;
     GraphMode mode = GraphMode::BASIC;
     bool mask_present = false;
@@ -753,9 +764,10 @@ struct Extraction {
  * L > k with Request::extend_paths: one path (§4.2), (orientation, path) its identity:
  * offset 0, |node| and |base_node| its anchor (the first k-mer), |path| its n = L - k + 1
  * nodes and |sequence| its L spelled bases, which instantiate P for FORWARD and PALINDROMIC
- * and rc(P) for REVERSE (§7.2: the result's kmer is |sequence|, anchor_kmer the anchor's
- * k-mer). The anchors of Request::release_anchors are released like L <= k contexts (offset
- * 0, |path| and |sequence| empty).
+ * and rc(P) for REVERSE (§7.2, owner decision #13: the result's new field sequence is
+ * |sequence|, its new field anchor_kmer the anchor's k-mer; kmer is not used for a path).
+ * The anchors of Request::release_anchors are released like L <= k contexts (offset 0,
+ * |path| and |sequence| empty).
  */
 struct Context {
     Orientation orientation;

@@ -65,9 +65,10 @@ both. The block: `modes`, `projections` (the list the host offers **now**: `["no
 `["none", "all"]` since milestone 3, `predicate_only` with 5b; gate the label projections on this list, never on
 a milestone number),
 scopes per graph mode, the caps and floors, `placement` and `support` the index can give, `mask`,
-`annotation: budgeted | unbudgeted`, `pattern_contract_version` (accept a higher version and read fields by
-presence, as you did for feature level 6; refuse only a lower or a missing one). A host without the block has
-no route.
+`annotation: budgeted | unbudgeted`, `pattern_contract_version` (accept only a version the service implements,
+1 today; refuse a missing, malformed or other one, a higher one included, since a higher version means a field
+changed meaning; within version 1 read fields by presence and pass unknown values of the extensible
+enumerations through, SPEC §1). A host without the block has no route.
 
 ## 2. When
 
@@ -75,7 +76,7 @@ no route.
 |---|---|---|
 | 1 | count (`mode: count`) and the label-free extraction (`all_or_count` / `partial` with `labels: none`): k-mers, offsets, strands, node and row ids; exact DNA and IUPAC; both strands; `suffix` and `any_offset`; single-graph servers; the capabilities block; `metagraph pattern` CLI | running now; contract freezes on its commit |
 | 3 | `labels: all`: label discovery and placement (record, 1-based position, strand) on BASIC indexes with record mapping | in the build (SPEC §14), with fixtures |
-| 4 | patterns longer than k (extension), per-label `support`, `require_support` | after 3 |
+| 4 | patterns longer than k (extension), per-label `support`, `require_support`; opt-in: only a request with `long_search: "paths"` gets paths (new fields `sequence`, `anchor_kmer`; `kmer` keeps its meaning), every other request keeps today's anchor-only answer (SPEC §12) | after 3 |
 | 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | after 4 |
 | 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
 | 7 | this service's job type (the backend's Python client methods are deferred until needed) | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
@@ -97,9 +98,18 @@ capabilities block are what to build on.
    instead of `POST /search`, skips scoring, truncation and enrichment for that kind, and stores contexts as
    result rows with the per-pattern summary per task: a kind marker and a summary column, no new worker family,
    no new tables. No synchronous MCP tool.
-2. **(required)** The merged view of a job: per count the **weakest relation wins** (`exact` only if every task's
-   is); `retrieval_complete` only when every task's is true; `withheld` and `stop` carried per task with the
-   graph and its reason; rows are contexts, never labels.
+2. **(required)** The merged view of a job: counts of one unit are added with the relation algebra of SPEC §7.4
+   (`Count::operator+=`), not "the weakest relation wins": `exact` + `exact` = `exact`; `unknown` + `unknown` =
+   `unknown`; `unknown` or `at_least` with anything = `at_least` of the known lower bounds (`exact` 7 +
+   `unknown` = `at_least` 7); otherwise `bounds` with `lower` and `upper` summed (`bounds` [3, 5] + `exact` 7
+   = `bounds` [10, 12]). Each answered entry is mapped back to its pattern's position in the job's request (the
+   pattern chunk's offset plus the entry's position, SPEC §7.9), never matched by text or `id` (two patterns can
+   share both); a pattern's counts are then added across its graph chunks, where a k-mer of two graphs is two
+   contexts (DESIGN §8). Label counts are **never** summed across tasks (a label in two chunks would count
+   twice): they stay per task. `retrieval_complete` (and any "complete" of the job) only when
+   every task that contributes to that pattern answered with `retrieval_complete: true`; a failed, refused or
+   missing task makes it incomplete. `withheld` and `stop` carried per task with the graph and its reason; rows
+   are contexts, never labels.
 3. **(required)** A chunked database is many graphs on one multi-graph server process, selected per task through
    `graphs: ["{label}-{i}/{N}"]` as `/search` does (`app/download_depth.py`, `enumerate_leaf_specs`). The job type
    is built and tested on refseq33m-experimental (one graph) with backend milestone 1; serving the chunked
@@ -113,17 +123,30 @@ capabilities block are what to build on.
    The engine needs nothing beyond "at most cap concurrent calls per database server across all routes"; a
    request's memory is bounded on the label-free path by the caps (`partial` and `all_or_count` keep about
    `max_contexts` descriptors, `count` the search frontier; on an even-k primary index up to `max_steps` × 88
-   bytes; SPEC §7.6) and with `labels: all` by `max_memory_mb`. The traversal jobs' separate per-host tokens move
-   into the same semaphore (your follow-up).
+   bytes; SPEC §7.6) and with `labels: all` by `max_memory_mb`. `max_memory_mb` is a deterministic account
+   (a model in bytes, so that where a request stops does not depend on the allocator; SPEC §14.4), not the
+   process's resident memory, and reads with `allow_unbudgeted_annotation` can pass it (the label names of one
+   read, and the read's own working memory, are not bounded by it): size a host's memory with headroom above
+   cap × `max_memory_mb`. The traversal jobs' separate per-host tokens move into the same semaphore (your
+   follow-up).
 5. **(required)** Caps at submit, never truncation afterwards: `max_contexts`, `max_patterns`, `time_budget_ms`
    above the service's ceilings are refused with a 400 naming the field (the strategy validator's rule: refuses,
    never lowers). An answer is passed through whole; cutting it on the way out would falsify
-   `retrieval_complete`. The task timeout derives from the request's `time_budget_ms` plus an allowance.
+   `retrieval_complete`. The task timeout derives from the request's `time_budget_ms` plus an allowance. Three
+   clocks stay distinct: `time_budget_ms` is the backend's deadline for preparing the answer from the parsed
+   body (the queue wait and the transport are outside it; the work stops well before it, SPEC §7.6), the
+   HTTP client timeout lies above it, and the job's lifetime is the service's own.
 6. **(required)** Served only for databases whose host carries the `pattern` block (§1) with a contract version
-   the service knows or a higher one; a lower or missing version, or no block, answers `pattern_unsupported` with
-   the host's feature list, as `traversal_disabled` does. Label projections are offered exactly when the host's
-   `projections` list has them, and every request sends `output.labels` explicitly (SPEC §1; the default is
-   `none` in contract version 1). The probe that reads capabilities already exists (`app/traversal/probe.py`).
+   the service implements (1) **and** `available: true` (SPEC §10.3). Any other version (missing, malformed,
+   lower or higher), or no block, answers `pattern_unsupported` with the host's feature list, as
+   `traversal_disabled` does. `available: false` answers unavailable with the host's `unavailable_reason` kept
+   verbatim (`mask_required`, `mask_invalid`, `alphabet_untested`, … or one the service does not know);
+   `available: null` means the index is loading: availability unknown, re-probe later, never cache it as
+   unavailable. Every option is gated on its capability: label projections exactly when the host's
+   `projections` list has them; on `annotation: "unbudgeted"`, `labels: all` only with the caller's explicit
+   consent, sent as `allow_unbudgeted_annotation: true`; kinds and scopes by their lists; values within `caps`.
+   Every request sends `output.labels` explicitly (SPEC §1; the default is `none` in contract version 1). The
+   probe that reads capabilities already exists (`app/traversal/probe.py`).
 7. **(required)** The answer passed through with the service's additions only: `database`, the untrusted-data
    notice on label and record strings, the standard error envelope. **Never** sum per-shard label counts into one
    number, never drop `relation`, `withheld`, `retrieval_complete` or `absence_scope`, never add labels of its own.
@@ -138,7 +161,9 @@ capabilities block are what to build on.
    vocabulary, and say that canonical and primary indexes report contexts only — `orientation` instead of a
    strand, no position.
 9. A stored answer keeps its `determinism`; a `time_limited` one is marked as not reproducible where the
-   service shows it.
+   service shows it. `full` holds within one backend build and configuration: after a backend update an equal
+   request may answer with other `work`, stopping points and `at_least` / `bounds` values, with every field's
+   meaning kept (SPEC §1, semantic compatibility).
 10. Rate limits and the anonymous budget as for the other jobs. Patterns are query data under the same privacy
     policy as sequences.
 11. Row ids are opaque and valid per (host, index release, graph); the later backend request "labels for given
@@ -155,27 +180,40 @@ timeout (`META_CALL_TIMEOUT_SECS`) stays above it. The deadline keeps its value 
 `any_offset` DFS per task, and the time kept back for writing the answer grows with what the answer holds (SPEC
 §7.6), so a stopped task still answers with counts. Nothing in the engine assumes a short run: the clock is read
 every 4,096 steps (and every 64 released contexts) whatever the budget; the retained descriptors are bounded by
-their caps, not by time, and `max_memory_mb` bounds the labelled retrieval; `max_steps` is the host's
+their caps, not by time, and `max_memory_mb` bounds the labelled retrieval (as an accounted model, not the
+process's memory, and not the unbudgeted reads; §3.1 item 4); `max_steps` is the host's
 (`--pattern-max-steps`, default 10⁸ per request, per shard from milestone 6): a request cannot raise it (a
 larger value is lowered and listed in `limits.clamped`), and it does not grow with `time_budget_ms`, so with a
 600 s budget it, not the deadline, usually stops a long discovery (`stop: max_steps`, `withheld:
 discovery_budget`). The cost of a long call is the request-pool slot it holds, counted by the shared
 per-database cap of item 4; the server stops a `/pattern` request whose client has closed (or half-closed) its
 connection at its next clock reading and writes nothing, so a task the service cancels frees the backend's slot
-once its HTTP connection is closed.
+once its HTTP connection is closed. `time_budget_ms` is not the task's latency: the wait for a backend thread
+comes before it, the work stops `finalize_reserve_ms` plus the estimated writing time before it (seconds, for
+an answer with many results), and a finalisation that overruns it is still a 503 `deadline` (SPEC §7.6); the
+task's HTTP timeout and the job's lifetime are separate, larger clocks.
 
 ## 4. Constraints
 
 - Never claim absence from a `count` or `labels: none` answer; show `absence_scope` and `retrieval_complete`.
+  Precisely (SPEC §9): an `exact` 0 count establishes absence of its unit in its scope (`exact` 0 contexts: no
+  k-mer of the index holds the pattern there); a count-mode or label-free answer establishes no absence of a
+  label, a sample or a record, whatever its counts; an incomplete list is not an inexact count (a `max_contexts`
+  cut after a completed discovery, `labels_cut` and `occurrences_cut` keep `exact` counts), but an item missing
+  from an incomplete list is not absent: one item's absence needs `retrieval_complete: true` or an `exact` 0.
 - A `determinism: time_limited` answer is not reproducible; say so where the service caches answers.
-- The service does not retry a `withheld` answer with a larger cap on its own; the agent decides.
+- The service does not retry a `withheld` answer, or a 503 `deadline`, with a larger cap on its own; the agent
+  decides.
 - Nothing here touches the search path or the traversal jobs.
 
 ## 5. Tests and acceptance
 
-- Unit: capabilities gating (block present, absent, lower, higher contract version); the per-task call and its
-  timeout; the merge (weakest relation, `retrieval_complete`, per-task `withheld`); the pass-through keeps every
-  field; the error envelope; the docstring's tool table regenerated. The fixture bodies of §2 feed these.
+- Unit: capabilities gating (block present, absent; contract version 1, missing, malformed, lower, higher;
+  `available` true, false with its reason, null); the per-task call and its timeout; the merge (the algebra of
+  §3.1 item 2 with its two examples, entries mapped by position across pattern chunks, label counts never
+  summed, `retrieval_complete` only with every contributing task, per-task `withheld`); the pass-through keeps
+  every field; the error envelope (SPEC §6: an unexpected status or body is a backend failure, never an empty
+  result); the docstring's tool table regenerated. The fixture bodies of §2 feed these.
 - e2e against staging once the route is deployed: a 16-nt primer of a known refseq33m record in `count` and in
   `labels: none` (the returned k-mers contain the primer), an IUPAC promoter, a palindrome, a pattern below the
   information floor (refused), `max_contexts` 1 in `all_or_count` (withheld with the exact count) and in

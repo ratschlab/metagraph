@@ -1,11 +1,14 @@
 #include "augment.hpp"
 
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -98,6 +101,22 @@ int augment_graph(Config *config) {
     logger->trace("Graph augmentation done in {} sec", timer.elapsed());
     timer.reset();
 
+    // A masked graph: DBGSuccinct::add_sequence marks every edge it inserts valid, the new
+    // dummy edges included, and leaves a sink dummy that a new k-mer took over invalid (its
+    // TODO). Written as it is, that mask makes the pattern search take dummies for k-mers and
+    // claim a too-large count exact (review of 2026-10-07, I17). So the mask is rebuilt here,
+    // as `transform --mask-dummy` builds it (node ids, and the annotation rows, unchanged)
+    auto *masked_succinct = dynamic_cast<graph::DBGSuccinct*>(graph.get());
+    if (masked_succinct && masked_succinct->get_mask()) {
+        logger->trace("Rebuilding the dummy-edge mask of the extended graph...");
+        // (one thread: the graph is in the dynamic state here, whose concurrent reads the
+        // mask's traversal has not been tested with)
+        const DummyMaskCounts counts = mask_dummy_edges(masked_succinct, 1);
+        logger->trace("Dummy-edge mask rebuilt in {:.3f} s: {} edges, {} k-mers",
+                      counts.seconds, counts.edges, counts.kmers);
+        timer.reset();
+    }
+
     if (node_weights) {
         node_weights->insert_nodes(*inserted_nodes);
 
@@ -126,6 +145,26 @@ int augment_graph(Config *config) {
 
     graph->serialize(config->outfbase);
     graph->serialize_extensions(config->outfbase);
+    if (dynamic_cast<const graph::DBGSuccinct*>(graph.get())
+            && !dynamic_cast<const graph::DBGSuccinct&>(*graph).get_mask()) {
+        // a mask left beside the output by an earlier graph would be loaded with this one
+        // (a stale mask of the right size passes the load's check): it is removed
+        const std::string stale
+                = utils::remove_suffix(config->outfbase, graph::DBGSuccinct::kExtension)
+                    + graph::DBGSuccinct::kDummyMaskExtension;
+        std::error_code error;
+        if (std::filesystem::exists(stale, error)) {
+            if (std::filesystem::remove(stale, error)) {
+                logger->warn("Removed the dummy-edge mask {} left beside the output: it was "
+                             "not this graph's (the extended graph has no mask)", stale);
+            } else {
+                logger->warn("The dummy-edge mask {} beside the output is not this graph's "
+                             "and could not be removed ({}): delete it, or rebuild it with "
+                             "`metagraph transform --mask-dummy --force`", stale,
+                             error.message());
+            }
+        }
+    }
     graph.reset();
 
     logger->trace("Serialized in {} sec", timer.elapsed());

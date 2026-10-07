@@ -1,0 +1,23 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "ok"
+  },
+  {
+   "dna": "ACGUACGTACGTACGTACGT",
+   "id": "bad"
+  },
+  {
+   "dna": "GGTTTGGCGAT",
+   "id": "floor"
+  },
+  {
+   "dna": "CTAGGAGATGGGCCAGCTAC",
+   "id": "absent"
+  }
+ ],
+ "output": {
+  "labels": "all"
+ }
+}
