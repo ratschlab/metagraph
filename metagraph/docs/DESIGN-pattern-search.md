@@ -47,9 +47,9 @@ Goals:
 6. **Bounded like `/traverse`:** annotation reads through the budget-aware, paced traversal classes, one deadline
    with a reserved finalisation window and per-shard memory accounts per request, every stop stated with its
    phase (§5).
-7. **Served synchronously:** the server route is a plain request/response like `/search`; the Python client gets
-   a method beside `align()`; the search service exposes it as a synchronous MCP tool and REST route, modelled on
-   `traverse_resolve` (§9).
+7. **Served synchronously by the server, as a job by the service:** the server route is a plain
+   request/response like `/search`; the Python client gets a method beside `align()`; the search service serves
+   it as a job (submit → status → results), the way it wraps `/search` (§9, the owner's decision of 2026-10-07).
 8. **Annotation predicates** (§5.6): a broad pattern narrowed by a logical condition on the labels of each
    context, evaluated before anything is materialised, with the retrieval threshold applied to what passes.
 9. **A label-free path** (§4.3, `output.labels: none`): counting **and** extracting the matching k-mers, rows
@@ -167,8 +167,21 @@ both are k-mers ending in c; `pick_edge(node_edge, c)` selects a node's edge wit
 `DBGSuccinct` keeps `valid_edges_` (`dbg_succinct.hpp:124-147`, the `.edgemask` file), a `bit_vector` with rank
 and select that is 0 on every dummy edge (those containing `$`, sources and sinks) and on pruned ones. **The mask
 is required:** without it `in_graph` treats every edge as a k-mer (`dbg_succinct.cpp:935`), dummies included, and
-no count of this route is right. A server whose graph loaded without its mask states `pattern.mask: absent` in
-the capabilities and refuses the route with `mask_required`.
+no count of this route is right. The mask lives in a separate `.edgemask` file beside the `.dbg`
+(`serialize`, `dbg_succinct.cpp:898`; loaded if present at :802), and **neither the mini index nor
+refseq33m-experimental's graph has one today** (`build/mini_refseq/graph_k31.dbg` and staging's
+`graph_k31.indexed.dbg` sit without it), so "required" alone would refuse the route everywhere. Three ways to
+have it, stated in the capabilities as `pattern.mask: file | built_at_load | absent`:
+- `file`: the `.edgemask` written by `metagraph build`, or once, offline, by a new `metagraph transform
+  --mask-dummy` that calls the build's own `mask_dummy_kmers(threads, false)` (no pruning: node ids and the
+  annotation stay valid) and writes the file; the cost is the dummy-tree traversal
+  (`BOSS::mark_source_dummy_edges` → `traverse_dummy_edges`, proportional to the dummy edges, at most k − 1 per
+  record) plus the sink pass. This is the one-time step for staging, run by the owner on mex before the route
+  answers there.
+- `built_at_load`: a server started with `--pattern-build-mask` builds the same mask in memory when the file is
+  absent; for small indexes and the tests, not for a 362 GB graph on every restart.
+- `absent`: the route answers `mask_required` and names the two remedies.
+The test setup builds the mini index's mask with the `transform` step.
 
 ### 4.1 Phase 1: anchors and contexts, by range narrowing (reused from the seeder)
 
@@ -486,7 +499,7 @@ own; what any item would push over the share is a stated memory stop.
 | `max_contexts` | 10,000 per pattern, all offsets and both strands, aggregate over shards | `--pattern-max-contexts` | the retrieval threshold of `all_or_count`; the count is always returned with its relation |
 | `max_anchors` (`long`) | 1,000 | `--pattern-max-anchors` | the extension threshold; `withheld: anchors_above_threshold` |
 | `max_paths` (`long`) | 1,000 | `--pattern-max-paths` | the retrieval threshold on completed paths; `candidates_examined` |
-| `max_steps` | 1,000,000 range, scan or edge steps per shard | `--pattern-max-steps` | `ranges_visited`, `steps`, the phase that hit it |
+| `max_steps` | 100,000,000 range, scan or edge steps per shard (a range step is a few rank operations, so this is of the order of the default time budget) | `--pattern-max-steps` | `ranges_visited`, `steps`, the phase that hit it |
 | `max_labels_per_anchor` | 64 | `--pattern-max-labels-per-anchor` | `anchors_truncated` with the cap and each row's total |
 | `max_predicate_contexts` (§5.6) | 100,000 per pattern | `--pattern-max-predicate-contexts` | the compute admission of a predicate pass; `withheld: predicate_above_threshold` with the unfiltered count |
 | `max_predicate_work` (§5.6) | the oracle's units, default as `max_annotation_work` | `--pattern-max-predicate-work` | `selection.tested` as `at_least`, `withheld: predicate_budget` |
@@ -495,7 +508,7 @@ own; what any item would push over the share is a stated memory stop.
 | `max_memory_mb` | 256 per request, split per shard | `--pattern-max-memory-mb` | `memory.stop` with the phase and the shard |
 | `max_labels` | 1,000 | `--pattern-max-labels` | `labels` count with its relation; labels kept by (contexts desc, column asc), as `/search`'s top-N; `partial` only (`all_or_count` returns all or none) |
 | `max_occurrences_per_label` | 16 | `--pattern-max-occurrences` | `occurrences` count per label with its relation; `partial` only |
-| `time_budget_ms` | 5,000 | `--pattern-max-time-ms` | `stop: time` with the phase and the shard; the finalisation reserve inside it |
+| `time_budget_ms` | 60,000 (the owner, 2026-10-07: "5 s is not sufficient in general"; some `/search` calls take longer today, and this is the more complex function) | `--pattern-max-time-ms`, default **600,000**: under the 900 s content timeout with room for serialisation and compression; the service sends an explicit budget per task under it | `stop: time` with the phase and the shard; the finalisation reserve inside it. Nothing in the engine assumes a short run: the clock is read every 4,096 steps whatever the budget, the memory account is bounded by `max_memory_mb` and the retained descriptors by their caps, not by time, and a long call costs the one server thread it holds |
 
 Why information rather than length, and why only as a gate: expected suffix anchors ≈ (k-mers in the graph) ×
 2^−bits. On a 50-billion-k-mer graph a 16-mer expects about 12 per strand, a 12-mer about 3,000, a 10-mer about
@@ -762,7 +775,7 @@ malformed request is a 400 for the whole; a request whose finalisation reserve i
 `GET /capabilities` lists `"pattern"` under `features` and `routes.pattern = "POST /pattern"`
 (`server.cpp:1421-1480`), with a `pattern` block: the floors, caps and the finalisation reserve, the modes, the projections (`none`,
 `all`, `predicate_only`, with `none` available everywhere) and scopes (and which scope each graph mode supports), `placement` (the best this index can give), `strand_stated`,
-`mask: present | absent`, `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
+`mask: file | built_at_load | absent`, `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
 resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. The same `pattern`
 block is carried by `GET /traverse/capabilities` (`server.cpp:1340-1370`), the document the search service's
 probe reads, which today has `attempts`, `coordinates` and `deadline_check` and no feature list: one cached probe
@@ -791,11 +804,13 @@ Differences from `/search`'s merge, all deliberate:
 
 ## 9. Serving the extension synchronously
 
-Three layers, all request/response; no job, no polling, no S3.
+Three layers. The server route and the Python client are request/response; the search service wraps the route in
+a **job** (submit → status → results), as it wraps `/search` and the traversal, the owner's decision of
+2026-10-07: the backend stays synchronous, the service is the asynchronous layer.
 
 **Server.** `POST /pattern` goes through `process_request` like `/search` (compact JSON, gzip when accepted,
-`kContentTimeoutS` 900 s, `server.cpp:52`). The route's own deadline (default 5 s, cap `--pattern-max-time-ms`,
-finalisation reserve inside it) keeps it far under that.
+`kContentTimeoutS` 900 s, `server.cpp:52`). The route's own deadline (default 60 s, cap `--pattern-max-time-ms`
+600 s, finalisation reserve inside it, §5.3) stays under that wall with room for serialisation and compression.
 
 **Python client.** `GraphClientJson.pattern(patterns, **options)` and `GraphClient.pattern(...)` beside `align()`
 (`api/python/metagraph/client.py:100`, `_json_seq_query` at :117): the same `requests.post` with the route's
@@ -806,15 +821,18 @@ nullable occurrence fields where nothing is placed. The counts come as attribute
 per-label totals are the deduplicated union of §7.2. `MultiGraphClient.pattern` fans out over hosts with the existing thread
 pool.
 
-**Search service** (its repository; the owner's call which session builds it). A synchronous MCP tool
-`pattern_search(database, dna | iupac | protein, mode, scope, strands, ...)` and REST `POST /pattern/search`,
-built like `traverse_resolve` (`app/mcp_server.py:5838`; REST `app/api/routes_traversal.py:766`, admission
-`_admit` at :502):
+**Search service** (its repository; the service session builds it, org-id integrates;
+`docs/PROMPT-search-service-pattern.md` is the request). A **job type**, modelled on the traversal jobs (one
+document per task), not on the search tables: one task per (database, host, pattern chunk of at most the host's
+`max_patterns`), each task calling `POST /pattern` once from a worker under the task's own timeout; the merged
+view takes the weakest relation per count, `retrieval_complete` only when every task's is true, `withheld` and
+`stop` per task with the host; large answers to S3. The service's fan-out is across hosts (a Logan node is
+hundreds of chunk hosts), orthogonal to the server's in-process shard fan-out of §8, so the job needs milestone 1
+only:
 
-- admission in `traverse_resolve`'s shape: a leased token per backend host with its own concurrency, lease and
-  timeout settings (`PATTERN_MAX_CONCURRENCY`, `PATTERN_PER_HOST`, `PATTERN_LEASE_S`, `PATTERN_TIMEOUT_S`,
-  `PATTERN_MAX_PATTERNS`; `TRAVERSAL_RESOLVE_*` at `app/settings.py:1292-1326` is the model), not the in-process
-  `_COMPARE_SLOTS` semaphore of the local tools, since the call hits a shared host;
+- admission by the queue: the service's per-database queues, `META_DB_CAPS` and its distributed semaphore
+  protect the hosts; pattern tasks run **one per host at a time**, because a call holds a server request thread
+  for its whole budget (staging serves with `-p 2 --threads-each 2`) and `/search` and `/traverse` must keep one;
 - caps at admission, never truncation afterwards: `max_contexts`, `max_patterns` and `time_budget_ms` above the
   service's ceilings are refused with a 400 naming the field; an answer is passed through whole, since cutting it
   would falsify `retrieval_complete`; the backend called from the API process on the thread pool
@@ -835,9 +853,10 @@ built like `traverse_resolve` (`app/mcp_server.py:5838`; REST `app/api/routes_tr
   budget as for the other synchronous tools; no caching of answers in v1 (`determinism: time_limited` matters
   only once an answer is cached).
 
-Archive-scale databases whose hosts serve several graphs are reachable through the same tool once their hosts
-build the feature; the fan-out happens inside the server (§8). A batch of many patterns, or a scan over every
-database, is the job queue's shape and comes later, wrapping this route.
+The service always sends an explicit `time_budget_ms` per task from its per-database timeout map (as it has
+`DATABASE_TIMEOUTS` for `/search`; Logan hosts take about 28 s per `/search` call today), under the host's
+`--pattern-max-time-ms` (§5.3); a job-originated call holds no client connection, so a long budget costs only
+the server thread it occupies. Multi-graph hosts (§8) change nothing on the service side.
 
 ## 10. Code placement and reuse
 
@@ -923,7 +942,8 @@ database, is the job queue's shape and comes later, wrapping this route.
    caches would exceed the share (one memory stop, not a silent overrun). Every later increment runs against
    it; the alignment golden gate of §11 is recorded in this step too.
 1. **Count-only engine and route** (`mode: count`, `scope: suffix`, exact DNA, one strand, BASIC): mask handling
-   settled first (the requirement, the charged scan, the bounds), then `PatternSearch` with the range DFS and the
+   settled first (the requirement, the charged scan, the bounds, `metagraph transform --mask-dummy` and
+   `--pattern-build-mask`, since neither the mini index nor staging's graph has a mask file), then `PatternSearch` with the range DFS and the
    `W` rule with marked edges, the exact counts, `POST /pattern` on a single-graph server answering counts, the
    finalisation reserve, capabilities. The early milestone: a server that counts correctly before any annotation
    is read.
@@ -970,8 +990,15 @@ is the benchmark in 6: a repeat-rich motif in `any_offset` scope on a Logan host
 
 ## 14. Open decisions for the owner
 
-1. Route and tool names: `/pattern` and `pattern_search` (this draft), or `/motif`.
-2. The default mode (`all_or_count`, this draft) and default scope (`any_offset` for L ≤ k, this draft; `suffix`
+Decided on 2026-10-07 (the owner, with the service session's review): the route is `POST /pattern`; the service
+serves it **as a job**, not as a synchronous tool, with the job's defaults `mode: count` and `scope: any_offset`
+and `partial` exposed; every host carrying the block offers it, canonical indexes included; the service session
+builds the job, org-id integrates, this side delivers the frozen contract, the fixture bodies and the `pattern`
+block on both capabilities routes with milestone 1; the route's default `time_budget_ms` is 60 s and the cap
+600 s (§5.3). Still open:
+
+1. Whether to keep `/pattern` or rename to `/motif` (this draft keeps `/pattern`).
+2. The route's own default mode (`all_or_count`, this draft) and default scope (`any_offset` for L ≤ k; `suffix`
    is the cheaper alternative and always states `absence_scope`).
 3. Defaults: the information floor (24 bits, discovery only), `max_contexts` (10,000), `max_anchors` and
    `max_paths` (1,000), `max_labels_per_anchor` (64), `max_steps` (10⁶ per shard), `max_memory_mb` (256 per
@@ -982,7 +1009,7 @@ is the benchmark in 6: a repeat-rich motif in `any_offset` scope on a Logan host
    `pattern_unsupported` until placement exists.
 6. Whether `allow_unbudgeted_annotation` exists at all, or unbudgeted backends get `count` only.
 7. The CLI subcommand: keep (tests and offline use) or server-only.
-8. Which session builds the search-service side (§9), and whether it waits for the queue path.
+8. The service's job kind and tool names (the service's call, in the `pattern_` family).
 
 ## 15. Known limitations, stated in the answer
 
@@ -996,8 +1023,8 @@ is the benchmark in 6: a repeat-rich motif in `any_offset` scope on a Logan host
 - Absence of a label is claimed only with `retrieval_complete: true`; a `count` answer claims nothing about labels.
 - A label's path for `long` without record mapping is not a proof of one record (`support: label_intersection`).
 - A pattern's N never matches a record's N symbol; flanks do.
-- The engine needs the succinct graph representation with its edge mask; other representations, or a graph
-  without its mask, answer 400 with the reason.
+- The engine needs the succinct graph representation with its edge mask (the `.edgemask` file, or built at load
+  with `--pattern-build-mask`); other representations, or a graph without a mask, answer 400 with the reason.
 - Budgeted retrieval exists only on the row-diff family with the budgeted decode; elsewhere `count` only, or
   unbudgeted by explicit opt-in; an anchor with more labels than the per-anchor cap withholds the results.
 - Indexes are served resident only; a shard not resident is a stopped shard.

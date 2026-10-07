@@ -11,8 +11,9 @@ to Supabase and Railway, the README tool table from `scripts/gen_mcp_tool_table.
 **The task.** Offer MetaGraph's new **pattern search** to agents: patterns shorter than k (a 16-nt primer, a
 20-nt spacer), IUPAC patterns (a promoter written with R, Y, N), and later peptides, found **completely** in an
 index and **counted before anything is read**, with a label-free path that returns the matching k-mers without
-touching the annotation. First as a **synchronous tool**, like `traverse_resolve`. A queue job type for batches
-and archive-wide scans is a later step and is scoped at the end.
+touching the annotation. **As a job** — submit, status, results — the way the service wraps `/search`: the
+owner decided (2026-10-07) that the backend route stays synchronous and the service serves it asynchronously,
+because that is what the service is for; there is no synchronous MCP tool for it.
 
 **Process.**
 1. Work out the design with the owner.
@@ -72,7 +73,8 @@ no route.
 | 4 | patterns longer than k (extension), per-label `support`, `require_support` | after 3 |
 | 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | after 4 |
 | 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
-| 7 | Python client methods; this service's tool | with you |
+| 7 | Python client methods; this service's job type | with you; the job needs backend milestone 1 only (§3.1 item 3) |
+| mask | refseq33m-experimental's graph has no `.edgemask` file, and the route needs one (DESIGN §4): before the route answers on staging the owner runs `metagraph transform --mask-dummy` once on mex (offline, no change to node ids or annotation), or the server starts with `--pattern-build-mask`; until then the host states `mask: absent` and the job answers `mask_required` | before the owner's `update.sh` that enables the route |
 | fixtures | with milestone 1's freeze commit, as for level 6: the capabilities block on both routes, one answer per mode and per `withheld` reason, an error slot, from the mini index, under `api/python/tests/data/traverse/pattern/`, so your unit tests do not wait for a host | with milestone 1 |
 
 Staging (`refseq33m-experimental`, a BASIC index with record mapping) gets the route when the owner runs
@@ -81,55 +83,64 @@ capabilities block are what to build on.
 
 ## 3. Requirements and proposals
 
-### 3.1 The synchronous tool (first)
+### 3.1 The job (the service surface)
 
-1. **(required)** An MCP tool `pattern_search(database, dna | iupac, mode, scope, strands, max_contexts, …)` and a
-   REST route `POST /pattern/search`, built like `traverse_resolve` (`app/mcp_server.py`, `app/api/routes_traversal.py`
-   with its `_admit`): synchronous, no job, no S3; the backend called from the API process on the thread pool.
-2. **(required)** Admission in `traverse_resolve`'s shape — a leased token per backend host with its own
-   concurrency, lease and timeout settings (`PATTERN_MAX_CONCURRENCY`, `PATTERN_PER_HOST`, `PATTERN_LEASE_S`,
-   `PATTERN_TIMEOUT_S`, `PATTERN_MAX_PATTERNS`) — not the in-process `_COMPARE_SLOTS` semaphore, which guards a
-   local computation; this call hits a shared host. Staging and production counting separately is the known gap,
-   bounded well enough for v1 by the backend's own 5 s deadline.
-3. **(required)** Caps at admission, never truncation afterwards: `max_contexts`, `max_patterns` and
-   `time_budget_ms` above the service's ceilings are refused with a 400 naming the field (the strategy validator's
-   rule: refuses, never lowers). An answer is passed through whole; cutting it on the way out would falsify
-   `retrieval_complete`. The HTTP timeout derives from the request's `time_budget_ms` plus an allowance, not from
-   the host's maximum.
-4. **(required)** Served only for databases whose host carries the `pattern` block (§1) with a contract version
+1. **(required)** A job type: submit → status → results, as the service wraps `/search`. One task per
+   (database, host, pattern chunk of at most the host's `max_patterns`); each task calls `POST /pattern` once,
+   synchronously from the worker, under the task's own timeout. No synchronous MCP tool.
+2. **(required)** Results stored per task in the **traversal-job shape** (one document per task), not in the
+   search tables, whose hit-shaped truncation and enrichment make no sense for contexts; rows are contexts, never
+   labels. The merged view of a job: per count the **weakest relation wins** (`exact` only if every task's is);
+   `retrieval_complete` only when every task's is true; `withheld` and `stop` carried per task with the host and
+   its reason; large answers to S3 as searches do.
+3. **(required)** The fan-out is **across hosts** — a Logan node is hundreds of chunk hosts, which exist today —
+   and is orthogonal to the backend's in-process shard fan-out (DESIGN §8), so the job needs backend milestone 1
+   only; multi-graph hosts (backend milestone 6) change nothing on the service side.
+4. **(required)** Admission by the queue: the service's per-database queues, `META_DB_CAPS` and the distributed
+   semaphore protect the hosts; no leased-token synchronous admission. One constraint from the host side: a
+   pattern call occupies a server request thread for its whole budget, and staging runs `-p 2 --threads-each 2`,
+   so the per-host concurrency of pattern tasks should stay at **one** so that `/search` and `/traverse` keep a
+   thread (§3.2).
+5. **(required)** Caps at submit, never truncation afterwards: `max_contexts`, `max_patterns`, `time_budget_ms`
+   above the service's ceilings are refused with a 400 naming the field (the strategy validator's rule: refuses,
+   never lowers). An answer is passed through whole; cutting it on the way out would falsify
+   `retrieval_complete`. The task timeout derives from the request's `time_budget_ms` plus an allowance.
+6. **(required)** Served only for databases whose host carries the `pattern` block (§1) with a contract version
    the service knows or a higher one; a lower or missing version, or no block, answers `pattern_unsupported` with
    the host's feature list, as `traversal_disabled` does. Label projections are offered exactly when the host's
    `projections` list has them. The probe that reads capabilities already exists (`app/traversal/probe.py`).
-5. **(required)** The answer passed through with the service's additions only: `database`, the untrusted-data
+7. **(required)** The answer passed through with the service's additions only: `database`, the untrusted-data
    notice on label and record strings, the standard error envelope. **Never** sum per-shard label counts into one
    number, never drop `relation`, `withheld`, `retrieval_complete` or `absence_scope`, never add labels of its own.
    `hit_unit` does not apply to a context count; the tool says what a context is instead: one distinct k-mer of
    the index that contains the pattern, at one offset and orientation — not a record, not an occurrence, not a
    hit; a k-mer present in ten samples is one context.
-8. **(required)** The docstring explains the three things an agent acts on: `withheld: count_above_threshold`
-   (narrow the pattern, scope or strand), `withheld: discovery_budget` (a more informative pattern; a filter does
-   not help), `withheld: annotation_budget` (ask for the count or `labels: none`, or a narrower pattern); that
-   `count` first, then `labels: none`, is the cheap way to look at a new pattern; it uses the service's existing
-   strand vocabulary, and says that canonical and primary indexes report contexts only — no strand, no position.
-9. No caching of this tool's answers in v1; `determinism: time_limited` matters only once an answer is cached, and
-   the design note states that.
-6. Rate limits and the anonymous-call budget as for the other synchronous tools. Patterns are query data under the
-   same privacy policy as sequences.
-7. Row ids are opaque and valid per (host, index release, graph); the later backend request "labels for given
-   rows" takes them back. The tool returns them as given.
+8. **(required)** The submit and results tools' docstrings explain the three things an agent acts on:
+   `withheld: count_above_threshold` (narrow the pattern, scope or strand), `withheld: discovery_budget` (a more
+   informative pattern; a filter does not help), `withheld: annotation_budget` (ask for the count or
+   `labels: none`, or a narrower pattern); that `count` first, then `labels: none`, is the cheap way to look at a
+   new pattern; they use the service's existing strand vocabulary, and say that canonical and primary indexes
+   report contexts only — no strand, no position.
+9. A stored answer keeps its `determinism`; a `time_limited` one is marked as not reproducible where the
+   service shows it.
+10. Rate limits and the anonymous budget as for the other jobs. Patterns are query data under the same privacy
+    policy as sequences.
+11. Row ids are opaque and valid per (host, index release, graph); the later backend request "labels for given
+    rows" takes them back. The job returns them as given.
 
-### 3.2 Later: a queue job type
+### 3.2 Time budget (decided 2026-10-07)
 
-The owner asked whether the service should support "this extra type of job". The MetaGraph design says: not
-first. The synchronous tool covers the interactive case, and the route answers in seconds under its own deadline.
-A queue job type is the right shape for two things only: **batches** (hundreds of patterns, e.g. a primer panel)
-and **archive-wide scans** across every database of a catalogue entry. When it comes, it wraps the same route:
-one task per (database, host, pattern chunk), per-task completion recorded as search tasks record it, results
-merged with the shard identity each result carries, large answers to S3 as searches do. What it needs from the
-service that the sync tool does not: the job type registry, the merge of `withheld` and relations across tasks
-(the weakest relation wins; `retrieval_complete` only when every task's is true), and a result table that keeps
-contexts, not labels, as rows. Scope it in the design note; build it after milestone 6 on the backend side, when
-multi-graph hosts exist.
+The owner: "5 s is not sufficient in general" — some `/search` calls take longer today (Logan hosts about 28 s),
+and pattern search is the more complex function. So the route's **default** `time_budget_ms` is **60 s** (what
+the CLI and a direct caller get) and the server cap `--pattern-max-time-ms` is **600 s**: under the 900 s content
+timeout, with room for serialising and compressing a large answer. The service always sends an explicit
+`time_budget_ms` per task from a per-database timeout map, as `DATABASE_TIMEOUTS` does for `/search`, under the
+host's cap. The deadline keeps its value under a job: it bounds a runaway `any_offset` DFS per task, and the
+finalisation reserve is unchanged, so a stopped task still answers with counts. Nothing in the engine assumes a
+short run: the clock is read every 4,096 steps whatever the budget; the memory account is bounded by
+`max_memory_mb` and the retained descriptors by their caps, not by time; `max_steps` (default 10⁸ per shard)
+is the other bound and is raised with the budget. The cost of a long call is the server request thread it holds
+(staging: `-p 2 --threads-each 2`), which is why item 4 keeps pattern tasks at one per host.
 
 ## 4. Constraints
 
@@ -140,33 +151,34 @@ multi-graph hosts exist.
 
 ## 5. Tests and acceptance
 
-- Unit: capabilities gating (feature present, absent, unknown contract version); admission and timeouts; the
-  pass-through keeps every field; the error envelope; the docstring's tool table regenerated.
+- Unit: capabilities gating (block present, absent, lower, higher contract version); the per-task call and its
+  timeout; the merge (weakest relation, `retrieval_complete`, per-task `withheld`); the pass-through keeps every
+  field; the error envelope; the docstring's tool table regenerated. The fixture bodies of §2 feed these.
 - e2e against staging once the route is deployed: a 16-nt primer of a known refseq33m record in `count` and in
   `labels: none` (the returned k-mers contain the primer), an IUPAC promoter, a palindrome, a pattern below the
   information floor (refused), `max_contexts` 1 in `all_or_count` (withheld with the exact count) and in
-  `partial` (one context, the cut stated), an unsupported host.
-- Acceptance: a primer answered within 2 s on staging; every `withheld` reason surfaced verbatim; no label claim
-  from a count answer in the tool's own wording.
+  `partial` (one context, the cut stated), an unsupported host, a two-host database merged.
+- Acceptance: a primer job done within the service's usual job latency on staging; every `withheld` reason
+  surfaced verbatim per task; no label claim from a count answer in the tools' own wording.
 - A new tool moves the registry count that the docs test and the e2e skill pin; update both in the same change.
 
 ## 6. Decisions (the service side's proposals of 2026-10-07, accepted by the MetaGraph side)
 
-1. Names: `pattern_search` and `POST /pattern/search`; `pattern_` is the family name, so the later "labels for
-   given rows" tool joins it. Not `/motif`.
-2. Defaults: `mode: count`, `scope: any_offset` (the complete scope), with `suffix` offered as the cheap option
-   and its `absence_scope` shown. `partial` is exposed: it is explicit, every cut is stated, and an agent that
-   wants "the first fifty" has no other path. (The route's own default mode is `all_or_count`; the tool's is
-   `count`, and the two documents now say so.)
+1. Surface: a **job** (submit → status → results), the owner's decision; no synchronous tool. The backend route
+   is `POST /pattern`; the service's job kind and tool names are the service's (the `pattern_` family, so the
+   later "labels for given rows" joins it). Not `/motif`.
+2. Defaults of the job: `mode: count`, `scope: any_offset` (the complete scope), with `suffix` offered as the
+   cheap option and its `absence_scope` shown. `partial` is exposed: it is explicit, every cut is stated, and an
+   agent that wants "the first fifty" has no other path. (The route's own default mode is `all_or_count`.)
 3. Databases: every host that carries the block, canonical indexes included (contexts only). The catalogue gets
    a `pattern` field beside `traversal`, from the same probe, with the same filter.
 4. Wording: "one distinct k-mer of the index that contains the pattern, at one offset and orientation. Not a
    record, not an occurrence, not a hit: a k-mer present in ten samples is one context."
-5. Queue job: not first. When it comes, modelled on the traversal jobs (one document per task), not on the
-   search tables, whose hit-shaped truncation and enrichment make no sense for contexts; after backend
-   milestone 6.
+5. The job is modelled on the traversal jobs (one document per task), not on the search tables; it needs
+   backend milestone 1 only (§3.1 item 3).
 6. Who and when: the service session writes the design note and implements through Opus agents; org-id
-   integrates; the MetaGraph side supplies the frozen contract plus the fixture bodies (§2) with milestone 1's
-   commit. First increment after that commit; live e2e after the owner's `update.sh`.
+   integrates; the MetaGraph side supplies the frozen contract, the fixture bodies (§2) and the `pattern` block
+   on `/traverse/capabilities` with milestone 1's commit. First increment after that commit; live e2e after the
+   owner's `update.sh`.
 
-Still open for the owner: nothing on the MetaGraph side; the design note's approval and the start date are his.
+Open for the owner: the design note's approval and the start date.
