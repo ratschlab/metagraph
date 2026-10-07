@@ -1,23 +1,45 @@
 /**
- * The oracle suite of the pattern search (docs/DESIGN-pattern-search.md §13, increments 0-2):
- * tiny graphs built from explicit records, checked against two brute-force oracles that
- * share no code with the engine:
+ * The oracle suite of the pattern search (docs/DESIGN-pattern-search.md §13, increments 0-2
+ * and the engine half of increment 4): tiny graphs built from explicit records, checked
+ * against two brute-force oracles:
  *  - the graph-walk oracle enumerates the built graph's k-mers (every valid edge of the
  *    DBGSuccinct; on a wrapped PRIMARY graph also the wrapper's reverse complements, numbered
  *    by CanonicalDBG::reverse_complement) and lists every (node, offset, orientation) whose
  *    k-mer instantiates the oriented pattern at that offset: the expected graph contexts,
  *    with their node ids and in answer order;
- *  - the record-scan oracle scans the records' retained islands (the stretches over A, C, G,
- *    T) as strings on both strands and lists the distinct (k-mer, offset, orientation) they
- *    contain: what the records say the contexts must be, independently of the graph.
+ *  - the record-scan oracle scans the records' retained islands (the stretches over the
+ *    symbols the build indexes: A, C, G, T, and N on a DNA5 build) as strings on both strands
+ *    and lists the distinct (k-mer, offset, orientation) they contain: what the records say
+ *    the contexts must be, independently of the graph.
  * count() must equal the first in every unit and relation, enumerate() must return exactly
  * its list in its order, and the first must equal the second wherever no k-mer was pruned.
+ *
+ * What the oracles share with the engine, and what they do not. They read a pattern only
+ * through this file's own IUPAC table (iupac_bases: the bases of each code, its reverse
+ * complement and palindromy derived from it), never through Pattern::positions(),
+ * reverse_complement() or is_palindromic(); ParsePatterns checks those against the table,
+ * code by code. They do share the graph: the graph-walk oracle reads the DBGSuccinct's
+ * valid-edge mask through in_graph() and the node ids of the graph and of the CanonicalDBG
+ * wrapper, as the engine does; the record-scan oracle, which reads neither, is the check on
+ * that. Context::base_node is checked against the stored node found by spelling every stored
+ * k-mer (StoredNodes), not against the engine's or CanonicalDBG's id arithmetic.
+ *
+ * Alphabet: the file runs on the DNA (DNA4) and DNA5 builds. Every DNA5-specific
+ * expectation is under #if _DNA5_GRAPH. CI builds DNA and Protein only; the DNA5 branches
+ * were run once, by hand, on a DNA5 build of the engine and these tests (fix1-integrator,
+ * 2026-10-07: every PatternSearch and PatternSearchFixes test passed), not in CI.
  */
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cmath>
 #include <functional>
+#include <iostream>
+#include <limits>
 #include <map>
+#include <memory>
 #include <random>
 #include <set>
 #include <string>
@@ -39,7 +61,10 @@
 
 namespace {
 
-#if ! _PROTEIN_GRAPH
+// the nucleotide builds the engine serves ($ACGT and $ACGTN); the case-sensitive DNA build
+// ($ACGTNacgt) is refused by the engine (alphabet_unsupported) and Protein has no pattern
+// search, so neither runs this suite
+#if _DNA_GRAPH || _DNA5_GRAPH
 
 using namespace mtg;
 using namespace mtg::graph;
@@ -59,21 +84,118 @@ std::string rev_comp(std::string s) {
     return s;
 }
 
-BaseSet base_bit(char c) {
-    switch (c) {
-        case 'A': return kBaseA;
-        case 'C': return kBaseC;
-        case 'G': return kBaseG;
-        case 'T': return kBaseT;
-        default: return 0;  // N, $: never matched by a pattern position (§3)
+// the record symbols the build indexes (§3): A, C, G, T, and N on a DNA5 build; any other
+// symbol splits a record into islands
+bool indexed_symbol(char c) {
+#if _DNA5_GRAPH
+    return c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N';
+#else
+    return c == 'A' || c == 'C' || c == 'G' || c == 'T';
+#endif
+}
+
+bool indexed(std::string_view s) {
+    return std::all_of(s.begin(), s.end(), indexed_symbol);
+}
+
+
+// ---------------------------------------------------------------- the oracles' IUPAC table
+
+/**
+ * The IUPAC-IUB nucleotide codes, written out here as the bases each admits (sorted): the
+ * oracles' only reading of a pattern. Nothing below derives a base set, a reverse complement
+ * or palindromy from Pattern; Pattern is the engine's input, and ParsePatterns checks the
+ * engine's tables against this one.
+ */
+constexpr char kIUPACCodes[] = "ACGTRYSWKMBDHVN";
+
+std::string iupac_bases(char code) {
+    switch (std::toupper(static_cast<unsigned char>(code))) {
+        case 'A': return "A";
+        case 'C': return "C";
+        case 'G': return "G";
+        case 'T': return "T";
+        case 'R': return "AG";    // purine
+        case 'Y': return "CT";    // pyrimidine
+        case 'S': return "CG";    // strong
+        case 'W': return "AT";    // weak
+        case 'K': return "GT";    // keto
+        case 'M': return "AC";    // amino
+        case 'B': return "CGT";   // not A
+        case 'D': return "AGT";   // not C
+        case 'H': return "ACT";   // not G
+        case 'V': return "ACG";   // not T
+        case 'N': return "ACGT";  // any base, never the record symbol N (§3)
+        default: return "";
     }
 }
 
-bool matches(const std::vector<BaseSet> &q, std::string_view s) {
+// the code admitting exactly |bases| (sorted)
+char iupac_code(const std::string &bases) {
+    for (const char *c = kIUPACCodes; *c; ++c) {
+        if (iupac_bases(*c) == bases)
+            return *c;
+    }
+    return '?';
+}
+
+char complement_base(char base) {
+    switch (base) {
+        case 'A': return 'T';
+        case 'C': return 'G';
+        case 'G': return 'C';
+        case 'T': return 'A';
+        default: return '?';
+    }
+}
+
+// an oriented pattern as the oracles read it: per position, the bases it admits (sorted)
+typedef std::vector<std::string> Bases;
+
+Bases oracle_pattern(std::string_view text) {
+    Bases q;
+    for (char c : text) {
+        q.push_back(iupac_bases(c));
+        EXPECT_FALSE(q.back().empty()) << "not an IUPAC code: " << c;
+    }
+    return q;
+}
+
+Bases oracle_pattern(const Pattern &pattern) {
+    return oracle_pattern(pattern.text());
+}
+
+// rc(q): the positions reversed, every base of each complemented
+Bases oracle_reverse_complement(const Bases &q) {
+    Bases rc(q.rbegin(), q.rend());
+    for (std::string &bases : rc) {
+        for (char &base : bases) {
+            base = complement_base(base);
+        }
+        std::sort(bases.begin(), bases.end());
+    }
+    return rc;
+}
+
+bool oracle_palindromic(const Bases &q) {
+    return q == oracle_reverse_complement(q);
+}
+
+std::string oracle_text(const Bases &q) {
+    std::string text;
+    for (const std::string &bases : q) {
+        text.push_back(iupac_code(bases));
+    }
+    return text;
+}
+
+// |s| instantiates |q|: every symbol is one its position admits. A position admits A, C, G,
+// T only, never the record symbol N or the sentinel $ (§3); the flank is not a position
+bool matches(const Bases &q, std::string_view s) {
     if (s.size() != q.size())
         return false;
     for (size_t i = 0; i < q.size(); ++i) {
-        if (!(q[i] & base_bit(s[i])))
+        if (q[i].find(s[i]) == std::string::npos)
             return false;
     }
     return true;
@@ -124,17 +246,24 @@ std::ostream& operator<<(std::ostream &out, const Ctx &c) {
                << orientation_key(c.orientation) << ")";
 }
 
-// the orientations the engine searches, with the oriented pattern of each (§3)
-std::vector<std::pair<Orientation, Pattern>> orientations(const Pattern &pattern,
-                                                          Strands strands) {
-    if (pattern.is_palindromic())
-        return { { Orientation::PALINDROMIC, pattern } };
-    std::vector<std::pair<Orientation, Pattern>> result;
+// the orientations searched, with the oriented pattern of each (§3), from the oracles' table
+std::vector<std::pair<Orientation, Bases>> orientations(const Pattern &pattern,
+                                                        Strands strands) {
+    const Bases q = oracle_pattern(pattern);
+    if (oracle_palindromic(q))
+        return { { Orientation::PALINDROMIC, q } };
+    std::vector<std::pair<Orientation, Bases>> result;
     if (strands != Strands::REVERSE)
-        result.emplace_back(Orientation::FORWARD, pattern);
+        result.emplace_back(Orientation::FORWARD, q);
     if (strands != Strands::FORWARD)
-        result.emplace_back(Orientation::REVERSE, pattern.reverse_complement());
+        result.emplace_back(Orientation::REVERSE, oracle_reverse_complement(q));
     return result;
+}
+
+// the oriented pattern a context or path of |orientation| instantiates
+Bases oriented(const Pattern &pattern, Orientation orientation) {
+    const Bases q = oracle_pattern(pattern);
+    return orientation == Orientation::REVERSE ? oracle_reverse_complement(q) : q;
 }
 
 std::vector<uint32_t> scope_offsets(size_t L, size_t k, Scope scope) {
@@ -149,10 +278,45 @@ std::vector<uint32_t> scope_offsets(size_t L, size_t k, Scope scope) {
     return offsets;
 }
 
-std::vector<BaseSet> window(const Pattern &q, size_t k) {
-    return std::vector<BaseSet>(q.positions().begin(),
-                                q.positions().begin() + std::min(q.length(), k));
+// the first min(L, k) positions: the whole pattern for L <= k, the anchor window for L > k
+Bases window(const Bases &q, size_t k) {
+    return Bases(q.begin(), q.begin() + std::min(q.size(), k));
 }
+
+/**
+ * The stored node of every node of the served graph, found by spelling (T1-03): on a wrapped
+ * PRIMARY graph the stored k-mer whose sequence is the node's k-mer or its reverse complement
+ * (every stored k-mer of the unwrapped DBGSuccinct is spelled once); on BASIC and CANONICAL
+ * the node itself. Never the engine's base_node() or CanonicalDBG's id arithmetic.
+ */
+class StoredNodes {
+  public:
+    explicit StoredNodes(const DeBruijnGraph &graph)
+          : graph_(graph), wrapped_(dynamic_cast<const CanonicalDBG*>(&graph)) {
+        if (!wrapped_)
+            return;
+        const DBGSuccinct &dbg_succ = dynamic_cast<const DBGSuccinct&>(wrapped_->get_graph());
+        for (node_index y = 1; y <= dbg_succ.max_index(); ++y) {
+            if (dbg_succ.in_graph(y))
+                stored_.emplace(dbg_succ.get_node_sequence(y), y);
+        }
+    }
+
+    node_index of(node_index node) const {
+        if (!wrapped_)
+            return node;
+        const std::string kmer = graph_.get_node_sequence(node);
+        auto it = stored_.find(kmer);
+        if (it == stored_.end())
+            it = stored_.find(rev_comp(kmer));
+        return it == stored_.end() ? DeBruijnGraph::npos : it->second;
+    }
+
+  private:
+    const DeBruijnGraph &graph_;
+    const CanonicalDBG *wrapped_;
+    std::map<std::string, node_index> stored_;
+};
 
 
 // ---------------------------------------------------------------- the oracles
@@ -182,7 +346,7 @@ std::vector<Ctx> walk_oracle(const DeBruijnGraph &graph, const Pattern &pattern,
     std::vector<Ctx> result;
     for (const auto &[node, kmer] : graph_kmers(graph)) {
         for (const auto &[orientation, q] : orientations(pattern, request.strands)) {
-            std::vector<BaseSet> w = window(q, k);
+            Bases w = window(q, k);
             for (uint32_t p : scope_offsets(pattern.length(), k, request.scope)) {
                 if (matches(w, std::string_view(kmer).substr(p, w.size())))
                     result.push_back(Ctx { node, p, orientation });
@@ -196,7 +360,9 @@ std::vector<Ctx> walk_oracle(const DeBruijnGraph &graph, const Pattern &pattern,
 typedef std::set<std::tuple<std::string, uint32_t, Orientation>> SpelledContexts;
 
 // the record-scan oracle: the k-mers of the records' islands (both orientations unless
-// BASIC) and the contexts they spell
+// BASIC) and the contexts they spell. An island is a stretch of indexed symbols: on DNA4 an
+// N splits a record; on DNA5 the k-mers containing N are kept, and their N can lie in a flank
+// but never at a pattern position (matches())
 SpelledContexts record_oracle(const std::vector<std::string> &records, size_t k,
                               DeBruijnGraph::Mode mode, const Pattern &pattern,
                               const Request &request) {
@@ -204,7 +370,7 @@ SpelledContexts record_oracle(const std::vector<std::string> &records, size_t k,
     for (const std::string &record : records) {
         for (size_t i = 0; i + k <= record.size(); ++i) {
             std::string kmer = record.substr(i, k);
-            if (!std::all_of(kmer.begin(), kmer.end(), [](char c) { return base_bit(c); }))
+            if (!indexed(kmer))
                 continue;
             kmers.insert(kmer);
             if (mode != DeBruijnGraph::BASIC)
@@ -214,7 +380,7 @@ SpelledContexts record_oracle(const std::vector<std::string> &records, size_t k,
     SpelledContexts result;
     for (const std::string &kmer : kmers) {
         for (const auto &[orientation, q] : orientations(pattern, request.strands)) {
-            std::vector<BaseSet> w = window(q, k);
+            Bases w = window(q, k);
             for (uint32_t p : scope_offsets(pattern.length(), k, request.scope)) {
                 if (matches(w, std::string_view(kmer).substr(p, w.size())))
                     result.emplace(kmer, p, orientation);
@@ -235,12 +401,17 @@ SpelledContexts spelled(const DeBruijnGraph &graph, const std::vector<Ctx> &cont
 
 // ---------------------------------------------------------------- the checks
 
-std::vector<Ctx> run_enumerate(const PatternSearch &engine, const Pattern &pattern,
-                               const Request &request, Result *result,
+std::vector<Ctx> run_enumerate(const PatternSearch &engine, const StoredNodes &stored,
+                               const Pattern &pattern, const Request &request, Result *result,
                                uint64_t max_steps = kManySteps) {
     Budget budget = unbounded_budget(max_steps);
     std::vector<Ctx> contexts;
     *result = engine.enumerate(pattern, request, budget, [&](const Context &c) {
+        // the node of the annotation row (the route's row is graph_to_anno_index(base_node)):
+        // the stored k-mer of the context, found by spelling (T1-03)
+        EXPECT_EQ(stored.of(c.node), c.base_node) << "node " << c.node;
+        EXPECT_TRUE(c.path.empty());
+        EXPECT_TRUE(c.sequence.empty());
         contexts.push_back(Ctx { c.node, c.offset, c.orientation });
     });
     return contexts;
@@ -259,6 +430,7 @@ void check_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
     const size_t k = graph.get_k();
     const size_t L = pattern.length();
     PatternSearch engine(graph);
+    const StoredNodes stored(graph);
 
     std::vector<Ctx> expected = walk_oracle(graph, pattern, request);
     if (num_expected)
@@ -315,7 +487,7 @@ void check_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
     Request all = request;
     all.mode = Mode::ALL_OR_COUNT;
     Result enumerated;
-    std::vector<Ctx> released = run_enumerate(engine, pattern, all, &enumerated);
+    std::vector<Ctx> released = run_enumerate(engine, stored, pattern, all, &enumerated);
     EXPECT_EQ(counted.work.steps, enumerated.work.steps);
     EXPECT_EQ(counted.work.ranges_visited, enumerated.work.ranges_visited);
     ASSERT_TRUE(enumerated.extraction);
@@ -341,9 +513,8 @@ void check_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
     for (const Ctx &c : released) {
         // every released context spells the oriented pattern at its offset
         std::string kmer = graph.get_node_sequence(c.node);
-        Pattern q = c.orientation == Orientation::REVERSE ? pattern.reverse_complement()
-                                                          : pattern;
-        EXPECT_TRUE(matches(window(q, k), std::string_view(kmer).substr(c.offset, L)));
+        EXPECT_TRUE(matches(window(oriented(pattern, c.orientation), k),
+                            std::string_view(kmer).substr(c.offset, L)));
     }
 
     // ALL_OR_COUNT: all or nothing at the threshold (max_anchors for released anchors)
@@ -354,7 +525,7 @@ void check_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
         Request tight = all;
         set_cap(&tight, expected.size() - 1);
         Result withheld;
-        EXPECT_TRUE(run_enumerate(engine, pattern, tight, &withheld).empty());
+        EXPECT_TRUE(run_enumerate(engine, stored, pattern, tight, &withheld).empty());
         EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, withheld.extraction->withheld);
         EXPECT_FALSE(withheld.extraction->complete);
         EXPECT_EQ(Relation::EXACT, L > k ? withheld.anchors->total.relation
@@ -368,7 +539,7 @@ void check_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
                           uint64_t(expected.size()) }) {
         set_cap(&partial, cap);
         Result cut;
-        std::vector<Ctx> prefix = run_enumerate(engine, pattern, partial, &cut);
+        std::vector<Ctx> prefix = run_enumerate(engine, stored, pattern, partial, &cut);
         ASSERT_EQ(std::min<uint64_t>(cap, expected.size()), prefix.size());
         EXPECT_TRUE(std::equal(prefix.begin(), prefix.end(), expected.begin()));
         if (cap >= expected.size()) {
@@ -388,13 +559,309 @@ std::vector<Ctx> contexts_of(const DeBruijnGraph &graph, const Pattern &pattern,
     Request all = request;
     all.mode = Mode::ALL_OR_COUNT;
     Result result;
-    return run_enumerate(PatternSearch(graph), pattern, all, &result);
+    return run_enumerate(PatternSearch(graph), StoredNodes(graph), pattern, all, &result);
 }
 
 Result count_of(const DeBruijnGraph &graph, const Pattern &pattern, const Request &request,
                 uint64_t max_steps = kManySteps) {
     Budget budget = unbounded_budget(max_steps);
     return PatternSearch(graph).count(pattern, request, budget);
+}
+
+
+// ---------------------------------------------------------------- relations against the truth
+
+/**
+ * The true counts of one (graph, pattern, request), from the graph-walk oracle: contexts
+ * (L <= k) or anchors (L > k), in total, per offset of the scope and per orientation
+ * searched, zeros included.
+ */
+struct Truth {
+    uint64_t total = 0;
+    std::map<uint32_t, uint64_t> by_offset;
+    std::map<Orientation, uint64_t> by_orientation;
+};
+
+Truth truth_of(const DeBruijnGraph &graph, const Pattern &pattern, const Request &request,
+               const std::vector<Ctx> &expected) {
+    Truth truth;
+    for (uint32_t p : scope_offsets(pattern.length(), graph.get_k(), request.scope)) {
+        truth.by_offset[p] = 0;
+    }
+    for (const auto &[orientation, q] : orientations(pattern, request.strands)) {
+        truth.by_orientation[orientation] = 0;
+    }
+    for (const Ctx &c : expected) {
+        ++truth.total;
+        ++truth.by_offset[c.offset];
+        ++truth.by_orientation[c.orientation];
+    }
+    return truth;
+}
+
+// |count| states a true relation to |truth| (§3): EXACT equal to it, AT_LEAST at most it,
+// BOUNDS around it with the lower bound as the value, UNKNOWN without a value
+::testing::AssertionResult true_relation(const Count &count, uint64_t truth) {
+    bool holds = false;
+    switch (count.relation) {
+        case Relation::EXACT:
+            holds = count.value == truth;
+            break;
+        case Relation::AT_LEAST:
+            holds = count.value <= truth;
+            break;
+        case Relation::BOUNDS:
+            holds = count.lower == count.value && count.lower <= truth && truth <= count.upper;
+            break;
+        case Relation::UNKNOWN:
+            holds = count.value == 0;
+            break;
+    }
+    if (holds)
+        return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure()
+        << to_string(count.relation) << " " << count.value << " [" << count.lower << ", "
+        << count.upper << "] does not hold for the true count " << truth;
+}
+
+// every count of |r| (total, suffix, per offset, per orientation) holds for |truth|
+void expect_true_relations(const Result &r, const Truth &truth, size_t k, size_t L) {
+    if (L > k) {
+        ASSERT_TRUE(r.anchors);
+        EXPECT_TRUE(true_relation(r.anchors->total, truth.total)) << "anchors";
+        ASSERT_EQ(truth.by_orientation.size(), r.anchors->by_orientation.size());
+        for (const auto &[o, count] : r.anchors->by_orientation) {
+            EXPECT_TRUE(true_relation(count, truth.by_orientation.at(o)))
+                << "anchors " << orientation_key(o);
+        }
+        return;
+    }
+    ASSERT_TRUE(r.contexts);
+    EXPECT_TRUE(true_relation(r.contexts->total, truth.total)) << "total";
+    EXPECT_TRUE(true_relation(r.contexts->suffix, truth.by_offset.at(k - L))) << "suffix";
+    ASSERT_EQ(truth.by_offset.size(), r.contexts->by_offset.size());
+    for (const auto &[p, count] : r.contexts->by_offset) {
+        EXPECT_TRUE(true_relation(count, truth.by_offset.at(p))) << "offset " << p;
+    }
+    ASSERT_EQ(truth.by_orientation.size(), r.contexts->by_orientation.size());
+    for (const auto &[o, count] : r.contexts->by_orientation) {
+        EXPECT_TRUE(true_relation(count, truth.by_orientation.at(o)))
+            << "orientation " << orientation_key(o);
+    }
+}
+
+/**
+ * Every step budget below the complete run's (T1-01): count() stopped at max_steps = s for
+ * every s in [0, steps of the complete run) states a true relation in every count against
+ * the graph-walk oracle; the total is AT_LEAST after a stop in discovery (s below the
+ * complete run's ranges_visited) and BOUNDS after a stop in a mask scan, never EXACT; the
+ * stop is {that phase, max_steps} after exactly s steps. For L <= k, enumerate() at the same
+ * budget counts alike and delivers, in PARTIAL, a sorted subset of the oracle's contexts with
+ * the cut max_steps, and in ALL_OR_COUNT nothing (discovery_budget); enumerate() is run at
+ * every third budget and at the budgets around the end of discovery. A case whose complete
+ * run takes more than |max_sweep| steps is sampled: the first and last 64 budgets, the 64
+ * around the end of discovery, and about |max_sweep| more evenly spread. Returns the number
+ * of stopped runs checked.
+ */
+uint64_t check_halts_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
+                                     const Request &request, uint64_t max_sweep = 1500) {
+    const size_t k = graph.get_k();
+    const size_t L = pattern.length();
+    PatternSearch engine(graph);
+    const StoredNodes stored(graph);
+    const std::vector<Ctx> expected = walk_oracle(graph, pattern, request);
+    const Truth truth = truth_of(graph, pattern, request, expected);
+
+    Budget unbounded = unbounded_budget();
+    const Result full = engine.count(pattern, request, unbounded);
+    EXPECT_FALSE(full.refusal);
+    if (full.refusal)
+        return 0;
+    EXPECT_FALSE(full.stop);
+    expect_true_relations(full, truth, k, L);
+    EXPECT_EQ(Relation::EXACT, (L > k ? full.anchors->total : full.contexts->total).relation);
+    const uint64_t discovery = full.work.ranges_visited;
+    const uint64_t steps = full.work.steps;
+
+    std::set<uint64_t> budgets;
+    if (steps <= max_sweep) {
+        for (uint64_t s = 0; s < steps; ++s) {
+            budgets.insert(s);
+        }
+    } else {
+        auto add = [&](uint64_t from, uint64_t to) {
+            for (uint64_t s = from; s < std::min(to, steps); ++s) {
+                budgets.insert(s);
+            }
+        };
+        add(0, 64);
+        add(steps - 64, steps);
+        add(discovery > 32 ? discovery - 32 : 0, discovery + 32);
+        for (uint64_t s = 0; s < steps; s += steps / max_sweep + 1) {
+            budgets.insert(s);
+        }
+    }
+
+    uint64_t runs = 0;
+    for (uint64_t s : budgets) {
+        SCOPED_TRACE("max_steps " + std::to_string(s) + " of " + std::to_string(steps)
+                     + " (discovery " + std::to_string(discovery) + ")");
+        Budget budget = unbounded_budget(s);
+        const Result r = engine.count(pattern, request, budget);
+        ++runs;
+        EXPECT_FALSE(r.refusal);
+        if (!r.stop) {
+            ADD_FAILURE() << "no stop";
+            continue;
+        }
+        const StopPhase phase = s < discovery ? StopPhase::DISCOVERY : StopPhase::MASK_SCAN;
+        EXPECT_EQ(phase, r.stop->phase);
+        EXPECT_EQ(StopReason::MAX_STEPS, r.stop->reason);
+        EXPECT_FALSE(r.time_limited);
+        // every charge is one step, and the refused one is not counted
+        EXPECT_EQ(s, r.work.steps);
+        EXPECT_EQ(std::min(s, discovery), r.work.ranges_visited);
+        const Count &total = L > k ? r.anchors->total : r.contexts->total;
+        EXPECT_EQ(phase == StopPhase::DISCOVERY ? Relation::AT_LEAST : Relation::BOUNDS,
+                  total.relation);
+        expect_true_relations(r, truth, k, L);
+
+        // enumerate() at every third budget and around the phase boundaries (its discovery
+        // is count()'s, checked above at every budget)
+        const bool boundary = (s + 1 >= discovery && s <= discovery + 1) || s + 1 == steps;
+        if (L > k || !(s % 3 == 0 || boundary))
+            continue;
+
+        // enumerate(): the same discovery, then what the mode delivers after a step stop
+        Request partial = request;
+        partial.mode = Mode::PARTIAL;
+        partial.max_contexts = kManySteps;
+        Result cut;
+        std::vector<Ctx> some = run_enumerate(engine, stored, pattern, partial, &cut, s);
+        EXPECT_EQ(r.work.steps, cut.work.steps);
+        EXPECT_EQ(total.relation, cut.contexts->total.relation);
+        EXPECT_EQ(total.value, cut.contexts->total.value);
+        if (!cut.extraction) {
+            ADD_FAILURE() << "no extraction";
+            continue;
+        }
+        EXPECT_FALSE(cut.extraction->complete);
+        EXPECT_FALSE(cut.extraction->withheld);
+        EXPECT_EQ(StopReason::MAX_STEPS, cut.extraction->cut);
+        EXPECT_EQ(some.size(), cut.extraction->returned);
+        EXPECT_TRUE(std::adjacent_find(some.begin(), some.end(),
+                                       [](const Ctx &a, const Ctx &b) { return !(a < b); })
+                        == some.end()) << "not strictly in answer order";
+        for (const Ctx &c : some) {
+            EXPECT_TRUE(std::binary_search(expected.begin(), expected.end(), c)) << c;
+        }
+
+        Request all = request;
+        all.mode = Mode::ALL_OR_COUNT;
+        Result none;
+        EXPECT_TRUE(run_enumerate(engine, stored, pattern, all, &none, s).empty());
+        EXPECT_TRUE(none.extraction && none.extraction->withheld == Withheld::DISCOVERY_BUDGET
+                        && !none.extraction->complete);
+    }
+    return runs;
+}
+
+/**
+ * stop_at_threshold and the thresholds of the release at every cap from 0 to one past the
+ * truth (T1-01; sampled above 64): a threshold stop implies cap < value <= truth, AT_LEAST
+ * in discovery with the reason max_contexts (max_anchors for L > k), and in ALL_OR_COUNT
+ * nothing (threshold_crossed); no stop implies EXACT and right (the stop is not promised
+ * whenever the truth exceeds the cap: the running lower bound may stay below it). Without
+ * stop_at_threshold,
+ * ALL_OR_COUNT releases exactly the oracle's list when the truth is within the cap and
+ * withholds count_above_threshold otherwise, and PARTIAL releases the first cap contexts.
+ */
+void check_thresholds_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
+                                      const Request &request) {
+    const size_t k = graph.get_k();
+    const size_t L = pattern.length();
+    PatternSearch engine(graph);
+    const StoredNodes stored(graph);
+    const std::vector<Ctx> expected = walk_oracle(graph, pattern, request);
+    const Truth truth = truth_of(graph, pattern, request, expected);
+    const uint64_t n = truth.total;
+
+    std::set<uint64_t> caps;
+    for (uint64_t cap = 0; cap <= n + 1; cap += (cap < 32 || cap + 33 > n) ? 1 : n / 32 + 1) {
+        caps.insert(cap);
+    }
+    for (uint64_t cap : caps) {
+        SCOPED_TRACE("cap " + std::to_string(cap) + " truth " + std::to_string(n));
+        auto with_cap = [&](Mode mode, bool stop) {
+            Request r = request;
+            r.mode = mode;
+            r.stop_at_threshold = stop;
+            (L > k ? r.max_anchors : r.max_contexts) = cap;
+            return r;
+        };
+
+        Budget budget = unbounded_budget();
+        const Result c = engine.count(pattern, with_cap(Mode::COUNT, true), budget);
+        const Count &total = L > k ? c.anchors->total : c.contexts->total;
+        expect_true_relations(c, truth, k, L);
+        if (c.stop) {
+            EXPECT_EQ(StopPhase::DISCOVERY, c.stop->phase);
+            EXPECT_EQ(L > k ? StopReason::MAX_ANCHORS : StopReason::MAX_CONTEXTS,
+                      c.stop->reason);
+            EXPECT_EQ(Relation::AT_LEAST, total.relation);
+            EXPECT_LT(cap, total.value);
+            EXPECT_FALSE(budget.stopped());  // a threshold ends only its own pattern
+        } else {
+            EXPECT_EQ(Relation::EXACT, total.relation);
+        }
+        if (cap >= n) {
+            EXPECT_FALSE(c.stop);
+        }
+
+        if (L > k)
+            continue;
+
+        Result all;
+        std::vector<Ctx> released
+            = run_enumerate(engine, stored, pattern, with_cap(Mode::ALL_OR_COUNT, true), &all);
+        if (c.stop) {
+            EXPECT_TRUE(released.empty());
+            EXPECT_EQ(Withheld::THRESHOLD_CROSSED, all.extraction->withheld);
+        } else if (n <= cap) {
+            EXPECT_EQ(expected, released);
+            EXPECT_TRUE(all.extraction->complete);
+        } else {
+            // the running lower bound need not cross the cap (a wrapped PRIMARY union counts
+            // the larger part only): no stop, and the exact count above the cap withholds
+            EXPECT_TRUE(released.empty());
+            EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, all.extraction->withheld);
+        }
+
+        Result plain;
+        released = run_enumerate(engine, stored, pattern, with_cap(Mode::ALL_OR_COUNT, false),
+                                 &plain);
+        EXPECT_EQ(Relation::EXACT, plain.contexts->total.relation);
+        if (n <= cap) {
+            EXPECT_TRUE(plain.extraction->complete);
+            EXPECT_EQ(expected, released);
+        } else {
+            EXPECT_TRUE(released.empty());
+            EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, plain.extraction->withheld);
+        }
+
+        Result partial;
+        released = run_enumerate(engine, stored, pattern, with_cap(Mode::PARTIAL, true),
+                                 &partial);
+        ASSERT_LE(released.size(), std::min(cap, n));
+        EXPECT_TRUE(std::is_sorted(released.begin(), released.end()));
+        for (const Ctx &x : released) {
+            EXPECT_TRUE(std::binary_search(expected.begin(), expected.end(), x)) << x;
+        }
+        if (!partial.stop) {
+            EXPECT_EQ(std::min(cap, n), released.size());
+            EXPECT_TRUE(std::equal(released.begin(), released.end(), expected.begin()));
+        }
+    }
 }
 
 
@@ -436,6 +903,88 @@ TEST(PatternSearch, ParsePatterns) {
     EXPECT_TRUE(Pattern::parse(PatternKind::DNA, "A").reverse_complement().is_exact());
     EXPECT_EQ(PatternKind::DNA, dna.reverse_complement().kind());
     EXPECT_EQ(kBaseC | kBaseT, Pattern::parse(PatternKind::IUPAC, "AY").allowed(1, "A"));
+}
+
+// the engine's base set of a position, spelled as bases through the header's bit convention
+// (bit 0 A, bit 1 C, bit 2 G, bit 3 T)
+std::string spelled_set(BaseSet set) {
+    std::string bases;
+    if (set & kBaseA) bases.push_back('A');
+    if (set & kBaseC) bases.push_back('C');
+    if (set & kBaseG) bases.push_back('G');
+    if (set & kBaseT) bases.push_back('T');
+    return bases;
+}
+
+TEST(PatternSearch, IUPACTableAgainstTheOracles) {
+    // X-ORACLE-01: the engine's IUPAC table, code by code, against the oracles' own; a
+    // consistent swap of two codes in both of the engine's tables (K/M, B/V, D/H) passes
+    // every pin of ParsePatterns but not this
+    for (const char *c = kIUPACCodes; *c; ++c) {
+        SCOPED_TRACE(std::string("code ") + *c);
+        const std::string bases = iupac_bases(*c);
+        for (char text : { *c, static_cast<char>(std::tolower(*c)) }) {
+            Pattern p = Pattern::parse(PatternKind::IUPAC, std::string(1, text));
+            ASSERT_EQ(1u, p.length());
+            EXPECT_EQ(std::string(1, *c), p.text());
+            EXPECT_EQ(bases, spelled_set(p.positions()[0]));
+            EXPECT_EQ(bases, spelled_set(p.allowed(0, "")));
+            EXPECT_DOUBLE_EQ(std::log2(4.0 / bases.size()), p.information_bits());
+            EXPECT_EQ(bases.size() == 1, p.is_exact());
+            const Bases rc = oracle_reverse_complement({ bases });
+            EXPECT_EQ(oracle_text(rc), p.reverse_complement().text());
+            EXPECT_EQ(rc[0], spelled_set(p.reverse_complement().positions()[0]));
+            EXPECT_EQ(oracle_palindromic({ bases }), p.is_palindromic());
+        }
+        // a DNA pattern is A, C, G, T only
+        if (bases.size() == 1) {
+            EXPECT_EQ(std::string(1, *c), Pattern::parse(PatternKind::DNA, std::string(1, *c)).text());
+        } else {
+            EXPECT_THROW(Pattern::parse(PatternKind::DNA, std::string(1, *c)), PatternError);
+        }
+    }
+    // single codes, by the IUPAC rules themselves: S, W, N are their own complements
+    for (char c : std::string("SWN")) {
+        EXPECT_TRUE(Pattern::parse(PatternKind::IUPAC, std::string(1, c)).is_palindromic()) << c;
+    }
+    for (char c : std::string("ACGTRYKMBDHV")) {
+        EXPECT_FALSE(Pattern::parse(PatternKind::IUPAC, std::string(1, c)).is_palindromic()) << c;
+    }
+    EXPECT_FALSE(Pattern::parse(PatternKind::DNA, "CAG").is_palindromic());
+    EXPECT_FALSE(Pattern::parse(PatternKind::DNA, "TTAGGA").is_palindromic());
+    EXPECT_TRUE(Pattern::parse(PatternKind::DNA, "GAATTC").is_palindromic());
+
+    // every IUPAC pattern of length 1 .. 3 (3 615 of them): the reverse complement, its text
+    // and palindromy, and every position, against the oracles' table
+    size_t checked = 0;
+    std::function<void(std::string&)> all = [&](std::string &text) {
+        if (text.size()) {
+            Pattern p = Pattern::parse(PatternKind::IUPAC, text);
+            const Bases q = oracle_pattern(text);
+            const Bases rc = oracle_reverse_complement(q);
+            ASSERT_EQ(q.size(), p.positions().size()) << text;
+            for (size_t i = 0; i < q.size(); ++i) {
+                ASSERT_EQ(q[i], spelled_set(p.positions()[i])) << text << " " << i;
+            }
+            ASSERT_EQ(oracle_text(rc), p.reverse_complement().text()) << text;
+            for (size_t i = 0; i < rc.size(); ++i) {
+                ASSERT_EQ(rc[i], spelled_set(p.reverse_complement().positions()[i])) << text;
+            }
+            ASSERT_EQ(oracle_palindromic(q), p.is_palindromic()) << text;
+            ASSERT_EQ(p.is_palindromic(), p.reverse_complement().is_palindromic()) << text;
+            ++checked;
+        }
+        if (text.size() == 3)
+            return;
+        for (const char *c = kIUPACCodes; *c; ++c) {
+            text.push_back(*c);
+            all(text);
+            text.pop_back();
+        }
+    };
+    std::string text;
+    all(text);
+    EXPECT_EQ(15u + 15 * 15 + 15 * 15 * 15, checked);
 }
 
 TEST(PatternSearch, CountAlgebra) {
@@ -506,7 +1055,11 @@ TEST(PatternSearch, GraphSupport) {
     EXPECT_EQ(GraphMode::BASIC, s.mode);
     EXPECT_TRUE(s.strand_stated);
     EXPECT_TRUE(s.mask_present);
+#if _DNA5_GRAPH
+    EXPECT_EQ("$ACGTN", s.alphabet);
+#else
     EXPECT_EQ("$ACGT", s.alphabet);
+#endif
     EXPECT_EQ(5u, s.k);
     EXPECT_EQ(2u, s.scopes.size());
 
@@ -687,8 +1240,54 @@ TEST(PatternSearch, SuffixToPrefixSymbolSet) {
     EXPECT_EQ(std::vector<std::string>{ "ACGTA" }, called);
 }
 
+TEST(PatternSearch, FlankSymbolsAreTheBuildAlphabet) {
+    // §4.1: the flank of any_offset tries every symbol of the graph's alphabet but the
+    // sentinel, the seeder's NonSentinelSymbols (pattern_search.cpp, expand()): A, C, G, T on
+    // a DNA4 build, and N as well on DNA5. On DNA4 that set equals the pattern alphabet, so
+    // no DNA4 run can tell a flank restricted to A, C, G, T from the right one (X-TESTS-01,
+    // T1-08); only the _DNA5_GRAPH cases (DNA5Flank, NCentredSelfComplementOddK) can, on a
+    // DNA5 build (run by hand once, not in CI). What DNA4 can check is the symbol set itself
+    auto graph = build(4, { "ACGTACGT" }, DeBruijnGraph::BASIC);
+    const boss::BOSS &boss = base_dbg(*graph).get_boss();
+    std::string symbols;
+    align::NonSentinelSymbols()(boss, std::make_tuple(uint64_t(1), uint64_t(1), size_t(1)),
+                                [&](boss::BOSS::TAlphabet s) {
+                                    symbols.push_back(boss.decode(s));
+                                });
+#if _DNA5_GRAPH
+    EXPECT_EQ("ACGTN", symbols);
+#else
+    EXPECT_EQ("ACGT", symbols);
+#endif
+    EXPECT_EQ(boss.alphabet.substr(1), symbols);
+}
+
 
 // ---------------------------------------------------------------- §13: the named cases
+
+// the k-mers of the graph's invalid (dummy or pruned) edges, spelled through the BOSS, $
+// for the sentinel
+std::set<std::string> invalid_edges(const DBGSuccinct &dbg_succ) {
+    const boss::BOSS &boss = dbg_succ.get_boss();
+    std::set<std::string> result;
+    for (node_index e = 1; e <= dbg_succ.max_index(); ++e) {
+        if (!dbg_succ.in_graph(e))
+            result.insert(boss.get_node_str(e) + boss.decode(boss.get_W(e) % boss.alph_size));
+    }
+    return result;
+}
+
+// the edges, valid or not, of the nodes ending with |suffix| that can end with |c|: the
+// W rule's leaf (§4.1)
+DBGSuccinct::LastSymbolEdges leaf_edges(const DBGSuccinct &dbg_succ,
+                                        const std::string &suffix, char c) {
+    const boss::BOSS &boss = dbg_succ.get_boss();
+    auto encoded = boss.encode(suffix);
+    auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
+    EXPECT_EQ(suffix.size(), static_cast<size_t>(end - encoded.begin())) << suffix;
+    first = boss.pred_last(first - 1) + 1;
+    return dbg_succ.count_edges_with_last_symbol(first, last, boss.encode(c));
+}
 
 TEST(PatternSearch, PrunedDummyRecordStart) {
     // k = 4: ACGA is a k-mer of TACGAT, so the record ACGA starts without a dummy chain of
@@ -698,7 +1297,22 @@ TEST(PatternSearch, PrunedDummyRecordStart) {
         auto graph = build(4, records, DeBruijnGraph::BASIC, batch);
         Pattern ac = Pattern::parse(PatternKind::DNA, "AC");
 
-        // suffix: no k-mer ends with AC (a $$AC dummy, if any, is invalid)
+        // the premise, checked (T1-11): no dummy chain $$$A, $$AC, $ACG of ACGA; TACGAT's
+        // chain $$$T, $$TA, $TAC is there, and $TAC is the one dummy in the leaf of AC
+        // (nodes ending with A, W = C), which only a scan can tell from a k-mer
+        const DBGSuccinct &dbg_succ = base_dbg(*graph);
+        const std::set<std::string> dummies = invalid_edges(dbg_succ);
+        for (std::string chain : { "$$$A", "$$AC", "$ACG" }) {
+            EXPECT_FALSE(dummies.count(chain)) << chain;
+        }
+        for (std::string chain : { "$$$T", "$$TA", "$TAC" }) {
+            EXPECT_TRUE(dummies.count(chain)) << chain;
+        }
+        const auto leaf = leaf_edges(dbg_succ, "A", 'C');
+        EXPECT_EQ(1u, leaf.candidates);
+        EXPECT_EQ(1u, leaf.invalid_non_sentinel);
+
+        // suffix: no k-mer ends with AC; the leaf's one candidate is the dummy $TAC
         Result suffix = count_of(*graph, ac, make_request(Scope::SUFFIX));
         EXPECT_EQ(Relation::EXACT, suffix.contexts->total.relation);
         EXPECT_EQ(0u, suffix.contexts->total.value);
@@ -819,14 +1433,14 @@ TEST(PatternSearch, InterruptedMaskScanBounds) {
     EXPECT_EQ(bounds.lower, bounds.value);
     EXPECT_EQ(Relation::BOUNDS, none.contexts->by_offset.at(2).relation);
 
-    // one edge scanned ($$AC, matching): bounds [3 - 1 - 1, 3 - 1] = [1, 2]
+    // one edge scanned ($$AC, matching): bounds [3 - 1 - 1, 3 - 1] = [1, 2], exactly
+    // (T1-11: [1, 3] and [2, 2] would be wrong here)
     Result half = count_of(*graph, ac, request, discovery + 1);
     EXPECT_EQ(StopPhase::MASK_SCAN, half.stop->phase);
     EXPECT_EQ(Relation::BOUNDS, half.contexts->total.relation);
-    EXPECT_LE(half.contexts->total.lower, 2u);
-    EXPECT_GE(half.contexts->total.upper, 2u);
-    EXPECT_LE(half.contexts->total.upper, 3u);
-    EXPECT_GE(half.contexts->total.lower, bounds.lower);
+    EXPECT_EQ(1u, half.contexts->total.lower);
+    EXPECT_EQ(2u, half.contexts->total.upper);
+    EXPECT_EQ(1u, half.contexts->total.value);
 
     // a discovery stop: at_least, never bounds (an undiscovered branch has no upper bound)
     Result early = count_of(*graph, ac, request, discovery - 1);
@@ -835,10 +1449,45 @@ TEST(PatternSearch, InterruptedMaskScanBounds) {
     EXPECT_LE(early.contexts->total.value, 2u);
 }
 
+TEST(PatternSearch, SentinelTighteningPinned) {
+    // T1-11: the bound of a W-rule leaf counts only the invalid edges whose W is not $ (J),
+    // since a dummy sink (W = $) never carries the symbol c: the design's bound I tightened
+    // (Item::lower). k = 3, GCA and TAC: the leaf of AC (nodes ending with A) holds the sink
+    // CA$ and the k-mer TAC: one candidate (TAC), one invalid edge, none of it non-sentinel.
+    // So AC has exactly one suffix context known by ranks alone: no scan, no scan step, and
+    // a budget of exactly the discovery's steps answers exact. Counting the sink as a
+    // possible loss (J = I) would scan it, charge a step and, at that budget, answer bounds
+    std::vector<std::string> records { "GCA", "TAC" };
+    for (bool batch : { false, true }) {
+        auto graph = build(3, records, DeBruijnGraph::BASIC, batch);
+        const auto leaf = leaf_edges(base_dbg(*graph), "A", 'C');
+        ASSERT_EQ(1u, leaf.candidates);
+        ASSERT_EQ(1u, leaf.invalid);
+        ASSERT_EQ(0u, leaf.invalid_non_sentinel);
+        ASSERT_TRUE(invalid_edges(base_dbg(*graph)).count("CA$"));
+
+        Pattern ac = Pattern::parse(PatternKind::DNA, "AC");
+        Request request = make_request(Scope::SUFFIX, Strands::FORWARD);
+        Result r = count_of(*graph, ac, request);
+        EXPECT_EQ(Relation::EXACT, r.contexts->total.relation);
+        EXPECT_EQ(1u, r.contexts->total.value);
+        EXPECT_EQ(0u, r.work.mask_scans);
+        EXPECT_EQ(r.work.ranges_visited, r.work.steps);
+
+        Result tight = count_of(*graph, ac, request, r.work.ranges_visited);
+        EXPECT_FALSE(tight.stop);
+        EXPECT_EQ(Relation::EXACT, tight.contexts->total.relation);
+        EXPECT_EQ(1u, tight.contexts->total.value);
+        check_against_oracles(*graph, ac, request, &records);
+        check_against_oracles(*graph, ac, make_request(Scope::SUFFIX), &records);
+    }
+}
+
 TEST(PatternSearch, DNA5Flank) {
     // §4.1: the flank admits every symbol of the build's alphabet. On a DNA5 build ACNTA is a
     // k-mer at k = 5 and contains AC at offset 0; on a DNA4 build the record splits into the
-    // islands AC and TA, both shorter than k, so nothing is indexed and nothing is claimed
+    // islands AC and TA, both shorter than k, so nothing is indexed and nothing is claimed.
+    // The DNA5 branch is not in CI (no DNA5 build there; run by hand once; X-TESTS-01, T1-08)
     std::vector<std::string> records { "ACNTA" };
     auto graph = build(5, records, DeBruijnGraph::BASIC);
     Pattern ac = Pattern::parse(PatternKind::DNA, "AC");
@@ -847,21 +1496,93 @@ TEST(PatternSearch, DNA5Flank) {
 #if _DNA5_GRAPH
     EXPECT_EQ(1u, r.contexts->total.value);
     EXPECT_EQ(1u, r.contexts->by_offset.at(0).value);
+    check_against_oracles(*graph, ac, make_request(), &records);
+
+    // N in flanks, in every graph mode, against both oracles (the record-scan oracle keeps
+    // the k-mers containing N on DNA5); a pattern position never matches a record's N. No
+    // k-mer here equals its reverse complement (an odd k-mer with N at its centre between
+    // complementary flanks would: NCentredSelfComplementOddK)
+    std::vector<std::string> flanked { "ACNTA", "GGACNNTTACCA", "TTNACGTNAA", "CANNNGTAC" };
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        for (bool batch : { false, true }) {
+            auto g = build(5, flanked, mode, batch);
+            for (std::string p : { "AC", "GT", "TA", "N", "NN", "ACG", "TTAC", "NNNNN", "ACNTA" }) {
+                SCOPED_TRACE(p + " mode " + std::to_string(mode));
+                // ACNTA is not an IUPAC pattern with a record N: its N admits A, C, G, T
+                Pattern pattern = Pattern::parse(PatternKind::IUPAC, p);
+                for (Scope scope : { Scope::SUFFIX, Scope::ANY_OFFSET }) {
+                    if (mode == DeBruijnGraph::PRIMARY && scope == Scope::SUFFIX)
+                        continue;
+                    check_against_oracles(*g, pattern, make_request(scope), &flanked, mode);
+                }
+            }
+        }
+    }
 #else
     EXPECT_EQ(0u, r.contexts->total.value);
     check_against_oracles(*graph, ac, make_request(), &records);
 #endif
 }
 
+#if _DNA5_GRAPH
+TEST(PatternSearch, NCentredSelfComplementOddK) {
+    // X-TESTS-01, E2-05. On DNA5 N complements to N, so at odd k = 5 the k-mer ACNGT is its
+    // own reverse complement, which no DNA4 k-mer of odd length can be. On BASIC and
+    // CANONICAL one k-mer is one context per (offset, orientation) (§3, SPEC §7.1): AC at
+    // offset 0 (forward) and GT, rc(AC), at offset 3 (reverse), once each. On a wrapped
+    // PRIMARY graph this is the KNOWN DNA5 LIMITATION the engine header, SPEC §8.2 and DESIGN
+    // §15 state (E2-05, code deferred): CanonicalDBG serves the stored ACNGT at two wrapper
+    // ids (y and y + offset, the same spelling), the engine unites palindromes for even k
+    // only, so each orientation counts and releases it twice: 2 + 2, the same two spellings at
+    // four node ids. First run on a DNA5 build by fix1-integrator (2026-10-07), which is
+    // where this expectation was taken from.
+    std::vector<std::string> records { "ACNGT" };
+    Pattern ac = Pattern::parse(PatternKind::DNA, "AC");
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        SCOPED_TRACE(mode);
+        const uint64_t per_orientation = mode == DeBruijnGraph::PRIMARY ? 2 : 1;
+        auto graph = build(5, records, mode);
+        Result r = count_of(*graph, ac, make_request());
+        ASSERT_TRUE(r.contexts);
+        EXPECT_EQ(Relation::EXACT, r.contexts->total.relation);
+        EXPECT_EQ(per_orientation, r.contexts->by_orientation.at(Orientation::FORWARD).value);
+        EXPECT_EQ(per_orientation, r.contexts->by_orientation.at(Orientation::REVERSE).value);
+        EXPECT_EQ(2 * per_orientation, r.contexts->total.value);
+        // the distinct (k-mer, offset, orientation) among the released contexts: two in
+        // every mode; their node ids: two, four on PRIMARY (the double count)
+        std::set<std::string> kmers;
+        std::set<std::pair<uint64_t, std::string>> nodes;
+        for (const Ctx &c : contexts_of(*graph, ac, make_request())) {
+            const std::string key = graph->get_node_sequence(c.node) + "@"
+                    + std::to_string(c.offset) + orientation_key(c.orientation);
+            kmers.insert(key);
+            nodes.emplace(c.node, key);
+        }
+        EXPECT_EQ(2u, kmers.size());
+        EXPECT_EQ(2 * per_orientation, nodes.size());
+        check_against_oracles(*graph, ac, make_request(), &records, mode);
+    }
+}
+#endif
+
 TEST(PatternSearch, IslandShorterThanK) {
-    // k = 5, DNA4: AAAAANACNCCCCC keeps AAAAA and CCCCC; AC sits in a two-base island
+    // k = 5, DNA4: AAAAANACNCCCCC keeps AAAAA and CCCCC; AC sits in a two-base island. On
+    // DNA5 the N k-mers are kept, and AC lies in four of them (X-ORACLE-02): AANAC at 3,
+    // ANACN at 2, NACNC at 1, ACNCC at 0 (a branch not in CI: no DNA5 build there)
     std::vector<std::string> records { "AAAAANACNCCCCC" };
     for (bool batch : { false, true }) {
         auto graph = build(5, records, DeBruijnGraph::BASIC, batch);
         Pattern ac = Pattern::parse(PatternKind::DNA, "AC");
         Result r = count_of(*graph, ac, make_request());
         EXPECT_EQ(Relation::EXACT, r.contexts->total.relation);
+#if _DNA5_GRAPH
+        EXPECT_EQ(4u, r.contexts->total.value);
+        for (uint32_t p : { 0, 1, 2, 3 }) {
+            EXPECT_EQ(1u, r.contexts->by_offset.at(p).value) << p;
+        }
+#else
         EXPECT_EQ(0u, r.contexts->total.value);
+#endif
         check_against_oracles(*graph, ac, make_request(), &records);
     }
 }
@@ -958,25 +1679,62 @@ TEST(PatternSearch, IUPACBothOrientationsOneOffset) {
 }
 
 TEST(PatternSearch, SuffixOnWrappedPrimary) {
-    // the wrapped PRIMARY graph of ACGA exposes ACGA and TCGT; CGT is in TCGT, a virtual
-    // node whose stored k-mer has ACG as its prefix, not CGT as a suffix: suffix is refused,
-    // any_offset finds it (§4.1)
+    // the wrapped PRIMARY graph of ACGA exposes ACGA and TCGT, one stored and one virtual
+    // (which one is the builder's choice: TCGT is stored in this build, T1-06). The last
+    // three bases of the virtual k-mer form a pattern that is a suffix of no stored k-mer,
+    // nor is its reverse complement: it lies at the prefix of the stored k-mer, read on the
+    // other strand. A stored-suffix lookup cannot find it, so suffix is refused on a wrapped
+    // PRIMARY graph and any_offset finds it, through the search of its reverse complement
+    // mapped to the virtual node (§4.1)
     std::vector<std::string> records { "ACGA" };
     auto graph = build(4, records, DeBruijnGraph::PRIMARY);
-    Pattern cgt = Pattern::parse(PatternKind::DNA, "CGT");
+    const DBGSuccinct &stored_graph = base_dbg(*graph);
+    const bool acga_stored = stored_graph.kmer_to_node("ACGA") != DeBruijnGraph::npos;
+    const std::string stored = acga_stored ? "ACGA" : "TCGT";
+    const std::string virtual_kmer = acga_stored ? "TCGT" : "ACGA";
+    ASSERT_NE(DeBruijnGraph::npos, stored_graph.kmer_to_node(stored));
+    ASSERT_EQ(DeBruijnGraph::npos, stored_graph.kmer_to_node(virtual_kmer));
+    const node_index virtual_node = graph->kmer_to_node(virtual_kmer);
+    ASSERT_NE(DeBruijnGraph::npos, virtual_node);
+    ASSERT_LT(stored_graph.max_index(), virtual_node);
 
-    Result suffix = count_of(*graph, cgt, make_request(Scope::SUFFIX));
+    // the pattern sitting only at the virtual k-mer's suffix (CGA in this build)
+    const std::string tail = virtual_kmer.substr(1);
+    Pattern q = Pattern::parse(PatternKind::DNA, tail);
+    for (std::string s : { tail, rev_comp(tail) }) {
+        EXPECT_NE(s, stored.substr(1)) << "a stored suffix";
+    }
+    Result suffix = count_of(*graph, q, make_request(Scope::SUFFIX));
+    ASSERT_TRUE(suffix.refusal);
+    EXPECT_EQ("scope_unsupported", suffix.refusal->code);
+    EXPECT_FALSE(suffix.contexts);
+    EXPECT_EQ(0u, suffix.work.steps);
+
+    auto contexts = contexts_of(*graph, q, make_request(Scope::ANY_OFFSET, Strands::FORWARD));
+    ASSERT_EQ(1u, contexts.size());
+    EXPECT_EQ(virtual_node, contexts[0].node);
+    EXPECT_EQ(virtual_kmer, graph->get_node_sequence(contexts[0].node));
+    EXPECT_EQ(1u, contexts[0].offset);  // k - L: the suffix
+    Result any = count_of(*graph, q, make_request());
+    EXPECT_EQ(Relation::EXACT, any.contexts->total.relation);
+    EXPECT_EQ(1u, any.contexts->by_orientation.at(Orientation::FORWARD).value);
+    EXPECT_EQ(1u, any.contexts->suffix.value);
+    check_against_oracles(*graph, q, make_request(), &records, DeBruijnGraph::PRIMARY);
+
+    // and CGT, the suffix of TCGT, for contrast: refused in suffix scope all the same
+    Pattern cgt = Pattern::parse(PatternKind::DNA, "CGT");
+    suffix = count_of(*graph, cgt, make_request(Scope::SUFFIX));
     ASSERT_TRUE(suffix.refusal);
     EXPECT_EQ("scope_unsupported", suffix.refusal->code);
     EXPECT_FALSE(suffix.contexts);
 
-    Result any = count_of(*graph, cgt, make_request());
+    any = count_of(*graph, cgt, make_request());
     EXPECT_EQ(Relation::EXACT, any.contexts->total.relation);
     EXPECT_EQ(1u, any.contexts->by_orientation.at(Orientation::FORWARD).value);   // TCGT
     EXPECT_EQ(1u, any.contexts->by_orientation.at(Orientation::REVERSE).value);   // ACGA
     EXPECT_EQ(std::vector<std::string>{ kNoteStrandUnknown }, any.notes);
 
-    auto contexts = contexts_of(*graph, cgt, make_request(Scope::ANY_OFFSET, Strands::FORWARD));
+    contexts = contexts_of(*graph, cgt, make_request(Scope::ANY_OFFSET, Strands::FORWARD));
     ASSERT_EQ(1u, contexts.size());
     EXPECT_EQ("TCGT", graph->get_node_sequence(contexts[0].node));
     EXPECT_EQ(1u, contexts[0].offset);
@@ -1081,8 +1839,14 @@ TEST(PatternSearch, MaxStepsAtLeast) {
     std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
     auto graph = build(7, records, DeBruijnGraph::BASIC);
     Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NA");
+    // the truth of every count is the oracles', not the engine's own complete run (E1-03,
+    // T1-09): the complete run is checked against both oracles first
+    check_against_oracles(*graph, pattern, make_request(), &records);
+    const std::vector<Ctx> expected = walk_oracle(*graph, pattern, make_request());
+    const Truth truth = truth_of(*graph, pattern, make_request(), expected);
     Result full = count_of(*graph, pattern, make_request());
     ASSERT_EQ(Relation::EXACT, full.contexts->total.relation);
+    ASSERT_EQ(truth.total, full.contexts->total.value);
 
     for (uint64_t steps = 0; steps < full.work.steps; ++steps) {
         Result r = count_of(*graph, pattern, make_request(), steps);
@@ -1090,32 +1854,26 @@ TEST(PatternSearch, MaxStepsAtLeast) {
         EXPECT_EQ(StopReason::MAX_STEPS, r.stop->reason);
         EXPECT_LE(r.work.steps, steps);
         const Count &total = r.contexts->total;
-        // a discovery stop: at_least or (only scans interrupted) bounds, never exact
+        // a discovery stop: at_least; only scans interrupted: bounds; never exact
         EXPECT_NE(Relation::EXACT, total.relation);
         if (r.stop->phase == StopPhase::DISCOVERY) {
             EXPECT_TRUE(total.relation == Relation::AT_LEAST
                         || total.relation == Relation::UNKNOWN) << steps;
         }
-        EXPECT_LE(total.value, full.contexts->total.value) << steps;
-        // offsets whose discovery completed are exact and right; the others are lower bounds
+        EXPECT_LE(total.value, truth.total) << steps;
+        // every count against the oracle's truth, per offset and per orientation: exact and
+        // right where the discovery and the scans behind it completed, bounds around the
+        // truth where only scans are pending, a lower bound where discovery is open. Every
+        // offset sums both orientations, so in a discovery stop no offset is exact; an
+        // orientation can be (RelationRuleAcrossPatterns)
         for (const auto &[p, count] : r.contexts->by_offset) {
-            uint64_t truth = full.contexts->by_offset.at(p).value;
-            if (count.relation == Relation::EXACT) {
-                EXPECT_EQ(truth, count.value) << steps << " offset " << p;
-            } else if (count.relation == Relation::BOUNDS) {
-                EXPECT_LE(count.lower, truth);
-                EXPECT_GE(count.upper, truth);
-            } else if (count.relation == Relation::AT_LEAST) {
-                EXPECT_LE(count.value, truth);
-            }
+            EXPECT_TRUE(true_relation(count, truth.by_offset.at(p))) << steps << " offset " << p;
         }
         for (const auto &[o, count] : r.contexts->by_orientation) {
-            uint64_t truth = full.contexts->by_orientation.at(o).value;
-            if (count.relation == Relation::EXACT) {
-                EXPECT_EQ(truth, count.value);
-            }
-            EXPECT_LE(count.value, truth);
+            EXPECT_TRUE(true_relation(count, truth.by_orientation.at(o)))
+                << steps << " " << orientation_key(o);
         }
+        EXPECT_TRUE(true_relation(r.contexts->suffix, truth.by_offset.at(7 - 2))) << steps;
     }
 }
 
@@ -1182,7 +1940,7 @@ TEST(PatternSearch, StopAtThreshold) {
     request.max_contexts = 5;
     request.mode = Mode::ALL_OR_COUNT;
     Result all;
-    EXPECT_TRUE(run_enumerate(engine, pattern, request, &all).empty());
+    EXPECT_TRUE(run_enumerate(engine, StoredNodes(*graph), pattern, request, &all).empty());
     ASSERT_TRUE(all.stop);
     EXPECT_EQ(StopPhase::DISCOVERY, all.stop->phase);
     EXPECT_EQ(StopReason::MAX_CONTEXTS, all.stop->reason);
@@ -1192,7 +1950,8 @@ TEST(PatternSearch, StopAtThreshold) {
 
     request.mode = Mode::PARTIAL;
     Result partial;
-    std::vector<Ctx> some = run_enumerate(engine, pattern, request, &partial);
+    std::vector<Ctx> some = run_enumerate(engine, StoredNodes(*graph), pattern, request,
+                                          &partial);
     EXPECT_EQ(5u, some.size());
     EXPECT_EQ(StopReason::MAX_CONTEXTS, partial.extraction->cut);
     EXPECT_TRUE(std::is_sorted(some.begin(), some.end()));
@@ -1223,7 +1982,8 @@ TEST(PatternSearch, PartialAfterStepStop) {
     request.mode = Mode::PARTIAL;
     for (uint64_t steps : { 5, 20, 60 }) {
         Result r;
-        std::vector<Ctx> some = run_enumerate(engine, pattern, request, &r, steps);
+        std::vector<Ctx> some = run_enumerate(engine, StoredNodes(*graph), pattern, request,
+                                              &r, steps);
         ASSERT_TRUE(r.stop);
         EXPECT_EQ(StopReason::MAX_STEPS, r.extraction->cut);
         EXPECT_FALSE(r.extraction->complete);
@@ -1315,6 +2075,7 @@ TEST(PatternSearch, Refusals) {
     ASSERT_TRUE(refused.refusal);  // 12 bits in its anchor window at k = 6
     EXPECT_NE(std::string::npos, refused.refusal->message.find("anchor window"));
     EXPECT_DOUBLE_EQ(12.0, *refused.anchor_information_bits);
+    EXPECT_DOUBLE_EQ(12.0, *refused.min_anchor_information_bits);
 
     Request count = make_request();
     count.mode = Mode::COUNT;
@@ -1333,6 +2094,7 @@ TEST(PatternSearch, LongPatternAnchors) {
             Result r = count_of(*graph, pattern, make_request());
             EXPECT_EQ(Scope::LONG, r.scope);
             EXPECT_TRUE(r.anchor_information_bits);
+            EXPECT_TRUE(r.min_anchor_information_bits);
             EXPECT_EQ(kNotePathsLater, r.notes.back());
         }
     }
@@ -1364,6 +2126,211 @@ TEST(PatternSearch, EvenKPrimaryPalindromeScanBounds) {
             EXPECT_GE(total.upper, truth) << p << " " << steps;
         }
     }
+}
+
+
+// ---------------------------------------------------------------- stops in every graph mode
+
+struct HaltCase {
+    size_t k;
+    DeBruijnGraph::Mode mode;
+    std::vector<std::string> records;
+    std::vector<std::string> patterns;
+};
+
+const std::vector<HaltCase>& halt_cases() {
+    static const std::vector<std::string> kLong {
+        "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA"
+    };
+    static const std::vector<std::string> kShort { "ACGTTGCAAGGCTTAC", "TTTACGGATC" };
+    static const std::vector<HaltCase> cases {
+        // even k, wrapped PRIMARY, palindromic 4-mers (AATT, CGCG, GCGC, AGCT, ...): the
+        // union of a completed and a stopped probe may share palindromes, so its lower bound
+        // is the larger part, not the sum (the review's case: T, strands forward, max_steps
+        // 28, offset 2 is at_least 7 of 9; the sum of the parts would claim 10)
+        { 4, DeBruijnGraph::PRIMARY, { "ACGAAATTATG", "AGCTGTCTCGCGCGC" },
+          { "T", "A", "G", "C", "N", "AT", "CG", "TA", "W", "ACGT", "AATT", "NNNN", "CGCGC" } },
+        { 6, DeBruijnGraph::PRIMARY, { "TTACGCGTAA", "GAATATTCCG", "ACGCGTACGT", "CCGGAATTCC" },
+          { "G", "N", "CG", "AT", "GCG", "ACGCGT", "TTACGC", "ACGCGTA" } },
+        // the review's L = 1 case (offset k - 1 of a stopped search is open, not exact)
+        { 6, DeBruijnGraph::PRIMARY, { "TTA", "NGAGGTCGTGATCTCTAGCGCNTCCGGG", "CCTAGCCGCTCAAG" },
+          { "G", "C", "T", "CG", "GTCGTG" } },
+        // odd k, wrapped PRIMARY: no palindromic k-mer, the parts are disjoint
+        { 5, DeBruijnGraph::PRIMARY, kShort, { "A", "G", "N", "AC", "GTT", "ACGTT", "ACGTTG" } },
+        { 3, DeBruijnGraph::CANONICAL, kShort, { "A", "T", "N", "AC", "ACG", "GCAA" } },
+        { 5, DeBruijnGraph::CANONICAL, kShort, { "C", "N", "AC", "GTT", "TTTAC", "TTTACG" } },
+        { 4, DeBruijnGraph::BASIC, kLong, { "A", "T", "N", "NA", "GAT", "GATC", "R", "GATCG" } },
+        { 6, DeBruijnGraph::BASIC, kLong, { "C", "G", "AC", "GATCGA", "GATCGAT" } },
+    };
+    return cases;
+}
+
+TEST(PatternSearch, HaltsAgainstOraclesInEveryMode) {
+    // T1-01: a step stop at every budget below the complete run's, in every graph mode
+    // (BASIC, native CANONICAL, wrapped PRIMARY at odd k and at even k with palindromic
+    // k-mers), both builders, both scopes where served, every strand choice, patterns of
+    // length 1, 2, k and k + 1: every count states a true relation to the graph-walk oracle
+    // (check_halts_against_oracles). Before this, every step stop of the suite was on a BASIC
+    // graph with L >= 2
+    uint64_t runs = 0;
+    for (const HaltCase &c : halt_cases()) {
+        for (bool batch : { false, true }) {
+            auto graph = build(c.k, c.records, c.mode, batch);
+            for (const std::string &p : c.patterns) {
+                Pattern pattern = Pattern::parse(PatternKind::IUPAC, p);
+                for (Scope scope : { Scope::ANY_OFFSET, Scope::SUFFIX }) {
+                    if (scope == Scope::SUFFIX
+                            && (c.mode == DeBruijnGraph::PRIMARY || p.size() > c.k))
+                        continue;
+                    // every strand choice for L = 1, both strands otherwise
+                    for (Strands strands : { Strands::BOTH, Strands::FORWARD, Strands::REVERSE }) {
+                        if (strands != Strands::BOTH && p.size() > 1)
+                            continue;
+                        SCOPED_TRACE("k " + std::to_string(c.k) + " mode "
+                                     + std::to_string(c.mode) + " batch "
+                                     + std::to_string(batch) + " " + p + " "
+                                     + to_string(scope) + " " + to_string(strands));
+                        runs += check_halts_against_oracles(*graph, pattern,
+                                                            make_request(scope, strands));
+                    }
+                }
+            }
+        }
+    }
+    std::cerr << "stopped runs checked: " << runs << std::endl;
+    EXPECT_LT(5'000u, runs);
+}
+
+TEST(PatternSearch, ThresholdsAgainstOraclesInEveryMode) {
+    // T1-01: stop_at_threshold and the release thresholds at every cap up to one past the
+    // truth, in every graph mode, the even-k wrapped PRIMARY union with palindromic k-mers
+    // included (its running lower bound is the larger part, never the sum)
+    for (const HaltCase &c : halt_cases()) {
+        auto graph = build(c.k, c.records, c.mode);
+        for (const std::string &p : c.patterns) {
+            Pattern pattern = Pattern::parse(PatternKind::IUPAC, p);
+            for (Strands strands : { Strands::BOTH, Strands::FORWARD }) {
+                SCOPED_TRACE("k " + std::to_string(c.k) + " mode " + std::to_string(c.mode)
+                             + " " + p + " " + to_string(strands));
+                check_thresholds_against_oracles(*graph, pattern,
+                                                 make_request(Scope::ANY_OFFSET, strands));
+            }
+        }
+    }
+}
+
+TEST(PatternSearch, RandomGraphsHaltsAgainstOracles) {
+    // T1-01: step stops on random graphs of every mode (the mode rotates with the seed),
+    // three patterns each: one of length 1, one of length k, one of a random length up to
+    // k + 1; sampled sweeps (check_halts_against_oracles with max_sweep 300)
+    const char *iupac = "ACGTRYSWKMBDHVN";
+    uint64_t runs = 0;
+    for (uint32_t seed = 1; seed <= 24; ++seed) {
+        std::mt19937 rng(7919 * seed + 13);
+        size_t k = 3 + rng() % 6;
+        auto mode = static_cast<DeBruijnGraph::Mode>(seed % 3);
+        bool batch = rng() % 2;
+        std::vector<std::string> records(1 + rng() % 4);
+        for (std::string &record : records) {
+            size_t length = k + rng() % 25;
+            for (size_t i = 0; i < length; ++i) {
+                record.push_back(rng() % 25 ? "ACGT"[rng() % 4] : 'N');
+            }
+        }
+        auto graph = build(k, records, mode, batch);
+        for (size_t length : { size_t(1), k, 1 + rng() % (k + 1) }) {
+            std::string text;
+            const std::string &record = records[rng() % records.size()];
+            if (record.size() >= length) {
+                text = record.substr(rng() % (record.size() - length + 1), length);
+            }
+            for (char &c : text) {
+                if (c == 'N' || rng() % 4 == 0)
+                    c = iupac[rng() % 15];
+            }
+            while (text.size() < length) {
+                text.push_back(iupac[rng() % 15]);
+            }
+            Scope scope = mode != DeBruijnGraph::PRIMARY && rng() % 3 == 0
+                ? Scope::SUFFIX
+                : Scope::ANY_OFFSET;
+            auto strands = static_cast<Strands>(rng() % 3);
+            SCOPED_TRACE("seed " + std::to_string(seed) + " k " + std::to_string(k) + " mode "
+                         + std::to_string(mode) + " batch " + std::to_string(batch) + " "
+                         + text + " " + to_string(scope) + " " + to_string(strands));
+            runs += check_halts_against_oracles(*graph, Pattern::parse(PatternKind::IUPAC, text),
+                                                make_request(scope, strands), 300);
+        }
+    }
+    std::cerr << "random stopped runs checked: " << runs << std::endl;
+    EXPECT_LT(1'000u, runs);
+}
+
+TEST(PatternSearch, Kmer31BothStrandsMultiLocus) {
+    // T2-02 (the engine's half; the integration suite's patterns are test_pattern.py's): at
+    // k = 31 on a BASIC graph, an exact pattern with several loci on each strand, so that
+    // the - strand, several k-mers per (strand, offset) and the answer order across strands
+    // are compared with the oracles, and an IUPAC pattern whose reverse complement matches
+    // the same instances, so that one (node, offset) carries both orientations
+    std::mt19937 rng(31);
+    auto random_bases = [&](size_t n) {
+        std::string s;
+        for (size_t i = 0; i < n; ++i) {
+            s.push_back("ACGT"[rng() % 4]);
+        }
+        return s;
+    };
+    const std::string p14 = "AAGGCCATTTCCGG";
+    const std::string site = "GAATTC";
+    std::vector<std::string> records;
+    for (int r = 0; r < 4; ++r) {
+        std::string record = random_bases(60);
+        // two loci of P and one of rc(P) per record, each with its own flanks
+        record += p14 + random_bases(45) + rev_comp(p14) + random_bases(40) + p14;
+        // EcoRI sites inside RNNNNGAATTCNNNNY instances
+        record += random_bases(30) + "A" + random_bases(4) + site + random_bases(4) + "C"
+                + random_bases(50);
+        records.push_back(record);
+    }
+    auto graph = build(31, records, DeBruijnGraph::BASIC);
+
+    Pattern exact = Pattern::parse(PatternKind::DNA, p14);
+    check_against_oracles(*graph, exact, make_request(), &records);
+    check_against_oracles(*graph, exact, make_request(Scope::SUFFIX), &records);
+    check_against_oracles(*graph, exact, make_request(Scope::ANY_OFFSET, Strands::REVERSE),
+                          &records);
+    // the inputs are not trivial: at some offset, two distinct k-mers on each strand
+    const std::vector<Ctx> contexts = walk_oracle(*graph, exact, make_request());
+    for (Orientation o : { Orientation::FORWARD, Orientation::REVERSE }) {
+        std::map<uint32_t, std::set<node_index>> nodes;
+        for (const Ctx &c : contexts) {
+            if (c.orientation == o)
+                nodes[c.offset].insert(c.node);
+        }
+        size_t most = 0;
+        for (const auto &[p, at] : nodes) {
+            most = std::max(most, at.size());
+        }
+        EXPECT_LE(2u, most) << orientation_key(o);
+    }
+
+    // rc(RNNNNGAATTCNNNNN) = NNNNNGAATTCNNNNY: an instance with R first and Y last matches
+    // both, at the same (node, offset)
+    Pattern both = Pattern::parse(PatternKind::IUPAC, "RNNNNGAATTCNNNNN");
+    ASSERT_FALSE(both.is_palindromic());
+    check_against_oracles(*graph, both, make_request(), &records);
+    auto released = contexts_of(*graph, both, make_request());
+    size_t pairs = 0;
+    for (size_t i = 1; i < released.size(); ++i) {
+        if (released[i].node == released[i - 1].node
+                && released[i].offset == released[i - 1].offset) {
+            // one (node, offset), two orientations: forward first (§5.5)
+            EXPECT_EQ(Orientation::FORWARD, released[i - 1].orientation);
+            EXPECT_EQ(Orientation::REVERSE, released[i].orientation);
+            ++pairs;
+        }
+    }
+    EXPECT_LE(4u, pairs);
 }
 
 
@@ -1503,15 +2470,16 @@ PathOracle path_oracle(const DeBruijnGraph &graph, const Pattern &pattern,
     PathOracle result;
     for (const auto &[orientation, q] : orientations(pattern, request.strands)) {
         const Orientation o = orientation;
-        const Pattern &oriented = q;
+        const Bases &oriented = q;
         std::function<void(std::string&, std::vector<node_index>&)> grow
                 = [&](std::string &s, std::vector<node_index> &p) {
             if (s.size() == L) {
                 result.paths.push_back(PathCtx { p.front(), o, s, p });
                 return;
             }
+            // a pattern position admits A, C, G, T only, never N
             for (char b : std::string("ACGT")) {
-                if (!(oriented.positions()[s.size()] & base_bit(b)))
+                if (oriented[s.size()].find(b) == std::string::npos)
                     continue;
                 auto it = node_of.find(s.substr(s.size() - k + 1) + b);
                 if (it == node_of.end())
@@ -1549,14 +2517,13 @@ SpelledPaths record_path_oracle(const std::vector<std::string> &records, size_t 
             strands.push_back(rev_comp(record));
         }
     }
-    auto real = [](std::string_view s) {
-        return std::all_of(s.begin(), s.end(), [](char c) { return base_bit(c); });
-    };
+    // the k-mers of the islands (indexed symbols only: N splits a record on DNA4); an
+    // occurrence's N, on DNA5, is never at a pattern position (matches())
     std::set<std::string> retained;
     for (const std::string &s : strands) {
         for (size_t i = 0; i + k <= s.size(); ++i) {
             std::string kmer = s.substr(i, k);
-            if (real(kmer) && !pruned.count(kmer))
+            if (indexed(kmer) && !pruned.count(kmer))
                 retained.insert(kmer);
         }
     }
@@ -1565,7 +2532,7 @@ SpelledPaths record_path_oracle(const std::vector<std::string> &records, size_t 
     for (const std::string &s : strands) {
         for (size_t i = 0; i + L <= s.size(); ++i) {
             std::string occurrence = s.substr(i, L);
-            if (!real(occurrence))
+            if (!indexed(occurrence))
                 continue;
             bool all_retained = true;
             for (size_t j = 0; j + k <= L; ++j) {
@@ -1574,7 +2541,7 @@ SpelledPaths record_path_oracle(const std::vector<std::string> &records, size_t 
             if (!all_retained)
                 continue;
             for (const auto &[orientation, q] : orientations(pattern, request.strands)) {
-                if (matches(q.positions(), occurrence))
+                if (matches(q, occurrence))
                     result.emplace(occurrence, orientation);
             }
         }
@@ -1582,8 +2549,8 @@ SpelledPaths record_path_oracle(const std::vector<std::string> &records, size_t 
     return result;
 }
 
-std::vector<PathCtx> run_paths(const PatternSearch &engine, const Pattern &pattern,
-                               const Request &request, Result *result,
+std::vector<PathCtx> run_paths(const PatternSearch &engine, const StoredNodes &stored,
+                               const Pattern &pattern, const Request &request, Result *result,
                                uint64_t max_steps = kManySteps) {
     Budget budget = unbounded_budget(max_steps);
     std::vector<PathCtx> paths;
@@ -1594,7 +2561,12 @@ std::vector<PathCtx> run_paths(const PatternSearch &engine, const Pattern &patte
         if (c.path.size()) {
             EXPECT_EQ(c.node, c.path.front());
         }
-        EXPECT_EQ(engine.base_node(c.node), c.base_node);
+        // the anchor's stored node, and the one the route maps every node of the path to
+        // (PatternSearch::base_node), against the stored k-mers spelled (T1-03)
+        EXPECT_EQ(stored.of(c.node), c.base_node);
+        for (node_index n : c.path) {
+            EXPECT_EQ(stored.of(n), engine.base_node(n)) << n;
+        }
         paths.push_back(PathCtx { c.node, c.orientation, c.sequence, c.path });
     });
     return paths;
@@ -1611,7 +2583,7 @@ std::vector<PathCtx> paths_of(const DeBruijnGraph &graph, const Pattern &pattern
     Request all = request;
     all.mode = Mode::ALL_OR_COUNT;
     Result result;
-    return run_paths(PatternSearch(graph), pattern, all, &result);
+    return run_paths(PatternSearch(graph), StoredNodes(graph), pattern, all, &result);
 }
 
 // marks |kmer| pruned in the graph's valid-edge mask, as graph cleaning would (§3)
@@ -1645,6 +2617,7 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
     ASSERT_LT(k, L);
     ASSERT_TRUE(request.extend_paths);
     PatternSearch engine(graph);
+    const StoredNodes stored(graph);
 
     const PathOracle oracle = path_oracle(graph, pattern, request);
     const std::vector<PathCtx> &expected = oracle.paths;
@@ -1719,7 +2692,7 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
     Request all = request;
     all.mode = Mode::ALL_OR_COUNT;
     Result enumerated;
-    std::vector<PathCtx> released = run_paths(engine, pattern, all, &enumerated);
+    std::vector<PathCtx> released = run_paths(engine, stored, pattern, all, &enumerated);
     EXPECT_EQ(counted.work.steps, enumerated.work.steps);
     EXPECT_EQ(counted.work.extension_edges, enumerated.work.extension_edges);
     EXPECT_EQ(a.candidates_examined, enumerated.anchors->candidates_examined);
@@ -1730,7 +2703,6 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
     EXPECT_EQ(expected.size(), enumerated.extraction->returned);
     ASSERT_EQ(expected, released) << pattern.text();
 
-    const Pattern rc = pattern.reverse_complement();
     for (const PathCtx &p : released) {
         // n = L - k + 1 retained k-mers, each the next window of the spelled sequence, which
         // instantiates the oriented pattern
@@ -1739,8 +2711,7 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
         for (size_t i = 0; i < p.path.size(); ++i) {
             EXPECT_EQ(p.sequence.substr(i, k), graph.get_node_sequence(p.path[i]));
         }
-        const Pattern &q = p.orientation == Orientation::REVERSE ? rc : pattern;
-        EXPECT_TRUE(matches(q.positions(), p.sequence)) << p;
+        EXPECT_TRUE(matches(oriented(pattern, p.orientation), p.sequence)) << p;
     }
 
     // ALL_OR_COUNT: all or nothing at max_paths
@@ -1748,7 +2719,7 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
         Request tight = all;
         tight.max_paths = expected.size() - 1;
         Result withheld;
-        EXPECT_TRUE(run_paths(engine, pattern, tight, &withheld).empty());
+        EXPECT_TRUE(run_paths(engine, stored, pattern, tight, &withheld).empty());
         EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, withheld.extraction->withheld);
         EXPECT_FALSE(withheld.extraction->complete);
         EXPECT_EQ(Relation::EXACT, withheld.anchors->paths.relation);
@@ -1762,7 +2733,7 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
                           uint64_t(expected.size()) }) {
         partial.max_paths = cap;
         Result cut;
-        std::vector<PathCtx> prefix = run_paths(engine, pattern, partial, &cut);
+        std::vector<PathCtx> prefix = run_paths(engine, stored, pattern, partial, &cut);
         ASSERT_EQ(std::min<uint64_t>(cap, expected.size()), prefix.size());
         EXPECT_TRUE(std::equal(prefix.begin(), prefix.end(), expected.begin()));
         EXPECT_EQ(Relation::EXACT, cut.anchors->paths.relation);
@@ -1896,7 +2867,7 @@ TEST(PatternSearch, ExtensionAnchorWithoutPath) {
     Request all = request;
     all.mode = Mode::ALL_OR_COUNT;
     Result e;
-    EXPECT_TRUE(run_paths(PatternSearch(*graph), aaac, all, &e).empty());
+    EXPECT_TRUE(run_paths(PatternSearch(*graph), StoredNodes(*graph), aaac, all, &e).empty());
     EXPECT_TRUE(e.extraction->complete);
     EXPECT_EQ(0u, e.extraction->returned);
     check_paths_against_oracles(*graph, aaac, path_request(), &records, DeBruijnGraph::BASIC,
@@ -2103,7 +3074,7 @@ TEST(PatternSearch, ExtensionMaxAnchors) {
     for (Mode mode : { Mode::ALL_OR_COUNT, Mode::PARTIAL }) {
         request.mode = mode;
         Result e;
-        EXPECT_TRUE(run_paths(engine, pattern, request, &e).empty());
+        EXPECT_TRUE(run_paths(engine, StoredNodes(*graph), pattern, request, &e).empty());
         EXPECT_EQ(Withheld::ANCHORS_ABOVE_THRESHOLD, e.extraction->withheld);
         EXPECT_FALSE(e.extraction->complete);
         EXPECT_EQ(Extension::NOT_ADMITTED, e.anchors->extension);
@@ -2125,11 +3096,11 @@ TEST(PatternSearch, ExtensionMaxAnchors) {
     EXPECT_EQ(Relation::UNKNOWN, s.anchors->paths.relation);
     request.mode = Mode::ALL_OR_COUNT;
     Result t;
-    EXPECT_TRUE(run_paths(engine, pattern, request, &t).empty());
+    EXPECT_TRUE(run_paths(engine, StoredNodes(*graph), pattern, request, &t).empty());
     EXPECT_EQ(Withheld::THRESHOLD_CROSSED, t.extraction->withheld);
     request.mode = Mode::PARTIAL;
     Result u;
-    EXPECT_TRUE(run_paths(engine, pattern, request, &u).empty());
+    EXPECT_TRUE(run_paths(engine, StoredNodes(*graph), pattern, request, &u).empty());
     EXPECT_FALSE(u.extraction->withheld);
     EXPECT_EQ(StopReason::MAX_ANCHORS, u.extraction->cut);
 }
@@ -2147,7 +3118,7 @@ TEST(PatternSearch, ExtensionMaxPaths) {
     request.max_paths = expected.size() - 1;
     request.mode = Mode::ALL_OR_COUNT;
     Result all;
-    EXPECT_TRUE(run_paths(engine, pattern, request, &all).empty());
+    EXPECT_TRUE(run_paths(engine, StoredNodes(*graph), pattern, request, &all).empty());
     EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, all.extraction->withheld);
     EXPECT_EQ(Relation::EXACT, all.anchors->paths.relation);
     EXPECT_EQ(expected.size(), all.anchors->paths.value);
@@ -2155,7 +3126,7 @@ TEST(PatternSearch, ExtensionMaxPaths) {
 
     request.mode = Mode::PARTIAL;
     Result partial;
-    auto some = run_paths(engine, pattern, request, &partial);
+    auto some = run_paths(engine, StoredNodes(*graph), pattern, request, &partial);
     ASSERT_EQ(expected.size() - 1, some.size());
     EXPECT_TRUE(std::equal(some.begin(), some.end(), expected.begin()));
     EXPECT_EQ(StopReason::MAX_PATHS, partial.extraction->cut);
@@ -2186,11 +3157,11 @@ TEST(PatternSearch, ExtensionMaxPaths) {
 
     request.mode = Mode::ALL_OR_COUNT;
     Result crossed;
-    EXPECT_TRUE(run_paths(engine, pattern, request, &crossed).empty());
+    EXPECT_TRUE(run_paths(engine, StoredNodes(*graph), pattern, request, &crossed).empty());
     EXPECT_EQ(Withheld::THRESHOLD_CROSSED, crossed.extraction->withheld);
     request.mode = Mode::PARTIAL;
     Result first;
-    auto two = run_paths(engine, pattern, request, &first);
+    auto two = run_paths(engine, StoredNodes(*graph), pattern, request, &first);
     ASSERT_EQ(2u, two.size());
     EXPECT_TRUE(std::equal(two.begin(), two.end(), expected.begin()));
     EXPECT_EQ(StopReason::MAX_PATHS, first.extraction->cut);
@@ -2198,16 +3169,27 @@ TEST(PatternSearch, ExtensionMaxPaths) {
 }
 
 TEST(PatternSearch, ExtensionMaxStepsAtLeast) {
-    // every step budget: a stop in discovery leaves the paths unknown (nothing extended); a
-    // stop in the extension leaves the anchors exact and the paths at_least, PARTIAL a
-    // prefix of the answer, ALL_OR_COUNT nothing
+    // every step budget: a stop in discovery leaves the anchors a true lower bound and the
+    // paths unknown (nothing extended); a stop in the extension leaves the anchors exact and
+    // the paths at_least, PARTIAL a prefix of the answer, ALL_OR_COUNT nothing. In every
+    // graph mode, the even-k wrapped PRIMARY graph (palindromic anchors) included (T1-01),
+    // with the truth from the oracles (E1-03, T1-09)
     std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
-    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::PRIMARY }) {
-        auto graph = build(5, records, mode);
+    const std::vector<std::pair<size_t, DeBruijnGraph::Mode>> graphs {
+        { 5, DeBruijnGraph::BASIC }, { 5, DeBruijnGraph::PRIMARY },
+        { 5, DeBruijnGraph::CANONICAL }, { 4, DeBruijnGraph::PRIMARY },
+    };
+    for (const auto &[k, mode] : graphs) {
+        SCOPED_TRACE("k " + std::to_string(k) + " mode " + std::to_string(mode));
+        auto graph = build(k, records, mode);
         PatternSearch engine(*graph);
         Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NNNNNRN");
+        check_paths_against_oracles(*graph, pattern, path_request(), &records, mode);
         const std::vector<PathCtx> expected = path_oracle(*graph, pattern, path_request()).paths;
+        const Truth anchors = truth_of(*graph, pattern, make_request(),
+                                       walk_oracle(*graph, pattern, make_request()));
         Result full = count_paths(*graph, pattern, path_request());
+        ASSERT_EQ(anchors.total, full.anchors->total.value);
         ASSERT_EQ(Relation::EXACT, full.anchors->paths.relation);
         ASSERT_EQ(expected.size(), full.anchors->paths.value);
         Request plain = make_request();
@@ -2220,6 +3202,7 @@ TEST(PatternSearch, ExtensionMaxStepsAtLeast) {
             EXPECT_EQ(StopReason::MAX_STEPS, r.stop->reason);
             EXPECT_LE(r.work.steps, steps);
             const AnchorCounts &a = *r.anchors;
+            expect_true_relations(r, anchors, k, pattern.length());
             if (steps < discovery) {
                 EXPECT_NE(StopPhase::EXTENSION, r.stop->phase) << steps;
                 EXPECT_NE(Relation::EXACT, a.total.relation);
@@ -2250,7 +3233,7 @@ TEST(PatternSearch, ExtensionMaxStepsAtLeast) {
             Request partial = path_request();
             partial.mode = Mode::PARTIAL;
             Result p;
-            auto prefix = run_paths(engine, pattern, partial, &p, steps);
+            auto prefix = run_paths(engine, StoredNodes(*graph), pattern, partial, &p, steps);
             EXPECT_EQ(StopReason::MAX_STEPS, p.extraction->cut);
             EXPECT_FALSE(p.extraction->complete);
             ASSERT_LE(prefix.size(), expected.size());
@@ -2260,7 +3243,7 @@ TEST(PatternSearch, ExtensionMaxStepsAtLeast) {
             Request all = path_request();
             all.mode = Mode::ALL_OR_COUNT;
             Result w;
-            EXPECT_TRUE(run_paths(engine, pattern, all, &w, steps).empty());
+            EXPECT_TRUE(run_paths(engine, StoredNodes(*graph), pattern, all, &w, steps).empty());
             EXPECT_EQ(Withheld::DISCOVERY_BUDGET, w.extraction->withheld);
         }
     }
@@ -2435,6 +3418,166 @@ TEST(PatternSearch, ExtensionRandomGraphsAgainstOracles) {
               << ", with more than 1: " << multiple << ", most: " << max_expected << std::endl;
 }
 
-#endif // ! _PROTEIN_GRAPH
+
+// ---------------------------------------------------------------- time stops inside a phase
+
+TEST(PatternSearch, TimeStopMidDiscovery) {
+    // T2-03: a time stop inside discovery, not only before the pattern starts. An injected
+    // clock is on time for its first n readings and late from then on, for every n below the
+    // number of readings a complete run takes (whatever the engine's reading points are: the
+    // pattern's start, the stride crossings of Budget::kClockStride steps, the release).
+    // Every such run stops with reason time, time_limited, never an exact total, and every
+    // count a true relation of the oracle's truth; a stop inside discovery (after steps were
+    // charged) leaves the total at_least, ALL_OR_COUNT withholds deadline, PARTIAL returns
+    // nothing (cut time), and the next pattern of the request answers unknown
+    std::mt19937 rng(11);
+    std::vector<std::string> records(3);
+    for (std::string &record : records) {
+        for (int i = 0; i < 1500; ++i) {
+            record.push_back("ACGT"[rng() % 4]);
+        }
+    }
+    auto graph = build(9, records, DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    // A in any_offset at k = 9: the flank ranges of eight offsets, far more than a stride
+    Pattern pattern = Pattern::parse(PatternKind::DNA, "A");
+    const std::vector<Ctx> expected = walk_oracle(*graph, pattern, make_request());
+    const Truth truth = truth_of(*graph, pattern, make_request(), expected);
+    const Result full = count_of(*graph, pattern, make_request());
+    ASSERT_EQ(truth.total, full.contexts->total.value);
+    ASSERT_LT(2 * Budget::kClockStride, full.work.ranges_visited);  // discovery spans strides
+
+    // a budget whose clock reads on time |on_time| times, then late; |readings| counts them
+    const auto start = Deadline::Clock::now();
+    auto late_from = [start](int on_time, std::shared_ptr<int> readings = nullptr) {
+        if (!readings)
+            readings = std::make_shared<int>(0);
+        return Budget(kManySteps, Deadline(start, 1000, 250, [start, readings, on_time]() {
+            return start + std::chrono::milliseconds(++*readings > on_time ? 10'000 : 0);
+        }));
+    };
+    auto readings_of_complete_run = [&](const PatternSearch &search, const Pattern &p,
+                                        const Request &request) {
+        auto readings = std::make_shared<int>(0);
+        Budget budget = late_from(std::numeric_limits<int>::max(), readings);
+        Result r = search.count(p, request, budget);
+        EXPECT_FALSE(r.stop);
+        return *readings;
+    };
+
+    const int readings = readings_of_complete_run(engine, pattern, make_request());
+    ASSERT_LT(2, readings);
+    int inside = 0;
+    int first_inside = -1;
+    for (int on_time = 0; on_time < readings; ++on_time) {
+        SCOPED_TRACE("on time for " + std::to_string(on_time) + " of " + std::to_string(readings)
+                     + " readings");
+        Budget budget = late_from(on_time);
+        Result r = engine.count(pattern, make_request(), budget);
+        ASSERT_TRUE(r.stop);
+        EXPECT_EQ(StopReason::TIME, r.stop->reason);
+        EXPECT_TRUE(r.time_limited);
+        EXPECT_NE(Relation::EXACT, r.contexts->total.relation);
+        expect_true_relations(r, truth, 9, 1);
+        if (r.stop->phase != StopPhase::DISCOVERY || !r.work.steps)
+            continue;
+        // inside discovery: a lower bound, and no offset exact (every offset sums both
+        // orientations, and the stopped one is open)
+        ++inside;
+        if (first_inside < 0)
+            first_inside = on_time;
+        EXPECT_EQ(Relation::AT_LEAST, r.contexts->total.relation);
+        EXPECT_LT(r.work.steps, full.work.steps);
+        for (const auto &[p, count] : r.contexts->by_offset) {
+            EXPECT_NE(Relation::EXACT, count.relation) << p;
+        }
+
+        // the stop is sticky: the next pattern of the request does not start
+        Result next = engine.count(Pattern::parse(PatternKind::DNA, "ACGTAC"), make_request(),
+                                   budget);
+        ASSERT_TRUE(next.stop);
+        EXPECT_EQ(StopPhase::DISCOVERY, next.stop->phase);
+        EXPECT_EQ(StopReason::TIME, next.stop->reason);
+        EXPECT_EQ(Relation::UNKNOWN, next.contexts->total.relation);
+        EXPECT_EQ(0u, next.work.steps);
+    }
+    EXPECT_LE(2, inside);  // discovery spans at least two stride crossings
+    ASSERT_LE(0, first_inside);
+
+    // the release after a stop inside discovery: nothing, whatever the mode
+    Request all = make_request();
+    all.mode = Mode::ALL_OR_COUNT;
+    Budget budget = late_from(first_inside);
+    Result withheld = engine.enumerate(pattern, all, budget, [](const Context &) { FAIL(); });
+    EXPECT_EQ(StopPhase::DISCOVERY, withheld.stop->phase);
+    EXPECT_EQ(Withheld::DEADLINE, withheld.extraction->withheld);
+    EXPECT_EQ(Relation::AT_LEAST, withheld.contexts->total.relation);
+    EXPECT_FALSE(withheld.extraction->complete);
+
+    Request partial = make_request();
+    partial.mode = Mode::PARTIAL;
+    budget = late_from(first_inside);
+    Result cut = engine.enumerate(pattern, partial, budget, [](const Context &) { FAIL(); });
+    EXPECT_EQ(StopPhase::DISCOVERY, cut.stop->phase);
+    EXPECT_EQ(StopReason::TIME, cut.extraction->cut);
+    EXPECT_EQ(0u, cut.extraction->returned);
+    EXPECT_FALSE(cut.extraction->complete);
+    EXPECT_TRUE(cut.time_limited);
+
+    // increment 4: a long pattern stopped by time inside its extension's DFS: the anchors
+    // exact, the paths at_least and a lower bound of the oracle's, nothing released in
+    // ALL_OR_COUNT
+    Pattern long_pattern = Pattern::parse(PatternKind::IUPAC, "AC" + std::string(12, 'N'));
+    auto graph7 = build(7, records, DeBruijnGraph::BASIC);
+    PatternSearch extender(*graph7);
+    Request paths = make_request(Scope::ANY_OFFSET, Strands::FORWARD);
+    paths.extend_paths = true;
+    paths.max_paths = kManySteps;
+    const PathOracle path_truth = path_oracle(*graph7, long_pattern, paths);
+    Budget unbounded = unbounded_budget();
+    const Result complete = extender.count(long_pattern, paths, unbounded);
+    ASSERT_EQ(Extension::COMPLETED, complete.anchors->extension);
+    ASSERT_EQ(path_truth.paths.size(), complete.anchors->paths.value);
+    // the extension spans more than two stride crossings
+    ASSERT_LT(complete.work.ranges_visited + 2 * Budget::kClockStride, complete.work.steps);
+
+    const int long_readings = readings_of_complete_run(extender, long_pattern, paths);
+    int in_extension = 0;
+    for (int on_time = 0; on_time < long_readings; ++on_time) {
+        SCOPED_TRACE("long pattern, on time for " + std::to_string(on_time) + " of "
+                     + std::to_string(long_readings) + " readings");
+        budget = late_from(on_time);
+        Result r = extender.count(long_pattern, paths, budget);
+        ASSERT_TRUE(r.stop);
+        EXPECT_EQ(StopReason::TIME, r.stop->reason);
+        EXPECT_TRUE(r.time_limited);
+        EXPECT_NE(Relation::EXACT, r.anchors->paths.relation);
+        EXPECT_TRUE(true_relation(r.anchors->paths, path_truth.paths.size()));
+        if (r.stop->phase != StopPhase::EXTENSION || !r.work.extension_edges)
+            continue;
+        ++in_extension;
+        EXPECT_EQ(Relation::EXACT, r.anchors->total.relation);
+        EXPECT_EQ(complete.anchors->total.value, r.anchors->total.value);
+        EXPECT_EQ(Extension::STOPPED, r.anchors->extension);
+        EXPECT_EQ(Relation::AT_LEAST, r.anchors->paths.relation);
+        for (const auto &[o, count] : r.anchors->paths_by_orientation) {
+            EXPECT_EQ(Relation::AT_LEAST, count.relation) << orientation_key(o);
+            EXPECT_LE(count.value, complete.anchors->paths_by_orientation.at(o).value);
+        }
+        Request paths_all = paths;
+        paths_all.mode = Mode::ALL_OR_COUNT;
+        budget = late_from(on_time);
+        Result none = extender.enumerate(long_pattern, paths_all, budget,
+                                         [](const Context &) { FAIL(); });
+        EXPECT_EQ(Withheld::DEADLINE, none.extraction->withheld);
+        EXPECT_EQ(Relation::AT_LEAST, none.anchors->paths.relation);
+    }
+    EXPECT_LE(2, in_extension);
+    std::cerr << "clock readings: discovery run " << readings << " (" << inside
+              << " stops inside discovery), extension run " << long_readings << " ("
+              << in_extension << " stops inside the DFS)" << std::endl;
+}
+
+#endif // _DNA_GRAPH || _DNA5_GRAPH
 
 } // namespace

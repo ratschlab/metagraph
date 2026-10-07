@@ -1748,13 +1748,17 @@ uint64_t BOSS::mark_sink_dummy_edges(sdsl::bit_vector *mask) const {
 
     uint64_t num_dummy_sink_edges = 0;
 
-    // skip the main dummy source
-    for (edge_index i = 2; i < W_->size(); ++i) {
-        assert(get_W(i) != alph_size);
-        if (!get_W(i)) {
-            (*mask)[i] = true;
-            num_dummy_sink_edges++;
-        }
+    // The edges with W = $ from edge 2 on (skipping position 0, no edge, and the main dummy
+    // source at edge 1), enumerated by select over the sentinel's occurrences: O(sinks)
+    // selects on the wavelet tree instead of reading W at every edge, which made this pass
+    // single-threaded O(edges), hours on a graph of 10^11 edges. The same bits are set.
+    const uint64_t occurrences = W_->rank(0, W_->size() - 1);
+    for (uint64_t r = W_->rank(0, std::min<edge_index>(1, W_->size() - 1)) + 1;
+            r <= occurrences; ++r) {
+        edge_index i = W_->select(0, r);
+        assert(i >= 2 && i < W_->size() && !get_W(i));
+        (*mask)[i] = true;
+        num_dummy_sink_edges++;
     }
 
     assert(num_dummy_sink_edges == rank_W(num_edges(), 0) - 1);

@@ -92,8 +92,12 @@ enum class Unit { GRAPH_CONTEXTS, ANCHORS, PATHS, PLACED_OCCURRENCES, LABELS };
  *            was explored. An undiscovered IUPAC branch, offset or strand has no upper bound,
  *            so this is the relation of every interrupted discovery.
  *  BOUNDS    every range of every branch, offset and orientation was discovered and only the
- *            scans of invalid (masked) edges were interrupted: lower <= true <= upper.
- *  UNKNOWN   the phase never ran: not started, after a stop, or not in this increment.
+ *            deferred scans were interrupted: lower <= true <= upper.
+ *  UNKNOWN   the phase never ran: a stop came before it started, or not in this increment.
+ * A search whose discovery was entered is AT_LEAST even when the stop refused its very first
+ * step (AT_LEAST 0): it was interrupted, not skipped (SPEC §7.4). After any discovery stop
+ * every per-offset count of the interrupted search is AT_LEAST too: v1 does not track which
+ * offsets were completely discovered before the stop.
  */
 enum class Relation { EXACT, AT_LEAST, BOUNDS, UNKNOWN };
 
@@ -201,8 +205,10 @@ class Pattern {
      * Parses |text| (case-insensitive) as |kind|: DNA over A, C, G, T; IUPAC over the 15
      * codes A C G T R Y S W K M B D H V N. Throws PatternError with code "bad_alphabet" on
      * an empty text or on any other character (U, '-', '.', whitespace included), naming
-     * the first offending 0-based position. No length cap: a pattern longer than k costs
-     * only its anchor window (§4.1).
+     * the first offending 0-based position. No length cap: a pattern longer than k is
+     * charged steps for its anchor windows only (§4.1); parsing it, its information bits,
+     * its palindrome test and its low-complexity note cost O(L) time that no step charges
+     * and no clock reading interrupts (each a single pass, a few ns per base).
      */
     static Pattern parse(PatternKind kind, std::string_view text);
 
@@ -311,7 +317,15 @@ struct Request {
     // (L <= k), anchors against max_anchors (L > k), and with extend_paths the extension
     // stops as soon as more than max_paths paths are complete; the count of that phase is
     // then AT_LEAST, every later phase's UNKNOWN, and the stop names the threshold. Ends only
-    // that pattern; the next one starts afresh
+    // that pattern; the next one starts afresh.
+    // Checked in discovery (and the extension) only: the deferred scans (MASK_SCAN) never
+    // consult it and run to their end or to a budget stop, so a pattern can answer EXACT
+    // above its threshold with no stop (withheld COUNT_ABOVE_THRESHOLD, or cut MAX_CONTEXTS
+    // in PARTIAL), or BOUNDS with a budget stop in the scans. The running lower bound lags the
+    // count by the discount of masked edges not yet scanned and, on an even-k wrapped
+    // PRIMARY graph, by the palindromic k-mers both base searches may find (subtracted as
+    // the candidates of the ranges where a palindrome is possible): there the stop can fire
+    // late or not at all, and the answer is then the EXACT count with no stop.
     bool stop_at_threshold = false;
     /**
      * Per pattern, all offsets and orientations (§5.3): the stop_at_threshold threshold for
@@ -365,11 +379,24 @@ struct Request {
     bool release_anchors = false;
     /**
      * The information floor (§5.3): it gates discovery for every pattern except an exact one
-     * (Pattern::is_exact) in SUFFIX scope — IUPAC patterns, ANY_OFFSET, and LONG on the anchor
-     * window's bits; a pattern below it is refused with "information_below_floor" and costs
-     * nothing. Server policy (--pattern-min-information-bits), not a request field.
+     * (Pattern::is_exact) in SUFFIX scope — IUPAC patterns, ANY_OFFSET, and LONG on the bits
+     * of the anchor window of EVERY searched orientation (FORWARD: P[0, k); REVERSE: rc(P)[0,
+     * k), the reverse complement of P's last k positions; a palindromic P has one), so that
+     * no searched window below it runs; a pattern below it is refused with
+     * "information_below_floor" and costs nothing. Server policy
+     * (--pattern-min-information-bits), not a request field.
      */
     double min_information_bits = 24;
+};
+
+/**
+ * Thrown by a Budget whose abort predicate (Budget::set_abort) answers true at a clock reading:
+ * the request's caller has left, or the server is stopping. Nothing of the request is
+ * answered (the route closes the connection); the engine's state is freed by unwinding.
+ */
+class Aborted : public std::runtime_error {
+  public:
+    Aborted() : std::runtime_error("pattern: the request was aborted") {}
 };
 
 /**
@@ -441,14 +468,34 @@ struct Stop {
  * max_contexts caps, plus the invalid candidates it skips) but reads the clock.
  * Stops are sticky: once a charge is refused, every later charge is refused with the same
  * reason, and the patterns after it answer UNKNOWN counts with that stop.
+ *
+ * Where the engine reads the clock: at the start of every pattern, at every charge that
+ * crosses a multiple of kClockStride steps (discovery, the deferred scans and the extension
+ * share one step counter, so the boundary from discovery to the scans has no reading of its
+ * own: at most kClockStride - 1 steps pass unread there, as anywhere), before every release,
+ * every kClockStride edges the release examines and every kReleaseClockStride contexts it
+ * passes on (a released context costs the caller a k-mer spelling, k - 1 BOSS steps, and its
+ * result object), and every kReleaseClockStride contexts an ALL_OR_COUNT delivery passes to
+ * the caller. Work therefore ends within one such stride after the work time passes.
  */
 class Budget {
   public:
     // the clock is read at least every this many steps or examined edges (§5.3), and at
     // every check_time()
     static constexpr uint64_t kClockStride = 4096;
+    // ... and every this many contexts released to a caller, whose work per context (a
+    // spelling and a result object, microseconds) is far above a step's
+    static constexpr uint64_t kReleaseClockStride = 64;
 
     Budget(uint64_t max_steps, Deadline deadline);
+
+    /**
+     * |aborted| is asked at every clock reading (the stride crossings of charge(), every
+     * check_time(), the release's and the delivery's readings); when it answers true the
+     * reading throws Aborted, and nothing of the request is answered. The route passes
+     * "the client left, or the server stops". Unset (the default): never asked.
+     */
+    void set_abort(std::function<bool()> aborted) { aborted_ = std::move(aborted); }
 
     /**
      * Admits |n| more steps: true when steps_used() + n <= max_steps and the deadline's
@@ -459,8 +506,9 @@ class Budget {
      * do the work.
      */
     bool charge(uint64_t n = 1);
-    // reads the clock now (phase and pattern boundaries, extraction): false when the work
-    // time passed, recording TIME unless a stop was recorded before
+    // reads the clock now (the start of a pattern, the release and its strides, the
+    // delivery's strides): false when the work time passed, recording TIME unless a stop was
+    // recorded before
     bool check_time();
 
     std::optional<StopReason> stopped() const { return stopped_; }
@@ -473,6 +521,12 @@ class Budget {
     uint64_t steps_used_ = 0;
     Deadline deadline_;
     std::optional<StopReason> stopped_;
+    std::function<bool()> aborted_;
+
+    void poll_abort() const {
+        if (aborted_ && aborted_())
+            throw Aborted();
+    }
 };
 
 
@@ -489,7 +543,11 @@ class Budget {
  *             containing Q (base search of Q), and virtual rc(y) of stored y containing rc(Q)
  *             at offset k - L - p (base search of rc(Q), mapped to wrapper id y + offset).
  *             The two are united by (wrapper node id, offset) before anything counts them: a
- *             palindromic stored k-mer (even k only) is found by both and counted once. As on
+ *             palindromic stored k-mer (over A, C, G, T: even k only) is found by both and
+ *             counted once. (On a $ACGTN build an odd k-mer with N at its centre can equal its
+ *             reverse complement; CanonicalDBG serves such a stored k-mer at two ids, and the
+ *             engine, which unites palindromes for even k only, then counts and releases it
+ *             twice; a DNA5 build of the engine's tests confirms it. DNA5 is not in CI.) As on
  *             a native CANONICAL graph, FORWARD and REVERSE then count alike. ANY_OFFSET and
  *             LONG only; no strand.
  */
@@ -609,7 +667,11 @@ struct AnchorCounts {
 struct Work {
     // range evaluations (tighten_range calls and W-rule rank sets), one step each
     uint64_t ranges_visited = 0;
-    // ranges whose scan began (§4.1: zero in the common case; MASK_SCAN of StopPhase)
+    // ranges whose deferred scan began (MASK_SCAN of StopPhase): a W-rule range's masked
+    // edges, zero on BASIC, CANONICAL and odd-k graphs unless masked edges sit among the
+    // candidates; on an even-k wrapped PRIMARY graph also the palindrome check of every range
+    // at an offset where a palindromic k-mer can hold the pattern (one get_node_sequence, k - 1
+    // BOSS steps, per context, one step each): there about one per such range
     uint64_t mask_scans = 0;
     // L > k with extend_paths: the outgoing edges the extension examined, one step each
     // (allowed or not); 0 otherwise
@@ -617,6 +679,9 @@ struct Work {
     // every step this pattern charged: ranges_visited, plus the edges its scans examined,
     // plus extension_edges
     uint64_t steps = 0;
+    // diagnostic, not a JSON field of contract version 1: the most range descriptors held at
+    // once for the release (24 bytes each; see PatternSearch::enumerate, "Memory")
+    uint64_t spans_retained_peak = 0;
 };
 
 // A per-pattern refusal decided by the engine (JSON: the slot's error {code, message});
@@ -663,8 +728,9 @@ struct Extraction {
      * graph contexts (§5.1); it claims nothing about labels, which this increment never reads.
      */
     bool complete = false;
-    // set: nothing is published ("results": []) and the callback received nothing (an
-    // ALL_OR_COUNT release is buffered, so a deadline inside it withholds all of it)
+    // set: nothing is published ("results": [], returned 0). The callback received nothing,
+    // except when the deadline stopped an ALL_OR_COUNT delivery (DEADLINE, stop {EXTRACTION,
+    // TIME}): it then received a prefix of the contexts, which the caller must discard
     std::optional<Withheld> withheld;
     // PARTIAL, neither complete nor withheld: why the list is shorter than the pattern's
     // contexts — the reason of the stop that touched the pattern when there is one, else
@@ -731,11 +797,23 @@ struct Result {
     Scope scope = Scope::ANY_OFFSET;
     GraphMode graph_mode = GraphMode::BASIC;
     bool palindromic = false;
-    // the orientations searched, in search order (FORWARD before REVERSE)
+    // the orientations searched, in plan order (FORWARD before REVERSE). The base searches
+    // behind them run in the order of their estimated cost, the cheaper first (the plan's
+    // order on a tie, as for every exact pattern): a budget stop then leaves the cheap one
+    // complete and the expensive one interrupted, rather than the reverse
     std::vector<Orientation> searched;
     double information_bits = 0;
-    // L > k: the bits of the anchor window [0, k), stated separately (§3)
+    // L > k: the bits of the anchor window P[0, k), stated separately (§3; its meaning in
+    // contract version 1, whatever the strands searched)
     std::optional<double> anchor_information_bits;
+    // L > k: the least over the searched orientations' anchor windows (FORWARD and
+    // PALINDROMIC: P[0, k); REVERSE: rc(P)[0, k), whose bits are those of P[L - k, L)), the
+    // bits the information floor gated on (X-GUARANTEES-01; an addition to the JSON of
+    // contract version 1, the owner's decision of 2026-10-07)
+    std::optional<double> min_anchor_information_bits;
+    // L > k: the bits of each searched orientation's anchor window (an addition to the JSON
+    // of contract version 1 when the route publishes it)
+    std::map<Orientation, double> anchor_window_bits;
 
     // exactly one of the two is set on an answered pattern: contexts when L <= k, anchors
     // when L > k
@@ -787,6 +865,18 @@ struct Result {
  *    k-mers), so a path exists only where all its k-mers were retained.
  * No dummy edge is relied on and nothing is scored.
  *
+ * Cost: a searched window (the oriented pattern, or a long pattern's anchor window) is
+ * matched from its first position on the widest ranges, so a run of pattern N there would be
+ * branched four ways per position before any specified base narrows a range. On a $ACGT
+ * graph, where every base of a valid k-mer is one of A, C, G, T, such a leading run of length
+ * r is not searched: the window at offset p is exactly its core at offset p + r, so the core
+ * is searched with its offsets shifted (counts, offsets and the release unchanged, only the
+ * work). On $ACGTN (pattern N never matches the graph's N) the run is searched as given. An
+ * N run inside a window still costs about min(4^run, edges / 4^a) ranges per level, a being
+ * the specified bases before it in that orientation: the information bits do not bound it.
+ * The base searches run cheapest first by that estimate, so that a budget stop leaves the
+ * orientation whose run comes late complete.
+ *
  * Answer order (§5.5): contexts by (node, offset, orientation); paths by (anchor node,
  * orientation), then the DFS in symbol order A < C < G < T at every position, i.e. the
  * paths of one anchor by their spelled sequence. Deterministic on the same index.
@@ -820,8 +910,11 @@ class PatternSearch {
     /**
      * Counts |pattern| under |request| (as mode COUNT), charging |budget|. Range descriptors
      * are discarded as they are counted, except those whose scan is deferred until
-     * discovery completes (at most one per step charged, none in the common case); the
-     * rest of the memory is the DFS frontier, O(k * alphabet). Refusals (information floor, SUFFIX on a wrapped PRIMARY graph) come
+     * discovery completes (88 bytes each, at most one per step charged): none in the common
+     * case, but on an even-k wrapped PRIMARY graph one per range at an offset where a
+     * palindromic k-mer can hold the pattern, which for a short or degenerate pattern is
+     * nearly every range, so up to max_steps of them; the rest of the memory is the DFS
+     * frontier, O(k * alphabet). Refusals (information floor, SUFFIX on a wrapped PRIMARY graph) come
      * back as Result::refusal without charging anything. On a budget already stopped (or
      * whose work time has passed at the pattern's check_time) every count is UNKNOWN and
      * stop is {DISCOVERY, the budget's reason}. Never throws for a parsed pattern, except
@@ -844,11 +937,20 @@ class PatternSearch {
      * orientation separates the two contexts an IUPAC pattern can have at one offset).
      *  ALL_OR_COUNT  releases every context iff discovery completed with an EXACT total
      *                <= max_contexts; otherwise none (Extraction::withheld). The release is
-     *                buffered: the callback receives all of them, or nothing.
+     *                buffered (a released set that differs from the EXACT count throws
+     *                std::logic_error, nothing being published), then delivered to the
+     *                callback under the clock (read every kReleaseClockStride contexts): the
+     *                callback receives all of them, or — when the work time passes during
+     *                the delivery — a prefix, after which the result says withheld DEADLINE
+     *                with returned 0 and stop {EXTRACTION, TIME}, and the caller must discard
+     *                what it received.
      *  PARTIAL       releases the first max_contexts contexts in answer order among those
      *                discovered, also after a MAX_STEPS or threshold stop (what was built is
      *                delivered, the cut stated), streamed to the callback; none after a TIME
      *                stop in discovery; after a TIME stop in the release, what was called.
+     *                On an even-k wrapped PRIMARY graph a palindromic stored k-mer that only
+     *                the reverse-complement search reached before a stop is released too, so
+     *                that the list holds every context the counts credit.
      * L > k without request.extend_paths: nothing is released (PATHS_LATER_INCREMENT) unless
      * anchors are EXACT 0, or request.release_anchors asks for the anchors (Context offset 0).
      * L > k with request.extend_paths (release_anchors must then be false, else
@@ -869,13 +971,25 @@ class PatternSearch {
      *                extension was not admitted (withheld ANCHORS_ABOVE_THRESHOLD).
      *                The release reads the clock once before the first callback.
      *  An EXACT 0 of anchors or of paths is a complete, empty release.
-     * Release runs only while the deadline's work time has not passed, reading the clock every
-     * kClockStride edges examined; a stop there is {EXTRACTION, TIME}. Every released context
-     * is a valid edge whose k-mer contains the oriented pattern at its offset; every released
-     * path is a walk of valid k-mers whose sequence instantiates the oriented pattern.
-     * Memory: discovery retains at most one leaf range per step charged (ALL_OR_COUNT may drop
-     * them once the running lower bound exceeds max_contexts), freed before returning; the
-     * paths retained for the release are at most max_paths, each O(L); the contexts
+     * Release runs only while the deadline's work time has not passed, reading the clock
+     * before it starts, every kClockStride descriptors it prepares, every kClockStride edges
+     * it examines and every kReleaseClockStride contexts it passes on (the caller's work per
+     * context runs between two readings); a stop there is {EXTRACTION, TIME}. Every released
+     * context is a valid edge whose k-mer contains the oriented pattern at its offset; every
+     * released path is a walk of valid k-mers whose sequence instantiates the oriented
+     * pattern.
+     * Memory: discovery retains a 24-byte descriptor per range with contexts, freed before
+     * returning. ALL_OR_COUNT keeps them while the running lower bound is <= max_contexts
+     * and drops them all once it is above. PARTIAL keeps only those that can hold one of the
+     * first max_contexts contexts in answer order: once the descriptors whose node range
+     * ends at or before a node T are sure to hold max_contexts contexts, every descriptor
+     * whose range starts after T is dropped, at once or at the next compaction (when the
+     * retained ones exceed max(4096, twice those kept at the last one)); with max_contexts 0
+     * none is kept. What PARTIAL keeps is therefore about max_contexts descriptors plus the
+     * ranges that straddle T (O(k) per base search) plus the W-rule ranges whose masked edges
+     * leave no context guaranteed, at most 4096 or twice that between compactions, whatever
+     * the discovery's size; the release's own index over them (40 bytes each) is as large.
+     * The paths retained for the release are at most max_paths, each O(L); the contexts
      * themselves are the caller's.
      */
     Result enumerate(const Pattern &pattern, const Request &request, Budget &budget,

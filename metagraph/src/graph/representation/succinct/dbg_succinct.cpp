@@ -421,8 +421,12 @@ DBGSuccinct::count_edges_with_last_symbol(node_index first, node_index last,
 
     // An edge with W = $ is a dummy (a sink, or the main source at edge 1) and never valid:
     // a k-mer has no sentinel. So the invalid edges that can carry c are the invalid ones
-    // minus the sentinel edges. Should a mask ever mark a sentinel edge valid, the discount
-    // is dropped rather than trusted, so that no count is claimed exact on its strength.
+    // minus the sentinel edges. This rests on the mask marking every W = $ edge invalid, as
+    // mask_dummy_kmers guarantees (BOSS::mark_sink_dummy_edges, the main edge with the
+    // source dummies): a mask that marks some W = $ edge valid while the range holds as many
+    // other invalid edges makes invalid_non_sentinel too small by their number, and a lower
+    // bound or an exact count built on it too large. Only a range with fewer invalid edges
+    // than sentinel edges shows the violation here; its discount is then dropped.
     uint64_t sentinel = count_symbol(static_cast<BOSS::TAlphabet>(BOSS::kSentinelCode));
     assert(sentinel <= result.invalid);
     result.invalid_non_sentinel = sentinel <= result.invalid
@@ -800,8 +804,15 @@ bool DBGSuccinct::load(const std::string &filename) {
     auto prefix = utils::remove_suffix(filename, kExtension);
 
     std::unique_ptr<std::ifstream> in = utils::open_ifstream(prefix + kDummyMaskExtension);
-    if (!in->good())
+    if (!in->good()) {
+        // loaded without the mask, as always; but a file that is there and cannot be read is
+        // said, so that no later message can take it for a missing mask (M1-03)
+        if (std::filesystem::exists(prefix + kDummyMaskExtension)) {
+            logger->warn("The dummy-edge mask {} exists but could not be opened (permissions?):"
+                         " the graph is loaded without it", prefix + kDummyMaskExtension);
+        }
         return true;
+    }
 
     // initialize a new vector
     switch (get_state()) {

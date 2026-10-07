@@ -94,10 +94,17 @@ class DBGSuccinct : public DeBruijnGraph {
      * Pattern-search primitives (docs/DESIGN-pattern-search.md §4.1), beside
      * call_nodes_with_suffix_matching_longest_prefix, which they leave as it is: they
      * count first and call only what the caller asks for (its TODO), and they never count
-     * a dummy or pruned edge. Each works on a normalised BOSS edge range [first, last]
-     * (1 <= first <= last <= max_index(); whole node groups, as BOSS::tighten_range returns
-     * them, or [1, max_index()] for the empty suffix), and each requires the valid-edge mask
+     * a dummy or pruned edge as a k-mer (LastSymbolEdges::candidates is an upper bound that
+     * includes them; the caller resolves it with the scans when invalid_non_sentinel > 0).
+     * Each works on a normalised BOSS edge range [first, last] (1 <= first <= last <=
+     * max_index(); whole node groups, as BOSS::tighten_range returns them, or [1,
+     * max_index()] for the empty suffix), and each requires the valid-edge mask
      * (get_mask() != NULL): without it a dummy edge is indistinguishable from a k-mer.
+     * The mask is trusted as written: the primitives assume what mask_dummy_kmers
+     * guarantees (build/transform --mask-dummy, --pattern-build-mask), that every dummy
+     * edge, every edge with W = $ included, is 0 in it. A mask that marks a dummy valid (as
+     * DBGSuccinct::add_sequence on a masked graph writes for the dummies it inserts, see its
+     * TODO) makes them count it as a k-mer.
      */
 
     // The valid edges of the range: the k-mers leaving its nodes (two ranks).

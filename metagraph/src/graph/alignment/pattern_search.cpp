@@ -109,9 +109,15 @@ BaseSet Pattern::allowed(size_t position, std::string_view) const {
 
 double Pattern::information_bits(size_t begin, size_t end) const {
     assert(begin <= end && end <= positions_.size());
+    // log2(4 / |set|) per set size, each computed once by the very expression the sum used
+    // per position before, so that the sums are the same doubles bit for bit (one table read
+    // per base instead of a log2: the O(L) pass of a long pattern, C1-01)
+    static const std::array<double, 5> kBits {
+        0, std::log2(4.0 / 1u), std::log2(4.0 / 2u), std::log2(4.0 / 3u), std::log2(4.0 / 4u)
+    };
     double bits = 0;
     for (size_t i = begin; i < end; ++i) {
-        bits += std::log2(4.0 / set_size(positions_[i]));
+        bits += kBits[set_size(positions_[i])];
     }
     return bits;
 }
@@ -183,10 +189,12 @@ bool Budget::charge(uint64_t n) {
     }
 
     // the clock is read whenever the charge crosses a multiple of the stride (§5.3)
-    if (steps_used_ / kClockStride != (steps_used_ + n) / kClockStride
-            && deadline_.work_expired()) {
-        stopped_ = StopReason::TIME;
-        return false;
+    if (steps_used_ / kClockStride != (steps_used_ + n) / kClockStride) {
+        poll_abort();
+        if (deadline_.work_expired()) {
+            stopped_ = StopReason::TIME;
+            return false;
+        }
     }
 
     steps_used_ += n;
@@ -194,6 +202,7 @@ bool Budget::charge(uint64_t n) {
 }
 
 bool Budget::check_time() {
+    poll_abort();
     if (!deadline_.work_expired())
         return true;
 
@@ -233,6 +242,17 @@ std::vector<BaseSet> reverse_complement_sets(std::vector<BaseSet> q) {
         set = complement_set(set);
     }
     return q;
+}
+
+// the orientations a request searches, in search order: a palindromic P once (§3)
+std::vector<Orientation> searched_orientations(const Pattern &pattern, Strands strands) {
+    if (pattern.is_palindromic())
+        return { Orientation::PALINDROMIC };
+    if (strands == Strands::FORWARD)
+        return { Orientation::FORWARD };
+    if (strands == Strands::REVERSE)
+        return { Orientation::REVERSE };
+    return { Orientation::FORWARD, Orientation::REVERSE };
 }
 
 /**
@@ -343,18 +363,21 @@ struct Item {
 
 /**
  * A range kept for enumerate()'s release: only what the release reads (24 bytes; the scan
- * state of Item is not needed there), so that the retained ranges, at most one per step
- * charged, stay small.
+ * state of Item is not needed there), so that the retained ranges stay small.
  */
 struct Span {
     edge_index first;
     edge_index last;
-    uint32_t offset;
+    // the contexts the release is sure to find in the range (Item::lower() when it was
+    // counted, capped to 32 bits, still a lower bound): what PARTIAL's retention bound sums
+    uint32_t guaranteed;
+    uint16_t offset;
     // the W-rule symbol; 0 for a flank range
     TAlphabet c;
 
     bool flank() const { return !c; }
 };
+static_assert(sizeof(Span) == 24, "a retained range stays 24 bytes");
 
 /**
  * What is known of one count: started or not, its offset discovered completely or not,
@@ -386,56 +409,62 @@ Count to_count(const Estimate &e, Unit unit) {
  * where |q| = k). §4.1: positions 0 .. |q|-2 on node ranges, the last on W, then the flank.
  * (q is a list of base sets: a peptide's spelled-prefix dependence, a later increment, would
  * travel with the range.)
+ *
+ * A leading run of pattern N on a $ACGT graph is not searched (|lead|): every base of a
+ * valid k-mer there is one of A, C, G, T, so q at offset p is exactly its core q[lead, |q|)
+ * at offset p + lead, and the DFS runs on the core with its flank stopped where the offset
+ * of q reaches 0 (X-EFFICIENCY-01: the run would otherwise be branched four ways per position
+ * on the widest ranges). Every offset stored here is q's.
  */
 struct BaseSearch {
     std::vector<BaseSet> q;
-    // the BOSS codes of each position's bases, in A, C, G, T order
+    // the leading positions of q not searched (a pattern-N run, $ACGT graphs only)
+    size_t lead = 0;
+    // the BOSS codes of each core position's bases (q[lead + i]), in A, C, G, T order
     std::vector<std::vector<TAlphabet>> codes;
     bool any_offset = false;
     // count the palindromic contexts (even k, wrapped PRIMARY: what the union subtracts)
     bool count_palindromes = false;
+    // some orientation reads this search's contexts directly (not only mapped to the
+    // wrapper's reverse complements): its ranges' contexts start at their own first node
+    bool read_directly = false;
 
     bool started = false;
-    // discovery was interrupted (budget or threshold); then d_min is the smallest depth of
-    // a range whose children were not all created
+    // discovery was interrupted (budget or threshold): every offset is then undiscovered
+    // (AT_LEAST). v1 does not track which offsets were completely discovered before the stop
     bool halted = false;
-    size_t d_min = std::numeric_limits<size_t>::max();
 
     // per offset: the contexts known exactly when their range was discovered
     std::vector<uint64_t> exact;
     // the ranges that need a scan, in discovery order
     std::vector<Item> pending;
-    // enumerate(): every range with candidates, in discovery order
+    // enumerate(): the ranges with candidates the release may need, in discovery order
     std::vector<Span> release;
     // the lower bound of everything counted so far (stop_at_threshold, retention)
     uint64_t running_lower = 0;
+    // the candidates of the items whose palindromes are counted (count_palindromes): at least
+    // the palindromic contexts among them, which a wrapped PRIMARY union finds twice (E2-02)
+    uint64_t running_palindrome_candidates = 0;
 
     // per offset, filled by tally() after the scans
     std::vector<Estimate> contexts;
     std::vector<Estimate> palindromes;
 
     uint32_t max_offset(size_t k) const { return static_cast<uint32_t>(k - q.size()); }
+    // the positions the DFS matches
+    size_t core_length() const { return q.size() - lead; }
+    // the deepest range the DFS creates: a flank range there carries q's offset 0
+    size_t max_depth(size_t k) const { return k - 1 - lead; }
 
-    // the depth whose ranges carry offset p: all of them exist once every range one level up
-    // is fully expanded. The W rule (offset k - L) hangs off the leaves at depth L - 1 like
-    // the first flank offset (k - 1 - L, depth L), so both need depth L - 1 expanded
-    size_t completion_depth(uint32_t p, size_t k) const {
-        return p == max_offset(k) ? q.size() : k - 1 - p;
-    }
-
-    bool offset_discovered(uint32_t p, size_t k) const {
-        return started && (!halted || completion_depth(p, k) <= d_min);
-    }
-
-    void tally(size_t k) {
+    void tally() {
         // not started: nothing known, palindromes included
         contexts.assign(exact.size(), Estimate());
         palindromes.assign(exact.size(), Estimate());
         if (!started)
             return;
 
+        const bool discovered = !halted;
         for (uint32_t p = 0; p < exact.size(); ++p) {
-            bool discovered = offset_discovered(p, k);
             contexts[p] = { true, discovered, discovered, exact[p], exact[p] };
             palindromes[p] = { true, discovered, discovered, 0, 0 };
         }
@@ -478,6 +507,10 @@ struct Key {
     bool operator<(const Key &other) const {
         return std::tie(node, offset, orientation)
                 < std::tie(other.node, other.offset, other.orientation);
+    }
+    bool operator==(const Key &other) const {
+        return std::tie(node, offset, orientation)
+                == std::tie(other.node, other.offset, other.orientation);
     }
 };
 
@@ -524,18 +557,29 @@ class PatternRun {
             budget_(budget),
             retain_(retain),
             long_(pattern.length() > support.k),
-            extending_(long_ && request.extend_paths) {
+            extending_(long_ && request.extend_paths),
+            cap_(long_ ? request.max_anchors : request.max_contexts),
+            // PARTIAL releases at most cap_ contexts: keep only the ranges that can hold one
+            // of the first cap_ in answer order (E4-01)
+            prune_(retain && !extending_ && request.mode == Mode::PARTIAL) {
         for (char base : { 'A', 'C', 'G', 'T' }) {
             codes_.push_back(boss_.encode(base));
         }
         plan();
+        // nothing to release: nothing to keep
+        if (prune_ && !cap_)
+            retain_ = false;
     }
 
     const std::vector<Orientation>& searched() const { return searched_; }
     const std::vector<OrientationPlan>& plans() const { return plans_; }
     const std::optional<Stop>& stop() const { return stop_; }
     bool time_limited() const { return time_limited_; }
-    const Work& work() const { return work_; }
+    Work work() const {
+        Work work = work_;
+        work.spans_retained_peak = retained_peak_;
+        return work;
+    }
 
     // the offsets of the pattern's scope, ascending; 0 for a long pattern's anchors
     uint32_t max_offset() const {
@@ -554,7 +598,10 @@ class PatternRun {
 
     /**
      * Discovery of every base search, then the deferred scans, so that a stop in a scan
-     * leaves every range discovered and the counts BOUNDS (§4.1), then the tallies.
+     * leaves every range discovered and the counts BOUNDS (§4.1), then the tallies. The base
+     * searches run in the order of their estimated cost (the cheaper first, the plan's order
+     * on a tie: always for an exact pattern), so that a budget stop leaves the cheap ones
+     * complete rather than not started.
      */
     void run() {
         steps_before_ = budget_.steps_used();
@@ -563,18 +610,26 @@ class PatternRun {
             // a request-wide stop before this pattern: nothing runs, every count UNKNOWN
             record_stop(StopPhase::DISCOVERY, *budget_.stopped());
         } else {
-            for (BaseSearch &search : searches_) {
-                discover(search);
+            std::vector<size_t> order(searches_.size());
+            std::vector<double> cost(searches_.size());
+            for (size_t i = 0; i < searches_.size(); ++i) {
+                order[i] = i;
+                cost[i] = estimated_cost(searches_[i]);
+            }
+            std::stable_sort(order.begin(), order.end(),
+                             [&](size_t a, size_t b) { return cost[a] < cost[b]; });
+            for (size_t i : order) {
+                discover(searches_[i]);
                 if (stop_)
                     break;
             }
             if (!stop_)
-                scan_all();
+                scan_all(order);
         }
 
         work_.steps = budget_.steps_used() - steps_before_;
         for (BaseSearch &search : searches_) {
-            search.tally(k_);
+            search.tally();
         }
     }
 
@@ -625,12 +680,33 @@ class PatternRun {
     /**
      * The release (§4.3, label-free): the retained contexts of every orientation in
      * (node, offset, orientation) order, at most |limit| of them, each passed to |emit|.
-     * Charges no steps; reads the clock every kClockStride edges examined. Returns false
-     * when the deadline stopped it ({|phase|, TIME} recorded: EXTRACTION for a release,
-     * EXTENSION for the listing of the anchors to extend).
+     * Charges no steps; reads the clock before it starts, every kClockStride cursors it
+     * prepares and every kClockStride edges it examines, and, when |emit| is the caller's
+     * (|callers_emit|: a spelling and a result object per context, not a buffer's
+     * push_back), every kReleaseClockStride contexts it emits. Returns false when the
+     * deadline stopped it ({|phase|, TIME} recorded: EXTRACTION for a release, EXTENSION for
+     * the listing of the anchors to extend).
      */
     bool release(uint64_t limit, const std::function<void(const Context&)> &emit,
-                 StopPhase phase = StopPhase::EXTRACTION);
+                 bool callers_emit, StopPhase phase = StopPhase::EXTRACTION);
+
+    /**
+     * ALL_OR_COUNT's delivery of its buffered release to |callback|, whose work per context
+     * (a spelling, a result object) is the caller's: the clock is read before every
+     * kReleaseClockStride-th context. False when the work time passed before the last one
+     * ({EXTRACTION, TIME} recorded): |callback| then received a prefix, to be discarded.
+     */
+    bool deliver(const std::vector<Context> &buffer,
+                 const std::function<void(const Context&)> &callback) {
+        for (size_t i = 0; i < buffer.size(); ++i) {
+            if (i && !(i % Budget::kReleaseClockStride) && !budget_.check_time()) {
+                record_stop(StopPhase::EXTRACTION, StopReason::TIME);
+                return false;
+            }
+            callback(buffer[i]);
+        }
+        return true;
+    }
 
     // ---------------------------------------------------------------- extension (§4.2)
 
@@ -648,6 +724,7 @@ class PatternRun {
     // the anchors' ranges are no longer needed: the extension's admission failed (§5.2)
     void drop_anchors() {
         retain_ = false;
+        retained_ = 0;
         for (BaseSearch &search : searches_) {
             std::vector<Span>().swap(search.release);
         }
@@ -669,16 +746,23 @@ class PatternRun {
 
     /**
      * The retained paths, in answer order (the DFS's own), each passed to |emit|. Reads the
-     * clock once before the first: false, with nothing emitted, when the work time has
-     * passed ({EXTRACTION, TIME} recorded).
+     * clock before the first and before every kReleaseClockStride-th (the caller's work per
+     * path runs between two readings): false when the work time has passed ({EXTRACTION,
+     * TIME} recorded), |emit| having received the paths before that reading.
      */
     bool release_paths(const std::function<void(const Context&)> &emit) {
-        if (!budget_.check_time()) {
+        auto late = [&]() {
+            if (budget_.check_time())
+                return false;
             record_stop(StopPhase::EXTRACTION, StopReason::TIME);
+            return true;
+        };
+        if (late())
             return false;
-        }
-        for (const Context &path : paths_) {
-            emit(path);
+        for (size_t i = 0; i < paths_.size(); ++i) {
+            if (i && !(i % Budget::kReleaseClockStride) && late())
+                return false;
+            emit(paths_[i]);
         }
         return true;
     }
@@ -704,6 +788,19 @@ class PatternRun {
     // L > k with Request::extend_paths: the anchors are retained for the extension in every
     // mode, and dropped once their count exceeds max_anchors (§5.2)
     const bool extending_;
+    // ALL_OR_COUNT's threshold and PARTIAL's cap on what is released
+    const uint64_t cap_;
+    // PARTIAL: the retained ranges are bounded by what the release can use
+    const bool prune_;
+    // the ranges retained now, and the most at once (Work::spans_retained_peak)
+    uint64_t retained_ = 0;
+    uint64_t retained_peak_ = 0;
+    // PARTIAL: a range whose contexts all lie at nodes above this bound cannot hold one of the
+    // first cap_ contexts in answer order, which lie at or below it
+    node_index prune_bound_ = std::numeric_limits<node_index>::max();
+    // PARTIAL: the next compaction when more ranges than this are retained
+    uint64_t next_compaction_ = kMinCompaction;
+    static constexpr uint64_t kMinCompaction = 4096;
 
     std::vector<TAlphabet> codes_;
     std::vector<BaseSearch> searches_;
@@ -754,10 +851,18 @@ class PatternRun {
         search.q = q;
         search.any_offset = !long_ && request_.scope == Scope::ANY_OFFSET;
         search.count_palindromes = count_palindromes;
-        for (BaseSet set : q) {
+        // a leading pattern-N run is not searched where the graph has no N symbol: every
+        // base of a valid k-mer is then one of A, C, G, T, which N admits (at least one
+        // position is kept: an all-N window is searched as its last N)
+        if (support_.alphabet == "$ACGT") {
+            while (search.lead + 1 < q.size() && q[search.lead] == kAllBases) {
+                ++search.lead;
+            }
+        }
+        for (size_t i = search.lead; i < q.size(); ++i) {
             search.codes.emplace_back();
             for (size_t b = 0; b < 4; ++b) {
-                if (set & (1 << b))
+                if (q[i] & (1 << b))
                     search.codes.back().push_back(codes_[b]);
             }
         }
@@ -773,32 +878,27 @@ class PatternRun {
      * reverse complements of the stored ones containing rc(Q); for a long pattern, the
      * anchor window Q[0, k) and rc(Q[0, k)) (not rc(Q)[0, k), which is Q's last k-mer).
      * Identical base searches are run once (P and rc(P) serve both orientations).
+     * Only the windows are built (O(k)), never rc of the whole pattern: REVERSE's window
+     * rc(P)[0, k) is rc(P[L - k, L)).
      */
     void plan() {
-        if (pattern_.is_palindromic()) {
-            searched_ = { Orientation::PALINDROMIC };
-        } else if (request_.strands == Strands::FORWARD) {
-            searched_ = { Orientation::FORWARD };
-        } else if (request_.strands == Strands::REVERSE) {
-            searched_ = { Orientation::REVERSE };
-        } else {
-            searched_ = { Orientation::FORWARD, Orientation::REVERSE };
-        }
+        searched_ = searched_orientations(pattern_, request_.strands);
 
         const bool primary = support_.mode == GraphMode::PRIMARY;
         const bool even_primary = primary && !(k_ % 2);
-        const Pattern rc = pattern_.reverse_complement();
+        const auto &positions = pattern_.positions();
+        const size_t m = std::min(positions.size(), k_);
 
         for (Orientation orientation : searched_) {
-            const auto &positions = orientation == Orientation::REVERSE
-                ? rc.positions()
-                : pattern_.positions();
-            std::vector<BaseSet> window(positions.begin(),
-                                        positions.begin() + std::min(positions.size(), k_));
+            std::vector<BaseSet> window = orientation == Orientation::REVERSE
+                ? reverse_complement_sets(std::vector<BaseSet>(positions.end() - m,
+                                                               positions.end()))
+                : std::vector<BaseSet>(positions.begin(), positions.begin() + m);
 
             OrientationPlan o { orientation, 0, std::nullopt, std::nullopt, false };
             if (!primary) {
                 o.direct = add_search(window, false);
+                searches_[o.direct].read_directly = true;
                 plans_.push_back(o);
                 continue;
             }
@@ -813,6 +913,7 @@ class PatternRun {
                 }
             }
             o.direct = add_search(window, even_primary && !mirrored);
+            searches_[o.direct].read_directly = true;
             o.mapped = add_search(window_rc, false);
             if (even_primary) {
                 o.palindromes = mirrored ? *o.mapped : o.direct;
@@ -825,8 +926,11 @@ class PatternRun {
     // ---------------------------------------------------------------- discovery
 
     // the running lower bound of the whole pattern (§5.2 stop_at_threshold): the sum over
-    // orientations, where a wrapped PRIMARY union counts at least its larger part (both
-    // parts when k is odd: no k-mer of odd length is its own reverse complement)
+    // orientations. A wrapped PRIMARY union of a + b discovered contexts counts both parts
+    // when k is odd (no k-mer of odd length over A, C, G, T is its own reverse complement);
+    // for even k it can count a palindromic stored k-mer twice, at most once per candidate
+    // of the ranges where the counting search may meet one (pc), so it holds at least
+    // a + b - min(pc, a, b) (E2-02: max(a, b) before, about half the count)
     uint64_t running_lower() const {
         uint64_t total = 0;
         for (const OrientationPlan &o : plans_) {
@@ -835,7 +939,12 @@ class PatternRun {
                 total += a;
             } else {
                 uint64_t b = searches_[*o.mapped].running_lower;
-                total += o.palindromes ? std::max(a, b) : a + b;
+                uint64_t twice = 0;
+                if (o.palindromes) {
+                    twice = std::min({ searches_[*o.palindromes].running_palindrome_candidates,
+                                       a, b });
+                }
+                total += a + b - twice;
             }
         }
         return total;
@@ -870,30 +979,158 @@ class PatternRun {
         return true;
     }
 
-    static void halt(BaseSearch &search, size_t depth) {
+    static void halt(BaseSearch &search) {
         search.halted = true;
-        search.d_min = std::min(search.d_min, depth);
+    }
+
+    // whether the release may read a range of |search| at |offset| through a cursor whose
+    // contexts start at its own first node (the direct read, or the palindromes of a mapped
+    // one), rather than only shifted by the wrapper's offset
+    bool read_at_own_node(const BaseSearch &search, uint32_t offset) const {
+        return search.read_directly || may_be_palindromic(search.q, offset, k_);
     }
 
     void add_item(BaseSearch &search, const Item &item) {
-        if (retain_)
-            search.release.push_back(Span { item.first, item.last, item.offset, item.c });
+        if (retain_) {
+            const uint64_t lower = item.lower();
+            const node_index lowest = read_at_own_node(search, item.offset)
+                ? item.first
+                : item.first + wrapper_offset_;
+            // PARTIAL: a range wholly above the bound holds none of the first cap_ contexts
+            if (!prune_ || lowest <= prune_bound_) {
+                assert(item.offset <= std::numeric_limits<uint16_t>::max());
+                search.release.push_back(Span {
+                    item.first, item.last,
+                    static_cast<uint32_t>(std::min<uint64_t>(
+                            lower, std::numeric_limits<uint32_t>::max())),
+                    static_cast<uint16_t>(item.offset), item.c
+                });
+                retained_peak_ = std::max(retained_peak_, ++retained_);
+                if (prune_ && retained_ > next_compaction_)
+                    compact_release();
+            }
+        }
         if (item.pending()) {
             search.pending.push_back(item);
         } else {
             search.exact[item.offset] += item.candidates;
         }
         search.running_lower += item.lower();
+        if (item.count_palindromes)
+            search.running_palindrome_candidates += item.candidates;
+    }
+
+    /**
+     * PARTIAL's retention bound (E4-01): every cursor the release would build over the
+     * retained ranges, as (lowest node, highest node, contexts it is sure to emit), where
+     * distinct cursors never emit one context twice except a palindrome cursor, which is
+     * credited none. If the cursors that end at or before a node T are sure to emit cap_
+     * contexts, the first cap_ contexts in answer order (node first) lie at or below T, so a
+     * range none of whose cursors starts at or below T can be dropped. T found over the ranges
+     * retained so far can only fall as more arrive, so the bound holds for every later range
+     * too (add_item drops those at once).
+     */
+    void compact_release() {
+        struct Bound {
+            node_index high;
+            uint64_t sure;
+        };
+        std::vector<Bound> bounds;
+        bounds.reserve(retained_ + retained_ / 2);
+        for_each_use([&](const OrientationPlan &, const Span &span, Use use) {
+            bounds.push_back(Bound { use_high(span, use), use_sure(span, use) });
+        });
+        std::sort(bounds.begin(), bounds.end(),
+                  [](const Bound &a, const Bound &b) { return a.high < b.high; });
+        uint64_t sure = 0;
+        for (const Bound &bound : bounds) {
+            sure += bound.sure;
+            if (sure >= cap_) {
+                prune_bound_ = std::min(prune_bound_, bound.high);
+                break;
+            }
+        }
+
+        retained_ = 0;
+        for (size_t s = 0; s < searches_.size(); ++s) {
+            BaseSearch &search = searches_[s];
+            auto end = std::remove_if(search.release.begin(), search.release.end(),
+                                      [&](const Span &span) {
+                const node_index lowest = read_at_own_node(search, span.offset)
+                    ? span.first
+                    : span.first + wrapper_offset_;
+                return lowest > prune_bound_;
+            });
+            search.release.erase(end, search.release.end());
+            if (search.release.capacity() > 2 * search.release.size() + kMinCompaction)
+                search.release.shrink_to_fit();
+            retained_ += search.release.size();
+        }
+        next_compaction_ = std::max(kMinCompaction, 2 * retained_);
+    }
+
+    /**
+     * How the release reads a retained range (one cursor each):
+     *  DIRECT           the contexts of the orientation's own base search, at their nodes;
+     *  MAPPED           wrapped PRIMARY: the reverse-complement search's, at the wrapper's
+     *                   virtual node (node + wrapper offset) and the mirrored offset;
+     *  MAPPED_SKIPPING  the same at an offset where a palindromic k-mer is possible (even k):
+     *                   palindromic k-mers are skipped (CanonicalDBG serves them once, at
+     *                   their own id);
+     *  PALINDROMES      beside MAPPED_SKIPPING: only those palindromic k-mers, at their own id
+     *                   and the mirrored offset, which the direct search may not have reached
+     *                   before a stop (E2-01); the merge drops the duplicate when it has.
+     */
+    enum class Use : uint8_t { DIRECT, MAPPED, MAPPED_SKIPPING, PALINDROMES };
+
+    node_index use_low(const Span &span, Use use) const {
+        return use == Use::MAPPED || use == Use::MAPPED_SKIPPING
+            ? span.first + wrapper_offset_
+            : span.first;
+    }
+    node_index use_high(const Span &span, Use use) const {
+        return use == Use::MAPPED || use == Use::MAPPED_SKIPPING
+            ? span.last + wrapper_offset_
+            : span.last;
+    }
+    // the contexts a cursor is sure to emit that no other cursor emits
+    static uint64_t use_sure(const Span &span, Use use) {
+        return use == Use::DIRECT || use == Use::MAPPED ? span.guaranteed : 0;
+    }
+
+    /**
+     * Calls f(plan, span, use) for every cursor the release builds, in the order it builds
+     * them: per orientation, the direct search's ranges, then (wrapped PRIMARY) the mapped
+     * search's, each mapped one at a palindrome-capable offset followed by its PALINDROMES.
+     */
+    template <class F>
+    void for_each_use(F f) const {
+        for (const OrientationPlan &o : plans_) {
+            for (const Span &span : searches_[o.direct].release) {
+                f(o, span, Use::DIRECT);
+            }
+            if (!o.mapped)
+                continue;
+            const BaseSearch &mapped = searches_[*o.mapped];
+            for (const Span &span : mapped.release) {
+                if (may_be_palindromic(mapped.q, span.offset, k_)) {
+                    f(o, span, Use::MAPPED_SKIPPING);
+                    f(o, span, Use::PALINDROMES);
+                } else {
+                    f(o, span, Use::MAPPED);
+                }
+            }
+        }
     }
 
     // a flank range at depth d >= L: every valid edge leaving its nodes has the pattern at
-    // offset k - 1 - d (§4.1, all offsets)
+    // offset k - 1 - d (§4.1, all offsets; the core's offset less the lead for q's)
     void count_flank(BaseSearch &search, const Range &range) {
         const auto &[first, last, depth] = range;
         Item item;
         item.first = first;
         item.last = last;
-        item.offset = static_cast<uint32_t>(k_ - 1 - depth);
+        item.offset = static_cast<uint32_t>(k_ - 1 - depth - search.lead);
         item.candidates = dbg_succ_.count_valid_edges_in_range(first, last);
         if (!item.candidates)
             return;
@@ -933,51 +1170,51 @@ class PatternRun {
     }
 
     /**
-     * Expands one range at its depth d (the length of the suffix its nodes share):
+     * Expands one range at its depth d (the length of the suffix its nodes share), L being the
+     * core's length (the window less its unsearched lead):
      *  - d >= L: a flank range, counted;
      *  - d == L - 1: a leaf: the W rule for each base of the last position, then (any_offset)
-     *    the ranges of the whole pattern;
-     *  - children: the pattern's bases at d < L, every non-sentinel symbol in the flank.
+     *    the ranges of the whole core;
+     *  - children: the core's bases at d < L, every non-sentinel symbol in the flank, down to
+     *    the search's max_depth (k - 1 less the lead, where the window's offset reaches 0).
      * A child at depth 1 starts a suffix_to_prefix DFS; a child at depth k - 1 (whole nodes)
      * is expanded here, since suffix_to_prefix would call its edges one by one; the others
      * go through |push|, the try_symbol of the suffix_to_prefix DFS that popped |range|.
+     * After a halt the ranges still created are counted (they were charged) but not expanded.
      */
     void expand(BaseSearch &search, const Range &range,
                 const std::function<void(TAlphabet)> *push) {
         const size_t d = std::get<2>(range);
-        const size_t L = search.q.size();
-        const size_t K1 = boss_.get_k();
+        const size_t L = search.core_length();
+        const size_t max_depth = search.max_depth(k_);
 
         if (d >= L) {
             count_flank(search, range);
             if (threshold_crossed())
-                halt(search, d);
+                halt(search);
         }
-        if (search.halted) {
-            // created and counted, but not expanded
-            halt(search, d);
+        if (search.halted)
             return;
-        }
 
         if (d + 1 == L) {
             for (TAlphabet c : search.codes[L - 1]) {
                 if (!charge_range()) {
-                    halt(search, d);
+                    halt(search);
                     return;
                 }
                 count_w_rule(search, range, c);
                 if (threshold_crossed()) {
-                    halt(search, d);
+                    halt(search);
                     return;
                 }
             }
-            if (search.any_offset && d < K1)
+            if (search.any_offset && d < max_depth)
                 children(search, range, search.codes[L - 1], push);
 
         } else if (d + 1 < L) {
             children(search, range, search.codes[d], push);
 
-        } else if (d < K1) {
+        } else if (d < max_depth) {
             // the flank admits every symbol of the graph's alphabet but $, N on a DNA5 build
             // included (§4.1): the seeder's own symbol set
             std::vector<TAlphabet> symbols;
@@ -995,7 +1232,7 @@ class PatternRun {
 
         for (TAlphabet s : symbols) {
             if (!charge_range()) {
-                halt(search, d);
+                halt(search);
                 return;
             }
             if (d && d + 1 < K1) {
@@ -1014,10 +1251,8 @@ class PatternRun {
                     dfs(search, child);
                 }
             }
-            if (search.halted) {
-                halt(search, d);
+            if (search.halted)
                 return;
-            }
         }
     }
 
@@ -1040,6 +1275,25 @@ class PatternRun {
                 expand(search, range, &push);
             }
         );
+    }
+
+    /**
+     * The ranges a base search's DFS can create over its core, level by level: the core's
+     * combinations so far, of which at most the graph's share (edges / 4^d) can be non-empty.
+     * A planning estimate (X-EFFICIENCY-01: an N run early in a window is wide, late in it
+     * narrow), used only to order the searches; the flank is the same for every search.
+     */
+    double estimated_cost(const BaseSearch &search) const {
+        const double edges = static_cast<double>(boss_.num_edges());
+        double combinations = 1;
+        double strings = 1;
+        double cost = 0;
+        for (const auto &symbols : search.codes) {
+            combinations *= symbols.size();
+            strings *= 4;
+            cost += combinations * std::min(1.0, edges / strings);
+        }
+        return cost;
     }
 
     void discover(BaseSearch &search) {
@@ -1249,9 +1503,9 @@ class PatternRun {
         return true;
     }
 
-    void scan_all() {
-        for (BaseSearch &search : searches_) {
-            for (Item &item : search.pending) {
+    void scan_all(const std::vector<size_t> &order) {
+        for (size_t i : order) {
+            for (Item &item : searches_[i].pending) {
                 if (!scan(item))
                     return;
             }
@@ -1263,10 +1517,7 @@ class PatternRun {
     struct Cursor {
         const Span *item;
         Orientation orientation;
-        // a context of the reverse-complement search, exposed as the wrapper's virtual node
-        bool mapped;
-        // mapped, even k: palindromic stored k-mers are skipped (the direct search has them)
-        bool skip_palindromes;
+        Use use;
         edge_index next;
         Key key;
     };
@@ -1296,18 +1547,27 @@ class PatternRun {
             }
             if (!item.flank() && !dbg_succ_.in_graph(e))
                 continue;
-            if (!cursor.mapped) {
-                cursor.key = Key { e, item.offset, cursor.orientation };
-                return true;
+            switch (cursor.use) {
+                case Use::DIRECT:
+                    cursor.key = Key { e, item.offset, cursor.orientation };
+                    return true;
+                case Use::MAPPED_SKIPPING:
+                    // a palindromic stored k-mer is its own reverse complement in the wrapper
+                    // (CanonicalDBG::reverse_complement maps it to itself): the PALINDROMES
+                    // cursor beside this one releases it at its own id (§4.1)
+                    if (is_palindrome(e))
+                        continue;
+                    [[fallthrough]];
+                case Use::MAPPED:
+                    cursor.key = Key { e + wrapper_offset_, max_offset() - item.offset,
+                                       cursor.orientation };
+                    return true;
+                case Use::PALINDROMES:
+                    if (!is_palindrome(e))
+                        continue;
+                    cursor.key = Key { e, max_offset() - item.offset, cursor.orientation };
+                    return true;
             }
-            // a palindromic stored k-mer is its own reverse complement in the wrapper
-            // (CanonicalDBG::reverse_complement maps it to itself): the direct search has it
-            // at this offset already, so the union keeps one (§4.1)
-            if (cursor.skip_palindromes && is_palindrome(e))
-                continue;
-            cursor.key = Key { e + wrapper_offset_, max_offset() - item.offset,
-                               cursor.orientation };
-            return true;
         }
         cursor.next = 0;
         return false;
@@ -1315,35 +1575,39 @@ class PatternRun {
 };
 
 bool PatternRun::release(uint64_t limit, const std::function<void(const Context&)> &emit,
-                         StopPhase phase) {
+                         bool callers_emit, StopPhase phase) {
     release_phase_ = phase;
     if (!budget_.check_time()) {
         record_stop(phase, StopReason::TIME);
         return false;
     }
 
+    // the cursors over the retained ranges (PARTIAL keeps only those that can hold one of the
+    // first cap_ contexts, so this index is small); the clock every kClockStride of them
     std::vector<Cursor> cursors;
-    for (const OrientationPlan &o : plans_) {
-        for (const Span &item : searches_[o.direct].release) {
-            cursors.push_back(Cursor { &item, o.orientation, false, false, item.first, {} });
-        }
-        if (o.mapped) {
-            const BaseSearch &mapped = searches_[*o.mapped];
-            for (const Span &item : mapped.release) {
-                bool skip = may_be_palindromic(mapped.q, item.offset, k_);
-                cursors.push_back(Cursor { &item, o.orientation, true, skip, item.first, {} });
-            }
-        }
+    cursors.reserve(retained_ + retained_ / 4);
+    bool late = false;
+    for_each_use([&](const OrientationPlan &o, const Span &span, Use use) {
+        if (late)
+            return;
+        cursors.push_back(Cursor { &span, o.orientation, use, span.first, {} });
+        late = !(cursors.size() % Budget::kClockStride) && !budget_.check_time();
+    });
+    if (late) {
+        record_stop(phase, StopReason::TIME);
+        return false;
     }
 
     // a cursor's contexts are at nodes >= this bound: cursors join the merge only when the
     // merge reaches their bound, so that a small limit examines few ranges
-    auto bound = [&](const Cursor &c) {
-        return c.item->first + (c.mapped ? wrapper_offset_ : 0);
-    };
+    auto bound = [&](const Cursor &c) { return use_low(*c.item, c.use); };
     std::stable_sort(cursors.begin(), cursors.end(), [&](const Cursor &a, const Cursor &b) {
         return bound(a) < bound(b);
     });
+    if (cursors.size() >= Budget::kClockStride && !budget_.check_time()) {
+        record_stop(phase, StopReason::TIME);
+        return false;
+    }
 
     auto later = [&](size_t a, size_t b) { return cursors[b].key < cursors[a].key; };
     std::priority_queue<size_t, std::vector<size_t>, decltype(later)> heap(later);
@@ -1351,6 +1615,9 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
     size_t joined = 0;
     uint64_t released = 0;
     bool stopped = false;
+    // the last context emitted: a PALINDROMES cursor can meet one the direct search also
+    // found, and keys come out of the merge in order, so a duplicate follows its original
+    std::optional<Key> last;
     while (released < limit) {
         if (heap.empty() && joined == cursors.size())
             break;
@@ -1372,8 +1639,17 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
         size_t top = heap.top();
         heap.pop();
         const Key key = cursors[top].key;
-        emit(Context { key.orientation, key.offset, key.node, base_of(key.node), {}, {} });
-        ++released;
+        if (!last || !(key == *last)) {
+            // the caller's work per context runs between two clock readings
+            if (callers_emit && released && !(released % Budget::kReleaseClockStride)
+                    && !budget_.check_time()) {
+                record_stop(phase, StopReason::TIME);
+                return false;
+            }
+            emit(Context { key.orientation, key.offset, key.node, base_of(key.node), {}, {} });
+            ++released;
+            last = key;
+        }
 
         if (advance(cursors[top], &stopped))
             heap.push(top);
@@ -1390,7 +1666,7 @@ bool PatternRun::extend(bool keep, uint64_t num_anchors) {
     // the anchors in answer order (§5.5); their ranges are discarded once they are listed:
     // the anchors are kept through the extension, not beyond (§5.2)
     std::vector<Context> anchors;
-    listed_ = release(kNoLimit, [&](const Context &c) { anchors.push_back(c); },
+    listed_ = release(kNoLimit, [&](const Context &c) { anchors.push_back(c); }, false,
                       StopPhase::EXTENSION);
     drop_anchors();
     if (listed_ && anchors.size() != num_anchors) {
@@ -1508,7 +1784,10 @@ Extraction extract_paths(const AnchorCounts &anchors, const Request &request,
                 } else if (release()) {
                     extraction.complete = true;
                 } else {
+                    // a deadline during the delivery: the prefix delivered is the caller's to
+                    // discard (all or nothing)
                     extraction.withheld = Withheld::DEADLINE;
+                    extraction.returned = 0;
                 }
             } else if (!release()) {
                 extraction.cut = StopReason::TIME;
@@ -1632,12 +1911,32 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     result.graph_mode = support_.mode;
     result.palindromic = pattern.is_palindromic();
     result.information_bits = pattern.information_bits();
-    // the bits the information floor reads: the anchor window's for a long pattern (kept in a
-    // plain double rather than read back from the optional, which GCC 13 -O3 flags as maybe
-    // uninitialized under -Werror)
-    const double floor_bits = is_long ? pattern.information_bits(0, k) : result.information_bits;
-    if (is_long)
-        result.anchor_information_bits = floor_bits;
+    // the bits the information floor reads: for a long pattern the least over the searched
+    // orientations' anchor windows (X-GUARANTEES-01: FORWARD P[0, k), REVERSE rc(P)[0, k),
+    // whose bits are P[L - k, L)'s), so that no searched window below the floor runs (kept in
+    // a plain double rather than read back from the optional, which GCC 13 -O3 flags as maybe
+    // uninitialized under -Werror). anchor_information_bits keeps its contract-version-1
+    // meaning, the bits of P[0, k) whatever the strands; the least is stated apart, in
+    // min_anchor_information_bits (the owner's decision of 2026-10-07)
+    double floor_bits = result.information_bits;
+    // the orientation whose window is the least informative (FORWARD before REVERSE on a tie)
+    Orientation floor_window = Orientation::FORWARD;
+    if (is_long) {
+        bool first = true;
+        for (Orientation o : searched_orientations(pattern, request.strands)) {
+            const double bits = o == Orientation::REVERSE
+                ? pattern.information_bits(L - k, L)
+                : pattern.information_bits(0, k);
+            result.anchor_window_bits[o] = bits;
+            if (first || bits < floor_bits) {
+                floor_bits = bits;
+                floor_window = o;
+            }
+            first = false;
+        }
+        result.anchor_information_bits = pattern.information_bits(0, k);
+        result.min_anchor_information_bits = floor_bits;
+    }
 
     auto finish = [&]() {
         result.elapsed_ms = std::chrono::duration<double, std::milli>(
@@ -1662,7 +1961,11 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             result.refusal = Refusal {
                 "information_below_floor",
                 "pattern: " + format_bits(bits) + " information bits"
-                    + (is_long ? " in the anchor window" : "")
+                    + (!is_long ? ""
+                        : floor_window == Orientation::REVERSE
+                            ? " in the anchor window of the reverse orientation (the reverse "
+                              "complement of the pattern's last k positions)"
+                            : " in the anchor window")
                     + ", below the floor of " + format_bits(request.min_information_bits)
                     + " for scope " + to_string(result.scope)
             };
@@ -1802,16 +2105,26 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
 
         } else if (request.mode == Mode::ALL_OR_COUNT) {
             if (exact && total->value <= max_released) {
-                // buffered, so that the callback receives all of them or none: a deadline
-                // in the release withholds everything (§5.2)
+                // buffered, so that a deadline in the release withholds everything (§5.2),
+                // then delivered under the clock: the caller's work per context (a spelling,
+                // a result object) is work too, and a deadline during it withholds everything
+                // as well, the prefix delivered being the caller's to discard
                 std::vector<Context> buffer;
-                if (engine.release(kNoLimit, [&](const Context &c) { buffer.push_back(c); })) {
-                    assert(buffer.size() == total->value);
-                    for (const Context &c : buffer) {
-                        (*callback)(c);
+                if (engine.release(kNoLimit, [&](const Context &c) { buffer.push_back(c); },
+                                   false)) {
+                    // the absence licence rests on this: checked in every build (T1-02)
+                    if (buffer.size() != total->value) {
+                        throw std::logic_error("pattern: " + std::to_string(buffer.size())
+                                               + " contexts released of "
+                                               + std::to_string(total->value)
+                                               + " counted exactly");
                     }
-                    extraction.returned = buffer.size();
-                    extraction.complete = true;
+                    if (engine.deliver(buffer, *callback)) {
+                        extraction.returned = buffer.size();
+                        extraction.complete = true;
+                    } else {
+                        extraction.withheld = Withheld::DEADLINE;
+                    }
                 } else {
                     extraction.withheld = Withheld::DEADLINE;
                 }
@@ -1833,7 +2146,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             } else if (engine.release(max_released, [&](const Context &c) {
                            (*callback)(c);
                            ++extraction.returned;
-                       })) {
+                       }, true)) {
                 if (exact && extraction.returned == total->value) {
                     extraction.complete = true;
                 } else {
