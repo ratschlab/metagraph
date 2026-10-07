@@ -1,0 +1,11 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "output": {
+  "labels": "none"
+ }
+}

@@ -1,0 +1,21 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGAT",
+   "id": "short"
+  },
+  {
+   "iupac": "NNNNNNNNACGTACGTAC",
+   "id": "degenerate"
+  },
+  {
+   "iupac": "NNNNNNNNNNNNNNNNNNNNGGTTTGGCGATCTGGTTTTC",
+   "id": "long_window"
+  },
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "ok"
+  }
+ ],
+ "mode": "count"
+}

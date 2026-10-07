@@ -1,0 +1,14 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  },
+  {
+   "dna": "CGGAATGGCTCATCACGATC"
+  }
+ ],
+ "max_steps": 50,
+ "output": {
+  "labels": "none"
+ }
+}

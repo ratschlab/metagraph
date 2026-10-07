@@ -1,0 +1,11 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "mode": "count",
+ "graphs": [
+  "mini_refseq"
+ ]
+}

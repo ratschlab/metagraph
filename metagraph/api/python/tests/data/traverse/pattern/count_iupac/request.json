@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "iupac": "GTGYCAGCMGCCGCGGTAA",
+   "id": "515F"
+  },
+  {
+   "iupac": "GGACTACNVGGGTWTCTAAT",
+   "id": "806R"
+  }
+ ],
+ "mode": "count"
+}

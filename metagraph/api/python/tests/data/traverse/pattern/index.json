@@ -1,0 +1,394 @@
+{
+ "pattern_contract_version": 1,
+ "generator": "scripts/traversal/pattern_fixtures.py",
+ "spec": "docs/SPEC-pattern-search.md",
+ "servers": {
+  "masked": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --index-name mini_refseq --index-release fixtures-mini_refseq  (a copy of the mini graph with the .edgemask of transform --mask-dummy; annotation, .seqs and sidecars linked from the mini)",
+  "unmasked": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built: no .edgemask)",
+  "built_at_load": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-build-mask --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built, its mask built in memory at start-up)",
+  "multi": "server_query {work}/graphs.csv --index-release fixtures-mini_refseq  (one line: mini_refseq,{work}/masked/graph_k31.dbg,{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg)",
+  "primary": "server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg --index-name mini_primary --index-release fixtures-mini_refseq  (a PRIMARY graph of 562.fa and 573.fa at k = 31 with --mask-dummy, column annotation by file name)"
+ },
+ "fixtures": {
+  "capabilities": {
+   "server": "masked",
+   "method": "GET",
+   "path": "/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, placement record)"
+  },
+  "traverse_capabilities": {
+   "server": "masked",
+   "method": "GET",
+   "path": "/traverse/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "GET /traverse/capabilities (the document the service probe reads) on the same server: the same `pattern` block"
+  },
+  "capabilities_mask_absent": {
+   "server": "unmasked",
+   "method": "GET",
+   "path": "/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the mini index as built, without its .edgemask: the feature and route listed, the block available false, unavailable_reason mask_required, mask absent"
+  },
+  "traverse_capabilities_mask_absent": {
+   "server": "unmasked",
+   "method": "GET",
+   "path": "/traverse/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same unmasked server on the probe route"
+  },
+  "capabilities_built_at_load": {
+   "server": "built_at_load",
+   "method": "GET",
+   "path": "/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the mini index as built, served with --pattern-build-mask: the block available, mask built_at_load (the mask built in memory at start-up), otherwise as with the file"
+  },
+  "traverse_capabilities_built_at_load": {
+   "server": "built_at_load",
+   "method": "GET",
+   "path": "/traverse/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same server on the probe route"
+  },
+  "capabilities_multi_graph": {
+   "server": "multi",
+   "method": "GET",
+   "path": "/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a multi-graph server: no `pattern` feature or route; the block says multi_graph_later_increment and nothing else"
+  },
+  "traverse_capabilities_multi_graph": {
+   "server": "multi",
+   "method": "GET",
+   "path": "/traverse/capabilities?graph=mini_refseq",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the multi-graph server probed for one graph: the same reduced block"
+  },
+  "traverse_capabilities_primary": {
+   "server": "primary",
+   "method": "GET",
+   "path": "/traverse/capabilities",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], strand_stated false, placement none_canonical, annotation unbudgeted (column)"
+  },
+  "count": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "mode count, scope any_offset and strands both by default: exact context counts with suffix, by_offset (every offset, zeros included) and by_strand; labels and occurrences unknown; no results; an absent primer counts exact 0"
+  },
+  "count_suffix": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "scope suffix: only offset k - L, absence_scope suffix_only; an exact 11-mer (22 bits) is admitted in this scope however short"
+  },
+  "count_forward": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "strands forward: P only, strands [\"+\"], by_strand {\"+\"}"
+  },
+  "count_reverse": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "strands reverse: rc(P) only, strands [\"-\"]"
+  },
+  "count_iupac": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "IUPAC patterns (the 16S V4 primers 515F and 806R): kind iupac, fractional information_bits"
+  },
+  "count_palindrome": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a palindromic pattern: searched once, palindromic true, strands [\"=\"], by_strand {\"both\"}"
+  },
+  "count_low_complexity": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a repeat sdust flags: notes [\"low_complexity_pattern\"] (here with no context)"
+  },
+  "count_long": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "L > k in mode count: scope long, counts.anchors (anchor window [0, k)) and counts.paths unknown, anchor_information_bits, note paths_later_increment; no anchor: paths exact 0"
+  },
+  "information_floor": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "error slots information_below_floor (22 bits; 20 bits; a long pattern whose anchor window has 22): the slot keeps the pattern's description, the others are answered"
+  },
+  "bad_alphabet": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "error slots bad_alphabet (U, an IUPAC code in a dna pattern, X, an empty pattern): only id, kind and error; the last pattern is answered"
+  },
+  "clamped": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "request values above the server caps are lowered and listed in limits.clamped {field, requested, effective}, never refused"
+  },
+  "all_or_count": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "mode and output omitted: all_or_count with output.labels \"none\"; every context returned (kmer, instance, offset, strand, node, row) in (node, offset, orientation) order, retrieval_complete true; the absent primer: results [] and complete"
+  },
+  "all_or_count_iupac": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "an IUPAC pattern retrieved: each result's instance is the matched variant (Y, M resolved), rc(P)'s instances on strand \"-\""
+  },
+  "all_or_count_suffix": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "retrieval in scope suffix (offset k - L only, absence_scope suffix_only); the palindrome's contexts carry strand \"=\""
+  },
+  "all_or_count_withheld": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the exact count (24) above max_contexts (10): results withheld, withheld.reason count_above_threshold, returned 0, no cut"
+  },
+  "partial_cut": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "mode partial: the first 5 contexts in answer order, cut.reason max_contexts, retrieval_complete false, the count exact"
+  },
+  "stop_at_threshold": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "stop_at_threshold: discovery stops once the count passes max_contexts: at_least, stop {discovery, max_contexts}, withheld threshold_crossed"
+  },
+  "max_steps": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "max_steps reached in discovery: at_least counts, stop {discovery, max_steps}, withheld discovery_budget; the request's budget is spent, so the next pattern answers unknown counts with the same stop"
+  },
+  "max_steps_partial": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same stop in mode partial: what discovery found is delivered, cut.reason max_steps; the second pattern returns nothing, cut max_steps"
+  },
+  "deadline": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a 251 ms budget (1 ms of work before the 250 ms finalisation reserve): stop {discovery, time}, withheld deadline, determinism time_limited; the next pattern unknown (counts and work of time_limited patterns vary between runs)"
+  },
+  "deadline_partial": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the deadline in mode partial: nothing is released after a time stop in discovery (its membership would depend on the machine): returned 0, cut.reason time"
+  },
+  "long": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "L > k in all_or_count: anchors counted, paths unknown, withheld paths_later_increment; with no anchor the empty answer is complete (anchors and paths exact 0)"
+  },
+  "primary_any_offset": {
+   "server": "primary",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a PRIMARY index: results carry orientation (forward, reverse) instead of strand, by_orientation instead of by_strand, note strand_unknown_canonical; node is the wrapper id"
+  },
+  "primary_suffix": {
+   "server": "primary",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "scope suffix on a PRIMARY index: error slot scope_unsupported (a virtual suffix is a stored prefix); any_offset is complete there"
+  },
+  "unknown_field": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 invalid_request: a field nothing reads is refused, never ignored"
+  },
+  "too_many_patterns": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 invalid_request: more patterns than the server's max_patterns (16): a list is refused, never cut"
+  },
+  "later_increment_labels": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 later_increment: output.labels \"all\" (labels read from the annotation) is not served yet (capabilities projections)"
+  },
+  "later_increment_graphs": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 later_increment: the request field graphs (multi-graph selection) is refused by name, whatever its value"
+  },
+  "resident_only": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 resident_only: in_ram, whatever its value (the route never loads an index)"
+  },
+  "mask_required": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 mask_required: the graph has no dummy-edge mask, whatever the request asks"
+  },
+  "multi_graph": {
+   "server": "multi",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 later_increment on a multi-graph server, whatever the request"
+  },
+  "deadline_503": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 503,
+   "hand_made": true,
+   "headers": {},
+   "shows": "HAND-MADE: 503 deadline, the answer could not be written by time_budget_ms (nothing partial is sent)"
+  },
+  "initializing_503": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 503,
+   "hand_made": true,
+   "headers": {
+    "Retry-After": "60"
+   },
+   "shows": "HAND-MADE: 503 while the index loads (every route; no code; Retry-After: 60)"
+  }
+ }
+}

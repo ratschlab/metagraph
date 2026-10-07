@@ -34,8 +34,8 @@ annotation predicates (later), §7 the request and answer, §7.3 the capabilitie
 proposed, §13 the increments.
 
 **The route:** `POST /pattern` on the same `server_query` process that serves `/search`, `/resolve` and
-`/traverse`. Synchronous request/response, compact JSON, gzip when accepted; its own deadline (default 5 s) with
-a finalisation reserve; the 900 s content timeout far above it.
+`/traverse`. Synchronous request/response, compact JSON, gzip when accepted; its own deadline (default 60 s, cap
+600 s, §3.2) with a finalisation reserve; the 900 s content timeout above the cap.
 
 **What a request says.** A list of patterns (`dna` | `iupac`, later `protein`), a `mode`
 (`count` | `all_or_count` | `partial`), a `scope` (`suffix` | `any_offset`; `long` is implied for patterns longer

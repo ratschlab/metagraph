@@ -1,0 +1,12 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "max_contexts": 5,
+ "stop_at_threshold": true,
+ "output": {
+  "labels": "none"
+ }
+}

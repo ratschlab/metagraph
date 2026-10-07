@@ -1,0 +1,12 @@
+{
+ "patterns": [
+  {
+   "iupac": "GTGYCAGCMGCCGCGGTAA",
+   "id": "515F"
+  }
+ ],
+ "mode": "all_or_count",
+ "output": {
+  "labels": "none"
+ }
+}

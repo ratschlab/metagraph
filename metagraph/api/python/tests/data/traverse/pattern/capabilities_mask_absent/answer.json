@@ -1,0 +1,187 @@
+{
+ "algorithm_version": "traverse-0.2",
+ "attempts": {
+  "allowance_ms": 10000,
+  "bound": "min(seeds x the effective bounds.time_budget_ms + allowance_ms, hard_cap_ms) ms on the attempt's clock, which starts when the server read the request's header (time queued before that, all server threads busy, is not in it); hard_cap_ms = content_timeout_s x 1000 - 1000, the cap whatever the seeds' budgets (usage.bound.capped_by: content_timeout when it applied); seeds stop being walked at bound - max(allowance_ms / 2, the delivery reserve), which moves as the walk goes (the walk-until; the walk stops at its first poll that reads the clock after it, usage.stopped_at, such a poll being one in 8 of a walk's polls, every poll before a paced read's chunk or in the lookahead, and the poll before each seed; usage.bound.walk_until_ms states the walk-until in force when it stopped the walk, else the lowest walk-until seen: the lowest that such a poll compared with, not a lower one in force only between two such polls), and a response not written by the bound is not written (503 with usage). The bound itself is compared only at the delivery checks (every 4096 objects of a seed's result or of the MGT text, every 64 KiB of text, between compression blocks and before the transport): past it the attempt runs on until its next delivery check (then the 503) or its handler's return — the rest of the piece it was in when the bound passed and, when its walk had not stopped by then, the walk up to its next poll that reads the clock, the stopped seed's finalisation and the building of its result up to the first delivery check (deadline_check names these pieces) —, a run of no stated length (deadline_check.max_uninterruptible_ms: null; observed_max_uninterruptible_ms leaves some of these pieces out)",
+  "cancel": "POST /traverse/cancel",
+  "cancel_fields": [
+   "attempt_id",
+   "wait_ms",
+   "not_after_ms"
+  ],
+  "client_check_ms": 100,
+  "clock_skew_allowance_ms": 2000,
+  "content_timeout_s": 900,
+  "delivery_reserve": {
+   "account_per_text_byte": {
+    "graphlet": 50.0,
+    "json": 30.0
+   },
+   "build_mbps": 10.0,
+   "calibration": "starting estimates, replaced by this server's measurements: account_per_text_byte just below the smallest ratios measured on real responses (JSON details 33.5 to 1,344, graphlet 58.4 and more; 20 and 40 before feature level 4). They stay conservative, so a server's first large attempt of a detail can still be cut early until it has measured that detail on its own responses: on a warm SRA server the first tree and full attempts of a 16S beam (40 s bound) were cut at 3-5 s at feature levels 3 and 4 alike, the tree text measuring 115-129 account units a byte against the 30 assumed (an earlier figure of 18.2 s instead of 11.0 s came from a cold walk and did not reproduce); per-detail starting ratios were not adopted, one locus being too narrow a measurement to start a reserve from; stop_ms = chunk_target_ms + 950 (950 ms for the heads between two readings of the clock and the stopped seed's finalisation: 352 ms measured on a quiet SRA server, 1,001 ms on a loaded one, 1,699 ms once; + 200 before feature level 4; a longer one measured replaces it), the rest of a finalisation that grows with the result being covered by the margin while it runs faster than 4 x build_mbps; compress_mbps and build_mbps conservative (measured 460-670 and 13.6-51 MB/s on SRA at level 1)",
+   "compress_mbps": 50.0,
+   "coordinate_account_per_text_byte": 12,
+   "margin": 1.25,
+   "measured_account_per_text_byte": {
+    "full": null,
+    "graphlet": null,
+    "summary": null,
+    "tree": null
+   },
+   "measured_build_mbps": null,
+   "measured_compress_mbps": null,
+   "measured_stop_ms": null,
+   "measured_text_bytes": 1048576,
+   "rate_window": 16,
+   "rule": "reserve_ms = margin x ((T + E) / (compress x 1000) + E / (build x 1000)) + stop, rates in MB/s: T the exact bytes of the text of the seeds finished so far (each seed's result is written as text once built), E the text the seed being walked is estimated to write: ceil((A - C) / the account per text byte of the requested detail) + ceil(C / coordinate_account_per_text_byte), A its modelled account and C the part of it that is its record coordinates (output.coordinates: the block with its entries and occurrences, or the null form; 0 without them), both updated at every level's end — every byte of coordinate text costs at least coordinate_account_per_text_byte account bytes, whatever its digits —, stop the time from the walk-until to the walk's end (the walk stops at its first poll that reads the clock after the walk-until, then finalises the stopped seed): stop_ms, or the longest this server measured over its last rate_window attempts that walked past their walk-until (measured_stop_ms) when longer. Each of compress, build and the account per text byte is the configured value (compress_mbps, build_mbps, account_per_text_byte) until this server has measured its own on responses and seeds of at least measured_text_bytes: then the slowest rate, and the smallest ratio for the detail, of its last rate_window measurements (the measured_* fields, as of this document), and the attempt's own seeds' where those are more conservative; a ratio is measured as (A - C) / (the seed's text - the text its record coordinates wrote, counted exactly from digits and punctuation) on a rest of at least measured_text_bytes, so that a request with coordinates measures what the same walk without them would. A response is still not delivered (503) when it is built or compressed more slowly than the rates used allow for with the margin, a seed writes more text than its estimate, or the walk ends later after its walk-until than stop",
+   "stop_ms": 1000
+  },
+  "fields": [
+   "attempt_id",
+   "budget_id",
+   "locus_id",
+   "not_after_ms",
+   "expect_server_instance"
+  ],
+  "hard_cap_ms": 899000,
+  "id_pattern": "^[A-Za-z0-9._:-]{1,128}$",
+  "instance": "expect_server_instance (with attempt_id; a string matching id_pattern, as every server_instance does): a request naming another server_instance than this process's is refused before anything runs, checked first (ahead of a duplicate id and of not_after_ms), 409 {error, state: \"instance_mismatch\", expect_server_instance, server_instance, the ids given, not_after_ms if given}: tombstones and the holds of finished attempts live in memory, so a restarted process (a new server_instance) has none, and a delayed copy of a cancelled or finished request would otherwise run there. A value that is not such a string (null, empty, longer than 128 characters, a character outside the pattern) and the field without attempt_id are a 400 naming the field, without usage: nothing runs and nothing is registered (the CLI prints that error, exit status 1); a server below feature level 5 refuses the unknown field (400)",
+  "not_after": "not_after_ms (Unix epoch ms, an integer in [0, 2^53 - 1], with or without attempt_id): a request whose not_after_ms is earlier than this server's clock when its handler starts is refused, 409 {error, state: \"expired\", not_after_ms, server_time_ms, the ids given, server_instance}, and never runs (no usage, nothing registered: a later GET /traverse/attempt answers 404); the check is strict, no allowance added. It is the last of the refusals, all made under one lock: a request naming another expect_server_instance is refused first (409 instance_mismatch), then one whose attempt_id is running, retained, held or tombstoned here, whatever its not_after_ms (the duplicate's 409 {error, attempt}; a held or tombstoned id's refusal extends that hold, as suppression and release_rule state), so an expired 409 means that no attempt with that id existed on this server_instance when it was judged, and none can start here later while this server's clock does not step back below not_after_ms. A ledger treats an attempt it has no answer for as one that cannot start subsequently once its own clock passes not_after_ms + clock_skew_allowance_ms (an unanswered request may already be running: bound_ms covers its walk and its delivery), and as past its bound once its clock passes that + bound_ms — apart from what it runs past its bound, up to its next delivery check, a run of no stated length (bound, release_rule)",
+  "release_rule": "A ledger may release an attempt's capacity before it finished only on a 404 with tombstone: true and covers_admission: true from the same server_instance, for an attempt it sent with exactly that not_after_ms and with expect_server_instance equal to that server_instance (a copy reaching a restarted process or another server is then refused, instance_mismatch). An attempt sent without not_after_ms, or without expect_server_instance, is never released early on a tombstone. Otherwise it releases only on a finished state (GET /traverse/attempt, a cancel's 404 or 200 with state finished, the 409 refusing a copy of the request whose attempt — the id's state, as GET answers it, with its attempt_id and server_instance — says state finished, or the response; replay-safe only as stated next), on an expired 409 (below), or once its own clock passes not_after_ms + clock_skew_allowance_ms + bound_ms (the clock release, below). A finished attempt's id stays refused (409) while it is retained (retention_s, retention_count) and, for an attempt sent with not_after_ms, until this server's clock reads later than not_after_ms + clock_skew_allowance_ms, at most tombstone_max_s after it finished or after its latest refused copy: a copy of the request refused with its own not_after_ms extends the hold to that + clock_skew_allowance_ms, at most tombstone_max_s from the copy's arrival (held among the tombstones, on both clocks, and never dropped early, so beyond retention_count if need be: their number is at most the finishes and refused copies within tombstone_max_s). The hold is this process's, in memory: a restarted process (a new server_instance) holds none, and a copy of the request reaching it runs there unless it was sent with expect_server_instance (then it is refused, 409 instance_mismatch). So a finished state is replay-safe — no copy of the request runs after it, on this process or a restarted one — only for an attempt sent with expect_server_instance equal to this server_instance and with not_after_ms, when not_after_ms + clock_skew_allowance_ms lies within tombstone_max_s of the finish: a ledger that releases on a finished state before its own clock passes not_after_ms + clock_skew_allowance_ms + bound_ms pins the instance, as for a tombstone. A finished state of an attempt sent without expect_server_instance assumes that no copy of the request reaches a restarted process (or another server at the same address) while it could still be admitted there; one sent without not_after_ms, or with one further out, assumes that no copy of the request arrives after the attempt left retention. An expired 409 (state: expired) for an attempt sent with exactly that not_after_ms — from the server_instance it named in expect_server_instance, when it named one — releases it: this server checks the id's registration (running, retained, held, tombstoned) before the expiry, under one lock (not_after), so no copy of the request was running or registered on that server_instance when it was judged, and none can start there later. It settles nothing: an earlier copy may have run, finished and left retention, and its usage is then unknown. It assumes that this server's clock does not step back below not_after_ms (the 409's server_time_ms - not_after_ms is the step it survives) and, for an attempt sent without expect_server_instance, that no copy of the request reaches another server at the same address while it could still be admitted there. The clock release takes the attempt as stopped once the ledger's clock passes not_after_ms + clock_skew_allowance_ms + bound_ms: it is then past its bound apart from what it runs past it until its next delivery check — the rest of the piece the bound fell into and, when its walk had not stopped, the walk up to its next poll that reads the clock, the stopped seed's finalisation and the building up to that check (bound) —, a run of no stated length (deadline_check.max_uninterruptible_ms is null, and observed_max_uninterruptible_ms is an observation, not a margin). A GET /traverse/attempt that still answers running or stopping after that instant shows that run still going: a ledger that must not let two attempts overlap keeps polling while it answers so, or adds a margin of its own. A 429, a cancel's 200 with state stopping, a 409 whose attempt says running or stopping or is a tombstone, and a 409 instance_mismatch release nothing. Assumed: the ledger's clock is within clock_skew_allowance_ms of this server's, this server's clock does not step back by more than that, nothing between the ledger and the server rewrites a request's attempt_id, not_after_ms or expect_server_instance, no copy of the request reaches another server that serves the same ledger (a server knows only its own tombstones and holds; expect_server_instance refuses such a copy only where it names that server's instance), and, for the clock release, that the attempt's run past its bound has ended by then",
+  "retention_count": 10000,
+  "retention_s": 3600,
+  "server_instance": "a1aa5647e82fa438",
+  "state": "GET /traverse/attempt/{attempt_id}",
+  "suppression": "POST /traverse/cancel of an id no attempt of this process holds tombstones it (404, tombstone: true): a request with the id arriving while the tombstone is live is refused (409, its attempt object carrying the tombstone) and never runs. The tombstone is held at least retention_s (3600 s) from the cancel and, when the cancel names the request's not_after_ms, until this server's clock reads later than not_after_ms + clock_skew_allowance_ms, at most tombstone_max_s (86400 s) from the cancel. A repeated cancel, and a refused copy of the request (with its own not_after_ms), never shorten it: each extends it to at least retention_s from then and to its own not_after_ms + clock_skew_allowance_ms within the cap. It is held while either clock says it is live: the steady clock for the duration computed when it was set or extended, and the wall clock while it reads at most suppressed_until_ms (inclusive). Every tombstone answer (the cancel's 404, a repeated cancel's 404, GET /traverse/attempt's 404 and the refused request's 409) states suppressed_until_ms (that last instant, Unix epoch ms on this server's clock), not_after_ms (the one it was judged against: for the refused request's 409 its own, absent when it has none; for a cancel its own, else, as for GET, the largest named for the id; absent when none was), covers_admission (true iff a not_after_ms was judged against and suppressed_until_ms >= not_after_ms + clock_skew_allowance_ms: no copy of that request can start on this server_instance, since while the tombstone is live it is refused and once it is gone this server's clock has read later than suppressed_until_ms, so its not_after_ms has passed on the clock the strict check reads) and, when false, covers_admission_reason (no_not_after_ms | beyond_tombstone_max). What a clock step can do: a backward step of this server's wall clock by more than clock_skew_allowance_ms after the tombstone expired can make a copy's not_after_ms lie in the future again, so it could be admitted (the same assumption the ledger's skew allowance makes); a forward step does not shorten the hold. A cancel of an unknown id is tombstoned only while fewer than retention_count (10000) tombstones and finished attempts held past their retention (release_rule) are held; beyond that it is refused (429, tombstone: false, reason: tombstones_full) and promises nothing",
+  "tombstone_max_s": 86400
+ },
+ "compression_level": 1,
+ "content_encodings": [
+  "gzip",
+  "deflate"
+ ],
+ "deadline_check": {
+  "chunk_target_ms": 50,
+  "max_uninterruptible_ms": null,
+  "observed_max_uninterruptible_ms": 0,
+  "rule": "under a deadline — the seed's bounds.time_budget_ms (at depth > 0 and in a derivation) and, with attempt_id, the attempt's walk-until — every /traverse annotation read (a level's fetch, the lookahead, a seed's validation, a derivation's window) that the deadline may fall into is decoded in chunks, the deadline checked before each: a read is one piece when, at the slowest per-row time the request has seen, it would take less than 1/64 of the time left (rows more than 64 times slower than any seen before can make such a read overrun); else its first chunk is at most 8 rows, each next one at most 4 times the previous and sized at the rate the previous measured to take chunk_target_ms (or the time left), taken in the walk's order (the rows of one path share their row-diff decoding), and the rest is one piece once predicted at that rate to take less than 1/4 of the time left. A read far from its deadline is thus one piece, as before, and a cancel or a gone client is seen after it. A seed's validation is stopped by the attempt only, never by its own time budget. One chunk, at least one row, is uninterruptible, and no time bound on one piece is stated (max_uninterruptible_ms: null, and it stays null: checkpoints inside reads bound the index operations of a piece, not its wall time, which page faults and scheduling leave open); observed_max_uninterruptible_ms is the longest single piece of this process (below), a whole read far from its deadline included, an observation, not a bound. A chunked read returns exactly what one read would (the same rows, caches and counters) unless the deadline stops it, and a stopped read censors the walk at the read (the unchunked walk ran it to its end, past the deadline, before its next check). The lookahead's chains (graph steps along unbranched runs, up to min(annotation.batch_kmers, the radius left) per head of a level) read the same deadlines every 16 graph steps and before each chain's key mapping, and a stop ends the lookahead there. The text of each seed's result and of the response is written under the attempt's delivery check every 64 KiB, a larger piece copied in pieces up to the next check; the preparation of one token (one JSON value, e.g. a graphlet string of many MB, is escaped whole before it is copied) is not interrupted, and the longest time between two such checks is part of observed_max_uninterruptible_ms. Not chunked: /resolve, the mapping of a seed's k-mers, the seed phase's own processing (resolving and checking the named labels, linear in their bytes, which no server limit caps), a head's processing (checked every work_check_interval units), a chain's key mapping (one call, at most annotation.batch_kmers nodes), a read's preparation before its first chunk (its cache lookups and the ordering of its keys in the walk's order, n log n in them: a lookahead read has up to a level's heads x batch_kmers keys), the lookahead's clearing once it outgrows its bound (linear in its entries), a seed's finalisation and summary, the building of a seed's JSON tree between the attempt's delivery checks (every 4096 objects), and the transport; chunk_target_ms 0: one piece per read. observed_max_uninterruptible_ms counts the reads and chunks, the head pieces (the walk between two readings of the clock for a stop, its reads excluded: a lookahead's chains between their polls included) and the delivery gaps; it leaves out the mapping of a seed's k-mers, the seed phase's own processing, a derivation's steps and a seed's finalisation (each seed's timing.deadline.longest_piece names its longest piece of any kind). A cancel is therefore seen up to one piece late; a walk-until at the first poll that reads the clock after it (one in 8 of a walk's polls — the one before a head —, every poll before a paced read's chunk or in the lookahead, and the poll before each seed), so up to 7 heads later; and the attempt's bound, which only the delivery checks compare, is passed by the processing up to the next of them: the rest of the piece it fell into and, when the walk had not stopped, the walk up to that poll, the stopped seed's finalisation and the building up to the next delivery check (attempts.bound)"
+ },
+ "feature_level": 6,
+ "features": [
+  "search",
+  "align",
+  "resolve",
+  "traverse",
+  "attempts",
+  "pattern"
+ ],
+ "graphs": null,
+ "mode": "single",
+ "pattern": {
+  "alphabet": "$ACGT",
+  "annotation": "budgeted",
+  "available": false,
+  "caps": {
+   "max_anchors": 1000,
+   "max_contexts": 10000,
+   "max_patterns": 16,
+   "max_steps": 100000000,
+   "min_information_bits": 24,
+   "time_budget_ms": 600000
+  },
+  "caps_rule": "each cap is the maximum of its request field: a larger request value is lowered to it and listed in limits.clamped; each is also the field's default, except time_budget_ms, whose default is default_time_budget_ms; max_patterns is not lowered: a longer list is refused",
+  "default_mode": "all_or_count",
+  "default_projection": "none",
+  "default_scope": "any_offset",
+  "default_strands": "both",
+  "default_time_budget_ms": 60000,
+  "finalize_reserve_ms": 250,
+  "graph_cleaned": "unknown",
+  "graph_mode": "basic",
+  "k": 31,
+  "kinds": [
+   "dna",
+   "iupac"
+  ],
+  "kinds_later_increment": [
+   "protein"
+  ],
+  "long_patterns": "anchors_counted",
+  "mask": "absent",
+  "modes": [
+   "count",
+   "all_or_count",
+   "partial"
+  ],
+  "pattern_contract_version": 1,
+  "placement": "record",
+  "projections": [
+   "none"
+  ],
+  "projections_later_increment": [
+   "all",
+   "predicate_only"
+  ],
+  "records_shorter_than_k": "not_indexed",
+  "resident_only": true,
+  "scopes": [
+   "suffix",
+   "any_offset"
+  ],
+  "scopes_by_graph_mode": {
+   "basic": [
+    "suffix",
+    "any_offset"
+   ],
+   "canonical": [
+    "suffix",
+    "any_offset"
+   ],
+   "primary": [
+    "any_offset"
+   ]
+  },
+  "strand_stated": true,
+  "strands": [
+   "both",
+   "forward",
+   "reverse"
+  ],
+  "support": "record_verified",
+  "unavailable_reason": "mask_required"
+ },
+ "ready": true,
+ "release": "fixtures-mini_refseq",
+ "resolve": {
+  "time_budget": {
+   "accepted": true,
+   "check_kmers": 4096,
+   "check_labels": 4096,
+   "default": null,
+   "finalize_reserve_configurable": false,
+   "finalize_reserve_ms": 250,
+   "knob": "bounds.time_budget_ms",
+   "max_time_ms": 30000,
+   "rule": "opt-in: a request without bounds.time_budget_ms runs without a deadline, as before, whatever max_time_ms; with it, a number of ms above finalize_reserve_ms (else 400), lowered to max_time_ms when that is not 0 (stated in limits.clamped), the deadline starting when the request's body is parsed. The work stops at the budget less finalize_reserve_ms: the deadline is read between two batches of annotation rows (a discovery's pass and the explicit labels' priming: the first of 64 rows, then up to 4,096 rows or about 64 MiB of rows) and before every check_kmers k-mers of the explicit labels' hits, which are then fetched in pieces of that many k-mers. A stop answers 200 with stop {phase (rows | support), reason time, resolved_kmers, query_kmers, resolved_bp, query_bp, remainder_from_bp, message}: the answer is then exactly the resolve of the sequence's first resolved_kmers k-mers (its num_kmers, graph_runs, labels, labels_truncated, candidates and selection are those of that prefix; a run ending at resolved_kmers may continue past it), resolved_kmers being the first k-mer in the graph whose labels were not read (the k-mers before it absent from the graph are resolved); an explicit selection whose interval ends past the prefix or names a label the prefix did not profile is not made (selection: null); without a stop, stop is null, and limits {time_budget_ms, finalize_reserve_ms, clamped} is stated either way. The answer is built within the reserve: the loops over its labels after the work and its JSON read the whole budget every check_labels labels or objects, its text every 64 KiB and its compression every block; past the budget the answer is 503 {error, code: deadline}, never a partial one. Not polled: the parse of the request, the mapping of the query's k-mers (one call, linear in the query, which max_query_bp bounds), the resolution of explicit labels and their query's setup (linear in their bytes; no server limit caps their number), one row batch's decode and accumulation, a discovery's pass setup (linear in the k-mers), one piece of hits (on a direct-access annotation check_kmers x labels cell reads) and its accumulation, the ranking of a discovery's labels and the sort of the candidates (n log n), the seed selection, and the transport: a stop comes up to one such piece after the work deadline, and an overrun of the reserve by them answers 503",
+   "stop_phases": [
+    "rows",
+    "support"
+   ]
+  }
+ },
+ "routes": {
+  "align": "POST /align",
+  "attempt": "GET /traverse/attempt/{attempt_id}",
+  "cancel": "POST /traverse/cancel",
+  "capabilities": "GET /capabilities",
+  "column_labels": "GET /column_labels",
+  "pattern": "POST /pattern",
+  "resolve": "POST /resolve",
+  "search": "POST /search",
+  "stats": "GET /stats",
+  "traverse": "POST /traverse",
+  "traverse_capabilities": "GET /traverse/capabilities"
+ },
+ "schema_version": 1,
+ "server_instance": "a1aa5647e82fa438"
+}

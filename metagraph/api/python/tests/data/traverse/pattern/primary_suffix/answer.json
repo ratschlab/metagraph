@@ -1,0 +1,42 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "primary",
+  "index_fp": null,
+  "index_ns": "mini_primary",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": false
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_contexts": 10000,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "count",
+ "output": null,
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "anchor_information_bits": null,
+   "error": {
+    "code": "scope_unsupported",
+    "message": "pattern: scope suffix is not served on a primary graph (the suffix of a virtual k-mer is the prefix of a stored one); use scope any_offset"
+   },
+   "id": null,
+   "information_bits": 40.0,
+   "kind": "dna",
+   "length": 20,
+   "pattern": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 0.008541
+ }
+}

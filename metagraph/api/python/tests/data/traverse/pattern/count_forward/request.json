@@ -1,0 +1,9 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "mode": "count",
+ "strands": "forward"
+}

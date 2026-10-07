@@ -1,0 +1,374 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_contexts": 10000,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "none"
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "10": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "11": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "12": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "5": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "6": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "7": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "8": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "9": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 13
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 13
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "unit": "graph_contexts",
+     "value": 26
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "515F",
+   "information_bits": 36.0,
+   "kind": "iupac",
+   "length": 19,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "GTGYCAGCMGCCGCGGTAA",
+   "results": [
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "CCTTCGTATTACCGCGGCTGCTGGCACGAAG",
+     "node": 186207,
+     "offset": 8,
+     "row": 186206,
+     "strand": "-"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "ACTTCGTGCCAGCAGCCGCGGTAATACGAAG",
+     "node": 190528,
+     "offset": 5,
+     "row": 190527,
+     "strand": "+"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "CGGCTAACTTCGTGCCAGCAGCCGCGGTAAT",
+     "node": 309925,
+     "offset": 11,
+     "row": 309924,
+     "strand": "+"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "GCACCCTTCGTATTACCGCGGCTGCTGGCAC",
+     "node": 706834,
+     "offset": 12,
+     "row": 706833,
+     "strand": "-"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "CCCTTCGTATTACCGCGGCTGCTGGCACGAA",
+     "node": 933186,
+     "offset": 9,
+     "row": 933185,
+     "strand": "-"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "AACTTCGTGCCAGCAGCCGCGGTAATACGAA",
+     "node": 948520,
+     "offset": 6,
+     "row": 948519,
+     "strand": "+"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "GCTAACTTCGTGCCAGCAGCCGCGGTAATAC",
+     "node": 1370197,
+     "offset": 9,
+     "row": 1370196,
+     "strand": "+"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "CCGGCTAACTTCGTGCCAGCAGCCGCGGTAA",
+     "node": 1478867,
+     "offset": 12,
+     "row": 1478866,
+     "strand": "+"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "CGTATTACCGCGGCTGCTGGCACGAAGTTAG",
+     "node": 1516034,
+     "offset": 4,
+     "row": 1516033,
+     "strand": "-"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "CACCCTTCGTATTACCGCGGCTGCTGGCACG",
+     "node": 1712966,
+     "offset": 11,
+     "row": 1712965,
+     "strand": "-"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "CTAACTTCGTGCCAGCAGCCGCGGTAATACG",
+     "node": 1884073,
+     "offset": 8,
+     "row": 1884072,
+     "strand": "+"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "ATTACCGCGGCTGCTGGCACGAAGTTAGCCG",
+     "node": 2267768,
+     "offset": 1,
+     "row": 2267767,
+     "strand": "-"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "TATTACCGCGGCTGCTGGCACGAAGTTAGCC",
+     "node": 2840742,
+     "offset": 2,
+     "row": 2840741,
+     "strand": "-"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "CTTCGTATTACCGCGGCTGCTGGCACGAAGT",
+     "node": 4221938,
+     "offset": 7,
+     "row": 4221937,
+     "strand": "-"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "CTTCGTGCCAGCAGCCGCGGTAATACGAAGG",
+     "node": 4223760,
+     "offset": 4,
+     "row": 4223759,
+     "strand": "+"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "GTATTACCGCGGCTGCTGGCACGAAGTTAGC",
+     "node": 4640626,
+     "offset": 3,
+     "row": 4640625,
+     "strand": "-"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "ACCCTTCGTATTACCGCGGCTGCTGGCACGA",
+     "node": 4693939,
+     "offset": 10,
+     "row": 4693938,
+     "strand": "-"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "TAACTTCGTGCCAGCAGCCGCGGTAATACGA",
+     "node": 4748585,
+     "offset": 7,
+     "row": 4748584,
+     "strand": "+"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "TTACCGCGGCTGCTGGCACGAAGTTAGCCGG",
+     "node": 4877886,
+     "offset": 0,
+     "row": 4877885,
+     "strand": "-"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "TTCGTGCCAGCAGCCGCGGTAATACGAAGGG",
+     "node": 5575177,
+     "offset": 3,
+     "row": 5575176,
+     "strand": "+"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "TCGTGCCAGCAGCCGCGGTAATACGAAGGGT",
+     "node": 5980026,
+     "offset": 2,
+     "row": 5980025,
+     "strand": "+"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "GTGCCAGCAGCCGCGGTAATACGAAGGGTGC",
+     "node": 6676806,
+     "offset": 0,
+     "row": 6676805,
+     "strand": "+"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "GGCTAACTTCGTGCCAGCAGCCGCGGTAATA",
+     "node": 6857798,
+     "offset": 10,
+     "row": 6857797,
+     "strand": "+"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "TTCGTATTACCGCGGCTGCTGGCACGAAGTT",
+     "node": 7614572,
+     "offset": 6,
+     "row": 7614571,
+     "strand": "-"
+    },
+    {
+     "instance": "GTGCCAGCAGCCGCGGTAA",
+     "kmer": "CGTGCCAGCAGCCGCGGTAATACGAAGGGTG",
+     "node": 7877188,
+     "offset": 1,
+     "row": 7877187,
+     "strand": "+"
+    },
+    {
+     "instance": "TTACCGCGGCTGCTGGCAC",
+     "kmer": "TCGTATTACCGCGGCTGCTGGCACGAAGTTA",
+     "node": 8171877,
+     "offset": 5,
+     "row": 8171876,
+     "strand": "-"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 26,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.210583
+   },
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "ranges_visited": 151,
+    "steps": 151
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 0.2185
+ }
+}

@@ -1,0 +1,14 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  },
+  {
+   "dna": "GCCGAATTCGGC"
+  }
+ ],
+ "scope": "suffix",
+ "output": {
+  "labels": "none"
+ }
+}

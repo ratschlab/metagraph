@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "iupac": "NNNNNNNNNNNNGGTTTGGCGATC",
+   "id": "heavy"
+  }
+ ],
+ "mode": "partial",
+ "time_budget_ms": 251,
+ "output": {
+  "labels": "none"
+ }
+}

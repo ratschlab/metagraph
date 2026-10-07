@@ -1,0 +1,25 @@
+{
+ "patterns": [
+  {
+   "dna": "ACGUACGTACGTACGTACGT",
+   "id": "u"
+  },
+  {
+   "dna": "ACGRACGTACGTACGTACGT",
+   "id": "r"
+  },
+  {
+   "iupac": "ACGTXACGTACGTACGTACG",
+   "id": "x"
+  },
+  {
+   "dna": "",
+   "id": "empty"
+  },
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "ok"
+  }
+ ],
+ "mode": "count"
+}

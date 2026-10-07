@@ -1,0 +1,4 @@
+{
+ "code": "later_increment",
+ "error": "request.output.labels: \"all\" (labels read from the annotation) in a later increment; this increment serves \"none\""
+}

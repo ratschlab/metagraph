@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  },
+  {
+   "dna": "CGGAATGGCTCATCACGATC"
+  }
+ ],
+ "mode": "partial",
+ "max_steps": 50,
+ "output": {
+  "labels": "none"
+ }
+}

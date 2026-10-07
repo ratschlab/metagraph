@@ -1,0 +1,11 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA"
+  },
+  {
+   "dna": "GATAGAGAACTCGAGAGAGGTTCCACCTTCATATTGAATT"
+  }
+ ],
+ "mode": "count"
+}

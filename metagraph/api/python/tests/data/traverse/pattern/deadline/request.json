@@ -1,0 +1,16 @@
+{
+ "patterns": [
+  {
+   "iupac": "NNNNNNNNNNNNGGTTTGGCGATC",
+   "id": "heavy"
+  },
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "time_budget_ms": 251,
+ "output": {
+  "labels": "none"
+ }
+}

@@ -1,0 +1,12 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "mode": "partial",
+ "time_budget_ms": 251,
+ "output": {
+  "labels": "none"
+ }
+}

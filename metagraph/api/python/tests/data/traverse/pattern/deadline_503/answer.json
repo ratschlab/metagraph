@@ -1,0 +1,4 @@
+{
+ "error": "pattern: the answer could not be written within time_budget_ms (251 ms, the finalisation reserve of 250 ms included): nothing partial is sent",
+ "code": "deadline"
+}

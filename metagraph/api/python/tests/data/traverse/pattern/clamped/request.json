@@ -1,0 +1,11 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "mode": "count",
+ "max_contexts": 1000000,
+ "max_steps": 1000000000,
+ "time_budget_ms": 1000000
+}

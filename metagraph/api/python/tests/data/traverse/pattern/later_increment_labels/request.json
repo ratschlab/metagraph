@@ -1,0 +1,10 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "output": {
+  "labels": "all"
+ }
+}
