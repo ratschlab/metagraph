@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shlex
 import shutil
 import signal
@@ -2107,6 +2108,92 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(3, len(out['labels']))
         self.assertEqual(1, len(out['candidates']))
 
+    def test_api_resolve_deadline(self):
+        """Milestone 1b (SPEC §4.5): bounds.time_budget_ms on /resolve. The `resolve` block on
+        both GET routes; a budget a microsecond above the finalisation reserve stops the work
+        before its first row (200: the stop block, the resolve of the empty prefix); one at the
+        reserve is a 400 naming the field; one above the cap is lowered to it and stated, the
+        answer otherwise the unbudgeted one; the library and the CLI (no cap) alike."""
+        url = f'http://{self.host}:{self.port}'
+        probe = requests.get(url + '/traverse/capabilities').json()
+        server = requests.get(url + '/capabilities').json()
+        self.assertEqual(probe['resolve'], server['resolve'])
+        t = probe['resolve']['time_budget']
+        self.assertTrue(t['accepted'])
+        self.assertEqual('bounds.time_budget_ms', t['knob'])
+        self.assertIsNone(t['default'])
+        self.assertEqual(probe['max_time_ms'], t['max_time_ms'])
+        self.assertEqual(250, t['finalize_reserve_ms'])
+        self.assertEqual(['rows', 'support'], t['stop_phases'])
+        self.assertIn('Not polled', t['rule'])
+        reserve = t['finalize_reserve_ms']
+        n = BLOCK - K + 1
+        for request in ({'sequence': self.element, 'discover': {'max_labels': 10, 'kind': 'header'}},
+                        {'sequence': self.element, 'labels': ['acc1', 'acc2', 'acc3']}):
+            what = json.dumps(request)[-60:]
+            ret = self._post('resolve', request)
+            self.assertEqual(200, ret.status_code, ret.text)
+            plain = ret.json()
+            self.assertNotIn('stop', plain, what)
+            self.assertNotIn('limits', plain, what)
+            ret = self._post('resolve', dict(request, bounds={'time_budget_ms': reserve + 0.001}))
+            self.assertEqual(200, ret.status_code, ret.text)
+            out = ret.json()
+            stop = out['stop']
+            self.assertEqual(('rows', 'time', 0, n, 0, BLOCK, 0),
+                             (stop['phase'], stop['reason'], stop['resolved_kmers'],
+                              stop['query_kmers'], stop['resolved_bp'], stop['query_bp'],
+                              stop['remainder_from_bp']), what)
+            self.assertIn('exactly the resolve', stop['message'])
+            self.assertEqual({'time_budget_ms': reserve + 0.001, 'finalize_reserve_ms': reserve,
+                              'clamped': []}, out['limits'])
+            # the resolve of the empty prefix: no k-mer, no run, no candidate; explicit labels
+            # listed with no support, a discovery's none
+            self.assertEqual((0, [], []), (out['num_kmers'], out['graph_runs'], out['candidates']))
+            self.assertEqual([(l['label'], 0, []) for l in plain['labels']] if 'labels' in request
+                             else [], [(l['label'], l['kmers_supported'], l['runs'])
+                                       for l in out['labels']], what)
+            # above the cap: lowered to it, stated, and the answer is the unbudgeted one
+            ret = self._post('resolve', dict(request, bounds={'time_budget_ms': 10 ** 7}))
+            self.assertEqual(200, ret.status_code, ret.text)
+            big = ret.json()
+            self.assertIsNone(big.pop('stop'))
+            self.assertEqual({'time_budget_ms': t['max_time_ms'], 'finalize_reserve_ms': reserve,
+                              'clamped': [{'field': 'bounds.time_budget_ms',
+                                           'requested': 10 ** 7,
+                                           'effective': t['max_time_ms']}]}, big.pop('limits'))
+            big.pop('timing')
+            plain.pop('timing')
+            self.assertEqual(plain, big, what)
+        # at the reserve, or not a number: refused, naming the field
+        for bad in (reserve, -1, '1000'):
+            ret = self._post('resolve', {'sequence': self.element, 'labels': ['acc1'],
+                                         'bounds': {'time_budget_ms': bad}})
+            self.assertEqual(400, ret.status_code, ret.text)
+            self.assertIn('bounds.time_budget_ms', ret.json()['error'])
+        # the library passes it through
+        client = graphlet_lib.TraverseClient(self.host, self.port)
+        out = client.resolve(self.element, labels=['acc1'], time_budget_ms=reserve + 0.001)
+        self.assertEqual((0, n), (out['stop']['resolved_kmers'], out['stop']['query_kmers']))
+        out = client.resolve(self.element, labels=['acc1'], time_budget_ms=10000)
+        self.assertIsNone(out['stop'])
+        self.assertEqual(n, out['num_kmers'])
+        # the CLI: the same answers, no cap
+        out, rc = self._traverse({'sequence': self.element, 'labels': ['acc1'],
+                                  'bounds': {'time_budget_ms': reserve + 0.001}}, resolve=True)
+        self.assertEqual(0, rc)
+        self.assertEqual(('rows', 0, n), (out['stop']['phase'], out['stop']['resolved_kmers'],
+                                          out['stop']['query_kmers']))
+        out, rc = self._traverse({'sequence': self.element, 'labels': ['acc1'],
+                                  'bounds': {'time_budget_ms': 10 ** 7}}, resolve=True)
+        self.assertEqual(0, rc)
+        self.assertEqual(({'time_budget_ms': 10 ** 7, 'finalize_reserve_ms': reserve,
+                           'clamped': []}, None), (out['limits'], out['stop']))
+        out, rc = self._traverse({'sequence': self.element, 'labels': ['acc1'],
+                                  'bounds': {'time_budget_ms': reserve}}, resolve=True)
+        self.assertEqual(1, rc)
+        self.assertIn('bounds.time_budget_ms', out['error'])
+
     def test_api_traverse(self):
         ret = self._post('traverse', {
             'seeds': [{'sequence': self.element, 'labels': ['acc1', 'acc2', 'acc3']}],
@@ -2542,10 +2629,11 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual('gzip', ret.headers.get('Content-Encoding'))
         c = ret.json()
         # 'pattern': the block, feature and route of POST /pattern (DESIGN-pattern-search.md
-        # §7.3; test_pattern.py checks the block itself)
+        # §7.3; test_pattern.py checks the block itself); 'resolve': the block of /resolve's
+        # deadline (SPEC §4.5; test_api_resolve_deadline checks it)
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
                           'content_encodings', 'deadline_check', 'feature_level', 'features',
-                          'graphs', 'mode', 'pattern', 'ready', 'release', 'routes',
+                          'graphs', 'mode', 'pattern', 'ready', 'release', 'resolve', 'routes',
                           'schema_version', 'server_instance'}, set(c))
         self.assertEqual((6, 'single', None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['ready'],
@@ -2789,6 +2877,120 @@ def _instant(text):
     import datetime
     return datetime.datetime.strptime(text, '%Y-%m-%dT%H:%M:%S.%fZ').replace(
         tzinfo=datetime.timezone.utc).timestamp()
+
+
+RESOLVE_BASE_BINARY = os.environ.get('METAGRAPH_BASE_BINARY', '')
+
+
+@unittest.skipUnless(RESOLVE_BASE_BINARY and os.path.isfile(RESOLVE_BASE_BINARY),
+                     "$METAGRAPH_BASE_BINARY (a binary before /resolve's deadline) is not set")
+class TestTraverseResolveRegression(TestTraverseBase):
+    """Milestone 1b (SPEC §4.5): a /resolve without bounds.time_budget_ms is answered byte for
+    byte as by the binary before the deadline ($METAGRAPH_BASE_BINARY, e.g. the build of
+    804731aa), apart from timing.elapsed_ms: the resolve requests of this file and their
+    refusals, on the server (with and without gzip) and on the CLI."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.servers = {}
+        for name, binary in (('base', RESOLVE_BASE_BINARY), ('new', METAGRAPH)):
+            port = _free_port()
+            log = open(f'{cls.tempdir.name}/resolve-{name}.log', 'w')
+            process = subprocess.Popen(
+                shlex.split(binary) + ['server_query', '-i', cls.graph, '-a', cls.anno,
+                                       '--port', str(port), '--address', '127.0.0.1', '-p', '2',
+                                       '--index-name', 'tiny', '--index-manifest', cls.manifest],
+                stdout=log, stderr=subprocess.STDOUT)
+            url = f'http://127.0.0.1:{port}'
+            for _ in range(600):
+                try:
+                    if requests.get(url + '/traverse/capabilities', timeout=2).ok:
+                        break
+                except requests.exceptions.RequestException:
+                    pass
+                time.sleep(0.1)
+            cls.servers[name] = (binary, url, process, log)
+
+    @classmethod
+    def tearDownClass(cls):
+        for _, _, process, log in cls.servers.values():
+            process.kill()
+            process.wait()
+            log.close()
+        super().tearDownClass()
+
+    def _requests(self):
+        e = self.element
+        with open(os.path.join(REPO, 'docs', 'SPEC-labeled-traversal-core.md'),
+                  encoding='utf-8') as f:
+            spec = f.read()
+        section = spec[spec.index('### 4.1 Request'):]
+        block = section[section.index('```json') + len('```json'):]
+        example = dict(json.loads(block[:block.index('```')]), sequence=e)
+        explicit_example = {k: v for k, v in example.items() if k != 'discover'}
+        explicit_example['labels'] = ['acc1']
+        return [
+            {'sequence': e, 'discover': {'max_labels': 10, 'kind': 'header'}},
+            {'sequence': self.left1 + e, 'labels': ['acc1', 'acc2', 'acc3'],
+             'select': {'policy': 'max_support', 'max_seeds': 2, 'min_block_bp': K}},
+            {'sequence': e, 'labels': ['acc1', 'acc2', 'acc3']},
+            {'sequence': e, 'discover': {'max_labels': 10}},
+            example,
+            explicit_example,
+            {'sequence': e, 'labels': ['acc1', 'acc3'], 'support': 'trace', 'run_format': 'rle'},
+            {'sequence': self.left2 + e + self.right2,
+             'discover': {'max_labels': 2, 'kind': 'header'}, 'support': 'trace',
+             'select': {'policy': 'longest_first', 'max_labels_per_seed': 1}},
+            {'sequence': self.left1 + e + self.right2, 'discover': {'max_labels': 1},
+             'select': {'policy': 'max_support', 'label_order': 'kmers_supported'}},
+            {'sequence': e, 'labels': ['acc1'],
+             'select': {'policy': 'explicit',
+                        'seeds': [{'kmer_interval': [0, 10], 'labels': ['acc1']}]}},
+            {'sequence': e[:40] + 'N' * 5 + e[45:], 'labels': ['acc2'],
+             'bounds': {'max_query_bp': 1000}},
+            # refusals
+            {'sequence': e, 'labels': ['acc1'], 'not_after_ms': 1},
+            {'sequence': e, 'labels': ['nope']},
+            {'sequence': 'ACGT', 'labels': ['acc1']},
+            {'sequence': e, 'labels': ['acc1'], 'discover': {}},
+            {'bogus': 1},
+            {'sequence': e, 'labels': ['acc1'], 'bounds': {'max_query_bp': 10}},
+            {'sequence': e, 'labels': ['acc1'], 'select': {'policy': 'explicit'}},
+        ]
+
+    @staticmethod
+    def _untimed(text):
+        return re.sub(r'"elapsed_ms":[-+0-9.eE]+', '"elapsed_ms":0', text)
+
+    def test_server_answers_as_before(self):
+        compared = 0
+        for request in self._requests():
+            for encoding in ('identity', 'gzip'):
+                answers = []
+                for name in ('base', 'new'):
+                    ret = requests.post(self.servers[name][1] + '/resolve',
+                                        data=json.dumps(request),
+                                        headers={'Accept-Encoding': encoding})
+                    answers.append((ret.status_code, ret.headers.get('Content-Encoding'),
+                                    self._untimed(ret.text)))
+                self.assertEqual(answers[0], answers[1], json.dumps(request)[:200])
+                compared += 1
+        self.assertGreaterEqual(compared, 36)
+
+    def test_cli_answers_as_before(self):
+        path = f'{self.tempdir.name}/resolve-regression.json'
+        for request in self._requests():
+            with open(path, 'w') as f:
+                json.dump(request, f)
+            answers = []
+            for name in ('base', 'new'):
+                res = subprocess.run(shlex.split(self.servers[name][0])
+                                     + ['traverse', '--resolve', '--json', '-i', self.graph,
+                                        '-a', self.anno, path],
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                answers.append((res.returncode, self._untimed(res.stdout.decode())))
+            self.assertEqual(answers[0], answers[1], json.dumps(request)[:200])
 
 
 @unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")

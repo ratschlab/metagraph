@@ -99,11 +99,6 @@ static std::vector<KmerInterval> runs_of(const std::vector<bool> &mask) {
     return runs;
 }
 
-// The k-mers between two checkpoints of the explicit labels' support pass: a hit list per
-// k-mer is a few to a few thousand hits, so a gone client is seen within milliseconds, and a
-// check (a peek on its socket) costs nothing beside that
-static constexpr uint64_t kResolveCheckKmers = 4096;
-
 
 namespace {
 
@@ -254,11 +249,13 @@ std::vector<Row> anno_rows(const std::vector<node_index> &keys) {
  * decoded once per batch, and a row whose key occurs again after its batch is kept for that
  * occurrence while the rows kept take at most |kept_max| bytes (row_copy_bytes), dropped at its
  * last occurrence; beyond that bound a repeated row is decoded again. |checkpoint| runs between
- * batches. What the request holds is one batch of rows and the rows kept
+ * batches; true from it ends the pass there (a deadline). What the request holds is one batch
+ * of rows and the rows kept. Returns how many of |keys| were used: all of them, or those before
+ * the batch the pass ended at — a prefix, since the keys are used in order
  */
 template <class RowT, class Decode, class Use, class Checkpoint>
-void for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint64_t kept_max,
-                  const Decode &decode, const Use &use, const Checkpoint &checkpoint) {
+size_t for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint64_t kept_max,
+                    const Decode &decode, const Use &use, const Checkpoint &checkpoint) {
     constexpr size_t kNever = std::numeric_limits<size_t>::max();
     // the next occurrence of each k-mer's key (kNever: none)
     std::vector<size_t> next_use(keys.size(), kNever);
@@ -316,8 +313,11 @@ void for_each_row(const std::vector<node_index> &keys, BatchSizer sizer, uint64_
             }
         }
         begin = end;
-        checkpoint();
+        // after the last batch the pass is complete whatever the checkpoint says
+        if (checkpoint() && begin < keys.size())
+            return begin;
     }
+    return keys.size();
 }
 
 } // namespace
@@ -349,6 +349,25 @@ SupportProfile resolve_support(LabelOracle &oracle,
         if (options.stop && options.stop() && options.abandon)
             options.abandon();
     };
+    // A boundary of the work under a deadline (ResolveOptions::time_up): the client first, so
+    // that a gone client is abandoned exactly where it was before; true ends the work here.
+    // Without a deadline this is the checkpoint, at the same places
+    auto poll = [&]() {
+        checkpoint();
+        return options.time_up && options.time_up();
+    };
+    // Where the deadline ended the work: the k-mers before |resolved| are resolved, the profile
+    // being exactly the resolve of that prefix (decision B7). The prefix is what makes a stopped
+    // answer honest without a new statement per field: every run, count, truncation, candidate
+    // and seed is that of a real query, the first |resolved| k-mers, never a sample of the whole
+    bool stopped = false;
+    uint64_t resolved = 0;
+    ResolveStop::Phase stop_phase = ResolveStop::ROWS;
+    // the loops over the labels after the work: the answer's time, every kResolveCheckLabels
+    auto finishing = [&](size_t i) {
+        if (options.finish_check && i && i % kResolveCheckLabels == 0)
+            options.finish_check();
+    };
     profile.num_kmers = query.size() - profile.k + 1;
     checkpoint();
     std::vector<node_index> keys = oracle.keys_of_sequence(query);
@@ -366,25 +385,47 @@ SupportProfile resolve_support(LabelOracle &oracle,
     }
     profile.graph_runs = runs_of(in_graph);
     size_t num_present = present_keys.size();
+    // The work ended at k-mer x (|phase|): the profile becomes that of the query's first x
+    // k-mers — num_kmers, and the graph runs cut there (the runs of the labels hold no k-mer
+    // past x: only those before it were read). Applied once, before the labels' profiles are
+    // taken, so that whatever is built from them is built from the prefix
+    auto apply_stop = [&]() {
+        if (!stopped || profile.stop)
+            return;
+        profile.stop = ResolveStop { stop_phase, resolved, profile.num_kmers };
+        profile.num_kmers = resolved;
+        std::vector<KmerInterval> cut;
+        for (const KmerInterval &run : profile.graph_runs) {
+            if (run.begin >= resolved)
+                break;
+            cut.push_back({ run.begin, std::min(run.end, resolved) });
+        }
+        profile.graph_runs.swap(cut);
+    };
 
     // ---- the rows: decoded in batches, each dropped once it is used (review of the pass-5
     // fixes, finding 7: the discovery kept a prefix of the rows for the profile pass, which
     // decoded all the others again in one call, so the request held about all of them and paid
     // a second decode). |use(j, row)| gets the row of present_keys[j], j ascending: tuple rows
     // with |tuple_rows|, else whole rows (for_each_row: a repeated key's row is kept for its
-    // later occurrences within kept_bytes)
-    auto each_row = [&](bool tuple_rows, const auto &use_rows, const auto &use_tuples) {
+    // later occurrences within kept_bytes). Returns how many present k-mers were used: all, or
+    // under a deadline those before the batch it ended at (none when it had passed before the
+    // first: |rows_expired|)
+    bool rows_expired = false;
+    auto each_row = [&](bool tuple_rows, const auto &use_rows, const auto &use_tuples) -> size_t {
+        if (rows_expired)
+            return 0;
         const BatchSizer sizer(options.batch_rows, options.batch_bytes);
         if (tuple_rows) {
-            for_each_row<MultiIntMatrix::RowTuples>(present_keys, sizer, options.kept_bytes,
+            return for_each_row<MultiIntMatrix::RowTuples>(present_keys, sizer, options.kept_bytes,
                 [&](const std::vector<node_index> &batch) {
                     return oracle.get_row_tuples(anno_rows(batch));
-                }, use_tuples, checkpoint);
+                }, use_tuples, poll);
         } else {
-            for_each_row<BinaryMatrix::SetBitPositions>(present_keys, sizer, options.kept_bytes,
+            return for_each_row<BinaryMatrix::SetBitPositions>(present_keys, sizer, options.kept_bytes,
                 [&](const std::vector<node_index> &batch) {
                     return oracle.get_rows(anno_rows(batch));
-                }, use_rows, checkpoint);
+                }, use_rows, poll);
         }
     };
 
@@ -400,7 +441,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
     } else {
         if (options.discover_kind == LabelKind::HEADER && !oracle.coord_to_header())
             throw std::invalid_argument("Header discovery requires a CoordToHeader index");
-        checkpoint();
+        // the deadline's first read: past it, no row is read
+        rows_expired = poll();
 
         // Discovery reads every present k-mer's row once and accumulates, per label, both what
         // ranks it (its k-mers) and its profile (support runs; for trace the chain's state), so
@@ -442,7 +484,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
         const bool tuple_rows = with_coords || options.discover_kind == LabelKind::HEADER;
         std::vector<Coord> sorted;
         std::vector<Coord> local;
-        each_row(tuple_rows,
+        const size_t used = each_row(tuple_rows,
             [&](size_t j, const BinaryMatrix::SetBitPositions &row) {
                 for (Column c : row) {
                     of(c, 0).add(present_pos[j]);
@@ -492,10 +534,21 @@ SupportProfile resolve_support(LabelOracle &oracle,
                         of(c, previous).add_trace(i, local.data(), local.size(), scratch);
                 }
             });
+        if (used < num_present) {
+            // The deadline ended the pass: the rows of the first |used| present k-mers were
+            // read, so the k-mers before the next present one are resolved (those between are
+            // absent from the graph, which the mapping told). The labels met are those of that
+            // prefix, each with its support in it: what a discovery on the prefix accumulates
+            stopped = true;
+            stop_phase = ResolveStop::ROWS;
+            resolved = present_pos[used];
+            num_present = used;
+        }
         checkpoint();
         std::vector<std::tuple<std::pair<Column, uint64_t>, uint64_t, uint64_t>> ranked;
         ranked.reserve(found.size());
         for (uint64_t at = 0; at < found.size(); ++at) {
+            finishing(at);
             ranked.emplace_back(found_ids[at], found[at].kmers, at);
         }
         std::vector<uint32_t>().swap(slot);
@@ -520,6 +573,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
         }
         discovered.reserve(ranked.size());
         for (const auto &[id, count, at] : ranked) {
+            finishing(refs.size());
             LabelRef ref;
             ref.kind = options.discover_kind;
             ref.column = id.first;
@@ -537,12 +591,15 @@ SupportProfile resolve_support(LabelOracle &oracle,
         lp.label = ref;
         profile.labels.push_back(lp);
     }
+    // a discovery that met no label (or whose deadline passed before its first row)
+    apply_stop();
     if (refs.empty())
         return profile;
 
     if (options.labels.empty()) {
         // a discovery's profiles are what it accumulated
         for (LabelId l = 0; l < refs.size(); ++l) {
+            finishing(l);
             LabelProfile &lp = profile.labels[l];
             LabelSupport &support = discovered[l];
             lp.runs = support.take_runs();
@@ -552,19 +609,37 @@ SupportProfile resolve_support(LabelOracle &oracle,
     } else {
         // ---- support per k-mer of explicit labels
         LabelQuery query_labels(oracle, refs, with_coords);
-        checkpoint();
+        // The deadline's first read: the labels are resolved (an unknown one refused), no row
+        // is read yet. |resolved| is the end of the k-mers whose hits the query can give
+        // without reading a row it has not read: all of them until a stop
+        const bool expired = poll();
+        resolved = profile.num_kmers;
+        const std::string path = query_labels.access_path();
+        if (expired) {
+            // what the rows (or a direct read's cells) would have been read for: k-mers
+            // before the first present one need none
+            stopped = num_present > 0;
+            stop_phase = path != "direct" ? ResolveStop::ROWS : ResolveStop::SUPPORT;
+            resolved = num_present ? present_pos[0] : profile.num_kmers;
+        }
         // The distinct keys' whole or tuple rows are decoded in batches and primed into the
         // query (the hits a fetch builds from them, kept per key), so that the fetch below
         // decodes nothing and the request holds one batch of rows at a time beside the hits —
         // each row once, as the fetch decoded the distinct keys; direct cell reads hold no rows
-        const std::string path = query_labels.access_path();
-        if (path != "direct") {
+        if (path != "direct" && !expired) {
             std::vector<node_index> distinct;
+            // under a deadline, the k-mer where each distinct key first occurs: the keys are
+            // primed in that order, so a stop after the first P of them has primed every k-mer
+            // before distinct_at[P] (a key occurring before it occurred first before it)
+            std::vector<uint64_t> distinct_at;
             {
                 tsl::hopscotch_set<node_index> seen;
-                for (node_index key : present_keys) {
-                    if (seen.insert(key).second)
-                        distinct.push_back(key);
+                for (size_t j = 0; j < present_keys.size(); ++j) {
+                    if (seen.insert(present_keys[j]).second) {
+                        distinct.push_back(present_keys[j]);
+                        if (options.time_up)
+                            distinct_at.push_back(present_pos[j]);
+                    }
                 }
             }
             BatchSizer sizer(options.batch_rows, options.batch_bytes);
@@ -581,11 +656,15 @@ SupportProfile resolve_support(LabelOracle &oracle,
                     query_labels.prime(batch, rows);
                     sizer.done(rows);
                 }
-                checkpoint();
+                // after the last batch the rows are all read, whatever the deadline says
+                if (poll() && begin + batch.size() < distinct.size()) {
+                    stopped = true;
+                    stop_phase = ResolveStop::ROWS;
+                    resolved = distinct_at[begin + batch.size()];
+                    break;
+                }
             }
         }
-        auto hits = query_labels.fetch(keys);
-        checkpoint();
 
         // Every label's support from one pass over the k-mers: each hit goes to its label's
         // accumulator, k-mer by k-mer in ascending order, as a discovery accumulates them.
@@ -598,11 +677,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
         // labels on 1 M k-mers); the accumulator's runs are runs_of's of that bitmap
         std::vector<LabelSupport> support(refs.size());
         std::vector<Coord> scratch;
-        for (uint64_t i = 0; i < hits.size(); ++i) {
-            // a client gone is seen within a few thousand k-mers of the pass, not after it
-            if (i && i % kResolveCheckKmers == 0)
-                checkpoint();
-            for (const auto &h : hits[i]) {
+        auto scatter = [&](uint64_t i, const LabelQuery::NodeHits &node_hits) {
+            for (const auto &h : node_hits) {
                 assert(h.label < refs.size());
                 LabelSupport &s = support[h.label];
                 if (with_coords) {
@@ -621,8 +697,48 @@ SupportProfile resolve_support(LabelOracle &oracle,
                     s.add(i);
                 }
             }
+        };
+        if (!options.time_up) {
+            // no deadline: one fetch of every k-mer's hits, as before
+            auto hits = query_labels.fetch(keys);
+            checkpoint();
+            for (uint64_t i = 0; i < hits.size(); ++i) {
+                // a client gone is seen within a few thousand k-mers of the pass, not after it
+                if (i && i % kResolveCheckKmers == 0)
+                    checkpoint();
+                scatter(i, hits[i]);
+            }
+        } else {
+            // Under a deadline the hits are fetched kResolveCheckKmers k-mers at a time, the
+            // deadline read before each piece but the first (read just before it): one fetch of
+            // the whole query is a piece no clock read can end — on a direct-access annotation
+            // it reads every k-mer's cell of every label. A key's hits do not depend on the
+            // piece it is fetched in, so the profile is the one fetch's
+            std::vector<node_index> piece;
+            for (uint64_t begin = 0; begin < resolved; begin += kResolveCheckKmers) {
+                if (begin && poll()) {
+                    // resolved: the k-mers before the first present one from |begin| on (any
+                    // between are absent); none before |resolved|, nothing was left to read
+                    const auto next = std::lower_bound(present_pos.begin(), present_pos.end(),
+                                                       begin);
+                    if (next != present_pos.end() && *next < resolved) {
+                        stopped = true;
+                        stop_phase = ResolveStop::SUPPORT;
+                        resolved = *next;
+                    }
+                    break;
+                }
+                const uint64_t end = std::min<uint64_t>(resolved, begin + kResolveCheckKmers);
+                piece.assign(keys.begin() + begin, keys.begin() + end);
+                const auto hits = query_labels.fetch(piece);
+                for (uint64_t i = begin; i < end; ++i) {
+                    scatter(i, hits[i - begin]);
+                }
+            }
         }
+        apply_stop();
         for (LabelId l = 0; l < refs.size(); ++l) {
+            finishing(l);
             LabelProfile &lp = profile.labels[l];
             lp.runs = support[l].take_runs();
             // presence keeps none (add records no trace)
@@ -634,6 +750,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
     // ---- seed candidates: identical maximal runs grouped
     std::map<KmerInterval, std::vector<LabelId>> groups;
     for (LabelId l = 0; l < profile.labels.size(); ++l) {
+        finishing(l);
         for (const auto &run : profile.labels[l].runs) {
             if (run.size() >= options.min_block_kmers)
                 groups[run].push_back(l);

@@ -1,7 +1,13 @@
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <map>
 #include <random>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
 
 #include "tests/test_helpers.hpp"
 #include "tests/graph/all/test_dbg_helpers.hpp"
@@ -470,6 +476,226 @@ TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
     }
     // the trace jumped somewhere: the comparison covers trace breaks
     EXPECT_GT(breaks, 0u);
+}
+
+
+// ---- milestone 1b: the deadline of a /resolve (ResolveOptions::time_up)
+
+// what a client reads of a profile, compared field by field
+void expect_same_profile(const SupportProfile &expected, const SupportProfile &got,
+                         const std::string &where) {
+    EXPECT_EQ(expected.num_kmers, got.num_kmers) << where;
+    EXPECT_EQ(expected.graph_runs, got.graph_runs) << where;
+    ASSERT_EQ(expected.labels.size(), got.labels.size()) << where;
+    for (size_t i = 0; i < expected.labels.size(); ++i) {
+        const LabelProfile &e = expected.labels[i], &g = got.labels[i];
+        EXPECT_EQ(e.label.name, g.label.name) << where;
+        EXPECT_TRUE(e.label.kind == g.label.kind) << where;
+        EXPECT_EQ(e.kmers_supported, g.kmers_supported) << where << " " << e.label.name;
+        EXPECT_EQ(e.runs, g.runs) << where << " " << e.label.name;
+        EXPECT_EQ(e.trace_breaks, g.trace_breaks) << where << " " << e.label.name;
+    }
+    ASSERT_EQ(expected.labels_truncated.has_value(), got.labels_truncated.has_value()) << where;
+    if (expected.labels_truncated) {
+        const LabelTruncation &e = *expected.labels_truncated, &g = *got.labels_truncated;
+        EXPECT_EQ(std::make_tuple(e.kept, e.total, e.min_kept_kmers, e.max_dropped_kmers,
+                                  e.dropped_full_length),
+                  std::make_tuple(g.kept, g.total, g.min_kept_kmers, g.max_dropped_kmers,
+                                  g.dropped_full_length)) << where;
+    }
+    ASSERT_EQ(expected.candidates.size(), got.candidates.size()) << where;
+    for (size_t i = 0; i < expected.candidates.size(); ++i) {
+        EXPECT_EQ(expected.candidates[i].kmers, got.candidates[i].kmers) << where;
+        EXPECT_EQ(expected.candidates[i].labels, got.candidates[i].labels) << where;
+    }
+}
+
+// Every stop |opts| can come to, one per poll of the work (the deadline passing at the n-th
+// read, n = 1, 2, ... until the work completes before it), each checked against what the
+// decision B7 promises: exactly the resolve of the query's first stop->resolved_kmers k-mers,
+// resolved_kmers being a k-mer in the graph whose labels were not read, never decreasing in n.
+// Without a stop the profile is the unbudgeted one. Returns the stops seen: (phase, k-mers
+// resolved)
+std::vector<std::pair<ResolveStop::Phase, uint64_t>>
+check_every_stop(LabelOracle &oracle, const std::string &q, const ResolveOptions &opts,
+                 const std::string &what) {
+    const SupportProfile full = resolve_support(oracle, q, opts);
+    EXPECT_FALSE(full.stop) << what;
+    std::vector<std::pair<ResolveStop::Phase, uint64_t>> stops;
+    uint64_t last = 0;
+    for (size_t n = 1; ; ++n) {
+        size_t polls = 0;
+        ResolveOptions timed = opts;
+        timed.time_up = [&polls, n]() { return ++polls >= n; };
+        const SupportProfile got = resolve_support(oracle, q, timed);
+        const std::string where = what + ", deadline at read " + std::to_string(n);
+        if (!got.stop) {
+            expect_same_profile(full, got, where);
+            break;
+        }
+        const uint64_t x = got.stop->resolved_kmers;
+        stops.emplace_back(got.stop->phase, x);
+        EXPECT_EQ(x, got.num_kmers) << where;
+        EXPECT_EQ(full.num_kmers, got.stop->query_kmers) << where;
+        EXPECT_GE(x, last) << where;
+        last = x;
+        EXPECT_TRUE(std::any_of(full.graph_runs.begin(), full.graph_runs.end(),
+                                [x](const KmerInterval &r) { return r.begin <= x && x < r.end; }))
+            << where << ": the stop is at k-mer " << x << ", not one in the graph";
+        if (x == 0) {
+            EXPECT_TRUE(got.graph_runs.empty()) << where;
+            EXPECT_TRUE(got.candidates.empty()) << where;
+            EXPECT_EQ(opts.discover ? 0u : opts.labels.size(), got.labels.size()) << where;
+            for (const LabelProfile &lp : got.labels) {
+                EXPECT_EQ(0u, lp.kmers_supported) << where;
+                EXPECT_TRUE(lp.runs.empty()) << where;
+            }
+        } else {
+            ResolveOptions untimed = opts;
+            expect_same_profile(resolve_support(oracle, q.substr(0, x + kK - 1), untimed), got,
+                                where);
+        }
+        if (n > 100000) {
+            ADD_FAILURE() << what << ": no end to the stops";
+            break;
+        }
+    }
+    return stops;
+}
+
+size_t count_phase(const std::vector<std::pair<ResolveStop::Phase, uint64_t>> &stops,
+                   ResolveStop::Phase phase) {
+    return std::count_if(stops.begin(), stops.end(),
+                         [phase](const auto &s) { return s.first == phase; });
+}
+
+// Milestone 1b (decision B7, DESIGN-traverse-graphlet.md §21): a resolve its deadline stops is
+// exactly the resolve of a query prefix, wherever the stop falls among the row batches — a
+// discovery with and without truncation and explicit labels (primed from rows or tuple rows),
+// presence and trace, on a query with a stretch absent from the graph and a repeat (rows kept
+// for a later occurrence), its rows read three at a time
+TYPED_TEST(ResolveCoordTest, DeadlineStopIsTheResolveOfAPrefix) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    const std::string R = random_seq(40, 31), M = random_seq(40, 32);
+    const std::string left = random_seq(150, 34) + R + M;
+    const std::string right = R + M + random_seq(150, 35);
+    // the k-mers touching the middle stretch are in no label's sequence
+    const std::string q = left + random_seq(30, 33) + right;
+    std::mt19937 gen(36);
+    std::vector<std::string> seqs, labels;
+    for (size_t i = 0; i < 120; ++i) {
+        const std::string &part = i % 2 ? left : right;
+        const size_t a = gen() % (part.size() - 30);
+        std::string s = part.substr(a, 20 + gen() % std::min<size_t>(150, part.size() - a - 20));
+        if (i % 5 == 0)
+            s[gen() % s.size()] = "ACGT"[gen() % 4];
+        seqs.push_back(s);
+        labels.push_back("L" + std::to_string(i));
+    }
+    auto anno = build_anno_graph<Graph, Annotation>(kK, seqs, labels, DeBruijnGraph::BASIC, true);
+    LabelOracle oracle(*anno);
+    size_t stops = 0;
+    for (Support support : { Support::KMER, Support::TRACE }) {
+        for (size_t max_labels : { size_t(0), size_t(1000), size_t(10) }) {
+            ResolveOptions opts;
+            opts.support = support;
+            if (max_labels) {
+                opts.discover = true;
+                opts.discover_max_labels = max_labels;
+            } else {
+                opts.labels = labels;
+            }
+            opts.batch_rows = 3;
+            const std::string what = std::string(support == Support::TRACE ? "trace" : "kmer")
+                    + (max_labels ? ", discover " + std::to_string(max_labels) : ", explicit");
+            const auto seen = check_every_stop(oracle, q, opts, what);
+            // rows read three at a time: a stop between most of them
+            EXPECT_GT(count_phase(seen, ResolveStop::ROWS), 30u) << what;
+            stops += seen.size();
+        }
+    }
+    EXPECT_GT(stops, 200u);
+}
+
+// Milestone 1b: the explicit labels' hits under a deadline, fetched kResolveCheckKmers k-mers at
+// a time with the deadline read before each piece — on the direct path (three labels of a
+// column annotation: no rows primed, the hits are cell reads) and on the row paths (their
+// priming first). A stop in that pass resolves the k-mers before the next one in the graph
+// from the piece on; without a stop the profile is the one fetch's
+TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
+    using Graph = typename TypeParam::first_type;
+    using Annotation = typename TypeParam::second_type;
+    // three and a half pieces of k-mers, a stretch of them absent from the graph across the
+    // second piece's start
+    const std::string q = random_seq(3 * kResolveCheckKmers + 2000, 41);
+    const std::string a = q.substr(0, 4000), b = q.substr(4300, 9000);
+    const std::string c = q.substr(2000, 1000) + q.substr(11000, 1000);
+    auto anno = build_anno_graph<Graph, Annotation>(kK, { a, b, c }, { "A", "B", "C" },
+                                                    DeBruijnGraph::BASIC);
+    LabelOracle oracle(*anno);
+    ResolveOptions opts;
+    opts.labels = { "A", "B", "C" };
+    const auto seen = check_every_stop(oracle, q, opts, "explicit A, B, C");
+    // The pieces begin at 4096, 8192 and 12288: a stop before each but the first, the first at
+    // the next k-mer in the graph (about 4300: those of [3990, 4300) touch the stretch no label
+    // has, but for an 11-mer of the graph met by chance). A stop of the row paths' priming
+    // past 4096 is followed by one of the hits pass at its first read (the deadline has
+    // passed), so their stops are among these too. The direct path's first read (before any
+    // hit) stops in this phase, at k-mer 0
+    ResolveOptions untimed = opts;
+    const SupportProfile full = resolve_support(oracle, q, untimed);
+    uint64_t next_in_graph = 0;
+    for (const KmerInterval &run : full.graph_runs) {
+        if (run.end > kResolveCheckKmers) {
+            next_in_graph = std::max<uint64_t>(run.begin, kResolveCheckKmers);
+            break;
+        }
+    }
+    EXPECT_GT(next_in_graph, 4000u);
+    EXPECT_LE(next_in_graph, 4300u);
+    std::set<uint64_t> in_hits;
+    for (const auto &[phase, x] : seen) {
+        if (phase == ResolveStop::SUPPORT && x)
+            in_hits.insert(x);
+    }
+    EXPECT_EQ((std::set<uint64_t>{ next_in_graph, 2 * kResolveCheckKmers, 3 * kResolveCheckKmers }),
+              in_hits);
+    // a discovery reads the same rows in batches, never in the hits pass
+    ResolveOptions disc;
+    disc.discover = true;
+    const auto discovered = check_every_stop(oracle, q, disc, "discover");
+    EXPECT_EQ(0u, count_phase(discovered, ResolveStop::SUPPORT));
+    EXPECT_GT(count_phase(discovered, ResolveStop::ROWS), 3u);
+}
+
+// Milestone 1b: the loops over the labels after the work read ResolveOptions::finish_check
+// every kResolveCheckLabels labels, and what it throws abandons the request
+TEST(Resolve, FinishCheckIsReadInTheLoopsOverTheLabels) {
+    const std::string q = random_seq(200, 51);
+    std::vector<std::string> seqs, labels;
+    for (size_t i = 0; i < 2 * kResolveCheckLabels + 10; ++i) {
+        seqs.push_back(q.substr(i % 150, 40));
+        labels.push_back("L" + std::to_string(i));
+    }
+    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels);
+    LabelOracle oracle(*anno);
+    for (bool discover : { true, false }) {
+        ResolveOptions opts;
+        if (discover) {
+            opts.discover = true;
+            opts.discover_max_labels = labels.size();
+        } else {
+            opts.labels = labels;
+        }
+        size_t reads = 0;
+        opts.finish_check = [&reads]() { reads++; };
+        const SupportProfile profile = resolve_support(oracle, q, opts);
+        EXPECT_EQ(labels.size(), profile.labels.size());
+        EXPECT_GE(reads, 4u) << discover;
+        opts.finish_check = []() { throw std::runtime_error("late"); };
+        EXPECT_THROW(resolve_support(oracle, q, opts), std::runtime_error) << discover;
+    }
 }
 
 } // namespace

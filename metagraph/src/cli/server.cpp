@@ -974,9 +974,28 @@ int run_server(Config *config) {
     traversal_io.compression_level = config->traverse_compression_level;
 
     // Report where a query is supported and which labels carry which blocks, and
-    // optionally freeze seeds for /traverse. No graph traversal.
+    // optionally freeze seeds for /traverse. No graph traversal. A request with
+    // bounds.time_budget_ms runs under that deadline (capped by --traverse-max-time-ms, as
+    // /traverse's), its answer written under it: past it, 503 "deadline", never a partial
+    // answer; without the field nothing reads a clock and the answer is as it always was
+    const ResolveTimeLimits resolve_time { config->traverse_max_time_ms, kResolveFinalizeMs };
     server.resource["^/resolve$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                 shared_ptr<HttpServer::Request> request) {
+        auto as_http = [](const ResolveDeadline &e) {
+            return HttpError(503, resolve_deadline_body(e));
+        };
+        // the request's deadline, set once its body is parsed (none without the field: the
+        // check then does nothing, and the text and its compression are the same bytes)
+        ResolveDelivery delivery;
+        ResponseControl control;
+        control.compression_level = traversal_io.compression_level;
+        control.check = [&]() {
+            try {
+                delivery.check();
+            } catch (const ResolveDeadline &e) {
+                throw as_http(e);
+            }
+        };
         process_request(response, request, num_requests++, [&](const std::string &content) {
             if (!config->fnames.size() && anno_graph.wait_for(0s) != std::future_status::ready)
                 throw CurrentlyInitializingError();
@@ -992,11 +1011,14 @@ int run_server(Config *config) {
                     return shutdown.stopping() || client_gone(*request);
                 };
                 return process_resolve_request(json, index, config->index_release,
-                                               config->resolve_max_query_bp, &identity, gone);
+                                               config->resolve_max_query_bp, &identity, gone,
+                                               resolve_time, &delivery);
             } catch (const graph::traversal::AttemptAborted &e) {
                 throw ClientGone(e.what());
+            } catch (const ResolveDeadline &e) {
+                throw as_http(e);
             }
-        }, /* compact */ true, &traversal_io);
+        }, /* compact */ true, &control);
     };
 
     // Extend frozen seeds along consistent annotation labels.
@@ -1407,6 +1429,10 @@ int run_server(Config *config) {
         // /capabilities, here because this is the document a service's probe reads
         caps["pattern"] = pattern_capabilities_json(&index, pattern_limits(*config),
                                                     !config->fnames.empty());
+        // /resolve's deadline (bounds.time_budget_ms, milestone 1b): the same block as on
+        // /capabilities. Not a feature_level bump, which every /resolve and /traverse response
+        // states: a client gates on this block's presence
+        caps["resolve"] = resolve_capabilities_json(resolve_time);
         return caps;
     };
 
@@ -1524,6 +1550,9 @@ int run_server(Config *config) {
             c["pattern"] = pattern_capabilities_json(
                     !multi && c["ready"].asBool() ? anno_graph.get().get() : nullptr,
                     pattern_limits(*config), multi);
+            // /resolve's deadline (bounds.time_budget_ms): index-free, so stated while the
+            // single index loads too
+            c["resolve"] = resolve_capabilities_json(resolve_time);
             c["release"] = config->index_release;
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;

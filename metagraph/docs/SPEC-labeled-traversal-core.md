@@ -101,13 +101,13 @@ walks.
 }
 ```
 
-- `bounds.time_budget_ms` is **rejected** (400 naming the field): `/resolve` enforces no deadline
-  yet, and accepting one would promise what nothing enforces; budgets for `/resolve` arrive with
-  stage 3b (`DESIGN-traverse-graphlet.md` §21). Bound the work with `bounds.max_query_bp`: every
-  in-graph k-mer's annotation row is read, so the k-mers read are the work. `discover.max_labels`
-  caps the labels profiled and returned, not the rows read (a discovery reads every k-mer's whole
-  row whatever it keeps); the 400's hint named it as a work bound before the efficiency pass and
-  now says this.
+- `bounds.time_budget_ms` *(milestone 1b of `DESIGN-pattern-search.md`; a 400 before, "no deadline is
+  enforced")*: optional, the request's deadline in milliseconds, with the semantics of §4.5 — the work stops
+  at the budget less a finalisation reserve and the answer is then exactly the resolve of a query prefix,
+  with a `stop` block; without the field nothing changes. `bounds.max_query_bp` bounds the work too: every
+  in-graph k-mer's annotation row is read, so the k-mers read are the work. `discover.max_labels` caps the
+  labels profiled and returned, not the rows read (a discovery reads every k-mer's whole row whatever it
+  keeps).
 - Exactly one of `labels` (explicit, ≥ 1; column or header names) or `discover` must be present
   (both is a 400): the example discovers; with explicit labels it would carry
   `"labels": ["573", "NZ_STEQ01000045.1"]` in place of `discover`.
@@ -213,7 +213,78 @@ Plus counts `{candidates, eligible, selected}` and the normalized policy. The li
 ```
 
 `run_format: "rle"` emits runs as the existing presence-mask RLE (`encode_presence_mask`, `query.cpp:131`, moved
-to a header).
+to a header). A request with `bounds.time_budget_ms` also carries `limits` and `stop` (§4.5); a request without
+it carries neither.
+
+### 4.5 The deadline (`bounds.time_budget_ms`)
+
+*(Milestone 1b of `DESIGN-pattern-search.md`: the search service runs `/resolve` as a job and asked for a
+deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal/resolve.cpp`.)*
+
+- **Opt-in.** A request without `bounds.time_budget_ms` runs without a deadline and is answered byte for byte as
+  before — no `limits`, no `stop`, no clock read, the explicit labels' hits one fetch —, whatever the server's
+  cap. With it: a number of milliseconds **above the finalisation reserve** (250 ms, the same as
+  `--pattern-finalize-ms`'s default, fixed in this build: no flag sets it; a budget not above it, a negative
+  number or a non-number is a 400 naming the field), lowered to the server's `--traverse-max-time-ms` (the cap
+  of `/traverse`'s budget, default 30 000, 0 = none; the CLI applies none) and then stated in
+  `limits.clamped: [{"field": "bounds.time_budget_ms", "requested": …, "effective": …}]`. The deadline starts
+  when the request's body has been parsed, as `/pattern`'s (`DESIGN-pattern-search.md` §5.3). A cap at or below
+  the reserve would leave no time to work: every budgeted request would stop before its first row.
+- **The work stops at the budget less the reserve.** The deadline is read where the client's connection is
+  checked during the work, after it: before the first row is read; between two batches of rows (a discovery's
+  pass and the explicit labels' priming: 64 rows, then up to 4,096 rows or about 64 MiB of rows, §4.2); and
+  before every 4,096 k-mers of the explicit labels' hits, which under a deadline are fetched in pieces of 4,096
+  k-mers (one fetch of the whole query, the path without a deadline, is a piece no clock read can end; on a
+  direct-access annotation it reads every k-mer's cell of every label). A key's hits do not depend on the piece
+  they are fetched in, so the profile is the one fetch's.
+- **A stop answers the resolve of a query prefix** (decision B7, `DESIGN-traverse-graphlet.md` §21), status
+  200: exactly the profile of the sequence's first x k-mers — `num_kmers` = x, `graph_runs` cut at x, the
+  labels with their support in the prefix (a discovery's labels are those met in it, ranked and truncated
+  there: `labels_truncated` is the prefix's), the candidates and the selection made from them; no field
+  describes the rest of the query — and the `stop` block, beside `limits`:
+
+  ```json
+  "stop": {"phase": "rows", "reason": "time", "resolved_kmers": 1984, "query_kmers": 2970,
+           "resolved_bp": 2014, "query_bp": 3000, "remainder_from_bp": 1984,
+           "message": "bounds.time_budget_ms 1000 ms less the finalisation reserve of 250 ms ran out while …"},
+  "limits": {"time_budget_ms": 1000, "finalize_reserve_ms": 250, "clamped": []}
+  ```
+
+  x (`resolved_kmers`) is the first k-mer in the graph whose labels were not read (the k-mers before it that are
+  absent from the graph are resolved: the mapping told); `resolved_bp` = x + k − 1 (0 for x = 0);
+  `remainder_from_bp` = x: the sequence from that base holds exactly the k-mers not resolved, so a client
+  resolves the rest with it. A run ending at x may continue past it (in the remainder's answer it starts at
+  its k-mer 0). `phase` is `rows` (the rows of a discovery or of the explicit labels' priming were being read,
+  or none yet) or `support` (the explicit labels' hits; on a direct-access annotation also a stop before any).
+  An explicit `select` whose interval ends past x, or names a label the prefix did not profile, is **not made**:
+  `selection: null`, the message says which seed and why (whether it holds on the whole query is unknown, and a
+  400 would blame the request for the deadline); an interval invalid on the whole query (empty, or past its
+  k-mers) is still a 400. A request whose work completes answers `stop: null`; `limits` (the effective budget,
+  the reserve, the clamps) is stated either way.
+- **The answer is built within the reserve.** After the work, the loops over the labels (a discovery's ranking
+  and naming, the profiles, the candidates' grouping) read the whole budget every 4,096 labels, the selection
+  once it is done, the JSON every 4,096 labels, candidates or seeds, its text every 64 KiB and its compression
+  every block (the server's transport check, as `/pattern`'s). Past the budget the answer is **503**
+  `{"error": "resolve: the answer could not be built and written within bounds.time_budget_ms (… ms, the
+  finalisation reserve of 250 ms included): nothing partial is sent", "code": "deadline"}`, never a partial
+  answer; the CLI writes that body and exits 1. (A 503 with `Retry-After` and no `code` is still the loading
+  index's.)
+- **Not polled** — each a piece the deadline can fall into, so a stop comes up to one of them after the work
+  deadline, and their overrun of the reserve is a 503: the request's parse; the mapping of the query's k-mers
+  (one call, linear in the query, which `bounds.max_query_bp` and `--resolve-max-query-bp` bound); the
+  explicit labels' resolution and their query's setup (linear in their bytes, and no server limit caps their
+  number; an unknown label is refused before the deadline is first read, so a stop never hides one); one row
+  batch's decode (a row-diff row's whole path) and its accumulation (every label of its rows); a discovery
+  pass's setup (the next occurrence of every present k-mer, one hash pass) and the explicit priming's distinct
+  keys; one piece of hits and its accumulation; the ranking sort of a discovery's labels and the candidates'
+  sort (n log n); `select_seeds` (a `max_support` round sweeps every run); and the transport. The client's checks
+  are where they were (§10.3); a reserve that these overrun is not adapted to them (the reserve is fixed).
+- **Capabilities.** Both GET routes carry the `resolve` block (§10.3). The field is not a `feature_level`: every
+  `/resolve` and `/traverse` response states the level, so a bump would change every answer; a client gates
+  on the block. An older server refuses the field (400 naming it).
+- **Not in this milestone** (stage 3b-1 of `PLAN-traverse-next-stages.md`): `/resolve`'s memory and work
+  budgets, a server default deadline for a request without one (`--resolve-max-time-ms`), reads chunked inside
+  a batch (`DecodeControl`), and stage 3b's `outcome` / `resource_stop` vocabulary.
 
 ## 5. `traverse` request
 
@@ -1064,7 +1135,7 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   decoded whole because it was predicted to end before 1/64 of the time left overruns the deadline when its rows
   are more than 64 times slower than any the request read before; the rest of a split read, when its rows are
   more than 4 times slower than its chunk's. **Not chunked**: `/resolve`
-  (stage 3b), the mapping of a seed's k-mers, the seed phase's own processing (linear in the bytes of the
+  (stage 3b; its own deadline, `bounds.time_budget_ms`, is read between its row batches, §4.5), the mapping of a seed's k-mers, the seed phase's own processing (linear in the bytes of the
   labels named), a head's processing (checked every `work_check_interval` units), a lookahead chain's key
   mapping (one call, at most `batch_kmers` nodes; the chain's graph steps are polled, above), a read's
   preparation before its first chunk (its cache lookups and the ordering of its keys, n log n in them) and the
@@ -2502,7 +2573,22 @@ the server.
     processing, a derivation's steps and a seed's finalisation, §6.8) and `rule` (§6.8, chunked deadlines, as
     text, with the factors 64 and 4, the first chunk of 8 rows, from feature level 6 the lookahead's polls every
     16 graph steps, the steps left unpolled, what the observation counts, and how late a cancel, a walk-until and
-    the attempt's bound are seen).
+    the attempt's bound are seen). It describes `/traverse`'s reads; `/resolve`'s deadline is the `resolve` block's.
+  - **`resolve`** (both capabilities routes; milestone 1b of `DESIGN-pattern-search.md`, no feature level, §4.5):
+    `{"time_budget": {"accepted": true, "knob": "bounds.time_budget_ms", "default": null, "max_time_ms": 30000,
+    "finalize_reserve_ms": 250, "finalize_reserve_configurable": false, "check_kmers": 4096, "check_labels": 4096,
+    "stop_phases": ["rows", "support"], "rule": "…"}}` — `default` null: no deadline without the field, whatever
+    the cap; `max_time_ms` the cap (`--traverse-max-time-ms`; 0: none), `finalize_reserve_ms` the reserve inside
+    every budget (fixed in this build), `check_kmers` the explicit labels' hits between two readings, `check_labels`
+    the labels or JSON objects between two readings of the answer's time, and `rule` §4.5 as text: opt-in, the
+    400 and the clamp, where the deadline is read, the stop block and the prefix it answers, the selection not
+    made, the reserve and its 503, and what is not polled. On `GET /capabilities` it is index-free, so stated
+    while a single index loads too. Its presence on either route is how a client knows the field is accepted (a
+    server without it refuses the field, 400). **Neither `resolve` nor `pattern`** (`DESIGN-pattern-search.md`
+    §7.3) bumps `feature_level`: the level is in every `/resolve` and `/traverse` response, so a bump would
+    change every answer, which the milestone's byte-identity rule forbids; the probe and `GET /capabilities` of
+    such a build differ from the build before exactly by these blocks (and `/capabilities`' `pattern` feature
+    and route).
   - **`feature_level`** — what the server offers beyond the base contract, monotonic and only ever extended, so a
     client states a feature as `feature_level >= n` (`DESIGN-traverse-graphlet.md` §21: each pass that adds
     capabilities fields or routes bumps it by one; `schema_version` stays the request schema version). Absent or
@@ -2736,7 +2822,8 @@ the server.
     needs ?graph=<name> (and graph_path=<path> when the name spans several graphs); GET /capabilities lists the
     graphs`); an unknown or repeated parameter is a 400. In single-graph mode `graph` and `graph_path` are a 400,
     any other parameter is ignored, as before.
-- Caps: `--traverse-max-time-ms` (default 30 000), `--traverse-max-seeds` (64), `--traverse-max-seed-bp`
+- Caps: `--traverse-max-time-ms` (default 30 000; also the cap of `/resolve`'s `bounds.time_budget_ms`, which
+  it lowers, never sets, §4.5), `--traverse-max-seeds` (64), `--traverse-max-seed-bp`
   (100 000), `--traverse-max-seed-labels` (10 000) and `--resolve-max-query-bp` (0 = unlimited). `0` means
   unlimited for each. A cap that lowers a request bound is **echoed** as `clamped` (§5); `max_seeds` and
   `max_seed_bp` are refusals (400), not clamps. **The budgets' maxima** *(feature level 4; R16, the owner's
@@ -3103,6 +3190,7 @@ test T24 runs in `build_tsan/` (`-DCMAKE_BUILD_TYPE=Threads`). One ASan run befo
 | T57 | D3: a derivation the time budget cut after part of the seed (the owner's decision, feature level 6) | `WalkerDerive.PartialDerivationDeliversTheSetOfTheKmersRead` (virtual clock, 1 ms a row, 70 ms: j = 65 of 110 k-mers — the first window consumed, the second read whole; 70 when later windows followed `batch_kmers` 1 — the superset {A, C} against the whole seed's {A}, arms truncated at 0, under `kmer` and `trace`, no coordinates, `partial derivation`), `.PartialSetThatWouldFailTheSeedFailsAsBefore` (`exhaustive` over the cap, an extra label the superset duplicates, an ambiguous derived header, a depth-0 memory failure: each fails with the time budget "after 65 of 110 k-mers", as before D3; a cap that cuts the superset states it as a superset), `Walker.PartialSetWithAnUnrepresentableNameFailsAsBefore`, `Walker.FailedDerivationIsAStatedOutcome` (the server-lowered budget: walked, `observed` 1), `WalkerDeadlineChunks.DerivationWindowIsPaced` (j = 0 fails), `MiniRefSeq.PartialDerivationOnTheRealIndex` (j = 65 of 370 on a virtual clock; on the real clock partial, failed or derived whole, each stated), `.PartialSupersetIsNotRefusedAsTheWholeSeeds`, `Graphlet.PartialDerivationIsPricedAndBound` (the limitation priced and bound in every detail); integration `test_traverse_partial_derivation_states_its_set`; the fixtures `coords/d3_kmer`, `d3_trace_coordinates` and `d3_memory_stop` (the library's `WALKED_QUALIFIED_CLASS`). The `derivation` limitation's `observed` for `time_budget` has two units — elapsed ms failed, j walked — stated in §7.0 (*review of 2026-10-06, X1*) | §6.1, §7.0 |
 | T58 | the review of 2026-10-06, P2 items (feature level 6) | **W1** `WalkerDerive.WindowIsSixtyFourKmersWhateverBatchKmers` (the reviewer's U01-01 shape: 992 columns, a 195-k-mer derived seed, 100,000 work units — the response at `batch_kmers` 1, 7, 63, 65 and 1,000 equal to the one at 64, a work stop that fails the seed; an unbudgeted `no_carrier` at k-mer 90: `work_seed` and the response equal at 1, 7 and 64). **W2** `.CoordinateStateIsTheSumItReplaced` (16 carriers shrinking to 8 and 4, two compactions, on a column annotation and on a row-diff one: the running total recounted by `WalkerHooks::recount_derivation_state` wherever the state is counted — the soft observation under a memory budget of 4 GiB or 1 MiB, and on the row-diff annotation also `beside`, before every window's budget-aware read, under those budgets and under a work budget alone; without a budget nothing counts it, so that case only checks that the hook changes nothing — the result equal to the run without the recount; a debug build asserts it always; checked to bite with a one-byte drift after a compaction, the row-diff work-only case included) and `.TraceDerivationUnderAMemoryBudgetIsLinear` (200 kbp, 4 carriers: under a budget that never binds within three times the unbudgeted time; the base took 4.1–4.4 s against 0.3 s on the CLI; skipped in a debug build, whose assert recounts the state at every observation — the quadratic cost measured). *(The review of the P2 fixes: this row said the recount ran "without a budget"; GCC rejected an unbraced `EXPECT_EQ` in the first test, `-Werror=dangling-else`, so the changed test files are now compiled with GCC 13 too.)* **W3** `WalkerDeadlineChunks.LookaheadChainsReadTheStops` (a 20,000-k-mer chain on a clock every reading advances by 10 µs: a cancel and a walk-until at 50 ms, unpaced and paced, end the walk by 55 ms where the chain alone takes 200 ms; no head piece longer than 5 ms; `DecodePacer::max_head_ms` in the observation) and `.LookaheadHandsTheWalkUntilToTheAttempt` (the same chain under a control that reads the clock on every 8th poll and on every forced one, as the server's attempt does: unpaced and paced, the walk-until is taken by the lookahead's clock-reading poll and no checkpoint after it answers "no stop"; it fails with the earlier unpaced `ms_left` shortcut). **C20** `GraphletAttempt.WalkUntilStatedIsTheLowestAClockReadingPollSaw` (the reviewer's U11-02 driver: stride 8 states 65,000 where 58,900 was in force between clock-reading polls, stride 1 states 58,900; the `bound` text names the poll that reads the clock). **Texts** `GraphletAttemptRegistry.ReleaseTextsStateTheOverrunAndTheGrounds` (the X2, LRG-R1/R2, C16, C20, C24, C30 and X4 phrases, with and without retention; no "uninterruptible step" in `bound`, `not_after` or `release_rule`, no "first poll after" there or in `delivery_reserve.rule`) and, on a real server, `TestTraverseAttempts.test_release_texts_and_their_grounds` (the same grounds, `deadline_check.rule`'s stop latencies, the duplicate's 409 without "runs once"). The reviewer's reproductions re-run before and after (U01-01, U01-04, U03-01). Byte identity against `6897db99` on the CLI fixtures (`graphlet_fixtures.py --from-cli --check`) and the bench capabilities: only the texts and W1's stated cases differ | §5, §6.1, §6.8, §7.0, §10.3 |
 | T59 | the review of 2026-10-06, P3 server items (level-6 corrections) | **C10** `GraphletAttempt.UnstartedSeedsStateLabelsFromSeedAsTheWalked` (explicit, derived and annotate seeds cancelled after the first: the not-started results state the walked one's value, false in annotate mode); integration `test_wide_index_delivery_reserve_stops_the_walk` (both label modes) and `test_cancel_mid_walk_with_the_client_connected` (annotate: false). **W9** `GraphletStage3Review.LabelsAnUnbudgetedReadNamedAreTheirOwnStop` (a column annotation, a row naming 300 labels of 4 KB at 2 MiB: the labels' message, "observed: at least", `lower_max_labels_per_node` and `label_constrained_query`; one label per node walks past it) and `GraphletStage3Decode.StatementsFitTheirWidths` (its message at the widest values). **C8** `GraphletAttempt.StopLatencyIsMeasuredWhereTheWalkEnds` (the reviewer's timeline: 400 ms kept after a second call 10 s later, abandoned or failed; a walk that ended before its walk-until measures nothing). **C27** `GraphletServer.PeerClosedSeesTheServersOwnShutdown` (the server's own shutdown behind a CRLF and behind a pipelined request, and with nothing waiting; a pipe; a closed descriptor). **C26** `GraphletServer.CompressionTakesTheTextInPieces` (pieces of 1, 7, 32,768 and 65,537 bytes and one short of the text inflate to the whole text in both containers under the check; a text of one piece gives the old bytes; the output change itself, a text of 4 GiB or more, by the reproduction: 2^32 + 10 bytes inflated to 10 at `ea285c2e`). **C9** `GraphletServer.AssemblyReservesTheResponseOnce` (the response's capacity within 16 bytes of its size, members on either side of `results`, with and without checks; the bytes those of the tree). **W11** `LabelOracleBudgeted.LookaheadRunsFollowTheWalk` (a cache of 8 keys: the walk's first run decoded and kept, 130 charges where every run's were at least 28,736; under the byte bound one run kept, the second dropped, the warm ended) and `MiniRefSeq.LookaheadKeepsItsRunsUnderAMemoryBudget` (the review's walk under 16 MiB at `batch_kmers` 2,048, 4,096 and 8,192: the walk of the work budget alone, its tuple rows at most 25% more than that walk's — 33,015, 33,053 and 30,667 against 27,642; `ea285c2e` 36,275, 36,838 and 38,441). **W16** `ResolveCoordTest.ExplicitLabelsGiveTheDiscoverysProfiles` (301 explicit labels, presence and trace, column and row-diff annotations: the discovery's runs, trace breaks and counts). The reproductions re-run before and after: U11-01, U03-03, X-DUP-01, U13-02 (Linux in a container and macOS), U13-04 (2^32 + 10 bytes inflate whole), X-EFFICIENCY-02 (the delivery peak), U05-01 and X-EFFICIENCY-04. Byte identity against `ea285c2e`: the CLI fixtures (`graphlet_fixtures.py --from-cli --check`: up to date), the coordinate snapshots (only time values differ), 238 replays of the mini_refseq bench requests (with memory budgets at `batch_kmers` up to 8,192): no untimed byte differs; both capabilities documents identical | §6.8, §7.0, §10.3 |
+| T60 | `/resolve`'s deadline (milestone 1b, §4.5; no feature level) | `ResolveCoordTest.DeadlineStopIsTheResolveOfAPrefix` (decision B7: the deadline passing at every reading of the work in turn — rows read three at a time, a query with a stretch absent from the graph and a repeat, a discovery with and without truncation and 120 explicit labels, presence and trace, a column and a row-diff coordinate annotation — gives exactly the resolve of the prefix of `resolved_kmers` k-mers, a k-mer in the graph, never decreasing; no stop: the unbudgeted profile), `ResolveTest.DeadlineStopsTheExplicitHitsPass` (the hits fetched 4,096 k-mers at a time: a stop before each piece, at the next k-mer in the graph, on the direct path and the row paths, prefixes again), `Resolve.FinishCheckIsReadInTheLoopsOverTheLabels`; `ResolveDeadline.*` on the route with a clock that steps 1 ms a reading: `.WithoutTheFieldTheAnswerIsAsBefore` (no `limits`/`stop`; a budget that does not run out gives the same answer), `.AStopAnswersThePrefixWithTheStopBlock` (stops before the rows and after 64, 192, 448, 960, 1,984 rows, each byte for byte the unbudgeted resolve of the prefix apart from `limits`, `stop`, `timing`), `.ReserveOverrunAnswers503` (reserve 0: `ResolveDeadline`, the body `{error, code: deadline}`; the delivery check before and after the budget), `.BudgetValidationAndTheCap`, `.AnExplicitSelectionPastThePrefixIsNotMade`, `.CapabilitiesBlock`. Integration `TestTraverseAPI.test_api_resolve_deadline` (server and CLI: a budget just above the reserve stops at once with the stop block, a 400 at the reserve, the clamp to `max_time_ms`, the `resolve` block on both GET routes) and `test_api_resolve_without_budget_is_unchanged`; byte identity of the requests without the field against the previous build (bench mini panel and the resolve requests of `test_traverse.py`) | §4.5, §10.3 |
 
 ## 12. Implementation increments (each with tests, then an adversarial review)
 

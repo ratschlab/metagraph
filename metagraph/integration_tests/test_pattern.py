@@ -1215,12 +1215,18 @@ class TestPatternRegression(TestingBase):
         for key in a:
             if key not in ('features', 'routes'):
                 self.assertEqual(a[key], b[key], key)
-        self.assertEqual(set(a) | {'pattern'}, set(b))
-        # the probe gains the same block and nothing else
+        # the two stated gains: `pattern` (this route) and `resolve`, the block of /resolve's
+        # opt-in bounds.time_budget_ms (milestone 1b, SPEC-labeled-traversal-core.md §4.5): a
+        # capabilities block, not a feature, since /resolve is listed already
+        self.assertEqual(set(a) | {'pattern', 'resolve'}, set(b))
+        self.assertTrue(b['resolve']['time_budget']['accepted'])
+        self.assertIsNone(b['resolve']['time_budget']['default'])
+        # the probe gains the same two blocks and nothing else
         a = without_instance(self.base.get('traverse/capabilities').json())
         b = without_instance(self.new.get('traverse/capabilities').json())
-        self.assertEqual(b['pattern'], self.new.get('capabilities').json()['pattern'])
-        b.pop('pattern')
+        new_caps = self.new.get('capabilities').json()
+        for block in ('pattern', 'resolve'):
+            self.assertEqual(new_caps[block], b.pop(block), block)
         self.assertEqual(a, b)
 
 

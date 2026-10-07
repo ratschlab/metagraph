@@ -9,11 +9,13 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <numeric>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <tuple>
 
 #include "cli/config/config.hpp"
@@ -25,6 +27,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "common/utils/string_utils.hpp"
+#include "graph/alignment/pattern_search.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
@@ -545,16 +548,14 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     if (s.has("bounds")) {
         Strict b(s.raw("bounds"), "request.bounds");
         req.max_query_bp = b.uint("max_query_bp", 1'000'000, 1);
-        // resolve has no cooperative deadline yet, so accepting one would promise
-        // something nothing enforces. The hint names what bounds the work: the k-mers read.
-        // It used to name discover.max_labels too, which caps the labels returned, while a
-        // discovery reads every k-mer's whole row whatever it keeps (the efficiency pass)
+        // The deadline (milestone 1b of DESIGN-pattern-search.md: the search service runs
+        // /resolve as a job): opt-in, so that a request without it is answered exactly as
+        // before. Any finite non-negative number here; the route refuses a budget not above
+        // its finalisation reserve and lowers one above the server's cap, which it knows
         if (b.has("time_budget_ms")) {
-            throw InvalidRequest("request.bounds.time_budget_ms: not supported for resolve "
-                                 "(no deadline is enforced); bound the work with "
-                                 "bounds.max_query_bp instead (every k-mer's annotation row "
-                                 "is read; discover.max_labels caps the labels returned, "
-                                 "not the rows read)");
+            req.time_budget_ms = b.number("time_budget_ms", 0, 0,
+                                          std::numeric_limits<double>::max());
+            req.time_budget_given = b.raw("time_budget_ms");
         }
     }
     if (s.has("select")) {
@@ -2219,7 +2220,14 @@ static Json::Value interval_json(const KmerInterval &iv) {
     return j;
 }
 
-Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, const std::string &run_format) {
+Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, const std::string &run_format,
+                            const std::function<void()> &check) {
+    // the answer's deadline, read every kResolveCheckLabels objects (labels, candidates, seeds)
+    size_t objects = 0;
+    auto built = [&]() {
+        if (check && ++objects % kResolveCheckLabels == 0)
+            check();
+    };
     Json::Value j;
     j["k"] = uint_json(p.k);
     j["regime"] = to_string(p.regime);
@@ -2235,6 +2243,7 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
     j["graph_runs"] = runs_json(p.graph_runs);
     Json::Value labels(Json::arrayValue);
     for (const auto &l : p.labels) {
+        built();
         Json::Value lj;
         lj["label"] = l.label.name;
         lj["kind"] = to_string(l.label.kind);
@@ -2261,6 +2270,7 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
     }
     Json::Value cands(Json::arrayValue);
     for (const auto &c : p.candidates) {
+        built();
         Json::Value cj;
         cj["kmer_interval"] = interval_json(c.kmers);
         auto [a, b] = p.bp_interval(c.kmers);
@@ -2291,6 +2301,7 @@ Json::Value profile_to_json(const SupportProfile &p, const SeedSelection *sel, c
         s["counts"] = std::move(counts);
         Json::Value seeds(Json::arrayValue);
         for (const auto &seed : sel->seeds) {
+            built();
             Json::Value sj;
             sj["seed_id"] = seed.seed_id;
             sj["sequence"] = seed.sequence;
@@ -5604,12 +5615,150 @@ Json::Value process_traverse_request(const Json::Value &json,
     return out;
 }
 
-Json::Value process_resolve_request(const Json::Value &json,
-                                    const graph::AnnotatedDBG &anno_graph,
-                                    const std::string &release,
-                                    uint64_t max_query_bp,
-                                    const IndexIdentity *identity,
-                                    const std::function<bool()> &client_gone) {
+// a number of milliseconds as JSON: an integer when it is one (the flags are integers and a
+// client compares them as written), else the double (as /pattern's limits)
+static Json::Value ms_json(double x) {
+    if (x >= 0 && x == std::floor(x) && x <= 9007199254740991.0)
+        return uint_json(static_cast<uint64_t>(x));
+    return Json::Value(x);
+}
+
+// the same number in a message: 250.001, not std::to_string's 250.001000
+static std::string ms_text(double x) {
+    std::ostringstream out;
+    out << std::setprecision(15) << x;
+    return out.str();
+}
+
+Json::Value resolve_deadline_body(const ResolveDeadline &e) {
+    Json::Value b;
+    b["error"] = e.what();
+    b["code"] = "deadline";
+    return b;
+}
+
+Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
+    Json::Value t;
+    t["accepted"] = true;
+    t["knob"] = "bounds.time_budget_ms";
+    // no deadline without the field, whatever the cap: such a request is answered as before
+    t["default"] = Json::Value();
+    // the cap (--traverse-max-time-ms, as /traverse's); 0: none
+    t["max_time_ms"] = ms_json(limits.max_time_ms);
+    t["finalize_reserve_ms"] = ms_json(limits.finalize_ms);
+    t["finalize_reserve_configurable"] = false;
+    t["check_kmers"] = uint_json(kResolveCheckKmers);
+    t["check_labels"] = uint_json(kResolveCheckLabels);
+    Json::Value phases(Json::arrayValue);
+    phases.append("rows");
+    phases.append("support");
+    t["stop_phases"] = std::move(phases);
+    t["rule"] = "opt-in: a request without bounds.time_budget_ms runs without a deadline, as "
+        "before, whatever max_time_ms; with it, a number of ms above finalize_reserve_ms (else "
+        "400), lowered to max_time_ms when that is not 0 (stated in limits.clamped), the "
+        "deadline starting when the request's body is parsed. The work stops at the budget "
+        "less finalize_reserve_ms: the deadline is read between two batches of annotation rows "
+        "(a discovery's pass and the explicit labels' priming: the first of 64 rows, then up to "
+        "4,096 rows or about 64 MiB of rows) and before every check_kmers k-mers of the explicit "
+        "labels' hits, which are then fetched in pieces of that many k-mers. A stop answers 200 "
+        "with stop {phase (rows | support), reason time, resolved_kmers, query_kmers, "
+        "resolved_bp, query_bp, remainder_from_bp, message}: the answer is then exactly the "
+        "resolve of the sequence's first resolved_kmers k-mers (its num_kmers, graph_runs, "
+        "labels, labels_truncated, candidates and selection are those of that prefix; a run "
+        "ending at resolved_kmers may continue past it), resolved_kmers being the first k-mer "
+        "in the graph whose labels were not read (the k-mers before it absent from the graph "
+        "are resolved); an explicit selection whose interval ends past the prefix or names a "
+        "label the prefix did not profile is not made (selection: null); without a stop, stop "
+        "is null, and limits {time_budget_ms, finalize_reserve_ms, clamped} is stated either "
+        "way. The answer is built within the reserve: the loops over its labels after the work "
+        "and its JSON read the whole budget every check_labels labels or objects, its text "
+        "every 64 KiB and its compression every block; past the budget the answer is 503 "
+        "{error, code: deadline}, never a partial one. Not polled: the parse of the request, "
+        "the mapping of the query's k-mers (one call, linear in the query, which max_query_bp "
+        "bounds), the resolution of explicit labels and their query's setup (linear in their "
+        "bytes; no server limit caps their number), one row batch's decode and accumulation, "
+        "a discovery's pass setup (linear in the k-mers), one piece of hits (on a "
+        "direct-access annotation check_kmers x labels cell reads) and its accumulation, the "
+        "ranking of a discovery's labels and the sort of the candidates (n log n), the seed "
+        "selection, and the transport: a stop comes up to one such piece after the work "
+        "deadline, and an overrun of the reserve by them answers 503";
+    Json::Value r;
+    r["time_budget"] = std::move(t);
+    return r;
+}
+
+// Under a stop, why an explicit selection cannot be made from the prefix (empty: it can, and
+// is the prefix's): an interval ending past the k-mers resolved, or a label the prefix did not
+// profile (a discovery met only the prefix's labels) — whether either holds on the whole query
+// is unknown, so the selection is not made rather than refused (a 400 would blame the request
+// for the deadline). An interval invalid on the whole query is still a 400, as without a stop
+static std::string explicit_selection_blocked(const SupportProfile &profile,
+                                              const SelectionPolicy &policy) {
+    for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
+        const ExplicitSeed &ex = policy.explicit_seeds[i];
+        if (ex.kmers.begin >= ex.kmers.end || ex.kmers.end > profile.stop->query_kmers)
+            throw InvalidRequest("Explicit seed interval out of range");
+    }
+    for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
+        const ExplicitSeed &ex = policy.explicit_seeds[i];
+        const std::string seed = "select.seeds[" + std::to_string(i) + "]";
+        if (ex.kmers.end > profile.num_kmers) {
+            return seed + ".kmer_interval [" + std::to_string(ex.kmers.begin) + ", "
+                    + std::to_string(ex.kmers.end) + ") ends past the k-mers resolved";
+        }
+        for (const std::string &name : ex.labels) {
+            const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
+                [&](const LabelProfile &lp) { return lp.label.name == name; });
+            if (!profiled)
+                return seed + " names a label the resolved prefix did not profile";
+        }
+    }
+    return "";
+}
+
+static Json::Value resolve_stop_json(const ResolveStop &stop, size_t k, double budget_ms,
+                                      double reserve_ms, const std::string &not_made) {
+    Json::Value s;
+    s["phase"] = stop.phase == ResolveStop::ROWS ? "rows" : "support";
+    s["reason"] = "time";
+    s["resolved_kmers"] = uint_json(stop.resolved_kmers);
+    s["query_kmers"] = uint_json(stop.query_kmers);
+    // the bases the resolved k-mers cover (none for none), and where the rest starts: k-mer i
+    // starts at base i, so the sequence from remainder_from_bp has the k-mers not resolved
+    s["resolved_bp"] = uint_json(stop.resolved_kmers ? stop.resolved_kmers + k - 1 : 0);
+    s["query_bp"] = uint_json(stop.query_kmers + k - 1);
+    s["remainder_from_bp"] = uint_json(stop.resolved_kmers);
+    std::string message = "bounds.time_budget_ms " + ms_text(budget_ms)
+        + " ms less the finalisation reserve of " + ms_text(reserve_ms) + " ms ran out while "
+        + (stop.phase == ResolveStop::ROWS ? "the annotation rows of the query's k-mers were read"
+                                           : "the explicit labels' hits were read")
+        + ": this answer is exactly the resolve of the sequence's first "
+        + std::to_string(stop.resolved_kmers) + " of " + std::to_string(stop.query_kmers)
+        + " k-mers" + (stop.resolved_kmers ? " (a run ending there may continue past it)" : "")
+        + "; resolve the rest from base " + std::to_string(stop.resolved_kmers)
+        + ", or raise bounds.time_budget_ms";
+    if (!not_made.empty())
+        message += "; the explicit selection was not made (selection null): " + not_made;
+    s["message"] = std::move(message);
+    return s;
+}
+
+Json::Value process_resolve_request(
+        const Json::Value &json,
+        const graph::AnnotatedDBG &anno_graph,
+        const std::string &release,
+        uint64_t max_query_bp,
+        const IndexIdentity *identity,
+        const std::function<bool()> &client_gone,
+        const ResolveTimeLimits &time,
+        ResolveDelivery *delivery,
+        const std::function<std::chrono::steady_clock::time_point()> &clock) {
+    using graph::pattern::Deadline;
+    // the deadline of a request with bounds.time_budget_ms starts here, its body parsed (as
+    // /pattern's, DESIGN-pattern-search.md §5.3)
+    const std::function<Deadline::Clock::time_point()> now
+            = clock ? clock : std::function<Deadline::Clock::time_point()>(&Deadline::Clock::now);
+    const Deadline::Clock::time_point start = now();
     ResolveRequest req = parse_resolve_request(json);
     // a client that is gone is not answered: the request is abandoned at the next phase
     auto abandon = []() {
@@ -5625,27 +5774,94 @@ Json::Value process_resolve_request(const Json::Value &json,
     if (req.sequence.size() > req.max_query_bp)
         throw InvalidRequest("request.sequence: longer than bounds.max_query_bp");
 
+    // the deadline, only when asked for: without it nothing below reads a clock, and the
+    // answer is the one this route always gave
+    std::optional<Deadline> deadline;
+    Json::Value clamped(Json::arrayValue);
+    std::string late;
+    if (req.time_budget_ms) {
+        double budget = *req.time_budget_ms;
+        // the reserve is inside the budget: a budget not above it leaves no time to work
+        if (!(budget > time.finalize_ms)) {
+            throw InvalidRequest("request.bounds.time_budget_ms: expected more than the "
+                                 "finalisation reserve of " + ms_text(time.finalize_ms) + " ms");
+        }
+        if (time.max_time_ms > 0 && budget > time.max_time_ms) {
+            // lowered to the server's cap and stated, as /traverse states its clamps
+            Json::Value c;
+            c["field"] = "bounds.time_budget_ms";
+            c["requested"] = req.time_budget_given;
+            c["effective"] = ms_json(time.max_time_ms);
+            clamped.append(std::move(c));
+            budget = time.max_time_ms;
+        }
+        deadline.emplace(start, budget, time.finalize_ms, now);
+        late = "resolve: the answer could not be built and written within "
+               "bounds.time_budget_ms (" + ms_text(budget) + " ms, the finalisation reserve of "
+               + ms_text(time.finalize_ms) + " ms included): nothing partial is sent";
+        const Deadline *d = &*deadline;
+        req.options.time_up = [d]() { return d->work_expired(); };
+        req.options.finish_check = [d, &late]() {
+            if (d->respond_expired())
+                throw ResolveDeadline(late);
+        };
+        // the writing and the compression of the answer, after this function returned: the
+        // check holds its own copy of the deadline
+        if (delivery) {
+            delivery->set_check([copy = *deadline, late]() {
+                if (copy.respond_expired())
+                    throw ResolveDeadline(late);
+            });
+        }
+    }
+
     LabelOracle oracle(anno_graph);
     Timer timer;
     SupportProfile profile;
     std::optional<SeedSelection> selection;
+    std::string not_made;
     try {
         profile = resolve_support(oracle, req.sequence, req.options);
         if (client_gone && client_gone())
             abandon();
         if (req.select) {
             req.policy.release_id = release;
-            selection = select_seeds(profile, req.sequence, req.policy, oracle.regime() != Regime::BASIC);
+            // under a stop the selection is the prefix's (decision B7), made from it unless an
+            // explicit seed reaches beyond what the prefix can tell
+            if (profile.stop && req.policy.policy == SelectionPolicy::EXPLICIT)
+                not_made = explicit_selection_blocked(profile, req.policy);
+            if (not_made.empty())
+                selection = select_seeds(profile, req.sequence, req.policy, oracle.regime() != Regime::BASIC);
         }
     } catch (const std::invalid_argument &e) {
         throw InvalidRequest(e.what());
     }
-    Json::Value out = profile_to_json(profile, selection ? &*selection : nullptr, req.run_format);
+    // the selection is not polled: read once it is done
+    if (req.options.finish_check)
+        req.options.finish_check();
+    Json::Value out = profile_to_json(profile, selection ? &*selection : nullptr, req.run_format,
+                                      req.options.finish_check);
+    if (!not_made.empty())
+        out["selection"] = Json::Value();
     out["release"] = release;
     out["capabilities"] = capabilities_to_json(oracle, release, identity);
+    if (deadline) {
+        // the budget the work ran under, stated whether or not it stopped the work
+        Json::Value l;
+        l["time_budget_ms"] = ms_json(deadline->time_budget_ms());
+        l["finalize_reserve_ms"] = ms_json(deadline->finalize_reserve_ms());
+        l["clamped"] = std::move(clamped);
+        out["limits"] = std::move(l);
+        out["stop"] = profile.stop
+            ? resolve_stop_json(*profile.stop, profile.k, deadline->time_budget_ms(),
+                                deadline->finalize_reserve_ms(), not_made)
+            : Json::Value();
+    }
     Json::Value t;
     t["elapsed_ms"] = timer.elapsed() * 1000;
     out["timing"] = std::move(t);
+    if (req.options.finish_check)
+        req.options.finish_check();
     return out;
 }
 
@@ -5739,11 +5955,21 @@ int traverse_graph(Config *config) {
             TraverseLimits limits;
             limits.chunk_target_ms = static_cast<double>(config->traverse_chunk_target_ms);
             limits.path_cache_bytes = config->traverse_path_cache_mb << 20;
+            // a /resolve's deadline (bounds.time_budget_ms, no cap here) holds for the
+            // writing of its answer too, as on the server (else its 503 body, exit 1)
+            ResolveDelivery delivery;
             Json::Value out = config->traverse_resolve
-                ? process_resolve_request(json, *anno_graph, config->index_release, 0, &identity)
+                ? process_resolve_request(json, *anno_graph, config->index_release, 0, &identity,
+                                          nullptr, {}, &delivery)
                 : process_traverse_request(json, *anno_graph, config->index_release, limits,
                                            &identity, attempt.get());
-            std::cout << Json::writeString(builder, out) << std::endl;
+            const std::string text = Json::writeString(builder, out);
+            delivery.check();
+            std::cout << text << std::endl;
+        } catch (const ResolveDeadline &e) {
+            logger->error("Request in {} not answered: {}", file, e.what());
+            std::cout << Json::writeString(builder, resolve_deadline_body(e)) << std::endl;
+            status = 1;
         } catch (const InvalidRequest &e) {
             logger->error("Invalid request in {}: {}", file, e.what());
             Json::Value err;

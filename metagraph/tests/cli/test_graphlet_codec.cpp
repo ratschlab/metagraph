@@ -7055,3 +7055,268 @@ TEST(Graphlet, PartialDerivationIsPricedAndBound) {
     }
     EXPECT_GT(checked, 0u);
 }
+
+
+// ---- milestone 1b: POST /resolve with bounds.time_budget_ms (process_resolve_request)
+//
+// The deadline is opt-in (a request without it is answered as before), clamped to the
+// server's cap, its work stopped at the budget less the finalisation reserve with the answer
+// then exactly the resolve of a query prefix (decision B7) and a `stop` block, and its
+// finalisation read against the whole budget (503 deadline past it). A clock that moves a
+// fixed step at every reading makes the stop fall at a chosen reading, the same in every run.
+
+namespace {
+
+struct SteppingClock {
+    std::chrono::steady_clock::time_point base = std::chrono::steady_clock::now();
+    double step_ms = 1;
+    uint64_t reads = 0;
+    std::function<std::chrono::steady_clock::time_point()> fn() {
+        return [this]() {
+            return base + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<double, std::milli>(step_ms * reads++));
+        };
+    }
+};
+
+// the answer without what differs between runs (timing) and what a deadline adds
+Json::Value resolve_untimed(Json::Value v) {
+    v.removeMember("timing");
+    v.removeMember("limits");
+    v.removeMember("stop");
+    return v;
+}
+
+// a query of 3,000 bp; eight labels on stretches of it (two with a changed base), so that a
+// discovery reads its 2,970 rows in six batches (64, 128, 256, ...)
+struct ResolveDeadlineFixture {
+    std::string q;
+    std::unique_ptr<AnnotatedDBG> anno;
+
+    ResolveDeadlineFixture() : q(random_seq(3000, 601)) {
+        std::vector<std::string> seqs = { q.substr(0, 2000), q.substr(500), q.substr(1000, 500),
+                                          q.substr(0, 3000), q.substr(2500), q.substr(100, 900),
+                                          q.substr(1200, 1300), q.substr(40, 2900) };
+        seqs[6][600] = seqs[6][600] == 'A' ? 'C' : 'A';
+        seqs[7][1500] = seqs[7][1500] == 'G' ? 'T' : 'G';
+        std::vector<std::string> labels;
+        for (size_t i = 0; i < seqs.size(); ++i) {
+            labels.push_back("L" + std::to_string(i));
+        }
+        anno = test::build_anno_graph<DBGSuccinct, annot::RowFlatAnnotator>(31, seqs, labels);
+    }
+
+    Json::Value request(const std::string &sequence) const {
+        Json::Value r;
+        r["sequence"] = sequence;
+        r["discover"]["max_labels"] = 3;
+        r["select"]["policy"] = "longest_first";
+        return r;
+    }
+
+    Json::Value resolve(const Json::Value &request, SteppingClock *clock,
+                        const ResolveTimeLimits &time = {},
+                        ResolveDelivery *delivery = nullptr) const {
+        return process_resolve_request(request, *anno, "r1", 0, nullptr, nullptr, time, delivery,
+                                       clock ? clock->fn() : nullptr);
+    }
+};
+
+} // namespace
+
+TEST(ResolveDeadline, WithoutTheFieldTheAnswerIsAsBefore) {
+    const ResolveDeadlineFixture f;
+    for (const char *mode : { "discover", "explicit", "rle" }) {
+        Json::Value plain = f.request(f.q);
+        if (std::string(mode) == "explicit") {
+            plain.removeMember("discover");
+            plain["labels"].append("L0");
+            plain["labels"].append("L7");
+        } else if (std::string(mode) == "rle") {
+            plain["run_format"] = "rle";
+        }
+        const Json::Value out = f.resolve(plain, nullptr, { 1000, kResolveFinalizeMs });
+        // nothing a deadline adds: no limits, no stop
+        EXPECT_FALSE(out.isMember("limits")) << mode;
+        EXPECT_FALSE(out.isMember("stop")) << mode;
+        EXPECT_EQ(2970u, out["num_kmers"].asUInt64()) << mode;
+        // with a budget that does not run out: the same answer (the explicit labels' hits
+        // fetched in pieces under it), the budget stated, stop null
+        Json::Value budgeted = plain;
+        budgeted["bounds"]["time_budget_ms"] = 900;
+        const Json::Value timed = f.resolve(budgeted, nullptr, { 1000, kResolveFinalizeMs });
+        EXPECT_EQ(compact(resolve_untimed(out)), compact(resolve_untimed(timed))) << mode;
+        EXPECT_TRUE(timed["stop"].isNull()) << mode;
+        EXPECT_EQ("{\"clamped\":[],\"finalize_reserve_ms\":250,\"time_budget_ms\":900}",
+                  compact(timed["limits"])) << mode;
+    }
+}
+
+TEST(ResolveDeadline, AStopAnswersThePrefixWithTheStopBlock) {
+    const ResolveDeadlineFixture f;
+    // the clock moves 1 ms a reading: the work deadline (the budget less 250 ms) passes at the
+    // reading 1, 2, ... ms into the request — before the rows, then after each batch
+    std::vector<uint64_t> resolved;
+    for (double work_ms = 1; work_ms < 20; ++work_ms) {
+        Json::Value request = f.request(f.q);
+        request["bounds"]["time_budget_ms"] = kResolveFinalizeMs + work_ms;
+        SteppingClock clock;
+        const Json::Value out = f.resolve(request, &clock);
+        const std::string what = "work " + std::to_string(work_ms) + " ms";
+        ASSERT_TRUE(out.isMember("stop")) << what;
+        if (out["stop"].isNull()) {
+            EXPECT_EQ(2970u, out["num_kmers"].asUInt64()) << what;
+            break;
+        }
+        const Json::Value &stop = out["stop"];
+        const uint64_t x = stop["resolved_kmers"].asUInt64();
+        resolved.push_back(x);
+        EXPECT_EQ("rows", stop["phase"].asString()) << what;
+        EXPECT_EQ("time", stop["reason"].asString()) << what;
+        EXPECT_EQ(2970u, stop["query_kmers"].asUInt64()) << what;
+        EXPECT_EQ(3000u, stop["query_bp"].asUInt64()) << what;
+        EXPECT_EQ(x ? x + 30 : 0, stop["resolved_bp"].asUInt64()) << what;
+        EXPECT_EQ(x, stop["remainder_from_bp"].asUInt64()) << what;
+        EXPECT_NE(std::string::npos, stop["message"].asString().find("exactly the resolve"))
+            << what;
+        EXPECT_EQ(x, out["num_kmers"].asUInt64()) << what;
+        // the budget the work ran under
+        EXPECT_EQ(kResolveFinalizeMs + work_ms, out["limits"]["time_budget_ms"].asDouble());
+        EXPECT_EQ(250u, out["limits"]["finalize_reserve_ms"].asUInt64());
+        // decision B7: exactly the unbudgeted resolve of the prefix — its graph runs, labels,
+        // truncation statement, candidates and selection
+        if (x) {
+            const Json::Value prefix = f.resolve(f.request(f.q.substr(0, x + 30)), nullptr);
+            EXPECT_EQ(compact(resolve_untimed(prefix)), compact(resolve_untimed(out))) << what;
+        } else {
+            EXPECT_EQ("[]", compact(out["graph_runs"])) << what;
+            EXPECT_EQ("[]", compact(out["labels"])) << what;
+            EXPECT_EQ(0u, out["selection"]["seeds"].size()) << what;
+        }
+    }
+    // a stop before the rows and after each of the batches but the last (64, 192, 448, 960,
+    // 1984 rows read), then none
+    EXPECT_EQ((std::vector<uint64_t>{ 0, 64, 192, 448, 960, 1984 }), resolved);
+}
+
+TEST(ResolveDeadline, ReserveOverrunAnswers503) {
+    const ResolveDeadlineFixture f;
+    Json::Value request = f.request(f.q);
+    // no reserve: the work stops at the budget, and the answer can no longer be built by it
+    request["bounds"]["time_budget_ms"] = 3;
+    SteppingClock clock;
+    try {
+        f.resolve(request, &clock, { 0, 0 });
+        FAIL() << "a reserve overrun answered";
+    } catch (const ResolveDeadline &e) {
+        const Json::Value body = resolve_deadline_body(e);
+        EXPECT_EQ("deadline", body["code"].asString());
+        EXPECT_NE(std::string::npos, body["error"].asString().find("nothing partial is sent"));
+        EXPECT_EQ(2u, body.size());
+    }
+    // the same budget answered with time to spare: no exception
+    request["bounds"]["time_budget_ms"] = 1000;
+    SteppingClock spare;
+    ResolveDelivery delivery;
+    const Json::Value out = f.resolve(request, &spare, { 0, 0 }, &delivery);
+    EXPECT_TRUE(out["stop"].isNull());
+    // the writing of the answer is checked against the same deadline: not passed, then passed
+    EXPECT_NO_THROW(delivery.check());
+    spare.reads = 2000;
+    EXPECT_THROW(delivery.check(), ResolveDeadline);
+    // a request without the field installs no check
+    ResolveDelivery none;
+    f.resolve(f.request(f.q), &spare, { 0, 0 }, &none);
+    spare.reads = 1'000'000;
+    EXPECT_NO_THROW(none.check());
+}
+
+TEST(ResolveDeadline, BudgetValidationAndTheCap) {
+    const ResolveDeadlineFixture f;
+    const std::string q = f.q.substr(0, 200);
+    for (const Json::Value &bad : { Json::Value(250), Json::Value(100), Json::Value(0),
+                                    Json::Value(-1), Json::Value("1000"), Json::Value(true) }) {
+        Json::Value request = f.request(q);
+        request["bounds"]["time_budget_ms"] = bad;
+        try {
+            f.resolve(request, nullptr);
+            ADD_FAILURE() << "accepted " << compact(bad);
+        } catch (const InvalidRequest &e) {
+            EXPECT_NE(std::string::npos, std::string(e.what()).find("bounds.time_budget_ms"))
+                << e.what();
+        }
+    }
+    // above the cap: lowered to it and stated
+    Json::Value request = f.request(q);
+    request["bounds"]["time_budget_ms"] = 5000;
+    Json::Value out = f.resolve(request, nullptr, { 1000, kResolveFinalizeMs });
+    EXPECT_EQ("{\"clamped\":[{\"effective\":1000,\"field\":\"bounds.time_budget_ms\","
+              "\"requested\":5000}],\"finalize_reserve_ms\":250,\"time_budget_ms\":1000}",
+              compact(out["limits"]));
+    // at or under it: as asked (a fraction kept)
+    request["bounds"]["time_budget_ms"] = 999.5;
+    out = f.resolve(request, nullptr, { 1000, kResolveFinalizeMs });
+    EXPECT_EQ("{\"clamped\":[],\"finalize_reserve_ms\":250,\"time_budget_ms\":999.5}",
+              compact(out["limits"]));
+    // no cap (0, the CLI's)
+    request["bounds"]["time_budget_ms"] = 5000;
+    out = f.resolve(request, nullptr, { 0, kResolveFinalizeMs });
+    EXPECT_EQ(5000u, out["limits"]["time_budget_ms"].asUInt64());
+    EXPECT_EQ(0u, out["limits"]["clamped"].size());
+}
+
+TEST(ResolveDeadline, AnExplicitSelectionPastThePrefixIsNotMade) {
+    const ResolveDeadlineFixture f;
+    auto request = [&](uint64_t begin, uint64_t end) {
+        Json::Value r = f.request(f.q);
+        r["select"]["policy"] = "explicit";
+        Json::Value seed;
+        seed["kmer_interval"].append(Json::UInt64(begin));
+        seed["kmer_interval"].append(Json::UInt64(end));
+        seed["labels"].append("L3");
+        r["select"]["seeds"].append(seed);
+        r["discover"]["max_labels"] = 8;
+        r["bounds"]["time_budget_ms"] = kResolveFinalizeMs + 2;   // stops after 64 rows
+        return r;
+    };
+    SteppingClock clock;
+    Json::Value out = f.resolve(request(100, 200), &clock);
+    ASSERT_EQ(64u, out["stop"]["resolved_kmers"].asUInt64());
+    EXPECT_TRUE(out.isMember("selection"));
+    EXPECT_TRUE(out["selection"].isNull());
+    EXPECT_NE(std::string::npos, out["stop"]["message"].asString().find(
+            "the explicit selection was not made (selection null): select.seeds[0].kmer_interval "
+            "[100, 200) ends past the k-mers resolved"));
+    // inside the prefix: the prefix's selection
+    SteppingClock again;
+    out = f.resolve(request(10, 50), &again);
+    ASSERT_EQ(64u, out["stop"]["resolved_kmers"].asUInt64());
+    ASSERT_EQ(1u, out["selection"]["seeds"].size());
+    EXPECT_EQ("L3", out["selection"]["seeds"][0]["labels"][0].asString());
+    EXPECT_EQ(std::string::npos, out["stop"]["message"].asString().find("not made"));
+    // an interval out of range on the whole query is refused, stop or not
+    SteppingClock third;
+    EXPECT_THROW(f.resolve(request(2980, 3100), &third), InvalidRequest);
+}
+
+TEST(ResolveDeadline, CapabilitiesBlock) {
+    const Json::Value c = resolve_capabilities_json({ 30000, kResolveFinalizeMs });
+    ASSERT_EQ(1u, c.size());
+    const Json::Value &t = c["time_budget"];
+    EXPECT_TRUE(t["accepted"].asBool());
+    EXPECT_EQ("bounds.time_budget_ms", t["knob"].asString());
+    EXPECT_TRUE(t["default"].isNull());
+    EXPECT_TRUE(t["max_time_ms"].isUInt64());
+    EXPECT_EQ(30000u, t["max_time_ms"].asUInt64());
+    EXPECT_EQ(250u, t["finalize_reserve_ms"].asUInt64());
+    EXPECT_FALSE(t["finalize_reserve_configurable"].asBool());
+    EXPECT_EQ(4096u, t["check_kmers"].asUInt64());
+    EXPECT_EQ(4096u, t["check_labels"].asUInt64());
+    EXPECT_EQ("[\"rows\",\"support\"]", compact(t["stop_phases"]));
+    for (const char *needle : { "opt-in", "exactly the resolve", "503", "Not polled",
+                                "the mapping of the query's k-mers", "the seed selection" }) {
+        EXPECT_NE(std::string::npos, t["rule"].asString().find(needle)) << needle;
+    }
+    EXPECT_EQ(0u, resolve_capabilities_json({ 0, kResolveFinalizeMs })["time_budget"]
+                          ["max_time_ms"].asUInt64());
+}

@@ -64,9 +64,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         self.server.seen.append(('POST', self.path, dict(self.headers), body))
         if self.path == '/api/resolve':
-            return self._send(200, {'k': 5, 'labels': [{'label': 'acc1', 'kind': 'header',
-                                                         'kmers_supported': 6}],
-                                    'candidates': []})
+            if body['sequence'] == 'LATE':
+                # a /resolve past its own deadline (SPEC §4.5): no Retry-After, no usage
+                return self._send(503, {'error': 'resolve: the answer could not be built and '
+                                                 'written within bounds.time_budget_ms (300 ms, '
+                                                 'the finalisation reserve of 250 ms included): '
+                                                 'nothing partial is sent',
+                                        'code': 'deadline'})
+            out = {'k': 5, 'labels': [{'label': 'acc1', 'kind': 'header', 'kmers_supported': 6}],
+                   'candidates': []}
+            budget = (body.get('bounds') or {}).get('time_budget_ms')
+            if budget is not None:
+                out['num_kmers'] = 2
+                out['limits'] = {'time_budget_ms': budget, 'finalize_reserve_ms': 250,
+                                 'clamped': []}
+                out['stop'] = {'phase': 'rows', 'reason': 'time', 'resolved_kmers': 2,
+                               'query_kmers': 4, 'resolved_bp': 6, 'query_bp': 8,
+                               'remainder_from_bp': 2, 'message': '...'}
+            return self._send(200, out)
         if self.path != '/api/traverse':
             return self._send(404, {'error': 'no route'})
         seq = body['seeds'][0]['sequence']
@@ -189,6 +204,55 @@ class TestClient(unittest.TestCase):
         out = self.client.resolve('ACGTACGT', labels=['acc1'])
         self.assertEqual('acc1', out['labels'][0]['label'])
         self.assertEqual({'sequence': 'ACGTACGT', 'labels': ['acc1']}, self.server.seen[0][3])
+        # nothing a deadline adds
+        self.assertNotIn('stop', out)
+        self.assertNotIn('limits', out)
+
+    def test_resolve_time_budget(self):
+        """Milestone 1b: time_budget_ms= is sent as bounds.time_budget_ms, merged into a
+        bounds given otherwise; the answer is returned as written (limits, stop)."""
+        out = self.client.resolve('ACGTACGT', labels=['acc1'], time_budget_ms=300)
+        self.assertEqual({'sequence': 'ACGTACGT', 'labels': ['acc1'],
+                          'bounds': {'time_budget_ms': 300}}, self.server.seen[0][3])
+        self.assertEqual('time', out['stop']['reason'])
+        self.assertEqual(2, out['stop']['resolved_kmers'])
+        self.assertEqual(300, out['limits']['time_budget_ms'])
+        self.server.seen.clear()
+        self.client.resolve('ACGTACGT', discover={'max_labels': 5}, time_budget_ms=1000.5,
+                            bounds={'max_query_bp': 100})
+        self.assertEqual({'sequence': 'ACGTACGT', 'discover': {'max_labels': 5},
+                          'bounds': {'max_query_bp': 100, 'time_budget_ms': 1000.5}},
+                         self.server.seen[0][3])
+        # the same value twice is one budget; two different ones are refused before sending
+        self.server.seen.clear()
+        self.client.resolve('ACGTACGT', labels=['acc1'], time_budget_ms=300,
+                            bounds={'time_budget_ms': 300})
+        self.assertEqual({'time_budget_ms': 300}, self.server.seen[0][3]['bounds'])
+        self.server.seen.clear()
+        with self.assertRaises(ValueError):
+            self.client.resolve('ACGTACGT', labels=['acc1'], time_budget_ms=300,
+                                bounds={'time_budget_ms': 400})
+        self.assertEqual([], self.server.seen)
+        # the budget given through bounds alone is passed as it always was
+        self.client.resolve('ACGTACGT', labels=['acc1'], bounds={'time_budget_ms': 400})
+        self.assertEqual({'time_budget_ms': 400}, self.server.seen[0][3]['bounds'])
+
+    def test_resolve_deadline_503(self):
+        """A /resolve whose answer could not be built within its budget: 503 with code
+        deadline and no Retry-After is ResolveDeadline (a TraverseError), not a loading
+        server; a loading server's 503 is still ServerInitializing."""
+        from metagraph.traverse import ResolveDeadline
+        with self.assertRaises(ResolveDeadline) as cm:
+            self.client.resolve('LATE', labels=['acc1'], time_budget_ms=300)
+        self.assertIsInstance(cm.exception, TraverseError)
+        self.assertNotIsInstance(cm.exception, ServerInitializing)
+        self.assertEqual(503, cm.exception.status)
+        self.assertEqual('deadline', cm.exception.body['code'])
+        self.assertIn('nothing partial is sent', cm.exception.message)
+        self.assertIsNone(cm.exception.usage)
+        self.server.initializing = True
+        with self.assertRaises(ServerInitializing):
+            self.client.capabilities()
 
 
 class _FakeResponse:

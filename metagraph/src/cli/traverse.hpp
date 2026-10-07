@@ -1,6 +1,7 @@
 #ifndef __METAGRAPH_CLI_TRAVERSE_HPP__
 #define __METAGRAPH_CLI_TRAVERSE_HPP__
 
+#include <chrono>
 #include <functional>
 #include <optional>
 #include <tuple>
@@ -198,6 +199,10 @@ struct ResolveRequest {
     graph::traversal::SelectionPolicy policy;
     std::string run_format = "intervals"; // intervals | rle
     uint64_t max_query_bp = 1'000'000;
+    // bounds.time_budget_ms as given (opt-in: none, no deadline); the route checks it against
+    // the finalisation reserve and the server's cap, which parsing does not know
+    std::optional<double> time_budget_ms;
+    Json::Value time_budget_given;          // the value as sent (a clamp states it)
 };
 
 // Strict parsing: unknown keys, wrong types and out-of-range values throw InvalidRequest
@@ -215,9 +220,12 @@ Json::Value strategy_to_json(const graph::traversal::Strategy &strategy, const C
 Json::Value seed_result_to_json(const graph::traversal::SeedResult &result,
                                 const graph::traversal::Strategy &strategy,
                                 const std::string &detail, bool timing);
+// |check|: read every graph::traversal::kResolveCheckLabels objects built (a /resolve's
+// deadline: it throws to abandon the answer)
 Json::Value profile_to_json(const graph::traversal::SupportProfile &profile,
                             const graph::traversal::SeedSelection *selection,
-                            const std::string &run_format);
+                            const std::string &run_format,
+                            const std::function<void()> &check = nullptr);
 // The `coordinates` block of GET /traverse/capabilities (feature level 6; not in the
 // per-request capabilities, which change only in their feature_level): whether this index
 // reports record coordinates (supports_trace), the knobs and the cap's default, the block
@@ -406,14 +414,71 @@ Json::Value process_traverse_request(const Json::Value &json,
                                      const IndexIdentity *identity = nullptr,
                                      Attempt *attempt = nullptr,
                                      ResultTexts *texts = nullptr);
+// The finalisation reserve of a /resolve with bounds.time_budget_ms: its work stops this long
+// before the deadline, so that the answer can still be built, written and compressed by it
+// (as /pattern's, DESIGN-pattern-search.md §5.3; the same 250 ms as --pattern-finalize-ms's
+// default). Fixed in this build: no flag sets it (stated in the capabilities)
+constexpr double kResolveFinalizeMs = 250;
+
+// The time limits of a /resolve: the cap of bounds.time_budget_ms (the server's
+// --traverse-max-time-ms, as /traverse's; 0: none — the CLI, which an operator runs) and the
+// finalisation reserve inside every budget. A request without the field has no deadline,
+// whatever the cap: it is answered exactly as before the field was accepted
+struct ResolveTimeLimits {
+    double max_time_ms = 0;
+    double finalize_ms = kResolveFinalizeMs;
+};
+
+// A /resolve answer that could not be built and written within its bounds.time_budget_ms (the
+// finalisation overran the reserve): nothing partial is sent. The server answers 503 with
+// resolve_deadline_body(), the CLI writes that body and exits 1
+class ResolveDeadline : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+};
+// {"error": the message, "code": "deadline"} (the body of /pattern's 503 deadline)
+Json::Value resolve_deadline_body(const ResolveDeadline &e);
+
+// What the transport of one /resolve answer needs from its processing: the request's
+// deadline, known once the request is parsed (none without bounds.time_budget_ms). The answer
+// is written and compressed under check(), which throws ResolveDeadline once the budget has
+// passed. Used by one request's thread only
+class ResolveDelivery {
+  public:
+    void set_check(std::function<void()> check) { check_ = std::move(check); }
+    void check() const {
+        if (check_)
+            check_();
+    }
+
+  private:
+    std::function<void()> check_;
+};
+
+// The `resolve` block of both capabilities routes (GET /capabilities, GET
+// /traverse/capabilities): bounds.time_budget_ms accepted, its cap and the reserve, and the
+// rule — where the deadline is read, what a stop answers, what is not polled
+Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits);
+
 // |client_gone|: polled between the phases of the request (the discovery read, the support
-// fetch, the selection); true abandons it (graph::traversal::AttemptAborted)
-Json::Value process_resolve_request(const Json::Value &json,
-                                    const graph::AnnotatedDBG &anno_graph,
-                                    const std::string &release,
-                                    uint64_t max_query_bp = 0,
-                                    const IndexIdentity *identity = nullptr,
-                                    const std::function<bool()> &client_gone = nullptr);
+// fetch, the selection); true abandons it (graph::traversal::AttemptAborted).
+// |time|: the cap of bounds.time_budget_ms and the finalisation reserve; the deadline of a
+// request with the field starts on entry (its body parsed), read from |clock| (the steady
+// clock when null; injectable so that tests stop at a chosen instant). Its work stops at the
+// budget less the reserve — the answer then is exactly the resolve of the query's first
+// stop.resolved_kmers k-mers, with the `stop` block —; its finalisation is read against the
+// whole budget, and |delivery|, when given, receives the check for the writing of the answer.
+// Throws ResolveDeadline when the answer could not be built by the deadline.
+Json::Value process_resolve_request(
+        const Json::Value &json,
+        const graph::AnnotatedDBG &anno_graph,
+        const std::string &release,
+        uint64_t max_query_bp = 0,
+        const IndexIdentity *identity = nullptr,
+        const std::function<bool()> &client_gone = nullptr,
+        const ResolveTimeLimits &time = {},
+        ResolveDelivery *delivery = nullptr,
+        const std::function<std::chrono::steady_clock::time_point()> &clock = nullptr);
 
 // CLI entry point: `metagraph traverse [--resolve] -i GRAPH -a ANNOTATION request.json ...`
 int traverse_graph(Config *config);

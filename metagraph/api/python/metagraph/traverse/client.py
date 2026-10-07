@@ -73,8 +73,8 @@ from .attempts import (AttemptAnswer, AttemptAtBound, AttemptConflict, AttemptEx
 
 __all__ = ['TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
            'AttemptAtBound', 'AttemptExpired', 'AttemptConflict', 'InstanceMismatch',
-           'UnsupportedFeature', 'AttemptAnswer', 'AttemptSent', 'Suppression',
-           'ReleaseVerdict', 'release_verdict', 'classify_409', 'ACCEPT_ENCODING',
+           'UnsupportedFeature', 'ResolveDeadline', 'AttemptAnswer', 'AttemptSent',
+           'Suppression', 'ReleaseVerdict', 'release_verdict', 'classify_409', 'ACCEPT_ENCODING',
            'SUPPRESSION_LEVEL', 'COORDINATES_LEVEL', 'AUTO_COORDINATES_UNDER_MEMORY_BUDGET',
            'auto_coordinates', 'drop_coordinates_note', 'strip_coordinate_cap']
 
@@ -195,6 +195,14 @@ def _unknown_field(status, message):
         return None
     m = _UNKNOWN_FIELD.search(message)
     return m.group(1) if m else None
+
+
+class ResolveDeadline(TraverseError):
+    """503 with `code: "deadline"` and no `usage`: a /resolve sent with bounds.time_budget_ms
+    (resolve(time_budget_ms=)) whose answer could not be built and written within that budget
+    -- its finalisation overran the reserve (SPEC §4.5). Nothing partial was sent and nothing
+    was registered; send it again with a larger budget or a shorter sequence. Not a loading
+    server (whose 503 has Retry-After and no code): never retry it as one."""
 
 
 class UnsupportedFeature(ValueError):
@@ -390,6 +398,10 @@ class TraverseClient:
                 retry = hdrs.get('retry-after')
                 if isinstance(out, dict) and 'usage' in out and not retry:
                     raise AttemptAtBound(status, message, out)
+                if isinstance(out, dict) and out.get('code') == 'deadline' and not retry:
+                    # a /resolve past its own bounds.time_budget_ms (SPEC §4.5): answered, not
+                    # loading, so a ServerInitializing would invite a retry of the same budget
+                    raise ResolveDeadline(status, message, out)
                 raise ServerInitializing(status, message, out,
                                          int(retry) if retry and retry.isdigit() else None)
             if status == 409 and isinstance(out, dict):
@@ -521,7 +533,21 @@ class TraverseClient:
         (`ready: false`)."""
         return self._request('GET', '/capabilities')
 
-    def resolve(self, sequence, *, labels=None, discover=None, select=None, **opts):
+    def resolve(self, sequence, *, labels=None, discover=None, select=None, time_budget_ms=None,
+                **opts):
+        """POST /resolve -> the answer, a dict as the server wrote it (SPEC §4).
+
+        |time_budget_ms|: the request's deadline, sent as bounds.time_budget_ms (merged into a
+        `bounds` given in |opts|; giving it there too with another value is a ValueError). It
+        must exceed the server's finalisation reserve (capabilities()['resolve']['time_budget']
+        ['finalize_reserve_ms'], 250 ms) and is lowered to its max_time_ms, stated in the
+        answer's limits.clamped. The answer then carries `limits` and `stop`: stop None when the
+        work completed, else {phase, reason: 'time', resolved_kmers, query_kmers, resolved_bp,
+        query_bp, remainder_from_bp, message}, the answer being exactly the resolve of the
+        sequence's first resolved_kmers k-mers -- resolve sequence[remainder_from_bp:] for the
+        rest. An answer that could not be built within the budget raises ResolveDeadline (503).
+        A server without the field (no `resolve` block in its capabilities) refuses it: a
+        TraverseError 400 naming it. None (the default): sent exactly as before."""
         req = {'sequence': sequence}
         if labels is not None:
             req['labels'] = list(labels)
@@ -530,6 +556,13 @@ class TraverseClient:
         if select is not None:
             req['select'] = select
         req.update(opts)
+        if time_budget_ms is not None:
+            bounds = dict(req.get('bounds') or {})
+            if 'time_budget_ms' in bounds and bounds['time_budget_ms'] != time_budget_ms:
+                raise ValueError('time_budget_ms=%r and bounds.time_budget_ms=%r differ'
+                                 % (time_budget_ms, bounds['time_budget_ms']))
+            bounds['time_budget_ms'] = time_budget_ms
+            req['bounds'] = bounds
         if self.graph and 'graph' not in req:
             req['graph'] = self.graph
         return self._request('POST', '/resolve', req)

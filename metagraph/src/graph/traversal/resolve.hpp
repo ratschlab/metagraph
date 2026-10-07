@@ -56,6 +56,20 @@ struct ResolveOptions {
     // exception — the server's check that the client is still connected. Not a request field.
     std::function<bool()> stop;
     std::function<void()> abandon;
+    // The work deadline of a request with bounds.time_budget_ms (unset: no deadline, and the
+    // request runs exactly as without one). Read where |stop| is polled during the work —
+    // between two row batches, every kResolveCheckKmers k-mers of the explicit labels' support
+    // pass —, after |stop|: true ends the work there, and the profile is then exactly the
+    // resolve of the query's first SupportProfile::stop->resolved_kmers k-mers (decision B7,
+    // DESIGN-traverse-graphlet.md §21): a prefix, never a sample of the whole query. Under it
+    // the explicit labels' hits are fetched kResolveCheckKmers k-mers at a time (one fetch of
+    // the whole query, the unbudgeted path, is a piece no clock read can end). Not a request
+    // field.
+    std::function<bool()> time_up;
+    // Read every kResolveCheckLabels labels of the loops after the work (a discovery's naming,
+    // the profiles, the candidates' grouping): throws to abandon a request whose answer can no
+    // longer be built and written in time (the server: 503 deadline). Not a request field.
+    std::function<void()> finish_check;
     // the batches the rows are decoded in: at most |batch_rows| rows, sized to about
     // |batch_bytes|, and the bound of the rows a discovery keeps for repeated k-mers (tests
     // vary them; the profile does not depend on them). Not request fields
@@ -84,8 +98,31 @@ struct LabelTruncation {
     size_t dropped_full_length = 0;          // dropped labels supporting every in-graph k-mer
 };
 
+// The k-mers between two checkpoints of the explicit labels' support pass: a hit list per
+// k-mer is a few to a few thousand hits, so a gone client (and a deadline) is seen within
+// milliseconds, and a check (a peek on its socket, a clock read) costs nothing beside that
+constexpr uint64_t kResolveCheckKmers = 4096;
+
+// The loops over the labels after a /resolve's work read ResolveOptions::finish_check once in
+// this many labels: a label's step there is a few allocations (its name, its runs), so the
+// answer's time is read within a few milliseconds of it
+constexpr size_t kResolveCheckLabels = 4096;
+
+// Where a deadline (ResolveOptions::time_up) ended a /resolve's work, and how far it got: the
+// profile is that of the query's first |resolved_kmers| k-mers (SupportProfile::num_kmers),
+// out of its |query_kmers|
+struct ResolveStop {
+    // ROWS: reading the present k-mers' rows (a discovery's pass, the explicit labels'
+    // priming) or before it; SUPPORT: the explicit labels' hits, k-mer by k-mer
+    enum Phase { ROWS, SUPPORT };
+    Phase phase = ROWS;
+    uint64_t resolved_kmers = 0;
+    uint64_t query_kmers = 0;
+};
+
 struct SupportProfile {
     size_t k = 0;
+    // the k-mers profiled: the query's, or under a stop its prefix's (stop->resolved_kmers)
     uint64_t num_kmers = 0;
     Regime regime = Regime::BASIC;
     Support support = Support::KMER;
@@ -93,6 +130,9 @@ struct SupportProfile {
     std::vector<LabelProfile> labels;
     std::optional<LabelTruncation> labels_truncated;
     std::vector<SeedCandidate> candidates;   // ordered: longer, more labels, smaller begin
+    // set when the deadline ended the work: every field above is then exactly the resolve of
+    // the query's first num_kmers k-mers (a run ending there may continue past it)
+    std::optional<ResolveStop> stop;
 
     // base interval of a k-mer interval
     std::pair<uint64_t, uint64_t> bp_interval(const KmerInterval &iv) const {
@@ -102,7 +142,8 @@ struct SupportProfile {
 
 // Resolve where |query| is supported by which labels. No traversal.
 // Throws std::invalid_argument for unknown labels, invalid options, or unsupported
-// support kinds (trace needs coordinates and the BASIC regime).
+// support kinds (trace needs coordinates and the BASIC regime) — whatever the deadline: the
+// labels are resolved before it is first read.
 SupportProfile resolve_support(LabelOracle &oracle,
                                std::string_view query,
                                const ResolveOptions &options);

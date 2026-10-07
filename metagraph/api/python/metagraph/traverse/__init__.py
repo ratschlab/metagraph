@@ -52,7 +52,7 @@ _NAMES = {
                  'AttemptSent', 'InstanceMismatch', 'ReleaseVerdict', 'ServerInitializing',
                  'Suppression', 'TraverseError', 'TraverseResponse', 'classify_409',
                  'release_verdict'),
-    'client': ('TraverseClient', 'UnsupportedFeature'),
+    'client': ('ResolveDeadline', 'TraverseClient', 'UnsupportedFeature'),
     'store': ('Entry', 'GraphletStore', 'StoreLimitExceeded', 'UnknownHandle'),
 }
 _HOME = {name: mod for mod, names in _NAMES.items() for name in names}
@@ -73,7 +73,8 @@ __all__ = [
     'UNLIMITED',
     'TraverseClient', 'TraverseResponse', 'TraverseError', 'ServerInitializing',
     'AttemptAtBound', 'AttemptExpired', 'AttemptConflict', 'InstanceMismatch',
-    'UnsupportedFeature', 'AttemptAnswer', 'AttemptSent', 'Suppression', 'ReleaseVerdict',
+    'UnsupportedFeature', 'ResolveDeadline', 'AttemptAnswer', 'AttemptSent', 'Suppression',
+    'ReleaseVerdict',
     'release_verdict', 'classify_409', 'GraphletStore', 'Entry', 'UnknownHandle',
     'StoreLimitExceeded',
     'LocalBudget', 'LocalLimits', 'LocalStop', 'LocalBudgetExceeded', 'Partial',
