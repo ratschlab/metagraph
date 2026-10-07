@@ -6,16 +6,26 @@ scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, cont
     fields SCHEMA[NAME] below knows, so that the SPEC and this check cannot drift apart;
   - every answer: exactly the fields its shape has (answered entry, error slot, refusal,
     capabilities block), the types and enumerations of the SPEC, and the rules that tie the
-    fields together (a count's relation and its value, the offsets of the scope, the order of
-    the results, what withheld, cut and retrieval_complete imply) -- checked on the bodies,
-    never by asking a server;
-  - the fixture set: it covers every mode, scope, strand setting, withheld and cut reason, slot
-    error and refusal code a service has to handle, and the README names each fixture.
+    fields together -- a count's relation and its value, a total and its parts (exact: their
+    sum; at_least and bounds: the sum of their lower bounds, bounds also of their upper ones;
+    the weakest relation), the offsets of the scope, the information floor and its exemption,
+    a clamp to the cap, one budget per request (the steps of all patterns within max_steps, a
+    max_steps or time stop sticky: every later pattern unknown, work zero, the same stop), the
+    order of the results and, for a complete list, its agreement with the counts per offset and
+    per strand, what withheld, cut and retrieval_complete imply -- checked on the bodies, never
+    by asking a server (review of 2026-10-07, C2-02, C2-03, X-ORACLE-03: the cross-field rules
+    were missing); a flank of a result's k-mer is checked against the graph by
+    `pattern_fixtures.py --check` only;
+  - the fixture set: it covers every mode, scope, strand setting, relation (bounds included),
+    stop, withheld and cut reason, slot error, refusal code and unavailable reason a service
+    has to handle -- but for the ones UNPRODUCIBLE names, which no server of this build can
+    give -- and the README names each fixture.
 
 No metagraph import and no server: the service copies these bodies into its own tests, and
 this check is what makes them a contract rather than a sample.
 """
 
+import copy
 import json
 import math
 import os
@@ -60,6 +70,12 @@ REFUSALS = ('invalid_request', 'later_increment', 'resident_only', 'mask_require
             'annotation_unbudgeted')
 UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped',
                'alphabet_unsupported', 'multi_graph_later_increment')
+# The refusals and unavailable reasons no server of this build gives, so that no fixture holds
+# them (review of 2026-10-07, C2-01, D1-07, C1-05): primary_unwrapped (server_query and the CLI
+# always wrap a PRIMARY graph in CanonicalDBG; only an embedding reaches it) and
+# alphabet_unsupported (the BOSS alphabet is the build's: a graph of another alphabet does not
+# load). Every other code has a fixture.
+UNPRODUCIBLE = ('primary_unwrapped', 'alphabet_unsupported')
 MASKS = ('file', 'built_at_load', 'absent')
 PLACEMENTS = ('record', 'global', 'none', 'none_canonical')
 # an entry's placement (increment 3): the index's, or not_requested (output.occurrences false)
@@ -91,7 +107,7 @@ SCHEMA = {
     'clamped': ['field', 'requested', 'effective'],
     'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms'],
     'entry': ['id', 'kind', 'pattern', 'length', 'information_bits', 'anchor_information_bits',
-              'error', 'mode', 'scope', 'strands', 'palindromic', 'counts', 'work', 'stop',
+              'min_anchor_information_bits', 'error', 'mode', 'scope', 'strands', 'palindromic', 'counts', 'work', 'stop',
               'retrieval_complete', 'withheld', 'returned', 'cut', 'results', 'absence_scope',
               'determinism', 'notes', 'timing', 'placement', 'annotation', 'by_label',
               'rows_refused', 'anchors_truncated', 'labels_cut', 'occurrences_cut'],
@@ -126,7 +142,7 @@ SCHEMA = {
     'occurrences_cut': ['reason', 'labels'],
 }
 ENTRY_DESCRIPTION = ['id', 'kind', 'pattern', 'length', 'information_bits',
-                     'anchor_information_bits']
+                     'anchor_information_bits', 'min_anchor_information_bits']
 ENTRY_ANSWERED = ENTRY_DESCRIPTION + ['mode', 'scope', 'strands', 'palindromic', 'counts',
                                       'work', 'stop', 'retrieval_complete', 'absence_scope',
                                       'determinism', 'notes', 'timing']
@@ -237,6 +253,22 @@ class Checker:
         if total['relation'] == 'unknown':
             self.ok(all(p['relation'] == 'unknown' for p in parts), path,
                     'an unknown total has unknown parts')
+        # SPEC §7.4 (Count::operator+=): an at_least or bounds total is the sum of the lower
+        # bounds of what was explored (unknown as 0), a bounds total's upper the sum of the
+        # uppers; the relation is the weakest of the parts'
+        def low(c):
+            return 0 if c['relation'] == 'unknown' else c['value']
+
+        def high(c):
+            return c['upper'] if c['relation'] == 'bounds' else c['value']
+        if total['relation'] in ('at_least', 'bounds'):
+            self.ok(total['value'] == sum(low(p) for p in parts), path,
+                    'an at_least or bounds total is the sum of its parts\' lower bounds')
+            self.ok(any(p['relation'] in ('at_least', 'unknown') for p in parts)
+                    is (total['relation'] == 'at_least'), path, 'the weakest relation')
+        if total['relation'] == 'bounds':
+            self.ok(total['upper'] == sum(high(p) for p in parts), path,
+                    'a bounds total\'s upper is the sum of its parts\' uppers')
 
     def by_orientation(self, c, entry, strand_stated, unit, path):
         key = 'by_strand' if strand_stated else 'by_orientation'
@@ -310,6 +342,10 @@ class Checker:
             self.ok(request.get(c['field']) == c['requested'], path, 'the value asked for')
             if c['field'] in limits:
                 self.ok(limits[c['field']] == c['effective'], path, 'the effective limit')
+            if capabilities is not None:
+                # SPEC §4.5: lowered to the cap, not to the default
+                self.ok(c['effective'] == capabilities['caps'][c['field']], path,
+                        'lowered to the cap')
             clamped.append(c['field'])
         self.ok(clamped == [f for f in order if f in clamped], 'limits.clamped', 'order')
         echoed = [f for f in order if f in limits]
@@ -335,6 +371,56 @@ class Checker:
                 'one entry per request pattern')
         for i, (entry, asked) in enumerate(zip(a['patterns'], request['patterns'])):
             self.entry(entry, asked, request, a, f'patterns[{i}]')
+        self.budget(a, limits)
+
+    def budget(self, a, limits):
+        """SPEC §7.6, one budget per request: the steps of all patterns sum to at most max_steps,
+        and a stop by max_steps or time is sticky -- every later answered pattern stops with the
+        same reason in discovery, its counts unknown, its (engine) work zero."""
+        answered = [e for e in a['patterns'] if 'error' not in e]
+        self.ok(sum(e['work']['steps'] for e in answered) <= limits['max_steps'], 'patterns',
+                'the steps of all patterns sum to at most max_steps')
+        sticky = None
+        timed = False
+        for i, e in enumerate(a['patterns']):
+            if 'error' in e:
+                continue
+            path = f'patterns[{i}]'
+            # SPEC §7.9: the entry a time stop touched and every answered entry after it
+            if timed:
+                self.ok(e['determinism'] == 'time_limited', path + '.determinism',
+                        'an entry after a time-limited one is time-limited')
+            timed = timed or e['determinism'] == 'time_limited'
+            if sticky is not None:
+                self.ok(e['stop'] == {'phase': 'discovery', 'reason': sticky}, path + '.stop',
+                        f'the {sticky} stop of an earlier pattern, in discovery')
+                self.ok({f: e['work'][f] for f in ('ranges_visited', 'mask_scans', 'steps')}
+                        == {'ranges_visited': 0, 'mask_scans': 0, 'steps': 0}, path + '.work',
+                        'no work after a budget stop')
+                for name, c in self.counts_of(e):
+                    self.ok(c['relation'] == 'unknown' and c['value'] is None,
+                            f'{path}.counts.{name}', 'unknown after a budget stop')
+            elif e['stop'] is not None and e['stop']['reason'] in ('max_steps', 'time'):
+                sticky = e['stop']['reason']
+
+    @staticmethod
+    def counts_of(e):
+        """Every graph count of an answered entry: (name, count), parts included."""
+        c = e['counts']
+        out = []
+        for unit in ('contexts', 'anchors'):
+            if unit not in c:
+                continue
+            top = c[unit]
+            out.append((unit, top))
+            if 'suffix' in top:
+                out.append((unit + '.suffix', top['suffix']))
+            for key in ('by_offset', 'by_strand', 'by_orientation'):
+                for k, v in top.get(key, {}).items():
+                    out.append((f'{unit}.{key}.{k}', v))
+        if 'paths' in c:
+            out.append(('paths', c['paths']))
+        return out
 
     def timing(self, t, path, labelled=False):
         self.keys(t, SCHEMA['timing'] if labelled else ['elapsed_ms'], path)
@@ -368,17 +454,26 @@ class Checker:
                         'bad_alphabet for a pattern inside the alphabet')
                 return
             self.keys(e, ENTRY_DESCRIPTION + ['error'], path)
-            self.description(e, text, k, path)
+            self.description(e, text, k, path, request.get('strands', 'both'))
             if err['code'] == 'information_below_floor':
-                bits = e['anchor_information_bits'] if e['length'] > k else e['information_bits']
+                bits = e['min_anchor_information_bits'] if e['length'] > k \
+                    else e['information_bits']
                 self.ok(bits < a['limits']['min_information_bits'], path,
                         'refused above the floor')
+                # SPEC §7.8: an exact pattern in suffix scope is exempt from the floor
+                self.ok(not self.exempt(text, k, request), path,
+                        'an exact pattern of L <= k in suffix scope is exempt from the floor')
             return
 
         expected = ENTRY_ANSWERED + (ENTRY_RETRIEVAL if mode != 'count' else []) \
             + (ENTRY_LABELS if labelled else [])
         self.keys(e, expected, path)
-        self.description(e, text, k, path)
+        self.description(e, text, k, path, request.get('strands', 'both'))
+        # SPEC §7.8: a pattern answered is exempt or at or above the floor (for L > k: every
+        # searched anchor window, review of 2026-10-07, X-GUARANTEES-01)
+        bits = e['min_anchor_information_bits'] if e['length'] > k else e['information_bits']
+        self.ok(self.exempt(text, k, request) or bits >= a['limits']['min_information_bits'],
+                path, 'answered below the floor')
         self.ok(e['mode'] == mode, path + '.mode')
         L = e['length']
         scope = 'long' if L > k else request.get('scope', 'any_offset')
@@ -459,13 +554,20 @@ class Checker:
             self.ok(total['relation'] == 'exact', path + '.counts',
                     'a count without a stop is exact')
         self.one_of(e['determinism'], ('full', 'time_limited'), path + '.determinism')
-        if stop is not None and stop['reason'] == 'time':
+        # SPEC §7.6/§7.9: time_limited iff the clock touched the entry, in its stop or, in
+        # partial, only in its cut (stop keeps the first stop: a pattern stopped by max_steps or
+        # its threshold whose release met the work time, or a later pattern after a sticky
+        # max_steps stop whose empty release met it; review of 2026-10-07, C1-03 and
+        # X-DETERMINISM-01). With labels "all", a time stop of the reads after a step stop of the
+        # engine states the engine's stop, so only that direction is checked there.
+        clocked = (stop is not None and stop['reason'] == 'time') \
+            or (e.get('cut') or {}).get('reason') == 'time'
+        if clocked:
             self.ok(e['determinism'] == 'time_limited', path + '.determinism',
-                    'a time stop is not deterministic')
+                    'a time stop or a time cut is not deterministic')
         if e['determinism'] == 'time_limited':
-            # (with labels "all", a time stop of the reads after a step stop of the engine:
-            # the engine's stop is the one stated)
-            self.ok(stop is not None and (stop['reason'] == 'time' or labelled), path + '.stop')
+            self.ok(clocked or (labelled and stop is not None), path + '.stop',
+                    'time_limited without a time stop or a time cut')
         self.ok(isinstance(e['notes'], list) and all(n in NOTES for n in e['notes']),
                 path + '.notes', repr(e['notes']))
         self.ok(e['notes'] == [n for n in NOTES if n in e['notes']], path + '.notes', 'order')
@@ -490,18 +592,38 @@ class Checker:
             return
         self.retrieval(e, text, total, request, a, path)
 
-    def description(self, e, text, k, path):
+    def description(self, e, text, k, path, strands='both'):
         self.ok(e['pattern'] == text, path + '.pattern', 'the pattern in upper case')
         self.ok(e['length'] == len(text), path + '.length')
         self.ok(is_num(e['information_bits'])
                 and abs(e['information_bits'] - information_bits(text)) < 1e-9,
                 path + '.information_bits')
         if len(text) > k:
+            # anchor_information_bits: the bits of P[0, k), whatever the strands (its meaning in
+            # contract version 1); min_anchor_information_bits: the least informative anchor
+            # window searched, P[0, k) forward, rc(P)[0, k) reverse, whose bits are
+            # P[L - k, L)'s (review of 2026-10-07, X-GUARANTEES-01, and the owner's decision)
             self.ok(is_num(e['anchor_information_bits'])
                     and abs(e['anchor_information_bits'] - information_bits(text[:k])) < 1e-9,
-                    path + '.anchor_information_bits', 'the bits of [0, k)')
+                    path + '.anchor_information_bits', 'the bits of P[0, k)')
+            windows = []
+            if strands in ('both', 'forward') or revcomp(text) == text:
+                windows.append(information_bits(text[:k]))
+            if strands in ('both', 'reverse') and revcomp(text) != text:
+                windows.append(information_bits(text[-k:]))
+            self.ok(is_num(e['min_anchor_information_bits'])
+                    and abs(e['min_anchor_information_bits'] - min(windows)) < 1e-9,
+                    path + '.min_anchor_information_bits', 'the bits of the least anchor window')
         else:
-            self.ok(e['anchor_information_bits'] is None, path + '.anchor_information_bits')
+            for f in ('anchor_information_bits', 'min_anchor_information_bits'):
+                self.ok(e[f] is None, path + '.' + f)
+
+    @staticmethod
+    def exempt(text, k, request):
+        """SPEC §7.8: an exact pattern (ACGT only, whatever its kind) of L <= k in suffix scope
+        is exempt from the information floor."""
+        return all(c in 'ACGT' for c in text) and len(text) <= k \
+            and request.get('scope', 'any_offset') == 'suffix'
 
     def retrieval(self, e, text, total, request, a, path):
         k = a['index']['k']
@@ -573,6 +695,41 @@ class Checker:
             order.append((r['node'], r['offset'], ORIENTATION_RANK[r[key]]))
         self.ok(order == sorted(order) and len(set(order)) == len(order), path + '.results',
                 'ordered by (node, offset, orientation), each context once')
+        # review of 2026-10-07, X-ORACLE-03: the results and the counts beside them
+        contexts = [(r[key], r['kmer'], r['offset']) for r in results]
+        self.ok(len(set(contexts)) == len(contexts), path + '.results',
+                'a context (strand, k-mer, offset) returned once')
+        node_of, kmer_of = {}, {}
+        for r in results:
+            node_of.setdefault(r['kmer'], set()).add(r['node'])
+            kmer_of.setdefault(r['node'], set()).add(r['kmer'])
+        self.ok(all(len(v) == 1 for v in node_of.values())
+                and all(len(v) == 1 for v in kmer_of.values()), path + '.results',
+                'one node per k-mer and one k-mer per node')
+        if L <= k and results:
+            c = e['counts']['contexts']
+            by = c['by_strand' if strand_stated else 'by_orientation']
+            per_offset = {}
+            per_strand = {}
+            for r in results:
+                per_offset[str(r['offset'])] = per_offset.get(str(r['offset']), 0) + 1
+                s = STRAND_KEYS.get(r[key], r[key]) if strand_stated else r[key]
+                per_strand[s] = per_strand.get(s, 0) + 1
+            for name, parts, got in (('by_offset', c['by_offset'], per_offset),
+                                     ('by_strand' if strand_stated else 'by_orientation', by,
+                                      per_strand)):
+                for part, count in parts.items():
+                    n = got.get(part, 0)
+                    if e['retrieval_complete']:
+                        # every context returned: the results per part are the part's count
+                        self.ok(count['relation'] == 'exact' and n == count['value'],
+                                f'{path}.counts.contexts.{name}.{part}',
+                                f'{n} results, the count {count["value"]}')
+                    elif count['relation'] == 'exact':
+                        self.ok(n <= count['value'], f'{path}.counts.contexts.{name}.{part}',
+                                f'{n} results above the exact count {count["value"]}')
+                self.ok(set(got) <= set(parts), f'{path}.counts.contexts.{name}',
+                        'a result outside the parts counted')
         if labelled:
             self.labels(e, total, L, a, path)
 
@@ -696,6 +853,14 @@ class Checker:
         self.ok('none' in b['projections'], path + '.projections', '"none" is served everywhere')
         self.ok(b['default_mode'] in b['modes'], path + '.default_mode')
         self.ok(b['default_projection'] in b['projections'], path + '.default_projection')
+        # contract version 1: an omitted output.labels means "none" on every server stating
+        # it (review of 2026-10-07, D1-04: a "may become all" would change the meaning of an
+        # unchanged request under the same version)
+        self.ok(b['default_projection'] == 'none', path + '.default_projection',
+                'version 1: an omitted output.labels is "none"')
+        # review of 2026-10-07, R2-04: the rule names every cap
+        for cap in b['caps']:
+            self.ok(cap in b['caps_rule'], path + '.caps_rule', f'{cap} not in the rule')
         self.ok(not set(b['projections']) & set(b['projections_later_increment']),
                 path + '.projections_later_increment')
         self.ok(not set(b['kinds']) & set(b['kinds_later_increment']),
@@ -717,6 +882,14 @@ class Checker:
             return
         self.ok(is_int(b['k']), path + '.k')
         if b['graph_mode'] is None:
+            # SPEC §10.2: a graph the engine does not recognise (review of 2026-10-07, C2-01):
+            # not available, and only k is set
+            self.one_of(b['unavailable_reason'],
+                        ('representation_unsupported', 'primary_unwrapped'),
+                        path + '.unavailable_reason')
+            for f in ('alphabet', 'strand_stated', 'mask', 'scopes', 'placement', 'support',
+                      'annotation'):
+                self.ok(b[f] is None, f'{path}.{f}', 'only k is set on an unrecognised graph')
             return
         self.one_of(b['graph_mode'], GRAPH_MODES, path + '.graph_mode')
         self.ok(b['scopes'] == b['scopes_by_graph_mode'][b['graph_mode']], path + '.scopes')
@@ -863,7 +1036,8 @@ class TestPatternFixtures(unittest.TestCase):
     def test_coverage(self):
         """The fixtures show every situation a client of version 1 has to handle."""
         seen = {k: set() for k in ('mode', 'scope', 'strands', 'withheld', 'cut', 'stop',
-                                   'slot', 'refusal', 'graph_mode', 'relation', 'note')}
+                                   'slot', 'refusal', 'graph_mode', 'relation', 'note',
+                                   'stop_then_cut')}
         for name, f in self.fixtures.items():
             request, answer = self.bodies[name]
             if f['method'] != 'POST':
@@ -885,6 +1059,10 @@ class TestPatternFixtures(unittest.TestCase):
                         seen[f2].add(e[f2]['reason'])
                 if e['stop']:
                     seen['stop'].add((e['stop']['phase'], e['stop']['reason']))
+                    if e.get('cut') and e['stop']['reason'] != e['cut']['reason']:
+                        # an earlier stop kept in stop, a later one shown only by the cut
+                        seen['stop_then_cut'].add((e['stop']['reason'], e['cut']['reason'],
+                                                   e['determinism']))
                 total = e['counts'].get('contexts') or e['counts']['anchors']
                 seen['relation'].add(total['relation'])
         self.assertEqual(set(MODES), seen['mode'])
@@ -897,12 +1075,75 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(set(SLOT_ERRORS), seen['slot'])
         self.assertEqual({'basic', 'primary'}, seen['graph_mode'])
         self.assertEqual(set(NOTES), seen['note'])
-        self.assertLessEqual({'exact', 'at_least', 'unknown'}, seen['relation'])
+        # every relation, bounds and the mask_scan stop included (review of 2026-10-07,
+        # X-TESTS-03: no body carried either)
+        self.assertEqual(set(RELATIONS), seen['relation'])
         self.assertLessEqual({('discovery', 'max_steps'), ('discovery', 'time'),
-                              ('discovery', 'max_contexts')}, seen['stop'])
-        self.assertEqual({'invalid_request', 'later_increment', 'resident_only', 'mask_required',
-                          'deadline', 'initializing', 'annotation_unbudgeted'}, seen['refusal'])
+                              ('discovery', 'max_contexts'), ('mask_scan', 'max_steps')},
+                             seen['stop'])
+        # every refusal code but the unproducible ones (review of 2026-10-07, C2-01: the set was
+        # pinned to the covered ones, so a code without a fixture went unseen)
+        self.assertEqual((set(REFUSALS) | {'initializing'}) - set(UNPRODUCIBLE),
+                         seen['refusal'])
         self.assertLessEqual({('label_discovery', 'max_annotation_work')}, seen['stop'])
+        # SPEC §7.6 (the owner's decision of 2026-10-07): stop keeps the first stop; the time
+        # that then cut the release shows only as cut time and time_limited, in the pattern
+        # stopped by max_steps and in the one after it (review of 2026-10-07, C1-03)
+        self.assertIn(('max_steps', 'time', 'time_limited'), seen['stop_then_cut'])
+
+    def test_time_limited_is_the_clocks(self):
+        """SPEC §7.6/§7.9, both ways: an entry the clock touched (its stop, or only its cut) is
+        time_limited, and a time_limited entry was touched by the clock (review of 2026-10-07,
+        C1-03: the validator refused the SPEC's stop max_steps + cut time)."""
+        name = 'max_steps_then_time'
+        request, answer = self.bodies[name]
+        capabilities = self.capabilities_of(self.fixtures[name]['server'])
+
+        class Stub:
+            def fail(self, message):
+                raise AssertionError(message)
+
+        def check(a):
+            Checker(Stub(), name).answer(a, request, capabilities)
+
+        check(answer)
+        for i in (0, 1):
+            self.assertEqual(('max_steps', 'time', 'time_limited'),
+                             (answer['patterns'][i]['stop']['reason'],
+                              answer['patterns'][i]['cut']['reason'],
+                              answer['patterns'][i]['determinism']))
+        # a time cut stated as deterministic
+        a = copy.deepcopy(answer)
+        for e in a['patterns']:
+            e['determinism'] = 'full'
+        with self.assertRaisesRegex(AssertionError, 'a time stop or a time cut is not'):
+            check(a)
+        # time_limited where the clock touched nothing: the first entry's release complete
+        # up to max_contexts, cut by its discovery's max_steps
+        a = copy.deepcopy(answer)
+        a['patterns'][0]['cut'] = {'reason': 'max_steps'}
+        with self.assertRaisesRegex(AssertionError, 'time_limited without a time stop'):
+            check(a)
+        # an entry after a time-limited one stated as deterministic (its own cut dropped)
+        a = copy.deepcopy(answer)
+        a['patterns'][1]['determinism'] = 'full'
+        a['patterns'][1]['cut'] = {'reason': 'max_steps'}
+        with self.assertRaisesRegex(AssertionError, 'after a time-limited one'):
+            check(a)
+
+    def test_every_unavailable_reason_has_a_capabilities_fixture(self):
+        """Every unavailable reason but the unproducible ones, on both capabilities routes."""
+        seen = {}
+        for name, f in self.fixtures.items():
+            if f['method'] != 'GET':
+                continue
+            b = self.bodies[name][1]['pattern']
+            if b['available'] is False:
+                route = 'probe' if f['path'].startswith('/traverse/') else 'capabilities'
+                seen.setdefault(b['unavailable_reason'], set()).add(route)
+        self.assertEqual(set(UNAVAILABLE) - set(UNPRODUCIBLE), set(seen))
+        for reason, routes in seen.items():
+            self.assertEqual({'probe', 'capabilities'}, routes, reason)
 
     def test_hand_made_bodies_are_the_codes(self):
         """The two hand-made 503 bodies are written by the code as stored here."""
@@ -954,9 +1195,11 @@ class TestPatternFixtures(unittest.TestCase):
         """file, built_at_load and absent (DESIGN §4), each on both capabilities routes."""
         seen = {}
         for name, f in self.fixtures.items():
-            if f['method'] == 'GET' and f['server'] != 'multi':
+            # (a multi-graph server and a graph the engine does not recognise state no mask)
+            mask = self.bodies[name][1]['pattern'].get('mask') if f['method'] == 'GET' else None
+            if mask is not None:
                 route = 'probe' if f['path'].startswith('/traverse/') else 'capabilities'
-                seen.setdefault(self.bodies[name][1]['pattern']['mask'], set()).add(route)
+                seen.setdefault(mask, set()).add(route)
         self.assertEqual(set(MASKS), set(seen))
         for mask in ('file', 'built_at_load', 'absent'):
             self.assertEqual({'probe', 'capabilities'}, seen[mask], mask)

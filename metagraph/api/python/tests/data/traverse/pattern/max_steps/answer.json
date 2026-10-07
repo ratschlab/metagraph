@@ -130,6 +130,7 @@
    "information_bits": 40.0,
    "kind": "dna",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "palindromic": false,
@@ -147,7 +148,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.008125
+    "elapsed_ms": 0.036
    },
    "withheld": {
     "reason": "discovery_budget"
@@ -263,6 +264,7 @@
    "information_bits": 40.0,
    "kind": "dna",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "palindromic": false,
@@ -280,7 +282,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.002333
+    "elapsed_ms": 0.003333
    },
    "withheld": {
     "reason": "discovery_budget"
@@ -293,6 +295,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.015375
+  "elapsed_ms": 0.062208
  }
 }

@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <new>
 #include <numeric>
 #include <set>
 #include <string>
@@ -247,10 +248,41 @@ TEST(PatternMask, BuiltAtLoadIsNotInheritedByAnotherGraph) {
         address = graph.get();
         EXPECT_TRUE(mask_built_at_load(*graph));
     }
-    // a graph loaded after the first was freed, perhaps at its address, read its mask from
-    // the file
+    // a graph loaded after the first was freed read its mask from the file. With the registry's
+    // weak_ptr the expired entry pins the first graph's make_shared block until it is pruned,
+    // so this graph is never at its address; at the same address only a registry of raw
+    // pointers would be fooled, and whether a load lands there depends on the allocator (the
+    // test below makes it land there)
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(built);
     EXPECT_FALSE(mask_built_at_load(*graph)) << (graph.get() == address ? "same address" : "");
+}
+
+// review of 2026-10-07, T3-03: the second graph is constructed at the first one's address by
+// construction, whatever the allocator: one block of storage for both, their control blocks
+// allocated apart (an expired registry entry pins the control block, never the storage). A
+// registry that remembered addresses would take the second graph's mask for one built at load
+TEST(PatternMask, BuiltAtLoadIsNotInheritedAtTheSameAddress) {
+    const std::string dir = make_dir("load_address");
+    const std::string built = build_masked(dir, "basic", "stat");
+    const std::string stripped = strip(dir, built);
+    alignas(DBGSuccinct) unsigned char storage[sizeof(DBGSuccinct)];
+    auto destroy = [](DBGSuccinct *g) { g->~DBGSuccinct(); };
+    {
+        DBGSuccinct *first = new (storage) DBGSuccinct(2);
+        std::shared_ptr<DeBruijnGraph> graph(first, destroy);
+        ASSERT_TRUE(first->load(stripped));
+        ASSERT_EQ(nullptr, first->get_mask());
+        build_mask_at_load(graph);
+        ASSERT_NE(nullptr, first->get_mask());
+        EXPECT_TRUE(mask_built_at_load(*graph));
+    }
+    DBGSuccinct *second = new (storage) DBGSuccinct(2);
+    std::shared_ptr<DeBruijnGraph> graph(second, destroy);
+    ASSERT_TRUE(second->load(built));
+    ASSERT_NE(nullptr, second->get_mask());
+    ASSERT_EQ(static_cast<const void*>(storage),
+              static_cast<const void*>(dynamic_cast<DBGSuccinct*>(graph.get())));
+    EXPECT_FALSE(mask_built_at_load(*graph));
 }
 
 TEST(PatternMask, CountsOfTheMask) {

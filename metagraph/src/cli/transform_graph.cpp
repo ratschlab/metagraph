@@ -82,7 +82,8 @@ int write_dummy_mask(const std::string &graph_path, const Config &config) {
 
     // written to a temporary file in the same directory and renamed over the target, so that a
     // loader never reads a partial mask: DBGSuccinct::load refuses the graph with a mask it
-    // cannot read, and an interrupted run would otherwise leave such a file beside the graph
+    // cannot parse (one it cannot open is skipped with a warning), and an interrupted run would
+    // otherwise leave such a file beside the graph
     timer.reset();
     const std::string tmp_path = mask_path + ".tmp." + std::to_string(getpid());
     try {

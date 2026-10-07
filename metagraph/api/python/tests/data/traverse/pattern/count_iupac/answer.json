@@ -132,6 +132,7 @@
    "information_bits": 36.0,
    "kind": "iupac",
    "length": 19,
+   "min_anchor_information_bits": null,
    "mode": "count",
    "notes": [],
    "palindromic": false,
@@ -144,7 +145,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.2485
+    "elapsed_ms": 0.109
    },
    "work": {
     "mask_scans": 0,
@@ -256,6 +257,7 @@
    "information_bits": 35.415037499278846,
    "kind": "iupac",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "count",
    "notes": [],
    "palindromic": false,
@@ -268,7 +270,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.0635
+    "elapsed_ms": 0.088417
    },
    "work": {
     "mask_scans": 0,
@@ -278,6 +280,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.320083
+  "elapsed_ms": 0.213916
  }
 }

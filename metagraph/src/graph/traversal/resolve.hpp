@@ -66,9 +66,10 @@ struct ResolveOptions {
     // the whole query, the unbudgeted path, is a piece no clock read can end). Not a request
     // field.
     std::function<bool()> time_up;
-    // Read every kResolveCheckLabels labels of the loops after the work (a discovery's naming,
-    // the profiles, the candidates' grouping): throws to abandon a request whose answer can no
-    // longer be built and written in time (the server: 503 deadline). Not a request field.
+    // Read every kResolveCheckLabels labels of the loops after the work (a discovery's ranking
+    // and naming, the profiles, the candidates' grouping): throws to abandon a request whose
+    // answer can no longer be built and written in time (the server: 503 deadline). Not a
+    // request field.
     std::function<void()> finish_check;
     // the batches the rows are decoded in: at most |batch_rows| rows, sized to about
     // |batch_bytes|, and the bound of the rows a discovery keeps for repeated k-mers (tests
@@ -118,6 +119,11 @@ struct ResolveStop {
     Phase phase = ROWS;
     uint64_t resolved_kmers = 0;
     uint64_t query_kmers = 0;
+    // the runs of the WHOLE query's k-mers present in the graph (SupportProfile::graph_runs
+    // holds the prefix's): the k-mers are mapped before the deadline is first read, so their
+    // presence is known whatever the stop — an explicit seed not fully in the graph is a 400
+    // under a stop as without one (review of 2026-10-07, V1-02)
+    std::vector<KmerInterval> query_graph_runs;
 };
 
 struct SupportProfile {

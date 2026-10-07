@@ -1,0 +1,4 @@
+{
+ "code": "representation_unsupported",
+ "error": "pattern: the graph is not a succinct graph (a DBGSuccinct, or a PRIMARY one wrapped in CanonicalDBG): the pattern lookup narrows BOSS ranges"
+}

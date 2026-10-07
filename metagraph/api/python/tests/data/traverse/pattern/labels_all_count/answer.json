@@ -127,6 +127,7 @@
    "information_bits": 40.0,
    "kind": "dna",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "count",
    "notes": [
     "annotation_not_read"
@@ -141,7 +142,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.080666
+    "elapsed_ms": 0.052125
    },
    "work": {
     "mask_scans": 0,
@@ -151,6 +152,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.097667
+  "elapsed_ms": 0.06625
  }
 }

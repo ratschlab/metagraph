@@ -313,6 +313,7 @@
    "kind": "dna",
    "labels_cut": null,
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [
     "record_bounds_unknown"
@@ -4317,9 +4318,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.293167,
-    "label_discovery_ms": 0.447292,
-    "placement_ms": 0.253917
+    "elapsed_ms": 0.301875,
+    "label_discovery_ms": 0.352833,
+    "placement_ms": 0.187166
    },
    "withheld": null,
    "work": {
@@ -4333,6 +4334,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 1.441208
+  "elapsed_ms": 1.401292
  }
 }

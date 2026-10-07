@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <ostream>
 #include <stdexcept>
 #include <string>
 
@@ -74,8 +75,9 @@ struct PatternLimits {
     uint64_t max_steps = 100'000'000;
     double default_time_ms = 60'000;
     double max_time_ms = 600'000;
-    // the finalisation reserve inside the time budget (§5.3): work stops this long before the
-    // request's deadline so that the answer can still be written by it
+    // the finalisation reserve inside the time budget (§5.3): work stops at least this long
+    // before the request's deadline so that the answer can still be written by it (longer by
+    // the estimated finalisation of what the answer buffers: delivery_* below)
     double finalize_ms = 250;
     double min_information_bits = 24;
     // patterns per request: above it the request is refused (a list is not cut)
@@ -91,6 +93,15 @@ struct PatternLimits {
     // not a cap: the annotation reads under the deadline are decoded in chunks of about this
     // many ms (the server's --traverse-chunk-target-ms, as /traverse's reads); 0: one piece
     double chunk_target_ms = 50;
+    // not caps: the finalisation of what the answer buffers (AnswerVolume; review of
+    // 2026-10-07, X-EFFICIENCY-04): the rates (MB/s) at which its JSON text is assumed to be
+    // built and written, and compressed (--pattern-delivery-build-mbps,
+    // --pattern-delivery-compress-mbps), and the text written per byte of compact JSON (1 on
+    // the server; the CLI's indented text 2). The work stops finalize_ms plus that estimate
+    // before the deadline. 0 or infinity: the reserve alone
+    double delivery_build_mbps = 10;
+    double delivery_compress_mbps = 50;
+    double delivery_text_scale = 1;
 };
 
 PatternLimits pattern_limits(const Config &config);
@@ -105,15 +116,29 @@ class PatternDelivery {
   public:
     void set_deadline(const graph::pattern::Deadline &deadline) { deadline_ = deadline; }
     // throws PatternRefusal(503, "deadline") once the deadline's respond time passed; does
-    // nothing before a deadline was set (the request was refused before it was parsed)
+    // nothing before a deadline was set (the request was refused before it was parsed); and
+    // graph::pattern::Aborted when the abort predicate answers true
     void check() const;
+
+    /**
+     * The server's "the client left, or the server stops" (review of 2026-10-07,
+     * X-CONCURRENCY-01, R2-02: /pattern ran to its deadline for a caller that was gone):
+     * process_pattern_request gives it to the request's Budget (Budget::set_abort, read at
+     * every clock reading of the work), and check() asks it while the answer is assembled,
+     * written and compressed. Its answer true throws graph::pattern::Aborted; the server
+     * then writes nothing. Unset (the CLI, tests): never asked.
+     */
+    void set_abort(std::function<bool()> aborted) { abort_ = std::move(aborted); }
+    const std::function<bool()>& abort() const { return abort_; }
 
   private:
     std::optional<graph::pattern::Deadline> deadline_;
+    std::function<bool()> abort_;
 };
 
-// The request body as JSON; a body that is not JSON is refused as invalid_request (the
-// generic parse error of the other routes carries no code)
+// The request body as JSON: one RFC 8259 JSON text with unique member names and nothing after
+// it, nested at most 1,000 deep; anything else is refused as invalid_request (the generic
+// parse error of the other routes carries no code; their parser stays as lenient as it was)
 Json::Value parse_pattern_body(const std::string &content);
 
 /**
@@ -121,9 +146,11 @@ Json::Value parse_pattern_body(const std::string &content);
  * single graph of |anno_graph| under |limits|, stating |release|. The deadline starts on
  * entry (the body was parsed), read from |clock| (the steady clock when null; injectable so
  * that tests stop at a chosen instant); |delivery|, when given, receives it for the writing
- * of the answer. |identity| (may be null) states the index in the answer's `index`. Throws
- * PatternRefusal for a whole-request refusal, 503 "deadline" included when the answer could
- * not be assembled by the deadline; refused patterns are answered in their slots. Reads
+ * of the answer. The work stops finalize_ms before the deadline, earlier by the estimated
+ * time to write what the answer holds (AnswerVolume, limits.delivery_*). |identity| (may be
+ * null) states the index in the answer's `index`. Throws PatternRefusal for a
+ * whole-request refusal, 503 "deadline" included when the answer could not be assembled by
+ * the deadline; refused patterns are answered in their slots. Reads
  * annotation rows only for output.labels "all" in a retrieval mode (PatternRetrieval);
  * |hooks| (tests): a record mapping instead of the index's, a hook on every read.
  */
@@ -155,6 +182,23 @@ Json::Value process_pattern_request(const Json::Value &json,
  */
 Json::Value pattern_capabilities_json(const graph::AnnotatedDBG *anno_graph,
                                       const PatternLimits &limits, bool multi_graph);
+
+/**
+ * One request of `metagraph pattern` (the text of a request file, |name| in the log) as the
+ * CLI answers it on |out|, one JSON text written with |builder|: the answer (true), or the body
+ * of a refusal or, for any other failure, the body the server answers 400 without a code
+ * ({"error"}) (false). Never throws for a request, so that the next file is still answered.
+ * |hooks|: as process_pattern_request's (tests).
+ */
+bool write_pattern_answer(const std::string &content,
+                          const graph::AnnotatedDBG &anno_graph,
+                          const PatternLimits &limits,
+                          const std::string &release,
+                          const IndexIdentity *identity,
+                          const Json::StreamWriterBuilder &builder,
+                          std::ostream &out,
+                          const std::string &name = "the request",
+                          const RetrievalHooks *hooks = nullptr);
 
 // `metagraph pattern -i GRAPH -a ANNOTATION REQUEST.json ...`: one JSON answer per request
 // file on stdout, the server's (a refusal's body, exit 1); for tests and offline use

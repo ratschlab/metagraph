@@ -7135,7 +7135,11 @@ TEST(ResolveDeadline, WithoutTheFieldTheAnswerIsAsBefore) {
         } else if (std::string(mode) == "rle") {
             plain["run_format"] = "rle";
         }
-        const Json::Value out = f.resolve(plain, nullptr, { 1000, kResolveFinalizeMs });
+        SteppingClock untouched;
+        const Json::Value out = f.resolve(plain, &untouched, { 1000, kResolveFinalizeMs });
+        // no deadline is read without the field (review of 2026-10-07, T3-05, V1-03: its start
+        // was read for every request)
+        EXPECT_EQ(0u, untouched.reads) << mode;
         // nothing a deadline adds: no limits, no stop
         EXPECT_FALSE(out.isMember("limits")) << mode;
         EXPECT_FALSE(out.isMember("stop")) << mode;
@@ -7297,6 +7301,97 @@ TEST(ResolveDeadline, AnExplicitSelectionPastThePrefixIsNotMade) {
     // an interval out of range on the whole query is refused, stop or not
     SteppingClock third;
     EXPECT_THROW(f.resolve(request(2980, 3100), &third), InvalidRequest);
+}
+
+// review of 2026-10-07, V1-02: what is known whatever the stop is refused as without one — the
+// HTTP status of a malformed request does not depend on the deadline. An explicit seed not
+// fully in the graph (the query's k-mers are mapped before the deadline is read), and with
+// explicit labels a seed label not among them (every one of them is profiled whatever the
+// stop): 400 at every budget, the stopped ones included, also when another seed of the request
+// ends past the prefix. A discovery's label not met in the prefix stays unknown: not made
+TEST(ResolveDeadline, RequestErrorsAre400WhateverTheStop) {
+    const ResolveDeadlineFixture f;
+    // 300 random bases absent from the graph (k-mers 0..269), then 2,000 of the labelled query
+    const std::string late = random_seq(300, 977) + f.q.substr(0, 2000);
+    auto seed = [](uint64_t begin, uint64_t end, const std::string &label) {
+        Json::Value s;
+        s["kmer_interval"].append(Json::UInt64(begin));
+        s["kmer_interval"].append(Json::UInt64(end));
+        s["labels"].append(label);
+        return s;
+    };
+    auto request = [&](const std::string &sequence, bool discover,
+                       const std::vector<Json::Value> &seeds) {
+        Json::Value r;
+        r["sequence"] = sequence;
+        if (discover) {
+            r["discover"]["max_labels"] = 8;
+        } else {
+            r["labels"].append("L0");
+            r["labels"].append("L3");
+        }
+        r["select"]["policy"] = "explicit";
+        for (const Json::Value &s : seeds) {
+            r["select"]["seeds"].append(s);
+        }
+        return r;
+    };
+    struct Case {
+        std::string what;
+        Json::Value request;
+        std::string error;
+    };
+    const std::vector<Case> cases = {
+        { "a seed in the absent stretch, another past any prefix",
+          request(late, true, { seed(100, 200, "L0"), seed(1500, 1600, "L0") }),
+          "Explicit seed interval is not fully present in the graph" },
+        { "one seed straddling the absent stretch's end",
+          request(late, true, { seed(250, 400, "L0") }),
+          "Explicit seed interval is not fully present in the graph" },
+        { "explicit labels, a seed label not among them",
+          request(f.q, false, { seed(0, 40, "nope") }),
+          "Explicit seed label was not profiled: 'nope'" },
+        { "explicit labels, the unknown label on a later seed past any prefix",
+          request(f.q, false, { seed(0, 40, "L0"), seed(2500, 2600, "nope") }),
+          "Explicit seed label was not profiled: 'nope'" },
+    };
+    for (const Case &c : cases) {
+        // unbudgeted, then at budgets that stop the work early or late, and one that does not
+        size_t stopped = 0;
+        for (double work_ms : { -1.0, 1.0, 2.0, 3.0, 5.0, 8.0, 1e6 }) {
+            Json::Value r = c.request;
+            if (work_ms > 0)
+                r["bounds"]["time_budget_ms"] = kResolveFinalizeMs + work_ms;
+            SteppingClock clock;
+            try {
+                const Json::Value out = f.resolve(r, &clock);
+                ADD_FAILURE() << c.what << ", work " << work_ms << " ms: answered "
+                              << compact(out["stop"]);
+            } catch (const InvalidRequest &e) {
+                EXPECT_EQ(c.error, std::string(e.what())) << c.what << ", work " << work_ms;
+            }
+            // the same budget answered without the selection: does it stop?
+            Json::Value fine = r;
+            fine.removeMember("select");
+            SteppingClock again;
+            stopped += !f.resolve(fine, &again)["stop"].isNull() && work_ms > 0;
+        }
+        // some of the budgets above do stop the work, so the 400s were given under a stop
+        EXPECT_GE(stopped, 1u) << c.what;
+    }
+
+    // a discovery's label the prefix did not meet: unknown on the whole query, not made
+    Json::Value r = request(f.q, true, { seed(0, 40, "nope") });
+    r["bounds"]["time_budget_ms"] = kResolveFinalizeMs + 2;
+    SteppingClock clock;
+    const Json::Value out = f.resolve(r, &clock);
+    ASSERT_FALSE(out["stop"].isNull());
+    EXPECT_TRUE(out["selection"].isNull());
+    EXPECT_NE(std::string::npos, out["stop"]["message"].asString().find(
+            "select.seeds[0] names a label the resolved prefix did not discover"));
+    // the same without a deadline: the discovery met every label, 'nope' among none: 400
+    r["bounds"].removeMember("time_budget_ms");
+    EXPECT_THROW(f.resolve(r, nullptr), InvalidRequest);
 }
 
 TEST(ResolveDeadline, CapabilitiesBlock) {

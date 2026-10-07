@@ -11,9 +11,13 @@ field lists.
 
 Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms`
 (and every `timing` value of a pattern), `server_instance`, and the counts and work of
-a `determinism: time_limited` pattern.
+the first `determinism: time_limited` pattern of an answer (and, when the clock cut its
+release, its `returned` and `results`; the later ones, stopped by the same budget, are
+compared as they are).
 Paths under the generator's work directory read `{work}/...`. Two fixtures are
-HAND-MADE (no server produces them on demand); their text is the code's.
+HAND-MADE (no server produces them on demand); their text is the code's. No fixture
+holds `primary_unwrapped` (server_query and the CLI always wrap a PRIMARY graph) or
+`alphabet_unsupported` (a graph of another alphabet does not load in this build).
 
 - `capabilities` (GET /capabilities, 200, masked): GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, placement record)
 - `traverse_capabilities` (GET /traverse/capabilities, 200, masked): GET /traverse/capabilities (the document the service probe reads) on the same server: the same `pattern` block
@@ -24,6 +28,8 @@ HAND-MADE (no server produces them on demand); their text is the code's.
 - `capabilities_multi_graph` (GET /capabilities, 200, multi): a multi-graph server: no `pattern` feature or route; the block says multi_graph_later_increment and nothing else
 - `traverse_capabilities_multi_graph` (GET /traverse/capabilities, 200, multi): the multi-graph server probed for one graph: the same reduced block
 - `traverse_capabilities_primary` (GET /traverse/capabilities, 200, primary): a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], strand_stated false, placement none_canonical, annotation unbudgeted (column)
+- `capabilities_representation_unsupported` (GET /capabilities, 200, hash): a graph the engine does not recognise (a hash graph): the feature and route listed, the block available false, unavailable_reason representation_unsupported, graph_mode null and only k set
+- `traverse_capabilities_representation_unsupported` (GET /traverse/capabilities, 200, hash): the same hash-graph server on the probe route
 - `count` (POST /pattern, 200, masked): mode count, scope any_offset and strands both by default: exact context counts with suffix, by_offset (every offset, zeros included) and by_strand; labels and occurrences unknown; no results; an absent primer counts exact 0
 - `count_suffix` (POST /pattern, 200, masked): scope suffix: only offset k - L, absence_scope suffix_only; an exact 11-mer (22 bits) is admitted in this scope however short
 - `count_forward` (POST /pattern, 200, masked): strands forward: P only, strands ["+"], by_strand {"+"}
@@ -43,8 +49,11 @@ HAND-MADE (no server produces them on demand); their text is the code's.
 - `stop_at_threshold` (POST /pattern, 200, masked): stop_at_threshold: discovery stops once the count passes max_contexts: at_least, stop {discovery, max_contexts}, withheld threshold_crossed
 - `max_steps` (POST /pattern, 200, masked): max_steps reached in discovery: at_least counts, stop {discovery, max_steps}, withheld discovery_budget; the request's budget is spent, so the next pattern answers unknown counts with the same stop
 - `max_steps_partial` (POST /pattern, 200, masked): the same stop in mode partial: what discovery found is delivered, cut.reason max_steps; the second pattern returns nothing, cut max_steps
+- `max_steps_bounds` (POST /pattern, 200, masked): max_steps reached in a mask scan (scope suffix, a record-start pattern whose count needs one): stop {mask_scan, max_steps}, the count bounds {value = lower, upper} with the strand that finished exact; bounds + exact = bounds
+- `max_steps_bounds_withheld` (POST /pattern, 200, masked): the same stop in all_or_count: bounds, withheld discovery_budget
 - `deadline` (POST /pattern, 200, masked): a 251 ms budget (1 ms of work before the 250 ms finalisation reserve): stop {discovery, time}, withheld deadline, determinism time_limited; the next pattern unknown (counts and work of time_limited patterns vary between runs)
 - `deadline_partial` (POST /pattern, 200, masked): the deadline in mode partial: nothing is released after a time stop in discovery (its membership would depend on the machine): returned 0, cut.reason time
+- `max_steps_then_time` (POST /pattern, 200, masked): partial, discovery stopped by max_steps, then the release meets the work time: stop keeps the first stop {discovery, max_steps}, the time shows only as cut.reason time and determinism time_limited (how many were released varies between runs); the next pattern answers the sticky max_steps stop, its empty release past the work time: cut time, returned 0, time_limited
 - `long` (POST /pattern, 200, masked): L > k in all_or_count: anchors counted, paths unknown, withheld paths_later_increment; with no anchor the empty answer is complete (anchors and paths exact 0)
 - `primary_any_offset` (POST /pattern, 200, primary): a PRIMARY index: results carry orientation (forward, reverse) instead of strand, by_orientation instead of by_strand, note strand_unknown_canonical; node is the wrapper id
 - `primary_suffix` (POST /pattern, 200, primary): scope suffix on a PRIMARY index: error slot scope_unsupported (a virtual suffix is a stored prefix); any_offset is complete there
@@ -66,5 +75,6 @@ HAND-MADE (no server produces them on demand); their text is the code's.
 - `resident_only` (POST /pattern, 400, masked): 400 resident_only: in_ram, whatever its value (the route never loads an index)
 - `mask_required` (POST /pattern, 400, unmasked): 400 mask_required: the graph has no dummy-edge mask, whatever the request asks
 - `multi_graph` (POST /pattern, 400, multi): 400 later_increment on a multi-graph server, whatever the request
+- `representation_unsupported` (POST /pattern, 400, hash): 400 representation_unsupported: a graph the engine does not recognise (a hash graph), whatever the request asks
 - `deadline_503` (POST /pattern, 503, masked): HAND-MADE: 503 deadline, the answer could not be written by time_budget_ms (nothing partial is sent)
 - `initializing_503` (POST /pattern, 503, masked): HAND-MADE: 503 while the index loads (every route; no code; Retry-After: 60)

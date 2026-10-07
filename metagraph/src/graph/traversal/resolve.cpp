@@ -392,7 +392,8 @@ SupportProfile resolve_support(LabelOracle &oracle,
     auto apply_stop = [&]() {
         if (!stopped || profile.stop)
             return;
-        profile.stop = ResolveStop { stop_phase, resolved, profile.num_kmers };
+        profile.stop = ResolveStop { stop_phase, resolved, profile.num_kmers,
+                                     profile.graph_runs };
         profile.num_kmers = resolved;
         std::vector<KmerInterval> cut;
         for (const KmerInterval &run : profile.graph_runs) {

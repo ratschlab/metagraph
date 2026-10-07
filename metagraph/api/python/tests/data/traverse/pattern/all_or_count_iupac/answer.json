@@ -135,6 +135,7 @@
    "information_bits": 36.0,
    "kind": "iupac",
    "length": 19,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "palindromic": false,
@@ -358,7 +359,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.210583
+    "elapsed_ms": 0.329125
    },
    "withheld": null,
    "work": {
@@ -369,6 +370,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.2185
+  "elapsed_ms": 0.34575
  }
 }

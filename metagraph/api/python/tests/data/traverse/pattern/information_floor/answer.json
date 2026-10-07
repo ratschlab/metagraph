@@ -33,6 +33,7 @@
    "information_bits": 22.0,
    "kind": "dna",
    "length": 11,
+   "min_anchor_information_bits": null,
    "pattern": "GGTTTGGCGAT"
   },
   {
@@ -45,6 +46,7 @@
    "information_bits": 20.0,
    "kind": "iupac",
    "length": 18,
+   "min_anchor_information_bits": null,
    "pattern": "NNNNNNNNACGTACGTAC"
   },
   {
@@ -57,6 +59,7 @@
    "information_bits": 40.0,
    "kind": "iupac",
    "length": 40,
+   "min_anchor_information_bits": 22.0,
    "pattern": "NNNNNNNNNNNNNNNNNNNNGGTTTGGCGATCTGGTTTTC"
   },
   {
@@ -163,6 +166,7 @@
    "information_bits": 40.0,
    "kind": "dna",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "count",
    "notes": [],
    "palindromic": false,
@@ -175,7 +179,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.039583
+    "elapsed_ms": 0.086959
    },
    "work": {
     "mask_scans": 0,
@@ -185,6 +189,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.05025
+  "elapsed_ms": 0.115625
  }
 }

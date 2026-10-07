@@ -126,10 +126,11 @@ PatternLimits limits() {
 
 Json::Value run(const Index &idx, const std::string &body, RetrievalHooks hooks = {},
                 bool records = true,
-                const std::function<Clock::time_point()> &clock = nullptr) {
+                const std::function<Clock::time_point()> &clock = nullptr,
+                const PatternLimits &caps = limits()) {
     if (records)
         hooks.coord_to_header = idx.cth.get();
-    return process_pattern_request(parse_pattern_body(body), *idx.anno, limits(), "rel",
+    return process_pattern_request(parse_pattern_body(body), *idx.anno, caps, "rel",
                                    nullptr, nullptr, clock, &hooks);
 }
 
@@ -615,6 +616,92 @@ TEST(PatternRetrieval, DeadlineInTheReads) {
     out = run(idx, body("{\"dna\": \"AC\"}"), hooks, true, clock);
     EXPECT_EQ("deadline", out["patterns"][0]["withheld"]["reason"].asString());
     EXPECT_EQ("time_limited", out["patterns"][0]["determinism"].asString());
+}
+
+// X-EFFICIENCY-04 (review of 2026-10-07), the labelled retrieval: the labels built for the
+// answer are built under the work time, read before each context's (with them counted in the
+// answer's volume). A virtual clock the test moves past the work time when the second
+// context's labels are to be built: stop {output, time}; partial returns the first context
+// with its labels and the others read but not output (output_budget), all_or_count withholds
+// (deadline); the next pattern answers as after any time stop
+TEST(PatternRetrieval, DeadlineInTheOutput) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    const Clock::time_point start = Clock::now();
+    auto virtual_ms = std::make_shared<double>(0);
+    auto clock = [start, virtual_ms]() {
+        return start + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double, std::milli>(*virtual_ms));
+    };
+    RetrievalHooks hooks;
+    hooks.output_hook = [virtual_ms](size_t context) {
+        if (context >= 1)
+            *virtual_ms = 1e9;
+    };
+    Json::Value out = run(idx, body("{\"dna\": \"AC\"}, {\"dna\": \"GACG\"}",
+                                    "\"mode\": \"partial\""), hooks, true, clock);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("output", e["stop"]["phase"].asString());
+    EXPECT_EQ("time", e["stop"]["reason"].asString());
+    EXPECT_EQ("time_limited", e["determinism"].asString());
+    EXPECT_FALSE(e["retrieval_complete"].asBool());
+    EXPECT_EQ("exact", e["counts"]["contexts"]["relation"].asString());
+    const Json::Value &results = e["results"];
+    ASSERT_GT(results.size(), 1u);
+    EXPECT_EQ(e["counts"]["contexts"]["value"].asUInt64(), results.size());
+    EXPECT_EQ("complete", results[0]["labels_status"].asString());
+    EXPECT_TRUE(results[0]["labels"].isArray());
+    for (Json::ArrayIndex i = 1; i < results.size(); ++i) {
+        EXPECT_EQ("output_budget", results[i]["labels_status"].asString()) << i;
+        EXPECT_TRUE(results[i]["labels"].isNull()) << i;
+        EXPECT_FALSE(results[i]["labels_total"].isNull()) << i;
+    }
+    const Json::Value &next = out["patterns"][1];
+    EXPECT_EQ("discovery", next["stop"]["phase"].asString());
+    EXPECT_EQ("time", next["stop"]["reason"].asString());
+    EXPECT_EQ("unknown", next["counts"]["contexts"]["relation"].asString());
+
+    *virtual_ms = 0;
+    out = run(idx, body("{\"dna\": \"AC\"}"), hooks, true, clock);
+    const Json::Value &w = out["patterns"][0];
+    EXPECT_EQ("deadline", w["withheld"]["reason"].asString());
+    EXPECT_EQ("output", w["stop"]["phase"].asString());
+    EXPECT_EQ("time", w["stop"]["reason"].asString());
+    EXPECT_EQ(0u, w["results"].size());
+    EXPECT_EQ("time_limited", w["determinism"].asString());
+
+    // without the hook moving the clock: complete
+    *virtual_ms = 0;
+    out = run(idx, body("{\"dna\": \"AC\"}"), {}, true, clock);
+    EXPECT_TRUE(out["patterns"][0]["retrieval_complete"].asBool());
+}
+
+// X-EFFICIENCY-04 (review of 2026-10-07), the labelled retrieval: the contexts the engine
+// releases are counted in the answer's volume as their objects are built, so the reads after
+// them see the work time shortened by the time to write them. A clock that never moves and a
+// build rate of 1 byte per second: the reads stop by time before the first row (partial: the
+// contexts returned unread; all_or_count: withheld)
+TEST(PatternRetrieval, TheAnswersVolumeStopsTheReads) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    const Clock::time_point start = Clock::now();
+    auto clock = [start]() { return start; };
+    PatternLimits slow = limits();
+    slow.delivery_build_mbps = 1e-6;
+    Json::Value out = run(idx, body("{\"dna\": \"AC\"}", "\"mode\": \"partial\""), {}, true,
+                          clock, slow);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("label_discovery", e["stop"]["phase"].asString());
+    EXPECT_EQ("time", e["stop"]["reason"].asString());
+    EXPECT_EQ("time_limited", e["determinism"].asString());
+    EXPECT_EQ(0u, e["work"]["annotation_rows"].asUInt64());
+    ASSERT_GT(e["results"].size(), 0u);
+    for (const Json::Value &r : e["results"]) {
+        EXPECT_EQ("not_read", r["labels_status"].asString());
+    }
+    out = run(idx, body("{\"dna\": \"AC\"}"), {}, true, clock, slow);
+    EXPECT_EQ("deadline", out["patterns"][0]["withheld"]["reason"].asString());
+    // the default rates leave the tiny answer its reads
+    out = run(idx, body("{\"dna\": \"AC\"}"), {}, true, clock);
+    EXPECT_TRUE(out["patterns"][0]["retrieval_complete"].asBool());
 }
 
 TEST(PatternRetrieval, UnbudgetedBackend) {

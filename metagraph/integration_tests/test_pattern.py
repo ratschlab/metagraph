@@ -47,12 +47,27 @@ Fixtures:
     answers, mask: built_at_load). Skipped when the mini index is not built.
   - TestPatternSynthetic: random records, BASIC, CANONICAL and PRIMARY graphs at k = 15 (and a
     multi-graph server), always run.
+  - TestPatternFixtureBodies: the frozen fixture bodies (api/python/tests/data/traverse/pattern)
+    against the SPEC (api/python/tests/test_pattern_fixtures.py), and the blanking of
+    pattern_fixtures.py --check; no server, no index: always run.
+  - TestPatternFixtures: pattern_fixtures.py --check, the fixture bodies against what this
+    binary answers on the mini index; skipped without the mini index.
   - TestPatternRegression: /search and /align answer byte for byte as the base binary's
     ($METAGRAPH_BASE_BINARY, e.g. the build of 804731aa) on test_api.py's fixture and requests;
     skipped without it.
+
+CI has neither the mini index nor a base binary: there TestPatternMini, TestPatternFixtures and
+TestPatternRegression are skipped, which unittest counts as passed (review of 2026-10-07,
+T2-01, X-TESTS-05). With $METAGRAPH_REQUIRE_GUARDS=1 a missing input fails those classes instead
+of skipping them, so that a run meant to check the guarantees cannot pass without them.
 """
 
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
+# $METAGRAPH_REQUIRE_GUARDS=1: an input a guard class needs (the mini index, the base binary)
+# missing fails the class instead of skipping it
+REQUIRE_GUARDS = os.environ.get('METAGRAPH_REQUIRE_GUARDS', '') == '1'
+FIXTURE_VALIDATOR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api',
+                                 'python', 'tests', 'test_pattern_fixtures.py')
 MINI_K = 31
 MINI_GRAPH = 'graph_k31.dbg'
 MINI_ANNO = 'annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg'
@@ -194,12 +209,37 @@ class Records:
 
 
 # the refusal of a graph without its dummy-edge mask (§4): both remedies named
+# a 10-mer whose suffix-scope count on the mini needs a mask scan (it starts a record's first
+# k-mer): discovery takes 20 range steps, the scan one more, so max_steps 20 stops in the scan
+# with bounds (review of 2026-10-07, X-TESTS-03)
+SCAN_10 = 'ATGCCGGTGA'
+SCAN_STEPS = 20
+# a 31-mer of 12 bases around a run of 19 Ns (24 bits): about 2.5e7 range steps on the mini, a
+# discovery a work deadline of a second stops
+HEAVY31 = 'GG' + 'N' * 19 + 'TTGGCGATCT'
+
 MASK_REQUIRED_MESSAGE = (
     'pattern: the graph was loaded without its dummy-edge mask (.edgemask): without it every '
     'dummy edge would count as a k-mer and no count would be right; give the graph its mask '
     'once with `metagraph transform --mask-dummy <graph>.dbg` (writes the .edgemask beside the '
     'graph; node ids and annotation unchanged), or pass --pattern-build-mask to server_query '
-    'or pattern (builds it in memory at load)')
+    'or pattern (builds it in memory at load); the mask is read when the graph is loaded: '
+    'restart the server once the .edgemask exists')
+
+
+def guard(condition, reason):
+    """unittest.skipUnless(condition, reason); with $METAGRAPH_REQUIRE_GUARDS=1 a class whose
+    input is missing fails instead (review of 2026-10-07, T2-01)."""
+    if condition or not REQUIRE_GUARDS:
+        return unittest.skipUnless(condition, reason)
+
+    def decorate(cls):
+        def fail(klass):
+            raise AssertionError(f'$METAGRAPH_REQUIRE_GUARDS=1: {cls.__name__} cannot run: '
+                                 f'{reason}')
+        cls.setUpClass = classmethod(fail)
+        return cls
+    return decorate
 
 
 def untimed(value):
@@ -329,9 +369,9 @@ class PatternChecks:
 
 @unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
-@unittest.skipUnless(os.path.isfile(os.path.join(MINI_DIR, MINI_GRAPH))
-                     and os.path.isdir(os.path.join(MINI_DIR, 'fasta')),
-                     "the mini index is not built (scripts/traversal/build_mini_refseq.sh)")
+@guard(os.path.isfile(os.path.join(MINI_DIR, MINI_GRAPH))
+       and os.path.isdir(os.path.join(MINI_DIR, 'fasta')),
+       "the mini index is not built (scripts/traversal/build_mini_refseq.sh; not in CI)")
 class TestPatternMini(PatternChecks, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -583,6 +623,19 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         ret = self.server.post('pattern', '{"patterns": [', raw=True)
         self.assertEqual(400, ret.status_code)
         self.assertEqual('invalid_request', ret.json()['code'])
+        # one RFC 8259 JSON text with unique member names (review of 2026-10-07, R1-02: each
+        # was answered 200), nested at most 1,000 deep (R1-03, R2-01: a 400 without a code)
+        one = '{"patterns": [{"dna": "%s"}]' % self.p16
+        for raw in (one + '} GARBAGE', one + ',}', one + '} ' + one + '}',
+                    one + ', /* x */ "mode": "count"}', one + ', "mode": "count", "mode": "partial"}',
+                    one + ', "max_steps": 1, "max_steps": 100000}',
+                    '{"patterns": [{"dna": "%s", "dna": "%s"}]}' % (self.p16, self.p14),
+                    '[' * 1200 + ']' * 1200,
+                    one + ', "x": ' + '[' * 1500 + ']' * 1500 + '}'):
+            ret = self.server.post('pattern', raw, raw=True)
+            self.assertEqual(400, ret.status_code, raw[:100])
+            self.assertEqual({'error', 'code'}, set(ret.json()), raw[:100])
+            self.assertEqual('invalid_request', ret.json()['code'], raw[:100])
         # false projections and occurrences are accepted and change nothing
         out = self.pattern(self.server, {'patterns': p, 'mode': 'count',
                                          'output': {'labels': 'none', 'occurrences': False,
@@ -800,6 +853,118 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertLessEqual(got, expected)
         self.assertLessEqual(len(got), entry['counts']['contexts']['value'])
 
+    def test_bounds_in_a_mask_scan(self):
+        """max_steps reached in a mask scan (review of 2026-10-07, X-TESTS-03: no test answer
+        had relation bounds or phase mask_scan): the count is bounds, value = lower <= the
+        oracle's count <= upper, the parts summed as SPEC §7.4 says, and the stop names the
+        scan."""
+        truth = self.contexts(SCAN_10, scope='suffix')
+        full = self.pattern(self.server, {'patterns': [{'dna': SCAN_10}], 'mode': 'count',
+                                          'scope': 'suffix'})['patterns'][0]
+        self.assertContextCounts(full, truth, self.k, 10, 'suffix')
+        self.assertGreaterEqual(full['work']['mask_scans'], 1)
+        self.assertGreater(full['work']['steps'], SCAN_STEPS)
+        for mode in ('count', 'all_or_count'):
+            out = self.pattern(self.server, {'patterns': [{'dna': SCAN_10}], 'mode': mode,
+                                             'scope': 'suffix', 'max_steps': SCAN_STEPS})
+            e = out['patterns'][0]
+            self.assertEqual({'phase': 'mask_scan', 'reason': 'max_steps'}, e['stop'])
+            c = e['counts']['contexts']
+            self.assertEqual('bounds', c['relation'])
+            self.assertEqual(c['lower'], c['value'])
+            self.assertLessEqual(c['lower'], len(truth))
+            self.assertLessEqual(len(truth), c['upper'])
+            parts = list(c['by_strand'].values())
+            self.assertEqual(c['lower'], sum(p.get('lower', p['value']) for p in parts))
+            self.assertEqual(c['upper'], sum(p.get('upper', p['value']) for p in parts))
+            for strand, p in c['by_strand'].items():
+                n = sum(1 for t, _, _ in truth if t == strand)
+                if p['relation'] == 'exact':
+                    self.assertEqual(n, p['value'], strand)
+                else:
+                    self.assertEqual('bounds', p['relation'], strand)
+                    self.assertLessEqual(p['lower'], n)
+                    self.assertLessEqual(n, p['upper'])
+            self.assertEqual('full', e['determinism'])
+            if mode == 'all_or_count':
+                self.assertEqual({'reason': 'discovery_budget'}, e['withheld'])
+                self.assertEqual([], e['results'])
+
+    def test_a_stopped_request_answers_what_it_buffered(self):
+        """Review of 2026-10-07, X-EFFICIENCY-04: the work stops earlier by the estimated time
+        to write what the answer holds, so that a request whose earlier patterns buffered
+        many results and whose last one runs to the work deadline still answers within its
+        budget, with its counts and a time stop, instead of 503 with all of its work lost.
+        Fifteen patterns of 19,283 results each (a server whose max_contexts admits them all)
+        and a last one whose discovery outlasts the budget: with the 250 ms reserve alone the
+        work ran to 1,750 ms and the ~33 MB of results could not be written by 2,000 ms (503 in
+        every run, measured on the binary before the fix)."""
+        server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno,
+                                    '--pattern-max-contexts', '20000'],
+                        os.path.join(self.tempdir.name, 'server_volume.log'))
+        try:
+            request = {'patterns': [{'dna': 'ACGT'}] * 15 + [{'iupac': HEAVY31}],
+                       'mode': 'partial', 'scope': 'suffix', 'strands': 'forward',
+                       'time_budget_ms': 2000, 'output': {'labels': 'none'}}
+            ret = requests.post(server.url('pattern'), data=json.dumps(request),
+                                headers={'Accept-Encoding': 'gzip'}, timeout=120)
+        finally:
+            server.stop()
+        self.assertEqual(200, ret.status_code, ret.text[:500])
+        self.assertEqual('gzip', ret.headers.get('Content-Encoding'))
+        out = ret.json()
+        entries = out['patterns']
+        stopped = [i for i, e in enumerate(entries)
+                   if e['stop'] and e['stop']['reason'] == 'time']
+        self.assertTrue(stopped, [e['stop'] for e in entries])
+        first = stopped[0]
+        # the patterns before the stop: complete
+        expected = len(self.contexts('ACGT', scope='suffix', strands='forward'))
+        for e in entries[:first]:
+            self.assertCount({x: e['counts']['contexts'][x]
+                              for x in ('value', 'relation', 'unit')}, expected)
+            self.assertCompleteRetrieval(e)
+            self.assertEqual(expected, e['returned'])
+        # the stopped one, and every one after it as after any time stop, its counts kept
+        self.assertEqual('time_limited', entries[first]['determinism'])
+        self.assertEqual({'reason': 'time'}, entries[first]['cut'])
+        self.assertLessEqual(entries[first]['returned'], expected)
+        for e in entries[first + 1:]:
+            self.assertEqual({'phase': 'discovery', 'reason': 'time'}, e['stop'])
+            self.assertEqual('unknown', e['counts']['contexts']['relation'])
+            self.assertEqual(0, e['returned'])
+        self.assertLessEqual(out['timing']['elapsed_ms'], 2000)
+
+    def test_resolve_deadline_is_503(self):
+        """/resolve's 503 end to end (review of 2026-10-07, V1-04: only the exception was
+        tested): a query whose k-mer mapping, which the deadline cannot interrupt, outlasts
+        the whole budget is answered 503 {error, code: deadline}, uncompressed, without
+        Retry-After (that is the loading 503's), and the CLI writes the same body and exits 1."""
+        # the whole 7 Mbp record: its mapping takes well over the 250 ms reserve on any host
+        # (2 Mbp mapped within it on a quiet machine)
+        seq = ''.join(s for _, s in read_fasta(os.path.join(MINI_DIR, 'fasta', '287.fa')))
+        body = {'sequence': seq, 'discover': {'max_labels': 10},
+                'bounds': {'time_budget_ms': 250.001, 'max_query_bp': len(seq)}}
+        expected = {'error': 'resolve: the answer could not be built and written within '
+                             'bounds.time_budget_ms (250.001 ms, the finalisation reserve of '
+                             '250 ms included): nothing partial is sent',
+                    'code': 'deadline'}
+        for headers in ({}, {'Accept-Encoding': 'gzip'}):
+            ret = requests.post(self.server.url('resolve'), data=json.dumps(body),
+                                headers=headers, timeout=300)
+            self.assertEqual(503, ret.status_code, ret.text[:500])
+            self.assertNotIn('Retry-After', ret.headers)
+            self.assertNotIn('Content-Encoding', ret.headers)
+            self.assertEqual(expected, ret.json())
+        path = os.path.join(self.tempdir.name, 'resolve_deadline.json')
+        with open(path, 'w') as f:
+            json.dump(body, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['traverse', '--resolve', '--json',
+                                                       '-i', self.graph, '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(1, res.returncode, res.stderr.decode()[-2000:])
+        self.assertEqual(expected, json.loads(res.stdout))
+
     def test_long_pattern(self):
         out = self.pattern(self.server, {'patterns': [{'dna': self.p40},
                                                       {'dna': self.absent40}]})
@@ -808,6 +973,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual('long', entry['absence_scope'])
         self.assertEqual(80.0, entry['information_bits'])
         self.assertEqual(62.0, entry['anchor_information_bits'])
+        # both windows of this 40-mer carry 62 bits (an addition of the review of 2026-10-07,
+        # X-GUARANTEES-01: the least searched window, the floor's operand)
+        self.assertEqual(62.0, entry['min_anchor_information_bits'])
         self.assertIn('paths_later_increment', entry['notes'])
         self.assertNotIn('contexts', entry['counts'])
         anchors = self.records.anchors(self.p40, self.k)
@@ -1089,6 +1257,29 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(1, res.returncode)
         self.assertEqual('invalid_request', json.loads(res.stdout)['code'])
 
+        # every request file is answered, the later ones after a refused one (review of
+        # 2026-10-07, R1-03, R2-01: a body nested too deep aborted the run, exit 134, and
+        # left the later files unanswered)
+        deep = os.path.join(self.tempdir.name, 'deep.json')
+        with open(deep, 'w') as f:
+            f.write('[' * 1200 + ']' * 1200)
+        dup = os.path.join(self.tempdir.name, 'dup.json')
+        with open(dup, 'w') as f:
+            f.write('{"patterns": [{"dna": "%s"}], "mode": "count", "mode": "partial"}' % self.p16)
+        ok = os.path.join(self.tempdir.name, 'ok.json')
+        with open(ok, 'w') as f:
+            json.dump({'patterns': [{'dna': self.p16}], 'mode': 'count'}, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
+                                                       '-a', self.anno, deep, dup, ok],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(1, res.returncode, res.stderr.decode()[-2000:])
+        lines = res.stdout.decode().strip().split('\n')
+        self.assertEqual(3, len(lines), lines)
+        self.assertEqual('invalid_request', json.loads(lines[0])['code'])
+        self.assertEqual('invalid_request', json.loads(lines[1])['code'])
+        self.assertContextCounts(json.loads(lines[2])['patterns'][0], self.contexts(self.p16),
+                                 self.k, 16, 'any_offset')
+
     def test_cli_mask_required(self):
         """The mini index as built (no .edgemask): refused, since every dummy edge would count;
         with --pattern-build-mask the CLI answers as the server on the transformed copy."""
@@ -1112,12 +1303,47 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(untimed(self.pattern(self.server, request)),
                          untimed(json.loads(res.stdout)))
 
+    def test_cli_unreadable_mask(self):
+        """A .edgemask that is there but cannot be opened (permissions): the graph loads without
+        it, as it always did, and the messages say so rather than "no mask", whose remedy
+        `transform --mask-dummy` would refuse (review of 2026-10-07, M1-03)."""
+        d = os.path.join(self.tempdir.name, 'unreadable')
+        os.makedirs(d)
+        graph = os.path.join(d, MINI_GRAPH)
+        os.symlink(self.graph, graph)
+        for f in (MINI_ANNO, MINI_SEQS):
+            os.symlink(os.path.join(MINI_DIR, f), os.path.join(d, f))
+        mask = graph[:-len('.dbg')] + '.edgemask'
+        shutil.copyfile(self.graph[:-len('.dbg')] + '.edgemask', mask)
+        os.chmod(mask, 0)
+        try:
+            if os.access(mask, os.R_OK):
+                self.skipTest('the mask stays readable (running as root?)')
+            request = {'patterns': [{'dna': self.p16}], 'mode': 'count'}
+            path = os.path.join(d, 'request.json')
+            with open(path, 'w') as f:
+                json.dump(request, f)
+            res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', graph,
+                                                           '-a', os.path.join(d, MINI_ANNO),
+                                                           path],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            err = res.stderr.decode()
+            self.assertEqual(1, res.returncode, err)
+            self.assertEqual('mask_required', json.loads(res.stdout)['code'])
+            # the loader's warning and the start-up note both name the file and the cause
+            self.assertIn(f'The dummy-edge mask {mask} exists but could not be opened', err)
+            self.assertIn('--mask-dummy --force', err)
+            self.assertNotIn('The graph has no dummy-edge mask', err)
+        finally:
+            os.chmod(mask, 0o644)
+
     # ------------------------------------------------------------ the mask, made three ways
 
     def mask_panel(self):
         """/pattern requests whose answers depend on every masked edge: counts in both scopes,
-        both retrievals, IUPAC, a palindrome, a pattern longer than k, absent ones, and a stop
-        inside the work (its bounds count the mask scans)."""
+        both retrievals, IUPAC, a palindrome, a pattern longer than k, absent ones, a stop in
+        discovery, and a stop inside a mask scan (its bounds count the scanned edges; review of
+        2026-10-07, X-TESTS-03: the panel's only stop was in discovery)."""
         patterns = [{'dna': self.p16}, {'dna': self.p14}, {'iupac': self.iupac16},
                     {'dna': self.pal12}, {'dna': self.p40}, {'dna': self.absent16},
                     {'dna': self.absent40}]
@@ -1128,6 +1354,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                               'max_contexts': 25})
         panel.append({'patterns': [{'dna': self.p16}, {'iupac': self.iupac16}], 'mode': 'count',
                       'max_steps': 40})
+        panel.append({'patterns': [{'dna': SCAN_10}], 'mode': 'count', 'scope': 'suffix',
+                      'max_steps': SCAN_STEPS})
         return panel
 
     def assertSameAnswers(self, expected_server, server):
@@ -1411,6 +1639,59 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
         finally:
             server.stop()
 
+    def test_deadline_caps_under_the_content_timeout(self):
+        """A route deadline past the server's 900 s content timeout would be accepted and the
+        connection closed before any answer or 503 (review of 2026-10-07, R1-05): server_query
+        refuses a /pattern cap above 899,000 ms, and /resolve's opt-in deadline is capped
+        there when --traverse-max-time-ms is 0 (uncapped) or above it."""
+        cmd = shlex.split(METAGRAPH) + ['server_query', '-i', self.graph_basic, '-a',
+                                        self.anno_basic, '--pattern-max-time-ms', '900000',
+                                        '--port', str(free_port()), '--address', '127.0.0.1']
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+        except subprocess.TimeoutExpired:
+            self.fail('server_query started with --pattern-max-time-ms 900000')
+        self.assertNotEqual(0, res.returncode)
+        self.assertIn('--pattern-max-time-ms must be at most 899000', res.stderr.decode())
+
+        server = Server(METAGRAPH, ['-i', self.graph_basic, '-a', self.anno_basic,
+                                    '--pattern-max-time-ms', '899000',
+                                    '--traverse-max-time-ms', '0'],
+                        os.path.join(self.tempdir.name, 'server_caps.log'))
+        try:
+            caps = server.get('capabilities').json()
+            self.assertEqual(899000, caps['resolve']['time_budget']['max_time_ms'])
+            self.assertEqual(899000, caps['pattern']['caps']['time_budget_ms'])
+            sequence = next(self.records.sequences(False))[:300]
+            ret = server.post('resolve', {'sequence': sequence, 'discover': {'max_labels': 2},
+                                          'bounds': {'time_budget_ms': 1000000}})
+            self.assertEqual(200, ret.status_code, ret.text)
+            self.assertEqual({'time_budget_ms': 899000, 'finalize_reserve_ms': 250,
+                              'clamped': [{'field': 'bounds.time_budget_ms',
+                                           'requested': 1000000, 'effective': 899000}]},
+                             ret.json()['limits'])
+        finally:
+            server.stop()
+
+    def test_usage_states_the_threads_and_the_limits(self):
+        """The usage of server_query and pattern (review of 2026-10-07): the mask built at
+        load takes its threads from --threads-each on a server, from -p in the CLI (M1-04); a
+        server's /pattern cap stays under the content timeout (R1-05); the finalisation
+        reserve is a floor the answer's estimated writing time adds to, at stated rates (R1-04,
+        X-EFFICIENCY-04)."""
+        for command, needles in (
+                ('server_query', ['with --threads-each threads', 'at most 899000',
+                                  'longer by the estimated time to write what the answer holds',
+                                  '--pattern-delivery-build-mbps', '--pattern-delivery-compress-mbps']),
+                ('pattern', ['with -p threads',
+                             'longer by the estimated time to write what the answer holds',
+                             '--pattern-delivery-build-mbps', '--pattern-delivery-compress-mbps'])):
+            res = subprocess.run(shlex.split(METAGRAPH) + [command], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            text = (res.stdout + res.stderr).decode()
+            for needle in needles:
+                self.assertIn(needle, text, command)
+
     def test_cli(self):
         request = {'patterns': [{'iupac': p} for p in self.PATTERNS], 'mode': 'count'}
         server_out = self.pattern(self.servers['basic'], request)
@@ -1429,17 +1710,69 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(a['work'], b['work'])
 
 
+class TestPatternFixtureBodies(unittest.TestCase):
+    """The frozen fixture bodies against the SPEC, with no server and no index, so that CI runs
+    it (review of 2026-10-07, T2-01: api/python/tests/test_pattern_fixtures.py ran in no
+    workflow); and the blanking of pattern_fixtures.py --check (C2-02)."""
+
+    @staticmethod
+    def load(path, name):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_the_bodies_are_the_spec(self):
+        if not os.path.isfile(FIXTURE_VALIDATOR):
+            self.skipTest('api/python/tests/test_pattern_fixtures.py is not in this checkout')
+        module = self.load(FIXTURE_VALIDATOR, 'pattern_fixture_bodies')
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(module.TestPatternFixtures)
+        result = unittest.TestResult()
+        suite.run(result)
+        problems = [f'{t.id()}: {e[-1500:]}' for t, e in result.failures + result.errors]
+        self.assertEqual([], problems)
+        self.assertGreater(result.testsRun, 5)
+        self.assertEqual([], [t.id() for t, _ in result.skipped])
+
+    def test_check_blanks_only_where_the_clock_stopped(self):
+        """--check blanks the counts and work of the first time_limited pattern only: the ones
+        after it, stopped by the same budget, are compared (a regression that let them run
+        or count would otherwise pass --check)."""
+        if not os.path.isfile(FIXTURES_SCRIPT):
+            self.skipTest('the fixture script is not in this checkout')
+        script = self.load(FIXTURES_SCRIPT, 'pattern_fixtures_script')
+        path = os.path.join(os.path.dirname(FIXTURE_VALIDATOR), 'data', 'traverse', 'pattern',
+                            'deadline', 'answer.json')
+        with open(path) as f:
+            stored = json.load(f)
+        self.assertEqual(['time_limited', 'time_limited'],
+                         [e['determinism'] for e in stored['patterns']])
+        # the first pattern got as far as the clock let it: blanked
+        varied = json.loads(json.dumps(stored))
+        varied['patterns'][0]['work']['steps'] += 4096
+        varied['patterns'][0]['timing']['elapsed_ms'] += 1
+        self.assertEqual(script.dumps(script.blanked(stored)), script.dumps(script.blanked(varied)))
+        # the next one ran or counted after the stop: seen
+        for mutate in (lambda e: e['work'].update(steps=50, ranges_visited=50),
+                       lambda e: e['counts']['contexts'].update(relation='at_least', value=0)):
+            regressed = json.loads(json.dumps(stored))
+            mutate(regressed['patterns'][1])
+            self.assertNotEqual(script.dumps(script.blanked(stored)),
+                                script.dumps(script.blanked(regressed)))
+
+
 @unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
-@unittest.skipUnless(os.path.isfile(os.path.join(MINI_DIR, MINI_GRAPH))
-                     and os.path.isfile(FIXTURES_SCRIPT),
-                     "the mini index (scripts/traversal/build_mini_refseq.sh) or the fixture "
-                     "script is not there")
+@guard(os.path.isfile(os.path.join(MINI_DIR, MINI_GRAPH)) and os.path.isfile(FIXTURES_SCRIPT),
+       "the mini index (scripts/traversal/build_mini_refseq.sh; not in CI) or the fixture "
+       "script is not there")
 class TestPatternFixtures(unittest.TestCase):
     """The frozen fixture bodies the search service tests against
     (api/python/tests/data/traverse/pattern/, SPEC-pattern-search.md §11) are what this binary
     answers: a change of /pattern or of either capabilities route that alters one fails here,
-    not first in the service's tests. (Review of milestone 1b: the bodies had been generated by
+    not first in the service's tests -- on a machine with the mini index, which CI does not
+    have (review of 2026-10-07, T2-01). (Review of milestone 1b: the bodies had been generated by
     the milestone-1 binary and missed /capabilities' new `resolve` block and the new
     mask_required message, and nothing that ran a server compared them.)"""
 
@@ -1460,8 +1793,8 @@ class TestPatternFixtures(unittest.TestCase):
 
 
 @unittest.skipIf(PROTEIN_MODE, "the request panel is DNA")
-@unittest.skipUnless(BASE_BINARY and os.path.isfile(BASE_BINARY),
-                     "$METAGRAPH_BASE_BINARY (the binary before the pattern search) is not set")
+@guard(bool(BASE_BINARY) and os.path.isfile(BASE_BINARY),
+       "$METAGRAPH_BASE_BINARY (the binary before the pattern search) is not set (not in CI)")
 class TestPatternRegression(TestingBase):
     """/search and /align answer byte for byte as before the pattern search (§11), on
     test_api.py's fixture (transcripts_100.fa, k = 6) and requests; /capabilities only gains."""

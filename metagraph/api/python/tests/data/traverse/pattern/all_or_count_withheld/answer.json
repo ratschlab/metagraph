@@ -130,6 +130,7 @@
    "information_bits": 40.0,
    "kind": "dna",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "palindromic": false,
@@ -144,7 +145,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.021125
+    "elapsed_ms": 0.553375
    },
    "withheld": {
     "reason": "count_above_threshold"
@@ -157,6 +158,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.025583
+  "elapsed_ms": 0.571416
  }
 }

@@ -35,41 +35,6 @@
        "relation": "at_least",
        "unit": "graph_contexts",
        "value": 0
-      },
-      "1": {
-       "relation": "at_least",
-       "unit": "graph_contexts",
-       "value": 0
-      },
-      "2": {
-       "relation": "at_least",
-       "unit": "graph_contexts",
-       "value": 0
-      },
-      "3": {
-       "relation": "at_least",
-       "unit": "graph_contexts",
-       "value": 0
-      },
-      "4": {
-       "relation": "at_least",
-       "unit": "graph_contexts",
-       "value": 0
-      },
-      "5": {
-       "relation": "at_least",
-       "unit": "graph_contexts",
-       "value": 0
-      },
-      "6": {
-       "relation": "at_least",
-       "unit": "graph_contexts",
-       "value": 0
-      },
-      "7": {
-       "relation": "at_least",
-       "unit": "graph_contexts",
-       "value": 0
       }
      },
      "by_strand": {
@@ -79,9 +44,9 @@
        "value": 0
       },
       "-": {
-       "relation": "unknown",
+       "relation": "exact",
        "unit": "graph_contexts",
-       "value": null
+       "value": 0
       }
      },
      "relation": "at_least",
@@ -109,11 +74,12 @@
    "id": "heavy",
    "information_bits": 24.0,
    "kind": "iupac",
-   "length": 24,
+   "length": 31,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "palindromic": false,
-   "pattern": "NNNNNNNNNNNNGGTTTGGCGATC",
+   "pattern": "GGNNNNNNNNNNNNNNNNNNNTTGGCGATCT",
    "results": [],
    "retrieval_complete": false,
    "returned": 0,
@@ -127,7 +93,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 1.466958
+    "elapsed_ms": 1.625917
    },
    "withheld": {
     "reason": "deadline"
@@ -243,6 +209,7 @@
    "information_bits": 40.0,
    "kind": "dna",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "palindromic": false,
@@ -260,7 +227,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.01025
+    "elapsed_ms": 0.008292
    },
    "withheld": {
     "reason": "deadline"
@@ -273,6 +240,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 1.484625
+  "elapsed_ms": 1.654834
  }
 }

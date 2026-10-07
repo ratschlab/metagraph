@@ -1,0 +1,19 @@
+{
+ "patterns": [
+  {
+   "dna": "ACG",
+   "id": "steps"
+  },
+  {
+   "dna": "GGA",
+   "id": "after"
+  }
+ ],
+ "mode": "partial",
+ "scope": "suffix",
+ "max_steps": 3,
+ "time_budget_ms": 400,
+ "output": {
+  "labels": "none"
+ }
+}

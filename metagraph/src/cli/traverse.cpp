@@ -5669,8 +5669,11 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
         "labels, labels_truncated, candidates and selection are those of that prefix; a run "
         "ending at resolved_kmers may continue past it), resolved_kmers being the first k-mer "
         "in the graph whose labels were not read (the k-mers before it absent from the graph "
-        "are resolved); an explicit selection whose interval ends past the prefix or names a "
-        "label the prefix did not profile is not made (selection: null); without a stop, stop "
+        "are resolved); an explicit selection whose interval ends past the prefix, or that "
+        "names a label a discovery did not meet in the prefix, is not made (selection: null), "
+        "while what holds whatever the stop is refused (400) as without one: an interval "
+        "empty, out of range or not fully in the graph, and with explicit labels a seed label "
+        "that is not one of them; without a stop, stop "
         "is null, and limits {time_budget_ms, finalize_reserve_ms, clamped} is stated either "
         "way. The answer is built within the reserve: the loops over its labels after the work "
         "and its JSON read the whole budget every check_labels labels or objects, its text "
@@ -5690,16 +5693,35 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
 }
 
 // Under a stop, why an explicit selection cannot be made from the prefix (empty: it can, and
-// is the prefix's): an interval ending past the k-mers resolved, or a label the prefix did not
-// profile (a discovery met only the prefix's labels) — whether either holds on the whole query
-// is unknown, so the selection is not made rather than refused (a 400 would blame the request
-// for the deadline). An interval invalid on the whole query is still a 400, as without a stop
+// is the prefix's): an interval ending past the k-mers resolved, or, on a discovery, a label
+// the prefix did not discover — whether either holds on the whole query is unknown, so the
+// selection is not made rather than refused (a 400 would blame the request for the deadline).
+// What is known whatever the stop is refused as without one, every seed checked first, in
+// select_seeds' order (review of 2026-10-07, V1-02): an interval empty or out of range, an
+// interval not fully in the graph (the whole query's k-mers are mapped before the deadline is
+// read), and, with explicit labels (every one of them profiled whatever the stop), a seed
+// label that is not one of them
 static std::string explicit_selection_blocked(const SupportProfile &profile,
-                                              const SelectionPolicy &policy) {
+                                              const SelectionPolicy &policy, bool discover) {
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
         if (ex.kmers.begin >= ex.kmers.end || ex.kmers.end > profile.stop->query_kmers)
             throw InvalidRequest("Explicit seed interval out of range");
+        const bool in_one_run = std::any_of(profile.stop->query_graph_runs.begin(),
+                                            profile.stop->query_graph_runs.end(),
+            [&](const KmerInterval &run) {
+                return run.begin <= ex.kmers.begin && run.end >= ex.kmers.end;
+            });
+        if (!in_one_run)
+            throw InvalidRequest("Explicit seed interval is not fully present in the graph");
+        if (discover)
+            continue;
+        for (const std::string &name : ex.labels) {
+            const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
+                [&](const LabelProfile &lp) { return lp.label.name == name; });
+            if (!profiled)
+                throw InvalidRequest("Explicit seed label was not profiled: '" + name + "'");
+        }
     }
     for (size_t i = 0; i < policy.explicit_seeds.size(); ++i) {
         const ExplicitSeed &ex = policy.explicit_seeds[i];
@@ -5712,7 +5734,7 @@ static std::string explicit_selection_blocked(const SupportProfile &profile,
             const bool profiled = std::any_of(profile.labels.begin(), profile.labels.end(),
                 [&](const LabelProfile &lp) { return lp.label.name == name; });
             if (!profiled)
-                return seed + " names a label the resolved prefix did not profile";
+                return seed + " names a label the resolved prefix did not discover";
         }
     }
     return "";
@@ -5757,10 +5779,16 @@ Json::Value process_resolve_request(
         const std::function<std::chrono::steady_clock::time_point()> &clock) {
     using graph::pattern::Deadline;
     // the deadline of a request with bounds.time_budget_ms starts here, its body parsed (as
-    // /pattern's, DESIGN-pattern-search.md §5.3)
+    // /pattern's, DESIGN-pattern-search.md §5.3), before its fields are read; a request without
+    // the field reads no clock for it (review of 2026-10-07, T3-05, V1-03: the start was read
+    // for every request)
     const std::function<Deadline::Clock::time_point()> now
             = clock ? clock : std::function<Deadline::Clock::time_point()>(&Deadline::Clock::now);
-    const Deadline::Clock::time_point start = now();
+    std::optional<Deadline::Clock::time_point> start;
+    if (json.isObject() && json.isMember("bounds") && json["bounds"].isObject()
+            && json["bounds"].isMember("time_budget_ms")) {
+        start = now();
+    }
     ResolveRequest req = parse_resolve_request(json);
     // a client that is gone is not answered: the request is abandoned at the next phase
     auto abandon = []() {
@@ -5776,8 +5804,9 @@ Json::Value process_resolve_request(
     if (req.sequence.size() > req.max_query_bp)
         throw InvalidRequest("request.sequence: longer than bounds.max_query_bp");
 
-    // the deadline, only when asked for: without it nothing below reads a clock, and the
-    // answer is the one this route always gave
+    // the deadline, only when asked for: without it no deadline is set or read (the clock of
+    // timing.elapsed_ms is read as it always was), and the answer is the one this route
+    // always gave
     std::optional<Deadline> deadline;
     Json::Value clamped(Json::arrayValue);
     std::string late;
@@ -5797,7 +5826,10 @@ Json::Value process_resolve_request(
             clamped.append(std::move(c));
             budget = time.max_time_ms;
         }
-        deadline.emplace(start, budget, time.finalize_ms, now);
+        // (the parse admits the field only where the peek above saw it)
+        if (!start)
+            start = now();
+        deadline.emplace(*start, budget, time.finalize_ms, now);
         late = "resolve: the answer could not be built and written within "
                "bounds.time_budget_ms (" + ms_text(budget) + " ms, the finalisation reserve of "
                + ms_text(time.finalize_ms) + " ms included): nothing partial is sent";
@@ -5831,7 +5863,8 @@ Json::Value process_resolve_request(
             // under a stop the selection is the prefix's (decision B7), made from it unless an
             // explicit seed reaches beyond what the prefix can tell
             if (profile.stop && req.policy.policy == SelectionPolicy::EXPLICIT)
-                not_made = explicit_selection_blocked(profile, req.policy);
+                not_made = explicit_selection_blocked(profile, req.policy,
+                                                      req.options.discover);
             if (not_made.empty())
                 selection = select_seeds(profile, req.sequence, req.policy, oracle.regime() != Regime::BASIC);
         }

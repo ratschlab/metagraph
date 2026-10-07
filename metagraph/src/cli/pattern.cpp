@@ -1,10 +1,14 @@
 #include "pattern.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <set>
+#include <sstream>
 #include <string_view>
 #include <vector>
 
@@ -51,6 +55,18 @@ constexpr const char kNoteAnnotationNotRead[] = "annotation_not_read";
 // The JSON objects built between two readings of the answer's deadline (§5.3:
 // "serialisation every 4,096 objects")
 constexpr uint64_t kDeliveryStride = 4096;
+
+// The deepest nesting of arrays and objects a request body may have (jsoncpp's stackLimit,
+// its default): a deeper one is refused invalid_request
+constexpr int kMaxBodyNesting = 1000;
+
+// a number of milliseconds in a message: 250.5, not std::to_string's 250.500000 nor a cast's
+// 250 (review of 2026-10-07, T3-07; as /resolve's ms_text)
+std::string ms_text(double x) {
+    std::ostringstream out;
+    out << std::setprecision(15) << x;
+    return out.str();
+}
 
 PatternRefusal invalid(const std::string &message) {
     return PatternRefusal(400, "invalid_request", message);
@@ -322,8 +338,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         // the reserve is inside the budget: a budget not above it leaves no time to work
         if (!(t > limits.finalize_ms)) {
             throw invalid(f.path("time_budget_ms") + ": expected more than the finalisation "
-                          "reserve of " + std::to_string(static_cast<uint64_t>(limits.finalize_ms))
-                          + " ms");
+                          "reserve of " + ms_text(limits.finalize_ms) + " ms");
         }
         if (t > limits.max_time_ms) {
             // lowered to the cap, not to the default, which lies below it
@@ -370,7 +385,8 @@ std::string support_message(const GraphSupport &support) {
                "the graph its mask once with `metagraph transform --mask-dummy <graph>.dbg` "
                "(writes the .edgemask beside the graph; node ids and annotation unchanged), or "
                "pass --pattern-build-mask to server_query or pattern (builds it in memory at "
-               "load)";
+               "load); the mask is read when the graph is loaded: restart the server once the "
+               ".edgemask exists";
     }
     if (support.reason == "representation_unsupported") {
         return "pattern: the graph is not a succinct graph (a DBGSuccinct, or a PRIMARY one "
@@ -454,6 +470,10 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     e["information_bits"] = result->information_bits;
     e["anchor_information_bits"] = result->anchor_information_bits
             ? Json::Value(*result->anchor_information_bits) : Json::Value();
+    // the least informative searched anchor window, the floor's operand for L > k (an
+    // addition to contract version 1; review of 2026-10-07, X-GUARANTEES-01)
+    e["min_anchor_information_bits"] = result->min_anchor_information_bits
+            ? Json::Value(*result->min_anchor_information_bits) : Json::Value();
     if (result->refusal) {
         e["error"] = error_json(result->refusal->code, result->refusal->message);
         return e;
@@ -548,13 +568,14 @@ Json::Value PatternRefusal::body() const {
 }
 
 void PatternDelivery::check() const {
+    if (abort_ && abort_())
+        throw Aborted();
     if (deadline_ && deadline_->respond_expired()) {
         throw PatternRefusal(503, "deadline",
                              "pattern: the answer could not be written within time_budget_ms ("
-                             + std::to_string(static_cast<uint64_t>(deadline_->time_budget_ms()))
+                             + ms_text(deadline_->time_budget_ms())
                              + " ms, the finalisation reserve of "
-                             + std::to_string(static_cast<uint64_t>(
-                                     deadline_->finalize_reserve_ms()))
+                             + ms_text(deadline_->finalize_reserve_ms())
                              + " ms included): nothing partial is sent");
     }
 }
@@ -575,16 +596,52 @@ PatternLimits pattern_limits(const Config &config) {
     limits.max_labels = config.pattern_max_labels;
     limits.max_occurrences_per_label = config.pattern_max_occurrences;
     limits.chunk_target_ms = static_cast<double>(config.traverse_chunk_target_ms);
+    limits.delivery_build_mbps = config.pattern_delivery_build_mbps;
+    limits.delivery_compress_mbps = config.pattern_delivery_compress_mbps;
     return limits;
 }
 
 Json::Value parse_pattern_body(const std::string &content) {
+    // one RFC 8259 JSON text, its members' names unique (review of 2026-10-07, R1-02): no
+    // comments, no trailing comma, nothing after the value, and no duplicated member name,
+    // whose earlier value jsoncpp would drop without a word (a budget given twice would be
+    // replaced silently). Not CharReaderBuilder::strictMode(): its strictRoot would refuse a
+    // root that is not an object here, before the graph check (§5 step 4), where step 5 does.
+    // The route's own reader: /search, /align and /traverse keep theirs
+    // jsoncpp skips a comment before an object's member name whatever allowComments says: a
+    // '/' outside a string is no JSON at all, so the text is refused before it is parsed
+    bool in_string = false;
+    for (size_t i = 0; i < content.size(); ++i) {
+        if (in_string) {
+            if (content[i] == '\\')
+                ++i;
+            else if (content[i] == '"')
+                in_string = false;
+        } else if (content[i] == '"') {
+            in_string = true;
+        } else if (content[i] == '/') {
+            throw invalid("request: not JSON: a comment (or a '/' outside a string) at byte "
+                          + std::to_string(i));
+        }
+    }
     Json::CharReaderBuilder builder;
+    builder["allowComments"] = false;
+    builder["allowTrailingCommas"] = false;
+    builder["failIfExtra"] = true;
+    builder["rejectDupKeys"] = true;
+    builder["stackLimit"] = kMaxBodyNesting;
     std::unique_ptr<Json::CharReader> reader { builder.newCharReader() };
     Json::Value json;
     std::string errors;
-    if (!reader->parse(content.data(), content.data() + content.size(), &json, &errors))
-        throw invalid("request: not JSON: " + errors);
+    try {
+        if (!reader->parse(content.data(), content.data() + content.size(), &json, &errors))
+            throw invalid("request: not JSON: " + errors);
+    } catch (const Json::Exception &e) {
+        // jsoncpp throws rather than returns past its nesting limit (review of 2026-10-07,
+        // R1-03, R2-01): the client's to fix, not a server bug (a 400 without a code)
+        throw invalid("request: not JSON: " + std::string(e.what()) + " (more than "
+                      + std::to_string(kMaxBodyNesting) + " nested arrays and objects)");
+    }
     return json;
 }
 
@@ -624,8 +681,29 @@ Json::Value process_pattern_request(
     const Deadline deadline(start, req.time_budget_ms, limits.finalize_ms, now);
     if (delivery)
         delivery->set_deadline(deadline);
+    /**
+     * The work's deadline (review of 2026-10-07, X-EFFICIENCY-04): the request's, but read
+     * through a clock that runs ahead of |now| by the estimated time to write what the answer
+     * holds so far (AnswerVolume), so that the work stops finalize_ms plus that estimate before
+     * the deadline, and a request that buffered many results still answers within its budget
+     * (stopped by time, its counts kept) rather than 503 with all of its work lost. Every
+     * reading of the work time — the engine's (discovery, the release), the annotation reads'
+     * and the output of their labels — reads it; the answer's own deadline (|deadline|: the
+     * delivery check, timing.elapsed_ms) reads |now|.
+     */
+    AnswerVolume volume(limits.delivery_build_mbps, limits.delivery_compress_mbps,
+                        limits.delivery_text_scale);
+    auto work_clock = [&now, &volume]() {
+        // (bounded far above any budget, so that absurd rates cannot overflow the clock)
+        return now() + std::chrono::duration_cast<Deadline::Clock::duration>(
+                std::chrono::duration<double, std::milli>(std::min(volume.finalize_ms(), 1e12)));
+    };
     // one budget for the request, spent by the patterns in request order (§5.3, §5.5)
-    Budget budget(req.max_steps, deadline);
+    Budget budget(req.max_steps, Deadline(start, req.time_budget_ms, limits.finalize_ms,
+                                          work_clock));
+    // a caller that left is not answered: the work ends at its next clock reading
+    if (delivery && delivery->abort())
+        budget.set_abort(delivery->abort());
     const PatternSearch search(graph);
 
     const size_t k = graph.get_k();
@@ -637,7 +715,7 @@ Json::Value process_pattern_request(
     const bool read_labels = req.labels_all && mode != Mode::COUNT;
     std::optional<PatternRetrieval> retrieval;
     if (read_labels) {
-        retrieval.emplace(anno_graph, support.mode, req.retrieval, budget, hooks);
+        retrieval.emplace(anno_graph, support.mode, req.retrieval, budget, hooks, &volume);
         if (!retrieval->description().budgeted && !req.retrieval.allow_unbudgeted) {
             throw PatternRefusal(400, "annotation_unbudgeted",
                                  "pattern: output.labels \"all\" reads the annotation, and this "
@@ -655,8 +733,9 @@ Json::Value process_pattern_request(
     /**
      * One released context as its JSON result (§7.2, output.labels none), built in the engine's
      * callback: spelling the k-mer is graph work, done while the engine still reads the
-     * clock between releases, so that the finalisation reserve is left to assembling and
-     * writing the answer. The row is the annotation row the context's k-mer is annotated in,
+     * clock (every 64 contexts handed over, in partial's release and in all_or_count's
+     * delivery of its buffered release; review of 2026-10-07, R1-01, E4-03), so that the
+     * finalisation reserve is left to assembling and writing the answer. The row is the annotation row the context's k-mer is annotated in,
      * named without reading it: the stored k-mer's (base_node) on BASIC and wrapped PRIMARY
      * graphs; on a native CANONICAL graph the canonical k-mer's (the annotation key of every
      * route, LabelOracle::key_of), since the other orientation's row carries no labels.
@@ -698,6 +777,8 @@ Json::Value process_pattern_request(
         r["row"] = key != DeBruijnGraph::npos
                         && AnnotatedDBG::graph_to_anno_index(key) < num_rows
                 ? uint_json(AnnotatedDBG::graph_to_anno_index(key)) : Json::Value();
+        // in the answer from now on: the work time is read with it counted
+        volume.add(compact_json_bytes(r));
         return r;
     };
 
@@ -750,6 +831,8 @@ Json::Value process_pattern_request(
         }
         answered.push_back(std::move(a));
     }
+    if (hooks && hooks->work_done_hook)
+        hooks->work_done_hook();
     const double elapsed_ms = deadline.elapsed_ms();
 
     // the finalisation: assembling the answer, read against the deadline every
@@ -883,10 +966,22 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // the budget of a request that names none: unlike the other caps, below the maximum
     p["default_time_budget_ms"] = number_json(limits.default_time_ms);
     p["finalize_reserve_ms"] = number_json(limits.finalize_ms);
-    p["caps_rule"] = "each cap is the maximum of its request field: a larger request value is "
-                     "lowered to it and listed in limits.clamped; each is also the field's "
-                     "default, except time_budget_ms, whose default is default_time_budget_ms; "
-                     "max_patterns is not lowered: a longer list is refused";
+    // review of 2026-10-07: R2-04 (min_information_bits and max_patterns are no request
+    // field's maximum) and X-EFFICIENCY-04 (the time kept back from the work grows with what
+    // the answer holds)
+    p["caps_rule"] = "max_contexts, max_anchors, max_steps, time_budget_ms, "
+        "max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels and "
+        "max_occurrences_per_label are the maxima of their request fields: a larger request "
+        "value is lowered to the cap and listed in limits.clamped; each is also its field's "
+        "default, except time_budget_ms, whose default is default_time_budget_ms. "
+        "max_patterns bounds the length of patterns: a longer list is refused, never cut. "
+        "min_information_bits is the server's information floor, not a request field. Of "
+        "time_budget_ms, the work stops at least finalize_reserve_ms before the deadline, and "
+        "earlier by the time the answer built so far is estimated to take to write: "
+        + ms_text(kAnswerVolumeMargin) + " x (B / (" + ms_text(limits.delivery_build_mbps)
+        + " x 1000) + B / (" + ms_text(limits.delivery_compress_mbps) + " x 1000)) ms for B "
+        "bytes of its compact JSON text (the labels about to be built counted once more at the "
+        "first rate; rates in MB/s), so that a stopped request still answers with its counts";
 
     const char *graph_fields[] = { "graph_mode", "k", "alphabet", "strand_stated", "mask",
                                    "scopes", "placement", "support", "annotation" };
@@ -941,6 +1036,41 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     return p;
 }
 
+bool write_pattern_answer(const std::string &content,
+                          const AnnotatedDBG &anno_graph,
+                          const PatternLimits &limits,
+                          const std::string &release,
+                          const IndexIdentity *identity,
+                          const Json::StreamWriterBuilder &builder,
+                          std::ostream &out,
+                          const std::string &name,
+                          const RetrievalHooks *hooks) {
+    PatternDelivery delivery;
+    try {
+        const Json::Value json = parse_pattern_body(content);
+        const std::string text = Json::writeString(
+                builder, process_pattern_request(json, anno_graph, limits, release, identity,
+                                                 &delivery, nullptr, hooks));
+        // written by the deadline, as the server's answer must be (else 503 there)
+        delivery.check();
+        out << text << std::endl;
+        return true;
+    } catch (const PatternRefusal &e) {
+        logger->error("Request in {} refused ({} {}): {}", name, e.status(), e.code(),
+                      e.what());
+        out << Json::writeString(builder, e.body()) << std::endl;
+    } catch (const std::exception &e) {
+        // what the server answers 400 {"error"} without a code (an unexpected failure): the
+        // same body, and the next request file is still answered (review of 2026-10-07,
+        // R1-03, R2-01: an exception escaped and aborted the run, the later files unanswered)
+        logger->error("Request in {} failed: {}", name, e.what());
+        Json::Value body;
+        body["error"] = e.what();
+        out << Json::writeString(builder, body) << std::endl;
+    }
+    return false;
+}
+
 int pattern_graph(Config *config) {
     assert(config);
     assert(config->infbase_annotators.size() == 1);
@@ -959,6 +1089,9 @@ int pattern_graph(Config *config) {
 
     Json::StreamWriterBuilder builder;
     builder["indentation"] = config->output_json ? "" : "  ";
+    PatternLimits limits = pattern_limits(*config);
+    // the indented text writes about twice the compact one's bytes (AnswerVolume)
+    limits.delivery_text_scale = config->output_json ? 1 : 2;
     int status = 0;
     for (const auto &file : config->fnames) {
         std::ifstream in(file);
@@ -968,19 +1101,8 @@ int pattern_graph(Config *config) {
         }
         const std::string content((std::istreambuf_iterator<char>(in)),
                                   std::istreambuf_iterator<char>());
-        PatternDelivery delivery;
-        try {
-            const Json::Value json = parse_pattern_body(content);
-            const std::string text = Json::writeString(
-                    builder, process_pattern_request(json, *anno_graph, *config, &identity,
-                                                     &delivery));
-            // written by the deadline, as the server's answer must be (else 503 there)
-            delivery.check();
-            std::cout << text << std::endl;
-        } catch (const PatternRefusal &e) {
-            logger->error("Request in {} refused ({} {}): {}", file, e.status(), e.code(),
-                          e.what());
-            std::cout << Json::writeString(builder, e.body()) << std::endl;
+        if (!write_pattern_answer(content, *anno_graph, limits, config->index_release,
+                                  &identity, builder, std::cout, file)) {
             status = 1;
         }
     }

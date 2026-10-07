@@ -668,10 +668,13 @@ TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
     // the path the annotation is read on (LabelQuery::access_path): a column annotation and
     // RowFlat read cells (direct), RowDiff decodes rows
     const bool row_path = count_phase(seen, ResolveStop::ROWS) > 0;
-    if (std::is_same_v<Annotation, annot::ColumnCompressed<>>)
+    // (braces: GCC 13 -Werror=dangling-else on a gtest macro under an if)
+    if (std::is_same_v<Annotation, annot::ColumnCompressed<>>) {
         EXPECT_FALSE(row_path);
-    if (std::is_same_v<Annotation, annot::RowDiffColumnAnnotator>)
+    }
+    if (std::is_same_v<Annotation, annot::RowDiffColumnAnnotator>) {
         EXPECT_TRUE(row_path);
+    }
     if (!row_path) {
         EXPECT_EQ((std::set<uint64_t>{ next_in_graph, 2 * kResolveCheckKmers,
                                        3 * kResolveCheckKmers }), in_hits);
@@ -692,31 +695,42 @@ TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
 }
 
 // Milestone 1b: the loops over the labels after the work read ResolveOptions::finish_check
-// every kResolveCheckLabels labels, and what it throws abandons the request
+// every kResolveCheckLabels labels, and what it throws abandons the request. The reads are
+// counted exactly (review of 2026-10-07, T3-04: a lower bound let two of a discovery's loops
+// lose their check unseen): a loop over n labels reads it at the labels kResolveCheckLabels,
+// 2 kResolveCheckLabels, ... below n; a discovery has four such loops (the ranking, the
+// naming, the profiles, the candidates' grouping), explicit labels two (the profiles, the
+// grouping)
 TEST(Resolve, FinishCheckIsReadInTheLoopsOverTheLabels) {
     const std::string q = random_seq(200, 51);
-    std::vector<std::string> seqs, labels;
-    for (size_t i = 0; i < 2 * kResolveCheckLabels + 10; ++i) {
-        seqs.push_back(q.substr(i % 150, 40));
-        labels.push_back("L" + std::to_string(i));
-    }
-    auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels);
-    LabelOracle oracle(*anno);
-    for (bool discover : { true, false }) {
-        ResolveOptions opts;
-        if (discover) {
-            opts.discover = true;
-            opts.discover_max_labels = labels.size();
-        } else {
-            opts.labels = labels;
+    for (size_t n : { kResolveCheckLabels, kResolveCheckLabels + 1,
+                      2 * kResolveCheckLabels + 10 }) {
+        std::vector<std::string> seqs, labels;
+        for (size_t i = 0; i < n; ++i) {
+            seqs.push_back(q.substr(i % 150, 40));
+            labels.push_back("L" + std::to_string(i));
         }
-        size_t reads = 0;
-        opts.finish_check = [&reads]() { reads++; };
-        const SupportProfile profile = resolve_support(oracle, q, opts);
-        EXPECT_EQ(labels.size(), profile.labels.size());
-        EXPECT_GE(reads, 4u) << discover;
-        opts.finish_check = []() { throw std::runtime_error("late"); };
-        EXPECT_THROW(resolve_support(oracle, q, opts), std::runtime_error) << discover;
+        auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, labels);
+        LabelOracle oracle(*anno);
+        const size_t per_loop = (n - 1) / kResolveCheckLabels;
+        for (bool discover : { true, false }) {
+            ResolveOptions opts;
+            if (discover) {
+                opts.discover = true;
+                opts.discover_max_labels = labels.size();
+            } else {
+                opts.labels = labels;
+            }
+            size_t reads = 0;
+            opts.finish_check = [&reads]() { reads++; };
+            const SupportProfile profile = resolve_support(oracle, q, opts);
+            EXPECT_EQ(labels.size(), profile.labels.size());
+            EXPECT_EQ((discover ? 4 : 2) * per_loop, reads) << discover << " " << n;
+            if (!per_loop)
+                continue;
+            opts.finish_check = []() { throw std::runtime_error("late"); };
+            EXPECT_THROW(resolve_support(oracle, q, opts), std::runtime_error) << discover;
+        }
     }
 }
 

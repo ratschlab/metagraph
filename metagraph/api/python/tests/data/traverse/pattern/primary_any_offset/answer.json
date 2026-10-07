@@ -130,6 +130,7 @@
    "information_bits": 40.0,
    "kind": "dna",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [
     "strand_unknown_canonical"
@@ -339,7 +340,7 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.307583
+    "elapsed_ms": 2.025583
    },
    "withheld": null,
    "work": {
@@ -350,6 +351,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.323958
+  "elapsed_ms": 2.052667
  }
 }

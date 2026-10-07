@@ -30,6 +30,7 @@
  * guarantee rule); a count is exact only when everything behind it was read.
  */
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -56,6 +57,63 @@ class LabelOracle;
 }
 
 namespace cli {
+
+/**
+ * What the answer of one /pattern request has built so far, and the time writing it is
+ * expected to take (review of 2026-10-07, X-EFFICIENCY-04). The finalisation reserve
+ * (--pattern-finalize-ms) is the floor of the time kept back from the work; the work stops
+ * earlier by this estimate, so that a request whose patterns buffered many results is still
+ * answered within its budget (a time stop, its counts kept) rather than 503 "deadline" with
+ * all of its work lost. As /traverse's delivery reserve (traverse_attempts.hpp,
+ * Attempt::reserve_ms), but from configured rates only:
+ *
+ *   finalize_ms = margin x scale x ((T + P) / (build x 1000) + (T + P) / (compress x 1000)
+ *                                   + P / (build x 1000))
+ *
+ * T the bytes of compact JSON text of the objects built (each result as the route builds it,
+ * counted exactly by compact_json_bytes), P those of the label objects about to be built
+ * (estimated from above before they are built; counted once more, at the build rate, for
+ * building them), rates in MB/s (bytes per microsecond), scale the writer's text per compact
+ * byte (1 on the server; 2 for the CLI's indented text). Used by one request's thread only.
+ */
+class AnswerVolume {
+  public:
+    AnswerVolume() = default;
+    AnswerVolume(double build_mbps, double compress_mbps, double text_scale = 1)
+          : build_mbps_(build_mbps), compress_mbps_(compress_mbps), scale_(text_scale) {}
+
+    // |bytes| of compact JSON text built (to be written and compressed)
+    void add(uint64_t bytes) { text_ += bytes; }
+    // |bytes| of compact JSON text whose objects are about to be built
+    void add_pending(uint64_t bytes) { pending_ += bytes; }
+    void drop_pending(uint64_t bytes) { pending_ -= std::min(bytes, pending_); }
+    // the pending objects were built: from then on written only
+    void settle(uint64_t bytes) {
+        drop_pending(bytes);
+        add(bytes);
+    }
+
+    uint64_t text_bytes() const { return text_; }
+    uint64_t pending_bytes() const { return pending_; }
+    // the estimated time to write (and build the pending part of) what is buffered (ms); 0
+    // for a rate of 0 or infinity (no model: the reserve alone, as before the review)
+    double finalize_ms() const;
+
+  private:
+    double build_mbps_ = 0;
+    double compress_mbps_ = 0;
+    double scale_ = 1;
+    uint64_t text_ = 0;
+    uint64_t pending_ = 0;
+};
+
+// the margin of AnswerVolume::finalize_ms over its model (as /traverse's kReserveMargin)
+constexpr double kAnswerVolumeMargin = 1.25;
+
+// The length of |value| written as compact JSON by jsoncpp's StreamWriter, from above: a
+// string's every control, quote, backslash or non-ASCII byte counted as an escape of 6 bytes,
+// a double as 24 characters
+uint64_t compact_json_bytes(const Json::Value &value);
 
 /**
  * The annotation limits of one request, effective (after the server's caps, §5.3).
@@ -114,12 +172,18 @@ struct RetrievalContext {
 // Tests: a record mapping instead of the index's; a hook called before every annotation read
 // with its row count (to slow the reads down on a virtual clock); the memory account in bytes
 // instead of the request's MiB (0: the request's); a hook asked at every charge of a read's
-// DecodeBudget, refusing it when true (DecodeBudget::deny)
+// DecodeBudget, refusing it when true (DecodeBudget::deny); a hook called before the work time
+// is read for the labels of each context built for the answer, with the context's index (to
+// move a virtual clock past the work time in the middle of the output); and a hook called
+// once the route's work is done, before the answer is assembled (to move it into the
+// finalisation reserve or past the deadline)
 struct RetrievalHooks {
     const annot::CoordToHeader *coord_to_header = nullptr;
     std::function<void(size_t rows)> read_hook;
     uint64_t max_memory_bytes = 0;
     std::function<bool(uint64_t ordinal)> deny_decode;
+    std::function<void(size_t context)> output_hook;
+    std::function<void()> work_done_hook;
 };
 
 /**
@@ -156,13 +220,16 @@ struct LabelsAnswer {
  * One request's labelled retrieval: the oracle, the label dictionary (LabelRecorder), the
  * memory and work accounts, shared by the request's patterns in request order. Used by one
  * thread. The deadline is the request's (|budget|): a time stop of the reads is recorded in
- * |budget| too, so that the patterns after it answer as after any time stop.
+ * |budget| too, so that the patterns after it answer as after any time stop. |volume| (may be
+ * null) is the request's answer volume: the labels built for the answer are added to it, and
+ * the work time is read before each context's labels are built (with |budget|'s deadline,
+ * which reads the volume: a time stop there is stop {output, time}).
  */
 class PatternRetrieval {
   public:
     PatternRetrieval(const graph::AnnotatedDBG &anno_graph, graph::pattern::GraphMode mode,
                      const RetrievalLimits &limits, graph::pattern::Budget &budget,
-                     const RetrievalHooks *hooks = nullptr);
+                     const RetrievalHooks *hooks = nullptr, AnswerVolume *volume = nullptr);
     ~PatternRetrieval();
 
     const AnnotationDescription& description() const { return description_; }

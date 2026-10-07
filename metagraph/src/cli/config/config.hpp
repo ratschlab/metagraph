@@ -14,6 +14,16 @@
 namespace mtg {
 namespace cli {
 
+// The HTTP server's content timeout (s): the body, the handler and the response of every
+// request must fit in it (Simple-Web-Server's timeout_content, server.cpp), and the second a
+// route's own deadline leaves under it for the transport (/traverse's attempts' hard cap; the
+// cap of /pattern's time_budget_ms and of /resolve's opt-in deadline, review of 2026-10-07,
+// R1-05)
+constexpr uint64_t kServerContentTimeoutS = 900;
+constexpr uint64_t kServerTransportMarginMs = 1000;
+// the longest route deadline the transport can honour (ms)
+constexpr uint64_t kServerMaxDeadlineMs = kServerContentTimeoutS * 1000 - kServerTransportMarginMs;
+
 class Config {
   public:
     Config(int argc, char *argv[]);
@@ -173,16 +183,29 @@ class Config {
     double pattern_min_information_bits = 24;
     uint64_t pattern_max_contexts = 10'000;
     uint64_t pattern_max_anchors = 1'000;
-    // a range step is a few rank operations: of the order of the default time budget (§5.3)
+    // the step cap of a request (§5.3). Not calibrated against the time budget on a deployed
+    // index (review of 2026-10-07, X-EFFICIENCY-05): measured in RAM at 0.2-0.7 us a step
+    // (the mini index, random graphs of 0.5 and 2 billion edges; M5 Max, shared), so 1e8 steps
+    // take 20-75 s, about the default 60 s budget: which of the two stops a heavy request
+    // first depends on the machine and its load (a time stop is time_limited). The rate on
+    // a large mmapped index is unmeasured (the milestone-6 benchmark, DESIGN §13); a request
+    // cannot raise this cap, only the operator can
     uint64_t pattern_max_steps = 100'000'000;
     // the time budget of a request that names none, and the most one may name (the owner,
     // 2026-10-07: 60 s by default, capped under the 900 s content timeout with room for the
     // answer's serialisation and compression)
     uint64_t pattern_default_time_ms = 60'000;
     uint64_t pattern_max_time_ms = 600'000;
-    // the finalisation reserve inside the time budget: work stops this long before the
-    // deadline so that the counts can still be written by it (ms)
+    // the finalisation reserve inside the time budget: work stops at least this long before
+    // the deadline so that the answer can still be written by it (ms); longer by the
+    // estimated time to write what the answer buffers (review of 2026-10-07,
+    // X-EFFICIENCY-04): at the rates below (MB/s), building and writing its JSON text and
+    // compressing it, with a margin of 1.25 (pattern_retrieval.hpp, AnswerVolume). Starting
+    // estimates as /traverse's delivery rates: conservative (16 x 10,000 results, 18.4 MB of
+    // text, were written and gzipped in 0.3-0.45 s on an M-series Mac; the model gives 2.8 s)
     uint64_t pattern_finalize_ms = 250;
+    double pattern_delivery_build_mbps = 10;
+    double pattern_delivery_compress_mbps = 50;
     // patterns per request (a longer list is refused, not cut)
     uint64_t pattern_max_patterns = 16;
     // output.labels "all" (increment 3, §5.3): the labels kept per row (more are stated as a

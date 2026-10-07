@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -63,6 +64,53 @@ constexpr uint64_t kDedupBytes = 64;
 uint64_t statement_bytes(size_t k) { return 384 + k; }
 // the most keys one read takes (the reads' own runs are cut at kMaxDecodeRun as well)
 constexpr size_t kMaxChunk = graph::traversal::kMaxDecodeRun;
+
+/**
+ * The compact JSON text of the labels built for the answer, from above (AnswerVolume, review
+ * of 2026-10-07, X-EFFICIENCY-04): estimated before the objects are built, so that the work
+ * time is read with them counted. Integers at their widest (20 digits), strings as
+ * string_text_bytes.
+ */
+// a count {"relation":"at_least","unit":"placed_occurrences","value":<20 digits>}: 79
+constexpr uint64_t kCountText = 96;
+// a result's label fields: ,"labels":[],"labels_status":"output_budget","labels_total":<20
+// digits>,"support":"kmer" (about 100)
+constexpr uint64_t kResultLabelsText = 112;
+// a label object without its name and list: {"column":,"occurrence_list":[],"occurrences":
+// <count>,"support":"kmer"},
+constexpr uint64_t kLabelText = 64 + kCountText;
+// a placed occurrence without its record name: {"nt_coords":"<20>-<20>","nt_length":<20>,
+// "record":,"seq_id":<20>,"strand":"+"}, (142)
+constexpr uint64_t kOccurrenceText = 144;
+// a global one: {"kmer_coord":<20>,"offset":<20>,"strand":"+"}, (79)
+constexpr uint64_t kGlobalOccurrenceText = 80;
+// a by_label entry without its names: {"column":,"contexts":<count>,"contexts_suffix":
+// <count>,"graph":,"occurrences":<count>}, (68 and three counts)
+constexpr uint64_t kByLabelText = 72 + 3 * kCountText;
+
+// a string's text: quoted, every byte jsoncpp may escape (a control character, a quote, a
+// backslash, a byte of a non-ASCII character: \uXXXX) counted as 6
+uint64_t string_text_bytes(const char *begin, const char *end) {
+    uint64_t bytes = 2;
+    for (const char *c = begin; c != end; ++c) {
+        const unsigned char u = static_cast<unsigned char>(*c);
+        bytes += u < 0x20 || u >= 0x80 || u == '"' || u == '\\' ? 6 : 1;
+    }
+    return bytes;
+}
+
+uint64_t string_text_bytes(std::string_view s) {
+    return string_text_bytes(s.data(), s.data() + s.size());
+}
+
+uint64_t decimal_digits(uint64_t x) {
+    uint64_t digits = 1;
+    while (x >= 10) {
+        x /= 10;
+        ++digits;
+    }
+    return digits;
+}
 
 constexpr uint64_t kNoKey = graph::traversal::npos;
 
@@ -192,6 +240,60 @@ struct ContextLabel {
 } // namespace
 
 
+double AnswerVolume::finalize_ms() const {
+    // MB/s are bytes per microsecond: x 1000 bytes per ms. A rate of 0 or infinity: no model
+    auto ms = [](double bytes, double mbps) {
+        return mbps > 0 && std::isfinite(mbps) ? bytes / (mbps * 1000) : 0.0;
+    };
+    const double all = static_cast<double>(text_ + pending_) * scale_;
+    const double pending = static_cast<double>(pending_) * scale_;
+    return kAnswerVolumeMargin * (ms(all, build_mbps_) + ms(all, compress_mbps_)
+                                  + ms(pending, build_mbps_));
+}
+
+uint64_t compact_json_bytes(const Json::Value &v) {
+    switch (v.type()) {
+        case Json::nullValue:
+            return 4;
+        case Json::booleanValue:
+            return v.asBool() ? 4 : 5;
+        case Json::intValue: {
+            const int64_t x = v.asInt64();
+            return x < 0 ? 1 + decimal_digits(static_cast<uint64_t>(-(x + 1)) + 1)
+                         : decimal_digits(static_cast<uint64_t>(x));
+        }
+        case Json::uintValue:
+            return decimal_digits(v.asUInt64());
+        case Json::realValue:
+            // at most 17 significant digits, a sign, a point and an exponent
+            return 24;
+        case Json::stringValue: {
+            const char *begin = nullptr, *end = nullptr;
+            v.getString(&begin, &end);
+            return string_text_bytes(begin, end);
+        }
+        case Json::arrayValue: {
+            uint64_t bytes = 2 + (v.size() ? v.size() - 1 : 0);
+            for (const Json::Value &x : v) {
+                bytes += compact_json_bytes(x);
+            }
+            return bytes;
+        }
+        case Json::objectValue: {
+            // {"name":value,...}
+            uint64_t bytes = 2 + (v.size() ? v.size() - 1 : 0);
+            for (auto it = v.begin(); it != v.end(); ++it) {
+                const char *end = nullptr;
+                const char *begin = it.memberName(&end);
+                bytes += string_text_bytes(begin, end) + 1 + compact_json_bytes(*it);
+            }
+            return bytes;
+        }
+    }
+    return 0;
+}
+
+
 AnnotationDescription describe_annotation(const LabelOracle &oracle, GraphMode mode) {
     AnnotationDescription d;
     const bool basic = mode == GraphMode::BASIC;
@@ -206,13 +308,16 @@ AnnotationDescription describe_annotation(const LabelOracle &oracle, GraphMode m
 
 struct PatternRetrieval::Impl {
     Impl(const AnnotatedDBG &anno_graph, const RetrievalLimits &limits, Budget &budget,
-         const RetrievalHooks *hooks)
+         const RetrievalHooks *hooks, AnswerVolume *volume)
           : oracle(anno_graph, hooks ? hooks->coord_to_header : nullptr),
             limits(limits), budget(budget),
             account(hooks && hooks->max_memory_bytes ? hooks->max_memory_bytes
-                                                     : limits.max_memory_bytes) {
-        if (hooks)
+                                                     : limits.max_memory_bytes),
+            volume(volume) {
+        if (hooks) {
             deny_decode = hooks->deny_decode;
+            output_hook = hooks->output_hook;
+        }
         // the reads under the deadline are decoded in paced chunks (as /traverse's)
         oracle.pacer().target_ms = limits.chunk_target_ms;
         if (hooks && hooks->read_hook)
@@ -236,6 +341,10 @@ struct PatternRetrieval::Impl {
     uint64_t units = 0;
     // tests: DecodeBudget::deny of every read
     std::function<bool(uint64_t)> deny_decode;
+    // the request's answer volume (null: none), and the tests' hook before the work time is
+    // read for a context's labels
+    AnswerVolume *volume = nullptr;
+    std::function<void(size_t)> output_hook;
     // the pattern being released (admit_context): its descriptors' bytes, held, and what they
     // may hold (all_or_count: what the account had left; partial: half of it); false once a
     // descriptor did not fit
@@ -601,8 +710,9 @@ void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
 
 PatternRetrieval::PatternRetrieval(const AnnotatedDBG &anno_graph, GraphMode mode,
                                    const RetrievalLimits &limits, Budget &budget,
-                                   const RetrievalHooks *hooks)
-      : impl_(std::make_unique<Impl>(anno_graph, limits, budget, hooks)), limits_(limits) {
+                                   const RetrievalHooks *hooks, AnswerVolume *volume)
+      : impl_(std::make_unique<Impl>(anno_graph, limits, budget, hooks, volume)),
+        limits_(limits) {
     description_ = describe_annotation(impl_->oracle, mode);
     impl_->budgeted = description_.budgeted;
     const std::string placement = description_.placement;
@@ -683,6 +793,11 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
         a.work["memory_bytes"] = uint_json(m.account.peak());
         a.timing["label_discovery_ms"] = discovery_ms;
         a.timing["placement_ms"] = placement_ms;
+        // the statements stay in the answer, whatever else does (AnswerVolume)
+        if (m.volume) {
+            m.volume->add(compact_json_bytes(a.fields["rows_refused"])
+                          + compact_json_bytes(a.fields["anchors_truncated"]));
+        }
     };
 
     if (x.withheld) {
@@ -798,6 +913,36 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
         rank[order[r]] = r;
     }
 
+    // the text the labels built for the answer will write (AnswerVolume, review of
+    // 2026-10-07, X-EFFICIENCY-04), from above and before they are built: every result's label
+    // fields and by_label first, then each context's labels as the loop below takes them; the
+    // work time is read with them counted before each context's labels are built
+    uint64_t pending = 0;
+    auto pend = [&](uint64_t bytes) {
+        pending += bytes;
+        if (m.volume)
+            m.volume->add_pending(bytes);
+    };
+    auto unpend = [&](uint64_t bytes) {
+        pending -= std::min(bytes, pending);
+        if (m.volume)
+            m.volume->drop_pending(bytes);
+    };
+    std::vector<uint64_t> name_text(dict.size(), 0);
+    auto label_text = [&](LabelId id) {
+        if (!name_text[id])
+            name_text[id] = string_text_bytes(dict[id].name);
+        return name_text[id];
+    };
+    {
+        uint64_t fixed = keep * kResultLabelsText;
+        const uint64_t graph_text = compact_json_bytes(graph_name);
+        for (size_t r = 0; r < kept_labels; ++r) {
+            fixed += kByLabelText + label_text(order[r]) + graph_text;
+        }
+        pend(fixed);
+    }
+
     // the contexts' label lists with their occurrences; each label's deduplicated union
     // (§5.4: (column, seq_id, start, strand); the label is the column)
     std::vector<std::vector<ContextLabel>> lists(keep);
@@ -812,7 +957,7 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
             continue;
         const RetrievalContext &c = contexts[i];
         std::vector<ContextLabel> list;
-        uint64_t bytes = 0, new_dedup = 0;
+        uint64_t bytes = 0, new_dedup = 0, text = 0;
         std::vector<std::pair<LabelId, Occurrence>> inserted;
         for (LabelId id : row.labels.labels) {
             // a label partial's max_labels cut is not listed, but its occurrences are
@@ -820,8 +965,10 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
             const bool listed = rank[id] != std::numeric_limits<uint64_t>::max();
             ContextLabel cl;
             cl.label = id;
-            if (listed)
+            if (listed) {
                 bytes += kLabelEntryBytes;
+                text += kLabelText + label_text(id);
+            }
             if (m.place) {
                 auto hit = std::lower_bound(row.hits.begin(), row.hits.end(), id,
                                             [](const LabelQuery::Hit &h, LabelId l) {
@@ -857,10 +1004,13 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
                                          cl.occurrences.end());
                     cl.total = cl.occurrences.size();
                     for (const Occurrence &o : cl.occurrences) {
-                        if (listed) {
-                            bytes += m.records
-                                    ? occurrence_bytes(m.oracle.header_name(column, o.a))
-                                    : kGlobalOccurrenceBytes;
+                        if (listed && m.records) {
+                            const std::string_view record = m.oracle.header_name(column, o.a);
+                            bytes += occurrence_bytes(record);
+                            text += kOccurrenceText + string_text_bytes(record);
+                        } else if (listed) {
+                            bytes += kGlobalOccurrenceBytes;
+                            text += kGlobalOccurrenceText;
                         }
                         if (unions[id].insert(o).second) {
                             inserted.emplace_back(id, o);
@@ -876,7 +1026,21 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
             if (listed)
                 list.push_back(std::move(cl));
         }
-        if (!m.account.charge(bytes + new_dedup)) {
+        // the memory first (where it stops does not depend on the machine), then the time:
+        // the work time, read with this context's labels counted in the answer's volume
+        const bool held = m.account.charge(bytes + new_dedup);
+        bool late = false;
+        if (held) {
+            if (m.output_hook)
+                m.output_hook(i);
+            pend(text);
+            late = !m.budget.check_time();
+            if (late) {
+                unpend(text);
+                m.account.release(bytes + new_dedup);
+            }
+        }
+        if (!held || late) {
             for (const auto &[id, o] : inserted) {
                 unions[id].erase(o);
             }
@@ -884,7 +1048,10 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
             for (size_t j = i; j < keep; ++j) {
                 output_cut[j] = true;
             }
-            m.set_stop("output", "max_memory");
+            // a time stop of the output is recorded in the budget too (Budget::check_time):
+            // the later patterns answer as after any time stop
+            m.set_stop("output", late ? "time" : "max_memory");
+            m.time_stop |= late;
             break;
         }
         output += bytes;
@@ -984,6 +1151,8 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
                    : truncated ? "anchor_labels_truncated"
                                : "annotation_budget";
         m.account.release(output + descriptors);
+        // no label of this pattern is built for the answer
+        unpend(pending);
         finish_work();
         return a;
     }
@@ -1072,6 +1241,9 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
         f["labels"] = std::move(labels);
         a.result_fields.push_back(std::move(f));
     }
+    // the labels are built: from now on they are written only
+    if (m.volume)
+        m.volume->settle(pending);
     finish_work();
     return a;
 }

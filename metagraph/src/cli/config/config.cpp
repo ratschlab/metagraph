@@ -489,6 +489,10 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--pattern-finalize-ms")) {
             exact_ms(argv[i], get_value(i), &pattern_finalize_ms);
             i++;
+        } else if (!strcmp(argv[i], "--pattern-delivery-build-mbps")) {
+            pattern_delivery_build_mbps = atof(get_value(i++));
+        } else if (!strcmp(argv[i], "--pattern-delivery-compress-mbps")) {
+            pattern_delivery_compress_mbps = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--pattern-max-patterns")) {
             exact_ms(argv[i], get_value(i), &pattern_max_patterns);
             i++;
@@ -811,6 +815,25 @@ Config::Config(int argc, char *argv[]) {
         std::cerr << "Error: --pattern-max-steps and --pattern-max-patterns must be at least 1, "
                      "and --pattern-default-time-ms above --pattern-finalize-ms and at most "
                      "--pattern-max-time-ms" << std::endl;
+        print_usage_and_exit = true;
+    }
+    // a /pattern deadline the transport cannot honour would be accepted and echoed, and the
+    // connection closed at the content timeout before any answer or 503 (review of
+    // 2026-10-07, R1-05): the cap stays under it (the CLI has no transport)
+    if (identity == SERVER_QUERY && pattern_max_time_ms > kServerMaxDeadlineMs) {
+        std::cerr << "Error: --pattern-max-time-ms must be at most " << kServerMaxDeadlineMs
+                  << " on server_query (the " << kServerContentTimeoutS << " s content timeout "
+                  "less " << kServerTransportMarginMs << " ms for the transport)" << std::endl;
+        print_usage_and_exit = true;
+    }
+    // the rates the finalisation estimate of an answer assumes (review of 2026-10-07,
+    // X-EFFICIENCY-04): a rate that is not a positive number would make the estimate meaningless
+    if ((identity == PATTERN || identity == SERVER_QUERY)
+            && (!(pattern_delivery_build_mbps > 0) || !std::isfinite(pattern_delivery_build_mbps)
+                || !(pattern_delivery_compress_mbps > 0)
+                || !std::isfinite(pattern_delivery_compress_mbps))) {
+        std::cerr << "Error: --pattern-delivery-build-mbps and --pattern-delivery-compress-mbps "
+                     "must be positive numbers" << std::endl;
         print_usage_and_exit = true;
     }
     // the labelled retrieval's caps (increment 3): a row keeps at least one label, a read
@@ -1734,14 +1757,16 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-steps [INT] \tdefault and maximum of max_steps per request (range and mask-scan steps) [100000000]\n");
             fprintf(stderr, "\t   --pattern-default-time-ms [INT] \ttime_budget_ms of a request that names none [60000]\n");
             fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
-            fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops this long before the deadline [250]\n");
+            fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops at least this long before the deadline, longer by the estimated time to write what the answer holds (raise it with --pattern-max-contexts or --pattern-max-patterns, or on a slow host) [250]\n");
+            fprintf(stderr, "\t   --pattern-delivery-build-mbps [FLOAT] \trate (MB/s) at which an answer's JSON text is assumed to be built and written, for that estimate [10]\n");
+            fprintf(stderr, "\t   --pattern-delivery-compress-mbps [FLOAT] \trate (MB/s) at which it is assumed to be compressed [50]\n");
             fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
             fprintf(stderr, "\t   --pattern-max-labels-per-anchor [INT] \tdefault and maximum of max_labels_per_anchor: labels kept per row with output.labels all (more: a truncated anchor) [64]\n");
             fprintf(stderr, "\t   --pattern-max-annotation-work [INT] \tdefault and maximum of max_annotation_work per request (annotation work units) [100000000]\n");
             fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
             fprintf(stderr, "\t   --pattern-max-labels [INT] \tdefault and maximum of max_labels: labels listed per pattern in mode partial [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
-            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask (small graphs; else transform --mask-dummy once) [off]\n");
+            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask, with -p threads (small graphs; else transform --mask-dummy once) [off]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
             fprintf(stderr, "\n");
@@ -1793,15 +1818,17 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
             fprintf(stderr, "\t   --pattern-max-steps [INT] \tdefault and maximum of max_steps per request (range and mask-scan steps) [100000000]\n");
             fprintf(stderr, "\t   --pattern-default-time-ms [INT] \ttime_budget_ms of a request that names none [60000]\n");
-            fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
-            fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops this long before the deadline [250]\n");
+            fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request, at most 899000 (the 900 s content timeout less 1 s for the transport) [600000]\n");
+            fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops at least this long before the deadline, longer by the estimated time to write what the answer holds (raise it with --pattern-max-contexts or --pattern-max-patterns, or on a slow host) [250]\n");
+            fprintf(stderr, "\t   --pattern-delivery-build-mbps [FLOAT] \trate (MB/s) at which an answer's JSON text is assumed to be built and written, for that estimate [10]\n");
+            fprintf(stderr, "\t   --pattern-delivery-compress-mbps [FLOAT] \trate (MB/s) at which it is assumed to be compressed [50]\n");
             fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
             fprintf(stderr, "\t   --pattern-max-labels-per-anchor [INT] \tdefault and maximum of max_labels_per_anchor: labels kept per row with output.labels all (more: a truncated anchor) [64]\n");
             fprintf(stderr, "\t   --pattern-max-annotation-work [INT] \tdefault and maximum of max_annotation_work per request (annotation work units) [100000000]\n");
             fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
             fprintf(stderr, "\t   --pattern-max-labels [INT] \tdefault and maximum of max_labels: labels listed per pattern in mode partial [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
-            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask (small graphs; else transform --mask-dummy once) [off]\n");
+            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask, with --threads-each threads (small graphs; else transform --mask-dummy once; a mask written later is read only after a restart) [off]\n");
         } break;
     }
 

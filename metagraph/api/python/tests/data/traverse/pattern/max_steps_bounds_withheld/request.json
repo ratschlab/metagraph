@@ -1,0 +1,14 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGCCGGTGA",
+   "id": "scan"
+  }
+ ],
+ "mode": "all_or_count",
+ "scope": "suffix",
+ "max_steps": 20,
+ "output": {
+  "labels": "none"
+ }
+}

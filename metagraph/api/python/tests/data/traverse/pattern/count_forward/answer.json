@@ -122,6 +122,7 @@
    "information_bits": 40.0,
    "kind": "dna",
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "count",
    "notes": [],
    "palindromic": false,
@@ -133,7 +134,7 @@
     "+"
    ],
    "timing": {
-    "elapsed_ms": 0.011416
+    "elapsed_ms": 0.045709
    },
    "work": {
     "mask_scans": 0,
@@ -143,6 +144,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.016042
+  "elapsed_ms": 0.061666
  }
 }

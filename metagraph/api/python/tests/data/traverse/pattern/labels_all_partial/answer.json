@@ -185,6 +185,7 @@
     "returned": 2
    },
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "partial",
    "notes": [],
    "occurrences_cut": {
@@ -321,9 +322,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.091291,
-    "label_discovery_ms": 0.101667,
-    "placement_ms": 0.060334
+    "elapsed_ms": 0.128583,
+    "label_discovery_ms": 0.166166,
+    "placement_ms": 0.06325
    },
    "withheld": null,
    "work": {
@@ -337,6 +338,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.316292
+  "elapsed_ms": 0.43425
  }
 }

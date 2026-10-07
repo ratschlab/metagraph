@@ -180,6 +180,7 @@
    "kind": "dna",
    "labels_cut": null,
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [
     "strand_unknown_canonical",
@@ -705,8 +706,8 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.198792,
-    "label_discovery_ms": 0.02375,
+    "elapsed_ms": 0.192291,
+    "label_discovery_ms": 0.02475,
     "placement_ms": 0.0
    },
    "withheld": null,
@@ -721,6 +722,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.431375
+  "elapsed_ms": 0.314
  }
 }

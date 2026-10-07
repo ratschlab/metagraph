@@ -26,17 +26,26 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
   masked_no_map
              the masked copy served with --no-coord-mapping: coordinates without the record
              mapping (output.labels "all" places nothing: placement global)
+  hash       a hash graph (build --graph hash) of one mini record (1296536.fa) with a column
+             annotation: a graph the engine does not recognise (representation_unsupported;
+             review of 2026-10-07, C2-01)
 
 Two fixtures are HAND-MADE (index.json "hand_made": true): the 503 bodies a server cannot be
 made to produce on demand (an answer that overran its finalisation reserve; a request during
 the index load). Their text is the code's (src/cli/pattern.cpp PatternDelivery::check,
-server_utils.cpp process_request) and the unit test checks it against the source.
+server_utils.cpp process_request) and the unit test checks it against the source. Two refusal
+codes have no fixture at all: primary_unwrapped (server_query and the CLI always wrap a PRIMARY
+graph in CanonicalDBG) and alphabet_unsupported (a graph of another alphabet does not load in
+this build).
 
 Volatile values: every answer is stored as the server wrote it, but `timing.elapsed_ms` (and
 every other `timing` value of a pattern), the per-process `server_instance`, and the counts and
-work of a `determinism: time_limited`
-pattern depend on the run; --check blanks them on both sides, and a regeneration keeps a file
-whose blanked content did not change (so that rerunning does not churn the files). Paths
+work of the FIRST `determinism: time_limited` pattern of an answer (the one the clock stopped:
+how far it got; when the clock cut its release, also its `returned` and `results`) depend on the
+run; --check blanks them on both sides, and a regeneration keeps
+a file whose blanked content did not change (so that rerunning does not churn the files). The
+patterns after it are stopped by the same budget (SPEC §7.6: unknown counts, work zero), the
+same in every run, and compared as they are (review of 2026-10-07, C2-02). Paths
 under the work directory are written as {work}/... (they would otherwise name a temporary
 directory). Each fixture also asserts the situation it exists to show (`expect` below), so a
 server change cannot silently turn a fixture into a different case.
@@ -100,14 +109,30 @@ LOW = 'GCCGCCGCCGCCGCCGCCGC'         # a repeat sdust flags (low_complexity_patt
 # random 20- and 40-mers absent from the mini (asserted: exact zeros)
 ABSENT_20 = 'CTAGGAGATGGGCCAGCTAC'
 ABSENT_40 = 'GATAGAGAACTCGAGAGAGGTTCCACCTTCATATTGAATT'
-# 12 Ns then 12 bases of NDM-F: 24 bits, admitted, but ~2e7 range steps on the mini (about
-# 1.4 s): stopped by any budget of a few milliseconds
-HEAVY = 'N' * 12 + NDM_F[:12]
+# 12 bases of NDM-F's first 13 around a run of 19 Ns: 24 bits, admitted, but ~2.5e7 range
+# steps on the mini (about 1.5 s): stopped by any budget of a few milliseconds. (It was 12 Ns
+# then NDM-F's first 12 bases, until the engine learnt to skip a pattern's leading and
+# trailing N runs (review of 2026-10-07, X-EFFICIENCY-01): that one now takes 125 steps)
+HEAVY = NDM_F[:2] + 'N' * 19 + NDM_F[3:13]
+# a 10-mer whose suffix-scope count needs a mask scan (the prefix of a record's first k-mer):
+# discovery takes 20 range steps, its scan one more, so max_steps 20 stops in the scan with
+# bounds [lower, upper] (review of 2026-10-07, X-TESTS-03: no body carried bounds or mask_scan)
+SCAN_10 = 'ATGCCGGTGA'
+SCAN_STEPS = 20
+# the record the hash graph is built from (a graph the engine does not recognise)
+HASH_RECORD = '1296536.fa'
 
 # the server's defaults (--pattern-* flags, DESIGN-pattern-search.md §5.3), for the hand-made
 # 503 and the expectations
 FINALIZE_MS = 250
 TINY_BUDGET_MS = FINALIZE_MS + 1
+# a step stop whose release then meets the work time (review of 2026-10-07, C1-03): ACG in
+# suffix scope (an exact pattern of L <= k there: exempt from the floor) has ~1.2e5 contexts
+# on the mini, 3 range steps stop its discovery, and 150 ms of work time are always spent in
+# its release before max_contexts (10,000) are out: the estimated time to write the results
+# built (SPEC §7.6, ~0.15 ms per KB at the default rates) alone passes it after ~5,500 of them
+STEP_THEN_TIME_STEPS = 3
+STEP_THEN_TIME_BUDGET_MS = FINALIZE_MS + 150
 
 
 # ----------------------------------------------------------------------- expectations
@@ -172,6 +197,41 @@ def complete(entry):
           and entry['cut'] is None and entry['stop'] is None, entry)
 
 
+def unknown_counts(entry):
+    """Every graph count of the entry unknown and null: the total, suffix, every offset and
+    strand (SPEC §7.6: a pattern after a budget stop)."""
+    c = counts_of(entry)
+    parts = [c, c.get('suffix')] + list(c.get('by_offset', {}).values()) \
+        + list(c.get('by_strand', c.get('by_orientation', {})).values())
+    for x in parts:
+        if x is not None:
+            check(x['relation'] == 'unknown' and x['value'] is None, x)
+
+
+def work_zero(entry):
+    check(all(v == 0 for v in entry['work'].values()), entry['work'])
+
+
+def relation(value):
+    """counts.contexts (or anchors) with this relation."""
+    def run(entry):
+        check(counts_of(entry)['relation'] == value, counts_of(entry))
+    return run
+
+
+def not_exact(entry):
+    """A stop in discovery leaves no exact total (SPEC §7.4); nothing of the annotation is read."""
+    check(counts_of(entry)['relation'] != 'exact', counts_of(entry))
+    for name in ('labels', 'occurrences'):
+        check(entry['counts'][name]['relation'] == 'unknown', entry['counts'][name])
+
+
+def bounded(entry):
+    """relation bounds with value == lower <= upper."""
+    c = counts_of(entry)
+    check(c['relation'] == 'bounds' and c['value'] == c['lower'] <= c['upper'], c)
+
+
 def refused(code):
     def run(answer):
         check(set(answer) == {'error', 'code'} and answer['code'] == code, answer)
@@ -202,6 +262,14 @@ def caps_block(available, reason=None, mask=None):
         if mask is not None:
             check(b['mask'] == mask, b)
     return run
+
+
+def only_k(doc):
+    """A graph the engine does not recognise: graph_mode null, only k set (SPEC §10.2)."""
+    b = doc['pattern']
+    check(b['graph_mode'] is None and isinstance(b['k'], int), b)
+    for f in ('alphabet', 'strand_stated', 'mask', 'scopes', 'placement', 'support', 'annotation'):
+        check(b[f] is None, (f, b[f]))
 
 
 def features(listed):
@@ -284,6 +352,14 @@ FIXTURES = [
         'a PRIMARY index (wrapped in CanonicalDBG): graph_mode primary, scopes [any_offset], '
         'strand_stated false, placement none_canonical, annotation unbudgeted (column)',
         caps_block(True, mask='file')),
+    get('capabilities_representation_unsupported', 'hash', '/capabilities',
+        'a graph the engine does not recognise (a hash graph): the feature and route listed, '
+        'the block available false, unavailable_reason representation_unsupported, graph_mode '
+        'null and only k set',
+        expect_all(features(True), caps_block(False, 'representation_unsupported'), only_k)),
+    get('traverse_capabilities_representation_unsupported', 'hash', '/traverse/capabilities',
+        'the same hash-graph server on the probe route',
+        expect_all(caps_block(False, 'representation_unsupported'), only_k)),
 
     # ---------------------------------------------------------------- count
     post('count', 'masked',
@@ -399,6 +475,20 @@ FIXTURES = [
          'the same stop in mode partial: what discovery found is delivered, cut.reason '
          'max_steps; the second pattern returns nothing, cut max_steps',
          entries(cut('max_steps'), expect_all(cut('max_steps'), field('returned', 0)))),
+    post('max_steps_bounds', 'masked',
+         {'patterns': [p(SCAN_10, ident='scan')], 'mode': 'count', 'scope': 'suffix',
+          'max_steps': SCAN_STEPS}, 200,
+         'max_steps reached in a mask scan (scope suffix, a record-start pattern whose count '
+         'needs one): stop {mask_scan, max_steps}, the count bounds {value = lower, upper} with '
+         'the strand that finished exact; bounds + exact = bounds',
+         entries(expect_all(bounded, field('stop', {'phase': 'mask_scan',
+                                                   'reason': 'max_steps'})))),
+    post('max_steps_bounds_withheld', 'masked',
+         {'patterns': [p(SCAN_10, ident='scan')], 'mode': 'all_or_count', 'scope': 'suffix',
+          'max_steps': SCAN_STEPS, 'output': {'labels': 'none'}}, 200,
+         'the same stop in all_or_count: bounds, withheld discovery_budget',
+         entries(expect_all(bounded, withheld('discovery_budget'),
+                            field('stop', {'phase': 'mask_scan', 'reason': 'max_steps'})))),
     post('deadline', 'masked',
          {'patterns': [p(HEAVY, 'iupac', 'heavy'), p(NDM_F, ident='NDM-F')],
           'time_budget_ms': TINY_BUDGET_MS, 'output': {'labels': 'none'}}, 200,
@@ -406,14 +496,35 @@ FIXTURES = [
          '{discovery, time}, withheld deadline, determinism time_limited; the next pattern '
          'unknown (counts and work of time_limited patterns vary between runs)',
          entries(expect_all(withheld('deadline'), field('determinism', 'time_limited'),
-                             field('stop', {'phase': 'discovery', 'reason': 'time'})),
-                 withheld('deadline'))),
+                             field('stop', {'phase': 'discovery', 'reason': 'time'}),
+                             not_exact),
+                 # the budget is the request's: the next pattern unknown, work zero, the same
+                 # stop (SPEC §7.6; compared as stored, not blanked)
+                 expect_all(withheld('deadline'), field('determinism', 'time_limited'),
+                            field('stop', {'phase': 'discovery', 'reason': 'time'}),
+                            unknown_counts, work_zero))),
     post('deadline_partial', 'masked',
          {'patterns': [p(HEAVY, 'iupac', 'heavy')], 'mode': 'partial',
           'time_budget_ms': TINY_BUDGET_MS, 'output': {'labels': 'none'}}, 200,
          'the deadline in mode partial: nothing is released after a time stop in discovery '
          '(its membership would depend on the machine): returned 0, cut.reason time',
-         entries(expect_all(cut('time'), field('returned', 0)))),
+         entries(expect_all(cut('time'), field('returned', 0), not_exact,
+                            field('stop', {'phase': 'discovery', 'reason': 'time'})))),
+    post('max_steps_then_time', 'masked',
+         {'patterns': [p('ACG', ident='steps'), p('GGA', ident='after')], 'mode': 'partial',
+          'scope': 'suffix', 'max_steps': STEP_THEN_TIME_STEPS,
+          'time_budget_ms': STEP_THEN_TIME_BUDGET_MS, 'output': {'labels': 'none'}}, 200,
+         'partial, discovery stopped by max_steps, then the release meets the work time: stop '
+         'keeps the first stop {discovery, max_steps}, the time shows only as cut.reason time '
+         'and determinism time_limited (how many were released varies between runs); the next '
+         'pattern answers the sticky max_steps stop, its empty release past the work time: cut '
+         'time, returned 0, time_limited',
+         entries(expect_all(field('stop', {'phase': 'discovery', 'reason': 'max_steps'}),
+                            cut('time'), field('determinism', 'time_limited'), not_exact),
+                 expect_all(field('stop', {'phase': 'discovery', 'reason': 'max_steps'}),
+                            cut('time'), field('returned', 0),
+                            field('determinism', 'time_limited'), unknown_counts,
+                            work_zero))),
     post('long', 'masked',
          {'patterns': [p(NDM_40, ident='NDM-40'), p(ABSENT_40, ident='absent')],
           'output': {'labels': 'none'}}, 200,
@@ -564,6 +675,11 @@ FIXTURES = [
          {'patterns': [p(NDM_F)], 'mode': 'count'}, 400,
          '400 later_increment on a multi-graph server, whatever the request',
          refused('later_increment')),
+    post('representation_unsupported', 'hash',
+         {'patterns': [p(NDM_F)], 'mode': 'count'}, 400,
+         '400 representation_unsupported: a graph the engine does not recognise (a hash graph), '
+         'whatever the request asks',
+         refused('representation_unsupported')),
 
     # ---------------------------------------------------------------- hand-made
     post('deadline_503', 'masked',
@@ -607,6 +723,9 @@ SERVERS = {
     'masked_no_map': 'server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/' + MINI_ANNO
                      + ' --no-coord-mapping --index-name ' + INDEX_NAME + ' --index-release '
                      + INDEX_RELEASE + '  (the masked copy, its .seqs not loaded)',
+    'hash': 'server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg'
+            ' --index-release ' + INDEX_RELEASE + '  (a hash graph of ' + HASH_RECORD
+            + ' at k = 31, column annotation by file name)',
 }
 
 
@@ -717,6 +836,22 @@ def build_indexes(binary, mini, work):
         here([binary, 'annotate', '-p', '1', '-i', 'graph.dbg', '--anno-filename', '-o', 'anno']
              + PRIMARY_RECORDS)
 
+    hashed = os.path.join(work, 'hash')
+    if not os.path.isfile(os.path.join(hashed, 'anno.column.annodbg')):
+        os.makedirs(hashed, exist_ok=True)
+        shutil.copy(os.path.join(mini, 'fasta', HASH_RECORD), os.path.join(hashed, HASH_RECORD))
+        # a graph the engine does not recognise: neither a DBGSuccinct nor a wrapped PRIMARY one
+        for cmd in ([binary, 'build', '-p', '1', '--graph', 'hash', '-k', str(MINI_K),
+                     '-o', 'graph', HASH_RECORD],
+                    [binary, 'annotate', '-p', '1', '-i', 'graph.orhashdbg', '--anno-filename',
+                     '-o', 'anno', HASH_RECORD]):
+            with open(log, 'ab') as f:
+                f.write(('$ (cd hash) ' + ' '.join(cmd) + '\n').encode())
+                f.flush()
+                res = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=hashed)
+            if res.returncode:
+                raise RuntimeError(f'failed: {" ".join(cmd)} (log: {log})')
+
     with open(os.path.join(work, 'graphs.csv'), 'w') as f:
         f.write(f'{MULTI_GRAPH_NAME},{graph},{os.path.join(masked, MINI_ANNO)}\n')
 
@@ -739,6 +874,11 @@ def server_args(name, mini, work):
     if name == 'masked_no_map':
         return ['-i', os.path.join(masked, MINI_GRAPH), '-a', os.path.join(masked, MINI_ANNO),
                 '--no-coord-mapping'] + ident
+    if name == 'hash':
+        hashed = os.path.join(work, 'hash')
+        return ['-i', os.path.join(hashed, 'graph.orhashdbg'),
+                '-a', os.path.join(hashed, 'anno.column.annodbg'),
+                '--index-release', INDEX_RELEASE]
     if name == 'primary':
         primary = os.path.join(work, 'primary')
         return ['-i', os.path.join(primary, 'graph.dbg'),
@@ -798,15 +938,26 @@ def blanked(answer):
     if isinstance(a, dict) and isinstance(a.get('patterns'), list):
         if isinstance(a.get('timing'), dict):
             a['timing']['elapsed_ms'] = BLANK
+        clocked = False
         for e in a['patterns']:
             if isinstance(e.get('timing'), dict):
                 # elapsed_ms, and with output.labels "all" label_discovery_ms, placement_ms
                 for k in e['timing']:
                     e['timing'][k] = BLANK
-            if e.get('determinism') == 'time_limited':
-                # where the clock stopped the search: how far it got
+            if e.get('determinism') == 'time_limited' and not clocked:
+                # where the clock stopped the search: how far it got. Only the first such
+                # pattern: the later ones are stopped by the same budget before they start,
+                # the same in every run (review of 2026-10-07, C2-02)
+                clocked = True
                 e['counts'] = blank_count(e['counts'])
                 e['work'] = {k: BLANK for k in e['work']}
+                if e.get('cut') == {'reason': 'time'} \
+                        and e.get('stop') != {'phase': 'discovery', 'reason': 'time'}:
+                    # the clock cut its release: how many contexts got out (a time stop in
+                    # discovery releases nothing, returned 0, compared; review of 2026-10-07,
+                    # C1-03)
+                    e['returned'] = BLANK
+                    e['results'] = BLANK
     return a
 
 
@@ -832,9 +983,13 @@ def readme(fixtures):
         '',
         'Varies between runs (stored as answered, blanked by --check): `timing.elapsed_ms`',
         '(and every `timing` value of a pattern), `server_instance`, and the counts and work of',
-        'a `determinism: time_limited` pattern.',
+        'the first `determinism: time_limited` pattern of an answer (and, when the clock cut its',
+        'release, its `returned` and `results`; the later ones, stopped by the same budget, are',
+        'compared as they are).',
         'Paths under the generator\'s work directory read `{work}/...`. Two fixtures are',
-        'HAND-MADE (no server produces them on demand); their text is the code\'s.',
+        'HAND-MADE (no server produces them on demand); their text is the code\'s. No fixture',
+        'holds `primary_unwrapped` (server_query and the CLI always wrap a PRIMARY graph) or',
+        '`alphabet_unsupported` (a graph of another alphabet does not load in this build).',
         '',
     ]
     for f in fixtures:

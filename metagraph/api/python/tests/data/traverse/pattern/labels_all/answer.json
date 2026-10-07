@@ -313,6 +313,7 @@
    "kind": "dna",
    "labels_cut": null,
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "occurrences_cut": null,
@@ -6283,9 +6284,9 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.320459,
-    "label_discovery_ms": 0.549042,
-    "placement_ms": 0.219792
+    "elapsed_ms": 0.944542,
+    "label_discovery_ms": 0.437708,
+    "placement_ms": 0.934417
    },
    "withheld": null,
    "work": {
@@ -6406,6 +6407,7 @@
    "kind": "dna",
    "labels_cut": null,
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "occurrences_cut": null,
@@ -6423,8 +6425,8 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.063333,
-    "label_discovery_ms": 0.000167,
+    "elapsed_ms": 0.033292,
+    "label_discovery_ms": 4.1e-05,
     "placement_ms": 0.000125
    },
    "withheld": null,
@@ -6439,6 +6441,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 1.878625
+  "elapsed_ms": 3.026167
  }
 }

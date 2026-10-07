@@ -313,6 +313,7 @@
    "kind": "dna",
    "labels_cut": null,
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "partial",
    "notes": [],
    "occurrences_cut": null,
@@ -713,8 +714,8 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.183375,
-    "label_discovery_ms": 0.027417,
+    "elapsed_ms": 0.212708,
+    "label_discovery_ms": 0.048667,
     "placement_ms": 0.0
    },
    "withheld": null,
@@ -729,6 +730,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.289666
+  "elapsed_ms": 0.325333
  }
 }

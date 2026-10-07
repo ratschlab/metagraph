@@ -1,5 +1,6 @@
 #include "load_annotated_graph.hpp"
 
+#include <filesystem>
 #include <mutex>
 
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
@@ -48,8 +49,10 @@ void build_mask_at_load(const std::shared_ptr<DeBruijnGraph> &graph, bool stdout
                     ".edgemask file): nothing to build");
         return;
     }
+    // (the graph was loaded without one: none beside it, or one that could not be opened,
+    // which DBGSuccinct::load names in a warning; review of 2026-10-07, M1-03)
     logger->log(progress, "--pattern-build-mask: building the dummy-edge mask in memory "
-                          "(no .edgemask beside the graph)...");
+                          "(the graph was loaded without a .edgemask)...");
     try {
         const DummyMaskCounts counts = mask_dummy_edges(dbg_succ.get(), get_num_threads());
         logger->log(progress, "--pattern-build-mask: dummy-edge mask built in {:.3f} s with {} "
@@ -101,7 +104,19 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const
             build_mask_at_load(graph, cli);
         } else if (serves_pattern) {
             const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph.get());
-            if (dbg_succ && !dbg_succ->get_mask()) {
+            const std::string mask_path = utils::remove_suffix(path, DBGSuccinct::kExtension)
+                    + DBGSuccinct::kDummyMaskExtension;
+            if (dbg_succ && !dbg_succ->get_mask() && std::filesystem::exists(mask_path)) {
+                // a mask that is there but could not be opened (permissions): not "no mask",
+                // whose remedy transform would refuse (review of 2026-10-07, M1-03)
+                logger->log(cli ? spdlog::level::warn : spdlog::level::info,
+                            "The dummy-edge mask {} exists but could not be opened "
+                            "(permissions?): the graph was loaded without it, and the pattern "
+                            "search answers mask_required. Remedies: make it readable and "
+                            "restart, or `metagraph transform --mask-dummy --force {}`, or "
+                            "--pattern-build-mask (builds it in memory at every start)",
+                            mask_path, path);
+            } else if (dbg_succ && !dbg_succ->get_mask()) {
                 // the operator learns at start-up, not from the first refused request (in the
                 // server's log; on the CLI's stderr, as a warning)
                 logger->log(cli ? spdlog::level::warn : spdlog::level::info,

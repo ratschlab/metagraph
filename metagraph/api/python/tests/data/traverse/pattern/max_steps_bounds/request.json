@@ -1,0 +1,11 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGCCGGTGA",
+   "id": "scan"
+  }
+ ],
+ "mode": "count",
+ "scope": "suffix",
+ "max_steps": 20
+}

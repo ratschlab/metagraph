@@ -50,7 +50,7 @@ using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 // How long the HTTP server gives a request after its header was read (the body, the handler
 // and sending the response) before it shuts the connection: also the cap on the duration
 // bound of a /traverse attempt (traverse_attempts.hpp), less a second for the response
-constexpr long kContentTimeoutS = 900;
+constexpr long kContentTimeoutS = static_cast<long>(kServerContentTimeoutS);
 
 
 Json::Value process_search_request(const Json::Value &json,
@@ -915,12 +915,20 @@ int run_server(Config *config) {
         // the request's deadline, set once its body is parsed; the writing and the
         // compression of the answer are checked against it
         PatternDelivery delivery;
+        // a client that is gone, or a shutdown, is not answered: the work ends at its next
+        // clock reading, the writing at its next check, and nothing is written (review of
+        // 2026-10-07, X-CONCURRENCY-01, R2-02; as /resolve's and /traverse's)
+        delivery.set_abort([&request, &shutdown]() {
+            return shutdown.stopping() || client_gone(*request);
+        });
         ResponseControl control;
         control.check = [&]() {
             try {
                 delivery.check();
             } catch (const PatternRefusal &e) {
                 throw as_http(e);
+            } catch (const graph::pattern::Aborted &e) {
+                throw ClientGone(e.what());
             }
         };
         // the time to compress is inside the reserve: the traversal routes' faster level
@@ -939,6 +947,8 @@ int run_server(Config *config) {
                                                &identity, &delivery);
             } catch (const PatternRefusal &e) {
                 throw as_http(e);
+            } catch (const graph::pattern::Aborted &e) {
+                throw ClientGone(e.what());
             }
         }, /* compact */ true, &control);
     };
@@ -977,8 +987,16 @@ int run_server(Config *config) {
     // optionally freeze seeds for /traverse. No graph traversal. A request with
     // bounds.time_budget_ms runs under that deadline (capped by --traverse-max-time-ms, as
     // /traverse's), its answer written under it: past it, 503 "deadline", never a partial
-    // answer; without the field nothing reads a clock and the answer is as it always was
-    const ResolveTimeLimits resolve_time { config->traverse_max_time_ms, kResolveFinalizeMs };
+    // answer; without the field no deadline is set or read and the answer is as it always was
+    // the cap of the opt-in deadline: --traverse-max-time-ms, and never above what the
+    // transport can honour (review of 2026-10-07, R1-05: with the flag 0, uncapped, or above
+    // it, a budget past the content timeout was accepted and the connection closed before any
+    // answer or 503); lowered requests are stated in limits.clamped
+    const ResolveTimeLimits resolve_time {
+        config->traverse_max_time_ms > 0
+                && config->traverse_max_time_ms < static_cast<double>(kServerMaxDeadlineMs)
+            ? config->traverse_max_time_ms : static_cast<double>(kServerMaxDeadlineMs),
+        kResolveFinalizeMs };
     server.resource["^/resolve$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                 shared_ptr<HttpServer::Request> request) {
         auto as_http = [](const ResolveDeadline &e) {

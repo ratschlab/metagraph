@@ -1,4 +1,4 @@
 {
  "code": "mask_required",
- "error": "pattern: the graph was loaded without its dummy-edge mask (.edgemask): without it every dummy edge would count as a k-mer and no count would be right; give the graph its mask once with `metagraph transform --mask-dummy <graph>.dbg` (writes the .edgemask beside the graph; node ids and annotation unchanged), or pass --pattern-build-mask to server_query or pattern (builds it in memory at load)"
+ "error": "pattern: the graph was loaded without its dummy-edge mask (.edgemask): without it every dummy edge would count as a k-mer and no count would be right; give the graph its mask once with `metagraph transform --mask-dummy <graph>.dbg` (writes the .edgemask beside the graph; node ids and annotation unchanged), or pass --pattern-build-mask to server_query or pattern (builds it in memory at load); the mask is read when the graph is loaded: restart the server once the .edgemask exists"
 }

@@ -141,6 +141,7 @@
    "kind": "dna",
    "labels_cut": null,
    "length": 20,
+   "min_anchor_information_bits": null,
    "mode": "all_or_count",
    "notes": [],
    "occurrences_cut": null,
@@ -158,7 +159,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.087958,
+    "elapsed_ms": 0.073666,
     "label_discovery_ms": 0.0,
     "placement_ms": 0.0
    },
@@ -176,6 +177,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.124375
+  "elapsed_ms": 0.102459
  }
 }
