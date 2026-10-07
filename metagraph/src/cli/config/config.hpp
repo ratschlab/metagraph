@@ -166,6 +166,26 @@ class Config {
     double traverse_delivery_compress_mbps = 50;
     double traverse_delivery_build_mbps = 10;
 
+    // POST /pattern and `metagraph pattern` (docs/DESIGN-pattern-search.md §5.3): each cap is a
+    // request field's maximum (a larger request value is lowered to it and stated as clamped)
+    // and, but for the time budget, its default; the CLI applies the same ones, so that both
+    // answer alike
+    double pattern_min_information_bits = 24;
+    uint64_t pattern_max_contexts = 10'000;
+    uint64_t pattern_max_anchors = 1'000;
+    // a range step is a few rank operations: of the order of the default time budget (§5.3)
+    uint64_t pattern_max_steps = 100'000'000;
+    // the time budget of a request that names none, and the most one may name (the owner,
+    // 2026-10-07: 60 s by default, capped under the 900 s content timeout with room for the
+    // answer's serialisation and compression)
+    uint64_t pattern_default_time_ms = 60'000;
+    uint64_t pattern_max_time_ms = 600'000;
+    // the finalisation reserve inside the time budget: work stops this long before the
+    // deadline so that the counts can still be written by it (ms)
+    uint64_t pattern_finalize_ms = 250;
+    // patterns per request (a longer list is refused, not cut)
+    uint64_t pattern_max_patterns = 16;
+
     unsigned int max_path_length = 100;
     unsigned int smoothing_window = 1;  // no smoothing by default
     unsigned int num_kmers_in_seq = 0;  // assume all input reads have this length
@@ -257,6 +277,7 @@ class Config {
         QUERY,
         SERVER_QUERY,
         TRAVERSE,
+        PATTERN,
     };
     IdentityType identity = NO_IDENTITY;
 

@@ -2541,19 +2541,22 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(200, ret.status_code, ret.text)
         self.assertEqual('gzip', ret.headers.get('Content-Encoding'))
         c = ret.json()
+        # 'pattern': the block, feature and route of POST /pattern (DESIGN-pattern-search.md
+        # §7.3; test_pattern.py checks the block itself)
         self.assertEqual({'algorithm_version', 'attempts', 'compression_level',
                           'content_encodings', 'deadline_check', 'feature_level', 'features',
-                          'graphs', 'mode', 'ready', 'release', 'routes', 'schema_version',
-                          'server_instance'}, set(c))
+                          'graphs', 'mode', 'pattern', 'ready', 'release', 'routes',
+                          'schema_version', 'server_instance'}, set(c))
         self.assertEqual((6, 'single', None, True, 1),
                          (c['feature_level'], c['mode'], c['graphs'], c['ready'],
                           c['schema_version']))
-        self.assertEqual(['search', 'align', 'resolve', 'traverse', 'attempts'], c['features'])
+        self.assertEqual(['search', 'align', 'resolve', 'traverse', 'attempts', 'pattern'],
+                         c['features'])
         self.assertEqual({'align': 'POST /align', 'attempt': 'GET /traverse/attempt/{attempt_id}',
                           'cancel': 'POST /traverse/cancel', 'capabilities': 'GET /capabilities',
-                          'column_labels': 'GET /column_labels', 'resolve': 'POST /resolve',
-                          'search': 'POST /search', 'stats': 'GET /stats',
-                          'traverse': 'POST /traverse',
+                          'column_labels': 'GET /column_labels', 'pattern': 'POST /pattern',
+                          'resolve': 'POST /resolve', 'search': 'POST /search',
+                          'stats': 'GET /stats', 'traverse': 'POST /traverse',
                           'traverse_capabilities': 'GET /traverse/capabilities'}, c['routes'])
         probe = requests.get(url + '/traverse/capabilities').json()
         self.assertEqual(probe['attempts'], c['attempts'])

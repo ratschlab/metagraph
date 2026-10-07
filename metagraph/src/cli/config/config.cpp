@@ -68,6 +68,8 @@ Config::Config(int argc, char *argv[]) {
         identity = QUERY;
     } else if (!strcmp(argv[1], "traverse")) {
         identity = TRAVERSE;
+    } else if (!strcmp(argv[1], "pattern")) {
+        identity = PATTERN;
     } else if (!strcmp(argv[1], "server_query")) {
         identity = SERVER_QUERY;
         num_top_labels = 10'000;
@@ -458,6 +460,38 @@ Config::Config(int argc, char *argv[]) {
             bounded(argv[i], get_value(i), kMaxAttemptRetentionS,
                     &traverse_attempt_tombstone_max_s);
             i++;
+        } else if (!strcmp(argv[i], "--pattern-min-information-bits")) {
+            // a number of bits: stated in the capabilities as given
+            char *end = nullptr;
+            const char *text = get_value(i++);
+            pattern_min_information_bits = std::strtod(text, &end);
+            if (end == text || *end != '\0' || !(pattern_min_information_bits >= 0)
+                    || !std::isfinite(pattern_min_information_bits)) {
+                std::cerr << "Error: --pattern-min-information-bits must be a number >= 0, got '"
+                          << text << "'" << std::endl;
+                print_usage_and_exit = true;
+            }
+        } else if (!strcmp(argv[i], "--pattern-max-contexts")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_contexts);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-anchors")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_anchors);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-steps")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_steps);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-time-ms")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_time_ms);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-default-time-ms")) {
+            exact_ms(argv[i], get_value(i), &pattern_default_time_ms);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-finalize-ms")) {
+            exact_ms(argv[i], get_value(i), &pattern_finalize_ms);
+            i++;
+        } else if (!strcmp(argv[i], "--pattern-max-patterns")) {
+            exact_ms(argv[i], get_value(i), &pattern_max_patterns);
+            i++;
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
@@ -705,7 +739,25 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if ((identity == TRAVERSE || identity == SERVER_QUERY)
+    if (identity == PATTERN && (infbase.empty() || infbase_annotators.size() != 1)) {
+        std::cerr << "Error: pattern requires a graph (-i) and exactly one annotation (-a)" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    // the /pattern caps (DESIGN-pattern-search.md §5.3): a request needs at least one step, a
+    // pattern, and time beyond the finalisation reserve, which lies inside the time budget;
+    // the default budget is one a request may name
+    if ((identity == PATTERN || identity == SERVER_QUERY)
+            && (pattern_max_steps < 1 || pattern_max_patterns < 1
+                || pattern_default_time_ms <= pattern_finalize_ms
+                || pattern_default_time_ms > pattern_max_time_ms)) {
+        std::cerr << "Error: --pattern-max-steps and --pattern-max-patterns must be at least 1, "
+                     "and --pattern-default-time-ms above --pattern-finalize-ms and at most "
+                     "--pattern-max-time-ms" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if ((identity == TRAVERSE || identity == SERVER_QUERY || identity == PATTERN)
             && (!index_name.empty() || !index_manifest.empty())) {
         if (fnames.size() && identity == SERVER_QUERY) {
             // one name and one manifest describe one index, not a list of them
@@ -1132,6 +1184,9 @@ if (advanced) {
 
             fprintf(stderr, "\ttraverse\textend sequence seeds through the graph along consistent\n");
             fprintf(stderr, "\t\t\tannotation labels (JSON request files)\n\n");
+
+            fprintf(stderr, "\tpattern\t\tcount and extract the graph contexts of short DNA or IUPAC\n");
+            fprintf(stderr, "\t\t\tpatterns, without reading annotation (JSON request files)\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
@@ -1592,6 +1647,28 @@ if (advanced) {
             fprintf(stderr, "\n");
             return;
         }
+        case PATTERN: {
+            fprintf(stderr, "Usage: %s pattern [options] -i <GRAPH> -a <ANNOTATION> REQUEST.json [[REQUEST2.json] ...]\n"
+                            "\tEach request is the JSON body of POST /pattern (docs/DESIGN-pattern-search.md §7);\n"
+                            "\tone JSON answer is written to stdout per request, the server's, under the same caps.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for pattern:\n");
+            fprintf(stderr, "\t   --index-release [STR]\trelease id echoed in answers []\n");
+            fprintf(stderr, "\t   --index-name [STR]\t\tname of the index in answers, [A-Za-z0-9._-]+ []\n");
+            fprintf(stderr, "\t   --index-manifest [FILE]\tmanifest of the index bundle; its digest is the index identity []\n");
+            fprintf(stderr, "\t   --pattern-min-information-bits [FLOAT] \tinformation floor of a pattern (bits; an exact pattern in suffix scope is exempt) [24]\n");
+            fprintf(stderr, "\t   --pattern-max-contexts [INT] \tdefault and maximum of max_contexts per pattern (retrieval threshold, partial's cap) [10000]\n");
+            fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-steps [INT] \tdefault and maximum of max_steps per request (range and mask-scan steps) [100000000]\n");
+            fprintf(stderr, "\t   --pattern-default-time-ms [INT] \ttime_budget_ms of a request that names none [60000]\n");
+            fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
+            fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops this long before the deadline [250]\n");
+            fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
+            fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
+            fprintf(stderr, "\n");
+            return;
+        }
         case SERVER_QUERY: {
             fprintf(stderr, "Usage: %s server_query (-i <GRAPH> -a <ANNOTATION> | <GRAPHS.csv>) [options]\n\n"
                             "\tThe index must be passed with flags -i -a or with a file GRAPHS.csv listing one\n"
@@ -1633,6 +1710,14 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-compression-level [INT] \tzlib level (1-9) of the traversal routes' compressed bodies; the other routes use 9 [1]\n");
             fprintf(stderr, "\t   --traverse-delivery-compress-mbps [FLOAT] \tcompression rate the delivery reserve of an attempt assumes [50]\n");
             fprintf(stderr, "\t   --traverse-delivery-build-mbps [FLOAT] \tresponse-building rate it assumes until the attempt measures its own [10]\n");
+            fprintf(stderr, "\t   --pattern-min-information-bits [FLOAT] \tinformation floor of a pattern (bits; an exact pattern in suffix scope is exempt) [24]\n");
+            fprintf(stderr, "\t   --pattern-max-contexts [INT] \tdefault and maximum of max_contexts per pattern (retrieval threshold, partial's cap) [10000]\n");
+            fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-steps [INT] \tdefault and maximum of max_steps per request (range and mask-scan steps) [100000000]\n");
+            fprintf(stderr, "\t   --pattern-default-time-ms [INT] \ttime_budget_ms of a request that names none [60000]\n");
+            fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
+            fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops this long before the deadline [250]\n");
+            fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
         } break;
     }
 

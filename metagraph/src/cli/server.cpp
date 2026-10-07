@@ -33,6 +33,7 @@
 #include "align.hpp"
 #include "traverse.hpp"
 #include "traverse_attempts.hpp"
+#include "pattern.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "server_utils.hpp"
 #include "cli/load/load_annotation.hpp"
@@ -903,6 +904,45 @@ int run_server(Config *config) {
         });
     };
 
+    // Count, and extract without reading annotation, the graph contexts of short motifs and
+    // IUPAC patterns (DESIGN-pattern-search.md, increments 0-2; pattern.hpp). Single-graph
+    // servers only: the multi-graph fan-out with its barriers is a later increment (§8). Every
+    // refusal is {"error", "code"}; the answer is written under the request's own deadline
+    // (its finalisation reserve), past which it is 503 "deadline", never a partial answer.
+    server.resource["^/pattern$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
+                                                shared_ptr<HttpServer::Request> request) {
+        auto as_http = [](const PatternRefusal &e) { return HttpError(e.status(), e.body()); };
+        // the request's deadline, set once its body is parsed; the writing and the
+        // compression of the answer are checked against it
+        PatternDelivery delivery;
+        ResponseControl control;
+        control.check = [&]() {
+            try {
+                delivery.check();
+            } catch (const PatternRefusal &e) {
+                throw as_http(e);
+            }
+        };
+        // the time to compress is inside the reserve: the traversal routes' faster level
+        control.compression_level = config->traverse_compression_level;
+        process_request(response, request, num_requests++, [&](const std::string &content) {
+            try {
+                if (config->fnames.size()) {
+                    throw PatternRefusal(400, "later_increment",
+                                         "pattern: multi-graph servers in a later increment");
+                }
+                if (anno_graph.wait_for(0s) != std::future_status::ready)
+                    throw CurrentlyInitializingError();
+                const AnnotatedDBG &index = *anno_graph.get();
+                const IndexIdentity identity = identity_of(index);
+                return process_pattern_request(parse_pattern_body(content), index, *config,
+                                               &identity, &delivery);
+            } catch (const PatternRefusal &e) {
+                throw as_http(e);
+            }
+        }, /* compact */ true, &control);
+    };
+
     // The ledger-managed /traverse attempts of this process (requests with attempt_id): the
     // backend half of stage 4 of DESIGN-traverse-graphlet.md §14 (traverse_attempts.hpp)
     AttemptSettings attempt_settings;
@@ -1363,6 +1403,10 @@ int run_server(Config *config) {
         // record coordinates (feature level 6): only here, the per-request capabilities
         // change only in their feature_level
         caps["coordinates"] = coordinates_capabilities_json(oracle);
+        // the pattern search (DESIGN-pattern-search.md §7.3): the same block as on
+        // /capabilities, here because this is the document a service's probe reads
+        caps["pattern"] = pattern_capabilities_json(&index, pattern_limits(*config),
+                                                    !config->fnames.empty());
         return caps;
     };
 
@@ -1451,6 +1495,12 @@ int run_server(Config *config) {
             for (const char *f : { "resolve", "traverse", "attempts" }) {
                 features.append(f);
             }
+            if (!multi) {
+                // listed like align: a multi-graph server answers /pattern with 400; whether
+                // this graph can be searched is pattern.available (a client gates on both)
+                routes["pattern"] = "POST /pattern";
+                features.append("pattern");
+            }
             c["features"] = std::move(features);
             if (multi) {
                 std::vector<std::string> names;
@@ -1469,6 +1519,11 @@ int run_server(Config *config) {
             c["mode"] = multi ? "multi" : "single";
             // a multi-graph server loads every index before it listens
             c["ready"] = multi || anno_graph.wait_for(0s) == std::future_status::ready;
+            // the pattern search (DESIGN-pattern-search.md §7.3): its graph fields are null
+            // while the single index loads
+            c["pattern"] = pattern_capabilities_json(
+                    !multi && c["ready"].asBool() ? anno_graph.get().get() : nullptr,
+                    pattern_limits(*config), multi);
             c["release"] = config->index_release;
             c["routes"] = std::move(routes);
             c["schema_version"] = 1;

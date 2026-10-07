@@ -12,6 +12,7 @@
 #include "cli/align.hpp"
 #include "cli/query.hpp"
 #include "cli/traverse.hpp"
+#include "cli/pattern.hpp"
 #include "cli/assemble.hpp"
 #include "cli/server.hpp"
 #include "cli/transform_graph.hpp"
@@ -56,6 +57,9 @@ int main(int argc, char *argv[]) {
 
         case Config::TRAVERSE:
             return cli::traverse_graph(config.get());
+
+        case Config::PATTERN:
+            return cli::pattern_graph(config.get());
 
         case Config::COMPARE:
             return cli::compare(config.get());
