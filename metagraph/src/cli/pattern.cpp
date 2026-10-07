@@ -320,8 +320,11 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
 std::string support_message(const GraphSupport &support) {
     if (support.reason == "mask_required") {
         return "pattern: the graph was loaded without its dummy-edge mask (.edgemask): without "
-               "it every dummy edge would count as a k-mer and no count would be right; serve "
-               "the graph with its mask (metagraph build --mask-dummy)";
+               "it every dummy edge would count as a k-mer and no count would be right; give "
+               "the graph its mask once with `metagraph transform --mask-dummy <graph>.dbg` "
+               "(writes the .edgemask beside the graph; node ids and annotation unchanged), or "
+               "pass --pattern-build-mask to server_query or pattern (builds it in memory at "
+               "load)";
     }
     if (support.reason == "representation_unsupported") {
         return "pattern: the graph is not a succinct graph (a DBGSuccinct, or a PRIMARY one "
@@ -763,9 +766,10 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["graph_mode"] = to_string(support.mode);
     p["alphabet"] = support.alphabet.empty() ? Json::Value() : Json::Value(support.alphabet);
     p["strand_stated"] = support.strand_stated;
-    // §4: file | built_at_load | absent. This increment has no --pattern-build-mask, so a
-    // served graph has its mask only from the .edgemask file loaded beside the .dbg
-    p["mask"] = support.mask_present ? "file" : "absent";
+    // §4: file | built_at_load | absent: the .edgemask read beside the .dbg, or the same mask
+    // built in memory at load (--pattern-build-mask) when there was no file
+    p["mask"] = !support.mask_present ? "absent"
+              : mask_built_at_load(graph) ? "built_at_load" : "file";
     Json::Value scopes(Json::arrayValue);
     for (Scope s : support.scopes) {
         scopes.append(to_string(s));

@@ -6,6 +6,7 @@ import os
 import random
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -34,10 +35,13 @@ overlapping regex) and adds every k-mer that contains it, at each offset.
 Fixtures:
   - TestPatternMini: the mini index (build/mini_refseq, scripts/traversal/build_mini_refseq.sh;
     or $METAGRAPH_MINI_REFSEQ), a BASIC succinct graph at k = 31 with a row_diff_brwt_coord
-    annotation and its .seqs. It was built without the dummy-edge mask the route requires, so
-    the test rebuilds the graph from the same FASTA with --mask-dummy in a temporary directory;
-    the rebuilt .dbg is byte-identical, so the original annotation serves it as is. Skipped when
-    the mini index is not built.
+    annotation and its .seqs. It was built without the dummy-edge mask the route requires (§4),
+    so a COPY of its graph in a temporary directory is given the mask by `metagraph transform
+    --mask-dummy` (the one-time step for staging) and served with the original annotation, which
+    the mask leaves valid; build/mini_refseq itself is never written to. The masks made the other
+    ways are checked against it: a rebuild with --mask-dummy (the same .edgemask, the same
+    answers) and a server started with --pattern-build-mask on the unmasked graph (the same
+    answers, mask: built_at_load). Skipped when the mini index is not built.
   - TestPatternSynthetic: random records, BASIC, CANONICAL and PRIMARY graphs at k = 15 (and a
     multi-graph server), always run.
   - TestPatternRegression: /search and /align answer byte for byte as the base binary's
@@ -180,6 +184,24 @@ class Records:
         return {source for source, _, island in self.islands if kmer in island}
 
 
+# the refusal of a graph without its dummy-edge mask (§4): both remedies named
+MASK_REQUIRED_MESSAGE = (
+    'pattern: the graph was loaded without its dummy-edge mask (.edgemask): without it every '
+    'dummy edge would count as a k-mer and no count would be right; give the graph its mask '
+    'once with `metagraph transform --mask-dummy <graph>.dbg` (writes the .edgemask beside the '
+    'graph; node ids and annotation unchanged), or pass --pattern-build-mask to server_query '
+    'or pattern (builds it in memory at load)')
+
+
+def untimed(value):
+    """An answer without its timings (they differ between any two runs)."""
+    if isinstance(value, dict):
+        return {k: untimed(v) for k, v in value.items() if k not in ('timing', 'elapsed_ms')}
+    if isinstance(value, list):
+        return [untimed(v) for v in value]
+    return value
+
+
 def free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
@@ -310,27 +332,25 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         cls.records = Records.from_fasta(fastas)
         cls.k = MINI_K
 
-        # the mini index carries no .edgemask: rebuilt with it from the same records and the
-        # same flags (commands.log), single-threaded so that nothing depends on the order of
-        # threads
-        cls.graph = os.path.join(d, MINI_GRAPH)
-        TestingBase._run_command(
-            f'{METAGRAPH} build -p 1 --mode basic --graph succinct --state stat -k {MINI_K} '
-            f'--index-ranges 12 --mask-dummy --in-ram -o {cls.graph[:-len(".dbg")]} '
-            + ' '.join(fastas), 'Build the masked mini graph')
+        cls.fastas = fastas
+        # whatever build/mini_refseq holds, it must hold it still when the tests are done
+        cls.mini_files = sorted(os.listdir(MINI_DIR))
+
+        # the mini index carries no .edgemask: a copy of its graph gets it from `transform
+        # --mask-dummy` (DESIGN §4), which writes only <graph>.edgemask beside the copy; the
+        # annotation and its record mapping are the index's own (the mask changes no node id)
+        cls.graph = cls._mini_copy('masked', copy_graph=True)
+        cls.anno = os.path.join(os.path.dirname(cls.graph), MINI_ANNO)
+        cls.label_of_kmer = cls.records.names_with_kmer
+        res = TestingBase._run_command(f'{METAGRAPH} transform --mask-dummy -p 2 {cls.graph}',
+                                       'Mask the copy of the mini graph')
+        cls.transform_log = (res.stdout + res.stderr).decode()
         assert os.path.isfile(cls.graph[:-len('.dbg')] + '.edgemask')
-        if filecmp.cmp(cls.graph, os.path.join(MINI_DIR, MINI_GRAPH), shallow=False):
-            # the same graph: its annotation (and record mapping) serves the masked copy
-            for f in (MINI_ANNO, MINI_SEQS):
-                os.symlink(os.path.join(MINI_DIR, f), os.path.join(d, f))
-            cls.anno = os.path.join(d, MINI_ANNO)
-            cls.label_of_kmer = cls.records.names_with_kmer
-        else:
-            TestingBase._run_command(
-                f'{METAGRAPH} annotate -p 4 -i {cls.graph} --anno-filename '
-                f'-o {d}/annotation ' + ' '.join(fastas), 'Annotate the masked mini graph')
-            cls.anno = os.path.join(d, 'annotation.column.annodbg')
-            cls.label_of_kmer = cls.records.sources_with_kmer
+        assert filecmp.cmp(cls.graph, os.path.join(MINI_DIR, MINI_GRAPH), shallow=False)
+        # the mini graph as built, without a mask whatever build/mini_refseq holds: a symlink in
+        # a directory of its own (the loader reads the mask beside the path it is given)
+        cls.unmasked_graph = cls._mini_copy('unmasked', copy_graph=False)
+        cls.unmasked_anno = os.path.join(os.path.dirname(cls.unmasked_graph), MINI_ANNO)
 
         cls.server = Server(METAGRAPH, ['-i', cls.graph, '-a', cls.anno],
                             os.path.join(d, 'server.log'))
@@ -341,6 +361,21 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
     def tearDownClass(cls):
         cls.server.stop()
         cls.tempdir.cleanup()
+
+    @classmethod
+    def _mini_copy(cls, name, copy_graph):
+        """A directory holding the mini graph (a copy, or a symlink to it) beside symlinks to
+        its annotation and record mapping; returns the graph's path there."""
+        d = os.path.join(cls.tempdir.name, name)
+        os.makedirs(d)
+        graph = os.path.join(d, MINI_GRAPH)
+        if copy_graph:
+            shutil.copyfile(os.path.join(MINI_DIR, MINI_GRAPH), graph)
+        else:
+            os.symlink(os.path.join(MINI_DIR, MINI_GRAPH), graph)
+        for f in (MINI_ANNO, MINI_SEQS):
+            os.symlink(os.path.join(MINI_DIR, f), os.path.join(d, f))
+        return graph
 
     @classmethod
     def _choose_patterns(cls):
@@ -808,16 +843,141 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual('invalid_request', json.loads(res.stdout)['code'])
 
     def test_cli_mask_required(self):
-        """The mini index as built (no .edgemask): refused, since every dummy edge would count."""
+        """The mini index as built (no .edgemask): refused, since every dummy edge would count;
+        with --pattern-build-mask the CLI answers as the server on the transformed copy."""
+        request = {'patterns': [{'dna': self.p16}, {'iupac': self.iupac16}], 'mode': 'count'}
         path = os.path.join(self.tempdir.name, 'request_mask.json')
         with open(path, 'w') as f:
-            json.dump({'patterns': [{'dna': self.p16}], 'mode': 'count'}, f)
-        res = subprocess.run(shlex.split(METAGRAPH) + [
-                                 'pattern', '--json', '-i', os.path.join(MINI_DIR, MINI_GRAPH),
-                                 '-a', os.path.join(MINI_DIR, MINI_ANNO), path],
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            json.dump(request, f)
+        cli = shlex.split(METAGRAPH) + ['pattern']
+        args = ['--json', '-i', self.unmasked_graph, '-a', self.unmasked_anno, path]
+        res = subprocess.run(cli + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(1, res.returncode, res.stderr.decode())
-        self.assertEqual('mask_required', json.loads(res.stdout)['code'])
+        self.assertEqual({'error': MASK_REQUIRED_MESSAGE, 'code': 'mask_required'},
+                         json.loads(res.stdout))
+        # the start-up note names the remedies before any request is refused
+        self.assertIn('the pattern search answers mask_required. Remedies: `metagraph transform '
+                      f'--mask-dummy {self.unmasked_graph}` once', res.stderr.decode())
+
+        res = subprocess.run(cli + ['--pattern-build-mask'] + args,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertEqual(untimed(self.pattern(self.server, request)),
+                         untimed(json.loads(res.stdout)))
+
+    # ------------------------------------------------------------ the mask, made three ways
+
+    def mask_panel(self):
+        """/pattern requests whose answers depend on every masked edge: counts in both scopes,
+        both retrievals, IUPAC, a palindrome, a pattern longer than k, absent ones, and a stop
+        inside the work (its bounds count the mask scans)."""
+        patterns = [{'dna': self.p16}, {'dna': self.p14}, {'iupac': self.iupac16},
+                    {'dna': self.pal12}, {'dna': self.p40}, {'dna': self.absent16},
+                    {'dna': self.absent40}]
+        panel = []
+        for scope in ('any_offset', 'suffix'):
+            for mode in ('count', 'all_or_count', 'partial'):
+                panel.append({'patterns': patterns, 'mode': mode, 'scope': scope,
+                              'max_contexts': 25})
+        panel.append({'patterns': [{'dna': self.p16}, {'iupac': self.iupac16}], 'mode': 'count',
+                      'max_steps': 40})
+        return panel
+
+    def assertSameAnswers(self, expected_server, server):
+        for request in self.mask_panel():
+            a, b = (expected_server.post('pattern', request), server.post('pattern', request))
+            self.assertEqual(200, a.status_code, a.text)
+            self.assertEqual((a.status_code, untimed(a.json())), (b.status_code, untimed(b.json())),
+                             request)
+
+    def test_transform_left_the_index_alone(self):
+        """transform wrote <copy>.edgemask and nothing else; build/mini_refseq is unchanged."""
+        self.assertEqual(self.mini_files, sorted(os.listdir(MINI_DIR)))
+        self.assertEqual(sorted([MINI_GRAPH, MINI_GRAPH[:-len('.dbg')] + '.edgemask',
+                                 MINI_ANNO, MINI_SEQS]),
+                         sorted(os.listdir(os.path.dirname(self.graph))))
+        self.assertTrue(filecmp.cmp(self.graph, os.path.join(MINI_DIR, MINI_GRAPH),
+                                    shallow=False))
+        # the counts it logged: every edge is a k-mer, a source or a sink dummy, and the
+        # masked graph states its k-mers as its nodes
+        m = re.search(r'(\d+) edges, (\d+) source dummies \(the main dummy edge included\), '
+                      r'(\d+) sink dummies, (\d+) k-mers', self.transform_log)
+        self.assertIsNotNone(m, self.transform_log)
+        edges, source, sink, kmers = (int(x) for x in m.groups())
+        self.assertEqual(edges, source + sink + kmers)
+        self.assertEqual(edges, self.stats['annotation']['objects'])
+        self.assertEqual(kmers, self.stats['graph']['nodes'])
+
+    def test_transform_mask_equals_build_mask(self):
+        """The mask transform gave the copy is the one `build --mask-dummy` writes, and the
+        answers on a masked rebuild are the answers on the transformed copy."""
+        d = os.path.join(self.tempdir.name, 'rebuilt')
+        os.makedirs(d)
+        graph = os.path.join(d, MINI_GRAPH)
+        # the same records and flags as the mini index (commands.log), single-threaded so that
+        # nothing depends on the order of threads
+        TestingBase._run_command(
+            f'{METAGRAPH} build -p 1 --mode basic --graph succinct --state stat -k {MINI_K} '
+            f'--index-ranges 12 --mask-dummy --in-ram -o {graph[:-len(".dbg")]} '
+            + ' '.join(self.fastas), 'Build the masked mini graph')
+        if not filecmp.cmp(graph, os.path.join(MINI_DIR, MINI_GRAPH), shallow=False):
+            self.skipTest('the rebuild is not the mini graph (built by another metagraph?): '
+                          'its masks cannot be compared')
+        self.assertTrue(filecmp.cmp(graph[:-len('.dbg')] + '.edgemask',
+                                    self.graph[:-len('.dbg')] + '.edgemask', shallow=False))
+        for f in (MINI_ANNO, MINI_SEQS):
+            os.symlink(os.path.join(MINI_DIR, f), os.path.join(d, f))
+        server = Server(METAGRAPH, ['-i', graph, '-a', os.path.join(d, MINI_ANNO)],
+                        os.path.join(d, 'server.log'))
+        try:
+            self.assertSameAnswers(self.server, server)
+            self.assertEqual(self.stats, server.get('stats').json())
+        finally:
+            server.stop()
+
+    def test_pattern_build_mask(self):
+        """A server started with --pattern-build-mask on the unmasked graph builds the same mask
+        in memory: the same answers on every route of the panel, mask: built_at_load."""
+        d = self.tempdir.name
+        log = os.path.join(d, 'server_build_mask.log')
+        server = Server(METAGRAPH, ['-i', self.unmasked_graph, '-a', self.unmasked_anno,
+                                    '--pattern-build-mask'], log)
+        try:
+            for route in ('capabilities', 'traverse/capabilities'):
+                p = server.get(route).json()['pattern']
+                self.assertEqual('built_at_load', p['mask'])
+                self.assertTrue(p['available'])
+                # the rest of the block as on the server whose mask is a file
+                q = self.server.get(route).json()['pattern']
+                self.assertEqual(dict(q, mask='built_at_load'), p)
+            self.assertSameAnswers(self.server, server)
+            # the graph is the masked graph for every route: /stats states its k-mers
+            self.assertEqual(self.stats, server.get('stats').json())
+        finally:
+            server.stop()
+        with open(log) as f:
+            text = f.read()
+        self.assertRegex(text, r'--pattern-build-mask: dummy-edge mask built in [\d.]+ s')
+        # built in memory only
+        self.assertEqual(sorted([MINI_GRAPH, MINI_ANNO, MINI_SEQS]),
+                         sorted(os.listdir(os.path.dirname(self.unmasked_graph))))
+        self.assertFalse(os.path.exists(self.unmasked_graph[:-len('.dbg')] + '.edgemask'))
+
+    def test_mask_required(self):
+        """Without the mask: absent in the capabilities, 400 mask_required naming both remedies."""
+        server = Server(METAGRAPH, ['-i', self.unmasked_graph, '-a', self.unmasked_anno],
+                        os.path.join(self.tempdir.name, 'server_unmasked.log'))
+        try:
+            for route in ('capabilities', 'traverse/capabilities'):
+                p = server.get(route).json()['pattern']
+                self.assertEqual(('absent', False, 'mask_required'),
+                                 (p['mask'], p['available'], p['unavailable_reason']))
+            ret = server.post('pattern', {'patterns': [{'dna': self.p16}], 'mode': 'count'})
+            self.assertEqual(400, ret.status_code)
+            self.assertEqual({'error': MASK_REQUIRED_MESSAGE, 'code': 'mask_required'},
+                             ret.json())
+        finally:
+            server.stop()
 
 
 @unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")

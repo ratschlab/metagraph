@@ -492,6 +492,10 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--pattern-max-patterns")) {
             exact_ms(argv[i], get_value(i), &pattern_max_patterns);
             i++;
+        } else if (!strcmp(argv[i], "--pattern-build-mask")) {
+            pattern_build_mask = true;
+        } else if (!strcmp(argv[i], "--force")) {
+            force = true;
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
@@ -568,6 +572,44 @@ Config::Config(int argc, char *argv[]) {
 
     if (parallel_nodes == static_cast<unsigned int>(-1))
         parallel_nodes = get_num_threads();
+
+    // transform --mask-dummy (DESIGN-pattern-search.md §4) writes the dummy-edge mask beside
+    // the graph and nothing else, so another transformation asked with it would be dropped
+    // unseen: refused instead (checked before --to-fasta turns the identity into clean)
+    if (identity == TRANSFORM && mark_dummy_kmers) {
+        if (clear_dummy || initialize_bloom || to_adj_list || to_fasta
+                || graph_mode != DeBruijnGraph::BASIC || state != BOSS::State::STAT
+                || node_suffix_length != kDefaultIndexSuffixLen) {
+            std::cerr << "Error: --mask-dummy writes only the dummy-edge mask "
+                         "(<graph>.edgemask) and leaves the graph as it is; it cannot be "
+                         "combined with --clear-dummy, --initialize-bloom, --to-adj-list, "
+                         "--to-fasta, --unitigs, --mode, --state or --index-ranges" << std::endl;
+            print_usage_and_exit = true;
+        }
+        // the loader reads the mask beside the graph it loads, under the graph's own name:
+        // a mask written under another name would never be read
+        if (outfbase.size() && fnames.size() == 1
+                && utils::remove_suffix(outfbase, ".dbg")
+                        != utils::remove_suffix(fnames[0], ".dbg")) {
+            std::cerr << "Error: --mask-dummy writes the mask beside the graph, where the "
+                         "loader reads it (" << utils::remove_suffix(fnames[0], ".dbg")
+                      << ".edgemask): omit -o, or name the graph itself" << std::endl;
+            print_usage_and_exit = true;
+        }
+    }
+    if (force && !(identity == TRANSFORM && mark_dummy_kmers)) {
+        std::cerr << "Error: --force applies only to transform --mask-dummy" << std::endl;
+        print_usage_and_exit = true;
+    }
+    // the mask is built where the graph is loaded at start-up: one graph (-i / -a) of
+    // server_query or pattern. A graph list's graphs are loaded by requests, and /pattern is
+    // not served on them yet (a later increment), so the flag would do nothing there
+    if (pattern_build_mask
+            && !(identity == PATTERN || (identity == SERVER_QUERY && fnames.empty()))) {
+        std::cerr << "Error: --pattern-build-mask applies to server_query with one graph "
+                     "(-i / -a) and to pattern" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (identity == TRANSFORM && to_fasta)
         identity = CLEAN;
@@ -809,7 +851,8 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if ((identity == TRANSFORM
+    // (transform --mask-dummy writes beside its input graph and needs no -o)
+    if (((identity == TRANSFORM && !mark_dummy_kmers)
             || identity == BUILD
             || identity == ANNOTATE
             || identity == CONCATENATE
@@ -1372,11 +1415,15 @@ if (advanced) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM: {
-            fprintf(stderr, "Usage: %s transform -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s transform -o <outfile-base> [options] GRAPH\n"
+                            "       %s transform --mask-dummy [--force] [-p INT] GRAPH.dbg\n\n", prog_name.c_str(), prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
+            fprintf(stderr, "\t   --mask-dummy \twrite only the mask of dummy edges, <GRAPH without .dbg>.edgemask, as build --mask-dummy\n"
+                            "\t                \twould: nothing pruned, the graph file untouched, node ids and annotation valid [off]\n");
+            fprintf(stderr, "\t   --force \t\twith --mask-dummy: replace an existing .edgemask [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / stat / fast [stat]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
@@ -1664,6 +1711,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
             fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops this long before the deadline [250]\n");
             fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
+            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask (small graphs; else transform --mask-dummy once) [off]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
             fprintf(stderr, "\n");
@@ -1718,6 +1766,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
             fprintf(stderr, "\t   --pattern-finalize-ms [INT] \tfinalisation reserve inside the time budget: work stops this long before the deadline [250]\n");
             fprintf(stderr, "\t   --pattern-max-patterns [INT] \tpatterns per request (a longer list is refused) [16]\n");
+            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask (small graphs; else transform --mask-dummy once) [off]\n");
         } break;
     }
 

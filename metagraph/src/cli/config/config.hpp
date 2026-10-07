@@ -185,6 +185,13 @@ class Config {
     uint64_t pattern_finalize_ms = 250;
     // patterns per request (a longer list is refused, not cut)
     uint64_t pattern_max_patterns = 16;
+    // server_query (-i / -a) and pattern: a succinct graph loaded without its .edgemask gets
+    // the same dummy-edge mask built in memory before it is served (§4, mask: built_at_load),
+    // for small indexes and tests; a large one is given the file once by transform --mask-dummy
+    bool pattern_build_mask = false;
+    // transform --mask-dummy: replace an existing .edgemask (refused without, since a mask
+    // written by build or by another run would be overwritten unseen)
+    bool force = false;
 
     unsigned int max_path_length = 100;
     unsigned int smoothing_window = 1;  // no smoothing by default

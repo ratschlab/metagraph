@@ -1,5 +1,7 @@
 #include "load_annotated_graph.hpp"
 
+#include <mutex>
+
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
@@ -7,8 +9,10 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/coord_to_header.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
+#include "common/threads/threading.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "cli/config/config.hpp"
@@ -22,9 +26,93 @@ namespace cli {
 using namespace mtg::graph;
 using mtg::common::logger;
 
+namespace {
+
+// The graphs whose mask build_mask_at_load built. Weak references: a graph freed and another
+// allocated at its address must not pass for it (the unit tests load many graphs).
+std::mutex built_masks_mutex;
+std::vector<std::weak_ptr<const DBGSuccinct>> built_masks;
+
+} // namespace
+
+void build_mask_at_load(const std::shared_ptr<DeBruijnGraph> &graph, bool stdout_reserved) {
+    const auto progress = stdout_reserved ? spdlog::level::trace : spdlog::level::info;
+    auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
+    if (!dbg_succ) {
+        logger->warn("--pattern-build-mask: the graph is not a succinct graph: it has no "
+                     "dummy-edge mask to build (and the pattern search does not serve it)");
+        return;
+    }
+    if (dbg_succ->get_mask()) {
+        logger->log(progress, "--pattern-build-mask: the graph has its dummy-edge mask (its "
+                    ".edgemask file): nothing to build");
+        return;
+    }
+    logger->log(progress, "--pattern-build-mask: building the dummy-edge mask in memory "
+                          "(no .edgemask beside the graph)...");
+    try {
+        const DummyMaskCounts counts = mask_dummy_edges(dbg_succ.get(), get_num_threads());
+        logger->log(progress, "--pattern-build-mask: dummy-edge mask built in {:.3f} s with {} "
+                    "threads: {} edges, {} source dummies (the main dummy edge included), {} "
+                    "sink dummies, {} k-mers; it lives in memory only (transform --mask-dummy "
+                    "writes it to the graph's .edgemask once)",
+                    counts.seconds, get_num_threads(), counts.edges, counts.source_dummy,
+                    counts.sink_dummy, counts.kmers);
+    } catch (const std::exception &e) {
+        logger->error("--pattern-build-mask: the dummy-edge mask could not be built: {}",
+                      e.what());
+        exit(1);
+    }
+    std::lock_guard<std::mutex> lock(built_masks_mutex);
+    built_masks.emplace_back(dbg_succ);
+}
+
+bool mask_built_at_load(const DeBruijnGraph &graph) {
+    const DeBruijnGraph *base = &graph;
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
+        base = &canonical->get_graph();
+    std::lock_guard<std::mutex> lock(built_masks_mutex);
+    bool built = false;
+    for (auto it = built_masks.begin(); it != built_masks.end(); ) {
+        if (auto held = it->lock()) {
+            built |= held.get() == base;
+            ++it;
+        } else {
+            it = built_masks.erase(it);
+        }
+    }
+    return built;
+}
+
 std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const Config &config) {
-    return std::async(std::launch::async, [path=config.infbase]() -> std::shared_ptr<DeBruijnGraph> {
-        return load_critical_dbg(path);
+    // where the pattern search is served on this graph: the CLI and a single-graph server
+    // (a graph list's graphs are not searched by it yet). The CLI's stdout carries its answers,
+    // and the logger writes info lines there
+    const bool cli = config.identity == Config::PATTERN;
+    const bool serves_pattern
+            = cli || (config.identity == Config::SERVER_QUERY && config.fnames.empty());
+    return std::async(std::launch::async, [path=config.infbase, serves_pattern, cli,
+                                           build_mask=config.pattern_build_mask]()
+                                                -> std::shared_ptr<DeBruijnGraph> {
+        auto graph = load_critical_dbg(path);
+        // here, in the loading thread: while the annotation loads, and before the graph is
+        // shared with anyone, so that nothing ever sees it without the mask
+        if (build_mask) {
+            build_mask_at_load(graph, cli);
+        } else if (serves_pattern) {
+            const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph.get());
+            if (dbg_succ && !dbg_succ->get_mask()) {
+                // the operator learns at start-up, not from the first refused request (in the
+                // server's log; on the CLI's stderr, as a warning)
+                logger->log(cli ? spdlog::level::warn : spdlog::level::info,
+                            "The graph has no dummy-edge mask (.edgemask): the pattern search "
+                            "answers mask_required. Remedies: `metagraph transform "
+                            "--mask-dummy {}` once (writes the .edgemask beside the graph), "
+                            "or --pattern-build-mask (builds it in memory at every start)",
+                            path);
+            }
+        }
+        return graph;
     }).share();
 }
 

@@ -1,6 +1,9 @@
 #include "transform_graph.hpp"
 
 #include <filesystem>
+#include <fstream>
+
+#include <unistd.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -16,6 +19,109 @@ namespace cli {
 
 using mtg::common::logger;
 
+namespace {
+
+/**
+ * transform --mask-dummy (DESIGN-pattern-search.md §4): give an existing succinct graph the
+ * dummy-edge mask `build --mask-dummy` would have written, as the file <graph>.edgemask that
+ * DBGSuccinct::load reads beside it. Only that file is written: the mask prunes nothing, so
+ * node ids and the annotation stay valid, and a graph of hundreds of GB is not rewritten for a
+ * file a small fraction of its size. Without a mask every dummy edge passes for a k-mer, and
+ * the pattern search cannot count (mask_required).
+ */
+int write_dummy_mask(const std::string &graph_path, const Config &config) {
+    using graph::DBGSuccinct;
+
+    if (!utils::ends_with(graph_path, DBGSuccinct::kExtension)) {
+        logger->error("--mask-dummy: '{}' is not a succinct graph ({}): only a succinct graph "
+                      "has a dummy-edge mask", graph_path, DBGSuccinct::kExtension);
+        return 1;
+    }
+    const std::string prefix = utils::remove_suffix(graph_path, DBGSuccinct::kExtension);
+    const std::string mask_path = prefix + DBGSuccinct::kDummyMaskExtension;
+    const bool replacing = std::filesystem::exists(mask_path);
+    if (replacing && !config.force) {
+        // a mask written by build or by an earlier run is not overwritten unseen
+        logger->error("--mask-dummy: {} exists: the graph has its dummy-edge mask already; "
+                      "pass --force to build it again and replace it", mask_path);
+        return 1;
+    }
+
+    Timer timer;
+    logger->info("Loading the graph {} without its mask...", graph_path);
+    // without the mask: a replaced one is not read (it may be the broken file being replaced)
+    DBGSuccinct graph(2);
+    bool loaded = false;
+    try {
+        loaded = graph.load_without_mask(graph_path);
+    } catch (const std::exception &e) {
+        logger->error("Cannot load graph from '{}': {}", graph_path, e.what());
+        return 1;
+    }
+    if (!loaded) {
+        logger->error("Cannot load graph from '{}': {}", graph_path,
+                      utils::file_read_failure_detail(graph_path));
+        return 1;
+    }
+    logger->info("Graph loaded in {:.3f} s: k = {}, mode {}, {} edges", timer.elapsed(),
+                 graph.get_k(), Config::graphmode_to_string(graph.get_mode()),
+                 graph.max_index());
+
+    DummyMaskCounts counts;
+    try {
+        counts = mask_dummy_edges(&graph, get_num_threads());
+    } catch (const std::exception &e) {
+        // (memory, above all, on a large graph): nothing was written
+        logger->error("--mask-dummy: the mask could not be built: {}", e.what());
+        return 1;
+    }
+    logger->info("Dummy edges marked in {:.3f} s with {} threads: {} edges, {} source dummies "
+                 "(the main dummy edge included), {} sink dummies, {} k-mers",
+                 counts.seconds, get_num_threads(), counts.edges, counts.source_dummy,
+                 counts.sink_dummy, counts.kmers);
+
+    // written to a temporary file in the same directory and renamed over the target, so that a
+    // loader never reads a partial mask: DBGSuccinct::load refuses the graph with a mask it
+    // cannot read, and an interrupted run would otherwise leave such a file beside the graph
+    timer.reset();
+    const std::string tmp_path = mask_path + ".tmp." + std::to_string(getpid());
+    try {
+        {
+            std::ofstream out = utils::open_new_ofstream(tmp_path);
+            if (!out.good())
+                throw std::ios_base::failure("cannot open " + tmp_path + " for writing");
+            graph.get_mask()->serialize(out);
+            out.close();
+            if (!out)
+                throw std::ios_base::failure("cannot write " + tmp_path);
+        }
+        std::filesystem::rename(tmp_path, mask_path);
+    } catch (const std::exception &e) {
+        std::error_code ignored;
+        std::filesystem::remove(tmp_path, ignored);
+        logger->error("--mask-dummy: the mask was not written: {}", e.what());
+        return 1;
+    }
+    logger->info("{} {} ({} bytes) in {:.3f} s; {} is unchanged", replacing ? "Replaced" : "Wrote",
+                 mask_path, std::filesystem::file_size(mask_path), timer.elapsed(), graph_path);
+
+    // what the new file changes for the graph's other readers, which load it from now on
+    logger->info("Every loader of {} reads the mask from now on: the graph states its k-mers "
+                 "as nodes ({} instead of {} edges), and an index manifest "
+                 "(--index-manifest) must list the new file", graph_path, counts.kmers,
+                 counts.edges);
+    const std::string bloom_path = prefix + DBGSuccinct::kBloomFilterExtension;
+    if (std::filesystem::exists(bloom_path)) {
+        // DBGSuccinct::load reads the Bloom filter only together with the mask
+        logger->warn("{} exists beside the graph: DBGSuccinct::load reads a Bloom filter only "
+                     "when the mask is present, so it is loaded with the graph from now on",
+                     bloom_path);
+    }
+    return 0;
+}
+
+} // namespace
+
 
 int transform_graph(Config *config) {
     assert(config);
@@ -23,6 +129,10 @@ int transform_graph(Config *config) {
     const auto &files = config->fnames;
 
     assert(files.size() == 1);
+
+    if (config->mark_dummy_kmers)
+        return write_dummy_mask(files.at(0), *config);
+
     assert(config->outfbase.size());
 
     if (config->initialize_bloom)
