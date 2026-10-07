@@ -73,7 +73,7 @@ no route.
 | 4 | patterns longer than k (extension), per-label `support`, `require_support` | after 3 |
 | 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | after 4 |
 | 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
-| 7 | Python client methods; this service's job type | with you; the job needs backend milestone 1 only (§3.1 item 3) |
+| 7 | Python client methods; this service's job type | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
 | mask | refseq33m-experimental's graph has no `.edgemask` file, and the route needs one (DESIGN §4): before the route answers on staging the owner runs `metagraph transform --mask-dummy` once on mex (offline, no change to node ids or annotation), or the server starts with `--pattern-build-mask`; until then the host states `mask: absent` and the job answers `mask_required` | before the owner's `update.sh` that enables the route |
 | fixtures | with milestone 1's freeze commit, as for level 6: the capabilities block on both routes, one answer per mode and per `withheld` reason, an error slot, from the mini index, under `api/python/tests/data/traverse/pattern/`, so your unit tests do not wait for a host | with milestone 1 |
 
@@ -93,9 +93,10 @@ capabilities block are what to build on.
    labels. The merged view of a job: per count the **weakest relation wins** (`exact` only if every task's is);
    `retrieval_complete` only when every task's is true; `withheld` and `stop` carried per task with the host and
    its reason; large answers to S3 as searches do.
-3. **(required)** The fan-out is **across hosts** — a Logan node is hundreds of chunk hosts, which exist today —
-   and is orthogonal to the backend's in-process shard fan-out (DESIGN §8), so the job needs backend milestone 1
-   only; multi-graph hosts (backend milestone 6) change nothing on the service side.
+3. **(required)** A chunked database is many graphs on one multi-graph server process, selected per task through
+   `graphs: ["{label}-{i}/{N}"]` as `/search` does (`app/download_depth.py`, `enumerate_leaf_specs`). The job type
+   is built and tested on refseq33m-experimental (one graph) with backend milestone 1; serving the chunked
+   databases waits for backend milestone 6, which keeps `graphs` exactly as `/search` selects a shard.
 4. **(required)** Admission by the queue: the service's per-database queues, `META_DB_CAPS` and the distributed
    semaphore protect the hosts; no leased-token synchronous admission. One constraint from the host side: a
    pattern call occupies a server request thread for its whole budget, and staging runs `-p 2 --threads-each 2`,
@@ -134,8 +135,8 @@ The owner: "5 s is not sufficient in general" — some `/search` calls take long
 and pattern search is the more complex function. So the route's **default** `time_budget_ms` is **60 s** (what
 the CLI and a direct caller get) and the server cap `--pattern-max-time-ms` is **600 s**: under the 900 s content
 timeout, with room for serialising and compressing a large answer. The service always sends an explicit
-`time_budget_ms` per task from a per-database timeout map, as `DATABASE_TIMEOUTS` does for `/search`, under the
-host's cap. The deadline keeps its value under a job: it bounds a runaway `any_offset` DFS per task, and the
+`time_budget_ms` per task from its own per-database budget map (`PATTERN_DB_BUDGETS_MS`, default
+`PATTERN_TIME_BUDGET_MS`; `/search` uses one `META_CALL_TIMEOUT_SECS`), under the host's cap. The deadline keeps its value under a job: it bounds a runaway `any_offset` DFS per task, and the
 finalisation reserve is unchanged, so a stopped task still answers with counts. Nothing in the engine assumes a
 short run: the clock is read every 4,096 steps whatever the budget; the memory account is bounded by
 `max_memory_mb` and the retained descriptors by their caps, not by time; `max_steps` (default 10⁸ per shard)

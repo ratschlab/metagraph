@@ -826,9 +826,11 @@ pool.
 document per task), not on the search tables: one task per (database, host, pattern chunk of at most the host's
 `max_patterns`), each task calling `POST /pattern` once from a worker under the task's own timeout; the merged
 view takes the weakest relation per count, `retrieval_complete` only when every task's is true, `withheld` and
-`stop` per task with the host; large answers to S3. The service's fan-out is across hosts (a Logan node is
-hundreds of chunk hosts), orthogonal to the server's in-process shard fan-out of §8, so the job needs milestone 1
-only:
+`stop` per task with the host; large answers to S3. A chunked database on the service side is many **graphs on one multi-graph
+server process**, selected per task through the request's `graphs: ["{label}-{i}/{N}"]` as `/search` selects a
+shard today; the job type is built and tested on refseq33m-experimental (one graph) with milestone 1, and serving
+the chunked databases needs milestone 6, whose `graphs` selection keeps exactly `/search`'s names and semantics
+(§8):
 
 - admission by the queue: the service's per-database queues, `META_DB_CAPS` and its distributed semaphore
   protect the hosts; pattern tasks run **one per host at a time**, because a call holds a server request thread
@@ -853,10 +855,13 @@ only:
   budget as for the other synchronous tools; no caching of answers in v1 (`determinism: time_limited` matters
   only once an answer is cached).
 
-The service always sends an explicit `time_budget_ms` per task from its per-database timeout map (as it has
-`DATABASE_TIMEOUTS` for `/search`; Logan hosts take about 28 s per `/search` call today), under the host's
-`--pattern-max-time-ms` (§5.3); a job-originated call holds no client connection, so a long budget costs only
-the server thread it occupies. Multi-graph hosts (§8) change nothing on the service side.
+The service always sends an explicit `time_budget_ms` per task from its own per-database budget map
+(`PATTERN_DB_BUDGETS_MS`, default `PATTERN_TIME_BUDGET_MS`; `/search` has one `META_CALL_TIMEOUT_SECS` of
+1,200 s, and a chunk call takes about 28 s today), under the host's `--pattern-max-time-ms` (§5.3); a
+job-originated call holds no client connection, so a long budget costs only the server thread it occupies. Since
+one database's chunk tasks all land on the same server process, the service's cap of one pattern task per host
+means one per database server at a time; the production server's request-thread count sets how far that can be
+relaxed.
 
 ## 10. Code placement and reuse
 
