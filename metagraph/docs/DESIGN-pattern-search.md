@@ -48,8 +48,8 @@ Goals:
    with a reserved finalisation window and per-shard memory accounts per request, every stop stated with its
    phase (§5).
 7. **Served synchronously by the server, as a job by the service:** the server route is a plain
-   request/response like `/search`; the Python client gets a method beside `align()`; the search service serves
-   it as a job (submit → status → results), the way it wraps `/search` (§9, the owner's decision of 2026-10-07).
+   request/response like `/search`; the search service serves it as a job (submit → status → results), the way
+   it wraps `/search` (§9, the owner's decision of 2026-10-07). No Python client method until someone needs one.
 8. **Annotation predicates** (§5.6): a broad pattern narrowed by a logical condition on the labels of each
    context, evaluated before anything is materialised, with the retrieval threshold applied to what passes.
 9. **A label-free path** (§4.3, `output.labels: none`): counting **and** extracting the matching k-mers, rows
@@ -804,7 +804,7 @@ Differences from `/search`'s merge, all deliberate:
 
 ## 9. Serving the extension synchronously
 
-Three layers. The server route and the Python client are request/response; the search service wraps the route in
+Two layers. The server route is request/response; the search service wraps the route in
 a **job** (submit → status → results), as it wraps `/search` and the traversal, the owner's decision of
 2026-10-07: the backend stays synchronous, the service is the asynchronous layer.
 
@@ -812,14 +812,11 @@ a **job** (submit → status → results), as it wraps `/search` and the travers
 `kContentTimeoutS` 900 s, `server.cpp:52`). The route's own deadline (default 60 s, cap `--pattern-max-time-ms`
 600 s, finalisation reserve inside it, §5.3) stays under that wall with room for serialisation and compression.
 
-**Python client.** `GraphClientJson.pattern(patterns, **options)` and `GraphClient.pattern(...)` beside `align()`
-(`api/python/metagraph/client.py:100`, `_json_seq_query` at :117): the same `requests.post` with the route's
-JSON and timeout handling; `GraphClient.pattern` returns two DataFrames: `contexts`, one row per returned context (pattern, graph, k-mer,
-instance, offset, strand, support, the number of its labels), which keeps a selected context whose projected
-label list is empty; and `occurrences`, one row per (pattern, graph, context, column, placed occurrence) with
-nullable occurrence fields where nothing is placed. The counts come as attributes with their relations, and
-per-label totals are the deduplicated union of §7.2. `MultiGraphClient.pattern` fans out over hosts with the existing thread
-pool.
+**No Python client yet** (the owner, 2026-10-07: "write it lazily, when we need it"; unused code is weight to
+maintain). Nothing calls one: the search service has its own HTTP client, agents reach the route through the
+service's tools, and the tests call the route directly. When a user needs it, it is one method per class in
+`api/python/metagraph/client.py` beside `align()` on `_json_seq_query`. The same holds for passing
+`time_budget_ms` through the library's MCP `traverse_resolve`.
 
 **Search service** (its repository; the service session builds it, org-id integrates;
 `docs/PROMPT-search-service-pattern.md` is the request). A **kind of the existing search job** (the owner:
@@ -879,7 +876,7 @@ job-originated call holds no client connection, so a long budget costs only the 
 | codon automaton, genetic code | `src/common/seq_tools/genetic_code.{hpp,cpp}` | none in the tree | new, with the standard table |
 | route, fan-out, barriers, capabilities | `src/cli/server.cpp`, `server_utils.cpp` | the `/search` fan-out loop (`server.cpp:790-885`) | factored into a helper both routes call; the merge sorted, budget-shared and barriered for this route |
 | CLI | `metagraph pattern` (`src/cli/pattern.cpp`, `config.cpp`) | the `align --json` output style | new subcommand, for tests and offline use |
-| Python client | `api/python/metagraph/client.py` | `align()`, `_json_seq_query` | one method per client class |
+| Python client | `api/python/metagraph/client.py` | `align()`, `_json_seq_query` | deferred until a user needs it (§9) |
 
 ## 11. Not breaking the aligner
 
@@ -985,8 +982,8 @@ job-originated call holds no client connection, so a long budget costs only the 
    refseq33m-experimental (16-, 20-, 25-nt motifs in both scopes, a 29-nt IUPAC promoter, three peptides)
    recording `ranges_visited`, mask scans, counts per unit, rows, elapsed and memory, and an estimate for the
    Logan hosts from their k-mer counts.
-7. **Clients and service.** The Python client methods; the search service's synchronous tool and REST route (its
-   repository); docs (`docs/source`); the contract of §7 promoted into a SPEC section once frozen.
+7. **Service.** The search service's job kind (its repository); docs (`docs/source`); the contract of §7
+   promoted into a SPEC section once frozen. The Python client methods are deferred until a user needs them (§9).
 
 Estimate: increments 0–2 about 2 weeks for one engineer who knows the BOSS and traversal code (the count-only
 milestone, mask handling included); 3 about 2 weeks (the two-step retrieval is integration work, not reuse);
@@ -1135,3 +1132,9 @@ without labels (count and extract rows/k-mers)." Folded in as goal 9 and `output
 annotation read, on every backend and graph mode, under the graph-side budgets only; the engine's `enumerate()`
 is this path and the annotation steps sit on top of it. It belongs to milestone 1 (increment 2), and a later
 increment adds "labels for given rows" (§12) so that annotation is paid for only on chosen rows.
+
+## 23. The owner's decision (2026-10-07): no Python client yet
+
+The Python client methods (goal 7, §9, §10, increment 7) are dropped until a user needs them: nothing in the
+stack calls them, and unused code is weight to maintain. The route, the service's job kind and the SPEC with its
+fixtures are the serving layers.

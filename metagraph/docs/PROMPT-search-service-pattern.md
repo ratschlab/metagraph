@@ -73,7 +73,7 @@ no route.
 | 4 | patterns longer than k (extension), per-label `support`, `require_support` | after 3 |
 | 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | after 4 |
 | 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
-| 7 | Python client methods; this service's job type | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
+| 7 | this service's job type (the backend's Python client methods are deferred until needed) | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
 | mask | refseq33m-experimental's graph has no `.edgemask` file, and the route needs one (DESIGN §4): before the route answers on staging the owner runs `metagraph transform --mask-dummy` once on mex (offline, no change to node ids or annotation), or the server starts with `--pattern-build-mask`; until then the host states `mask: absent` and the job answers `mask_required` | before the owner's `update.sh` that enables the route |
 | fixtures | with milestone 1's freeze commit, as for level 6: the capabilities block on both routes, one answer per mode and per `withheld` reason, an error slot, from the mini index, under `api/python/tests/data/traverse/pattern/`, so your unit tests do not wait for a host | with milestone 1 |
 
