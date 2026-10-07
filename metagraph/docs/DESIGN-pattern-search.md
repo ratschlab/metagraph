@@ -763,8 +763,11 @@ malformed request is a 400 for the whole; a request whose finalisation reserve i
 (`server.cpp:1421-1480`), with a `pattern` block: the floors, caps and the finalisation reserve, the modes, the projections (`none`,
 `all`, `predicate_only`, with `none` available everywhere) and scopes (and which scope each graph mode supports), `placement` (the best this index can give), `strand_stated`,
 `mask: present | absent`, `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
-resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. A client gates on the
-feature, as the search service gates `traverse` on the feature list (§9).
+resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. The same `pattern`
+block is carried by `GET /traverse/capabilities` (`server.cpp:1340-1370`), the document the search service's
+probe reads, which today has `attempts`, `coordinates` and `deadline_check` and no feature list: one cached probe
+then serves both. A client gates on the block, accepts a higher contract version reading fields by presence,
+and offers the label projections exactly when the block's `projections` list has them (§9).
 
 ## 8. Multi-graph servers
 
@@ -808,19 +811,29 @@ pool.
 built like `traverse_resolve` (`app/mcp_server.py:5838`; REST `app/api/routes_traversal.py:766`, admission
 `_admit` at :502):
 
-- admission by a per-host semaphore with its own settings (`PATTERN_MAX_CONCURRENCY`, `PATTERN_PER_HOST`,
-  `PATTERN_TIMEOUT_S`, `PATTERN_MAX_PATTERNS`), the pattern the service already uses for its synchronous tools
-  (`_COMPARE_SLOTS`, `app/mcp_server.py:5516`; `TRAVERSAL_RESOLVE_*`, `app/settings.py:1292-1326`);
-- the backend called from the API process on the thread pool (`anyio.to_thread.run_sync`), one host per
-  database, timeout = the server's `max_time_ms` plus an allowance, as resolve does;
-- served only for databases whose host lists `pattern` in `/capabilities`; others answer
-  `pattern_unsupported` with the host's feature list, as `traversal_disabled` does;
-- the answer passed through with the service's additions only: `database`, `hit_unit`, the untrusted-data notice
-  on label and record strings, the standard error envelope; the tool's docstring explains the `withheld`
-  reasons, `retrieval_complete` and `absence_scope`, and what to change for each;
-- rate limits and the anonymous-call budget as for the other synchronous tools; `count` mode is the cheap default
-  the tool suggests for a first look at a new pattern, and `labels: none` the cheap second step: the k-mers
-  without the annotation, from which the agent picks rows before asking for labels.
+- admission in `traverse_resolve`'s shape: a leased token per backend host with its own concurrency, lease and
+  timeout settings (`PATTERN_MAX_CONCURRENCY`, `PATTERN_PER_HOST`, `PATTERN_LEASE_S`, `PATTERN_TIMEOUT_S`,
+  `PATTERN_MAX_PATTERNS`; `TRAVERSAL_RESOLVE_*` at `app/settings.py:1292-1326` is the model), not the in-process
+  `_COMPARE_SLOTS` semaphore of the local tools, since the call hits a shared host;
+- caps at admission, never truncation afterwards: `max_contexts`, `max_patterns` and `time_budget_ms` above the
+  service's ceilings are refused with a 400 naming the field; an answer is passed through whole, since cutting it
+  would falsify `retrieval_complete`; the backend called from the API process on the thread pool
+  (`anyio.to_thread.run_sync`), one host per database, timeout = the request's `time_budget_ms` plus an allowance;
+- served only for databases whose host carries the `pattern` block (on `/traverse/capabilities`, which the
+  service's probe reads, as well as on `/capabilities`, §7.3) with a contract version the service knows or a
+  higher one, fields read by presence; a lower or missing version answers `pattern_unsupported` with the host's
+  feature list, as `traversal_disabled` does; the label projections are offered exactly when the host's
+  `projections` list has them, so they switch on by themselves when a later milestone lands;
+- the answer passed through with the service's additions only: `database`, the untrusted-data notice on label
+  and record strings, the standard error envelope (no `hit_unit`: a context is not a hit, and the tool says what
+  it is instead — one distinct k-mer of the index containing the pattern at one offset and orientation); the
+  tool's docstring explains the `withheld` reasons, `retrieval_complete` and `absence_scope`, what to change for
+  each, uses the service's strand vocabulary, and says that canonical and primary indexes report contexts only;
+- the tool's default mode is `count` (the route's own default is `all_or_count`), `scope` defaults to
+  `any_offset`, `partial` is exposed, and `labels: none` is the cheap second step: the k-mers without the
+  annotation, from which the agent picks rows before asking for labels; rate limits and the anonymous-call
+  budget as for the other synchronous tools; no caching of answers in v1 (`determinism: time_limited` matters
+  only once an answer is cached).
 
 Archive-scale databases whose hosts serve several graphs are reachable through the same tool once their hosts
 build the feature; the fan-out happens inside the server (§8). A batch of many patterns, or a scan over every
