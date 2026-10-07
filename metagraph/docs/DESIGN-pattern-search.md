@@ -52,6 +52,10 @@ Goals:
    `traverse_resolve` (§9).
 8. **Annotation predicates** (§5.6): a broad pattern narrowed by a logical condition on the labels of each
    context, evaluated before anything is materialised, with the retrieval threshold applied to what passes.
+9. **A label-free path** (§4.3, `output.labels: none`): counting **and** extracting the matching k-mers, rows
+   and paths without reading a single annotation row. Labels are what slows a request down; the k-mers alone
+   answer most follow-up questions and seed `/traverse`, so the cheap path is a first-class mode, on every
+   backend and every graph mode.
 
 Non-goals (v1):
 
@@ -282,6 +286,20 @@ part). v1 anchors on [0, k) and states the anchor window's bits.
 
 ### 4.3 Labels, coordinates and placement (reused from the traversal, not from the aligner)
 
+**The label-free path first (`output.labels: none`).** Nothing else in this section runs for it. A request with
+`output.labels: none` returns the contexts themselves — k-mer, instance, offset, strand, the graph node id and
+the annotation row id (`AnnotatedDBG`'s graph-to-annotation mapping, so the row can be named later), and for
+`long` the path — without reading one annotation row: counting and extraction stay graph work, bounded by
+`max_steps`, the deadline and `max_contexts`, and the memory account holds only the contexts and the answer.
+It is available on every backend (no `decode_charged` requirement) and every graph mode (on canonical indexes
+the contexts come without placement, as everywhere). It is the cheap retrieval: labels cost a row decode per
+context, and most follow-up questions — seed `/traverse`, inspect the variants, choose rows — need the k-mers,
+not the labels. A later increment reads the labels of **given row ids** (§12), so an agent can count, extract,
+choose, and only then pay for annotation on the rows it chose. `all_or_count` applies its threshold to the
+contexts as usual; `retrieval_complete` then means every context is returned, and the answer claims nothing
+about any label. The engine's `enumerate()` is this path; the two steps below are what `labels: all` and
+`predicate_only` add on top of it.
+
 **Two steps, because the request names no labels.** The traversal's `LabelQuery` reads the rows of a key set
 against a **permitted label set** given to its constructor (`label_oracle.cpp:454`) and cannot discover labels;
 `LabelRecorder` discovers them (annotate mode: the labels of each key, ascending, at most `max_labels_per_node`,
@@ -384,6 +402,11 @@ plus an explicit opt-in for the traversal's "deliver what was built" convention:
 | `count` | discover and count the contexts (or anchors and paths) in the requested scope. **Without a predicate** no annotation row is decoded, and completed interval descriptors are **discarded** as they are counted, so the memory account bounds only the DFS frontier and broad patterns can be counted. **With a predicate** (§5.6) the answer carries the raw and the selected counts: descriptors are retained up to `max_predicate_contexts`, the predicate pass reads annotation under its budgets and the backend restrictions of §4.3, and still no result is returned |
 | `all_or_count` (default) | the count, with the interval descriptors **retained while retrieval is still possible**: without a predicate until the raw count exceeds `max_contexts`, with a predicate until it exceeds `max_predicate_contexts` (20,000 raw contexts may select 5); past that they are discarded and counting continues within the compute budget; retrieval of **all** requested results only if the completed aggregate count — the selected count when there is a predicate — is within the retrieval threshold and the retrieval finishes on every shard; otherwise the counts alone, with the reason |
 | `partial` | the count, then retrieval up to the caps with what was built delivered and every cut stated — an agent that wants the first results of a large set asks for it explicitly |
+
+**Projection `none`.** With `output.labels: none` the retrieval of `all_or_count` and `partial` is the
+label-free extraction of §4.3: the contexts with their k-mers, offsets, strands, node and row ids, no annotation
+read, no annotation budget touched. The same thresholds and barriers apply to the contexts; `rows_refused` and
+`anchors_truncated` stay empty by construction.
 
 **Descriptor retention by phase.** For L ≤ k the descriptors are the contexts' intervals, kept or discarded as
 the table says. For `long` the phases differ: **anchors** are always kept through the extension admission
@@ -641,7 +664,9 @@ boundary (§4.1), and need `record_verified` support for a record claim.
 }
 ```
 
-`predicate` is optional (§5.6); without it `output.labels` is `all` and the predicate caps are unused.
+`predicate` is optional (§5.6); without it `output.labels` defaults to `all`, and the predicate caps are unused.
+`output.labels: none` is the label-free path (§4.3): contexts with k-mers, offsets, strands, node and row ids,
+no annotation read; it is the cheapest retrieval and the one a client should ask for first.
 
 Exactly one of `dna`, `iupac`, `protein` per pattern; at most `--pattern-max-patterns` (default 16) per request;
 `id` optional. Unknown fields are refused (400), as `/traverse` refuses them; so is `in_ram` (§5.3). The route
@@ -706,6 +731,9 @@ One entry per pattern, in request order. Every count is `{value, relation, unit}
 - `by_label` is the per-label summary over the returned contexts (contexts, suffix contexts, placed occurrences
   with their relation), ordered as §5.5 orders labels; it answers "which samples carry it" while `results`
   answers "which sequences match".
+- With `output.labels: none` each result carries `kmer`, `instance`, `offset`, `strand`, `node` (the graph node
+  id, scoped by `graph`) and `row` (the annotation row id) and no `labels`; `by_label` is absent, and
+  `counts.labels` and `counts.occurrences` are `unknown` by construction, since nothing was read.
 - For `long`: `counts.anchors` (unit `anchors`), `counts.paths` (unit `paths`, with `candidates_examined`), and
   `support` on every returned label (`record_verified` | `label_intersection`, §4.3), summarised per context;
   `kmer` on every label of an L ≤ k result.
@@ -732,8 +760,8 @@ malformed request is a 400 for the whole; a request whose finalisation reserve i
 ### 7.3 Capabilities
 
 `GET /capabilities` lists `"pattern"` under `features` and `routes.pattern = "POST /pattern"`
-(`server.cpp:1421-1480`), with a `pattern` block: the floors, caps and the finalisation reserve, the modes and
-scopes (and which scope each graph mode supports), `placement` (the best this index can give), `strand_stated`,
+(`server.cpp:1421-1480`), with a `pattern` block: the floors, caps and the finalisation reserve, the modes, the projections (`none`,
+`all`, `predicate_only`, with `none` available everywhere) and scopes (and which scope each graph mode supports), `placement` (the best this index can give), `strand_stated`,
 `mask: present | absent`, `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
 resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. A client gates on the
 feature, as the search service gates `traverse` on the feature list (§9).
@@ -791,7 +819,8 @@ built like `traverse_resolve` (`app/mcp_server.py:5838`; REST `app/api/routes_tr
   on label and record strings, the standard error envelope; the tool's docstring explains the `withheld`
   reasons, `retrieval_complete` and `absence_scope`, and what to change for each;
 - rate limits and the anonymous-call budget as for the other synchronous tools; `count` mode is the cheap default
-  the tool suggests for a first look at a new pattern.
+  the tool suggests for a first look at a new pattern, and `labels: none` the cheap second step: the k-mers
+  without the annotation, from which the agent picks rows before asking for labels.
 
 Archive-scale databases whose hosts serve several graphs are reachable through the same tool once their hosts
 build the feature; the fan-out happens inside the server (§8). A batch of many patterns, or a scan over every
@@ -836,6 +865,9 @@ database, is the job queue's shape and comes later, wrapping this route.
   across shards, on the pattern-level label sets, for "present in A and absent throughout C".
 - **Paced, budgeted selected-column access** for predicates (`predicate.access: columns` under a budget), so that
   `any(A) and none(B)` on a column-major backend reads two bits instead of a row.
+- **Labels for given rows:** a request naming the row ids of contexts an earlier label-free answer returned,
+  answered with their labels (and placement where it exists) under the budgets of §4.3, so that annotation is
+  paid for only on the rows the agent chose.
 - **`suffix` scope on wrapped PRIMARY graphs** through a prefix lookup with orientation conversion.
 - **Bounded mismatches** (`NOTE-mismatch-search.md`): automaton states (position, mismatches used) in the DFS;
   the admission policy and caps carry over.
@@ -882,9 +914,13 @@ database, is the job queue's shape and comes later, wrapping this route.
    `W` rule with marked edges, the exact counts, `POST /pattern` on a single-graph server answering counts, the
    finalisation reserve, capabilities. The early milestone: a server that counts correctly before any annotation
    is read.
-2. **IUPAC, both strands, `any_offset`, graph modes.** The `allowed` callback; the two oriented searches with the
-   palindrome rule; the flank ranges with every real symbol and `ranges_visited`; native CANONICAL; wrapped
-   PRIMARY with `suffix` refused and `any_offset` complete.
+2. **IUPAC, both strands, `any_offset`, graph modes, and the label-free extraction.** The `allowed` callback;
+   the two oriented searches with the palindrome rule; the flank ranges with every real symbol and
+   `ranges_visited`; native CANONICAL; wrapped PRIMARY with `suffix` refused and `any_offset` complete; and
+   `enumerate()` behind `output.labels: none`: the contexts with k-mer, instance, offset, strand, node and row
+   ids returned by the route under `max_contexts`, `all_or_count` and `partial`, with no annotation read —
+   tested against the graph-walk oracle (every context, in BOSS edge order) on the tiny graphs and against the
+   FASTA oracle on the mini index.
 3. **Retrieval: discovery, placement, JSON, admission.** `LabelRecorder` discovery with the per-anchor cap, then
    `LabelQuery` placement, both with `DecodeBudget` and pacing; backend support and the unbudgeted opt-in;
    descriptors retained only while eligible; placement through `CoordToHeader` with `seq_id`; deduplication; the
@@ -1043,3 +1079,12 @@ unverified labels from the projection and counts them, besides refusing indexes 
 Stale `chain_verified` wording was replaced by per-label `support`. Implementation starts with increments 0–2
 (the oracle suite and the BASIC exact-suffix count milestone, then ambiguity, offsets and graph modes), with an
 early real-index benchmark before the annotation and service layers.
+
+## 22. The owner's addition (2026-10-07): the label-free path
+
+"There must be a fast query without touching the labels. Labels slow down a lot; preserve the functionality
+without labels (count and extract rows/k-mers)." Folded in as goal 9 and `output.labels: none` (§4.3, §5.2,
+§7): counting and extracting contexts — k-mer, instance, offset, strand, node and row ids, paths — with no
+annotation read, on every backend and graph mode, under the graph-side budgets only; the engine's `enumerate()`
+is this path and the annotation steps sit on top of it. It belongs to milestone 1 (increment 2), and a later
+increment adds "labels for given rows" (§12) so that annotation is paid for only on chosen rows.
