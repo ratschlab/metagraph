@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "tests/test_helpers.hpp"
@@ -618,11 +619,13 @@ TYPED_TEST(ResolveCoordTest, DeadlineStopIsTheResolveOfAPrefix) {
     EXPECT_GT(stops, 200u);
 }
 
-// Milestone 1b: the explicit labels' hits under a deadline, fetched kResolveCheckKmers k-mers at
-// a time with the deadline read before each piece — on the direct path (three labels of a
-// column annotation: no rows primed, the hits are cell reads) and on the row paths (their
-// priming first). A stop in that pass resolves the k-mers before the next one in the graph
-// from the piece on; without a stop the profile is the one fetch's
+// Milestone 1b: the explicit labels' hits under a deadline. On the direct path (three labels of
+// a column annotation: no rows primed, the hits are cell reads) they are fetched
+// kResolveCheckKmers k-mers at a time with the deadline read before each piece: a stop there
+// resolves the k-mers before the next one in the graph from the piece on. On the row paths each
+// priming batch's k-mers are scattered as it is primed, so every stop falls between batches and
+// keeps the rows read (review of 2026-10-07, T3-01/V1-01). Without a stop the profile is the one
+// fetch's
 TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -636,13 +639,13 @@ TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
     LabelOracle oracle(*anno);
     ResolveOptions opts;
     opts.labels = { "A", "B", "C" };
+    // the row paths' rows in batches of 1,000: about 13 of them, a stop between each two
+    opts.batch_rows = 1000;
     const auto seen = check_every_stop(oracle, q, opts, "explicit A, B, C");
-    // The pieces begin at 4096, 8192 and 12288: a stop before each but the first, the first at
-    // the next k-mer in the graph (about 4300: those of [3990, 4300) touch the stretch no label
-    // has, but for an 11-mer of the graph met by chance). A stop of the row paths' priming
-    // past 4096 is followed by one of the hits pass at its first read (the deadline has
-    // passed), so their stops are among these too. The direct path's first read (before any
-    // hit) stops in this phase, at k-mer 0
+    // The direct path's pieces begin at 4096, 8192 and 12288: a stop before each but the
+    // first, the first at the next k-mer in the graph (about 4300: those of [3990, 4300) touch
+    // the stretch no label has, but for an 11-mer of the graph met by chance). Its first read
+    // (before any hit) stops in this phase, at k-mer 0
     ResolveOptions untimed = opts;
     const SupportProfile full = resolve_support(oracle, q, untimed);
     uint64_t next_in_graph = 0;
@@ -655,12 +658,31 @@ TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
     EXPECT_GT(next_in_graph, 4000u);
     EXPECT_LE(next_in_graph, 4300u);
     std::set<uint64_t> in_hits;
+    uint64_t last_rows_stop = 0;
     for (const auto &[phase, x] : seen) {
         if (phase == ResolveStop::SUPPORT && x)
             in_hits.insert(x);
+        if (phase == ResolveStop::ROWS)
+            last_rows_stop = std::max(last_rows_stop, x);
     }
-    EXPECT_EQ((std::set<uint64_t>{ next_in_graph, 2 * kResolveCheckKmers, 3 * kResolveCheckKmers }),
-              in_hits);
+    // the path the annotation is read on (LabelQuery::access_path): a column annotation and
+    // RowFlat read cells (direct), RowDiff decodes rows
+    const bool row_path = count_phase(seen, ResolveStop::ROWS) > 0;
+    if (std::is_same_v<Annotation, annot::ColumnCompressed<>>)
+        EXPECT_FALSE(row_path);
+    if (std::is_same_v<Annotation, annot::RowDiffColumnAnnotator>)
+        EXPECT_TRUE(row_path);
+    if (!row_path) {
+        EXPECT_EQ((std::set<uint64_t>{ next_in_graph, 2 * kResolveCheckKmers,
+                                       3 * kResolveCheckKmers }), in_hits);
+    } else {
+        // no stop in a hits pass, and the late ones keep their rows: before the fix every
+        // priming stop past 4,096 k-mers became (support, about 4,300) at the hits pass's
+        // second read of the deadline already passed
+        EXPECT_TRUE(in_hits.empty());
+        EXPECT_GT(count_phase(seen, ResolveStop::ROWS), 10u);
+        EXPECT_GT(last_rows_stop, 2 * kResolveCheckKmers);
+    }
     // a discovery reads the same rows in batches, never in the hits pass
     ResolveOptions disc;
     disc.discover = true;

@@ -232,11 +232,14 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   the reserve would leave no time to work: every budgeted request would stop before its first row.
 - **The work stops at the budget less the reserve.** The deadline is read where the client's connection is
   checked during the work, after it: before the first row is read; between two batches of rows (a discovery's
-  pass and the explicit labels' priming: 64 rows, then up to 4,096 rows or about 64 MiB of rows, §4.2); and
-  before every 4,096 k-mers of the explicit labels' hits, which under a deadline are fetched in pieces of 4,096
-  k-mers (one fetch of the whole query, the path without a deadline, is a piece no clock read can end; on a
-  direct-access annotation it reads every k-mer's cell of every label). A key's hits do not depend on the piece
-  they are fetched in, so the profile is the one fetch's.
+  pass and the explicit labels' priming: 64 rows, then up to 4,096 rows or about 64 MiB of rows, §4.2); and,
+  on a direct-access annotation, before every 4,096 k-mers of the explicit labels' hits, which under a deadline
+  are fetched in pieces of 4,096 k-mers (one fetch of the whole query, the path without a deadline, is a piece
+  no clock read can end: it reads every k-mer's cell of every label). On the row paths the hits of the k-mers
+  each priming batch completes (those before the next batch's first k-mer) are taken from the primed rows right
+  after that batch, before the deadline is read, so a stop between batches keeps every row read (review of
+  2026-10-07, T3-01/V1-01: a separate pass read the deadline again and cut such answers to about 4,096
+  k-mers). A key's hits do not depend on the piece they are fetched in, so the profile is the one fetch's.
 - **A stop answers the resolve of a query prefix** (decision B7, `DESIGN-traverse-graphlet.md` §21), status
   200: exactly the profile of the sequence's first x k-mers — `num_kmers` = x, `graph_runs` cut at x, the
   labels with their support in the prefix (a discovery's labels are those met in it, ranked and truncated
@@ -255,7 +258,7 @@ deadline. `src/cli/traverse.cpp` `process_resolve_request`, `src/graph/traversal
   `remainder_from_bp` = x: the sequence from that base holds exactly the k-mers not resolved, so a client
   resolves the rest with it. A run ending at x may continue past it (in the remainder's answer it starts at
   its k-mer 0). `phase` is `rows` (the rows of a discovery or of the explicit labels' priming were being read,
-  or none yet) or `support` (the explicit labels' hits; on a direct-access annotation also a stop before any).
+  or none yet) or `support` (a direct-access annotation's explicit labels' hits, or a stop before any).
   An explicit `select` whose interval ends past x, or names a label the prefix did not profile, is **not made**:
   `selection: null`, the message says which seed and why (whether it holds on the whole query is unknown, and a
   400 would blame the request for the deadline); an interval invalid on the whole query (empty, or past its

@@ -609,6 +609,56 @@ SupportProfile resolve_support(LabelOracle &oracle,
     } else {
         // ---- support per k-mer of explicit labels
         LabelQuery query_labels(oracle, refs, with_coords);
+        // Every label's support from one pass over the k-mers: each hit goes to its label's
+        // accumulator, k-mer by k-mer in ascending order, as a discovery accumulates them.
+        // Under trace the per-label scan this replaces (for each label, every k-mer's hit list
+        // searched for it) cost O(labels x k-mers x hits), an absent label reading every list
+        // whole: 2,000 explicit labels took 5.9 s where the discovery returning the same
+        // profiles took 0.2 s, and nothing polled the client meanwhile (review of 2026-10-06,
+        // X-EFFICIENCY-04). Each label receives the calls the scan made, in the same order, so
+        // the profiles are the same. Presence held a bitmap of labels x k-mers (125 MB for 1,000
+        // labels on 1 M k-mers); the accumulator's runs are runs_of's of that bitmap
+        std::vector<LabelSupport> support(refs.size());
+        std::vector<Coord> scratch;
+        auto scatter = [&](uint64_t i, const LabelQuery::NodeHits &node_hits) {
+            for (const auto &h : node_hits) {
+                assert(h.label < refs.size());
+                LabelSupport &s = support[h.label];
+                if (with_coords) {
+                    // trace-consistent runs: a chain of coordinates increasing by one per
+                    // k-mer. Column labels have coordinates in the column frame, header labels
+                    // in the sequence frame; either way consecutive k-mers must have
+                    // consecutive coords (LabelSupport::add_trace). A label's first hit of the
+                    // k-mer is its one (the scan stopped at it; a query holds a label once)
+                    if (s.last == i)
+                        continue;
+                    s.add_trace(i, h.coords.data(), h.coords.size(), scratch);
+                } else {
+                    // present at the k-mer once, however many hits name it (as its bit was)
+                    if (s.open.end == i + 1)
+                        continue;
+                    s.add(i);
+                }
+            }
+        };
+        // The row paths under a deadline: the hits of the k-mers [scattered, end), whose keys
+        // the priming has all cached (no row is read: a fetch decodes only missing keys), in
+        // pieces of kResolveCheckKmers k-mers with the client checked between them
+        uint64_t scattered = 0;
+        std::vector<node_index> piece;
+        auto scatter_primed = [&](uint64_t end) {
+            for (uint64_t begin = scattered; begin < end; begin += kResolveCheckKmers) {
+                if (begin > scattered)
+                    checkpoint();
+                const uint64_t e = std::min<uint64_t>(end, begin + kResolveCheckKmers);
+                piece.assign(keys.begin() + begin, keys.begin() + e);
+                const auto hits = query_labels.fetch(piece);
+                for (uint64_t i = begin; i < e; ++i) {
+                    scatter(i, hits[i - begin]);
+                }
+            }
+            scattered = std::max(scattered, end);
+        };
         // The deadline's first read: the labels are resolved (an unknown one refused), no row
         // is read yet. |resolved| is the end of the k-mers whose hits the query can give
         // without reading a row it has not read: all of them until a stop
@@ -656,48 +706,26 @@ SupportProfile resolve_support(LabelOracle &oracle,
                     query_labels.prime(batch, rows);
                     sizer.done(rows);
                 }
+                const size_t next = begin + batch.size();
+                if (options.time_up) {
+                    // every k-mer before distinct_at[next] has its key primed now (the whole
+                    // query after the last batch): their hits are scattered here, so that a
+                    // stop between batches keeps every row it read (review of 2026-10-07,
+                    // T3-01/V1-01: a separate hits pass read again the deadline the priming
+                    // had seen pass, at its second piece, and cut the answer to about 4,096
+                    // k-mers however many rows were primed)
+                    scatter_primed(next < distinct.size() ? distinct_at[next] : resolved);
+                }
                 // after the last batch the rows are all read, whatever the deadline says
-                if (poll() && begin + batch.size() < distinct.size()) {
+                if (poll() && next < distinct.size()) {
                     stopped = true;
                     stop_phase = ResolveStop::ROWS;
-                    resolved = distinct_at[begin + batch.size()];
+                    resolved = distinct_at[next];
                     break;
                 }
             }
         }
 
-        // Every label's support from one pass over the k-mers: each hit goes to its label's
-        // accumulator, k-mer by k-mer in ascending order, as a discovery accumulates them.
-        // Under trace the per-label scan this replaces (for each label, every k-mer's hit list
-        // searched for it) cost O(labels x k-mers x hits), an absent label reading every list
-        // whole: 2,000 explicit labels took 5.9 s where the discovery returning the same
-        // profiles took 0.2 s, and nothing polled the client meanwhile (review of 2026-10-06,
-        // X-EFFICIENCY-04). Each label receives the calls the scan made, in the same order, so
-        // the profiles are the same. Presence held a bitmap of labels x k-mers (125 MB for 1,000
-        // labels on 1 M k-mers); the accumulator's runs are runs_of's of that bitmap
-        std::vector<LabelSupport> support(refs.size());
-        std::vector<Coord> scratch;
-        auto scatter = [&](uint64_t i, const LabelQuery::NodeHits &node_hits) {
-            for (const auto &h : node_hits) {
-                assert(h.label < refs.size());
-                LabelSupport &s = support[h.label];
-                if (with_coords) {
-                    // trace-consistent runs: a chain of coordinates increasing by one per
-                    // k-mer. Column labels have coordinates in the column frame, header labels
-                    // in the sequence frame; either way consecutive k-mers must have
-                    // consecutive coords (LabelSupport::add_trace). A label's first hit of the
-                    // k-mer is its one (the scan stopped at it; a query holds a label once)
-                    if (s.last == i)
-                        continue;
-                    s.add_trace(i, h.coords.data(), h.coords.size(), scratch);
-                } else {
-                    // present at the k-mer once, however many hits name it (as its bit was)
-                    if (s.open.end == i + 1)
-                        continue;
-                    s.add(i);
-                }
-            }
-        };
         if (!options.time_up) {
             // no deadline: one fetch of every k-mer's hits, as before
             auto hits = query_labels.fetch(keys);
@@ -708,13 +736,17 @@ SupportProfile resolve_support(LabelOracle &oracle,
                     checkpoint();
                 scatter(i, hits[i]);
             }
+        } else if (path != "direct") {
+            // the row paths scattered their hits with the priming. Left, when the deadline
+            // passed before the first row: the k-mers before the first present one, absent
+            // from the graph, with no hits
+            scatter_primed(resolved);
         } else {
-            // Under a deadline the hits are fetched kResolveCheckKmers k-mers at a time, the
-            // deadline read before each piece but the first (read just before it): one fetch of
-            // the whole query is a piece no clock read can end — on a direct-access annotation
-            // it reads every k-mer's cell of every label. A key's hits do not depend on the
-            // piece it is fetched in, so the profile is the one fetch's
-            std::vector<node_index> piece;
+            // Under a deadline the direct path's hits are fetched kResolveCheckKmers k-mers at a
+            // time, the deadline read before each piece but the first (read just before it): one
+            // fetch of the whole query is a piece no clock read can end — it reads every k-mer's
+            // cell of every label. A key's hits do not depend on the piece it is fetched in, so
+            // the profile is the one fetch's
             for (uint64_t begin = 0; begin < resolved; begin += kResolveCheckKmers) {
                 if (begin && poll()) {
                     // resolved: the k-mers before the first present one from |begin| on (any
