@@ -710,7 +710,7 @@ One entry per pattern, in request order. Every count is `{value, relation, unit}
                 "unknown_labels": {"refseq33m": []}},
   "results": [
     {"graph": "refseq33m", "index_fp": "907ec9…", "release": "refseq97-804731aa…",
-     "kmer": "TTGACGCGTCAGGTACCGGAACTGATCCAGT", "instance": "GCGTCAGGTACCGGA", "offset": 4, "strand": "+",
+     "kmer": "TTGACGCGTCAGGTACCGGAACTGATCCAGT", "instance": "GCGTCAGGTACCGGA", "offset": 5, "strand": "+",
      "support": "kmer",
      "labels": [
        {"column": "562", "support": "kmer", "occurrences": [
