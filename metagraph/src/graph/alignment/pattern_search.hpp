@@ -3,15 +3,45 @@
 
 /**
  * Pattern search: count, and extract without reading any annotation, every graph context of
- * a short motif or an IUPAC pattern (peptides later) on the succinct graph.
+ * a short motif or an IUPAC pattern (peptides later) on the succinct graph, and for a pattern
+ * longer than k every graph path spelling it (phase 2, the extension).
  *
  * The design is docs/DESIGN-pattern-search.md (v6 + §22); section numbers below refer to it.
  * This header is the contract between the engine (pattern_search.cpp) and the route
- * (src/cli/pattern.cpp) for increments 0-2: modes count, all_or_count and partial, the last two
- * only with output.labels "none" (the label-free path, §4.3); no annotation read, no placement,
- * no predicate, no extension beyond k, single graph. The JSON the route writes from these
- * types is the contract of §7 (src/cli/pattern.cpp writes it); every JSON name comes from the
- * to_string() family at the end of this file.
+ * (src/cli/pattern.cpp) for increments 0-2 and the engine half of increment 4: modes count,
+ * all_or_count and partial, the last two only with output.labels "none" (the label-free path,
+ * §4.3); no annotation read, no placement, no predicate, single graph. The JSON the route
+ * writes from these types is the contract of §7 (src/cli/pattern.cpp writes it); every JSON
+ * name comes from the to_string() family at the end of this file.
+ *
+ * The extension beyond k (§4.2, increment 4) is opt-in: Request::extend_paths. Without it
+ * (the default) a pattern longer than k is answered exactly as in increments 1-2 (anchors
+ * counted, paths UNKNOWN, nothing released, note paths_later_increment), so the route's
+ * answers do not change until it opts in.
+ *
+ * Wiring the route for `long` (a follow-up; the route is not edited by increment 4's engine
+ * work). In src/cli/pattern.cpp:
+ *  1. parse_request: accept "max_paths" (refused by name as later_increment today; capped
+ *     like max_anchors, by a new --pattern-max-paths) into req.request.max_paths, and set
+ *     req.request.extend_paths = true;
+ *  2. entry_json, the `anchors` branch: counts.paths = count_json(anchors->paths) as today,
+ *     plus paths["candidates_examined"] = anchors->candidates_examined, the per-strand split
+ *     put_orientations(&paths, anchors->paths_by_orientation, strand_stated), and
+ *     paths["extension"] = to_string(anchors->extension); work["extension_edges"] =
+ *     result->work.extension_edges; timing["extension_ms"] = result->extension_ms;
+ *  3. context_json: for a released path (!c.path.empty()) write kmer = c.sequence (the L
+ *     spelled bases, §7.2), instance = c.sequence, anchor_kmer =
+ *     graph.get_node_sequence(c.node), offset 0, and with output.paths the node ids c.path
+ *     (rows: AnnotatedDBG::graph_to_anno_index(search.base_node(n)) per node); the check
+ *     `c.offset + length > k` applies to L <= k contexts only;
+ *  4. capabilities: long_patterns "paths", max_paths among the caps. The SPEC's milestone
+ *     table (increment 4) announces what then changes for L > k, count mode included:
+ *     counts.paths becomes known, the note and the withheld reason paths_later_increment
+ *     no longer appear (they are never produced with extend_paths), and
+ *     anchors_above_threshold, stop phase "extension" and reason "max_paths" can appear.
+ * Everything else (the withheld reasons, the cut, retrieval_complete, the stop and its phase)
+ * flows through the existing Extraction and Stop fields with the values added below
+ * (Withheld::ANCHORS_ABOVE_THRESHOLD, StopReason::MAX_PATHS, StopPhase::EXTENSION).
  *
  * The owner's guarantee rule holds for every type here: nothing is weakened silently, every
  * count carries its unit and its relation, and a count is never promoted by assumption.
@@ -187,6 +217,10 @@ class Pattern {
      * |spelled| at positions [0, position) of this oriented pattern. For DNA and IUPAC it is
      * positions()[position] whatever was spelled; a peptide's codon automaton (§6, a later
      * increment) depends on |spelled|, which is why the range DFS asks through this call.
+     * The extension (§4.2) asks it at every position >= k with |spelled| the whole instance
+     * so far: the anchor's k spelled bases (read from the graph) followed by the bases the
+     * DFS appended, so that an automaton recomputes its state at the k boundary from the
+     * anchor's sequence (§4.1, last bullet) and needs no state carried by the engine.
      */
     BaseSet allowed(size_t position, std::string_view spelled) const;
 
@@ -246,8 +280,11 @@ enum class Mode { COUNT, ALL_OR_COUNT, PARTIAL };
  *              p in [0, k - L]: every occurrence inside a retained k-mer. Branching work even
  *              for an exact pattern (the flank ranges), charged to max_steps.
  *  LONG        (L > k) implied by the length whatever the request named, never requested:
- *              this increment counts the anchors (the k-mers instantiating positions
- *              [0, k)), extends nothing and extracts nothing.
+ *              the anchors (the k-mers instantiating positions [0, k)) are counted, and with
+ *              Request::extend_paths every admitted anchor is extended along the pattern to
+ *              position L (§4.2): the complete paths are the pattern's contexts (offset 0,
+ *              n = L - k + 1 k-mers, every one of them retained: §3 "Covered sequence").
+ *              Without extend_paths nothing is extended or extracted (increments 1-2).
  */
 enum class Scope { SUFFIX, ANY_OFFSET, LONG };
 
@@ -271,8 +308,10 @@ struct Request {
     Strands strands = Strands::BOTH;
     // when set, a pattern's discovery stops as soon as its running lower bound, over all its
     // offsets and orientations, exceeds its threshold (§5.2): contexts against max_contexts
-    // (L <= k), anchors against max_anchors (L > k); the count is then AT_LEAST and the stop
-    // names the threshold. Ends only that pattern; the next one starts afresh
+    // (L <= k), anchors against max_anchors (L > k), and with extend_paths the extension
+    // stops as soon as more than max_paths paths are complete; the count of that phase is
+    // then AT_LEAST, every later phase's UNKNOWN, and the stop names the threshold. Ends only
+    // that pattern; the next one starts afresh
     bool stop_at_threshold = false;
     /**
      * Per pattern, all offsets and orientations (§5.3): the stop_at_threshold threshold for
@@ -280,15 +319,48 @@ struct Request {
      * <= it) and PARTIAL's cap on the contexts returned.
      */
     uint64_t max_contexts = 10'000;
-    // the stop_at_threshold threshold for L > k (it admits an extension in a later increment)
+    /**
+     * L > k: the stop_at_threshold threshold of the anchors, and with extend_paths the
+     * extension's admission (§4.2, §5.2) in every mode, count() included: the anchors are
+     * extended only when their count is EXACT and <= max_anchors; above it the paths stay
+     * UNKNOWN (Extension::NOT_ADMITTED) and enumerate() withholds ANCHORS_ABOVE_THRESHOLD.
+     */
     uint64_t max_anchors = 1'000;
     /**
-     * L > k, enumerate() only: release the anchors (the k-mers instantiating the anchor
-     * window, at offset 0) exactly as contexts are released for L <= k, with max_anchors in
-     * the place of max_contexts (ALL_OR_COUNT's threshold, PARTIAL's cap). An anchor is not
-     * a context of the pattern (its path may not complete, §4.2), so the contract of this
-     * increment does not publish them and the route leaves this false: the results of a
-     * long pattern are then withheld (PATHS_LATER_INCREMENT). Not a JSON field.
+     * L > k: run phase 2 (§4.2), the depth-first extension of every admitted anchor along
+     * outgoing edges to position L, trying only Pattern::allowed() at each position. The
+     * complete paths are then the pattern's contexts: AnchorCounts::paths is counted (EXACT
+     * when every anchor was extended), enumerate() releases paths (Context::path and
+     * Context::sequence) instead of withholding PATHS_LATER_INCREMENT, and the note
+     * paths_later_increment is not set. False (the default): increments 1-2, unchanged —
+     * anchors counted, paths UNKNOWN (EXACT 0 without anchors), nothing extended or
+     * released for L > k, no extension step charged. Not a JSON field: the route sets it
+     * when it serves `long` (see "Wiring the route" at the top of this file).
+     */
+    bool extend_paths = false;
+    /**
+     * L > k with extend_paths: the retrieval threshold on completed paths (§4.2, §5.2) —
+     * ALL_OR_COUNT releases the paths only when their count is EXACT and <= max_paths,
+     * PARTIAL releases the first max_paths paths in answer order, and with
+     * stop_at_threshold the extension stops as soon as more than max_paths are complete
+     * (stop {EXTENSION, MAX_PATHS}). Retention (§5.2, "Descriptor retention by phase"): a
+     * count() keeps no path; ALL_OR_COUNT keeps the paths while their count is <= max_paths
+     * and drops them all once it is exceeded; PARTIAL keeps the first max_paths.
+     */
+    uint64_t max_paths = 1'000;
+    /**
+     * L > k without extend_paths, enumerate() only: release the anchors (the k-mers
+     * instantiating the anchor window, at offset 0) exactly as contexts are released for
+     * L <= k, with max_anchors in the place of max_contexts (ALL_OR_COUNT's threshold,
+     * PARTIAL's cap). An anchor is not a context of the pattern (its path may not complete,
+     * §4.2), so the contract does not publish them and the route leaves this false. Not a
+     * JSON field; a test and diagnostic aid.
+     * It is not what keeps the anchors for the extension: with extend_paths the anchors
+     * are retained in every mode, count() included, through the extension's admission —
+     * dropped as soon as their running count exceeds max_anchors (the admission fails) and
+     * once every anchor has been listed for the extension (§5.2, "Descriptor retention by
+     * phase") — and they are never released as results. enumerate() refuses
+     * release_anchors together with extend_paths (std::invalid_argument).
      */
     bool release_anchors = false;
     /**
@@ -333,8 +405,9 @@ class Deadline {
 };
 
 // Why a pattern's work stopped, or why PARTIAL's list was cut (JSON stop.reason, cut.reason):
-// the knob an agent can turn
-enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS };
+// the knob an agent can turn. MAX_PATHS: the stop_at_threshold threshold of the extension,
+// and PARTIAL's cap on the paths returned
+enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS, MAX_PATHS };
 
 /**
  * Where it stopped (JSON stop.phase):
@@ -343,11 +416,14 @@ enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS };
  *              edges or candidates (§4.1), and on an even-k wrapped PRIMARY graph the check
  *              of which contexts are palindromic k-mers — the only stop that, after complete
  *              discovery, can leave BOUNDS; every other discovery stop leaves AT_LEAST;
- *  EXTRACTION  enumerate()'s release of contexts, stopped by the deadline after discovery
- *              completed or stopped (its counts keep their relation: extraction counts
- *              nothing).
+ *  EXTRACTION  enumerate()'s release of contexts or paths, stopped by the deadline after
+ *              discovery (and extension) completed or stopped (its counts keep their
+ *              relation: extraction counts nothing);
+ *  EXTENSION   L > k with Request::extend_paths: the listing of the admitted anchors and the
+ *              DFS beyond k (§4.2), stopped by max_steps, the deadline, or max_paths with
+ *              stop_at_threshold. The anchors stay EXACT, the paths become AT_LEAST.
  */
-enum class StopPhase { DISCOVERY, MASK_SCAN, EXTRACTION };
+enum class StopPhase { DISCOVERY, MASK_SCAN, EXTRACTION, EXTENSION };
 
 struct Stop {
     StopPhase phase;
@@ -358,10 +434,11 @@ struct Stop {
  * The request's work budget: max_steps and the deadline, shared by all patterns of the
  * request in request order (§5.3: one share per shard; this increment has one shard), so
  * that the same request on the same index stops at the same step (§5.5). A step is one
- * range evaluation (a tighten_range, successful or not, or a W-rule rank set) or one edge
- * examined by a scan; extraction charges no steps (its work is linear in the contexts it
- * releases, which max_contexts caps, plus the invalid candidates it skips) but reads the
- * clock.
+ * range evaluation (a tighten_range, successful or not, or a W-rule rank set), one edge
+ * examined by a scan, or one outgoing edge examined by the extension (§4.2: every edge
+ * DeBruijnGraph::call_outgoing_kmers reports for a node the DFS expands, allowed or not);
+ * extraction charges no steps (its work is linear in the contexts it releases, which
+ * max_contexts caps, plus the invalid candidates it skips) but reads the clock.
  * Stops are sticky: once a charge is refused, every later charge is refused with the same
  * reason, and the patterns after it answer UNKNOWN counts with that stop.
  */
@@ -471,16 +548,61 @@ struct ContextCounts {
 };
 
 /**
+ * What phase 2 (§4.2) did for a pattern with L > k (JSON, once wired: counts.paths.extension).
+ *  NOT_REQUESTED  Request::extend_paths is false: increments 1-2, nothing extended; paths
+ *                 UNKNOWN, EXACT 0 when the anchors are EXACT 0.
+ *  NO_ANCHORS     the anchors are EXACT 0: nothing to extend; paths EXACT 0 (no path starts
+ *                 without an anchor: a derivation, not a promotion).
+ *  NOT_STARTED    the anchors are not EXACT (a step, time or anchor-threshold stop in
+ *                 discovery or a mask scan, see Result::stop): an anchor set not known
+ *                 completely is never extended; paths UNKNOWN (§3: every phase after a stop).
+ *  NOT_ADMITTED   the anchors are EXACT and above max_anchors: the extension's admission
+ *                 failed (§4.2); paths UNKNOWN; enumerate() withholds ANCHORS_ABOVE_THRESHOLD.
+ *  STOPPED        the extension started and stopped (Result::stop, phase EXTENSION: max_steps,
+ *                 the deadline, or max_paths with stop_at_threshold): paths AT_LEAST, the
+ *                 paths completed before the stop.
+ *  COMPLETED      every anchor was extended to L: paths EXACT.
+ */
+enum class Extension { NOT_REQUESTED, NO_ANCHORS, NOT_STARTED, NOT_ADMITTED, STOPPED, COMPLETED };
+
+/**
  * counts.anchors and counts.paths of a pattern with L > k. An anchor is a k-mer
  * instantiating positions [0, k) of the oriented pattern (§4.2); on a wrapped PRIMARY graph
- * the anchors of Q[0, k) and of rc(Q[0, k)), mapped, united by wrapper node id (§4.1).
+ * the anchors of Q[0, k) and of rc(Q[0, k)), mapped, united by wrapper node id (§4.1). A
+ * path is a walk of n = L - k + 1 k-mers along outgoing edges of the served graph, from an
+ * anchor of the oriented pattern Q, spelling an instance of Q; its identity is
+ * (orientation, node path) (§3, "Graph context", offset 0). Paths exist only where all n
+ * k-mers were retained (§3, "Covered sequence"), and a path is a graph context, not a
+ * record occurrence: two records ACG and CGT make the path ACGT (§4.3; per-label support
+ * is retrieval's).
  */
 struct AnchorCounts {
     Count total = Count::unknown(Unit::ANCHORS);
     std::map<Orientation, Count> by_orientation;
-    // completed paths (§4.2) are a later increment: UNKNOWN, except EXACT 0 when total is
-    // EXACT 0 (no path starts without an anchor; a derivation, not a promotion)
+    /**
+     * Completed paths (unit PATHS), by Extension: EXACT when COMPLETED (and EXACT 0 with
+     * NO_ANCHORS, or without extend_paths when the anchors are EXACT 0), AT_LEAST when
+     * STOPPED, UNKNOWN otherwise. Never derived from the anchors (an anchor may have no
+     * path: AAAC with AAA present).
+     */
     Count paths = Count::unknown(Unit::PATHS);
+    /**
+     * With extend_paths, one entry per orientation searched (empty without it): EXACT when
+     * every anchor of that orientation was extended (EXACT 0 when its anchors are EXACT 0),
+     * AT_LEAST when the extension stopped before, UNKNOWN when it did not run. |paths| is
+     * their sum with the weakest relation, except that a total whose extension did not run
+     * is UNKNOWN (EXACT 0 with NO_ANCHORS) rather than AT_LEAST over its known zeros.
+     */
+    std::map<Orientation, Count> paths_by_orientation;
+    /**
+     * The branches the DFS entered (§4.2: candidates_examined beside the paths): every
+     * partial path of k + 1 .. L bases the extension formed by appending an allowed
+     * outgoing k-mer, complete paths included, anchors not. Work done, not a count of the
+     * pattern: exact as such whether or not the extension completed; 0 when it did not run.
+     * The outgoing edges examined, allowed or not, are Work::extension_edges.
+     */
+    uint64_t candidates_examined = 0;
+    Extension extension = Extension::NOT_REQUESTED;
 };
 
 // JSON work: what the search spent, charged against Budget
@@ -489,7 +611,11 @@ struct Work {
     uint64_t ranges_visited = 0;
     // ranges whose scan began (§4.1: zero in the common case; MASK_SCAN of StopPhase)
     uint64_t mask_scans = 0;
-    // every step this pattern charged: ranges_visited plus the edges its scans examined
+    // L > k with extend_paths: the outgoing edges the extension examined, one step each
+    // (allowed or not); 0 otherwise
+    uint64_t extension_edges = 0;
+    // every step this pattern charged: ranges_visited, plus the edges its scans examined,
+    // plus extension_edges
     uint64_t steps = 0;
 };
 
@@ -503,17 +629,23 @@ struct Refusal {
 
 // Why enumerate() publishes nothing (JSON withheld.reason, §5.2)
 enum class Withheld {
-    // ALL_OR_COUNT: discovery completed, EXACT total > max_contexts
+    // ALL_OR_COUNT: discovery (and for L > k the extension) completed, EXACT total >
+    // max_contexts (L <= k), or EXACT paths > max_paths (L > k with extend_paths)
     COUNT_ABOVE_THRESHOLD,
-    // ALL_OR_COUNT: stop_at_threshold stopped discovery (stop reason MAX_CONTEXTS/MAX_ANCHORS)
+    // ALL_OR_COUNT: stop_at_threshold stopped discovery or the extension (stop reason
+    // MAX_CONTEXTS, MAX_ANCHORS or MAX_PATHS)
     THRESHOLD_CROSSED,
-    // ALL_OR_COUNT: discovery or a mask scan stopped at max_steps
+    // ALL_OR_COUNT: discovery, a mask scan or the extension stopped at max_steps
     DISCOVERY_BUDGET,
-    // ALL_OR_COUNT: discovery or extraction stopped by the deadline (§5.3)
+    // ALL_OR_COUNT: discovery, the extension or extraction stopped by the deadline (§5.3)
     DEADLINE,
-    // either mode, L > k with anchors not EXACT 0: results of a long pattern are its
-    // completed paths (§4.2), a later increment; anchors are never released as results
+    // either mode, L > k without extend_paths, anchors not EXACT 0: results of a long
+    // pattern are its completed paths (§4.2), not extended in increments 1-2; anchors are
+    // never released as results
     PATHS_LATER_INCREMENT,
+    // either mode, L > k with extend_paths: the anchors are EXACT and above max_anchors, so
+    // the extension was not admitted (§4.2); counts.anchors is exact, the paths UNKNOWN
+    ANCHORS_ABOVE_THRESHOLD,
 };
 
 /**
@@ -521,14 +653,14 @@ enum class Withheld {
  * §5.2 "Projection none"), single shard. Absent after count().
  */
 struct Extraction {
-    // contexts passed to the callback
+    // contexts (L > k with extend_paths: paths) passed to the callback
     uint64_t returned = 0;
     /**
      * Every context of the pattern in its scope and strands was released: discovery completed
      * with an EXACT count and returned equals it (an EXACT 0 included, and for L > k anchors
-     * EXACT 0, hence paths EXACT 0). JSON retrieval_complete: the one flag that licenses an
-     * absence claim over graph contexts (§5.1); it claims nothing about labels, which this
-     * increment never reads.
+     * EXACT 0, hence paths EXACT 0; with extend_paths, paths EXACT and all of them
+     * returned). JSON retrieval_complete: the one flag that licenses an absence claim over
+     * graph contexts (§5.1); it claims nothing about labels, which this increment never reads.
      */
     bool complete = false;
     // set: nothing is published ("results": []) and the callback received nothing (an
@@ -537,22 +669,32 @@ struct Extraction {
     // PARTIAL, neither complete nor withheld: why the list is shorter than the pattern's
     // contexts — the reason of the stop that touched the pattern when there is one, else
     // MAX_CONTEXTS (the first max_contexts in answer order were returned; MAX_ANCHORS for
-    // the anchors of Request::release_anchors)
+    // the anchors of Request::release_anchors; MAX_PATHS for paths)
     std::optional<StopReason> cut;
 };
 
 /**
- * One graph context of a pattern with L <= k, as enumerate() releases it (the route writes
- * one JSON result from it: kmer = graph.get_node_sequence(node) on the graph given to
- * PatternSearch, instance = kmer.substr(offset, L), which instantiates P for FORWARD and
- * PALINDROMIC and rc(P) for REVERSE, row = AnnotatedDBG::graph_to_anno_index(base_node)).
- * A context is (orientation, node, offset) (§3): an IUPAC pattern and its reverse
- * complement can both match one instance (NA and TN both match TA), giving two contexts
- * at one (node, offset) that differ in orientation; an exact DNA pattern cannot.
+ * One graph context, as enumerate() releases it.
+ *
+ * L <= k (the route writes one JSON result from it: kmer = graph.get_node_sequence(node) on
+ * the graph given to PatternSearch, instance = kmer.substr(offset, L), which instantiates P
+ * for FORWARD and PALINDROMIC and rc(P) for REVERSE, row =
+ * AnnotatedDBG::graph_to_anno_index(base_node)). A context is (orientation, node, offset)
+ * (§3): an IUPAC pattern and its reverse complement can both match one instance (NA and TN
+ * both match TA), giving two contexts at one (node, offset) that differ in orientation; an
+ * exact DNA pattern cannot. |path| and |sequence| are empty.
+ *
+ * L > k with Request::extend_paths: one path (§4.2), (orientation, path) its identity:
+ * offset 0, |node| and |base_node| its anchor (the first k-mer), |path| its n = L - k + 1
+ * nodes and |sequence| its L spelled bases, which instantiate P for FORWARD and PALINDROMIC
+ * and rc(P) for REVERSE (§7.2: the result's kmer is |sequence|, anchor_kmer the anchor's
+ * k-mer). The anchors of Request::release_anchors are released like L <= k contexts (offset
+ * 0, |path| and |sequence| empty).
  */
 struct Context {
     Orientation orientation;
-    // the oriented pattern's 0-based offset inside the k-mer of |node|, in [0, k - L]
+    // the oriented pattern's 0-based offset inside the k-mer of |node|, in [0, k - L]; 0 for
+    // a path
     uint32_t offset;
     // in the graph given to PatternSearch: the BOSS edge index on a DBGSuccinct, the wrapper
     // id on a wrapped PRIMARY graph (a stored k-mer's id, or that plus the wrapper's offset
@@ -560,14 +702,20 @@ struct Context {
     DeBruijnGraph::node_index node;
     // the stored k-mer that carries the annotation row: |node| itself, except for a virtual
     // node on a wrapped PRIMARY graph, where it is CanonicalDBG::get_base_node(node)
+    // (PatternSearch::base_node maps any node of |path| the same way)
     DeBruijnGraph::node_index base_node;
+    // a path only: its k-mers in reading order, ids as |node|; path.front() == node
+    std::vector<DeBruijnGraph::node_index> path = {};
+    // a path only: the L bases it spells (its first k are the anchor's k-mer)
+    std::string sequence = {};
 };
 
 // JSON notes of a pattern (§7.2), the ones this increment can state:
 //  low_complexity_pattern    an exact pattern that sdust flags with the seeder's parameters
 //                            (T = 20, W = 64, is_low_complexity): why its counts are large
 //  strand_unknown_canonical  graph mode CANONICAL or PRIMARY: orientations, not strands
-//  paths_later_increment     L > k: anchors counted, paths neither extended nor extracted
+//  paths_later_increment     L > k without Request::extend_paths: anchors counted, paths
+//                            neither extended nor extracted (never set with extend_paths)
 constexpr const char kNoteLowComplexity[] = "low_complexity_pattern";
 constexpr const char kNoteStrandUnknown[] = "strand_unknown_canonical";
 constexpr const char kNotePathsLater[] = "paths_later_increment";
@@ -607,6 +755,9 @@ struct Result {
     // kNote* values, in the order the constants are declared
     std::vector<std::string> notes;
     double elapsed_ms = 0;
+    // L > k with extend_paths: the time spent in phase 2 (the listing of the anchors and the
+    // DFS; §7.2 timing.extension_ms), part of elapsed_ms; 0 when it did not run
+    double extension_ms = 0;
 };
 
 
@@ -623,8 +774,22 @@ struct Result {
  *    found by a scan through the mask that is charged one step per edge;
  *  - for ANY_OFFSET, offsets p with p + L <= k - 1 by continuing the DFS from the pattern's
  *    leaves with every non-sentinel symbol (N included on DNA5) for k - 1 - p - L more
- *    steps and counting every valid edge leaving those nodes.
+ *    steps and counting every valid edge leaving those nodes;
+ *  - for L > k with Request::extend_paths (phase 2, §4.2): the anchors above (positions
+ *    [0, k) on node ranges and W), listed in answer order once they are counted EXACT and
+ *    admitted (<= max_anchors), then extended one by one by a depth-first search along
+ *    DeBruijnGraph::call_outgoing_kmers on the graph given to PatternSearch (the wrapper on
+ *    a wrapped PRIMARY graph, so a path may pass between stored and virtual k-mers), keeping
+ *    only the outgoing k-mers whose last base is in Pattern::allowed(position, spelled), to
+ *    position L. Every complete path is a context; the search never scores and stops at the
+ *    first disallowed base, so it is complete within its budget. Outgoing edges come from
+ *    the valid-edge mask's graph (DBGSuccinct::call_outgoing_kmers skips dummy and pruned
+ *    k-mers), so a path exists only where all its k-mers were retained.
  * No dummy edge is relied on and nothing is scored.
+ *
+ * Answer order (§5.5): contexts by (node, offset, orientation); paths by (anchor node,
+ * orientation), then the DFS in symbol order A < C < G < T at every position, i.e. the
+ * paths of one anchor by their spelled sequence. Deterministic on the same index.
  *
  * Stateless between calls; one instance may serve concurrent requests, each with its own
  * Budget.
@@ -641,13 +806,32 @@ class PatternSearch {
     const GraphSupport& graph_support() const { return support_; }
 
     /**
+     * The stored k-mer carrying the annotation row of |node| of the graph given to
+     * PatternSearch (Context::base_node, for every node of a Context::path): |node| itself,
+     * except for a virtual reverse complement on a wrapped PRIMARY graph, where it is
+     * CanonicalDBG::get_base_node(node).
+     */
+    DeBruijnGraph::node_index base_node(DeBruijnGraph::node_index node) const {
+        return support_.mode == GraphMode::PRIMARY && node > wrapper_offset_
+            ? node - wrapper_offset_
+            : node;
+    }
+
+    /**
      * Counts |pattern| under |request| (as mode COUNT), charging |budget|. Range descriptors
      * are discarded as they are counted, except those whose scan is deferred until
      * discovery completes (at most one per step charged, none in the common case); the
      * rest of the memory is the DFS frontier, O(k * alphabet). Refusals (information floor, SUFFIX on a wrapped PRIMARY graph) come
      * back as Result::refusal without charging anything. On a budget already stopped (or
      * whose work time has passed at the pattern's check_time) every count is UNKNOWN and
-     * stop is {DISCOVERY, the budget's reason}. Never throws for a parsed pattern.
+     * stop is {DISCOVERY, the budget's reason}. Never throws for a parsed pattern, except
+     * std::logic_error on a broken internal invariant (never expected: an answer that
+     * cannot be stated correctly is not stated at all).
+     * L > k with request.extend_paths: the anchors are retained (§5.2: kept through the
+     * extension's admission, dropped once their count exceeds max_anchors) and, when
+     * admitted, extended to count the paths (AnchorCounts::paths, Extension); no path is
+     * retained. The extension's memory is the anchor list (<= max_anchors) and the DFS
+     * stack, O(n * alphabet) for n = L - k + 1.
      */
     Result count(const Pattern &pattern, const Request &request, Budget &budget) const;
 
@@ -665,14 +849,34 @@ class PatternSearch {
      *                discovered, also after a MAX_STEPS or threshold stop (what was built is
      *                delivered, the cut stated), streamed to the callback; none after a TIME
      *                stop in discovery; after a TIME stop in the release, what was called.
-     * L > k: nothing is released (PATHS_LATER_INCREMENT) unless anchors are EXACT 0, or
-     * request.release_anchors asks for the anchors (Context offset 0).
+     * L > k without request.extend_paths: nothing is released (PATHS_LATER_INCREMENT) unless
+     * anchors are EXACT 0, or request.release_anchors asks for the anchors (Context offset 0).
+     * L > k with request.extend_paths (release_anchors must then be false, else
+     * std::invalid_argument): the discovery and the extension exactly as count() — the same
+     * steps, counts and stop — then the paths (Context::path, Context::sequence) in answer
+     * order (anchor node, orientation, then the spelled sequence), which is the DFS's own
+     * order, so the paths kept during the DFS are released as they are:
+     *  ALL_OR_COUNT  every path iff the extension completed (paths EXACT) with paths
+     *                <= max_paths, else none: withheld ANCHORS_ABOVE_THRESHOLD (anchors EXACT
+     *                > max_anchors), COUNT_ABOVE_THRESHOLD (paths EXACT > max_paths),
+     *                THRESHOLD_CROSSED (a MAX_ANCHORS or MAX_PATHS stop), DISCOVERY_BUDGET
+     *                (MAX_STEPS in any phase), DEADLINE (TIME in any phase).
+     *  PARTIAL       the first max_paths paths in answer order among those completed, also
+     *                after a MAX_STEPS or MAX_PATHS stop in the extension (cut = the stop's
+     *                reason, else MAX_PATHS when more paths exist); none after a stop in
+     *                discovery (an anchor set not known completely is never extended; cut =
+     *                that reason), none after a TIME stop (cut TIME), none when the
+     *                extension was not admitted (withheld ANCHORS_ABOVE_THRESHOLD).
+     *                The release reads the clock once before the first callback.
+     *  An EXACT 0 of anchors or of paths is a complete, empty release.
      * Release runs only while the deadline's work time has not passed, reading the clock every
      * kClockStride edges examined; a stop there is {EXTRACTION, TIME}. Every released context
-     * is a valid edge whose k-mer contains the oriented pattern at its offset.
+     * is a valid edge whose k-mer contains the oriented pattern at its offset; every released
+     * path is a walk of valid k-mers whose sequence instantiates the oriented pattern.
      * Memory: discovery retains at most one leaf range per step charged (ALL_OR_COUNT may drop
      * them once the running lower bound exceeds max_contexts), freed before returning; the
-     * contexts themselves are the caller's.
+     * paths retained for the release are at most max_paths, each O(L); the contexts
+     * themselves are the caller's.
      */
     Result enumerate(const Pattern &pattern, const Request &request, Budget &budget,
                      const std::function<void(const Context&)> &callback) const;
@@ -809,6 +1013,7 @@ inline const char* to_string(StopReason reason) {
         case StopReason::TIME: return "time";
         case StopReason::MAX_CONTEXTS: return "max_contexts";
         case StopReason::MAX_ANCHORS: return "max_anchors";
+        case StopReason::MAX_PATHS: return "max_paths";
     }
     return "unknown";
 }
@@ -818,6 +1023,7 @@ inline const char* to_string(StopPhase phase) {
         case StopPhase::DISCOVERY: return "discovery";
         case StopPhase::MASK_SCAN: return "mask_scan";
         case StopPhase::EXTRACTION: return "extraction";
+        case StopPhase::EXTENSION: return "extension";
     }
     return "unknown";
 }
@@ -829,6 +1035,20 @@ inline const char* to_string(Withheld withheld) {
         case Withheld::DISCOVERY_BUDGET: return "discovery_budget";
         case Withheld::DEADLINE: return "deadline";
         case Withheld::PATHS_LATER_INCREMENT: return "paths_later_increment";
+        case Withheld::ANCHORS_ABOVE_THRESHOLD: return "anchors_above_threshold";
+    }
+    return "unknown";
+}
+
+// counts.paths.extension (once the route is wired): what phase 2 did
+inline const char* to_string(Extension extension) {
+    switch (extension) {
+        case Extension::NOT_REQUESTED: return "not_requested";
+        case Extension::NO_ANCHORS: return "no_anchors";
+        case Extension::NOT_STARTED: return "not_started";
+        case Extension::NOT_ADMITTED: return "not_admitted";
+        case Extension::STOPPED: return "stopped";
+        case Extension::COMPLETED: return "completed";
     }
     return "unknown";
 }

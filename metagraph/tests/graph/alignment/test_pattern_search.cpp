@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <random>
 #include <set>
@@ -27,6 +28,7 @@
 #include "../all/test_dbg_helpers.hpp"
 
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
 #include "graph/alignment/aligner_seeder_methods.hpp"
 #include "graph/alignment/pattern_search.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -1429,6 +1431,1008 @@ TEST(PatternSearch, RandomGraphsAgainstOracles) {
     EXPECT_LT(90u, multiple);
     std::cerr << "random cases: " << cases << ", with contexts: " << nonempty
               << ", with more than 3: " << multiple << ", most: " << max_expected << std::endl;
+}
+
+
+// ---------------------------------------------------------------- increment 4: extension
+
+/*
+ * Phase 2 (§4.2, §13 increment 4): a pattern longer than k with Request::extend_paths. Two
+ * oracles, sharing no code with the engine's DFS:
+ *  - the graph-walk oracle extends strings over the served graph's k-mers (graph_kmers, a
+ *    map from each k-mer to its node id): every walk of L - k + 1 k-mers spelling an
+ *    instance of an oriented pattern, never through call_outgoing_kmers; it also counts the
+ *    partial walks of k + 1 .. L bases the DFS must enter (candidates_examined);
+ *  - the record-scan oracle lists the windows of L bases of the records' islands (and of
+ *    their reverse complements unless BASIC) that instantiate an oriented pattern and whose
+ *    k-mers were all retained (the records' k-mers less those a test pruned).
+ * Every record occurrence is a graph path; the converse fails exactly where two records
+ * join in the graph (a path is a graph context, not an occurrence: §3, §4.3).
+ */
+
+Request path_request(Scope scope = Scope::ANY_OFFSET, Strands strands = Strands::BOTH) {
+    Request request = make_request(scope, strands);
+    request.extend_paths = true;
+    request.max_paths = 1'000'000'000;
+    return request;
+}
+
+struct PathCtx {
+    node_index anchor;
+    Orientation orientation;
+    std::string sequence;
+    std::vector<node_index> path;
+
+    // the answer order (§5.5): anchor node, orientation, then the DFS in symbol order
+    bool operator<(const PathCtx &o) const {
+        return std::tie(anchor, orientation, sequence)
+                < std::tie(o.anchor, o.orientation, o.sequence);
+    }
+    bool operator==(const PathCtx &o) const {
+        return std::tie(anchor, orientation, sequence, path)
+                == std::tie(o.anchor, o.orientation, o.sequence, o.path);
+    }
+};
+
+std::ostream& operator<<(std::ostream &out, const PathCtx &p) {
+    out << "(" << p.anchor << ", " << orientation_key(p.orientation) << ", " << p.sequence
+        << ", [";
+    for (node_index n : p.path) {
+        out << " " << n;
+    }
+    return out << " ])";
+}
+
+struct PathOracle {
+    // in answer order
+    std::vector<PathCtx> paths;
+    // the anchors per orientation
+    std::map<Orientation, uint64_t> anchors;
+    // the partial walks of k + 1 .. L bases instantiating the oriented pattern's prefix
+    uint64_t candidates = 0;
+};
+
+PathOracle path_oracle(const DeBruijnGraph &graph, const Pattern &pattern,
+                       const Request &request) {
+    const size_t k = graph.get_k();
+    const size_t L = pattern.length();
+    std::map<std::string, node_index> node_of;
+    for (const auto &[node, kmer] : graph_kmers(graph)) {
+        node_of.emplace(kmer, node);
+    }
+    PathOracle result;
+    for (const auto &[orientation, q] : orientations(pattern, request.strands)) {
+        const Orientation o = orientation;
+        const Pattern &oriented = q;
+        std::function<void(std::string&, std::vector<node_index>&)> grow
+                = [&](std::string &s, std::vector<node_index> &p) {
+            if (s.size() == L) {
+                result.paths.push_back(PathCtx { p.front(), o, s, p });
+                return;
+            }
+            for (char b : std::string("ACGT")) {
+                if (!(oriented.positions()[s.size()] & base_bit(b)))
+                    continue;
+                auto it = node_of.find(s.substr(s.size() - k + 1) + b);
+                if (it == node_of.end())
+                    continue;
+                ++result.candidates;
+                s.push_back(b);
+                p.push_back(it->second);
+                grow(s, p);
+                s.pop_back();
+                p.pop_back();
+            }
+        };
+        for (const auto &[kmer, node] : node_of) {
+            if (!matches(window(q, k), kmer))
+                continue;
+            ++result.anchors[o];
+            std::string s = kmer;
+            std::vector<node_index> p { node };
+            grow(s, p);
+        }
+    }
+    std::sort(result.paths.begin(), result.paths.end());
+    return result;
+}
+
+typedef std::set<std::pair<std::string, Orientation>> SpelledPaths;
+
+SpelledPaths record_path_oracle(const std::vector<std::string> &records, size_t k,
+                                DeBruijnGraph::Mode mode, const Pattern &pattern,
+                                const Request &request,
+                                const std::set<std::string> &pruned = {}) {
+    std::vector<std::string> strands = records;
+    if (mode != DeBruijnGraph::BASIC) {
+        for (const std::string &record : records) {
+            strands.push_back(rev_comp(record));
+        }
+    }
+    auto real = [](std::string_view s) {
+        return std::all_of(s.begin(), s.end(), [](char c) { return base_bit(c); });
+    };
+    std::set<std::string> retained;
+    for (const std::string &s : strands) {
+        for (size_t i = 0; i + k <= s.size(); ++i) {
+            std::string kmer = s.substr(i, k);
+            if (real(kmer) && !pruned.count(kmer))
+                retained.insert(kmer);
+        }
+    }
+    const size_t L = pattern.length();
+    SpelledPaths result;
+    for (const std::string &s : strands) {
+        for (size_t i = 0; i + L <= s.size(); ++i) {
+            std::string occurrence = s.substr(i, L);
+            if (!real(occurrence))
+                continue;
+            bool all_retained = true;
+            for (size_t j = 0; j + k <= L; ++j) {
+                all_retained &= retained.count(occurrence.substr(j, k)) > 0;
+            }
+            if (!all_retained)
+                continue;
+            for (const auto &[orientation, q] : orientations(pattern, request.strands)) {
+                if (matches(q.positions(), occurrence))
+                    result.emplace(occurrence, orientation);
+            }
+        }
+    }
+    return result;
+}
+
+std::vector<PathCtx> run_paths(const PatternSearch &engine, const Pattern &pattern,
+                               const Request &request, Result *result,
+                               uint64_t max_steps = kManySteps) {
+    Budget budget = unbounded_budget(max_steps);
+    std::vector<PathCtx> paths;
+    *result = engine.enumerate(pattern, request, budget, [&](const Context &c) {
+        EXPECT_EQ(0u, c.offset);
+        EXPECT_FALSE(c.path.empty());
+        // braces: the gtest macro expands to an if/else (GCC's -Wdangling-else)
+        if (c.path.size()) {
+            EXPECT_EQ(c.node, c.path.front());
+        }
+        EXPECT_EQ(engine.base_node(c.node), c.base_node);
+        paths.push_back(PathCtx { c.node, c.orientation, c.sequence, c.path });
+    });
+    return paths;
+}
+
+Result count_paths(const DeBruijnGraph &graph, const Pattern &pattern, const Request &request,
+                   uint64_t max_steps = kManySteps) {
+    Budget budget = unbounded_budget(max_steps);
+    return PatternSearch(graph).count(pattern, request, budget);
+}
+
+std::vector<PathCtx> paths_of(const DeBruijnGraph &graph, const Pattern &pattern,
+                              const Request &request) {
+    Request all = request;
+    all.mode = Mode::ALL_OR_COUNT;
+    Result result;
+    return run_paths(PatternSearch(graph), pattern, all, &result);
+}
+
+// marks |kmer| pruned in the graph's valid-edge mask, as graph cleaning would (§3)
+void prune(const DeBruijnGraph &graph, const std::string &kmer) {
+    auto &dbg_succ = const_cast<DBGSuccinct&>(base_dbg(graph));
+    node_index node = dbg_succ.kmer_to_node(kmer);
+    ASSERT_NE(DeBruijnGraph::npos, node) << kmer;
+    auto *mask = dynamic_cast<bit_vector_dyn*>(const_cast<bit_vector*>(dbg_succ.get_mask()));
+    ASSERT_TRUE(mask);
+    mask->set(node, false);
+    ASSERT_FALSE(dbg_succ.in_graph(node));
+}
+
+/**
+ * Every check of one (graph, long pattern, request with extend_paths) against the oracles:
+ * the anchor and path counts in every unit and relation, candidates_examined, the steps
+ * (discovery as without the extension, plus one per outgoing edge examined), the released
+ * paths and their order, each path's nodes and sequence, ALL_OR_COUNT at the threshold and
+ * PARTIAL's prefixes. |records| enables the record-scan comparison (equality when
+ * |records_exact|, else inclusion).
+ */
+void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
+                                 const Request &request,
+                                 const std::vector<std::string> *records = nullptr,
+                                 DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC,
+                                 bool records_exact = false,
+                                 const std::set<std::string> &pruned = {},
+                                 size_t *num_expected = nullptr) {
+    const size_t k = graph.get_k();
+    const size_t L = pattern.length();
+    ASSERT_LT(k, L);
+    ASSERT_TRUE(request.extend_paths);
+    PatternSearch engine(graph);
+
+    const PathOracle oracle = path_oracle(graph, pattern, request);
+    const std::vector<PathCtx> &expected = oracle.paths;
+    if (num_expected)
+        *num_expected = expected.size();
+    uint64_t num_anchors = 0;
+    for (const auto &[o, n] : oracle.anchors) {
+        num_anchors += n;
+    }
+
+    if (records) {
+        SpelledPaths in_records = record_path_oracle(*records, k, mode, pattern, request, pruned);
+        SpelledPaths in_graph;
+        for (const PathCtx &p : expected) {
+            in_graph.emplace(p.sequence, p.orientation);
+        }
+        // every occurrence whose k-mers were all retained is a graph path (§5.1)
+        for (const auto &occurrence : in_records) {
+            EXPECT_TRUE(in_graph.count(occurrence))
+                << occurrence.first << " " << orientation_key(occurrence.second);
+        }
+        if (records_exact) {
+            EXPECT_EQ(in_records, in_graph) << pattern.text();
+        }
+    }
+
+    // count(): the anchors as without the extension, the paths exact
+    Budget budget = unbounded_budget();
+    Result counted = engine.count(pattern, request, budget);
+    ASSERT_FALSE(counted.refusal) << counted.refusal->message;
+    ASSERT_TRUE(counted.anchors);
+    EXPECT_FALSE(counted.contexts);
+    EXPECT_EQ(Scope::LONG, counted.scope);
+    EXPECT_FALSE(counted.stop);
+    EXPECT_FALSE(counted.time_limited);
+    EXPECT_FALSE(counted.extraction);
+    const AnchorCounts &a = *counted.anchors;
+    EXPECT_EQ(Relation::EXACT, a.total.relation);
+    EXPECT_EQ(num_anchors, a.total.value) << pattern.text();
+    EXPECT_EQ(num_anchors ? Extension::COMPLETED : Extension::NO_ANCHORS, a.extension);
+    EXPECT_EQ(Unit::PATHS, a.paths.unit);
+    EXPECT_EQ(Relation::EXACT, a.paths.relation);
+    EXPECT_EQ(expected.size(), a.paths.value) << pattern.text();
+    EXPECT_EQ(oracle.candidates, a.candidates_examined) << pattern.text();
+    EXPECT_LE(expected.size(), a.candidates_examined);
+    std::map<Orientation, uint64_t> by_orientation;
+    for (const PathCtx &p : expected) {
+        ++by_orientation[p.orientation];
+    }
+    ASSERT_EQ(orientations(pattern, request.strands).size(), a.paths_by_orientation.size());
+    for (const auto &[o, count] : a.paths_by_orientation) {
+        EXPECT_EQ(Relation::EXACT, count.relation);
+        EXPECT_EQ(Unit::PATHS, count.unit);
+        EXPECT_EQ(by_orientation[o], count.value) << pattern.text() << " " << orientation_key(o);
+    }
+    EXPECT_TRUE(std::find(counted.notes.begin(), counted.notes.end(), kNotePathsLater)
+                    == counted.notes.end());
+    if (!num_anchors) {
+        EXPECT_EQ(0u, counted.work.extension_edges);
+    }
+
+    // the discovery is that of the anchors alone; the extension adds one step per edge
+    Request anchors_only = request;
+    anchors_only.extend_paths = false;
+    Result plain = count_of(graph, pattern, anchors_only);
+    EXPECT_EQ(plain.anchors->total.value, a.total.value);
+    EXPECT_EQ(Extension::NOT_REQUESTED, plain.anchors->extension);
+    EXPECT_EQ(plain.work.ranges_visited, counted.work.ranges_visited);
+    EXPECT_EQ(plain.work.steps + counted.work.extension_edges, counted.work.steps);
+
+    // enumerate(), ALL_OR_COUNT: every path in answer order
+    Request all = request;
+    all.mode = Mode::ALL_OR_COUNT;
+    Result enumerated;
+    std::vector<PathCtx> released = run_paths(engine, pattern, all, &enumerated);
+    EXPECT_EQ(counted.work.steps, enumerated.work.steps);
+    EXPECT_EQ(counted.work.extension_edges, enumerated.work.extension_edges);
+    EXPECT_EQ(a.candidates_examined, enumerated.anchors->candidates_examined);
+    ASSERT_TRUE(enumerated.extraction);
+    EXPECT_TRUE(enumerated.extraction->complete);
+    EXPECT_FALSE(enumerated.extraction->withheld);
+    EXPECT_FALSE(enumerated.extraction->cut);
+    EXPECT_EQ(expected.size(), enumerated.extraction->returned);
+    ASSERT_EQ(expected, released) << pattern.text();
+
+    const Pattern rc = pattern.reverse_complement();
+    for (const PathCtx &p : released) {
+        // n = L - k + 1 retained k-mers, each the next window of the spelled sequence, which
+        // instantiates the oriented pattern
+        ASSERT_EQ(L, p.sequence.size());
+        ASSERT_EQ(L - k + 1, p.path.size());
+        for (size_t i = 0; i < p.path.size(); ++i) {
+            EXPECT_EQ(p.sequence.substr(i, k), graph.get_node_sequence(p.path[i]));
+        }
+        const Pattern &q = p.orientation == Orientation::REVERSE ? rc : pattern;
+        EXPECT_TRUE(matches(q.positions(), p.sequence)) << p;
+    }
+
+    // ALL_OR_COUNT: all or nothing at max_paths
+    if (!expected.empty()) {
+        Request tight = all;
+        tight.max_paths = expected.size() - 1;
+        Result withheld;
+        EXPECT_TRUE(run_paths(engine, pattern, tight, &withheld).empty());
+        EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, withheld.extraction->withheld);
+        EXPECT_FALSE(withheld.extraction->complete);
+        EXPECT_EQ(Relation::EXACT, withheld.anchors->paths.relation);
+        EXPECT_EQ(expected.size(), withheld.anchors->paths.value);
+    }
+
+    // PARTIAL: the first max_paths in answer order, the cut stated
+    Request partial = request;
+    partial.mode = Mode::PARTIAL;
+    for (uint64_t cap : { uint64_t(0), uint64_t(1), uint64_t(expected.size() / 2),
+                          uint64_t(expected.size()) }) {
+        partial.max_paths = cap;
+        Result cut;
+        std::vector<PathCtx> prefix = run_paths(engine, pattern, partial, &cut);
+        ASSERT_EQ(std::min<uint64_t>(cap, expected.size()), prefix.size());
+        EXPECT_TRUE(std::equal(prefix.begin(), prefix.end(), expected.begin()));
+        EXPECT_EQ(Relation::EXACT, cut.anchors->paths.relation);
+        if (cap >= expected.size()) {
+            EXPECT_TRUE(cut.extraction->complete);
+            EXPECT_FALSE(cut.extraction->cut);
+        } else {
+            EXPECT_FALSE(cut.extraction->complete);
+            EXPECT_EQ(StopReason::MAX_PATHS, cut.extraction->cut);
+        }
+    }
+}
+
+
+TEST(PatternSearch, ExtensionNotRequestedUnchanged) {
+    // without extend_paths a long pattern is answered as in increments 1-2, step for step
+    std::vector<std::string> records { "TTACGTACCA", "GGACGTTT" };
+    auto graph = build(4, records, DeBruijnGraph::BASIC);
+    Pattern acgta = Pattern::parse(PatternKind::DNA, "ACGTA");
+
+    Result plain = count_of(*graph, acgta, make_request());
+    EXPECT_EQ(Extension::NOT_REQUESTED, plain.anchors->extension);
+    EXPECT_EQ(Relation::UNKNOWN, plain.anchors->paths.relation);
+    EXPECT_TRUE(plain.anchors->paths_by_orientation.empty());
+    EXPECT_EQ(0u, plain.anchors->candidates_examined);
+    EXPECT_EQ(0u, plain.work.extension_edges);
+    EXPECT_EQ(0.0, plain.extension_ms);
+    EXPECT_EQ(kNotePathsLater, plain.notes.back());
+
+    Result extended = count_paths(*graph, acgta, path_request());
+    EXPECT_EQ(Extension::COMPLETED, extended.anchors->extension);
+    EXPECT_EQ(Relation::EXACT, extended.anchors->paths.relation);
+    EXPECT_TRUE(extended.notes.empty());
+    EXPECT_LT(0u, extended.work.extension_edges);
+    EXPECT_EQ(plain.work.steps + extended.work.extension_edges, extended.work.steps);
+
+    // the anchors are never results once paths are: the combination is refused
+    Request both = path_request();
+    both.release_anchors = true;
+    Budget budget = unbounded_budget();
+    EXPECT_THROW(PatternSearch(*graph).enumerate(acgta, both, budget, [](const Context &) {}),
+                 std::invalid_argument);
+    // count() reads no release field
+    EXPECT_NO_THROW(PatternSearch(*graph).count(acgta, both, budget));
+
+    // L <= k: extend_paths changes nothing
+    Pattern cg = Pattern::parse(PatternKind::DNA, "CG");
+    Result short_plain = count_of(*graph, cg, make_request());
+    Result short_ext = count_paths(*graph, cg, path_request());
+    EXPECT_EQ(short_plain.work.steps, short_ext.work.steps);
+    EXPECT_EQ(short_plain.contexts->total.value, short_ext.contexts->total.value);
+    EXPECT_EQ(contexts_of(*graph, cg, make_request()).size(),
+              contexts_of(*graph, cg, path_request()).size());
+}
+
+TEST(PatternSearch, ExtensionTwoAndThreeKmers) {
+    // k = 4: ACGTA spans two k-mers (ACGT, CGTA), ACGTAC three
+    std::vector<std::string> records { "TTACGTACCA", "GGACGTTT" };
+    auto graph = build(4, records, DeBruijnGraph::BASIC);
+
+    Pattern two = Pattern::parse(PatternKind::DNA, "ACGTA");
+    Result r = count_paths(*graph, two, path_request());
+    ASSERT_TRUE(r.anchors);
+    // + : ACGT is the anchor; of its outgoing CGTA and CGTT only CGTA continues the pattern
+    // - : TACGT, anchored at TACG
+    EXPECT_EQ(2u, r.anchors->total.value);
+    EXPECT_EQ(Relation::EXACT, r.anchors->paths.relation);
+    EXPECT_EQ(2u, r.anchors->paths.value);
+    EXPECT_EQ(1u, r.anchors->paths_by_orientation.at(Orientation::FORWARD).value);
+    EXPECT_EQ(1u, r.anchors->paths_by_orientation.at(Orientation::REVERSE).value);
+    EXPECT_EQ(2u, r.anchors->candidates_examined);
+    // the outgoing k-mers of ACGT (CGTA, CGTT) and of TACG (ACGT), one step each
+    EXPECT_EQ(3u, r.work.extension_edges);
+    EXPECT_EQ(r.work.extension_edges + count_of(*graph, two, make_request()).work.steps,
+              r.work.steps);
+
+    auto paths = paths_of(*graph, two, path_request(Scope::ANY_OFFSET, Strands::FORWARD));
+    ASSERT_EQ(1u, paths.size());
+    EXPECT_EQ("ACGTA", paths[0].sequence);
+    ASSERT_EQ(2u, paths[0].path.size());
+    EXPECT_EQ("ACGT", graph->get_node_sequence(paths[0].path[0]));
+    EXPECT_EQ("CGTA", graph->get_node_sequence(paths[0].path[1]));
+    check_paths_against_oracles(*graph, two, path_request(), &records, DeBruijnGraph::BASIC,
+                                true);
+
+    // three k-mers: + ACGTAC lies in the first record; - GTACGT is a graph path through
+    // GTAC -> TACG -> ACGT that no record contains (a context, not an occurrence)
+    Pattern three = Pattern::parse(PatternKind::DNA, "ACGTAC");
+    Result t = count_paths(*graph, three, path_request());
+    EXPECT_EQ(Relation::EXACT, t.anchors->paths.relation);
+    EXPECT_EQ(1u, t.anchors->paths_by_orientation.at(Orientation::FORWARD).value);
+    EXPECT_EQ(1u, t.anchors->paths_by_orientation.at(Orientation::REVERSE).value);
+    auto reverse = paths_of(*graph, three, path_request(Scope::ANY_OFFSET, Strands::REVERSE));
+    ASSERT_EQ(1u, reverse.size());
+    EXPECT_EQ("GTACGT", reverse[0].sequence);
+    EXPECT_EQ(Orientation::REVERSE, reverse[0].orientation);
+    EXPECT_EQ(0u, record_path_oracle(records, 4, DeBruijnGraph::BASIC, three,
+                                     path_request(Scope::ANY_OFFSET, Strands::REVERSE)).size());
+    check_paths_against_oracles(*graph, three, path_request(), &records);
+
+    for (auto mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto other = build(4, records, mode);
+        for (const Pattern &p : { two, three }) {
+            check_paths_against_oracles(*other, p, path_request(), &records, mode);
+        }
+    }
+}
+
+TEST(PatternSearch, ExtensionAnchorWithoutPath) {
+    // k = 3, AAAC: the anchor AAA exists, AAC does not: one anchor, zero paths, exactly. An
+    // anchor count says nothing about paths (§3): without the extension they are unknown
+    std::vector<std::string> records { "AAAA", "GAAT" };
+    auto graph = build(3, records, DeBruijnGraph::BASIC);
+    Pattern aaac = Pattern::parse(PatternKind::DNA, "AAAC");
+    Request request = path_request(Scope::ANY_OFFSET, Strands::FORWARD);
+
+    Result r = count_paths(*graph, aaac, request);
+    EXPECT_EQ(Relation::EXACT, r.anchors->total.relation);
+    EXPECT_EQ(1u, r.anchors->total.value);
+    EXPECT_EQ(Extension::COMPLETED, r.anchors->extension);
+    EXPECT_EQ(Relation::EXACT, r.anchors->paths.relation);
+    EXPECT_EQ(0u, r.anchors->paths.value);
+    EXPECT_EQ(0u, r.anchors->candidates_examined);
+    // AAA's outgoing k-mers AAA and AAT were examined, neither allowed
+    EXPECT_EQ(2u, r.work.extension_edges);
+
+    Request plain = request;
+    plain.extend_paths = false;
+    EXPECT_EQ(Relation::UNKNOWN, count_of(*graph, aaac, plain).anchors->paths.relation);
+
+    Request all = request;
+    all.mode = Mode::ALL_OR_COUNT;
+    Result e;
+    EXPECT_TRUE(run_paths(PatternSearch(*graph), aaac, all, &e).empty());
+    EXPECT_TRUE(e.extraction->complete);
+    EXPECT_EQ(0u, e.extraction->returned);
+    check_paths_against_oracles(*graph, aaac, path_request(), &records, DeBruijnGraph::BASIC,
+                                true);
+
+    // and no anchor at all: nothing to extend, paths exact 0 by derivation
+    Pattern cccca = Pattern::parse(PatternKind::DNA, "CCCCA");
+    Result none = count_paths(*graph, cccca, path_request());
+    EXPECT_EQ(Extension::NO_ANCHORS, none.anchors->extension);
+    EXPECT_EQ(Relation::EXACT, none.anchors->paths.relation);
+    EXPECT_EQ(0u, none.anchors->paths.value);
+    EXPECT_EQ(0u, none.work.extension_edges);
+    check_paths_against_oracles(*graph, cccca, path_request(), &records);
+}
+
+TEST(PatternSearch, ExtensionPrunedMiddleKmer) {
+    // k = 3, ACGTA with CGT pruned: ACG and GTA kept, so every base is covered, but no path
+    // spells ACGTA (§3 "Covered sequence": a long pattern needs every k-mer retained)
+    std::vector<std::string> records { "ACGTA" };
+    Pattern acgta = Pattern::parse(PatternKind::DNA, "ACGTA");
+    Request request = path_request(Scope::ANY_OFFSET, Strands::FORWARD);
+
+    auto intact = build(3, records, DeBruijnGraph::BASIC);
+    Result before = count_paths(*intact, acgta, request);
+    EXPECT_EQ(1u, before.anchors->paths.value);
+    check_paths_against_oracles(*intact, acgta, path_request(), &records, DeBruijnGraph::BASIC,
+                                true);
+
+    auto graph = build(3, records, DeBruijnGraph::BASIC);
+    prune(*graph, "CGT");
+    Result r = count_paths(*graph, acgta, request);
+    EXPECT_EQ(Relation::EXACT, r.anchors->total.relation);
+    EXPECT_EQ(1u, r.anchors->total.value);  // ACG
+    EXPECT_EQ(Extension::COMPLETED, r.anchors->extension);
+    EXPECT_EQ(Relation::EXACT, r.anchors->paths.relation);
+    EXPECT_EQ(0u, r.anchors->paths.value);
+    // the pruned k-mer is not even an outgoing edge of ACG
+    EXPECT_EQ(0u, r.work.extension_edges);
+    EXPECT_EQ(0u, record_path_oracle(records, 3, DeBruijnGraph::BASIC, acgta, request,
+                                     { "CGT" }).size());
+    check_paths_against_oracles(*graph, acgta, path_request(), &records, DeBruijnGraph::BASIC,
+                                true, { "CGT" });
+    // both flanking k-mers are still found as contexts of their own
+    EXPECT_EQ(1u, count_of(*graph, Pattern::parse(PatternKind::DNA, "GTA"),
+                           make_request(Scope::ANY_OFFSET, Strands::FORWARD))
+                      .contexts->total.value);
+}
+
+TEST(PatternSearch, ExtensionCrossRecordPath) {
+    // k = 3, records ACG and CGT: the graph path ACGT, which no record contains (§13: the
+    // graph-walk oracle expects one context, the record scan none). The engine counts graph
+    // contexts; telling them from record occurrences is retrieval's per-label support (§4.3)
+    std::vector<std::string> records { "ACG", "CGT" };
+    auto graph = build(3, records, DeBruijnGraph::BASIC);
+    Pattern acgt = Pattern::parse(PatternKind::DNA, "ACGT");
+    Result r = count_paths(*graph, acgt, path_request());
+    EXPECT_EQ(Relation::EXACT, r.anchors->paths.relation);
+    EXPECT_EQ(1u, r.anchors->paths.value);  // palindromic: searched once
+    EXPECT_TRUE(r.palindromic);
+    EXPECT_EQ(0u, record_path_oracle(records, 3, DeBruijnGraph::BASIC, acgt,
+                                     path_request()).size());
+    check_paths_against_oracles(*graph, acgt, path_request(), &records);
+}
+
+TEST(PatternSearch, ExtensionReverseHitOnWrappedPrimary) {
+    // k = 3, AACG on the wrapped PRIMARY graph of CGTT: the anchor AAC is the virtual
+    // reverse complement of stored GTT (found through rc(AAC), §4.1), and the path goes on
+    // along the wrapper to ACG, the virtual reverse complement of CGT
+    std::vector<std::string> records { "CGTT" };
+    auto graph = build(3, records, DeBruijnGraph::PRIMARY);
+    Pattern aacg = Pattern::parse(PatternKind::DNA, "AACG");
+
+    auto paths = paths_of(*graph, aacg, path_request(Scope::ANY_OFFSET, Strands::FORWARD));
+    ASSERT_EQ(1u, paths.size());
+    EXPECT_EQ("AACG", paths[0].sequence);
+    ASSERT_EQ(2u, paths[0].path.size());
+    EXPECT_EQ("AAC", graph->get_node_sequence(paths[0].path[0]));
+    EXPECT_EQ("ACG", graph->get_node_sequence(paths[0].path[1]));
+
+    Result r = count_paths(*graph, aacg, path_request());
+    EXPECT_EQ(2u, r.anchors->total.value);
+    EXPECT_EQ(Relation::EXACT, r.anchors->paths.relation);
+    EXPECT_EQ(1u, r.anchors->paths_by_orientation.at(Orientation::FORWARD).value);   // AACG
+    EXPECT_EQ(1u, r.anchors->paths_by_orientation.at(Orientation::REVERSE).value);   // CGTT
+    check_paths_against_oracles(*graph, aacg, path_request(), &records,
+                                DeBruijnGraph::PRIMARY, true);
+
+    // on the BASIC graph of the same record only the reverse orientation exists
+    auto basic = build(3, records, DeBruijnGraph::BASIC);
+    Result b = count_paths(*basic, aacg, path_request());
+    EXPECT_EQ(0u, b.anchors->paths_by_orientation.at(Orientation::FORWARD).value);
+    EXPECT_EQ(1u, b.anchors->paths_by_orientation.at(Orientation::REVERSE).value);
+    check_paths_against_oracles(*basic, aacg, path_request(), &records, DeBruijnGraph::BASIC,
+                                true);
+}
+
+TEST(PatternSearch, ExtensionPalindromicAnchorWindow) {
+    // k = 4, ACGTA on the wrapped PRIMARY graph of ACGTA: the anchor window ACGT is a
+    // palindromic k-mer found by both probes and united: one anchor, one path (§4.1)
+    std::vector<std::string> records { "ACGTA" };
+    auto graph = build(4, records, DeBruijnGraph::PRIMARY);
+    Pattern acgta = Pattern::parse(PatternKind::DNA, "ACGTA");
+    Request forward = path_request(Scope::ANY_OFFSET, Strands::FORWARD);
+    Result r = count_paths(*graph, acgta, forward);
+    EXPECT_EQ(Relation::EXACT, r.anchors->total.relation);
+    EXPECT_EQ(1u, r.anchors->total.value);
+    EXPECT_EQ(Relation::EXACT, r.anchors->paths.relation);
+    EXPECT_EQ(1u, r.anchors->paths.value);
+    auto paths = paths_of(*graph, acgta, forward);
+    ASSERT_EQ(1u, paths.size());
+    EXPECT_EQ("ACGTA", paths[0].sequence);
+    check_paths_against_oracles(*graph, acgta, path_request(), &records,
+                                DeBruijnGraph::PRIMARY, true);
+
+    // an IUPAC window with one palindromic instance (ACGT, which continues with A) and one
+    // not (ACGA, which does not)
+    std::vector<std::string> mixed { "ACGTA", "ACGAC" };
+    auto graph2 = build(4, mixed, DeBruijnGraph::PRIMARY);
+    Pattern acgwa = Pattern::parse(PatternKind::IUPAC, "ACGWA");
+    Result m = count_paths(*graph2, acgwa, forward);
+    EXPECT_EQ(2u, m.anchors->total.value);
+    EXPECT_EQ(1u, m.anchors->paths.value);
+    check_paths_against_oracles(*graph2, acgwa, path_request(), &mixed,
+                                DeBruijnGraph::PRIMARY, true);
+
+    // a palindromic k-mer inside a path: TACG -> ACGT -> CGTA
+    std::vector<std::string> inside { "TTACGTAA" };
+    auto graph3 = build(4, inside, DeBruijnGraph::PRIMARY);
+    for (std::string p : { "TACGTA", "TTACGTAA", "NACGTN", "ACGTAA" }) {
+        check_paths_against_oracles(*graph3, Pattern::parse(PatternKind::IUPAC, p),
+                                    path_request(), &inside, DeBruijnGraph::PRIMARY);
+    }
+    EXPECT_EQ(1u, count_paths(*graph3, Pattern::parse(PatternKind::DNA, "TACGTA"),
+                              forward).anchors->paths.value);
+}
+
+TEST(PatternSearch, ExtensionIUPAC) {
+    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto graph = build(5, records, mode);
+        for (std::string p : { "ACGTTGC", "GATCGATC", "NNNNNNA", "GGGCCCAA", "TTTTTTTT",
+                               "RNNNYNG", "GATCNATC", "ACGNTGCAAGG", "NNNNNNNN", "WSWSWS" }) {
+            size_t n = 0;
+            check_paths_against_oracles(*graph, Pattern::parse(PatternKind::IUPAC, p),
+                                        path_request(), &records, mode, false, {}, &n);
+            Result r = count_paths(*graph, Pattern::parse(PatternKind::IUPAC, p),
+                                   path_request());
+            EXPECT_EQ(n, r.anchors->paths.value) << p;
+        }
+    }
+}
+
+TEST(PatternSearch, ExtensionCandidatesExamined) {
+    // k = 3, records ACGTT and ACGAA: from the anchor ACG the DFS examines CGA and CGT
+    // (two edges) and enters CGT (one branch), then examines GTT and enters it (complete)
+    std::vector<std::string> records { "ACGTT", "ACGAA" };
+    auto graph = build(3, records, DeBruijnGraph::BASIC);
+    Request forward = path_request(Scope::ANY_OFFSET, Strands::FORWARD);
+
+    Result exact = count_paths(*graph, Pattern::parse(PatternKind::DNA, "ACGTT"), forward);
+    EXPECT_EQ(1u, exact.anchors->paths.value);
+    EXPECT_EQ(2u, exact.anchors->candidates_examined);
+    EXPECT_EQ(3u, exact.work.extension_edges);
+
+    // ACGNN: both branches entered and completed, in symbol order
+    Pattern acgnn = Pattern::parse(PatternKind::IUPAC, "ACGNN");
+    Result iupac = count_paths(*graph, acgnn, forward);
+    EXPECT_EQ(2u, iupac.anchors->paths.value);
+    EXPECT_EQ(4u, iupac.anchors->candidates_examined);
+    EXPECT_EQ(4u, iupac.work.extension_edges);
+    auto paths = paths_of(*graph, acgnn, forward);
+    ASSERT_EQ(2u, paths.size());
+    EXPECT_EQ("ACGAA", paths[0].sequence);
+    EXPECT_EQ("ACGTT", paths[1].sequence);
+    check_paths_against_oracles(*graph, acgnn, path_request(), &records, DeBruijnGraph::BASIC,
+                                true);
+}
+
+TEST(PatternSearch, ExtensionMaxAnchors) {
+    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
+    auto graph = build(5, records, DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NNNNNNA");
+    Result full = count_paths(*graph, pattern, path_request());
+    ASSERT_EQ(Relation::EXACT, full.anchors->total.relation);
+    const uint64_t anchors = full.anchors->total.value;
+    ASSERT_LT(4u, anchors);
+    ASSERT_LT(0u, full.anchors->paths.value);
+
+    // above max_anchors: the extension is not admitted, in every mode (§4.2)
+    Request request = path_request();
+    request.max_anchors = anchors - 1;
+    Result r = count_paths(*graph, pattern, request);
+    EXPECT_EQ(Relation::EXACT, r.anchors->total.relation);
+    EXPECT_EQ(anchors, r.anchors->total.value);
+    EXPECT_EQ(Extension::NOT_ADMITTED, r.anchors->extension);
+    EXPECT_EQ(Relation::UNKNOWN, r.anchors->paths.relation);
+    EXPECT_EQ(0u, r.anchors->candidates_examined);
+    EXPECT_EQ(0u, r.work.extension_edges);
+    EXPECT_FALSE(r.stop);
+    for (const auto &[o, count] : r.anchors->paths_by_orientation) {
+        EXPECT_EQ(Relation::UNKNOWN, count.relation);
+    }
+    for (Mode mode : { Mode::ALL_OR_COUNT, Mode::PARTIAL }) {
+        request.mode = mode;
+        Result e;
+        EXPECT_TRUE(run_paths(engine, pattern, request, &e).empty());
+        EXPECT_EQ(Withheld::ANCHORS_ABOVE_THRESHOLD, e.extraction->withheld);
+        EXPECT_FALSE(e.extraction->complete);
+        EXPECT_EQ(Extension::NOT_ADMITTED, e.anchors->extension);
+    }
+
+    // at max_anchors: admitted
+    request.max_anchors = anchors;
+    EXPECT_EQ(Extension::COMPLETED, count_paths(*graph, pattern, request).anchors->extension);
+
+    // stop_at_threshold: the anchors stop above max_anchors; nothing is extended
+    request.stop_at_threshold = true;
+    request.max_anchors = 2;
+    Result s = count_paths(*graph, pattern, request);
+    ASSERT_TRUE(s.stop);
+    EXPECT_EQ(StopPhase::DISCOVERY, s.stop->phase);
+    EXPECT_EQ(StopReason::MAX_ANCHORS, s.stop->reason);
+    EXPECT_EQ(Relation::AT_LEAST, s.anchors->total.relation);
+    EXPECT_EQ(Extension::NOT_STARTED, s.anchors->extension);
+    EXPECT_EQ(Relation::UNKNOWN, s.anchors->paths.relation);
+    request.mode = Mode::ALL_OR_COUNT;
+    Result t;
+    EXPECT_TRUE(run_paths(engine, pattern, request, &t).empty());
+    EXPECT_EQ(Withheld::THRESHOLD_CROSSED, t.extraction->withheld);
+    request.mode = Mode::PARTIAL;
+    Result u;
+    EXPECT_TRUE(run_paths(engine, pattern, request, &u).empty());
+    EXPECT_FALSE(u.extraction->withheld);
+    EXPECT_EQ(StopReason::MAX_ANCHORS, u.extraction->cut);
+}
+
+TEST(PatternSearch, ExtensionMaxPaths) {
+    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
+    auto graph = build(5, records, DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NNNNNNA");
+    const std::vector<PathCtx> expected = path_oracle(*graph, pattern, path_request()).paths;
+    ASSERT_LT(4u, expected.size());
+
+    // without stop_at_threshold the paths are counted exactly; the release is thresholded
+    Request request = path_request();
+    request.max_paths = expected.size() - 1;
+    request.mode = Mode::ALL_OR_COUNT;
+    Result all;
+    EXPECT_TRUE(run_paths(engine, pattern, request, &all).empty());
+    EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, all.extraction->withheld);
+    EXPECT_EQ(Relation::EXACT, all.anchors->paths.relation);
+    EXPECT_EQ(expected.size(), all.anchors->paths.value);
+    EXPECT_FALSE(all.stop);
+
+    request.mode = Mode::PARTIAL;
+    Result partial;
+    auto some = run_paths(engine, pattern, request, &partial);
+    ASSERT_EQ(expected.size() - 1, some.size());
+    EXPECT_TRUE(std::equal(some.begin(), some.end(), expected.begin()));
+    EXPECT_EQ(StopReason::MAX_PATHS, partial.extraction->cut);
+    EXPECT_EQ(Relation::EXACT, partial.anchors->paths.relation);
+
+    // stop_at_threshold: the extension stops as soon as max_paths is exceeded
+    request.stop_at_threshold = true;
+    request.max_paths = 2;
+    Budget budget = unbounded_budget();
+    Result s = engine.count(pattern, request, budget);
+    ASSERT_TRUE(s.stop);
+    EXPECT_EQ(StopPhase::EXTENSION, s.stop->phase);
+    EXPECT_EQ(StopReason::MAX_PATHS, s.stop->reason);
+    EXPECT_FALSE(s.time_limited);
+    EXPECT_EQ(Relation::EXACT, s.anchors->total.relation);
+    EXPECT_EQ(Extension::STOPPED, s.anchors->extension);
+    EXPECT_EQ(Relation::AT_LEAST, s.anchors->paths.relation);
+    EXPECT_EQ(3u, s.anchors->paths.value);
+    for (const auto &[o, count] : s.anchors->paths_by_orientation) {
+        EXPECT_NE(Relation::UNKNOWN, count.relation);
+    }
+    // a threshold stop ends only its own pattern
+    EXPECT_FALSE(budget.stopped());
+    Result next = engine.count(Pattern::parse(PatternKind::DNA, "GGGCCCAA"), path_request(),
+                               budget);
+    EXPECT_FALSE(next.stop);
+    EXPECT_EQ(Relation::EXACT, next.anchors->paths.relation);
+
+    request.mode = Mode::ALL_OR_COUNT;
+    Result crossed;
+    EXPECT_TRUE(run_paths(engine, pattern, request, &crossed).empty());
+    EXPECT_EQ(Withheld::THRESHOLD_CROSSED, crossed.extraction->withheld);
+    request.mode = Mode::PARTIAL;
+    Result first;
+    auto two = run_paths(engine, pattern, request, &first);
+    ASSERT_EQ(2u, two.size());
+    EXPECT_TRUE(std::equal(two.begin(), two.end(), expected.begin()));
+    EXPECT_EQ(StopReason::MAX_PATHS, first.extraction->cut);
+    EXPECT_FALSE(first.extraction->complete);
+}
+
+TEST(PatternSearch, ExtensionMaxStepsAtLeast) {
+    // every step budget: a stop in discovery leaves the paths unknown (nothing extended); a
+    // stop in the extension leaves the anchors exact and the paths at_least, PARTIAL a
+    // prefix of the answer, ALL_OR_COUNT nothing
+    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::PRIMARY }) {
+        auto graph = build(5, records, mode);
+        PatternSearch engine(*graph);
+        Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NNNNNRN");
+        const std::vector<PathCtx> expected = path_oracle(*graph, pattern, path_request()).paths;
+        Result full = count_paths(*graph, pattern, path_request());
+        ASSERT_EQ(Relation::EXACT, full.anchors->paths.relation);
+        ASSERT_EQ(expected.size(), full.anchors->paths.value);
+        Request plain = make_request();
+        const uint64_t discovery = count_of(*graph, pattern, plain).work.steps;
+        ASSERT_EQ(discovery + full.work.extension_edges, full.work.steps);
+
+        for (uint64_t steps = 0; steps < full.work.steps; ++steps) {
+            Result r = count_paths(*graph, pattern, path_request(), steps);
+            ASSERT_TRUE(r.stop) << steps;
+            EXPECT_EQ(StopReason::MAX_STEPS, r.stop->reason);
+            EXPECT_LE(r.work.steps, steps);
+            const AnchorCounts &a = *r.anchors;
+            if (steps < discovery) {
+                EXPECT_NE(StopPhase::EXTENSION, r.stop->phase) << steps;
+                EXPECT_NE(Relation::EXACT, a.total.relation);
+                EXPECT_EQ(Extension::NOT_STARTED, a.extension);
+                EXPECT_EQ(Relation::UNKNOWN, a.paths.relation);
+                EXPECT_EQ(0u, r.work.extension_edges);
+            } else {
+                EXPECT_EQ(StopPhase::EXTENSION, r.stop->phase) << steps;
+                EXPECT_EQ(Relation::EXACT, a.total.relation);
+                EXPECT_EQ(full.anchors->total.value, a.total.value);
+                EXPECT_EQ(Extension::STOPPED, a.extension);
+                EXPECT_EQ(Relation::AT_LEAST, a.paths.relation);
+                EXPECT_LE(a.paths.value, expected.size());
+                EXPECT_EQ(steps, r.work.steps);
+                EXPECT_EQ(steps - discovery, r.work.extension_edges);
+                EXPECT_LE(a.candidates_examined, full.anchors->candidates_examined);
+                for (const auto &[o, count] : a.paths_by_orientation) {
+                    const Count &truth = full.anchors->paths_by_orientation.at(o);
+                    if (count.relation == Relation::EXACT) {
+                        EXPECT_EQ(truth.value, count.value) << steps;
+                    } else {
+                        EXPECT_EQ(Relation::AT_LEAST, count.relation);
+                        EXPECT_LE(count.value, truth.value);
+                    }
+                }
+            }
+
+            Request partial = path_request();
+            partial.mode = Mode::PARTIAL;
+            Result p;
+            auto prefix = run_paths(engine, pattern, partial, &p, steps);
+            EXPECT_EQ(StopReason::MAX_STEPS, p.extraction->cut);
+            EXPECT_FALSE(p.extraction->complete);
+            ASSERT_LE(prefix.size(), expected.size());
+            EXPECT_TRUE(std::equal(prefix.begin(), prefix.end(), expected.begin())) << steps;
+            EXPECT_EQ(steps < discovery ? 0u : a.paths.value, prefix.size());
+
+            Request all = path_request();
+            all.mode = Mode::ALL_OR_COUNT;
+            Result w;
+            EXPECT_TRUE(run_paths(engine, pattern, all, &w, steps).empty());
+            EXPECT_EQ(Withheld::DISCOVERY_BUDGET, w.extraction->withheld);
+        }
+    }
+}
+
+TEST(PatternSearch, ExtensionDeadline) {
+    std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA" };
+    auto graph = build(5, records, DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    Pattern pattern = Pattern::parse(PatternKind::DNA, "GATCGATC");
+    const auto start = Deadline::Clock::now();
+
+    // the clock reads late from its |on_time|+1-th reading on: the pattern's start reads it
+    // first, the listing of the anchors second, the release of the paths third
+    auto run = [&](int on_time, Mode mode, std::vector<PathCtx> *released) {
+        auto readings = std::make_shared<int>(0);
+        auto clock = [start, readings, on_time]() {
+            return start + std::chrono::milliseconds(++*readings > on_time ? 10'000 : 0);
+        };
+        Budget budget(kManySteps, Deadline(start, 1000, 250, clock));
+        Request request = path_request();
+        request.mode = mode;
+        if (!released)
+            return engine.count(pattern, request, budget);
+        return engine.enumerate(pattern, request, budget, [&](const Context &c) {
+            released->push_back(PathCtx { c.node, c.orientation, c.sequence, c.path });
+        });
+    };
+
+    // late before the pattern: nothing runs
+    Result before = run(0, Mode::COUNT, nullptr);
+    EXPECT_EQ(StopPhase::DISCOVERY, before.stop->phase);
+    EXPECT_EQ(StopReason::TIME, before.stop->reason);
+    EXPECT_EQ(Extension::NOT_STARTED, before.anchors->extension);
+    EXPECT_EQ(Relation::UNKNOWN, before.anchors->paths.relation);
+    EXPECT_TRUE(before.time_limited);
+
+    // late at the extension: anchors exact, paths at_least 0
+    Result extension = run(1, Mode::COUNT, nullptr);
+    ASSERT_TRUE(extension.stop);
+    EXPECT_EQ(StopPhase::EXTENSION, extension.stop->phase);
+    EXPECT_EQ(StopReason::TIME, extension.stop->reason);
+    EXPECT_EQ(Relation::EXACT, extension.anchors->total.relation);
+    EXPECT_EQ(Extension::STOPPED, extension.anchors->extension);
+    EXPECT_EQ(Relation::AT_LEAST, extension.anchors->paths.relation);
+    EXPECT_EQ(0u, extension.anchors->paths.value);
+    EXPECT_TRUE(extension.time_limited);
+    std::vector<PathCtx> none;
+    Result all = run(1, Mode::ALL_OR_COUNT, &none);
+    EXPECT_EQ(Withheld::DEADLINE, all.extraction->withheld);
+    Result partial = run(1, Mode::PARTIAL, &none);
+    EXPECT_EQ(StopReason::TIME, partial.extraction->cut);
+    EXPECT_TRUE(none.empty());
+
+    // late at the release: paths exact, nothing released, stop {extraction, time}
+    Result release = run(2, Mode::ALL_OR_COUNT, &none);
+    EXPECT_EQ(Relation::EXACT, release.anchors->paths.relation);
+    EXPECT_LT(0u, release.anchors->paths.value);
+    ASSERT_TRUE(release.stop);
+    EXPECT_EQ(StopPhase::EXTRACTION, release.stop->phase);
+    EXPECT_EQ(Withheld::DEADLINE, release.extraction->withheld);
+    Result streamed = run(2, Mode::PARTIAL, &none);
+    EXPECT_EQ(StopReason::TIME, streamed.extraction->cut);
+    EXPECT_TRUE(none.empty());
+
+    // on time throughout
+    std::vector<PathCtx> got;
+    Result fine = run(100, Mode::ALL_OR_COUNT, &got);
+    EXPECT_FALSE(fine.stop);
+    EXPECT_TRUE(fine.extraction->complete);
+    EXPECT_EQ(fine.anchors->paths.value, got.size());
+}
+
+TEST(PatternSearch, ExtensionDeterministicOrder) {
+    // the same request on the same index gives the same paths in the same order (§5.5):
+    // anchors by node, then orientation, then the DFS in symbol order
+    std::mt19937 rng(7);
+    std::vector<std::string> records(4);
+    for (std::string &record : records) {
+        for (int i = 0; i < 40; ++i) {
+            record.push_back("ACGT"[rng() % 4]);
+        }
+    }
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto graph = build(4, records, mode);
+        Pattern pattern = Pattern::parse(PatternKind::IUPAC, "NNRNYN");
+        auto first = paths_of(*graph, pattern, path_request());
+        auto second = paths_of(*graph, pattern, path_request());
+        ASSERT_LT(10u, first.size());
+        EXPECT_EQ(first, second);
+        EXPECT_TRUE(std::is_sorted(first.begin(), first.end()));
+        // within one anchor and orientation, the paths come by their spelled sequence
+        for (size_t i = 1; i < first.size(); ++i) {
+            if (first[i].anchor == first[i - 1].anchor
+                    && first[i].orientation == first[i - 1].orientation) {
+                EXPECT_LT(first[i - 1].sequence, first[i].sequence);
+            }
+        }
+        check_paths_against_oracles(*graph, pattern, path_request(), &records, mode);
+    }
+}
+
+TEST(PatternSearch, ExtensionRandomGraphsAgainstOracles) {
+    // fixed seeds: a few hundred (graph, long pattern, request) cases over every graph mode,
+    // both builders, every strand choice, DNA and IUPAC patterns of length k + 1 .. k + 6
+    const char *iupac = "ACGTRYSWKMBDHVN";
+    size_t cases = 0;
+    size_t nonempty = 0;
+    size_t multiple = 0;
+    size_t max_expected = 0;
+    for (uint32_t seed = 1; seed <= 60; ++seed) {
+        std::mt19937 rng(1000 + seed);
+        size_t k = 3 + rng() % 6;
+        auto mode = static_cast<DeBruijnGraph::Mode>(rng() % 3);
+        bool batch = rng() % 2;
+
+        std::vector<std::string> records(1 + rng() % 5);
+        for (std::string &record : records) {
+            size_t length = k + 2 + rng() % 30;
+            for (size_t i = 0; i < length; ++i) {
+                // an occasional N splits a record into islands (DNA4)
+                record.push_back(rng() % 25 ? "ACGT"[rng() % 4] : 'N');
+            }
+        }
+        auto graph = build(k, records, mode, batch);
+
+        for (int t = 0; t < 6; ++t) {
+            size_t length = k + 1 + rng() % 6;
+            bool use_iupac = rng() % 2;
+            std::string text;
+            for (size_t i = 0; i < length; ++i) {
+                text.push_back(use_iupac && rng() % 3 == 0 ? iupac[rng() % 15] : "ACGT"[rng() % 4]);
+            }
+            // three quarters of the patterns from the records' islands, so that most have
+            // paths, and those of them that are IUPAC made degenerate at two positions
+            if (rng() % 4) {
+                for (int attempt = 0; attempt < 10; ++attempt) {
+                    const std::string &record = records[rng() % records.size()];
+                    if (record.size() < length)
+                        continue;
+                    std::string piece = record.substr(rng() % (record.size() - length + 1),
+                                                      length);
+                    if (piece.find('N') != std::string::npos)
+                        continue;
+                    text = piece;
+                    for (int d = 0; use_iupac && d < 2; ++d) {
+                        text[rng() % length] = iupac[rng() % 15];
+                    }
+                    break;
+                }
+            }
+            auto strands = static_cast<Strands>(rng() % 3);
+            Pattern pattern = Pattern::parse(PatternKind::IUPAC, text);
+            SCOPED_TRACE("seed " + std::to_string(seed) + " k " + std::to_string(k)
+                         + " mode " + std::to_string(mode) + " batch " + std::to_string(batch)
+                         + " pattern " + text);
+            size_t num_expected = 0;
+            check_paths_against_oracles(*graph, pattern,
+                                        path_request(Scope::ANY_OFFSET, strands),
+                                        &records, mode, false, {}, &num_expected);
+            ++cases;
+            nonempty += num_expected > 0;
+            multiple += num_expected > 1;
+            max_expected = std::max(max_expected, num_expected);
+        }
+    }
+    EXPECT_EQ(360u, cases);
+    // the cases are not vacuous: many have paths, some several
+    EXPECT_LT(150u, nonempty);
+    EXPECT_LT(50u, multiple);
+    std::cerr << "random long cases: " << cases << ", with paths: " << nonempty
+              << ", with more than 1: " << multiple << ", most: " << max_expected << std::endl;
 }
 
 #endif // ! _PROTEIN_GRAPH

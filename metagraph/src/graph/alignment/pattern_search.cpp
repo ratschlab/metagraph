@@ -1,6 +1,7 @@
 #include "pattern_search.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <iomanip>
@@ -480,6 +481,17 @@ struct Key {
     }
 };
 
+// the BaseSet bit of a spelled base; 0 for N and $, which no pattern position allows (§3)
+BaseSet base_of_char(char c) {
+    switch (c) {
+        case 'A': return kBaseA;
+        case 'C': return kBaseC;
+        case 'G': return kBaseG;
+        case 'T': return kBaseT;
+        default: return 0;
+    }
+}
+
 std::string format_bits(double bits) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(1) << bits;
@@ -492,14 +504,17 @@ std::string format_bits(double bits) {
  */
 class PatternRun {
   public:
-    PatternRun(const DBGSuccinct &dbg_succ,
+    PatternRun(const DeBruijnGraph &graph,
+               const DBGSuccinct &dbg_succ,
                const GraphSupport &support,
                uint64_t wrapper_offset,
                const Pattern &pattern,
                const Request &request,
                Budget &budget,
                bool retain)
-          : dbg_succ_(dbg_succ),
+          : graph_(graph),
+            canonical_(dynamic_cast<const CanonicalDBG*>(&graph)),
+            dbg_succ_(dbg_succ),
             boss_(dbg_succ.get_boss()),
             support_(support),
             k_(support.k),
@@ -508,7 +523,8 @@ class PatternRun {
             request_(request),
             budget_(budget),
             retain_(retain),
-            long_(pattern.length() > support.k) {
+            long_(pattern.length() > support.k),
+            extending_(long_ && request.extend_paths) {
         for (char base : { 'A', 'C', 'G', 'T' }) {
             codes_.push_back(boss_.encode(base));
         }
@@ -541,7 +557,7 @@ class PatternRun {
      * leaves every range discovered and the counts BOUNDS (§4.1), then the tallies.
      */
     void run() {
-        uint64_t steps_before = budget_.steps_used();
+        steps_before_ = budget_.steps_used();
 
         if (budget_.stopped() || !budget_.check_time()) {
             // a request-wide stop before this pattern: nothing runs, every count UNKNOWN
@@ -556,7 +572,7 @@ class PatternRun {
                 scan_all();
         }
 
-        work_.steps = budget_.steps_used() - steps_before;
+        work_.steps = budget_.steps_used() - steps_before_;
         for (BaseSearch &search : searches_) {
             search.tally(k_);
         }
@@ -610,11 +626,69 @@ class PatternRun {
      * The release (§4.3, label-free): the retained contexts of every orientation in
      * (node, offset, orientation) order, at most |limit| of them, each passed to |emit|.
      * Charges no steps; reads the clock every kClockStride edges examined. Returns false
-     * when the deadline stopped it ({EXTRACTION, TIME} recorded).
+     * when the deadline stopped it ({|phase|, TIME} recorded: EXTRACTION for a release,
+     * EXTENSION for the listing of the anchors to extend).
      */
-    bool release(uint64_t limit, const std::function<void(const Context&)> &emit);
+    bool release(uint64_t limit, const std::function<void(const Context&)> &emit,
+                 StopPhase phase = StopPhase::EXTRACTION);
+
+    // ---------------------------------------------------------------- extension (§4.2)
+
+    /**
+     * Phase 2 for an admitted anchor set (EXACT, <= max_anchors): lists the anchors in
+     * answer order through release() (the anchor ranges are then discarded, §5.2), and
+     * extends each by extend_anchor(). |keep|: retain complete paths for the release under
+     * the rule of Request::max_paths (enumerate()); count() keeps none. |anchors| is their
+     * EXACT count, which the listing must reproduce (std::logic_error otherwise: an anchor
+     * dropped before its extension would make a path count look exact). True when every
+     * anchor was extended to L; false when a stop ended it (recorded, phase EXTENSION).
+     */
+    bool extend(bool keep, uint64_t anchors);
+
+    // the anchors' ranges are no longer needed: the extension's admission failed (§5.2)
+    void drop_anchors() {
+        retain_ = false;
+        for (BaseSearch &search : searches_) {
+            std::vector<Span>().swap(search.release);
+        }
+    }
+
+    // the complete paths of anchors of |orientation| (all of them, retained or not)
+    uint64_t paths_found(Orientation orientation) const {
+        auto it = found_.find(orientation);
+        return it == found_.end() ? 0 : it->second;
+    }
+
+    // every anchor of |orientation| was extended to L: its path count is exact
+    bool orientation_extended(Orientation orientation) const {
+        auto it = anchors_left_.find(orientation);
+        return listed_ && (it == anchors_left_.end() || !it->second);
+    }
+
+    uint64_t candidates_examined() const { return candidates_; }
+
+    /**
+     * The retained paths, in answer order (the DFS's own), each passed to |emit|. Reads the
+     * clock once before the first: false, with nothing emitted, when the work time has
+     * passed ({EXTRACTION, TIME} recorded).
+     */
+    bool release_paths(const std::function<void(const Context&)> &emit) {
+        if (!budget_.check_time()) {
+            record_stop(StopPhase::EXTRACTION, StopReason::TIME);
+            return false;
+        }
+        for (const Context &path : paths_) {
+            emit(path);
+        }
+        return true;
+    }
+
+    uint64_t paths_retained() const { return paths_.size(); }
 
   private:
+    // the served graph: the DBGSuccinct itself, or the CanonicalDBG wrapping a PRIMARY one
+    const DeBruijnGraph &graph_;
+    const CanonicalDBG *canonical_;
     const DBGSuccinct &dbg_succ_;
     const BOSS &boss_;
     const GraphSupport &support_;
@@ -627,6 +701,9 @@ class PatternRun {
     // running lower bound shows that nothing will be released
     bool retain_;
     const bool long_;
+    // L > k with Request::extend_paths: the anchors are retained for the extension in every
+    // mode, and dropped once their count exceeds max_anchors (§5.2)
+    const bool extending_;
 
     std::vector<TAlphabet> codes_;
     std::vector<BaseSearch> searches_;
@@ -636,14 +713,34 @@ class PatternRun {
     std::optional<Stop> stop_;
     bool time_limited_ = false;
     Work work_;
+    uint64_t steps_before_ = 0;
     // the edges examined by the release, for the clock stride
     uint64_t examined_ = 0;
+    // the phase a clock stop in release() is recorded with
+    StopPhase release_phase_ = StopPhase::EXTRACTION;
+
+    // the extension: the anchors listed, those not yet extended to L per orientation, the
+    // complete paths per orientation and in all, the branches entered, the retained paths
+    bool listed_ = false;
+    std::map<Orientation, uint64_t> anchors_left_;
+    std::map<Orientation, uint64_t> found_;
+    uint64_t found_total_ = 0;
+    uint64_t candidates_ = 0;
+    bool keep_paths_ = false;
+    std::vector<Context> paths_;
 
     // the first stop is the pattern's; a later one only adds whether time touched it
     void record_stop(StopPhase phase, StopReason reason) {
         if (!stop_)
             stop_ = Stop { phase, reason };
         time_limited_ |= reason == StopReason::TIME;
+    }
+
+    // PatternSearch::base_node: the stored k-mer of a node of the served graph
+    node_index base_of(node_index node) const {
+        return support_.mode == GraphMode::PRIMARY && node > wrapper_offset_
+            ? node - wrapper_offset_
+            : node;
     }
 
     size_t add_search(const std::vector<BaseSet> &q, bool count_palindromes) {
@@ -748,12 +845,11 @@ class PatternRun {
     // count exceeds max_contexts, §5.2) and the threshold stop of stop_at_threshold
     bool threshold_crossed() {
         uint64_t lower = running_lower();
-        if (retain_ && request_.mode == Mode::ALL_OR_COUNT
+        // ALL_OR_COUNT releases nothing above its threshold, and the extension is not
+        // admitted above max_anchors in any mode (§5.2: anchors kept through the admission)
+        if (retain_ && (request_.mode == Mode::ALL_OR_COUNT || extending_)
                 && lower > (long_ ? request_.max_anchors : request_.max_contexts)) {
-            retain_ = false;
-            for (BaseSearch &search : searches_) {
-                std::vector<Span>().swap(search.release);
-            }
+            drop_anchors();
         }
         if (request_.stop_at_threshold
                 && lower > (long_ ? request_.max_anchors : request_.max_contexts)) {
@@ -955,6 +1051,144 @@ class PatternRun {
         expand(search, all, nullptr);
     }
 
+    // ---------------------------------------------------------------- extension
+
+    // one outgoing edge examined by the extension: one step
+    bool charge_edge() {
+        if (!budget_.charge(1)) {
+            record_stop(StopPhase::EXTENSION, *budget_.stopped());
+            return false;
+        }
+        ++work_.extension_edges;
+        return true;
+    }
+
+    // the outgoing k-mers of |node|, whose sequence is the last k bases of |spelled|; on the
+    // wrapper with that sequence as the spelling hint (it is the node's sequence, read once
+    // for the anchor and then extended base by base)
+    void call_outgoing(node_index node, const std::string &spelled,
+                       const DeBruijnGraph::OutgoingEdgeCallback &callback) const {
+        if (canonical_) {
+            canonical_->call_outgoing_kmers(node, spelled.substr(spelled.size() - k_), callback);
+        } else {
+            graph_.call_outgoing_kmers(node, callback);
+        }
+    }
+
+    /**
+     * A complete path of |anchor|: counted, kept under the retention rule of
+     * Request::max_paths (§5.2), and checked against max_paths for stop_at_threshold.
+     * False when that threshold stopped the extension.
+     */
+    bool complete_path(const Context &anchor, const std::vector<node_index> &path,
+                       const std::string &spelled) {
+        ++found_[anchor.orientation];
+        ++found_total_;
+        if (keep_paths_) {
+            const bool keep = request_.mode == Mode::PARTIAL
+                ? paths_.size() < request_.max_paths
+                : found_total_ <= request_.max_paths;
+            if (keep) {
+                paths_.push_back(Context { anchor.orientation, 0, anchor.node, anchor.base_node,
+                                           path, spelled });
+            } else if (request_.mode != Mode::PARTIAL) {
+                // ALL_OR_COUNT releases all paths or none: none, once they are too many
+                keep_paths_ = false;
+                std::vector<Context>().swap(paths_);
+            }
+        }
+        if (request_.stop_at_threshold && found_total_ > request_.max_paths) {
+            record_stop(StopPhase::EXTENSION, StopReason::MAX_PATHS);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * The depth-first search of one anchor (§4.2): from the anchor's k spelled bases, at
+     * every position the outgoing k-mers of the path's last node whose base is allowed at
+     * that position after the bases spelled so far (Pattern::allowed, so that an automaton
+     * reads its state from the spelled prefix), in symbol order (A, C, G, T), to position
+     * L of the oriented pattern |q|. One step per outgoing edge examined, allowed or not.
+     * False when a stop ended it.
+     */
+    bool extend_anchor(const Context &anchor, const Pattern &q) {
+        const size_t L = q.length();
+        assert(L > k_);
+
+        std::string spelled = graph_.get_node_sequence(anchor.node);
+        assert(spelled.size() == k_);
+        std::vector<node_index> path { anchor.node };
+
+        // the allowed outgoing k-mers of one node of the path, in symbol order, and the next
+        // one to enter. At most four: a node has one outgoing k-mer per last base, and a
+        // pattern position allows only A, C, G, T (never N or $)
+        struct Level {
+            std::array<std::pair<char, node_index>, 4> children;
+            uint8_t size = 0;
+            uint8_t next = 0;
+        };
+        std::vector<Level> levels;
+        levels.reserve(L - k_);
+
+        auto expand = [&]() {
+            const BaseSet allowed = q.allowed(spelled.size(), spelled);
+            Level level;
+            bool charged = true;
+            call_outgoing(path.back(), spelled, [&](node_index next, char c) {
+                if (!charged || !(charged = charge_edge()))
+                    return;
+                if (!(allowed & base_of_char(c)))
+                    return;
+                assert(level.size < level.children.size());
+                if (level.size < level.children.size())
+                    level.children[level.size++] = { c, next };
+            });
+            if (!charged)
+                return false;
+            // symbol order, by an insertion sort of at most four (std::sort's path for more
+            // than 16 elements makes GCC 13 -O3 report -Warray-bounds on this array)
+            for (uint8_t i = 1; i < level.size; ++i) {
+                for (uint8_t j = i;
+                        j && level.children[j].first < level.children[j - 1].first; --j) {
+                    std::swap(level.children[j], level.children[j - 1]);
+                }
+            }
+            levels.push_back(level);
+            return true;
+        };
+
+        if (!expand())
+            return false;
+
+        while (levels.size()) {
+            Level &top = levels.back();
+            if (top.next == top.size) {
+                levels.pop_back();
+                // the anchor itself is never popped
+                if (levels.size()) {
+                    path.pop_back();
+                    spelled.pop_back();
+                }
+                continue;
+            }
+            const auto [c, next] = top.children[top.next++];
+            path.push_back(next);
+            spelled.push_back(c);
+            ++candidates_;
+            if (spelled.size() < L) {
+                if (!expand())
+                    return false;
+                continue;
+            }
+            if (!complete_path(anchor, path, spelled))
+                return false;
+            path.pop_back();
+            spelled.pop_back();
+        }
+        return true;
+    }
+
     // ---------------------------------------------------------------- scans
 
     bool is_palindrome(edge_index edge) const {
@@ -1041,7 +1275,7 @@ class PatternRun {
     bool tick() {
         if (++examined_ % Budget::kClockStride || budget_.check_time())
             return true;
-        record_stop(StopPhase::EXTRACTION, StopReason::TIME);
+        record_stop(release_phase_, StopReason::TIME);
         return false;
     }
 
@@ -1080,9 +1314,11 @@ class PatternRun {
     }
 };
 
-bool PatternRun::release(uint64_t limit, const std::function<void(const Context&)> &emit) {
+bool PatternRun::release(uint64_t limit, const std::function<void(const Context&)> &emit,
+                         StopPhase phase) {
+    release_phase_ = phase;
     if (!budget_.check_time()) {
-        record_stop(StopPhase::EXTRACTION, StopReason::TIME);
+        record_stop(phase, StopReason::TIME);
         return false;
     }
 
@@ -1136,10 +1372,7 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
         size_t top = heap.top();
         heap.pop();
         const Key key = cursors[top].key;
-        node_index base_node = support_.mode == GraphMode::PRIMARY && key.node > wrapper_offset_
-            ? key.node - wrapper_offset_
-            : key.node;
-        emit(Context { key.orientation, key.offset, key.node, base_node });
+        emit(Context { key.orientation, key.offset, key.node, base_of(key.node), {}, {} });
         ++released;
 
         if (advance(cursors[top], &stopped))
@@ -1148,6 +1381,146 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
             return false;
     }
     return true;
+}
+
+bool PatternRun::extend(bool keep, uint64_t num_anchors) {
+    assert(extending_);
+    keep_paths_ = keep;
+
+    // the anchors in answer order (§5.5); their ranges are discarded once they are listed:
+    // the anchors are kept through the extension, not beyond (§5.2)
+    std::vector<Context> anchors;
+    listed_ = release(kNoLimit, [&](const Context &c) { anchors.push_back(c); },
+                      StopPhase::EXTENSION);
+    drop_anchors();
+    if (listed_ && anchors.size() != num_anchors) {
+        throw std::logic_error("pattern: " + std::to_string(anchors.size())
+                               + " anchors listed for the extension of "
+                               + std::to_string(num_anchors) + " counted");
+    }
+
+    bool done = listed_;
+    if (listed_) {
+        for (const Context &anchor : anchors) {
+            ++anchors_left_[anchor.orientation];
+        }
+        const Pattern rc = pattern_.reverse_complement();
+        for (const Context &anchor : anchors) {
+            // each oriented pattern is extended in its own reading direction from its own
+            // first k-mer (§4.1, "Orientation")
+            if (!extend_anchor(anchor, anchor.orientation == Orientation::REVERSE ? rc
+                                                                                  : pattern_)) {
+                done = false;
+                break;
+            }
+            --anchors_left_[anchor.orientation];
+        }
+    }
+
+    work_.steps = budget_.steps_used() - steps_before_;
+    return done;
+}
+
+// why ALL_OR_COUNT withholds the results of a pattern its stop touched (§5.2)
+Withheld withheld_for(StopReason reason) {
+    switch (reason) {
+        case StopReason::MAX_CONTEXTS:
+        case StopReason::MAX_ANCHORS:
+        case StopReason::MAX_PATHS:
+            return Withheld::THRESHOLD_CROSSED;
+        case StopReason::TIME:
+            return Withheld::DEADLINE;
+        case StopReason::MAX_STEPS:
+            return Withheld::DISCOVERY_BUDGET;
+    }
+    return Withheld::DISCOVERY_BUDGET;
+}
+
+/**
+ * The release of a long pattern's paths (Request::extend_paths), from what the extension
+ * counted and kept: see PatternSearch::enumerate for the rules per mode.
+ */
+Extraction extract_paths(const AnchorCounts &anchors, const Request &request,
+                         PatternRun &engine,
+                         const std::function<void(const Context&)> &callback) {
+    Extraction extraction;
+    const bool all_or_count = request.mode == Mode::ALL_OR_COUNT;
+    auto release = [&]() {
+        return engine.release_paths([&](const Context &path) {
+            callback(path);
+            ++extraction.returned;
+        });
+    };
+
+    switch (anchors.extension) {
+        case Extension::NOT_REQUESTED:
+            throw std::logic_error("pattern: paths released without extension");
+
+        case Extension::NO_ANCHORS:
+            // no anchor, no path: the empty answer is complete
+            extraction.complete = true;
+            break;
+
+        case Extension::NOT_ADMITTED:
+            extraction.withheld = Withheld::ANCHORS_ABOVE_THRESHOLD;
+            break;
+
+        case Extension::NOT_STARTED: {
+            // the anchors stopped (discovery, a mask scan, or their threshold): nothing was
+            // extended, so nothing is delivered in either mode
+            assert(engine.stop());
+            const StopReason reason = engine.stop() ? engine.stop()->reason
+                                                    : StopReason::MAX_STEPS;
+            if (all_or_count) {
+                extraction.withheld = withheld_for(reason);
+            } else {
+                extraction.cut = reason;
+            }
+            break;
+        }
+
+        case Extension::STOPPED: {
+            assert(engine.stop());
+            const StopReason reason = engine.stop() ? engine.stop()->reason
+                                                    : StopReason::MAX_STEPS;
+            if (all_or_count) {
+                extraction.withheld = withheld_for(reason);
+            } else if (reason == StopReason::TIME) {
+                // membership depends on the machine: nothing (as for L <= k)
+                extraction.cut = StopReason::TIME;
+            } else {
+                // the paths completed before the stop are a prefix of the answer order
+                extraction.cut = release() ? reason : StopReason::TIME;
+            }
+            break;
+        }
+
+        case Extension::COMPLETED: {
+            assert(anchors.paths.relation == Relation::EXACT);
+            const uint64_t paths = anchors.paths.value;
+            if (all_or_count) {
+                if (paths > request.max_paths) {
+                    extraction.withheld = Withheld::COUNT_ABOVE_THRESHOLD;
+                } else if (engine.paths_retained() != paths) {
+                    throw std::logic_error("pattern: the extension kept "
+                                           + std::to_string(engine.paths_retained())
+                                           + " of " + std::to_string(paths) + " paths");
+                } else if (release()) {
+                    extraction.complete = true;
+                } else {
+                    extraction.withheld = Withheld::DEADLINE;
+                }
+            } else if (!release()) {
+                extraction.cut = StopReason::TIME;
+            } else if (extraction.returned == paths) {
+                extraction.complete = true;
+            } else {
+                extraction.cut = StopReason::MAX_PATHS;
+            }
+            break;
+        }
+    }
+    return extraction;
 }
 
 } // namespace
@@ -1238,6 +1611,10 @@ Result PatternSearch::enumerate(const Pattern &pattern, const Request &request,
                                 const std::function<void(const Context&)> &callback) const {
     if (request.mode == Mode::COUNT)
         throw std::invalid_argument("pattern: enumerate() needs mode all_or_count or partial");
+    if (request.extend_paths && request.release_anchors) {
+        throw std::invalid_argument("pattern: release_anchors and extend_paths exclude each "
+                                    "other (the results of a long pattern are its paths)");
+    }
 
     return run(pattern, request, budget, &callback);
 }
@@ -1293,16 +1670,19 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         }
     }
 
-    // the anchors of a long pattern are released only on request (Request::release_anchors)
-    const bool releasing = callback && (!is_long || request.release_anchors);
+    // phase 2 (§4.2): a long pattern's anchors extended to paths, on request
+    const bool extending = is_long && request.extend_paths;
+    // the release of contexts through PatternRun::release: the contexts of L <= k, or the
+    // anchors of a long pattern on request (Request::release_anchors, never with extension)
+    const bool releasing = callback && !extending && (!is_long || request.release_anchors);
     // the threshold of ALL_OR_COUNT and the cap of PARTIAL
     const uint64_t max_released = is_long ? request.max_anchors : request.max_contexts;
-    PatternRun engine(*dbg_succ_, support_, wrapper_offset_, pattern, request, budget,
-                      releasing);
+    // the anchors are retained for the extension in every mode (§5.2)
+    PatternRun engine(graph_, *dbg_succ_, support_, wrapper_offset_, pattern, request, budget,
+                      releasing || extending);
     engine.run();
 
     result.searched = engine.searched();
-    result.work = engine.work();
 
     // counts by orientation and offset, summed with the weakest relation (§3)
     const Unit unit = is_long ? Unit::ANCHORS : Unit::GRAPH_CONTEXTS;
@@ -1336,9 +1716,60 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         anchors.total = *total;
         anchors.by_orientation = std::move(by_orientation);
         // no path starts without an anchor (a derivation, not a promotion); otherwise the
-        // paths are a later increment's (§4.2)
-        if (total->relation == Relation::EXACT && total->value == 0)
+        // paths need the extension (§4.2)
+        const bool no_anchor = total->relation == Relation::EXACT && total->value == 0;
+        if (no_anchor)
             anchors.paths = Count::exact(Unit::PATHS, 0);
+
+        if (extending) {
+            bool ran = false;
+            if (no_anchor) {
+                anchors.extension = Extension::NO_ANCHORS;
+            } else if (total->relation != Relation::EXACT || engine.stop()) {
+                // an anchor set not known completely is never extended (§3)
+                anchors.extension = Extension::NOT_STARTED;
+            } else if (total->value > request.max_anchors) {
+                // the extension's admission (§4.2); the anchors are discarded (§5.2)
+                anchors.extension = Extension::NOT_ADMITTED;
+                engine.drop_anchors();
+            } else {
+                auto extension_start = std::chrono::steady_clock::now();
+                anchors.extension = engine.extend(callback != nullptr, total->value)
+                        ? Extension::COMPLETED
+                        : Extension::STOPPED;
+                result.extension_ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - extension_start).count();
+                anchors.candidates_examined = engine.candidates_examined();
+                ran = true;
+            }
+
+            // per orientation: EXACT 0 without anchors; EXACT when every anchor of it was
+            // extended, AT_LEAST when the extension stopped before; UNKNOWN when it did not run
+            std::optional<Count> sum;
+            for (Orientation o : engine.searched()) {
+                const Count &a = anchors.by_orientation.at(o);
+                Count paths = Count::unknown(Unit::PATHS);
+                if (a.relation == Relation::EXACT && a.value == 0) {
+                    paths = Count::exact(Unit::PATHS, 0);
+                } else if (ran) {
+                    paths = engine.orientation_extended(o)
+                        ? Count::exact(Unit::PATHS, engine.paths_found(o))
+                        : Count::at_least(Unit::PATHS, engine.paths_found(o));
+                }
+                anchors.paths_by_orientation.emplace(o, paths);
+                if (sum) {
+                    *sum += paths;
+                } else {
+                    sum = paths;
+                }
+            }
+            if (ran) {
+                assert(sum);
+                anchors.paths = *sum;
+                assert((anchors.paths.relation == Relation::EXACT)
+                            == (anchors.extension == Extension::COMPLETED));
+            }
+        }
         result.anchors = std::move(anchors);
     } else {
         ContextCounts contexts;
@@ -1357,9 +1788,12 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         if (engine.stop())
             reason = engine.stop()->reason;
 
-        if (!releasing) {
-            // the results of a long pattern are its paths, a later increment; with no
-            // anchor there is no path, so the empty answer is complete
+        if (extending) {
+            extraction = extract_paths(*result.anchors, request, engine, *callback);
+
+        } else if (!releasing) {
+            // the results of a long pattern are its paths, not extended without
+            // extend_paths; with no anchor there is no path, so the empty answer is complete
             if (exact && total->value == 0) {
                 extraction.complete = true;
             } else {
@@ -1415,6 +1849,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         result.extraction = extraction;
     }
 
+    result.work = engine.work();
     result.stop = engine.stop();
     result.time_limited = engine.time_limited();
 
@@ -1422,7 +1857,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         result.notes.push_back(kNoteLowComplexity);
     if (support_.mode != GraphMode::BASIC)
         result.notes.push_back(kNoteStrandUnknown);
-    if (is_long)
+    if (is_long && !extending)
         result.notes.push_back(kNotePathsLater);
 
     return finish();
