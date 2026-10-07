@@ -90,6 +90,54 @@ class DBGSuccinct : public DeBruijnGraph {
             size_t min_match_length = 1,
             size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
 
+    /**
+     * Pattern-search primitives (docs/DESIGN-pattern-search.md §4.1), beside
+     * call_nodes_with_suffix_matching_longest_prefix, which they leave as it is: they
+     * count first and call only what the caller asks for (its TODO), and they never count
+     * a dummy or pruned edge. Each works on a normalised BOSS edge range [first, last]
+     * (1 <= first <= last <= max_index(); whole node groups, as BOSS::tighten_range returns
+     * them, or [1, max_index()] for the empty suffix), and each requires the valid-edge mask
+     * (get_mask() != NULL): without it a dummy edge is indistinguishable from a k-mer.
+     */
+
+    // The valid edges of the range: the k-mers leaving its nodes (two ranks).
+    uint64_t count_valid_edges_in_range(node_index first, node_index last) const;
+
+    // The edges of a range that can end with one symbol c (see count_edges_with_last_symbol)
+    struct LastSymbolEdges {
+        // edges with W in {c, c + alph_size} (plain + marked): the k-mers u.c of the
+        // range's nodes u, valid or not; an upper bound of the valid ones
+        uint64_t candidates = 0;
+        // invalid edges of the range
+        uint64_t invalid = 0;
+        // invalid edges whose W is not the sentinel ($ or its marked form): the only invalid
+        // edges that can be candidates, since every edge with W = $ is a dummy sink, so
+        // candidates - invalid_non_sentinel is a lower bound of the valid candidates
+        uint64_t invalid_non_sentinel = 0;
+    };
+
+    /**
+     * Counts the edges of the range whose W is c (plain) or c + alph_size (marked: another
+     * edge into the same target carries c), with O(1) ranks. The valid ones among them
+     * (the k-mers of the range's nodes ending with c) number exactly |candidates| when
+     * |invalid_non_sentinel| is 0; otherwise the caller resolves them with
+     * next_invalid_edge or next_edge_with_last_symbol, a scan it can charge and interrupt.
+     * 1 <= c < alph_size.
+     */
+    LastSymbolEdges count_edges_with_last_symbol(node_index first, node_index last,
+                                                 boss::BOSS::TAlphabet c) const;
+
+    // The first edge e in [from, last] with W[e] in {c, c + alph_size}, valid or not;
+    // npos if there is none (from > last included).
+    node_index next_edge_with_last_symbol(node_index from, node_index last,
+                                          boss::BOSS::TAlphabet c) const;
+
+    // The first valid edge in [from, last]; npos if there is none.
+    node_index next_valid_edge(node_index from, node_index last) const;
+
+    // The first invalid (dummy or pruned) edge in [from, last]; npos if there is none.
+    node_index next_invalid_edge(node_index from, node_index last) const;
+
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()
     // returns true, or if the sequence is exhausted.

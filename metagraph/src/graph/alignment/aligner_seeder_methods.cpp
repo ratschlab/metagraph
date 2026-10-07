@@ -92,52 +92,6 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
     return seeds;
 }
 
-template <class BOSSEdgeRange>
-void suffix_to_prefix(const DBGSuccinct &dbg_succ,
-                      const BOSSEdgeRange &index_range,
-                      const std::function<void(DBGSuccinct::node_index)> &callback) {
-    const auto &boss = dbg_succ.get_boss();
-    assert(std::get<2>(index_range));
-    assert(std::get<2>(index_range) < dbg_succ.get_k());
-
-    auto call_nodes_in_range = [&](const BOSSEdgeRange &final_range) {
-        const auto &[first, last, seed_length] = final_range;
-        assert(seed_length == boss.get_k());
-        for (boss::BOSS::edge_index i = first; i <= last; ++i) {
-            DBGSuccinct::node_index node = dbg_succ.validate_edge(i);
-            if (node)
-                callback(node);
-        }
-    };
-
-    if (std::get<2>(index_range) == boss.get_k()) {
-        call_nodes_in_range(index_range);
-        return;
-    }
-
-    std::vector<BOSSEdgeRange> range_stack { index_range };
-
-    while (range_stack.size()) {
-        BOSSEdgeRange cur_range = std::move(range_stack.back());
-        range_stack.pop_back();
-        assert(std::get<2>(cur_range) < boss.get_k());
-        ++std::get<2>(cur_range);
-
-        for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
-            auto next_range = cur_range;
-            auto &[first, last, seed_length] = next_range;
-
-            if (boss.tighten_range(&first, &last, s)) {
-                if (seed_length == boss.get_k()) {
-                    call_nodes_in_range(next_range);
-                } else {
-                    range_stack.emplace_back(std::move(next_range));
-                }
-            }
-        }
-    }
-}
-
 const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph *graph) {
     if (const auto *wrapper = dynamic_cast<const DBGWrapper<>*>(graph))
         graph = &wrapper->get_graph();

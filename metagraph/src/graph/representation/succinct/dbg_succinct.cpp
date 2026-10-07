@@ -392,6 +392,89 @@ void DBGSuccinct
     }
 }
 
+uint64_t DBGSuccinct::count_valid_edges_in_range(node_index first, node_index last) const {
+    assert(valid_edges_ && "the pattern primitives need the valid-edge mask");
+    assert(first >= 1 && first <= last && last <= max_index());
+
+    return valid_edges_->rank1(last) - valid_edges_->rank1(first - 1);
+}
+
+DBGSuccinct::LastSymbolEdges
+DBGSuccinct::count_edges_with_last_symbol(node_index first, node_index last,
+                                          BOSS::TAlphabet c) const {
+    assert(valid_edges_ && "the pattern primitives need the valid-edge mask");
+    assert(first >= 1 && first <= last && last <= max_index());
+
+    const BOSS &boss = *boss_graph_;
+    assert(c >= 1 && c < boss.alph_size);
+
+    // edges with W in {s, s + alph_size}: the k-mers of the range's nodes ending with s
+    auto count_symbol = [&](BOSS::TAlphabet s) {
+        return boss.rank_W(last, s) - boss.rank_W(first - 1, s)
+             + boss.rank_W(last, s + boss.alph_size)
+             - boss.rank_W(first - 1, s + boss.alph_size);
+    };
+
+    LastSymbolEdges result;
+    result.candidates = count_symbol(c);
+    result.invalid = (last - first + 1) - count_valid_edges_in_range(first, last);
+
+    // An edge with W = $ is a dummy (a sink, or the main source at edge 1) and never valid:
+    // a k-mer has no sentinel. So the invalid edges that can carry c are the invalid ones
+    // minus the sentinel edges. Should a mask ever mark a sentinel edge valid, the discount
+    // is dropped rather than trusted, so that no count is claimed exact on its strength.
+    uint64_t sentinel = count_symbol(static_cast<BOSS::TAlphabet>(BOSS::kSentinelCode));
+    assert(sentinel <= result.invalid);
+    result.invalid_non_sentinel = sentinel <= result.invalid
+        ? result.invalid - sentinel
+        : result.invalid;
+
+    return result;
+}
+
+node_index DBGSuccinct::next_edge_with_last_symbol(node_index from, node_index last,
+                                                   BOSS::TAlphabet c) const {
+    assert(last <= max_index());
+    if (!from || from > last)
+        return npos;
+
+    const BOSS &boss = *boss_graph_;
+    assert(c >= 1 && c < boss.alph_size);
+
+    node_index edge = boss.succ_W(from, c, c + boss.alph_size).first;
+    return edge <= last ? edge : npos;
+}
+
+node_index DBGSuccinct::next_valid_edge(node_index from, node_index last) const {
+    assert(valid_edges_ && "the pattern primitives need the valid-edge mask");
+    assert(last <= max_index());
+    if (!from || from > last)
+        return npos;
+
+    uint64_t rank = valid_edges_->rank1(from - 1);
+    if (rank == valid_edges_->num_set_bits())
+        return npos;
+
+    node_index edge = valid_edges_->select1(rank + 1);
+    return edge <= last ? edge : npos;
+}
+
+node_index DBGSuccinct::next_invalid_edge(node_index from, node_index last) const {
+    assert(valid_edges_ && "the pattern primitives need the valid-edge mask");
+    assert(last <= max_index());
+    if (!from || from > last)
+        return npos;
+
+    // rank0 counts position 0 (no edge, always unset), so select0(rank + 1) is the first
+    // unset position after from - 1
+    uint64_t rank = valid_edges_->rank0(from - 1);
+    if (rank == valid_edges_->size() - valid_edges_->num_set_bits())
+        return npos;
+
+    node_index edge = valid_edges_->select0(rank + 1);
+    return edge <= last ? edge : npos;
+}
+
 void DBGSuccinct::traverse(node_index start,
                            const char *begin,
                            const char *end,

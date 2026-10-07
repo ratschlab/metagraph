@@ -3,11 +3,85 @@
 
 #include "alignment.hpp"
 #include "common/vectors/bitmap.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 namespace mtg {
 namespace graph {
 namespace align {
+
+// The symbols suffix_to_prefix tries at every depth unless its caller names others: every
+// symbol of the graph's alphabet except the sentinel, s = 1 .. alph_size - 1 (on a DNA5
+// build this includes N). This is the loop suffix_to_prefix always had; the SuffixSeeder
+// relies on it unchanged (DESIGN-pattern-search.md §11).
+struct NonSentinelSymbols {
+    template <class BOSSEdgeRange, class TrySymbol>
+    void operator()(const boss::BOSS &boss, const BOSSEdgeRange &, const TrySymbol &try_symbol) const {
+        for (boss::BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
+            try_symbol(s);
+        }
+    }
+};
+
+/**
+ * Starting from a range of nodes sharing a suffix of length std::get<2>(index_range) (in
+ * [1, k - 1]), extend the suffix symbol by symbol (depth first) up to whole (k-1)-mer nodes
+ * and call every valid edge leaving those nodes: the k-mers having the suffix as a prefix.
+ *
+ * |symbols| chooses the symbols tried at each step: it is called once per range taken from
+ * the stack, as symbols(boss, range, try_symbol), where |range| has its length already
+ * incremented to the length of the ranges it is about to produce, and calls
+ * try_symbol(s) for each symbol s to append, in the order the ranges are to be pushed.
+ * The default (NonSentinelSymbols) is the loop over every non-sentinel symbol that this
+ * function has always run, so its existing callers behave as before. The pattern search
+ * (pattern_search.cpp) passes the symbols a pattern allows at each depth.
+ */
+template <class BOSSEdgeRange, class SymbolSet = NonSentinelSymbols>
+void suffix_to_prefix(const DBGSuccinct &dbg_succ,
+                      const BOSSEdgeRange &index_range,
+                      const std::function<void(DBGSuccinct::node_index)> &callback,
+                      const SymbolSet &symbols = SymbolSet()) {
+    const auto &boss = dbg_succ.get_boss();
+    assert(std::get<2>(index_range));
+    assert(std::get<2>(index_range) < dbg_succ.get_k());
+
+    auto call_nodes_in_range = [&](const BOSSEdgeRange &final_range) {
+        const auto &[first, last, seed_length] = final_range;
+        assert(seed_length == boss.get_k());
+        for (boss::BOSS::edge_index i = first; i <= last; ++i) {
+            DBGSuccinct::node_index node = dbg_succ.validate_edge(i);
+            if (node)
+                callback(node);
+        }
+    };
+
+    if (std::get<2>(index_range) == boss.get_k()) {
+        call_nodes_in_range(index_range);
+        return;
+    }
+
+    std::vector<BOSSEdgeRange> range_stack { index_range };
+
+    while (range_stack.size()) {
+        BOSSEdgeRange cur_range = std::move(range_stack.back());
+        range_stack.pop_back();
+        assert(std::get<2>(cur_range) < boss.get_k());
+        ++std::get<2>(cur_range);
+
+        symbols(boss, cur_range, [&](boss::BOSS::TAlphabet s) {
+            auto next_range = cur_range;
+            auto &[first, last, seed_length] = next_range;
+
+            if (boss.tighten_range(&first, &last, s)) {
+                if (seed_length == boss.get_k()) {
+                    call_nodes_in_range(next_range);
+                } else {
+                    range_stack.emplace_back(std::move(next_range));
+                }
+            }
+        });
+    }
+}
 
 class ISeeder {
   public:
