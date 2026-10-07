@@ -85,23 +85,28 @@ capabilities block are what to build on.
 
 ### 3.1 The job (the service surface)
 
-1. **(required)** A job type: submit → status → results, as the service wraps `/search`. One task per
-   (database, host, pattern chunk of at most the host's `max_patterns`); each task calls `POST /pattern` once,
-   synchronously from the worker, under the task's own timeout. No synchronous MCP tool.
-2. **(required)** Results stored per task in the **traversal-job shape** (one document per task), not in the
-   search tables, whose hit-shaped truncation and enrichment make no sense for contexts; rows are contexts, never
-   labels. The merged view of a job: per count the **weakest relation wins** (`exact` only if every task's is);
-   `retrieval_complete` only when every task's is true; `withheld` and `stop` carried per task with the host and
-   its reason; large answers to S3 as searches do.
+1. **(required)** A **kind of the existing search job** (the owner, 2026-10-07: "it is essentially a search, and
+   the results are like search too"): the same Search/Task/Result tables, the same leaf split (one task per
+   (database, graph chunk, pattern chunk of at most the host's `max_patterns`)), the same semaphore, per-database
+   caps, 1,200 s client timeout, status, results, CSV, S3, lock and retention. The worker calls `POST /pattern`
+   instead of `POST /search`, skips scoring, truncation and enrichment for that kind, and stores contexts as
+   result rows with the per-pattern summary per task: a kind marker and a summary column, no new worker family,
+   no new tables. No synchronous MCP tool.
+2. **(required)** The merged view of a job: per count the **weakest relation wins** (`exact` only if every task's
+   is); `retrieval_complete` only when every task's is true; `withheld` and `stop` carried per task with the
+   graph and its reason; rows are contexts, never labels.
 3. **(required)** A chunked database is many graphs on one multi-graph server process, selected per task through
    `graphs: ["{label}-{i}/{N}"]` as `/search` does (`app/download_depth.py`, `enumerate_leaf_specs`). The job type
    is built and tested on refseq33m-experimental (one graph) with backend milestone 1; serving the chunked
    databases waits for backend milestone 6, which keeps `graphs` exactly as `/search` selects a shard.
-4. **(required)** Admission by the queue: the service's per-database queues, `META_DB_CAPS` and the distributed
-   semaphore protect the hosts; no leased-token synchronous admission. One constraint from the host side: a
-   pattern call occupies a server request thread for its whole budget, and staging runs `-p 2 --threads-each 2`,
-   so the per-host concurrency of pattern tasks should stay at **one** so that `/search` and `/traverse` keep a
-   thread (§3.2).
+4. **(required)** Admission by the queue, **shared with search and traversal** (the owner: "traverse, pattern
+   match and normal search need to share the pool inside async and inside the sync server"): the per-database
+   queues, `META_DB_CAPS` and the distributed semaphore count search, pattern and traversal calls against one cap
+   per database server (the cap search uses today, e.g. 15 on sra-logan-chunks). The server has one request pool
+   (`-p` / `--threads-each`) for every route and reserves nothing per route; the engine needs nothing beyond
+   "at most cap concurrent calls per database server across all routes", and its memory is bounded per request
+   by `max_memory_mb`. The traversal jobs' separate per-host tokens move into the same semaphore (your
+   follow-up).
 5. **(required)** Caps at submit, never truncation afterwards: `max_contexts`, `max_patterns`, `time_budget_ms`
    above the service's ceilings are refused with a 400 naming the field (the strategy validator's rule: refuses,
    never lowers). An answer is passed through whole; cutting it on the way out would falsify
@@ -134,14 +139,14 @@ capabilities block are what to build on.
 The owner: "5 s is not sufficient in general" — some `/search` calls take longer today (Logan hosts about 28 s),
 and pattern search is the more complex function. So the route's **default** `time_budget_ms` is **60 s** (what
 the CLI and a direct caller get) and the server cap `--pattern-max-time-ms` is **600 s**: under the 900 s content
-timeout, with room for serialising and compressing a large answer. The service always sends an explicit
-`time_budget_ms` per task from its own per-database budget map (`PATTERN_DB_BUDGETS_MS`, default
-`PATTERN_TIME_BUDGET_MS`; `/search` uses one `META_CALL_TIMEOUT_SECS`), under the host's cap. The deadline keeps its value under a job: it bounds a runaway `any_offset` DFS per task, and the
-finalisation reserve is unchanged, so a stopped task still answers with counts. Nothing in the engine assumes a
-short run: the clock is read every 4,096 steps whatever the budget; the memory account is bounded by
-`max_memory_mb` and the retained descriptors by their caps, not by time; `max_steps` (default 10⁸ per shard)
-is the other bound and is raised with the budget. The cost of a long call is the server request thread it holds
-(staging: `-p 2 --threads-each 2`), which is why item 4 keeps pattern tasks at one per host.
+timeout, with room for serialising and compressing a large answer. Budgets exactly like search: the service
+sends `time_budget_ms` equal to the host's cap (600 s) unless the caller asks for less, and its 1,200 s client
+timeout (`META_CALL_TIMEOUT_SECS`) stays above it. The deadline keeps its value under a job: it bounds a runaway
+`any_offset` DFS per task, and the finalisation reserve is unchanged, so a stopped task still answers with
+counts. Nothing in the engine assumes a short run: the clock is read every 4,096 steps whatever the budget; the
+memory account is bounded by `max_memory_mb` and the retained descriptors by their caps, not by time;
+`max_steps` (default 10⁸ per shard) is the other bound and is raised with the budget. The cost of a long call is
+the request-pool slot it holds, counted by the shared per-database cap of item 4.
 
 ## 4. Constraints
 
@@ -175,8 +180,9 @@ is the other bound and is raised with the budget. The cost of a long call is the
    a `pattern` field beside `traversal`, from the same probe, with the same filter.
 4. Wording: "one distinct k-mer of the index that contains the pattern, at one offset and orientation. Not a
    record, not an occurrence, not a hit: a k-mer present in ten samples is one context."
-5. The job is modelled on the traversal jobs (one document per task), not on the search tables; it needs
-   backend milestone 1 only (§3.1 item 3).
+5. The job is a kind of the existing search job (same tables, fan-out, semaphore, caps, timeout, status,
+   results, S3, lock, retention), the owner's decision; refseq33m-experimental after backend milestone 1, chunked
+   databases after milestone 6 (§3.1 items 1 and 3).
 6. Who and when: the service session writes the design note and implements through Opus agents; org-id
    integrates; the MetaGraph side supplies the frozen contract, the fixture bodies (§2) and the `pattern` block
    on `/traverse/capabilities` with milestone 1's commit. First increment after that commit; live e2e after the

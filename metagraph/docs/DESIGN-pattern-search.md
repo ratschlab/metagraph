@@ -822,19 +822,25 @@ per-label totals are the deduplicated union of §7.2. `MultiGraphClient.pattern`
 pool.
 
 **Search service** (its repository; the service session builds it, org-id integrates;
-`docs/PROMPT-search-service-pattern.md` is the request). A **job type**, modelled on the traversal jobs (one
-document per task), not on the search tables: one task per (database, host, pattern chunk of at most the host's
-`max_patterns`), each task calling `POST /pattern` once from a worker under the task's own timeout; the merged
-view takes the weakest relation per count, `retrieval_complete` only when every task's is true, `withheld` and
-`stop` per task with the host; large answers to S3. A chunked database on the service side is many **graphs on one multi-graph
+`docs/PROMPT-search-service-pattern.md` is the request). A **kind of the existing search job** (the owner:
+"it is essentially a search, and the results are like search too"): the same Search/Task/Result tables, the same
+leaf split (one task per (database, graph chunk, pattern chunk of at most the host's `max_patterns`)), the same
+semaphore, per-database caps, 1,200 s client timeout, status, results, CSV, S3, lock and retention; the worker
+calls `POST /pattern` instead of `POST /search`, skips scoring, truncation and enrichment for that kind, and
+stores contexts as result rows with the per-pattern summary per task. The merged view takes the weakest relation
+per count, `retrieval_complete` only when every task's is true, `withheld` and `stop` per task. A chunked database on the service side is many **graphs on one multi-graph
 server process**, selected per task through the request's `graphs: ["{label}-{i}/{N}"]` as `/search` selects a
 shard today; the job type is built and tested on refseq33m-experimental (one graph) with milestone 1, and serving
 the chunked databases needs milestone 6, whose `graphs` selection keeps exactly `/search`'s names and semantics
 (§8):
 
-- admission by the queue: the service's per-database queues, `META_DB_CAPS` and its distributed semaphore
-  protect the hosts; pattern tasks run **one per host at a time**, because a call holds a server request thread
-  for its whole budget (staging serves with `-p 2 --threads-each 2`) and `/search` and `/traverse` must keep one;
+- admission by the queue, **shared with search and traversal** (the owner: "they use essentially the same
+  resources: load an index and access it"): the service's per-database queues, `META_DB_CAPS` and its distributed
+  semaphore count search, pattern and traversal calls against **one** cap per database server, and on the server
+  side the one request pool (`-p` / `--threads-each`) serves `/search`, `/pattern`, `/traverse` and `/resolve`
+  alike — no per-route pool, no reservation. The engine needs nothing beyond "at most cap concurrent calls per
+  database server across all routes"; its memory is bounded per request by `max_memory_mb`, so the server's
+  worst case for pattern calls is cap × that;
 - caps at admission, never truncation afterwards: `max_contexts`, `max_patterns` and `time_budget_ms` above the
   service's ceilings are refused with a 400 naming the field; an answer is passed through whole, since cutting it
   would falsify `retrieval_complete`; the backend called from the API process on the thread pool
@@ -855,13 +861,9 @@ the chunked databases needs milestone 6, whose `graphs` selection keeps exactly 
   budget as for the other synchronous tools; no caching of answers in v1 (`determinism: time_limited` matters
   only once an answer is cached).
 
-The service always sends an explicit `time_budget_ms` per task from its own per-database budget map
-(`PATTERN_DB_BUDGETS_MS`, default `PATTERN_TIME_BUDGET_MS`; `/search` has one `META_CALL_TIMEOUT_SECS` of
-1,200 s, and a chunk call takes about 28 s today), under the host's `--pattern-max-time-ms` (§5.3); a
-job-originated call holds no client connection, so a long budget costs only the server thread it occupies. Since
-one database's chunk tasks all land on the same server process, the service's cap of one pattern task per host
-means one per database server at a time; the production server's request-thread count sets how far that can be
-relaxed.
+Budgets exactly like search: the service sends `time_budget_ms` equal to the host's cap (600 s, §5.3) unless the
+caller asks for less, and its 1,200 s client timeout (`META_CALL_TIMEOUT_SECS`) stays above it; a
+job-originated call holds no client connection, so a long budget costs only the request-pool slot it occupies.
 
 ## 10. Code placement and reuse
 
