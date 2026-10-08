@@ -6,12 +6,17 @@
  * reverse_complement), over the served graph's k-mers (the valid edges of the DBGSuccinct,
  * and on a wrapped PRIMARY graph their reverse complements at CanonicalDBG's ids). What stays
  * shared with the engine: the DBGSuccinct mask (in_graph) and CanonicalDBG's numbering.
+ * The findings of GPT review 3 (2026-10-08) close the file: the low-complexity note against
+ * sdust run over the whole text (the library the engine runs piece by piece), and the clock
+ * readings of the diagnostic and of the extension.
  */
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <random>
@@ -28,6 +33,8 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+
+#include <sdust.h>
 
 
 namespace {
@@ -1005,6 +1012,248 @@ TEST(PatternSearchFixes, SinkPassMarksTheSameEdges) {
         EXPECT_EQ(boss.rank_W(boss.num_edges(), 0) - 1, boss.mark_sink_dummy_edges(&marked));
         EXPECT_EQ(expected, marked);
         EXPECT_GT(sdsl::util::cnt_one_bits(marked), 30u);
+    }
+}
+
+
+// ---------------------------------------------------------------- GPT review 3, item 2: the
+// low-complexity note, an optional diagnostic, under the clock and never after a stop
+
+// the oracle: sdust over the whole text, as the seeder calls it (T = 20, W = 64)
+bool sdust_flags(const std::string &text) {
+    int n = 0;
+    uint64_t *intervals = sdust(0, reinterpret_cast<const uint8_t*>(text.data()),
+                                static_cast<int>(text.size()), 20, 64, &n);
+    std::free(intervals);
+    return n > 0;
+}
+
+bool noted_low_complexity(const Result &r) {
+    return std::find(r.notes.begin(), r.notes.end(), std::string(kNoteLowComplexity))
+            != r.notes.end();
+}
+
+// a budget whose clock counts its readings in |*readings| and reads late from the
+// |on_time| + 1-th on
+Budget counted_budget(std::shared_ptr<uint64_t> readings,
+                      uint64_t on_time = std::numeric_limits<uint64_t>::max(),
+                      uint64_t max_steps = kSteps) {
+    const Clock::time_point start = Clock::now();
+    return Budget(max_steps, Deadline(start, 1000, 250, [start, readings, on_time]() {
+        return start + std::chrono::seconds(++*readings > on_time ? 100 : 0);
+    }));
+}
+
+TEST(PatternSearchFixes, LowComplexityNoteAsSdustOverTheWholePattern) {
+    // the engine reads a pattern in pieces of 128 bases (plus the 63 of the window before the
+    // next): the note must be stated exactly when sdust flags the whole text. Random texts of
+    // up to 1,500 bases, two in three with a short repeat (8 to 40 bases), half of these
+    // across a multiple of 128, where a piece without the overlap would see only part of it
+    auto graph = build(13, random_records(2, 300, 5), DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    std::mt19937 rng(23);
+    const std::vector<std::string> units { "A", "AT", "CA", "ACG", "GGT", "ATG" };
+    uint64_t flagged = 0;
+    uint64_t clean = 0;
+    for (int t = 0; t < 300; ++t) {
+        const size_t length = rng() % 2
+            ? 1 + rng() % 1500
+            : 128 * (1 + rng() % 8) + 64 - rng() % 128;
+        std::string text;
+        for (size_t i = 0; i < length; ++i) {
+            text.push_back("ACGT"[rng() % 4]);
+        }
+        if (rng() % 3) {
+            const std::string &unit = units[rng() % units.size()];
+            const size_t run = 8 + rng() % 33;
+            const size_t at = rng() % 2 && length > 128 + run
+                ? 128 * (1 + rng() % (length / 128)) - run / 2
+                : rng() % length;
+            for (size_t i = 0; i < run && at + i < length; ++i) {
+                text[at + i] = unit[i % unit.size()];
+            }
+        }
+        Budget budget = budget_of();
+        Result r = engine.count(iupac(text), request_of(Mode::COUNT, 1000), budget);
+        ASSERT_FALSE(r.refusal) << text;
+        ASSERT_FALSE(r.stop) << text;
+        EXPECT_FALSE(r.time_limited) << text;
+        const bool expected = sdust_flags(text);
+        EXPECT_EQ(expected, noted_low_complexity(r)) << text;
+        ++(expected ? flagged : clean);
+    }
+    EXPECT_LT(60u, flagged);
+    EXPECT_LT(60u, clean);
+}
+
+TEST(PatternSearchFixes, LowComplexityNoteNotStatedAfterAStop) {
+    // the review's repro: 10,000 Met (ATG x 10,000, 0.7 s of sdust read whole) with
+    // max_steps 1 answered 503 after its 1 ms of work time. After any stop the diagnostic is
+    // not run: no note, and no clock reading for it
+    auto graph = build(31, random_records(2, 300, 5), DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    const Pattern met = Pattern::parse(PatternKind::PROTEIN, std::string(10'000, 'M'));
+    ASSERT_TRUE(met.is_exact());
+    Request request = request_of(Mode::COUNT, 1000);
+    request.extend_paths = true;
+
+    auto readings = std::make_shared<uint64_t>(0);
+    Budget one = counted_budget(readings, std::numeric_limits<uint64_t>::max(), 1);
+    Result stopped = engine.count(met, request, one);
+    ASSERT_TRUE(stopped.stop);
+    EXPECT_EQ(StopPhase::DISCOVERY, stopped.stop->phase);
+    EXPECT_EQ(StopReason::MAX_STEPS, stopped.stop->reason);
+    EXPECT_FALSE(noted_low_complexity(stopped));
+    EXPECT_EQ(1u, *readings);  // the pattern's start only
+    // the next pattern of the request, stopped before it starts
+    Result next = engine.count(Pattern::parse(PatternKind::DNA, std::string(60, 'A')), request,
+                               one);
+    ASSERT_TRUE(next.stop);
+    EXPECT_FALSE(noted_low_complexity(next));
+
+    // completed: the note, from the first piece, which reads no clock (a twin whose bases
+    // differ only after the anchor windows, and is not exact, reads it as often: every
+    // further piece would read it)
+    Budget completed = counted_budget(readings);
+    *readings = 0;
+    Result full = engine.count(met, request, completed);
+    EXPECT_FALSE(full.stop);
+    EXPECT_FALSE(full.time_limited);
+    EXPECT_TRUE(noted_low_complexity(full));
+    const uint64_t with_diagnostic = *readings;
+    std::string inexact(10'000, 'M');
+    inexact[5'000] = 'X';
+    *readings = 0;
+    Budget twin_budget = counted_budget(readings);
+    Result twin = engine.count(Pattern::parse(PatternKind::PROTEIN, inexact), request,
+                               twin_budget);
+    EXPECT_FALSE(twin.stop);
+    EXPECT_FALSE(noted_low_complexity(twin));
+    EXPECT_EQ(twin.work.steps, full.work.steps);
+    EXPECT_EQ(*readings, with_diagnostic);
+}
+
+TEST(PatternSearchFixes, LowComplexityDiagnosticReadsTheClock) {
+    // a text sdust flags only at its end: 3,000 random bases it does not flag (the first seed
+    // that gives such), then 40 A. Complete, the diagnostic reads the clock before each of its
+    // pieces but the first; late from its third reading on, it ends there: the counts
+    // complete, no stop, the note left out and the answer time_limited
+    std::string text;
+    for (uint32_t seed = 1; text.empty(); ++seed) {
+        ASSERT_GT(100u, seed);
+        std::string candidate = random_records(1, 3'000, seed).front();
+        if (!sdust_flags(candidate))
+            text = candidate;
+    }
+    text += std::string(40, 'A');
+    ASSERT_TRUE(sdust_flags(text));
+    std::string inexact = text;
+    inexact[1'500] = 'N';
+
+    auto graph = build(31, random_records(2, 300, 5), DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    const Request request = request_of(Mode::COUNT, 1000);
+    auto readings = std::make_shared<uint64_t>(0);
+    Budget twin_budget = counted_budget(readings);
+    Result twin = engine.count(iupac(inexact), request, twin_budget);
+    const uint64_t before = *readings;
+    *readings = 0;
+    Budget full_budget = counted_budget(readings);
+    Result full = engine.count(iupac(text), request, full_budget);
+    EXPECT_TRUE(noted_low_complexity(full));
+    EXPECT_FALSE(full.time_limited);
+    EXPECT_EQ(twin.work.steps, full.work.steps);
+    // the 22 pieces inside the 3,000 random bases are not flagged (a piece is flagged only
+    // where its text is): the 23rd or the 24th, which ends the text, is the last read
+    EXPECT_LE(before + 22, *readings);
+    EXPECT_GE(before + 23, *readings);
+
+    *readings = 0;
+    Budget late = counted_budget(readings, before + 2);
+    Result cut = engine.count(iupac(text), request, late);
+    EXPECT_FALSE(cut.stop);
+    EXPECT_TRUE(cut.time_limited);
+    EXPECT_FALSE(noted_low_complexity(cut));
+    EXPECT_EQ(before + 3, *readings);
+    ASSERT_TRUE(cut.anchors);
+    EXPECT_EQ(Relation::EXACT, cut.anchors->total.relation);
+    EXPECT_EQ(full.anchors->total.value, cut.anchors->total.value);
+    EXPECT_EQ(full.work.steps, cut.work.steps);
+}
+
+
+// ---------------------------------------------------------------- GPT review 3, item 5: the
+// extension reads the clock before every anchor, every 64 anchors it lists and every 64
+// nodes its DFS expands
+
+TEST(PatternSearchFixes, ExtensionReadsTheClockBeforeEveryAnchor) {
+    // staging (refseq33m, count, long_search paths, a 40-base pattern half N): 674 anchors
+    // listed, spelled and extended on a cold index ran 3 s past the work time without a clock
+    // reading (their DFS charged 1,129 steps, within one stride), and the answer was 503
+    // instead of a stated stop. Here every k-mer is an anchor (a window of N) and has an
+    // outgoing k-mer (circular records), and the clock runs with the steps: on time through
+    // discovery and the listing, late as soon as the extension charged an edge. Discovery is
+    // made to end one step past a stride, so that no stride crossing reads the clock after it
+    const size_t k = 11;
+    std::vector<std::string> records = random_records(3, 400, 31);
+    for (std::string &record : records) {
+        record += record.substr(0, k - 1);
+    }
+    auto graph = build(k, records, DeBruijnGraph::BASIC);
+    PatternSearch engine(*graph);
+    Request request = request_of(Mode::COUNT, 1'000'000'000, Scope::ANY_OFFSET,
+                                 Strands::FORWARD);
+    request.extend_paths = true;
+    request.max_paths = 1'000'000'000;
+
+    // |tail| bases after the window: 10 (an exact tail, most anchors end at its first base)
+    // or 200 (N: every anchor's DFS follows its record for 200 nodes)
+    for (const std::string &tail : { std::string("ACGTACGTAC"), std::string(200, 'N') }) {
+        SCOPED_TRACE(tail.size());
+        const Pattern pattern = iupac(std::string(k, 'N') + tail);
+        Budget unbounded = budget_of();
+        const Result full = engine.count(pattern, request, unbounded);
+        ASSERT_EQ(Extension::COMPLETED, full.anchors->extension);
+        const uint64_t anchors = full.anchors->total.value;
+        ASSERT_LT(2 * Budget::kReleaseClockStride, anchors);
+        EXPECT_EQ(anchors, full.work.extension_anchors);
+        ASSERT_LE(anchors, full.work.extension_edges);
+        const uint64_t discovery = full.work.steps - full.work.extension_edges;
+
+        const uint64_t stride = Budget::kClockStride;
+        const uint64_t ahead = (stride + 1 - discovery % stride) % stride;
+        const uint64_t at_end = ahead + discovery;
+        auto budget_of_clock = std::make_shared<const Budget*>(nullptr);
+        auto readings_at_end = std::make_shared<uint64_t>(0);
+        const Clock::time_point start = Clock::now();
+        Budget budget(kSteps, Deadline(start, 1000, 250,
+                                       [start, budget_of_clock, readings_at_end, at_end]() {
+            const uint64_t steps = (*budget_of_clock)->steps_used();
+            *readings_at_end += steps == at_end;
+            return start + std::chrono::seconds(steps > at_end ? 100 : 0);
+        }));
+        *budget_of_clock = &budget;
+        ASSERT_TRUE(budget.charge(ahead));
+        Result r = engine.count(pattern, request, budget);
+
+        // a stated stop: the anchors exact, the paths a lower bound
+        ASSERT_TRUE(r.stop);
+        EXPECT_EQ(StopPhase::EXTENSION, r.stop->phase);
+        EXPECT_EQ(StopReason::TIME, r.stop->reason);
+        EXPECT_TRUE(r.time_limited);
+        EXPECT_EQ(Relation::EXACT, r.anchors->total.relation);
+        EXPECT_EQ(anchors, r.anchors->total.value);
+        EXPECT_EQ(Extension::STOPPED, r.anchors->extension);
+        EXPECT_EQ(Relation::AT_LEAST, r.anchors->paths.relation);
+        EXPECT_LE(r.anchors->paths.value, full.anchors->paths.value);
+        EXPECT_EQ(discovery, r.work.steps - r.work.extension_edges);
+        // the first anchor only, and of its DFS (200 nodes deep for the N tail) at most the
+        // nodes before the 64th: each entered as a candidate before it is expanded
+        EXPECT_EQ(1u, r.work.extension_anchors);
+        EXPECT_LE(1u, r.work.extension_edges);
+        EXPECT_GT(Budget::kReleaseClockStride, r.anchors->candidates_examined);
+        // on time: the listing's start, its reading every 64 anchors, the first anchor's
+        EXPECT_EQ(2 + (anchors - 1) / Budget::kReleaseClockStride, *readings_at_end);
     }
 }
 

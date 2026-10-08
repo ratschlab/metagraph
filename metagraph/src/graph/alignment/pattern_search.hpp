@@ -227,9 +227,11 @@ class Pattern {
      * GeneticCode::standard()) below. Throws PatternError with code "bad_alphabet" on
      * an empty text or on any other character (U, '-', '.', whitespace included), naming
      * the first offending 0-based position. No length cap: a pattern longer than k is
-     * charged steps for its anchor windows only (§4.1); parsing it, its information bits,
-     * its palindrome test and its low-complexity note cost O(L) time that no step charges
-     * and no clock reading interrupts (each a single pass, a few ns per base).
+     * charged steps for its anchor windows only (§4.1); parsing it, its information bits
+     * and its palindrome test cost O(L) time that no step charges and no clock reading
+     * interrupts (each a single pass, a few ns per base). Its low-complexity note (sdust,
+     * O(L) too, but tens of microseconds per base of a repeat) is read under the clock and
+     * stops at the first piece flagged (kNoteLowComplexity).
      */
     static Pattern parse(PatternKind kind, std::string_view text);
 
@@ -617,7 +619,11 @@ struct Stop {
  * every kClockStride edges the release examines and every kReleaseClockStride contexts it
  * passes on (a released context costs the caller a k-mer spelling, k - 1 BOSS steps, and its
  * result object), and every kReleaseClockStride contexts an ALL_OR_COUNT delivery passes to
- * the caller. Work therefore ends within one such stride after the work time passes.
+ * the caller; in the extension also every kReleaseClockStride anchors it lists, before every
+ * anchor it extends (spelled first, k - 1 BOSS steps no step charges) and before every
+ * kReleaseClockStride-th node its DFS expands (GPT review 3, item 5); after a search that
+ * completed, before every piece but the first of the low-complexity diagnostic
+ * (kNoteLowComplexity). Work therefore ends within one such stride after the work time passes.
  */
 class Budget {
   public:
@@ -897,6 +903,13 @@ struct Work {
     // L > k with extend_paths: the outgoing edges the extension examined, one step each
     // (allowed or not); 0 otherwise
     uint64_t extension_edges = 0;
+    // L > k with extend_paths, counters of the extension's work beside its steps (GPT review
+    // 3; not steps, never charged): the anchors whose extension began, each spelled once
+    // (k - 1 BOSS steps no step charges) before its DFS, at most the anchors listed; and the
+    // DFS's branchings, the nodes it expanded (anchors included) with two or more outgoing
+    // k-mers allowed at the next position. 0 when the extension did not run
+    uint64_t extension_anchors = 0;
+    uint64_t extension_branches = 0;
     // every step this pattern charged: ranges_visited, plus the edges its scans examined,
     // plus k - 1 per candidate checked (Request::max_checked_entries), plus extension_edges
     uint64_t steps = 0;
@@ -1003,7 +1016,15 @@ struct Context {
 
 // JSON notes of a pattern (§7.2), the ones this increment can state:
 //  low_complexity_pattern    an exact pattern that sdust flags with the seeder's parameters
-//                            (T = 20, W = 64, is_low_complexity): why its counts are large
+//                            (T = 20, W = 64, is_low_complexity): why its counts are large.
+//                            An optional diagnostic (GPT review 3, item 2): never stated on
+//                            an answer with a stop (any phase and reason, the request-wide
+//                            stop of an earlier pattern included), nor when the work time
+//                            passed before sdust had read the pattern (read in pieces of 128
+//                            bases, the clock before each but the first, so only a pattern
+//                            longer than 191 bases can lose it so; Result::time_limited is
+//                            then set, the counts complete and the stop none). Otherwise
+//                            stated iff sdust flags the whole pattern, as before
 //  strand_unknown_canonical  graph mode CANONICAL or PRIMARY: orientations, not strands
 //  paths_later_increment     L > k without Request::extend_paths: anchors counted, paths
 //                            neither extended nor extracted (never set with extend_paths)
@@ -1065,7 +1086,10 @@ struct Result {
     // (phase DISCOVERY) with UNKNOWN counts
     std::optional<Stop> stop;
     // a TIME stop touched it, in any phase: the answer depends on the machine (JSON
-    // determinism "time_limited", else "full"; §5.5)
+    // determinism "time_limited", else "full"; §5.5). Also set without a stop when the work
+    // time passed during the low-complexity diagnostic of a completed search of more than
+    // 191 bases, which then leaves its note out (kNoteLowComplexity): only that note depends
+    // on the machine there
     bool time_limited = false;
     // set by enumerate() on an answered pattern; never by count()
     std::optional<Extraction> extraction;

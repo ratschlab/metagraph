@@ -486,18 +486,31 @@ uint64_t DBGSuccinct::count_edges_with_symbol(node_index first, node_index last,
 
 node_index DBGSuccinct::next_non_sink_edge(node_index from, node_index last) const {
     assert(last <= max_index());
-    if (!from)
+    if (!from || from > last)
         return npos;
 
     const BOSS &boss = *boss_graph_;
-    // a sink dummy is the only edge of its node, so a run of them is short in a range of
-    // node groups: read W edge by edge
-    for (node_index e = from; e <= last; ++e) {
-        // W modulo alph_size is BOSS::kSentinelCode (0) for $, plain or marked
+    // a sink dummy is the only edge of its node, so a run of them is mostly short: the first
+    // edges are read one by one (W modulo alph_size is BOSS::kSentinelCode (0) for $, plain
+    // or marked)
+    const node_index end = std::min(last, from + kNonSinkReads - 1);
+    for (node_index e = from; e <= end; ++e) {
         if (boss.get_W(e) % boss.alph_size)
             return e;
     }
-    return npos;
+    if (end == last)
+        return npos;
+
+    // but consecutive sink nodes can be many (the targets of 100,000 records sharing their
+    // last bases, none continued: GPT review 3, item 3): beyond the first edges the next
+    // occurrence of every symbol other than $, plain and marked, by rank and select on W,
+    // 2 (alph_size - 1) of each whatever the run's length
+    node_index next = boss.get_W().size();
+    for (BOSS::TAlphabet s = 1; s < boss.alph_size; ++s) {
+        next = std::min({ next, boss.succ_W(end + 1, s),
+                          boss.succ_W(end + 1, s + boss.alph_size) });
+    }
+    return next <= last ? next : npos;
 }
 
 node_index DBGSuccinct::next_edge_with_last_symbol(node_index from, node_index last,

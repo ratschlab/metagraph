@@ -176,8 +176,11 @@ class DBGSuccinct : public DeBruijnGraph {
     uint64_t count_edges_with_symbol(node_index first, node_index last,
                                      boss::BOSS::TAlphabet c) const;
 
-    // The first edge in [from, last] whose W is not $; npos if there is none.
+    // The first edge in [from, last] whose W is not $; npos if there is none (from > last
+    // included). Reads W at the first kNonSinkReads edges, then jumps over the rest of a run
+    // of sink dummies by rank and select (O(alph_size) of them, whatever the run's length).
     node_index next_non_sink_edge(node_index from, node_index last) const;
+    static constexpr uint64_t kNonSinkReads = 16;
 
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()

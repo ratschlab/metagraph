@@ -346,16 +346,47 @@ typedef std::tuple<edge_index, edge_index, size_t> Range;
 
 constexpr uint64_t kNoLimit = std::numeric_limits<uint64_t>::max();
 
-bool is_low_complexity(std::string_view s) {
-    // the seeder's filter with its parameters (aligner_seeder_methods.cpp, T = 20, W = 64),
-    // repeated here because that function is file-local to the aligner, which this
-    // increment does not edit (§11)
-    int n = 0;
-    std::unique_ptr<uint64_t, decltype(std::free)*> r {
-        sdust(0, reinterpret_cast<const uint8_t*>(s.data()), s.size(), 20, 64, &n),
-        std::free
-    };
-    return n > 0;
+// the seeder's sdust parameters (aligner_seeder_methods.cpp, T = 20, W = 64), and the bases
+// is_low_complexity reads between two clock readings
+constexpr int kSdustThreshold = 20;
+constexpr size_t kSdustWindow = 64;
+constexpr size_t kSdustPiece = 128;
+
+/**
+ * Whether sdust flags |s| anywhere with the seeder's parameters: the seeder's filter,
+ * repeated here because that function is file-local to the aligner, which this increment
+ * does not edit (§11). An optional diagnostic of a completed search (kNoteLowComplexity),
+ * run under the deadline (GPT review 3, item 2: one sdust over a 30,000-base repeat took
+ * 0.7 s without a clock reading). sdust decides at each base from the window of W bases
+ * ending there (its triplet counts, and the longest suffix whose counts stay within T / 5),
+ * and it flags |s| iff some window holds a perfect interval. So |s| is read in pieces of
+ * kSdustPiece + W - 1 bases overlapping by W - 1, which hold every window of |s|; a window
+ * cut at a piece's start is a suffix of the window of |s| at that base and holds a perfect
+ * interval only if that one does: some piece is flagged iff |s| is. Stops at the first piece
+ * flagged, so a repeat costs one piece (its perfect intervals are what makes sdust slow:
+ * about 6 ms for 191 bases of ATG), and reads the clock before every piece but the first:
+ * nullopt when the work time passed first. The first piece is read whatever the clock says,
+ * so that a pattern of at most kSdustPiece + W - 1 bases is always diagnosed (its answer
+ * never depends on the machine for it), at the cost of one piece past the work time.
+ */
+std::optional<bool> is_low_complexity(std::string_view s, Budget &budget) {
+    for (size_t begin = 0; begin < s.size(); begin += kSdustPiece) {
+        if (begin && !budget.check_time())
+            return std::nullopt;
+        const std::string_view piece = s.substr(begin, kSdustPiece + kSdustWindow - 1);
+        int n = 0;
+        std::unique_ptr<uint64_t, decltype(std::free)*> r {
+            sdust(0, reinterpret_cast<const uint8_t*>(piece.data()), piece.size(),
+                  kSdustThreshold, kSdustWindow, &n),
+            std::free
+        };
+        if (n > 0)
+            return true;
+        // the last piece reached the end of |s|
+        if (begin + piece.size() == s.size())
+            break;
+    }
+    return false;
 }
 
 std::vector<BaseSet> reverse_complement_sets(std::vector<BaseSet> q) {
@@ -936,7 +967,8 @@ class PatternRun {
      * Charges no steps; reads the clock before it starts, every kClockStride cursors it
      * prepares and every kClockStride edges it examines, and, when |emit| is the caller's
      * (|callers_emit|: a spelling and a result object per context, not a buffer's
-     * push_back), every kReleaseClockStride contexts it emits. Returns false when the
+     * push_back; also the listing of the anchors to extend, list_anchors), every
+     * kReleaseClockStride contexts it emits. Returns false when the
      * deadline stopped it ({|phase|, TIME} recorded: EXTRACTION for a release, EXTENSION for
      * the listing of the anchors to extend). |exhausted|, when given and true is returned:
      * every retained range was drained (no context left in them; a cut at |limit| with
@@ -1106,6 +1138,8 @@ class PatternRun {
     std::map<Orientation, uint64_t> found_;
     uint64_t found_total_ = 0;
     uint64_t candidates_ = 0;
+    // the nodes the DFS expanded, for its clock stride
+    uint64_t expanded_ = 0;
     bool keep_paths_ = false;
     std::vector<Context> paths_;
 
@@ -1773,8 +1807,9 @@ class PatternRun {
      * every position the outgoing k-mers of the path's last node whose base is allowed at
      * that position after the bases spelled so far (Pattern::allowed, so that an automaton
      * reads its state from the spelled prefix), in symbol order (A, C, G, T), to position
-     * L of the oriented pattern |q|. One step per outgoing edge examined, allowed or not.
-     * False when a stop ended it.
+     * L of the oriented pattern |q|. One step per outgoing edge examined, allowed or not;
+     * the clock before every kReleaseClockStride-th node expanded, counted over the whole
+     * extension. False when a stop ended it.
      */
     bool extend_anchor(const Context &anchor, const Pattern &q) {
         const size_t L = q.length();
@@ -1796,6 +1831,14 @@ class PatternRun {
         levels.reserve(L - k_);
 
         auto expand = [&]() {
+            // the clock before every kReleaseClockStride-th node expanded: a node's outgoing
+            // k-mers cost a few BOSS steps each (more on the wrapper of a PRIMARY graph) and
+            // one step is charged per edge, so that a stride of steps can take long on a cold
+            // index (GPT review 3, item 5)
+            if (!(++expanded_ % Budget::kReleaseClockStride) && !budget_.check_time()) {
+                record_stop(StopPhase::EXTENSION, StopReason::TIME);
+                return false;
+            }
             const BaseSet allowed = q.allowed(spelled.size(), spelled);
             Level level;
             bool charged = true;
@@ -1810,6 +1853,8 @@ class PatternRun {
             });
             if (!charged)
                 return false;
+            if (level.size > 1)
+                ++work_.extension_branches;
             // symbol order, by an insertion sort of at most four (std::sort's path for more
             // than 16 elements makes GCC 13 -O3 report -Warray-bounds on this array)
             for (uint8_t i = 1; i < level.size; ++i) {
@@ -2173,8 +2218,10 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
 bool PatternRun::list_anchors(std::vector<Context> *anchors) {
     assert(extending_);
     // the anchors in answer order (§5.5); their ranges are discarded once they are listed:
-    // the anchors are kept through the extension, not beyond (§5.2)
-    listed_ = release(kNoLimit, [&](const Context &c) { anchors->push_back(c); }, false,
+    // the anchors are kept through the extension, not beyond (§5.2). The clock every
+    // kReleaseClockStride anchors listed, as for a caller's emit: on a cold index each costs
+    // a few page reads that no step charges (GPT review 3, item 5)
+    listed_ = release(kNoLimit, [&](const Context &c) { anchors->push_back(c); }, true,
                       StopPhase::EXTENSION);
     drop_anchors();
     work_.steps = budget_.steps_used() - steps_before_;
@@ -2191,6 +2238,15 @@ bool PatternRun::extend_listed(bool keep, const std::vector<Context> &anchors) {
     }
     const Pattern rc = pattern_.reverse_complement();
     for (const Context &anchor : anchors) {
+        // the clock before every anchor: its spelling (k - 1 BOSS steps) is work no step
+        // charges, and the anchors' DFS charges too few steps to cross a stride (GPT review 3,
+        // item 5: 674 anchors spelled on a cold index ran 3 s past the work time unread)
+        if (!budget_.check_time()) {
+            record_stop(StopPhase::EXTENSION, StopReason::TIME);
+            done = false;
+            break;
+        }
+        ++work_.extension_anchors;
         // each oriented pattern is extended in its own reading direction from its own
         // first k-mer (§4.1, "Orientation")
         if (!extend_anchor(anchor, anchor.orientation == Orientation::REVERSE ? rc
@@ -2970,10 +3026,18 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     result.time_limited = engine.time_limited();
 
     // the bases of an exact pattern: its text, or for a peptide (every residue one codon)
-    // the codons it spells
-    if (pattern.is_exact() && is_low_complexity(pattern.kind() == PatternKind::PROTEIN
-                                                    ? exact_bases(pattern)
-                                                    : pattern.text()))
+    // the codons it spells. An optional diagnostic: not run after any stop, and left out when
+    // the work time passes before sdust has its answer, a time stop the answer states as
+    // time_limited only (its counts complete, its stop none; GPT review 3, item 2)
+    bool low_complexity = false;
+    if (pattern.is_exact() && !result.stop) {
+        const std::optional<bool> flagged = is_low_complexity(
+                pattern.kind() == PatternKind::PROTEIN ? exact_bases(pattern) : pattern.text(),
+                budget);
+        low_complexity = flagged.value_or(false);
+        result.time_limited |= !flagged;
+    }
+    if (low_complexity)
         result.notes.push_back(kNoteLowComplexity);
     if (support_.mode != GraphMode::BASIC)
         result.notes.push_back(kNoteStrandUnknown);

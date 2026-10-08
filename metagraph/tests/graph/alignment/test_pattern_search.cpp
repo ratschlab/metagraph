@@ -2458,6 +2458,9 @@ struct PathOracle {
     std::map<Orientation, uint64_t> anchors;
     // the partial walks of k + 1 .. L bases instantiating the oriented pattern's prefix
     uint64_t candidates = 0;
+    // the walks of k .. L - 1 bases (anchors included) that two or more such walks extend by
+    // one base: the DFS's branchings (Work::extension_branches)
+    uint64_t branchings = 0;
 };
 
 PathOracle path_oracle(const DeBruijnGraph &graph, const Pattern &pattern,
@@ -2479,6 +2482,13 @@ PathOracle path_oracle(const DeBruijnGraph &graph, const Pattern &pattern,
                 return;
             }
             // a pattern position admits A, C, G, T only, never N
+            uint64_t children = 0;
+            for (char b : std::string("ACGT")) {
+                if (oriented[s.size()].find(b) != std::string::npos
+                        && node_of.count(s.substr(s.size() - k + 1) + b))
+                    ++children;
+            }
+            result.branchings += children > 1;
             for (char b : std::string("ACGT")) {
                 if (oriented[s.size()].find(b) == std::string::npos)
                     continue;
@@ -2664,6 +2674,10 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
     EXPECT_EQ(expected.size(), a.paths.value) << pattern.text();
     EXPECT_EQ(oracle.candidates, a.candidates_examined) << pattern.text();
     EXPECT_LE(expected.size(), a.candidates_examined);
+    // the extension's counters beside its steps (GPT review 3): every anchor spelled and
+    // extended, and the walks the DFS branched at
+    EXPECT_EQ(num_anchors, counted.work.extension_anchors) << pattern.text();
+    EXPECT_EQ(oracle.branchings, counted.work.extension_branches) << pattern.text();
     std::map<Orientation, uint64_t> by_orientation;
     for (const PathCtx &p : expected) {
         ++by_orientation[p.orientation];
@@ -2696,6 +2710,8 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
     std::vector<PathCtx> released = run_paths(engine, stored, pattern, all, &enumerated);
     EXPECT_EQ(counted.work.steps, enumerated.work.steps);
     EXPECT_EQ(counted.work.extension_edges, enumerated.work.extension_edges);
+    EXPECT_EQ(counted.work.extension_anchors, enumerated.work.extension_anchors);
+    EXPECT_EQ(counted.work.extension_branches, enumerated.work.extension_branches);
     EXPECT_EQ(a.candidates_examined, enumerated.anchors->candidates_examined);
     ASSERT_TRUE(enumerated.extraction);
     EXPECT_TRUE(enumerated.extraction->complete);
@@ -3258,7 +3274,8 @@ TEST(PatternSearch, ExtensionDeadline) {
     const auto start = Deadline::Clock::now();
 
     // the clock reads late from its |on_time|+1-th reading on: the pattern's start reads it
-    // first, the listing of the anchors second, the release of the paths third
+    // first, the listing of the anchors second, then the extension before each anchor (GPT
+    // review 3, item 5; one anchor here, GATCG), the release of the paths after them
     auto run = [&](int on_time, Mode mode, std::vector<PathCtx> *released) {
         auto readings = std::make_shared<int>(0);
         auto clock = [start, readings, on_time]() {
@@ -3299,14 +3316,26 @@ TEST(PatternSearch, ExtensionDeadline) {
     EXPECT_EQ(StopReason::TIME, partial.extraction->cut);
     EXPECT_TRUE(none.empty());
 
+    // late before the anchor's extension: the anchors listed, none extended
+    Result anchor = run(2, Mode::COUNT, nullptr);
+    ASSERT_TRUE(anchor.stop);
+    EXPECT_EQ(StopPhase::EXTENSION, anchor.stop->phase);
+    EXPECT_EQ(StopReason::TIME, anchor.stop->reason);
+    EXPECT_EQ(1u, anchor.anchors->total.value);
+    EXPECT_EQ(Extension::STOPPED, anchor.anchors->extension);
+    EXPECT_EQ(Relation::AT_LEAST, anchor.anchors->paths.relation);
+    EXPECT_EQ(0u, anchor.anchors->paths.value);
+    EXPECT_EQ(0u, anchor.work.extension_anchors);
+    EXPECT_EQ(0u, anchor.work.extension_edges);
+
     // late at the release: paths exact, nothing released, stop {extraction, time}
-    Result release = run(2, Mode::ALL_OR_COUNT, &none);
+    Result release = run(3, Mode::ALL_OR_COUNT, &none);
     EXPECT_EQ(Relation::EXACT, release.anchors->paths.relation);
     EXPECT_LT(0u, release.anchors->paths.value);
     ASSERT_TRUE(release.stop);
     EXPECT_EQ(StopPhase::EXTRACTION, release.stop->phase);
     EXPECT_EQ(Withheld::DEADLINE, release.extraction->withheld);
-    Result streamed = run(2, Mode::PARTIAL, &none);
+    Result streamed = run(3, Mode::PARTIAL, &none);
     EXPECT_EQ(StopReason::TIME, streamed.extraction->cut);
     EXPECT_TRUE(none.empty());
 

@@ -31,6 +31,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <random>
@@ -797,6 +798,121 @@ TEST(PatternUnmasked, PrimitivesWithoutTheMask) {
         }
         EXPECT_EQ(m.count_valid_edges_in_range(1, n), real);
     }
+}
+
+/**
+ * GPT review 3, item 3: 100,000 consecutive sink dummies before one k-mer. The records
+ * A^18 c TC (c: 11 bases over A, G, T, one per record) are each one k-mer at k = 31, whose
+ * target node ends with TC and is continued by no record (none starts with TC), and T^30 CA
+ * adds the node T^29 C, the colex-last node ending with C, with an edge A: the nodes ending
+ * with C are the 100,000 sinks, then T^29 C. The skip over the sinks (next_non_sink_edge,
+ * which the unmasked release, the palindrome scans and the check call) must not read them
+ * one by one: its result against a read of W, its cost against the same call over a run of
+ * 40 sinks (a linear scan costs 2,500 times as much there), and the release of the first
+ * context of "C" (offset 29 of T^29 CA, lying after the run in its flank range) against the
+ * masked graph's.
+ */
+TEST(PatternUnmasked, LongSinkRunSkippedByRankAndSelect) {
+    const size_t k = 31;
+    const size_t num_sinks = 100'000;
+    std::vector<std::string> records;
+    records.reserve(num_sinks + 1);
+    for (size_t i = 0; i < num_sinks; ++i) {
+        std::string code;
+        for (size_t j = 0, x = i; j < 11; ++j, x /= 3) {
+            code.push_back("AGT"[x % 3]);
+        }
+        records.push_back(std::string(18, 'A') + code + "TC");
+    }
+    records.push_back(std::string(30, 'T') + "CA");
+    auto graph = build_graph_batch<DBGSuccinct>(k, records, DeBruijnGraph::BASIC);
+    DBGSuccinct &dbg_succ = const_cast<DBGSuccinct&>(base_dbg(*graph));
+    const BOSS &boss = dbg_succ.get_boss();
+    const node_index n = dbg_succ.max_index();
+
+    // the oracle: W read edge by edge
+    auto sink = [&](node_index e) { return !(boss.get_W(e) % boss.alph_size); };
+    auto scan = [&](node_index from, node_index last) -> node_index {
+        for (node_index e = from; e <= last; ++e) {
+            if (!sink(e))
+                return e;
+        }
+        return DeBruijnGraph::npos;
+    };
+    // the longest run of sink edges, and the edge after it
+    node_index run_first = 0;
+    node_index run_end = 0;
+    for (node_index e = 1, first = 0; e <= n + 1; ++e) {
+        if (e <= n && sink(e)) {
+            if (!first)
+                first = e;
+            continue;
+        }
+        if (first && e - first > run_end - run_first) {
+            run_first = first;
+            run_end = e;
+        }
+        first = 0;
+    }
+    ASSERT_EQ(num_sinks, run_end - run_first);
+    ASSERT_LE(run_end, n);
+    EXPECT_EQ(std::string(29, 'T') + "CA", dbg_succ.get_node_sequence(run_end));
+
+    // the result, from inside and around the run, up to ranges ending inside it
+    std::vector<node_index> froms { 1, run_first - 1, run_first, run_first + 1,
+                                    run_first + DBGSuccinct::kNonSinkReads - 1,
+                                    run_first + DBGSuccinct::kNonSinkReads,
+                                    run_first + num_sinks / 2, run_end - 17, run_end - 16,
+                                    run_end - 1, run_end, run_end + 1 };
+    for (node_index from : froms) {
+        for (node_index last : { from, from + 15, from + 16, from + 17, run_end - 1, run_end,
+                                 run_end + 3, n }) {
+            if (from < 1 || from > n || last > n)
+                continue;
+            ASSERT_EQ(from > last ? DeBruijnGraph::npos : scan(from, last),
+                      dbg_succ.next_non_sink_edge(from, last)) << from << " " << last;
+        }
+    }
+
+    // the cost: the least of 20 rounds of 200 calls, over the whole run and over its last 40
+    auto cost = [&](node_index from) {
+        double least = std::numeric_limits<double>::infinity();
+        node_index found = 0;
+        for (int round = 0; round < 20; ++round) {
+            const auto start = std::chrono::steady_clock::now();
+            for (int i = 0; i < 200; ++i) {
+                found += dbg_succ.next_non_sink_edge(from, n);
+            }
+            least = std::min(least, std::chrono::duration<double, std::micro>(
+                    std::chrono::steady_clock::now() - start).count());
+        }
+        EXPECT_EQ(20u * 200u * run_end, found);
+        return least;
+    };
+    const double whole_run = cost(run_first);
+    const double short_run = cost(run_end - 40);
+    std::cerr << "next_non_sink_edge: over " << num_sinks << " sinks " << whole_run / 200
+              << " us, over 40 sinks " << short_run / 200 << " us" << std::endl;
+    EXPECT_LT(whole_run, 20 * short_run);
+
+    // the release in the graph's own words: "C", the first context in answer order after two
+    // steps (the W rule at the root and the flank range of the nodes ending with C), with the
+    // mask and without it
+    Request request = make_request(Scope::ANY_OFFSET, Strands::FORWARD);
+    request.mode = Mode::PARTIAL;
+    request.max_contexts = 1;
+    const Pattern c = Pattern::parse(PatternKind::DNA, "C");
+    Result masked_result;
+    std::vector<Ctx> masked = enumerate_of(*graph, c, request, &masked_result, 2);
+    ASSERT_EQ(1u, masked.size());
+    EXPECT_EQ(run_end, masked.front().node);
+    EXPECT_EQ(29u, masked.front().offset);
+    dbg_succ.reset_mask();
+    Result unmasked_result;
+    std::vector<Ctx> unmasked = enumerate_of(*graph, c, request, &unmasked_result, 2);
+    EXPECT_EQ(masked, unmasked);
+    ASSERT_TRUE(unmasked_result.stop);
+    EXPECT_EQ(StopReason::MAX_STEPS, unmasked_result.stop->reason);
 }
 
 
