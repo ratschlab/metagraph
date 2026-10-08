@@ -41,13 +41,23 @@ namespace {
 constexpr const char *kDefaultProjection = "none";
 
 // Request fields of later increments (§7.1): refused by name, any value (null included),
-// rather than reported as unknown, so that the answer says what to wait for. long_search
-// (owner decision #13 of 2026-10-07): the opt-in of increment 4's paths ("paths"; "anchors"
-// the answer of today), reserved: refused whatever its value until the paths are served
+// rather than reported as unknown, so that the answer says what to wait for. (long_search,
+// max_paths and require_support, reserved until increment 4, are served now: the paths of a
+// pattern longer than k, opt-in by long_search "paths", owner decisions #13 and #14)
 const char *const kLaterIncrementFields[] = {
-    "long_search", "max_paths", "require_support", "predicate", "max_predicate_contexts",
-    "max_predicate_work", "graphs", "genetic_code", "budget_split",
+    "predicate", "max_predicate_contexts", "max_predicate_work", "graphs", "genetic_code",
+    "budget_split",
 };
+
+// long_search (owner decision #13 of 2026-10-07): "anchors", the default, answers a pattern
+// longer than k by its anchors (the answer of increments 1-3, unchanged); "paths" extends them
+// into paths (increment 4). A pattern of at most k bases is answered alike under both
+constexpr const char kLongSearchAnchors[] = "anchors";
+constexpr const char kLongSearchPaths[] = "paths";
+// require_support (owner decision #14): every label carrying a path is returned with its
+// support ("label_intersection", the default), or only the record-verified ones
+constexpr const char kSupportIntersection[] = "label_intersection";
+constexpr const char kSupportVerified[] = "record_verified";
 
 // The note of an entry whose request named the labels (output.labels "all", or an
 // annotation field) but whose answer reads none: mode count reads no annotation (§5.2), and
@@ -153,6 +163,12 @@ struct ParsedRequest {
     bool annotation_named = false;
     // the effective annotation limits (used with labels_all in a retrieval mode)
     RetrievalLimits retrieval;
+    // long_search "paths" (increment 4): patterns longer than k are extended into paths
+    // (Request::extend_paths); false for "anchors" or when omitted
+    bool long_paths = false;
+    // require_support "record_verified" (increment 4): the labels of paths that one record
+    // verifies only
+    bool require_verified = false;
 };
 
 void note_clamped(Json::Value *clamped, const char *field, Json::Value requested,
@@ -297,10 +313,10 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             req.retrieval.occurrences = o.raw("occurrences").asBool();
         }
         if (o.has("paths")) {
+            // increment 4: accepted with either value and changes nothing, since a path
+            // result always carries its node path (nodes, rows), as a context its node and row
             if (!o.raw("paths").isBool())
                 throw invalid(o.path("paths") + ": expected a boolean");
-            if (o.raw("paths").asBool())
-                throw later(o.path("paths") + ": true in a later increment");
         }
         o.finish();
     }
@@ -375,6 +391,30 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         r.allow_unbudgeted = f.raw("allow_unbudgeted_annotation").asBool();
     }
     r.chunk_target_ms = limits.chunk_target_ms;
+
+    // increment 4: the paths of a pattern longer than k, opt-in (owner decision #13)
+    const std::string long_search = string_field(f, "long_search", kLongSearchAnchors);
+    if (long_search != kLongSearchAnchors && long_search != kLongSearchPaths)
+        throw invalid(f.path("long_search") + ": expected one of anchors|paths");
+    req.long_paths = long_search == kLongSearchPaths;
+    req.request.extend_paths = req.long_paths;
+    // accepted with any request; it bounds the paths of long_search "paths" only
+    req.request.max_paths = capped_integer(f, "max_paths", limits.max_paths, 0, &req.clamped);
+    // an annotation field (its effect is on the labels of paths): named in a request that
+    // reads no labels, it is stated as not read (annotation_not_read)
+    req.annotation_named |= f.has("require_support");
+    const std::string support = string_field(f, "require_support", kSupportIntersection);
+    if (support != kSupportIntersection && support != kSupportVerified) {
+        throw invalid(f.path("require_support") + ": expected one of label_intersection|"
+                      "record_verified");
+    }
+    req.require_verified = support == kSupportVerified;
+    if (req.require_verified && !r.occurrences) {
+        // the verification reads the labels' coordinates, which output.occurrences false
+        // declines: the two contradict each other
+        throw invalid(f.path("require_support") + ": \"record_verified\" needs the labels' "
+                      "coordinates, which output.occurrences false does not read");
+    }
 
     f.finish();
     return req;
@@ -471,7 +511,8 @@ Json::Value error_json(const std::string &code, const std::string &message) {
  * admitted only the first of them (their objects not built; apply_labels states the cut).
  */
 Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
-                       bool strand_stated, Json::Value results, uint64_t released) {
+                       bool strand_stated, Json::Value results, uint64_t released,
+                       bool long_paths) {
     Json::Value e;
     e["id"] = spec.id;
     e["kind"] = to_string(spec.kind);
@@ -518,7 +559,17 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
         Json::Value a = count_json(result->anchors->total);
         put_orientations(&a, result->anchors->by_orientation, strand_stated);
         counts["anchors"] = std::move(a);
-        counts["paths"] = count_json(result->anchors->paths);
+        Json::Value paths = count_json(result->anchors->paths);
+        if (long_paths) {
+            // increment 4 (long_search "paths", §4.2): the paths counted by the extension,
+            // per orientation, beside the branches it entered (work, not a count of the
+            // pattern) and what it did (no_anchors, not_started, not_admitted, stopped,
+            // completed)
+            put_orientations(&paths, result->anchors->paths_by_orientation, strand_stated);
+            paths["candidates_examined"] = uint_json(result->anchors->candidates_examined);
+            paths["extension"] = to_string(result->anchors->extension);
+        }
+        counts["paths"] = std::move(paths);
     } else {
         throw std::logic_error("pattern: the engine answered a pattern without counts");
     }
@@ -531,6 +582,10 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     work["ranges_visited"] = uint_json(result->work.ranges_visited);
     work["mask_scans"] = uint_json(result->work.mask_scans);
     work["steps"] = uint_json(result->work.steps);
+    if (long_paths && result->anchors) {
+        // the outgoing edges the extension examined, one step each (part of steps)
+        work["extension_edges"] = uint_json(result->work.extension_edges);
+    }
     e["work"] = std::move(work);
     e["stop"] = stop_json(result->stop);
 
@@ -568,6 +623,8 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     e["notes"] = std::move(notes);
     Json::Value timing;
     timing["elapsed_ms"] = result->elapsed_ms;
+    if (long_paths && result->anchors)
+        timing["extension_ms"] = result->extension_ms;
     e["timing"] = std::move(timing);
     return e;
 }
@@ -630,6 +687,7 @@ PatternLimits pattern_limits(const Config &config) {
     PatternLimits limits;
     limits.max_contexts = config.pattern_max_contexts;
     limits.max_anchors = config.pattern_max_anchors;
+    limits.max_paths = config.pattern_max_paths;
     limits.max_steps = config.pattern_max_steps;
     limits.default_time_ms = static_cast<double>(config.pattern_default_time_ms);
     limits.max_time_ms = static_cast<double>(config.pattern_max_time_ms);
@@ -771,6 +829,23 @@ Json::Value process_pattern_request(
                                  "it anyway (the answer then says annotation: unbudgeted), or "
                                  "ask for output.labels \"none\" or mode count");
         }
+        // increment 4 (DESIGN §4.3, owner decision #14): require_support "record_verified"
+        // keeps the labels one record verifies, which needs a BASIC index with coordinates
+        // and its record mapping; an index that cannot verify refuses it rather than answer
+        // in the weaker mode
+        if (req.long_paths && req.require_verified
+                && std::string(retrieval->description().support) != kSupportVerified) {
+            throw PatternRefusal(400, "support_unavailable",
+                                 "pattern: require_support \"record_verified\" needs a BASIC "
+                                 "index with coordinates and its record mapping (.seqs), to "
+                                 "check that one record holds the whole path; this index's "
+                                 "best support is \""
+                                 + std::string(retrieval->description().support)
+                                 + "\" (placement \""
+                                 + std::string(retrieval->description().placement)
+                                 + "\"). Ask without require_support: each label of a path "
+                                 "then states its support");
+        }
     }
     // the graph's name in by_label (the index's --index-name; null without one)
     const Json::Value graph_name = identity && !identity->name.empty()
@@ -828,6 +903,75 @@ Json::Value process_pattern_request(
         return r;
     };
 
+    /**
+     * One released path of a pattern longer than k as its JSON result (long_search "paths",
+     * increment 4; owner decision #13): the new fields sequence (the L bases it spells),
+     * anchor_kmer (its anchor's k bases, as the graph spells them) and the node path with the
+     * row of each k-mer (nodes, rows), never kmer, which keeps its meaning (a context's
+     * k-mer); instance is the sequence, offset 0, the strand or orientation as for contexts.
+     * The rows are named without reading them, as a context's row (§7.10).
+     */
+    auto path_json = [&](const Context &c, size_t length, RetrievalPath *collected = nullptr) {
+        const size_t n = length - k + 1;
+        if (length <= k || c.path.size() != n || c.sequence.size() != length
+                || c.path.front() != c.node || c.offset != 0) {
+            throw std::logic_error("pattern: the engine released a path of "
+                                   + std::to_string(c.path.size()) + " k-mers and "
+                                   + std::to_string(c.sequence.size()) + " bases for a pattern "
+                                   "of " + std::to_string(length) + " bases");
+        }
+        std::string anchor = graph.get_node_sequence(c.node);
+        if (anchor.size() != k || c.sequence.compare(0, k, anchor) != 0) {
+            throw std::logic_error("pattern: the engine released a path whose sequence does "
+                                   "not start with its anchor's k-mer");
+        }
+        // the annotation key of each k-mer: the stored k-mer's (base_node) on BASIC and
+        // wrapped PRIMARY graphs, the canonical k-mer's on a native CANONICAL graph
+        std::vector<DeBruijnGraph::node_index> keys(n, DeBruijnGraph::npos);
+        if (support.mode == GraphMode::CANONICAL) {
+            size_t j = 0;
+            graph.map_to_nodes(c.sequence, [&](DeBruijnGraph::node_index x) {
+                if (j < n)
+                    keys[j] = x;
+                ++j;
+            });
+        } else {
+            for (size_t j = 0; j < n; ++j) {
+                keys[j] = search.base_node(c.path[j]);
+            }
+        }
+        Json::Value r;
+        Json::Value nodes(Json::arrayValue), rows(Json::arrayValue);
+        for (size_t j = 0; j < n; ++j) {
+            nodes.append(uint_json(c.path[j]));
+            const bool valid = keys[j] != DeBruijnGraph::npos
+                                && AnnotatedDBG::graph_to_anno_index(keys[j]) < num_rows;
+            rows.append(valid ? uint_json(AnnotatedDBG::graph_to_anno_index(keys[j]))
+                              : Json::Value());
+            if (!valid)
+                keys[j] = DeBruijnGraph::npos;
+        }
+        if (collected) {
+            collected->orientation = c.orientation;
+            collected->sequence = c.sequence;
+            collected->keys.assign(keys.begin(), keys.end());
+        }
+        r["sequence"] = c.sequence;
+        r["anchor_kmer"] = std::move(anchor);
+        r["instance"] = c.sequence;
+        r["offset"] = 0;
+        if (strand_stated) {
+            r["strand"] = strand_symbol(c.orientation);
+        } else {
+            r["orientation"] = orientation_key(c.orientation);
+        }
+        r["nodes"] = std::move(nodes);
+        r["rows"] = std::move(rows);
+        // in the answer from now on: the work time is read with it counted
+        volume.add(compact_json_bytes(r));
+        return r;
+    };
+
     Json::Value entries(Json::arrayValue);
     struct Answered {
         std::optional<Result> result;
@@ -844,15 +988,37 @@ Json::Value process_pattern_request(
         Answered a;
         a.results = Json::Value(Json::arrayValue);
         if (spec.pattern) {
+            // long_search "paths": a pattern longer than k is answered by its paths
+            const bool paths = req.long_paths && spec.pattern->length() > k;
             if (mode == Mode::COUNT) {
                 a.result = search.count(*spec.pattern, req.request, budget);
             } else if (!read_labels) {
                 const size_t length = spec.pattern->length();
                 a.result = search.enumerate(*spec.pattern, req.request, budget,
                                             [&](const Context &c) {
-                    a.results.append(context_json(c, length));
+                    a.results.append(paths ? path_json(c, length) : context_json(c, length));
                 });
                 a.released = a.results.size();
+            } else if (paths) {
+                const size_t length = spec.pattern->length();
+                std::vector<RetrievalPath> collected;
+                retrieval->begin_release(mode);
+                a.result = search.enumerate(*spec.pattern, req.request, budget,
+                                            [&](const Context &c) {
+                    ++a.released;
+                    // the path's descriptor, sequence and arrays are charged to the memory
+                    // account before its object is built; after the first that does not fit
+                    // none is built
+                    if (!retrieval->admit_path(length))
+                        return;
+                    collected.emplace_back();
+                    a.results.append(path_json(c, length, &collected.back()));
+                });
+                if (!a.result->refusal && a.result->extraction) {
+                    a.labels = retrieval->retrieve_paths(collected, a.released, length, mode,
+                                                         *a.result->extraction, graph_name,
+                                                         req.require_verified);
+                }
             } else {
                 const size_t length = spec.pattern->length();
                 std::vector<RetrievalContext> collected;
@@ -894,7 +1060,8 @@ Json::Value process_pattern_request(
             objects = 0;
         }
         Json::Value entry = entry_json(req.patterns[i], a.result ? &*a.result : nullptr, mode,
-                                       strand_stated, std::move(a.results), a.released);
+                                       strand_stated, std::move(a.results), a.released,
+                                       req.long_paths);
         if (a.labels) {
             apply_labels(&entry, std::move(*a.labels), mode);
         } else if (req.annotation_named && !read_labels && entry.isMember("notes")) {
@@ -949,6 +1116,13 @@ Json::Value process_pattern_request(
         l["max_occurrences_per_label"] = uint_json(r.max_occurrences_per_label);
         l["allow_unbudgeted_annotation"] = r.allow_unbudgeted;
     }
+    if (req.long_paths) {
+        // increment 4, in the answers that ask for paths only (the others answer as before)
+        l["long_search"] = kLongSearchPaths;
+        l["max_paths"] = uint_json(req.request.max_paths);
+        if (read_labels)
+            l["require_support"] = req.require_verified ? kSupportVerified : kSupportIntersection;
+    }
     l["clamped"] = std::move(req.clamped);
     out["limits"] = std::move(l);
 
@@ -989,7 +1163,11 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // a virtual suffix of the wrapper is a stored prefix (§4.1): not a BOSS range
     by_mode["primary"] = strings_json({ "any_offset" });
     p["scopes_by_graph_mode"] = std::move(by_mode);
+    // what a pattern longer than k gets without the option (paths are opt-in: SPEC §12)
     p["long_patterns"] = "anchors_counted";
+    // increment 4 (owner decision #13): the long_search values served, and the default
+    p["long_search"] = strings_json({ kLongSearchAnchors, kLongSearchPaths });
+    p["default_long_search"] = kLongSearchAnchors;
     p["strands"] = strings_json({ "both", "forward", "reverse" });
     p["default_strands"] = to_string(Strands::BOTH);
     p["graph_cleaned"] = "unknown";
@@ -998,6 +1176,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     Json::Value caps;
     caps["max_contexts"] = uint_json(limits.max_contexts);
     caps["max_anchors"] = uint_json(limits.max_anchors);
+    // increment 4: long_search "paths"
+    caps["max_paths"] = uint_json(limits.max_paths);
     caps["max_steps"] = uint_json(limits.max_steps);
     caps["time_budget_ms"] = number_json(limits.max_time_ms);
     caps["min_information_bits"] = number_json(limits.min_information_bits);
@@ -1016,10 +1196,10 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // field's maximum) and X-EFFICIENCY-04 (the time kept back from the work grows with what
     // the answer holds)
     p["caps_rule"] = "max_contexts, max_anchors, max_steps, time_budget_ms, "
-        "max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels and "
-        "max_occurrences_per_label are the maxima of their request fields: a larger request "
-        "value is lowered to the cap and listed in limits.clamped; each is also its field's "
-        "default, except time_budget_ms, whose default is default_time_budget_ms. "
+        "max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels, "
+        "max_occurrences_per_label and max_paths are the maxima of their request fields: a "
+        "larger request value is lowered to the cap and listed in limits.clamped; each is also "
+        "its field's default, except time_budget_ms, whose default is default_time_budget_ms. "
         "max_patterns bounds the length of patterns: a longer list is refused, never cut. "
         "min_information_bits is the server's information floor, not a request field. Of "
         "time_budget_ms, the work stops at least finalize_reserve_ms before the deadline, and "
@@ -1027,7 +1207,12 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
         + ms_text(kAnswerVolumeMargin) + " x (B / (" + ms_text(limits.delivery_build_mbps)
         + " x 1000) + B / (" + ms_text(limits.delivery_compress_mbps) + " x 1000)) ms for B "
         "bytes of its compact JSON text (the labels about to be built counted once more at the "
-        "first rate; rates in MB/s), so that a stopped request still answers with its counts";
+        "first rate; rates in MB/s), so that a stopped request still answers with its counts. "
+        "A pattern longer than k is answered by its anchors (long_patterns) unless the request "
+        "sets long_search \"paths\" (long_search lists the values served): then an exact "
+        "anchor count of at most max_anchors admits the extension, and an exact path count of "
+        "at most max_paths the release of the paths (partial: the first max_paths); "
+        "long_search changes nothing for a pattern of at most k bases";
 
     const char *graph_fields[] = { "graph_mode", "k", "alphabet", "strand_stated", "mask",
                                    "scopes", "placement", "support", "annotation" };

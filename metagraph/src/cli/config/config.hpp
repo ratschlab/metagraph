@@ -183,6 +183,10 @@ class Config {
     double pattern_min_information_bits = 24;
     uint64_t pattern_max_contexts = 10'000;
     uint64_t pattern_max_anchors = 1'000;
+    // increment 4 (long_search "paths", §4.2): the default and maximum of max_paths, the
+    // retrieval threshold on the completed paths of a pattern longer than k (all_or_count
+    // releases them only when their exact count is at most this; partial's cap)
+    uint64_t pattern_max_paths = 1'000;
     // the step cap of a request (§5.3). Not calibrated against the time budget on a deployed
     // index (review of 2026-10-07, X-EFFICIENCY-05): measured in RAM at 0.2-0.7 us a step
     // (the mini index, random graphs of 0.5 and 2 billion edges; M5 Max, shared), so 1e8 steps

@@ -70,6 +70,8 @@ constexpr uint64_t kDedupBytes = 64;
 // available_bytes) or an anchors_truncated entry (k-mer, row, cap, total); reserved before
 // the read that can produce it, so that it always fits, and held with the answer
 uint64_t statement_bytes(size_t k) { return 384 + k; }
+// a released path (long_search "paths"): see path_descriptor_bytes in the header
+constexpr uint64_t kPathKmerBytes = 192;
 
 /**
  * The compact JSON text of the labels built for the answer, from above (AnswerVolume, review
@@ -93,6 +95,16 @@ constexpr uint64_t kGlobalOccurrenceText = 80;
 // a by_label entry without its names: {"column":,"contexts":<count>,"contexts_suffix":
 // <count>,"graph":,"occurrences":<count>}, (68 and three counts)
 constexpr uint64_t kByLabelText = 72 + 3 * kCountText;
+// paths (long_search "paths"): a result's label fields, ,"labels":[],"labels_excluded_
+// unverified":<20 digits>,"labels_status":"output_budget","labels_total":<20 digits>,
+// "support":"label_intersection" (about 160)
+constexpr uint64_t kPathResultLabelsText = 176;
+// a path's label object without its name and list: {"column":,"occurrence_list":[],
+// "occurrences":<count>,"support":"label_intersection"},
+constexpr uint64_t kPathLabelText = 80 + kCountText;
+// a path's by_label entry without its names: {"column":,"graph":,"occurrences":<count>,
+// "paths":<count>,"paths_record_verified":<count>}, (73 and three counts)
+constexpr uint64_t kPathByLabelText = 80 + 3 * kCountText;
 
 // a string's text: quoted, every byte jsoncpp may escape (a control character, a quote, a
 // backslash, a byte of a non-ASCII character: \uXXXX) counted as 6
@@ -241,10 +253,39 @@ struct ContextLabel {
     std::vector<Occurrence> occurrences;
     // the occurrences of this context-label before the partial cut
     uint64_t total = 0;
+    // a path's label (long_search "paths"): record_verified, one record holds the whole path
+    bool verified = false;
 };
+
+// What the verification made of a label carrying a path (every k-mer of it annotated)
+enum class PathSupport : uint8_t {
+    // not verified: no record placement, or a row of the path not placed (refused, not
+    // reached), or no coordinates of the label in a placed row
+    NOT_PLACED,
+    // the coordinates were read: no contiguous occurrence of the whole path in one record
+    // (record placement), or record bounds unknown (global: the chains only)
+    PLACED,
+    // record placement: one record of the label holds the whole path (record_verified)
+    VERIFIED,
+};
+
+// a label carrying a path, with what the verification made of it (8 bytes in the model)
+struct PathLabel {
+    LabelId label = 0;
+    PathSupport support = PathSupport::NOT_PLACED;
+};
+// the memory model of a path's labels (the labels on every k-mer of it, held until the
+// pattern's labels are built): its list and 8 bytes per label
+constexpr uint64_t kPathLabelsBytes = 32;
+constexpr uint64_t kPathLabelBytes = 8;
 
 } // namespace
 
+
+uint64_t path_descriptor_bytes(size_t k, size_t length) {
+    const uint64_t n = length >= k ? length - k + 1 : 1;
+    return context_bytes(k) + 3 * static_cast<uint64_t>(length) + kPathKmerBytes * n;
+}
 
 double AnswerVolume::finalize_ms() const {
     // MB/s are bytes per microsecond: x 1000 bytes per ms. A rate of 0 or infinity: no model
@@ -439,10 +480,13 @@ struct PatternRetrieval::Impl {
                   Mode mode, uint64_t *rows_read, uint64_t *pattern_units,
                   uint64_t *held_lists, Json::Value *refused);
 
-    // step 2: the coordinates of the rows' labels
+    // step 2: the coordinates of the rows' labels; |needed| (paths): only the rows it marks
+    // (those of a path with at least one label on every k-mer), every row read with a label
+    // when null (contexts)
     void place_rows(std::vector<RowState> &rows, const std::vector<RetrievalContext> &contexts,
                     Mode mode, uint64_t *rows_read, uint64_t *pattern_units,
-                    uint64_t *held_hits, Json::Value *refused);
+                    uint64_t *held_hits, Json::Value *refused,
+                    const std::vector<bool> *needed = nullptr);
 };
 
 // Both steps read one row at a time (review GPT-2, finding 2): the time and the work are
@@ -555,12 +599,13 @@ void PatternRetrieval::Impl::discover(std::vector<RowState> &rows,
 void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
                                         const std::vector<RetrievalContext> &contexts,
                                         Mode mode, uint64_t *rows_read, uint64_t *pattern_units,
-                                        uint64_t *held_hits, Json::Value *refused) {
-    // the rows read with at least one label
+                                        uint64_t *held_hits, Json::Value *refused,
+                                        const std::vector<bool> *needed) {
+    // the rows read with at least one label (and, for paths, needed)
     std::vector<size_t> todo;
     for (size_t i = 0; i < rows.size(); ++i) {
         if ((rows[i].status == RowStatus::COMPLETE || rows[i].status == RowStatus::TRUNCATED)
-                && !rows[i].labels.labels.empty()) {
+                && !rows[i].labels.labels.empty() && (!needed || (*needed)[i])) {
             todo.push_back(i);
         }
     }
@@ -673,17 +718,24 @@ void PatternRetrieval::begin_release(Mode mode) {
     m.admitting = true;
 }
 
-bool PatternRetrieval::admit_context() {
+bool PatternRetrieval::admit(uint64_t bytes) {
     Impl &m = *impl_;
     if (!m.admitting)
         return false;
-    const uint64_t bytes = context_bytes(m.oracle.get_k());
     if (m.descriptors + bytes > m.allowance || !m.account.charge(bytes)) {
         m.admitting = false;
         return false;
     }
     m.descriptors += bytes;
     return true;
+}
+
+bool PatternRetrieval::admit_context() {
+    return admit(context_bytes(impl_->oracle.get_k()));
+}
+
+bool PatternRetrieval::admit_path(size_t length) {
+    return admit(path_descriptor_bytes(impl_->oracle.get_k(), length));
 }
 
 uint64_t PatternRetrieval::memory_peak() const { return impl_->account.peak(); }
@@ -1194,6 +1246,725 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
         a.result_fields.push_back(std::move(f));
     }
     // the labels are built: from now on they are written only
+    if (m.volume)
+        m.volume->settle(pending);
+    finish_work();
+    return a;
+}
+
+
+LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &paths,
+                                              uint64_t released, size_t length, Mode mode,
+                                              const Extraction &x, const Json::Value &graph_name,
+                                              bool require_verified) {
+    Impl &m = *impl_;
+    const size_t k = m.oracle.get_k();
+    // the descriptors admit_path() charged for |paths|, the pattern's from here on
+    const uint64_t descriptors = m.descriptors;
+    m.descriptors = 0;
+    m.admitting = false;
+    if (length <= k)
+        throw std::logic_error("pattern: paths of a pattern not longer than k");
+    assert(paths.size() <= released);
+    assert(descriptors == paths.size() * path_descriptor_bytes(k, length));
+    // a label is verified only with record placement (BASIC, coordinates, the record mapping,
+    // occurrences requested): the route refuses require_support "record_verified" elsewhere
+    if (require_verified && !m.records) {
+        throw std::logic_error("pattern: require_support record_verified without record "
+                               "placement");
+    }
+    m.stop.reset();
+    m.time_stop = false;
+    m.read_stop = false;
+    const size_t n = length - k + 1;
+    const bool partial = mode == Mode::PARTIAL;
+
+    // counts.labels.by_support: the labels by the support this answer gives them (the
+    // strongest over the returned paths); record_verified is unknown where nothing can be
+    // verified (no record placement)
+    auto support_split = [&](Relation verified_relation, uint64_t verified,
+                             Relation intersection_relation, uint64_t intersection) {
+        Json::Value v;
+        v["record_verified"] = count_json(m.records ? verified_relation : Relation::UNKNOWN,
+                                          verified, Unit::LABELS);
+        v["label_intersection"] = count_json(intersection_relation, intersection, Unit::LABELS);
+        return v;
+    };
+
+    LabelsAnswer a;
+    a.fields["placement"] = placement();
+    a.fields["annotation"] = description_.budgeted ? "budgeted" : "unbudgeted";
+    a.fields["rows_refused"] = Json::Value(Json::arrayValue);
+    a.fields["anchors_truncated"] = Json::Value(Json::arrayValue);
+    a.fields["labels_cut"] = Json::Value();
+    a.fields["occurrences_cut"] = Json::Value();
+    a.fields["by_label"] = Json::Value();
+    if (require_verified)
+        a.fields["labels_excluded_unverified"] = count_json(Relation::UNKNOWN, 0, Unit::LABELS);
+    a.labels_count = count_json(Relation::UNKNOWN, 0, Unit::LABELS);
+    a.labels_count["by_support"] = support_split(Relation::UNKNOWN, 0, Relation::UNKNOWN, 0);
+    a.occurrences_count = count_json(Relation::UNKNOWN, 0, Unit::PLACED_OCCURRENCES);
+    if (!description_.budgeted)
+        a.notes.push_back("annotation_unbudgeted");
+    if (m.place && !m.records)
+        a.notes.push_back("record_bounds_unknown");
+    // no coordinates read (placement none, none_canonical, not_requested): every label of a
+    // path is supported by the intersection of its k-mers' labels only (DESIGN §4.3)
+    if (!m.place)
+        a.notes.push_back("label_intersection_only");
+
+    uint64_t rows_read = 0, pattern_units = 0;
+    double discovery_ms = 0, placement_ms = 0;
+    auto finish_work = [&]() {
+        a.work["annotation_rows"] = uint_json(rows_read);
+        a.work["annotation_units"] = uint_json(pattern_units);
+        a.work["memory_bytes"] = uint_json(m.account.peak());
+        a.timing["label_discovery_ms"] = discovery_ms;
+        a.timing["placement_ms"] = placement_ms;
+        if (m.volume) {
+            m.volume->add(compact_json_bytes(a.fields["rows_refused"])
+                          + compact_json_bytes(a.fields["anchors_truncated"]));
+        }
+    };
+
+    if (x.withheld) {
+        // nothing was released: nothing is read (§5.2)
+        m.account.release(descriptors);
+        finish_work();
+        return a;
+    }
+
+    // the descriptors of the released paths were charged as the engine released them, before
+    // their result objects were built (admit_path): the first that did not fit ended the list
+    const size_t keep = paths.size();
+    if (keep < released) {
+        m.set_stop("output", "max_memory");
+        if (!partial) {
+            m.account.release(descriptors);
+            a.withheld = "output_budget";
+            a.stop = m.stop;
+            finish_work();
+            return a;
+        }
+        a.cut = "max_memory";
+    }
+
+    // the rows: the distinct keys of the paths' k-mers, in answer order of their first
+    // appearance, each named by its k-mer in the statements (rows_refused, anchors_truncated)
+    std::vector<RowState> rows;
+    std::vector<RetrievalContext> namer;
+    std::vector<std::vector<size_t>> path_rows(keep);
+    {
+        std::unordered_map<uint64_t, size_t> index;
+        for (size_t i = 0; i < keep; ++i) {
+            const RetrievalPath &p = paths[i];
+            if (p.sequence.size() != length || p.keys.size() != n) {
+                throw std::logic_error("pattern: a released path of " + std::to_string(
+                                       p.sequence.size()) + " bases and "
+                                       + std::to_string(p.keys.size()) + " k-mers for a "
+                                       "pattern of " + std::to_string(length) + " bases");
+            }
+            path_rows[i].reserve(n);
+            for (size_t j = 0; j < n; ++j) {
+                if (p.keys[j] == kNoKey) {
+                    throw std::runtime_error("pattern: the k-mer " + p.sequence.substr(j, k)
+                                             + " has no annotation row: the annotation does "
+                                             "not describe this graph");
+                }
+                auto [it, inserted] = index.emplace(p.keys[j], rows.size());
+                if (inserted) {
+                    RowState row;
+                    row.key = p.keys[j];
+                    row.first = namer.size();
+                    rows.push_back(std::move(row));
+                    RetrievalContext c;
+                    c.orientation = p.orientation;
+                    c.kmer = p.sequence.substr(j, k);
+                    c.key = p.keys[j];
+                    namer.push_back(std::move(c));
+                }
+                path_rows[i].push_back(it->second);
+            }
+        }
+    }
+
+    Json::Value &refused = a.fields["rows_refused"];
+    uint64_t held_lists = 0, held_hits = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    m.discover(rows, namer, mode, &rows_read, &pattern_units, &held_lists, &refused);
+    discovery_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0).count();
+
+    bool truncated = false;
+    bool rows_complete = true;
+    for (const RowState &row : rows) {
+        if (row.status == RowStatus::TRUNCATED) {
+            truncated = true;
+            Json::Value t;
+            t["kmer"] = namer[row.first].kmer;
+            t["row"] = uint_json(AnnotatedDBG::graph_to_anno_index(row.key));
+            t["cap"] = uint_json(m.limits.max_labels_per_anchor);
+            t["total"] = uint_json(row.labels.total);
+            a.fields["anchors_truncated"].append(std::move(t));
+        }
+        rows_complete &= row.status == RowStatus::COMPLETE;
+    }
+
+    // ---- each path's labels: those on EVERY one of its k-mers (the intersection of its
+    // rows' lists; a truncated row's kept labels are true ones, so the intersection of the
+    // kept lists is a true, possibly incomplete, list). A path's status is its worst row's:
+    // refused, then not read, then truncated
+    auto severity = [](RowStatus s) {
+        switch (s) {
+            case RowStatus::COMPLETE: return 0;
+            case RowStatus::TRUNCATED: return 1;
+            case RowStatus::PENDING:
+            case RowStatus::NOT_READ: return 2;
+            case RowStatus::REFUSED: return 3;
+        }
+        return 2;
+    };
+    std::vector<RowStatus> path_status(keep, RowStatus::COMPLETE);
+    std::vector<std::vector<PathLabel>> carried(keep);
+    std::vector<bool> needed(rows.size(), false);
+    // the lists are held until the pattern's labels are built: charged as each is made; the
+    // first that does not fit ends the labels of the pattern there (stop {output, max_memory},
+    // as a context's labels that do not fit)
+    uint64_t carried_bytes = 0;
+    size_t lists_end = keep;
+    auto is_read = [](RowStatus s) {
+        return s == RowStatus::COMPLETE || s == RowStatus::TRUNCATED;
+    };
+    for (size_t i = 0; i < keep; ++i) {
+        // the clock before each path's list (O(n) row lists to intersect): a time stop ends
+        // the lists there, as the output of the labels (stop {output, time})
+        if (!m.budget.check_time()) {
+            m.set_stop("output", "time");
+            m.time_stop = true;
+            lists_end = i;
+            break;
+        }
+        RowStatus status = RowStatus::COMPLETE;
+        for (size_t r : path_rows[i]) {
+            if (severity(rows[r].status) > severity(status))
+                status = rows[r].status;
+        }
+        path_status[i] = status == RowStatus::PENDING ? RowStatus::NOT_READ : status;
+        if (!is_read(path_status[i]))
+            continue;
+        std::vector<LabelId> common(rows[path_rows[i][0]].labels.labels);
+        std::sort(common.begin(), common.end());
+        for (size_t j = 1; j < n && !common.empty(); ++j) {
+            std::vector<LabelId> next(rows[path_rows[i][j]].labels.labels);
+            std::sort(next.begin(), next.end());
+            std::vector<LabelId> both;
+            std::set_intersection(common.begin(), common.end(), next.begin(), next.end(),
+                                  std::back_inserter(both));
+            common.swap(both);
+        }
+        const uint64_t bytes = kPathLabelsBytes + kPathLabelBytes * common.size();
+        if (!m.account.charge(bytes)) {
+            lists_end = i;
+            break;
+        }
+        carried_bytes += bytes;
+        carried[i].reserve(common.size());
+        for (LabelId id : common) {
+            carried[i].push_back(PathLabel { id, PathSupport::NOT_PLACED });
+        }
+        if (!common.empty()) {
+            for (size_t r : path_rows[i]) {
+                needed[r] = true;
+            }
+        }
+    }
+    const bool lists_complete = lists_end == keep;
+
+    // ---- step 2, the verification: the coordinates of the rows of the paths that carry a
+    // label (all_or_count: only when every row was read completely, as for contexts)
+    if (m.place && !m.read_stop && lists_complete && (partial || (rows_complete && !m.stop))) {
+        const auto t2 = std::chrono::steady_clock::now();
+        m.place_rows(rows, namer, mode, &rows_read, &pattern_units, &held_hits, &refused,
+                     &needed);
+        placement_ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - t2).count();
+    }
+
+    const std::vector<LabelRef> &dict = m.recorder->labels();
+    // the column coordinates c of a label's chains along path |i|: c a coordinate of the first
+    // k-mer with c + j one of the j-th k-mer's, for every j (consecutive coordinates of one
+    // column, §4.3). False when a row of the path was not placed, or holds no coordinates of
+    // the label (not verified). The chain list is at most the first row's coordinates of the
+    // label, which its hits hold (charged with them)
+    std::vector<const LabelQuery::Hit*> chain_hits;
+    auto chains = [&](size_t i, LabelId id, std::vector<Coord> *out) {
+        out->clear();
+        if (!m.place)
+            return false;
+        chain_hits.assign(n, nullptr);
+        for (size_t j = 0; j < n; ++j) {
+            const RowState &row = rows[path_rows[i][j]];
+            if (!row.placed)
+                return false;
+            auto hit = std::lower_bound(row.hits.begin(), row.hits.end(), id,
+                                        [](const LabelQuery::Hit &h, LabelId l) {
+                                            return h.label < l;
+                                        });
+            if (hit == row.hits.end() || hit->label != id)
+                return false;
+            chain_hits[j] = &*hit;
+        }
+        out->assign(chain_hits[0]->coords.begin(), chain_hits[0]->coords.end());
+        for (size_t j = 1; j < n && !out->empty(); ++j) {
+            const auto &next = chain_hits[j]->coords;
+            out->erase(std::remove_if(out->begin(), out->end(), [&](Coord c) {
+                return !std::binary_search(next.begin(), next.end(), c + j);
+            }), out->end());
+        }
+        return true;
+    };
+    // the occurrences of a chain list: record placement, the chains whose whole path lies in
+    // one record — (seq_id, local + 1), the record mapping first (§4.3; a chain whose first
+    // k-mer is in one record and whose last is past that record's k-mers crosses into the next
+    // record of the column: not an occurrence); global, every chain (kmer_coord, offset 0)
+    auto occurrences_of = [&](size_t i, LabelId id, const std::vector<Coord> &chain,
+                              std::vector<Occurrence> *occ) {
+        occ->clear();
+        const Column column = dict[id].column;
+        const uint8_t strand = strand_rank(paths[i].orientation);
+        if (m.records) {
+            m.oracle.map_coords(column, chain.data(), chain.size(),
+                                [&](Coord, uint64_t seq_id, Coord local) {
+                const uint64_t kmers = m.oracle.num_kmers_in_sequence(column, seq_id);
+                if (local >= kmers) {
+                    throw std::runtime_error("pattern: a coordinate of " + paths[i].sequence
+                                             + " maps past the end of its record: the record "
+                                             "mapping does not describe this annotation");
+                }
+                if (local + n - 1 < kmers)
+                    occ->push_back(Occurrence { seq_id, local + 1, strand });
+            });
+        } else {
+            for (Coord c : chain) {
+                occ->push_back(Occurrence { c, 0, strand });
+            }
+        }
+        std::sort(occ->begin(), occ->end());
+        occ->erase(std::unique(occ->begin(), occ->end()), occ->end());
+    };
+
+    // the verification of every carried label (no list is kept: the occurrences are made
+    // again for the labels built for the answer, and charged there)
+    bool placement_complete = true;
+    bool any_placed = false;
+    {
+        std::vector<Coord> chain;
+        std::vector<Occurrence> occ;
+        for (size_t i = 0; i < lists_end; ++i) {
+            // the clock before each path's verification (O(n) coordinate lists per label): a
+            // time stop leaves the later paths' labels not verified (stop {placement, time})
+            if (m.place && !carried[i].empty() && !m.budget.check_time()) {
+                m.set_stop("placement", "time");
+                m.time_stop = true;
+                placement_complete = false;
+                break;
+            }
+            for (PathLabel &pl : carried[i]) {
+                if (!chains(i, pl.label, &chain)) {
+                    pl.support = PathSupport::NOT_PLACED;
+                    if (m.place)
+                        placement_complete = false;
+                    continue;
+                }
+                any_placed = true;
+                if (m.records) {
+                    occurrences_of(i, pl.label, chain, &occ);
+                    pl.support = occ.empty() ? PathSupport::PLACED : PathSupport::VERIFIED;
+                } else {
+                    pl.support = PathSupport::PLACED;
+                }
+            }
+        }
+    }
+    // what a path lists: every label carrying it, or (require_support "record_verified") the
+    // verified ones only
+    auto listed_label = [&](const PathLabel &pl) {
+        return !require_verified || pl.support == PathSupport::VERIFIED;
+    };
+
+    // the label order of §5.5 over the paths read: paths desc, column asc
+    std::vector<uint64_t> label_paths(dict.size(), 0), label_verified(dict.size(), 0);
+    std::vector<bool> label_carries(dict.size(), false);
+    for (size_t i = 0; i < lists_end; ++i) {
+        for (const PathLabel &pl : carried[i]) {
+            label_carries[pl.label] = true;
+            if (pl.support == PathSupport::VERIFIED)
+                label_verified[pl.label]++;
+            if (listed_label(pl))
+                label_paths[pl.label]++;
+        }
+    }
+    std::vector<LabelId> order;
+    uint64_t excluded_labels = 0;
+    for (LabelId id = 0; id < dict.size(); ++id) {
+        if (label_paths[id])
+            order.push_back(id);
+        if (require_verified && label_carries[id] && !label_verified[id])
+            excluded_labels++;
+    }
+    std::sort(order.begin(), order.end(), [&](LabelId x, LabelId y) {
+        if (label_paths[x] != label_paths[y])
+            return label_paths[x] > label_paths[y];
+        return dict[x].name < dict[y].name;
+    });
+    const uint64_t num_labels = order.size();
+    std::vector<uint64_t> rank(dict.size(), std::numeric_limits<uint64_t>::max());
+    size_t kept_labels = order.size();
+    if (partial && kept_labels > m.limits.max_labels) {
+        kept_labels = m.limits.max_labels;
+        Json::Value cut = reason_json("max_labels");
+        cut["returned"] = uint_json(kept_labels);
+        a.fields["labels_cut"] = std::move(cut);
+    }
+    for (size_t r = 0; r < kept_labels; ++r) {
+        rank[order[r]] = r;
+    }
+
+    // the text the labels built for the answer will write (AnswerVolume), from above and
+    // before they are built
+    uint64_t pending = 0;
+    auto pend = [&](uint64_t bytes) {
+        pending += bytes;
+        if (m.volume)
+            m.volume->add_pending(bytes);
+    };
+    auto unpend = [&](uint64_t bytes) {
+        pending -= std::min(bytes, pending);
+        if (m.volume)
+            m.volume->drop_pending(bytes);
+    };
+    std::vector<uint64_t> name_text(dict.size(), 0);
+    auto label_text = [&](LabelId id) {
+        if (!name_text[id])
+            name_text[id] = string_text_bytes(dict[id].name);
+        return name_text[id];
+    };
+    uint64_t summary_text = 0;
+    {
+        const uint64_t graph_text = compact_json_bytes(graph_name);
+        for (size_t r = 0; r < kept_labels; ++r) {
+            summary_text += kPathByLabelText + label_text(order[r]) + graph_text;
+        }
+        pend(keep * kPathResultLabelsText + summary_text);
+    }
+
+    // by_label before any path's labels (as for contexts)
+    uint64_t summary = 0;
+    for (size_t r = 0; r < kept_labels; ++r) {
+        summary += by_label_bytes(dict[order[r]].name);
+    }
+    const bool summary_held = m.account.charge(summary);
+    if (!summary_held)
+        unpend(summary_text);
+
+    // the paths' label lists with their occurrences; each label's deduplicated union (§5.4)
+    std::vector<std::vector<ContextLabel>> lists(keep);
+    std::vector<std::set<Occurrence>> unions(dict.size());
+    std::vector<bool> output_cut(keep, !summary_held);
+    for (size_t i = lists_end; i < keep; ++i) {
+        output_cut[i] = true;
+    }
+    uint64_t output = 0, dedup = 0;
+    bool output_stopped = !summary_held || !lists_complete;
+    if (output_stopped)
+        m.set_stop("output", "max_memory");
+    {
+        std::vector<Coord> chain;
+        std::vector<Occurrence> occ;
+        for (size_t i = 0; i < keep && !output_stopped; ++i) {
+            if (!is_read(path_status[i]))
+                continue;
+            std::vector<ContextLabel> list;
+            uint64_t bytes = 0, new_dedup = 0, text = 0;
+            std::vector<std::pair<LabelId, Occurrence>> inserted;
+            for (const PathLabel &pl : carried[i]) {
+                if (!listed_label(pl))
+                    continue;
+                // a label partial's max_labels cut does not list: its occurrences are counted
+                const bool listed = rank[pl.label] != std::numeric_limits<uint64_t>::max();
+                ContextLabel cl;
+                cl.label = pl.label;
+                cl.verified = pl.support == PathSupport::VERIFIED;
+                if (listed) {
+                    bytes += label_entry_bytes(dict[pl.label].name);
+                    text += kPathLabelText + label_text(pl.label);
+                }
+                if (pl.support != PathSupport::NOT_PLACED) {
+                    cl.placed = true;
+                    chains(i, pl.label, &chain);
+                    occurrences_of(i, pl.label, chain, &occ);
+                    cl.occurrences = occ;
+                    cl.total = cl.occurrences.size();
+                    const Column column = dict[pl.label].column;
+                    for (const Occurrence &o : cl.occurrences) {
+                        if (listed && m.records) {
+                            const std::string_view record = m.oracle.header_name(column, o.a);
+                            bytes += occurrence_bytes(record);
+                            text += kOccurrenceText + string_text_bytes(record);
+                        } else if (listed) {
+                            bytes += kGlobalOccurrenceBytes;
+                            text += kGlobalOccurrenceText;
+                        }
+                        if (unions[pl.label].insert(o).second) {
+                            inserted.emplace_back(pl.label, o);
+                            new_dedup += kDedupBytes;
+                        }
+                    }
+                }
+                if (listed)
+                    list.push_back(std::move(cl));
+            }
+            // the memory first, then the time (as for contexts)
+            const bool held = m.account.charge(bytes + new_dedup);
+            bool late = false;
+            if (held) {
+                if (m.output_hook)
+                    m.output_hook(i);
+                pend(text);
+                late = !m.budget.check_time();
+                if (late) {
+                    unpend(text);
+                    m.account.release(bytes + new_dedup);
+                }
+            }
+            if (!held || late) {
+                for (const auto &[id, o] : inserted) {
+                    unions[id].erase(o);
+                }
+                output_stopped = true;
+                for (size_t j = i; j < keep; ++j) {
+                    output_cut[j] = true;
+                }
+                m.set_stop("output", late ? "time" : "max_memory");
+                m.time_stop |= late;
+                break;
+            }
+            output += bytes;
+            dedup += new_dedup;
+            std::sort(list.begin(), list.end(), [&](const ContextLabel &x, const ContextLabel &y) {
+                return rank[x.label] < rank[y.label];
+            });
+            lists[i] = std::move(list);
+        }
+    }
+
+    // partial: each label lists the first max_occurrences_per_label occurrences of its union
+    uint64_t occurrences_total = 0;
+    for (LabelId id : order) {
+        occurrences_total += unions[id].size();
+    }
+    if (partial && m.place) {
+        uint64_t cut_labels = 0;
+        for (size_t r = 0; r < kept_labels; ++r) {
+            const LabelId id = order[r];
+            if (unions[id].size() <= m.limits.max_occurrences_per_label)
+                continue;
+            cut_labels++;
+            auto last = unions[id].begin();
+            std::advance(last, m.limits.max_occurrences_per_label);
+            const std::set<Occurrence> kept(unions[id].begin(), last);
+            for (auto &list : lists) {
+                for (ContextLabel &cl : list) {
+                    if (cl.label != id)
+                        continue;
+                    uint64_t dropped = 0;
+                    const Column column = dict[id].column;
+                    cl.occurrences.erase(std::remove_if(cl.occurrences.begin(),
+                                                        cl.occurrences.end(),
+                                                        [&](const Occurrence &o) {
+                        if (kept.count(o))
+                            return false;
+                        dropped += m.records
+                                ? occurrence_bytes(m.oracle.header_name(column, o.a))
+                                : kGlobalOccurrenceBytes;
+                        return true;
+                    }), cl.occurrences.end());
+                    m.account.release(dropped);
+                    output -= std::min(output, dropped);
+                }
+            }
+        }
+        if (cut_labels) {
+            Json::Value cut = reason_json("max_occurrences_per_label");
+            cut["labels"] = uint_json(cut_labels);
+            a.fields["occurrences_cut"] = std::move(cut);
+        }
+    }
+
+    // what the pattern's reads and its paths' label lists held is freed; the dictionary, the
+    // descriptors and the labels built for the answer stay
+    m.account.release(held_lists + held_hits + dedup + carried_bytes);
+
+    // ---- the statements
+    const bool all_returned = x.complete && keep == released;
+    const bool anything_read = rows_read > 0;
+    // every path returned, every row of every path read completely, every path's list made
+    const bool paths_read = all_returned && rows_complete && lists_complete;
+    // every label carrying a path verified or refuted (where verification applies)
+    const bool verification_complete = !m.place || placement_complete;
+    const bool labels_exact = paths_read && (!require_verified || verification_complete);
+    const bool verified_exact = paths_read && verification_complete;
+    const bool occurrences_exact = paths_read && verification_complete && !output_stopped;
+    const Relation fallback = anything_read || keep ? Relation::AT_LEAST : Relation::UNKNOWN;
+    const bool empty_complete = released == 0 && x.complete;
+
+    a.complete = all_returned && rows_complete && lists_complete && verification_complete
+                    && !output_stopped && !m.stop && a.fields["labels_cut"].isNull()
+                    && a.fields["occurrences_cut"].isNull();
+    a.stop = m.stop;
+    a.time_limited = m.time_stop;
+
+    if (!partial && !a.complete) {
+        // all_or_count: all or nothing (§5.2), the reason named, as for contexts
+        a.withheld = m.time_stop ? "deadline"
+                   : !refused.empty() || m.read_stop ? "annotation_budget"
+                   : output_stopped || m.stop ? "output_budget"
+                   : truncated ? "anchor_labels_truncated"
+                               : "annotation_budget";
+        m.account.release(output + descriptors + (summary_held ? summary : 0));
+        unpend(pending);
+        finish_work();
+        return a;
+    }
+
+    uint64_t verified_labels = 0;
+    for (LabelId id : order) {
+        verified_labels += label_verified[id] > 0;
+    }
+    const Relation labels_relation = empty_complete || labels_exact ? Relation::EXACT
+                                                                    : fallback;
+    a.labels_count = count_json(labels_relation, num_labels, Unit::LABELS);
+    if (m.records) {
+        const bool exact = empty_complete || verified_exact;
+        a.labels_count["by_support"] = support_split(
+                exact ? Relation::EXACT : fallback, verified_labels,
+                exact ? Relation::EXACT : Relation::UNKNOWN, num_labels - verified_labels);
+    } else {
+        a.labels_count["by_support"] = support_split(Relation::UNKNOWN, 0, labels_relation,
+                                                     num_labels);
+    }
+    if (require_verified) {
+        a.fields["labels_excluded_unverified"] = count_json(
+                empty_complete || verified_exact ? Relation::EXACT : Relation::UNKNOWN,
+                excluded_labels, Unit::LABELS);
+    }
+    a.occurrences_count = count_json(!m.records ? Relation::UNKNOWN
+                                     : empty_complete || occurrences_exact ? Relation::EXACT
+                                     : any_placed ? Relation::AT_LEAST : Relation::UNKNOWN,
+                                     occurrences_total, Unit::PLACED_OCCURRENCES);
+
+    // by_label: the per-label summary over the returned paths, in label order
+    Json::Value by_label(Json::arrayValue);
+    for (size_t r = 0; r < kept_labels && summary_held; ++r) {
+        const LabelId id = order[r];
+        Json::Value b;
+        b["graph"] = graph_name;
+        b["column"] = dict[id].name;
+        b["paths"] = count_json(labels_exact ? Relation::EXACT : Relation::AT_LEAST,
+                                label_paths[id], Unit::PATHS);
+        b["paths_record_verified"] = count_json(
+                !m.records ? Relation::UNKNOWN
+                : verified_exact ? Relation::EXACT : Relation::AT_LEAST,
+                label_verified[id], Unit::PATHS);
+        b["occurrences"] = count_json(!m.records ? Relation::UNKNOWN
+                                      : occurrences_exact ? Relation::EXACT
+                                      : any_placed ? Relation::AT_LEAST : Relation::UNKNOWN,
+                                      unions[id].size(), Unit::PLACED_OCCURRENCES);
+        by_label.append(std::move(b));
+    }
+    if (summary_held)
+        a.fields["by_label"] = std::move(by_label);
+
+    // the results' labels
+    a.result_fields.reserve(keep);
+    for (size_t i = 0; i < keep; ++i) {
+        const RetrievalPath &p = paths[i];
+        Json::Value f;
+        const bool read = is_read(path_status[i]) && i < lists_end;
+        f["labels_status"] = output_cut[i] && is_read(path_status[i])
+                ? "output_budget" : to_string(path_status[i]);
+        // the labels on every k-mer of the path, their true number: known when every row of
+        // the path was read completely (a truncated row's labels are only partly known)
+        f["labels_total"] = read && path_status[i] == RowStatus::COMPLETE
+                ? uint_json(carried[i].size()) : Json::Value();
+        if (require_verified) {
+            // the labels of the path left out for not being verified, their true number: known
+            // when every row of the path was read completely (a truncated row's labels are
+            // only partly known, as for labels_total) and every label carrying it was verified
+            // or refuted (a placement stopped or refused before it leaves a label neither:
+            // excluded, but not shown unverified); null otherwise, never a smaller integer
+            uint64_t excluded = 0;
+            bool decided = read && path_status[i] == RowStatus::COMPLETE;
+            for (const PathLabel &pl : carried[i]) {
+                excluded += pl.support != PathSupport::VERIFIED;
+                decided &= pl.support != PathSupport::NOT_PLACED;
+            }
+            f["labels_excluded_unverified"] = decided ? uint_json(excluded) : Json::Value();
+        }
+        if (!read || output_cut[i]) {
+            f["support"] = Json::Value();
+            f["labels"] = Json::Value();
+            a.result_fields.push_back(std::move(f));
+            continue;
+        }
+        Json::Value labels(Json::arrayValue);
+        bool any_verified = false, any_unverified = false;
+        for (const ContextLabel &cl : lists[i]) {
+            Json::Value l;
+            const Column column = dict[cl.label].column;
+            l["column"] = dict[cl.label].name;
+            l["support"] = cl.verified ? "record_verified" : "label_intersection";
+            (cl.verified ? any_verified : any_unverified) = true;
+            if (m.place) {
+                if (!cl.placed) {
+                    if (m.records)
+                        l["occurrences"] = count_json(Relation::UNKNOWN, 0,
+                                                      Unit::PLACED_OCCURRENCES);
+                    l["occurrence_list"] = Json::Value();
+                } else {
+                    if (m.records)
+                        l["occurrences"] = count_json(Relation::EXACT, cl.total,
+                                                      Unit::PLACED_OCCURRENCES);
+                    Json::Value occ(Json::arrayValue);
+                    for (const Occurrence &o : cl.occurrences) {
+                        Json::Value e;
+                        if (m.records) {
+                            e["seq_id"] = uint_json(o.a);
+                            e["record"] = m.oracle.header_name(column, o.a);
+                            e["strand"] = strand_of(p.orientation);
+                            e["nt_coords"] = std::to_string(o.b) + "-"
+                                                + std::to_string(o.b + length - 1);
+                            e["nt_length"] = uint_json(
+                                    m.oracle.num_kmers_in_sequence(column, o.a) + k - 1);
+                        } else {
+                            e["kmer_coord"] = uint_json(o.a);
+                            e["offset"] = uint_json(o.b);
+                            e["strand"] = strand_of(p.orientation);
+                        }
+                        occ.append(std::move(e));
+                    }
+                    l["occurrence_list"] = std::move(occ);
+                }
+            }
+            labels.append(std::move(l));
+        }
+        // the path's support: its listed labels' (null when it lists none)
+        f["support"] = !any_verified && !any_unverified ? Json::Value()
+                     : any_verified && any_unverified ? Json::Value("mixed")
+                     : Json::Value(any_verified ? "record_verified" : "label_intersection");
+        f["labels"] = std::move(labels);
+        a.result_fields.push_back(std::move(f));
+    }
     if (m.volume)
         m.volume->settle(pending);
     finish_work();

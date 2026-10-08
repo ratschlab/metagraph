@@ -1,0 +1,1556 @@
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <functional>
+#include <map>
+#include <memory>
+#include <random>
+#include <sstream>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <vector>
+
+#include <json/json.h>
+#include "gtest/gtest.h"
+
+#include "../annotation/test_annotated_dbg_helpers.hpp"
+
+#include "annotation/coord_to_header.hpp"
+#include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "cli/pattern.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+
+
+// Patterns longer than k as paths (long_search "paths", increment 4 of
+// docs/DESIGN-pattern-search.md, §4.2, §4.3 "Label consistency for long"; owner decisions #13
+// and #14): the route's path results (sequence, anchor_kmer, nodes, rows; never kmer), the two
+// thresholds (max_anchors admits the extension, max_paths the release), the counts with their
+// relations, and the labels of each path with its per-label support (label_intersection:
+// every k-mer of the path annotated; record_verified: one record holds the whole path) and
+// require_support. Tiny graphs built from explicit records in labelled columns with their
+// coordinates and record mapping. The expectations come from two oracles that never ask the
+// engine:
+//  - a GRAPH-WALK oracle over the k-mer set of the records (as deposited on BASIC; with their
+//    reverse complements on CANONICAL and PRIMARY graphs): every string of L bases that
+//    instantiates the oriented pattern (the test's own IUPAC table) and whose every k-window
+//    is such a k-mer, found by a depth-first walk over strings;
+//  - a RECORD-SCAN oracle over the records: a column carries a path when every k-mer of it is
+//    in one of its records; it verifies it when one of its records holds the whole path, at
+//    the 1-based positions of the scan.
+
+namespace {
+
+using namespace mtg;
+using namespace mtg::graph;
+using namespace mtg::cli;
+
+// ------------------------------------------------------------------ the test's own tables
+
+const std::map<char, std::string> kCodes = {
+    { 'A', "A" }, { 'C', "C" }, { 'G', "G" }, { 'T', "T" }, { 'R', "AG" }, { 'Y', "CT" },
+    { 'S', "CG" }, { 'W', "AT" }, { 'K', "GT" }, { 'M', "AC" }, { 'B', "CGT" },
+    { 'D', "AGT" }, { 'H', "ACT" }, { 'V', "ACG" }, { 'N', "ACGT" },
+};
+
+char complement_code(char c) {
+    switch (c) {
+        case 'A': return 'T';
+        case 'C': return 'G';
+        case 'G': return 'C';
+        case 'T': return 'A';
+        case 'R': return 'Y';
+        case 'Y': return 'R';
+        case 'K': return 'M';
+        case 'M': return 'K';
+        case 'B': return 'V';
+        case 'V': return 'B';
+        case 'D': return 'H';
+        case 'H': return 'D';
+        default: return c;     // S, W, N
+    }
+}
+
+std::string rc(const std::string &s) {
+    std::string out(s.rbegin(), s.rend());
+    for (char &c : out) {
+        c = complement_code(c);
+    }
+    return out;
+}
+
+bool admits(char code, char base) {
+    return kCodes.at(code).find(base) != std::string::npos;
+}
+
+// |s| instantiates |q| position by position
+bool instantiates(const std::string &q, const std::string &s) {
+    if (q.size() != s.size())
+        return false;
+    for (size_t i = 0; i < q.size(); ++i) {
+        if (!admits(q[i], s[i]))
+            return false;
+    }
+    return true;
+}
+
+// the oriented patterns of |p|: (+, P) and (-, rc(P)), or (=, P) for a palindrome; on a graph
+// without strands, their orientation names
+std::vector<std::pair<std::string, std::string>> oriented(const std::string &p,
+                                                          bool strand_stated = true) {
+    if (rc(p) == p)
+        return { { strand_stated ? "=" : "palindromic", p } };
+    return { { strand_stated ? "+" : "forward", p }, { strand_stated ? "-" : "reverse", rc(p) } };
+}
+
+// ------------------------------------------------------------------ the index
+
+struct Record {
+    std::string column;
+    std::string header;
+    std::string seq;
+};
+
+struct Index {
+    size_t k = 0;
+    DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC;
+    std::vector<Record> records;
+    std::unique_ptr<AnnotatedDBG> anno;
+    std::unique_ptr<annot::CoordToHeader> cth;
+    std::vector<uint64_t> starts;
+};
+
+// as test_pattern_retrieval.cpp builds its indexes: each record's k-mers numbered from its
+// column's running count, the record mapping from the same records
+template <class Annotation>
+Index build(size_t k, const std::vector<Record> &records, bool coordinates,
+            DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC) {
+    Index idx;
+    idx.k = k;
+    idx.mode = mode;
+    idx.records = records;
+    std::vector<std::string> seqs, labels;
+    std::map<std::string, uint64_t> next;
+    for (const Record &r : records) {
+        EXPECT_GE(r.seq.size(), k);
+        seqs.push_back(r.seq);
+        labels.push_back(r.column);
+        idx.starts.push_back(next[r.column]);
+        next[r.column] += r.seq.size() - k + 1;
+    }
+    idx.anno = test::build_anno_graph<DBGSuccinct, Annotation>(
+            k, seqs, labels, mode, coordinates,
+            coordinates ? idx.starts : std::vector<uint64_t>{});
+    if (coordinates) {
+        const auto &encoder = idx.anno->get_annotator().get_label_encoder();
+        std::vector<std::vector<std::string>> headers(encoder.size());
+        std::vector<std::vector<uint64_t>> num_kmers(encoder.size());
+        for (const Record &r : records) {
+            const size_t c = encoder.encode(r.column);
+            headers[c].push_back(r.header);
+            num_kmers[c].push_back(r.seq.size() - k + 1);
+        }
+        idx.cth = std::make_unique<annot::CoordToHeader>(std::move(headers),
+                                                         std::move(num_kmers));
+    }
+    return idx;
+}
+
+// ------------------------------------------------------------------ the oracles
+
+/**
+ * The graph-walk oracle: the k-mers of the records (with their reverse complements when the
+ * graph holds both orientations) and the paths of an oriented pattern over them.
+ */
+struct Walk {
+    size_t k = 0;
+    std::set<std::string> kmers;
+
+    explicit Walk(const Index &idx) : k(idx.k) {
+        const bool both = idx.mode != DeBruijnGraph::BASIC;
+        for (const Record &r : idx.records) {
+            for (size_t i = 0; i + k <= r.seq.size(); ++i) {
+                kmers.insert(r.seq.substr(i, k));
+                if (both)
+                    kmers.insert(rc(r.seq.substr(i, k)));
+            }
+        }
+    }
+
+    // the k-mers instantiating q[0, k)
+    std::vector<std::string> anchors(const std::string &q) const {
+        std::vector<std::string> out;
+        for (const std::string &x : kmers) {
+            if (instantiates(q.substr(0, k), x))
+                out.push_back(x);
+        }
+        return out;
+    }
+
+    /**
+     * Every string of |q|'s length that instantiates q and whose every k-window is a k-mer,
+     * found by extending each anchor one base at a time; |candidates| counts the prefixes of
+     * k + 1 .. L bases so formed (the branches the engine's DFS enters, §4.2).
+     */
+    std::vector<std::string> paths(const std::string &q, uint64_t *candidates = nullptr) const {
+        std::vector<std::string> out;
+        uint64_t entered = 0;
+        std::function<void(const std::string&)> dfs = [&](const std::string &s) {
+            if (s.size() == q.size()) {
+                out.push_back(s);
+                return;
+            }
+            for (char b : std::string("ACGT")) {
+                if (!admits(q[s.size()], b))
+                    continue;
+                if (!kmers.count(s.substr(s.size() - k + 1) + b))
+                    continue;
+                ++entered;
+                dfs(s + b);
+            }
+        };
+        for (const std::string &x : anchors(q)) {
+            dfs(x);
+        }
+        if (candidates)
+            *candidates = entered;
+        return out;
+    }
+};
+
+/**
+ * The record-scan oracle: per column its records (seq_id order); which columns carry a path
+ * (every k-mer of it in one of their records, either orientation on a graph without strands),
+ * and where a column's records hold the whole path (1-based starts).
+ */
+struct Scan {
+    size_t k = 0;
+    bool both = false;
+    std::map<std::string, std::vector<const Record*>> columns;
+
+    explicit Scan(const Index &idx) : k(idx.k), both(idx.mode != DeBruijnGraph::BASIC) {
+        for (const Record &r : idx.records) {
+            columns[r.column].push_back(&r);
+        }
+    }
+
+    bool holds_kmer(const std::string &column, const std::string &kmer) const {
+        for (const Record *r : columns.at(column)) {
+            if (r->seq.find(kmer) != std::string::npos)
+                return true;
+            if (both && r->seq.find(rc(kmer)) != std::string::npos)
+                return true;
+        }
+        return false;
+    }
+
+    std::set<std::string> carriers(const std::string &path) const {
+        std::set<std::string> out;
+        for (const auto &[column, recs] : columns) {
+            bool all = true;
+            for (size_t i = 0; i + k <= path.size() && all; ++i) {
+                all = holds_kmer(column, path.substr(i, k));
+            }
+            if (all)
+                out.insert(column);
+        }
+        return out;
+    }
+
+    // {(seq_id, 1-based start)} of |path| in the records of |column|
+    std::set<std::pair<uint64_t, uint64_t>> occurrences(const std::string &column,
+                                                        const std::string &path) const {
+        std::set<std::pair<uint64_t, uint64_t>> out;
+        const auto &recs = columns.at(column);
+        for (uint64_t id = 0; id < recs.size(); ++id) {
+            const std::string &seq = recs[id]->seq;
+            for (size_t i = 0; i + path.size() <= seq.size(); ++i) {
+                if (seq.compare(i, path.size(), path) == 0)
+                    out.emplace(id, i + 1);
+            }
+        }
+        return out;
+    }
+};
+
+// ------------------------------------------------------------------ running requests
+
+PatternLimits limits() {
+    PatternLimits l;
+    // the short anchor windows of the tiny graphs are below any useful floor
+    l.min_information_bits = 0;
+    return l;
+}
+
+Json::Value run(const Index &idx, const std::string &body, RetrievalHooks hooks = {},
+                bool records = true, const PatternLimits &caps = limits()) {
+    if (records)
+        hooks.coord_to_header = idx.cth.get();
+    return process_pattern_request(parse_pattern_body(body), *idx.anno, caps, "rel",
+                                   nullptr, nullptr, nullptr, &hooks);
+}
+
+using Clock = pattern::Deadline::Clock;
+
+// as run(), the request's clock |clock| (a virtual one the test moves)
+Json::Value run_clocked(const Index &idx, const std::string &body, RetrievalHooks hooks,
+                        const std::function<Clock::time_point()> &clock) {
+    hooks.coord_to_header = idx.cth.get();
+    return process_pattern_request(parse_pattern_body(body), *idx.anno, limits(), "rel",
+                                   nullptr, nullptr, clock, &hooks);
+}
+
+std::pair<int, std::string> refusal(const Index &idx, const std::string &body,
+                                    bool records = true) {
+    try {
+        run(idx, body, {}, records);
+    } catch (const PatternRefusal &e) {
+        return { e.status(), e.code() };
+    }
+    return { 200, "" };
+}
+
+std::string body(const std::string &patterns, const std::string &rest = "",
+                 const std::string &labels = "all") {
+    return "{\"patterns\": [" + patterns + "], \"long_search\": \"paths\", "
+           "\"output\": {\"labels\": \"" + labels + "\"}" + (rest.empty() ? "" : ", " + rest)
+           + "}";
+}
+
+// an answer without its timings
+Json::Value untimed(Json::Value v) {
+    if (v.isObject()) {
+        v.removeMember("timing");
+        for (const std::string &name : v.getMemberNames()) {
+            v[name] = untimed(v[name]);
+        }
+    } else if (v.isArray()) {
+        for (Json::ArrayIndex i = 0; i < v.size(); ++i) {
+            v[i] = untimed(v[i]);
+        }
+    }
+    return v;
+}
+
+// (strand or orientation, sequence) of paths
+using PathSet = std::set<std::pair<std::string, std::string>>;
+
+uint8_t orientation_rank(const std::string &s) {
+    if (s == "+" || s == "forward")
+        return 0;
+    if (s == "-" || s == "reverse")
+        return 1;
+    return 2;
+}
+
+/**
+ * The label-free shape of every path result against the graph-walk oracle: exactly the
+ * oracle's paths, each with sequence = instance, anchor_kmer its first k bases as the graph
+ * spells its first node, offset 0, its n nodes spelling its k-windows, its rows those of the
+ * stored (or canonical) k-mers, no kmer; in the answer order (anchor node, orientation,
+ * sequence). Returns the (strand, sequence) of every result, in order.
+ */
+std::vector<std::pair<std::string, std::string>>
+check_path_results(const Index &idx, const Json::Value &e, const std::string &p) {
+    const size_t k = idx.k, L = p.size(), n = L - k + 1;
+    const bool strand_stated = idx.mode == DeBruijnGraph::BASIC;
+    const std::string key = strand_stated ? "strand" : "orientation";
+    const DeBruijnGraph &graph = idx.anno->get_graph();
+    Walk walk(idx);
+    PathSet expected;
+    for (const auto &[strand, q] : oriented(p, strand_stated)) {
+        for (const std::string &s : walk.paths(q)) {
+            expected.emplace(strand, s);
+        }
+    }
+    std::vector<std::pair<std::string, std::string>> got;
+    std::vector<std::tuple<uint64_t, uint8_t, std::string>> order;
+    for (const Json::Value &r : e["results"]) {
+        EXPECT_FALSE(r.isMember("kmer")) << r;
+        EXPECT_FALSE(r.isMember("node")) << r;
+        EXPECT_FALSE(r.isMember("row")) << r;
+        const std::string s = r["sequence"].asString();
+        EXPECT_EQ(L, s.size());
+        EXPECT_EQ(s, r["instance"].asString());
+        EXPECT_EQ(s.substr(0, k), r["anchor_kmer"].asString());
+        EXPECT_EQ(0u, r["offset"].asUInt64());
+        EXPECT_TRUE(r.isMember(key)) << r;
+        EXPECT_FALSE(r.isMember(strand_stated ? "orientation" : "strand")) << r;
+        const Json::Value &nodes = r["nodes"];
+        const Json::Value &rows = r["rows"];
+        EXPECT_EQ(n, nodes.size());
+        EXPECT_EQ(n, rows.size());
+        for (Json::ArrayIndex j = 0; j < nodes.size() && j < n; ++j) {
+            const uint64_t node = nodes[j].asUInt64();
+            EXPECT_EQ(s.substr(j, k), graph.get_node_sequence(node)) << j << " " << r;
+            EXPECT_TRUE(rows[j].isUInt64()) << r;
+            if (!rows[j].isUInt64())
+                continue;
+            if (idx.mode == DeBruijnGraph::BASIC) {
+                EXPECT_EQ(node - 1, rows[j].asUInt64());
+            } else if (idx.mode == DeBruijnGraph::CANONICAL) {
+                // the canonical k-mer's row, shared with the reverse complement
+                DeBruijnGraph::node_index canonical = DeBruijnGraph::npos;
+                graph.map_to_nodes(s.substr(j, k), [&](DeBruijnGraph::node_index x) {
+                    canonical = x;
+                });
+                EXPECT_EQ(canonical - 1, rows[j].asUInt64());
+            }
+            EXPECT_LT(rows[j].asUInt64(), idx.anno->get_annotator().num_objects());
+        }
+        got.emplace_back(r[key].asString(), s);
+        order.emplace_back(nodes[0].asUInt64(), orientation_rank(r[key].asString()), s);
+    }
+    EXPECT_EQ(expected, PathSet(got.begin(), got.end()));
+    EXPECT_EQ(got.size(), PathSet(got.begin(), got.end()).size());
+    EXPECT_TRUE(std::is_sorted(order.begin(), order.end()));
+    EXPECT_EQ(got.size(), e["returned"].asUInt64());
+    return got;
+}
+
+/**
+ * counts.anchors and counts.paths of a completed extension against the graph-walk oracle:
+ * per strand, exact, with the branches the extension entered and what it did.
+ */
+void check_path_counts(const Index &idx, const Json::Value &e, const std::string &p) {
+    const bool strand_stated = idx.mode == DeBruijnGraph::BASIC;
+    const std::string by = strand_stated ? "by_strand" : "by_orientation";
+    Walk walk(idx);
+    uint64_t anchors = 0, paths = 0, candidates = 0;
+    const Json::Value &a = e["counts"]["anchors"];
+    const Json::Value &c = e["counts"]["paths"];
+    for (const auto &[strand, q] : oriented(p, strand_stated)) {
+        const std::string name = strand == "=" ? "both" : strand;
+        uint64_t entered = 0;
+        const uint64_t found = walk.paths(q, &entered).size();
+        anchors += walk.anchors(q).size();
+        paths += found;
+        candidates += entered;
+        EXPECT_EQ(walk.anchors(q).size(), a[by][name]["value"].asUInt64()) << name;
+        EXPECT_EQ(found, c[by][name]["value"].asUInt64()) << name << " " << c;
+        EXPECT_EQ("exact", c[by][name]["relation"].asString());
+        EXPECT_EQ("paths", c[by][name]["unit"].asString());
+    }
+    // a palindromic anchor window on a wrapped PRIMARY graph is one anchor, not two
+    if (idx.mode != DeBruijnGraph::PRIMARY) {
+        EXPECT_EQ(anchors, a["value"].asUInt64());
+    }
+    EXPECT_EQ("exact", a["relation"].asString());
+    EXPECT_EQ(paths, c["value"].asUInt64()) << c;
+    EXPECT_EQ("exact", c["relation"].asString());
+    EXPECT_EQ("paths", c["unit"].asString());
+    if (idx.mode == DeBruijnGraph::BASIC) {
+        EXPECT_EQ(candidates, c["candidates_examined"].asUInt64()) << c;
+    }
+    EXPECT_EQ(anchors ? "completed" : "no_anchors", c["extension"].asString());
+    EXPECT_FALSE(e.isMember("error"));
+    EXPECT_EQ("long", e["scope"].asString());
+    EXPECT_EQ("long", e["absence_scope"].asString());
+    for (const Json::Value &note : e["notes"]) {
+        EXPECT_NE("paths_later_increment", note.asString());
+    }
+    EXPECT_TRUE(e["work"].isMember("extension_edges"));
+    EXPECT_LE(e["work"]["extension_edges"].asUInt64(), e["work"]["steps"].asUInt64());
+    EXPECT_TRUE(e["timing"].isMember("extension_ms"));
+}
+
+// {(column, seq_id, start, strand)}: every occurrence of the oriented pattern in every record
+std::set<std::tuple<std::string, uint64_t, uint64_t, std::string>>
+placed_scan(const Index &idx, const std::string &p) {
+    std::set<std::tuple<std::string, uint64_t, uint64_t, std::string>> out;
+    std::map<std::string, uint64_t> seq_id;
+    for (const Record &r : idx.records) {
+        const uint64_t id = seq_id[r.column]++;
+        for (const auto &[strand, q] : oriented(p)) {
+            for (size_t i = 0; i + q.size() <= r.seq.size(); ++i) {
+                if (instantiates(q, r.seq.substr(i, q.size())))
+                    out.emplace(r.column, id, i + 1, strand);
+            }
+        }
+    }
+    return out;
+}
+
+/**
+ * A complete labelled answer with record placement (BASIC) against both oracles: each path's
+ * labels exactly the columns carrying it (or, with |require_verified|, those verifying it),
+ * each with its support and its placed occurrences of the whole path; by_label and every
+ * count exact, the support split, and the occurrences the record scan's.
+ */
+void check_labelled_paths(const Index &idx, const Json::Value &e, const std::string &p,
+                          bool require_verified) {
+    const size_t L = p.size();
+    Scan scan(idx);
+    check_path_counts(idx, e, p);
+    const auto results = check_path_results(idx, e, p);
+    EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+    EXPECT_TRUE(e["withheld"].isNull());
+    EXPECT_TRUE(e["stop"].isNull());
+    EXPECT_TRUE(e["cut"].isNull());
+    EXPECT_EQ("record", e["placement"].asString());
+    EXPECT_EQ("budgeted", e["annotation"].asString());
+    EXPECT_EQ(0u, e["rows_refused"].size());
+    EXPECT_EQ(0u, e["anchors_truncated"].size());
+
+    std::map<std::string, uint64_t> label_paths, label_verified;
+    std::map<std::string, std::set<std::tuple<uint64_t, uint64_t, std::string>>> unions;
+    std::set<std::string> carriers_all, verified_any;
+    for (Json::ArrayIndex i = 0; i < e["results"].size(); ++i) {
+        const Json::Value &r = e["results"][i];
+        const std::string strand = results[i].first;
+        const std::string s = results[i].second;
+        const std::set<std::string> carriers = scan.carriers(s);
+        std::set<std::string> verified;
+        for (const std::string &c : carriers) {
+            if (!scan.occurrences(c, s).empty())
+                verified.insert(c);
+        }
+        carriers_all.insert(carriers.begin(), carriers.end());
+        const std::set<std::string> &listed = require_verified ? verified : carriers;
+        EXPECT_EQ("complete", r["labels_status"].asString()) << r;
+        EXPECT_EQ(carriers.size(), r["labels_total"].asUInt64()) << r;
+        if (require_verified) {
+            EXPECT_EQ(carriers.size() - verified.size(),
+                      r["labels_excluded_unverified"].asUInt64()) << r;
+        } else {
+            EXPECT_FALSE(r.isMember("labels_excluded_unverified"));
+        }
+        const std::string summary = listed.empty() ? ""
+                : verified.size() == listed.size() ? "record_verified"
+                : verified.empty() ? "label_intersection" : "mixed";
+        if (summary.empty()) {
+            EXPECT_TRUE(r["support"].isNull()) << r;
+        } else {
+            EXPECT_EQ(summary, r["support"].asString()) << r;
+        }
+        std::set<std::string> got;
+        for (const Json::Value &l : r["labels"]) {
+            const std::string column = l["column"].asString();
+            got.insert(column);
+            const auto occ = scan.occurrences(column, s);
+            EXPECT_EQ(occ.empty() ? "label_intersection" : "record_verified",
+                      l["support"].asString()) << s << " " << column;
+            EXPECT_EQ(occ.size(), l["occurrences"]["value"].asUInt64()) << s << " " << column;
+            EXPECT_EQ("exact", l["occurrences"]["relation"].asString());
+            std::set<std::pair<uint64_t, uint64_t>> listed_occ;
+            for (const Json::Value &o : l["occurrence_list"]) {
+                const uint64_t seq_id = o["seq_id"].asUInt64();
+                const Record &rec = *scan.columns.at(column).at(seq_id);
+                EXPECT_EQ(rec.header, o["record"].asString());
+                EXPECT_EQ(rec.seq.size(), o["nt_length"].asUInt64());
+                EXPECT_EQ(strand, o["strand"].asString());
+                const std::string coords = o["nt_coords"].asString();
+                const uint64_t start = std::stoull(coords.substr(0, coords.find('-')));
+                EXPECT_EQ(std::to_string(start) + "-" + std::to_string(start + L - 1), coords);
+                listed_occ.emplace(seq_id, start);
+                unions[column].emplace(seq_id, start, strand);
+            }
+            EXPECT_EQ(occ, listed_occ) << s << " " << column;
+            label_paths[column]++;
+            if (!occ.empty()) {
+                label_verified[column]++;
+                verified_any.insert(column);
+            }
+        }
+        EXPECT_EQ(listed, got) << s;
+    }
+
+    // by_label: every listed column once, (paths desc, column asc), exact
+    const Json::Value &by_label = e["by_label"];
+    ASSERT_EQ(label_paths.size(), by_label.size()) << by_label;
+    std::vector<std::pair<int64_t, std::string>> keys;
+    uint64_t occurrences = 0;
+    for (const Json::Value &b : by_label) {
+        const std::string column = b["column"].asString();
+        keys.emplace_back(-b["paths"]["value"].asInt64(), column);
+        EXPECT_FALSE(b.isMember("contexts"));
+        EXPECT_EQ(label_paths[column], b["paths"]["value"].asUInt64()) << column;
+        EXPECT_EQ("exact", b["paths"]["relation"].asString());
+        EXPECT_EQ("paths", b["paths"]["unit"].asString());
+        EXPECT_EQ(label_verified[column], b["paths_record_verified"]["value"].asUInt64());
+        EXPECT_EQ("exact", b["paths_record_verified"]["relation"].asString());
+        EXPECT_EQ(unions[column].size(), b["occurrences"]["value"].asUInt64()) << column;
+        EXPECT_EQ("exact", b["occurrences"]["relation"].asString());
+        occurrences += unions[column].size();
+    }
+    EXPECT_TRUE(std::is_sorted(keys.begin(), keys.end()));
+
+    const Json::Value &labels = e["counts"]["labels"];
+    EXPECT_EQ(label_paths.size(), labels["value"].asUInt64());
+    EXPECT_EQ("exact", labels["relation"].asString());
+    EXPECT_EQ(verified_any.size(), labels["by_support"]["record_verified"]["value"].asUInt64());
+    EXPECT_EQ("exact", labels["by_support"]["record_verified"]["relation"].asString());
+    EXPECT_EQ(label_paths.size() - verified_any.size(),
+              labels["by_support"]["label_intersection"]["value"].asUInt64());
+    EXPECT_EQ("exact", labels["by_support"]["label_intersection"]["relation"].asString());
+    EXPECT_EQ(occurrences, e["counts"]["occurrences"]["value"].asUInt64());
+    EXPECT_EQ("exact", e["counts"]["occurrences"]["relation"].asString());
+    if (require_verified) {
+        uint64_t excluded = 0;
+        for (const std::string &c : carriers_all) {
+            excluded += !verified_any.count(c);
+        }
+        EXPECT_EQ(excluded, e["labels_excluded_unverified"]["value"].asUInt64());
+        EXPECT_EQ("exact", e["labels_excluded_unverified"]["relation"].asString());
+    } else {
+        EXPECT_FALSE(e.isMember("labels_excluded_unverified"));
+    }
+
+    // the placed occurrences: the record scan's, each once
+    std::set<std::tuple<std::string, uint64_t, uint64_t, std::string>> placed;
+    for (const auto &[column, set] : unions) {
+        for (const auto &[seq_id, start, strand] : set) {
+            placed.emplace(column, seq_id, start, strand);
+        }
+    }
+    EXPECT_EQ(placed_scan(idx, p), placed);
+}
+
+// k = 5. The pattern ACGTACC (n = 3 k-mers: ACGTA, CGTAC, GTACC):
+//  - column A holds it whole in its record a0 (verified, at 3-9);
+//  - column B holds ACGTA as the last k-mer of b0 (local 3) and CGTAC, GTACC as the first
+//    two of b1: consecutive column coordinates 3, 4, 5 crossing from b0 into b1, which the
+//    record bounds must reject (label_intersection), as DESIGN §4.3 "Label consistency";
+//  - CGTACC (n = 2) is held whole by a0 (at 4-9) and b1 (at 1-6): verified in both;
+//  - ACCAAG: its anchor ACCAA (a0's last k-mer) has no outgoing k-mer: no path;
+//  - GGACGTACCA (n = 6), a0's first ten bases: in A only.
+const size_t kK = 5;
+const std::vector<Record> kRecords = {
+    { "A", "a0", "GGACGTACCAA" },
+    { "B", "b0", "TTTACGTA" },
+    { "B", "b1", "CGTACCGG" },
+    { "C", "c0", "TTGCATGCAT" },
+};
+
+
+TEST(PatternPaths, TwoAndThreeKmersAgainstBothOracles) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    for (const std::string p : { "CGTACC", "ACGTACC", "GGACGTACCA" }) {
+        Json::Value out = run(idx, body("{\"dna\": \"" + p + "\"}"));
+        EXPECT_EQ("paths", out["limits"]["long_search"].asString());
+        EXPECT_EQ(1000u, out["limits"]["max_paths"].asUInt64());
+        EXPECT_EQ("label_intersection", out["limits"]["require_support"].asString());
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_GT(e["results"].size(), 0u) << p;
+        check_labelled_paths(idx, e, p, false);
+        // the same paths without labels: nothing read, the same results' shape
+        Json::Value none = run(idx, body("{\"dna\": \"" + p + "\"}", "", "none"));
+        const Json::Value &f = none["patterns"][0];
+        check_path_counts(idx, f, p);
+        EXPECT_EQ(e["returned"], f["returned"]);
+        EXPECT_TRUE(f["retrieval_complete"].asBool());
+        check_path_results(idx, f, p);
+        for (const Json::Value &r : f["results"]) {
+            EXPECT_EQ(7u, r.size()) << r;     // sequence, anchor_kmer, instance, offset,
+                                              // strand, nodes, rows
+        }
+        EXPECT_FALSE(none["limits"].isMember("require_support"));
+        EXPECT_EQ("unknown", f["counts"]["labels"]["relation"].asString());
+    }
+}
+
+TEST(PatternPaths, CrossRecordPathIsNotRecordVerified) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    Json::Value out = run(idx, body("{\"dna\": \"ACGTACC\"}"));
+    const Json::Value &e = out["patterns"][0];
+    check_labelled_paths(idx, e, "ACGTACC", false);
+    ASSERT_EQ(1u, e["results"].size());
+    const Json::Value &r = e["results"][0];
+    EXPECT_EQ("mixed", r["support"].asString());
+    ASSERT_EQ(2u, r["labels"].size());
+    std::map<std::string, std::string> support;
+    for (const Json::Value &l : r["labels"]) {
+        support[l["column"].asString()] = l["support"].asString();
+    }
+    const std::map<std::string, std::string> expected {
+        { "A", "record_verified" }, { "B", "label_intersection" },
+    };
+    EXPECT_EQ(expected, support);
+    // B's coordinates are consecutive (3, 4, 5) but cross from b0 into b1: no occurrence
+    for (const Json::Value &l : r["labels"]) {
+        if (l["column"].asString() == "B") {
+            EXPECT_EQ(0u, l["occurrences"]["value"].asUInt64());
+            EXPECT_EQ(0u, l["occurrence_list"].size());
+        } else {
+            ASSERT_EQ(1u, l["occurrence_list"].size());
+            EXPECT_EQ("3-9", l["occurrence_list"][0]["nt_coords"].asString());
+            EXPECT_EQ("a0", l["occurrence_list"][0]["record"].asString());
+        }
+    }
+    EXPECT_EQ(1u, e["counts"]["labels"]["by_support"]["record_verified"]["value"].asUInt64());
+    EXPECT_EQ(1u, e["counts"]["labels"]["by_support"]["label_intersection"]["value"].asUInt64());
+    EXPECT_EQ(1u, e["counts"]["occurrences"]["value"].asUInt64());
+}
+
+TEST(PatternPaths, RequireSupportListsTheVerifiedLabels) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    for (const std::string p : { "ACGTACC", "CGTACC", "GGACGTACCA" }) {
+        Json::Value out = run(idx, body("{\"dna\": \"" + p + "\"}",
+                                        "\"require_support\": \"record_verified\""));
+        EXPECT_EQ("record_verified", out["limits"]["require_support"].asString());
+        check_labelled_paths(idx, out["patterns"][0], p, true);
+    }
+    Json::Value out = run(idx, body("{\"dna\": \"ACGTACC\"}",
+                                    "\"require_support\": \"record_verified\""));
+    const Json::Value &e = out["patterns"][0];
+    ASSERT_EQ(1u, e["results"].size());
+    // B carries the path but verifies none: left out, counted
+    ASSERT_EQ(1u, e["results"][0]["labels"].size());
+    EXPECT_EQ("A", e["results"][0]["labels"][0]["column"].asString());
+    EXPECT_EQ("record_verified", e["results"][0]["support"].asString());
+    EXPECT_EQ(1u, e["results"][0]["labels_excluded_unverified"].asUInt64());
+    EXPECT_EQ(2u, e["results"][0]["labels_total"].asUInt64());
+    ASSERT_EQ(1u, e["by_label"].size());
+    EXPECT_EQ("A", e["by_label"][0]["column"].asString());
+    EXPECT_EQ(1u, e["labels_excluded_unverified"]["value"].asUInt64());
+    EXPECT_EQ(1u, e["counts"]["labels"]["value"].asUInt64());
+    EXPECT_EQ(0u, e["counts"]["labels"]["by_support"]["label_intersection"]["value"].asUInt64());
+    // an L <= k pattern in the same request is not touched (its labels are the k-mer's)
+    out = run(idx, body("{\"dna\": \"ACG\"}, {\"dna\": \"ACGTACC\"}",
+                        "\"require_support\": \"record_verified\""));
+    Json::Value plain = run(idx, "{\"patterns\": [{\"dna\": \"ACG\"}], \"output\": "
+                                 "{\"labels\": \"all\"}}");
+    EXPECT_EQ(untimed(plain["patterns"][0]), untimed(out["patterns"][0]));
+}
+
+TEST(PatternPaths, AnAnchorWithoutAPath) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    // ACCAA is a0's last k-mer: an anchor of ACCAAG with no outgoing k-mer
+    for (const std::string mode : { "all_or_count", "partial", "count" }) {
+        Json::Value out = run(idx, body("{\"dna\": \"ACCAAG\"}", "\"mode\": \"" + mode + "\""));
+        const Json::Value &e = out["patterns"][0];
+        check_path_counts(idx, e, "ACCAAG");
+        EXPECT_EQ(1u, e["counts"]["anchors"]["value"].asUInt64());
+        EXPECT_EQ(0u, e["counts"]["paths"]["value"].asUInt64());
+        EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+        EXPECT_EQ("completed", e["counts"]["paths"]["extension"].asString());
+        EXPECT_EQ(0u, e["counts"]["paths"]["candidates_examined"].asUInt64());
+        if (mode == "count") {
+            EXPECT_FALSE(e["retrieval_complete"].asBool());
+            EXPECT_FALSE(e.isMember("results"));
+            continue;
+        }
+        // an exact 0: the empty answer is complete, its labels exact zeros
+        EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+        EXPECT_EQ(0u, e["results"].size());
+        EXPECT_TRUE(e["withheld"].isNull());
+        EXPECT_EQ(0u, e["counts"]["labels"]["value"].asUInt64());
+        EXPECT_EQ("exact", e["counts"]["labels"]["relation"].asString());
+        EXPECT_EQ("exact", e["counts"]["labels"]["by_support"]["record_verified"]["relation"]
+                                   .asString());
+        EXPECT_EQ("exact", e["counts"]["occurrences"]["relation"].asString());
+        EXPECT_EQ(0u, e["by_label"].size());
+        EXPECT_EQ(0u, e["work"]["annotation_rows"].asUInt64());
+    }
+    // without the option: anchors counted, paths unknown, as before
+    Json::Value out = run(idx, "{\"patterns\": [{\"dna\": \"ACCAAG\"}]}");
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("unknown", e["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ("paths_later_increment", e["withheld"]["reason"].asString());
+}
+
+// Owner decision #13: the paths are opt-in; a request without long_search "paths" — or with
+// "anchors", its default — is answered as before, and "paths" changes nothing for a pattern of
+// at most k bases
+TEST(PatternPaths, WithoutTheOptionTheAnswerIsUnchanged) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    for (const std::string rest : { "", ", \"mode\": \"count\"", ", \"mode\": \"partial\"",
+                                    ", \"output\": {\"labels\": \"all\"}",
+                                    ", \"output\": {\"labels\": \"none\", \"paths\": false}" }) {
+        const std::string patterns = "\"patterns\": [{\"dna\": \"ACGTACC\"}, {\"dna\": \"ACG\"}, "
+                                     "{\"iupac\": \"GTACN\"}]";
+        Json::Value plain = run(idx, "{" + patterns + rest + "}");
+        Json::Value anchors = run(idx, "{" + patterns + rest + ", \"long_search\": "
+                                       "\"anchors\"}");
+        EXPECT_EQ(untimed(plain), untimed(anchors)) << rest;
+        const Json::Value &e = plain["patterns"][0];
+        EXPECT_EQ("unknown", e["counts"]["paths"]["relation"].asString());
+        EXPECT_FALSE(e["counts"]["paths"].isMember("extension"));
+        EXPECT_FALSE(e["work"].isMember("extension_edges"));
+        EXPECT_FALSE(plain["limits"].isMember("long_search"));
+        EXPECT_FALSE(plain["limits"].isMember("max_paths"));
+        bool later = false;
+        for (const Json::Value &note : e["notes"]) {
+            later |= note.asString() == "paths_later_increment";
+        }
+        EXPECT_TRUE(later);
+        // long_search "paths": the patterns of at most k bases answer alike (in a request of
+        // their own: beside a long pattern's path labels, the request's one memory account
+        // would state its own peak in their memory_bytes)
+        const std::string shorter = "\"patterns\": [{\"dna\": \"ACG\"}, {\"iupac\": \"GTACN\"}]";
+        Json::Value without = run(idx, "{" + shorter + rest + "}");
+        Json::Value paths = run(idx, "{" + shorter + rest + ", \"long_search\": \"paths\"}");
+        EXPECT_EQ(untimed(without["patterns"]), untimed(paths["patterns"])) << rest;
+        EXPECT_EQ(untimed(without["index"]), untimed(paths["index"]));
+        EXPECT_EQ(untimed(without["output"]), untimed(paths["output"]));
+        // the limits gain the option and its threshold (and the support with labels read)
+        Json::Value limits = paths["limits"];
+        EXPECT_EQ("paths", limits["long_search"].asString());
+        limits.removeMember("long_search");
+        limits.removeMember("max_paths");
+        limits.removeMember("require_support");
+        EXPECT_EQ(without["limits"], limits) << rest;
+    }
+    // max_paths without the option: bounded, clamped and listed like the other caps, no effect
+    PatternLimits caps = limits();
+    caps.max_paths = 5;
+    Json::Value out = run(idx, "{\"patterns\": [{\"dna\": \"ACGTACC\"}], \"max_paths\": 9}", {},
+                          true, caps);
+    ASSERT_EQ(1u, out["limits"]["clamped"].size());
+    EXPECT_EQ("max_paths", out["limits"]["clamped"][0]["field"].asString());
+    EXPECT_EQ(9u, out["limits"]["clamped"][0]["requested"].asUInt64());
+    EXPECT_EQ(5u, out["limits"]["clamped"][0]["effective"].asUInt64());
+    EXPECT_FALSE(out["limits"].isMember("max_paths"));
+    out = run(idx, "{\"patterns\": [{\"dna\": \"ACGTACC\"}], \"max_paths\": 9, \"long_search\": "
+                   "\"paths\"}", {}, true, caps);
+    EXPECT_EQ(5u, out["limits"]["max_paths"].asUInt64());
+    // require_support in a request that reads no labels: stated as not read
+    out = run(idx, "{\"patterns\": [{\"dna\": \"ACGTACC\"}], \"require_support\": "
+                   "\"record_verified\", \"long_search\": \"paths\"}");
+    const Json::Value &notes = out["patterns"][0]["notes"];
+    ASSERT_GT(notes.size(), 0u);
+    EXPECT_EQ("annotation_not_read", notes[notes.size() - 1].asString());
+}
+
+// Patterns with several paths: random records of three columns, IUPAC patterns cut from them
+// and widened, every answer against both oracles
+TEST(PatternPaths, RandomRecordsAgainstTheOracles) {
+    std::mt19937 rng(4711);
+    auto random_seq = [&](size_t length) {
+        std::string s;
+        for (size_t i = 0; i < length; ++i) {
+            s += "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    std::vector<Record> records;
+    // a segment of 14 bases held whole by two records of column c1 (r1, r4), and split across
+    // the adjacent records r3 and r6 of column c0 (seq_ids 1 and 2): r3 ends with its first 9
+    // bases (its k-mers 0-2 at k = 7), r6 starts with the rest from base 3 (its k-mers 3-7),
+    // so that c0's column coordinates of its k-mers are consecutive across the two records —
+    // carried by c0 (label_intersection), verified by c1 only
+    const std::string shared = random_seq(14);
+    for (int i = 0; i < 9; ++i) {
+        std::string seq = random_seq(20 + rng() % 30);
+        if (i == 1 || i == 4)
+            seq = seq.substr(0, 8) + shared + seq.substr(8);
+        if (i == 3)
+            seq += shared.substr(0, 9);
+        if (i == 6)
+            seq = shared.substr(3) + seq;
+        records.push_back({ std::string("c") + char('0' + i % 3), "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(7, records, true);
+    std::vector<std::string> patterns = { shared, shared.substr(0, 10), shared.substr(2, 9) };
+    for (const Record &r : records) {
+        const size_t L = 8 + rng() % 7;
+        if (r.seq.size() < L + 1)
+            continue;
+        std::string p = r.seq.substr(rng() % (r.seq.size() - L), L);
+        patterns.push_back(p);
+        // widened at two positions
+        p[1] = "NRYS"[rng() % 4];
+        p[L - 2] = 'N';
+        patterns.push_back(p);
+    }
+    {
+        // the shared segment: verified in c1, carried across two records by c0
+        Json::Value out = run(idx, body("{\"dna\": \"" + shared + "\"}"));
+        const Json::Value &e = out["patterns"][0];
+        bool c0 = false;
+        for (const Json::Value &r : e["results"]) {
+            if (r["sequence"].asString() != shared)
+                continue;
+            for (const Json::Value &l : r["labels"]) {
+                if (l["column"].asString() == "c0") {
+                    c0 = true;
+                    EXPECT_EQ("label_intersection", l["support"].asString()) << r;
+                } else if (l["column"].asString() == "c1") {
+                    EXPECT_EQ("record_verified", l["support"].asString()) << r;
+                    EXPECT_EQ(2u, l["occurrences"]["value"].asUInt64()) << r;
+                }
+            }
+        }
+        EXPECT_TRUE(c0) << e;
+    }
+    for (const std::string &p : patterns) {
+        const bool iupac = p.find_first_not_of("ACGT") != std::string::npos;
+        const std::string spec = "{\"" + std::string(iupac ? "iupac" : "dna") + "\": \"" + p
+                                 + "\"}";
+        for (bool require : { false, true }) {
+            Json::Value out = run(idx, body(spec, require ? "\"require_support\": "
+                                                            "\"record_verified\"" : ""));
+            const Json::Value &e = out["patterns"][0];
+            SCOPED_TRACE(p + (require ? " record_verified" : ""));
+            check_labelled_paths(idx, e, p, require);
+        }
+    }
+}
+
+TEST(PatternPaths, ReverseHitOnAWrappedPrimaryGraph) {
+    // k = 3: the record CGTT; the PRIMARY graph stores one orientation of each k-mer, the
+    // wrapper exposes both. AACG's forward path AAC, ACG lies on the reverse complements of
+    // the stored GTT and CGT (anchored through rc(AAC), DESIGN §4.1), its reverse one is the
+    // record itself
+    const std::vector<Record> records = { { "x", "x0", "CGTT" }, { "y", "y0", "GTTA" } };
+    Index idx = build<annot::ColumnCompressed<>>(3, records, false, DeBruijnGraph::PRIMARY);
+    Json::Value out = run(idx, body("{\"dna\": \"AACG\"}", "\"allow_unbudgeted_annotation\": true"),
+                          {}, false);
+    EXPECT_EQ("primary", out["index"]["graph_mode"].asString());
+    const Json::Value &e = out["patterns"][0];
+    check_path_counts(idx, e, "AACG");
+    const auto results = check_path_results(idx, e, "AACG");
+    const PathSet expected {
+        { "forward", "AACG" }, { "reverse", "CGTT" },
+    };
+    EXPECT_EQ(expected, PathSet(results.begin(), results.end()));
+    EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+    EXPECT_EQ("none_canonical", e["placement"].asString());
+    std::set<std::string> notes;
+    for (const Json::Value &n : e["notes"]) {
+        notes.insert(n.asString());
+    }
+    EXPECT_TRUE(notes.count("strand_unknown_canonical"));
+    EXPECT_TRUE(notes.count("label_intersection_only"));
+    Scan scan(idx);
+    for (Json::ArrayIndex i = 0; i < e["results"].size(); ++i) {
+        const Json::Value &r = e["results"][i];
+        std::set<std::string> got;
+        for (const Json::Value &l : r["labels"]) {
+            got.insert(l["column"].asString());
+            EXPECT_EQ("label_intersection", l["support"].asString());
+            EXPECT_FALSE(l.isMember("occurrence_list"));
+        }
+        // x holds CGT and GTT; y holds GTT only: x carries both paths, y neither
+        EXPECT_EQ(scan.carriers(results[i].second), got) << r;
+        EXPECT_EQ(std::set<std::string>({ "x" }), got);
+        EXPECT_EQ("label_intersection", r["support"].asString());
+    }
+    // nothing can be verified there
+    EXPECT_EQ("unknown", e["counts"]["labels"]["by_support"]["record_verified"]["relation"]
+                             .asString());
+    EXPECT_EQ(1u, e["counts"]["labels"]["by_support"]["label_intersection"]["value"].asUInt64());
+    EXPECT_EQ("unknown", e["by_label"][0]["paths_record_verified"]["relation"].asString());
+    EXPECT_EQ(std::make_pair(400, std::string("support_unavailable")),
+              refusal(idx, body("{\"dna\": \"AACG\"}", "\"allow_unbudgeted_annotation\": true, "
+                                "\"require_support\": \"record_verified\""), false));
+}
+
+TEST(PatternPaths, PalindromicAnchorWindowOnAWrappedPrimaryGraph) {
+    // k = 4: ACGTA's anchor window ACGT is its own reverse complement, found by both probes of
+    // the wrapped PRIMARY graph and united (DESIGN §4.1): one anchor, one extension
+    const std::vector<Record> records = { { "x", "x0", "ACGTA" } };
+    Index idx = build<annot::ColumnCompressed<>>(4, records, false, DeBruijnGraph::PRIMARY);
+    Json::Value out = run(idx, body("{\"dna\": \"ACGTA\"}", "", "none"), {}, false);
+    const Json::Value &e = out["patterns"][0];
+    check_path_counts(idx, e, "ACGTA");
+    EXPECT_EQ(1u, e["counts"]["anchors"]["by_orientation"]["forward"]["value"].asUInt64());
+    EXPECT_EQ(1u, e["counts"]["paths"]["by_orientation"]["forward"]["value"].asUInt64());
+    const auto results = check_path_results(idx, e, "ACGTA");
+    const PathSet expected {
+        { "forward", "ACGTA" }, { "reverse", "TACGT" },
+    };
+    EXPECT_EQ(expected, PathSet(results.begin(), results.end()));
+    EXPECT_TRUE(e["retrieval_complete"].asBool());
+}
+
+TEST(PatternPaths, NativeCanonicalGraph) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, false,
+                                                     DeBruijnGraph::CANONICAL);
+    for (const std::string p : { "ACGTACC", "GGACGTACCA", "CGTACC" }) {
+        Json::Value out = run(idx, body("{\"dna\": \"" + p + "\"}"), {}, false);
+        const Json::Value &e = out["patterns"][0];
+        check_path_counts(idx, e, p);
+        const auto results = check_path_results(idx, e, p);
+        EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+        EXPECT_EQ("none_canonical", e["placement"].asString());
+        Scan scan(idx);
+        for (Json::ArrayIndex i = 0; i < e["results"].size(); ++i) {
+            std::set<std::string> got;
+            for (const Json::Value &l : e["results"][i]["labels"]) {
+                got.insert(l["column"].asString());
+            }
+            EXPECT_EQ(scan.carriers(results[i].second), got) << results[i].second;
+        }
+    }
+}
+
+// The two thresholds (§4.2, §5.2): max_anchors admits the extension, max_paths the release;
+// stop_at_threshold, max_steps in the extension, and partial's cut, each with its relation
+TEST(PatternPaths, ThresholdsAndStops) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    const std::string p = "ACNNNNNT";
+    const std::string spec = "{\"iupac\": \"" + p + "\"}";
+    Walk walk(idx);
+    uint64_t anchors = 0, paths = 0;
+    for (const auto &[strand, q] : oriented(p)) {
+        anchors += walk.anchors(q).size();
+        paths += walk.paths(q).size();
+    }
+    ASSERT_GT(anchors, 3u);
+    ASSERT_GT(paths, 3u);
+
+    // everything within the thresholds: complete
+    Json::Value full = run(idx, body(spec, "", "none"));
+    const Json::Value &all = full["patterns"][0];
+    check_path_counts(idx, all, p);
+    check_path_results(idx, all, p);
+    EXPECT_TRUE(all["retrieval_complete"].asBool());
+
+    // max_anchors below the anchors: the extension is not admitted, in every mode
+    for (const std::string mode : { "all_or_count", "partial", "count" }) {
+        Json::Value out = run(idx, body(spec, "\"mode\": \"" + mode + "\", \"max_anchors\": "
+                                              + std::to_string(anchors - 1), "none"));
+        const Json::Value &e = out["patterns"][0];
+        EXPECT_EQ(anchors, e["counts"]["anchors"]["value"].asUInt64());
+        EXPECT_EQ("exact", e["counts"]["anchors"]["relation"].asString());
+        EXPECT_EQ("unknown", e["counts"]["paths"]["relation"].asString());
+        EXPECT_EQ("not_admitted", e["counts"]["paths"]["extension"].asString());
+        EXPECT_EQ(0u, e["counts"]["paths"]["candidates_examined"].asUInt64());
+        EXPECT_EQ(0u, e["work"]["extension_edges"].asUInt64());
+        EXPECT_TRUE(e["stop"].isNull());
+        if (mode != "count") {
+            EXPECT_EQ("anchors_above_threshold", e["withheld"]["reason"].asString()) << mode;
+            EXPECT_EQ(0u, e["results"].size());
+            EXPECT_FALSE(e["retrieval_complete"].asBool());
+        }
+    }
+
+    // max_paths below the paths: all_or_count withholds with the exact count, partial
+    // returns the first max_paths in answer order
+    Json::Value out = run(idx, body(spec, "\"max_paths\": " + std::to_string(paths - 1), "none"));
+    const Json::Value &over = out["patterns"][0];
+    EXPECT_EQ("count_above_threshold", over["withheld"]["reason"].asString());
+    EXPECT_EQ(paths, over["counts"]["paths"]["value"].asUInt64());
+    EXPECT_EQ("exact", over["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ(paths - 1, out["limits"]["max_paths"].asUInt64());
+    out = run(idx, body(spec, "\"max_paths\": 2, \"mode\": \"partial\"", "none"));
+    const Json::Value &cut = out["patterns"][0];
+    EXPECT_EQ("max_paths", cut["cut"]["reason"].asString());
+    EXPECT_EQ(2u, cut["returned"].asUInt64());
+    EXPECT_FALSE(cut["retrieval_complete"].asBool());
+    EXPECT_EQ(paths, cut["counts"]["paths"]["value"].asUInt64());
+    EXPECT_EQ("exact", cut["counts"]["paths"]["relation"].asString());
+    for (Json::ArrayIndex i = 0; i < 2; ++i) {
+        EXPECT_EQ(all["results"][i], cut["results"][i]);
+    }
+
+    // stop_at_threshold on the paths: the extension stops past max_paths, its count at_least
+    out = run(idx, body(spec, "\"max_paths\": 2, \"stop_at_threshold\": true", "none"));
+    const Json::Value &crossed = out["patterns"][0];
+    EXPECT_EQ("extension", crossed["stop"]["phase"].asString());
+    EXPECT_EQ("max_paths", crossed["stop"]["reason"].asString());
+    EXPECT_EQ("at_least", crossed["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ(3u, crossed["counts"]["paths"]["value"].asUInt64());
+    EXPECT_EQ("stopped", crossed["counts"]["paths"]["extension"].asString());
+    EXPECT_EQ("exact", crossed["counts"]["anchors"]["relation"].asString());
+    EXPECT_EQ("threshold_crossed", crossed["withheld"]["reason"].asString());
+    out = run(idx, body(spec, "\"max_paths\": 2, \"stop_at_threshold\": true, \"mode\": "
+                              "\"partial\"", "none"));
+    EXPECT_EQ("max_paths", out["patterns"][0]["cut"]["reason"].asString());
+    EXPECT_EQ(2u, out["patterns"][0]["returned"].asUInt64());
+
+    // stop_at_threshold on the anchors: the anchors stop, nothing is extended
+    out = run(idx, body(spec, "\"max_anchors\": 1, \"stop_at_threshold\": true, \"mode\": "
+                              "\"partial\"", "none"));
+    const Json::Value &early = out["patterns"][0];
+    EXPECT_EQ("discovery", early["stop"]["phase"].asString());
+    EXPECT_EQ("max_anchors", early["stop"]["reason"].asString());
+    EXPECT_EQ("at_least", early["counts"]["anchors"]["relation"].asString());
+    EXPECT_EQ("unknown", early["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ("not_started", early["counts"]["paths"]["extension"].asString());
+    EXPECT_EQ("max_anchors", early["cut"]["reason"].asString());
+    EXPECT_EQ(0u, early["returned"].asUInt64());
+
+    // max_steps in the extension: the paths completed before the stop, at_least
+    Json::Value count = run(idx, "{\"patterns\": [" + spec + "], \"mode\": \"count\"}");
+    const uint64_t discovery = count["patterns"][0]["work"]["steps"].asUInt64();
+    const uint64_t steps = all["work"]["steps"].asUInt64();
+    ASSERT_GT(steps, discovery + 2);
+    EXPECT_EQ(steps - discovery, all["work"]["extension_edges"].asUInt64());
+    Json::Value stopped = run(idx, body(spec, "\"max_steps\": "
+                                              + std::to_string(discovery + (steps - discovery) / 2),
+                                        "none"));
+    const Json::Value &budget = stopped["patterns"][0];
+    EXPECT_EQ("extension", budget["stop"]["phase"].asString());
+    EXPECT_EQ("max_steps", budget["stop"]["reason"].asString());
+    EXPECT_EQ("at_least", budget["counts"]["paths"]["relation"].asString());
+    EXPECT_LT(budget["counts"]["paths"]["value"].asUInt64(), paths);
+    EXPECT_EQ("discovery_budget", budget["withheld"]["reason"].asString());
+    out = run(idx, body(spec, "\"mode\": \"partial\", \"max_steps\": "
+                              + std::to_string(discovery + (steps - discovery) / 2), "none"));
+    const Json::Value &partial = out["patterns"][0];
+    EXPECT_EQ("max_steps", partial["cut"]["reason"].asString());
+    EXPECT_EQ(budget["counts"]["paths"]["value"], partial["returned"]);
+    for (Json::ArrayIndex i = 0; i < partial["results"].size(); ++i) {
+        // the paths completed before the stop are a prefix of the answer order
+        EXPECT_EQ(all["results"][i], partial["results"][i]);
+    }
+    // a step stop is sticky: the next pattern answers unknown
+    out = run(idx, body(spec + ", " + spec, "\"max_steps\": "
+                        + std::to_string(discovery + (steps - discovery) / 2), "none"));
+    EXPECT_EQ("unknown", out["patterns"][1]["counts"]["anchors"]["relation"].asString());
+    EXPECT_EQ("unknown", out["patterns"][1]["counts"]["paths"]["relation"].asString());
+    EXPECT_EQ("not_started", out["patterns"][1]["counts"]["paths"]["extension"].asString());
+
+    // labelled: the same thresholds, the labels read only for an admitted release
+    out = run(idx, body(spec, "\"max_paths\": " + std::to_string(paths - 1)));
+    EXPECT_EQ("count_above_threshold", out["patterns"][0]["withheld"]["reason"].asString());
+    EXPECT_EQ(0u, out["patterns"][0]["work"]["annotation_rows"].asUInt64());
+    EXPECT_TRUE(out["patterns"][0]["by_label"].isNull());
+    Json::Value labelled = run(idx, body(spec));
+    check_labelled_paths(idx, labelled["patterns"][0], p, false);
+}
+
+// The memory account charges each released path (its descriptor, sequence and node and row
+// arrays: path_descriptor_bytes) before its result object is built (§5.3)
+TEST(PatternPaths, TheMemoryAccountStopsPathRetention) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    const std::string spec = "{\"iupac\": \"ACNNNNNT\"}";
+    const uint64_t descriptor = path_descriptor_bytes(5, 8);
+    EXPECT_EQ(512u + 2 * 5 + 3 * 8 + 192 * 4, descriptor);
+    Json::Value full = run(idx, body(spec, "\"mode\": \"partial\""));
+    const uint64_t paths = full["patterns"][0]["returned"].asUInt64();
+    ASSERT_GT(paths, 3u);
+
+    // room for the descriptors of six paths: partial's take at most half, three
+    RetrievalHooks hooks;
+    hooks.max_memory_bytes = 6 * descriptor;
+    Json::Value out = run(idx, body(spec, "\"mode\": \"partial\""), hooks);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ(3u, e["returned"].asUInt64());
+    EXPECT_EQ("max_memory", e["cut"]["reason"].asString());
+    EXPECT_EQ("output", e["stop"]["phase"].asString());
+    EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+    EXPECT_FALSE(e["retrieval_complete"].asBool());
+    EXPECT_EQ(paths, e["counts"]["paths"]["value"].asUInt64());
+    EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+    EXPECT_LE(e["work"]["memory_bytes"].asUInt64(), hooks.max_memory_bytes);
+    for (Json::ArrayIndex i = 0; i < 3; ++i) {
+        EXPECT_EQ(full["patterns"][0]["results"][i]["sequence"], e["results"][i]["sequence"]);
+    }
+    // all_or_count: all or nothing
+    out = run(idx, body(spec), hooks);
+    EXPECT_EQ("output_budget", out["patterns"][0]["withheld"]["reason"].asString());
+    EXPECT_EQ(0u, out["patterns"][0]["results"].size());
+
+    // any account smaller than a complete run's peak: something is cut, refused or stopped,
+    // said, and the account never passes its maximum
+    Json::Value complete = run(idx, body(spec));
+    ASSERT_TRUE(complete["patterns"][0]["retrieval_complete"].asBool());
+    const uint64_t peak = complete["patterns"][0]["work"]["memory_bytes"].asUInt64();
+    for (uint64_t max = descriptor; max < peak; max += (peak - descriptor) / 23 + 1) {
+        hooks.max_memory_bytes = max;
+        for (const std::string mode : { "all_or_count", "partial" }) {
+            Json::Value x = run(idx, body(spec, "\"mode\": \"" + mode + "\""), hooks);
+            const Json::Value &w = x["patterns"][0];
+            EXPECT_FALSE(w["retrieval_complete"].asBool()) << max << " " << mode;
+            EXPECT_LE(w["work"]["memory_bytes"].asUInt64(), max) << mode;
+            EXPECT_TRUE(!w["withheld"].isNull() || !w["cut"].isNull() || !w["stop"].isNull()
+                        || w["rows_refused"].size()) << max << " " << mode << " " << w;
+        }
+    }
+}
+
+// The reads and the output of the paths' labels are work under the deadline (§5.3), as for
+// contexts: a virtual clock moved past the work time at the first read, or when the second
+// path's labels are to be built
+TEST(PatternPaths, DeadlineInTheReadsAndInTheOutput) {
+    std::mt19937 rng(17);
+    std::vector<Record> records;
+    for (int i = 0; i < 6; ++i) {
+        std::string seq;
+        for (int j = 0; j < 120; ++j) {
+            seq += "ACGT"[rng() % 4];
+        }
+        records.push_back({ i % 2 ? "odd" : "even", "r" + std::to_string(i), seq });
+    }
+    Index idx = build<annot::RowDiffColumnAnnotator>(5, records, true);
+    const std::string spec = "{\"iupac\": \"ACNNNNNT\"}";
+    const Clock::time_point start = Clock::now();
+    auto virtual_ms = std::make_shared<double>(0);
+    auto clock = [start, virtual_ms]() {
+        return start + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double, std::milli>(*virtual_ms));
+    };
+
+    // the reads: every read moves the clock far past the budget
+    RetrievalHooks reads;
+    reads.read_hook = [virtual_ms](size_t) { *virtual_ms += 1e6; };
+    Json::Value out = run_clocked(idx, body(spec + ", " + spec, "\"mode\": \"partial\""),
+                                  reads, clock);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("label_discovery", e["stop"]["phase"].asString());
+    EXPECT_EQ("time", e["stop"]["reason"].asString());
+    EXPECT_EQ("time_limited", e["determinism"].asString());
+    EXPECT_FALSE(e["retrieval_complete"].asBool());
+    // the extension completed before the clock moved
+    EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+    EXPECT_GT(e["results"].size(), 1u);
+    for (const Json::Value &r : e["results"]) {
+        EXPECT_NE("complete", r["labels_status"].asString());
+    }
+    // the next pattern: after a time stop, as after any
+    const Json::Value &next = out["patterns"][1];
+    EXPECT_EQ("discovery", next["stop"]["phase"].asString());
+    EXPECT_EQ("time", next["stop"]["reason"].asString());
+    EXPECT_EQ("unknown", next["counts"]["anchors"]["relation"].asString());
+    *virtual_ms = 0;
+    out = run_clocked(idx, body(spec), reads, clock);
+    EXPECT_EQ("deadline", out["patterns"][0]["withheld"]["reason"].asString());
+
+    // the output: past the work time when the second path's labels are to be built
+    RetrievalHooks output;
+    output.output_hook = [virtual_ms](size_t path) {
+        if (path >= 1)
+            *virtual_ms = 1e9;
+    };
+    *virtual_ms = 0;
+    out = run_clocked(idx, body(spec, "\"mode\": \"partial\""), output, clock);
+    const Json::Value &o = out["patterns"][0];
+    EXPECT_EQ("output", o["stop"]["phase"].asString());
+    EXPECT_EQ("time", o["stop"]["reason"].asString());
+    EXPECT_EQ("time_limited", o["determinism"].asString());
+    EXPECT_FALSE(o["retrieval_complete"].asBool());
+    const Json::Value &results = o["results"];
+    ASSERT_GT(results.size(), 1u);
+    EXPECT_EQ("complete", results[0]["labels_status"].asString());
+    EXPECT_TRUE(results[0]["labels"].isArray());
+    for (Json::ArrayIndex i = 1; i < results.size(); ++i) {
+        EXPECT_EQ("output_budget", results[i]["labels_status"].asString()) << i;
+        EXPECT_TRUE(results[i]["labels"].isNull()) << i;
+        EXPECT_TRUE(results[i]["support"].isNull()) << i;
+    }
+    *virtual_ms = 0;
+    out = run_clocked(idx, body(spec), output, clock);
+    EXPECT_EQ("deadline", out["patterns"][0]["withheld"]["reason"].asString());
+    EXPECT_EQ(0u, out["patterns"][0]["results"].size());
+    // the clock left alone: complete
+    *virtual_ms = 0;
+    out = run_clocked(idx, body(spec), {}, clock);
+    EXPECT_TRUE(out["patterns"][0]["retrieval_complete"].asBool());
+}
+
+TEST(PatternPaths, TruncatedAndRefusedRows) {
+    // GGACGTACCAA twice, in columns A and D: every row of its paths carries two labels
+    std::vector<Record> records = kRecords;
+    records.push_back({ "D", "d0", "GGACGTACCAA" });
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, records, true);
+    Json::Value out = run(idx, body("{\"dna\": \"GGACGTACCA\"}", "\"max_labels_per_anchor\": 1"));
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("anchor_labels_truncated", e["withheld"]["reason"].asString());
+    EXPECT_EQ(0u, e["results"].size());
+    // the six rows of the path, each stated once with its k-mer and its total (A and D; B
+    // too for ACGTA, CGTAC and GTACC)
+    Scan scan(idx);
+    std::set<std::string> truncated;
+    for (const Json::Value &t : e["anchors_truncated"]) {
+        const std::string kmer = t["kmer"].asString();
+        uint64_t total = 0;
+        for (const auto &[column, recs] : scan.columns) {
+            total += scan.holds_kmer(column, kmer);
+        }
+        EXPECT_EQ(total, t["total"].asUInt64()) << kmer;
+        EXPECT_EQ(1u, t["cap"].asUInt64());
+        truncated.insert(kmer);
+    }
+    const std::set<std::string> expected { "GGACG", "GACGT", "ACGTA", "CGTAC", "GTACC",
+                                           "TACCA" };
+    EXPECT_EQ(expected, truncated);
+    // partial: the path's labels a true but partial list, their total unknown
+    out = run(idx, body("{\"dna\": \"GGACGTACCA\"}", "\"max_labels_per_anchor\": 1, \"mode\": "
+                        "\"partial\""));
+    const Json::Value &p = out["patterns"][0];
+    ASSERT_EQ(1u, p["results"].size());
+    EXPECT_EQ("truncated", p["results"][0]["labels_status"].asString());
+    EXPECT_TRUE(p["results"][0]["labels_total"].isNull());
+    EXPECT_LE(p["results"][0]["labels"].size(), 1u);
+    EXPECT_EQ("at_least", p["counts"]["labels"]["relation"].asString());
+    EXPECT_FALSE(p["retrieval_complete"].asBool());
+
+    // every read refused: the rows stated, no label claimed
+    RetrievalHooks hooks;
+    hooks.deny_decode = [](uint64_t) { return true; };
+    out = run(idx, body("{\"dna\": \"GGACGTACCA\"}", "\"mode\": \"partial\""), hooks);
+    const Json::Value &r = out["patterns"][0];
+    ASSERT_EQ(1u, r["results"].size());
+    EXPECT_EQ("refused", r["results"][0]["labels_status"].asString());
+    EXPECT_TRUE(r["results"][0]["labels"].isNull());
+    EXPECT_TRUE(r["results"][0]["support"].isNull());
+    EXPECT_EQ(6u, r["rows_refused"].size());
+    EXPECT_EQ("at_least", r["counts"]["labels"]["relation"].asString());
+    out = run(idx, body("{\"dna\": \"GGACGTACCA\"}"), hooks);
+    EXPECT_EQ("annotation_budget", out["patterns"][0]["withheld"]["reason"].asString());
+    EXPECT_EQ(1u, out["patterns"][0]["rows_refused"].size());
+
+    // the placement reads refused (after the discovery's): every label unverified, stated
+    Json::Value plain = run(idx, body("{\"dna\": \"GGACGTACCA\"}", "\"mode\": \"partial\""));
+    // six rows, each read in both steps
+    const uint64_t rows = plain["patterns"][0]["work"]["annotation_rows"].asUInt64() / 2;
+    ASSERT_EQ(6u, rows);
+    // the first charge of every read has the ordinal 0 (a DecodeBudget per read)
+    auto reads = std::make_shared<uint64_t>(0);
+    RetrievalHooks place;
+    place.deny_decode = [reads, rows](uint64_t ordinal) {
+        if (!ordinal)
+            ++*reads;
+        return *reads > rows;
+    };
+    out = run(idx, body("{\"dna\": \"GGACGTACCA\"}", "\"mode\": \"partial\""), place);
+    const Json::Value &v = out["patterns"][0];
+    EXPECT_FALSE(v["retrieval_complete"].asBool());
+    EXPECT_GT(v["rows_refused"].size(), 0u);
+    for (const Json::Value &x : v["rows_refused"]) {
+        EXPECT_EQ("placement", x["phase"].asString());
+    }
+    ASSERT_EQ(1u, v["results"].size());
+    for (const Json::Value &l : v["results"][0]["labels"]) {
+        EXPECT_EQ("label_intersection", l["support"].asString());
+        EXPECT_EQ("unknown", l["occurrences"]["relation"].asString());
+        EXPECT_TRUE(l["occurrence_list"].isNull());
+    }
+    EXPECT_EQ("at_least", v["counts"]["labels"]["by_support"]["record_verified"]["relation"]
+                              .asString());
+    EXPECT_EQ("unknown", v["counts"]["labels"]["by_support"]["label_intersection"]["relation"]
+                             .asString());
+    // with require_support the unverified labels are left out, their count unknown
+    *reads = 0;
+    out = run(idx, body("{\"dna\": \"GGACGTACCA\"}", "\"mode\": \"partial\", "
+                        "\"require_support\": \"record_verified\""), place);
+    const Json::Value &q = out["patterns"][0];
+    EXPECT_EQ(0u, q["results"][0]["labels"].size());
+    // neither label was verified nor refuted: excluded, their number not stated as known
+    // (review of increments 4 and 5: it was 2, as if both had been refuted)
+    EXPECT_EQ("complete", q["results"][0]["labels_status"].asString());
+    EXPECT_EQ(2u, q["results"][0]["labels_total"].asUInt64());
+    EXPECT_TRUE(q["results"][0]["labels_excluded_unverified"].isNull()) << q["results"][0];
+    EXPECT_EQ("unknown", q["labels_excluded_unverified"]["relation"].asString());
+    EXPECT_EQ("at_least", q["counts"]["labels"]["relation"].asString());
+}
+
+// A path's labels_excluded_unverified is an integer only when it is the true number: every row
+// of the path read completely and every label carrying it verified or refuted; null otherwise,
+// as labels_total (review of increments 4 and 5, finding 1: with max_labels_per_anchor below a
+// row's label count the path's truncated rows gave a definite integer over the labels kept,
+// 0 where B, carrying the path unverified, had been cut). The expectations: the record scan.
+TEST(PatternPaths, ExcludedUnverifiedOnlyWhenEveryLabelIsDecided) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    const std::string p = "ACGTACC";
+    Scan scan(idx);
+    const std::set<std::string> carriers = scan.carriers(p);
+    std::set<std::string> verified;
+    for (const std::string &c : carriers) {
+        if (!scan.occurrences(c, p).empty())
+            verified.insert(c);
+    }
+    // A verifies it, B carries it across b0 -> b1: every row of the path has two labels
+    ASSERT_EQ((std::set<std::string> { "A", "B" }), carriers);
+    ASSERT_EQ(std::set<std::string> { "A" }, verified);
+    const std::string require = "\"require_support\": \"record_verified\", \"mode\": \"partial\"";
+
+    // the rows truncated (one label of two kept): the count unknown, for the path and the entry
+    for (const std::string &rest : { require, std::string("\"mode\": \"partial\"") }) {
+        const bool verified_only = rest == require;
+        Json::Value out = run(idx, body("{\"dna\": \"" + p + "\"}",
+                                        rest + ", \"max_labels_per_anchor\": 1"));
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_EQ(1u, e["results"].size()) << e;
+        const Json::Value &r = e["results"][0];
+        EXPECT_EQ("truncated", r["labels_status"].asString()) << r;
+        EXPECT_TRUE(r["labels_total"].isNull()) << r;
+        EXPECT_EQ(3u, e["anchors_truncated"].size());
+        EXPECT_FALSE(e["retrieval_complete"].asBool());
+        if (verified_only) {
+            EXPECT_TRUE(r["labels_excluded_unverified"].isNull()) << r;
+            EXPECT_EQ("unknown", e["labels_excluded_unverified"]["relation"].asString());
+            for (const Json::Value &l : r["labels"]) {
+                EXPECT_EQ("record_verified", l["support"].asString());
+            }
+        } else {
+            EXPECT_FALSE(r.isMember("labels_excluded_unverified")) << r;
+            EXPECT_FALSE(e.isMember("labels_excluded_unverified"));
+        }
+    }
+    // the cap at the rows' label count: read completely, every label decided, the count exact
+    for (const char *cap : { "2", "3" }) {
+        Json::Value out = run(idx, body("{\"dna\": \"" + p + "\"}",
+                                        require + ", \"max_labels_per_anchor\": "
+                                        + std::string(cap)));
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_EQ(1u, e["results"].size()) << e;
+        const Json::Value &r = e["results"][0];
+        EXPECT_EQ("complete", r["labels_status"].asString()) << r;
+        EXPECT_EQ(carriers.size(), r["labels_total"].asUInt64()) << r;
+        EXPECT_EQ(carriers.size() - verified.size(),
+                  r["labels_excluded_unverified"].asUInt64()) << r;
+        EXPECT_EQ(carriers.size() - verified.size(),
+                  e["labels_excluded_unverified"]["value"].asUInt64());
+        EXPECT_EQ("exact", e["labels_excluded_unverified"]["relation"].asString());
+        check_labelled_paths(idx, e, p, true);
+    }
+
+    // the placement stopped by the clock after its first read: the labels neither verified nor
+    // refuted, the count unknown (stop {placement, time})
+    Json::Value plain = run(idx, body("{\"dna\": \"" + p + "\"}", require));
+    const uint64_t rows = plain["patterns"][0]["work"]["annotation_rows"].asUInt64() / 2;
+    ASSERT_EQ(3u, rows);
+    const Clock::time_point start = Clock::now();
+    auto virtual_ms = std::make_shared<double>(0);
+    auto clock = [start, virtual_ms]() {
+        return start + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double, std::milli>(*virtual_ms));
+    };
+    auto reads = std::make_shared<uint64_t>(0);
+    RetrievalHooks late;
+    late.read_hook = [reads, rows, virtual_ms](size_t) {
+        if (++*reads > rows)
+            *virtual_ms = 1e9;
+    };
+    Json::Value out = run_clocked(idx, body("{\"dna\": \"" + p + "\"}", require), late, clock);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("placement", e["stop"]["phase"].asString()) << e["stop"];
+    EXPECT_EQ("time", e["stop"]["reason"].asString());
+    ASSERT_EQ(1u, e["results"].size());
+    const Json::Value &r = e["results"][0];
+    EXPECT_EQ(carriers.size(), r["labels_total"].asUInt64()) << r;
+    EXPECT_TRUE(r["labels_excluded_unverified"].isNull()) << r;
+    EXPECT_EQ("unknown", e["labels_excluded_unverified"]["relation"].asString());
+    EXPECT_FALSE(e["retrieval_complete"].asBool());
+}
+
+TEST(PatternPaths, GlobalPlacementListsTheChainsUnverified) {
+    // coordinates without the record mapping: B's chain across b0 and b1 cannot be told from
+    // a record's, nothing is verified (record_bounds_unknown)
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    Json::Value out = run(idx, body("{\"dna\": \"ACGTACC\"}"), {}, false);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("global", e["placement"].asString());
+    EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+    std::set<std::string> notes;
+    for (const Json::Value &n : e["notes"]) {
+        notes.insert(n.asString());
+    }
+    EXPECT_TRUE(notes.count("record_bounds_unknown"));
+    EXPECT_FALSE(notes.count("label_intersection_only"));
+    ASSERT_EQ(1u, e["results"].size());
+    std::map<std::string, std::set<uint64_t>> chains;
+    for (const Json::Value &l : e["results"][0]["labels"]) {
+        EXPECT_EQ("label_intersection", l["support"].asString());
+        EXPECT_FALSE(l.isMember("occurrences"));
+        for (const Json::Value &o : l["occurrence_list"]) {
+            EXPECT_EQ(0u, o["offset"].asUInt64());
+            EXPECT_EQ("+", o["strand"].asString());
+            chains[l["column"].asString()].insert(o["kmer_coord"].asUInt64());
+        }
+    }
+    // A: a0's ACGTA at its column coordinate 2; B: b0's ACGTA at 3 (then b1's at 4, 5)
+    const std::map<std::string, std::set<uint64_t>> expected { { "A", { 2 } }, { "B", { 3 } } };
+    EXPECT_EQ(expected, chains);
+    EXPECT_EQ("unknown", e["counts"]["occurrences"]["relation"].asString());
+    EXPECT_EQ("unknown", e["counts"]["labels"]["by_support"]["record_verified"]["relation"]
+                             .asString());
+    EXPECT_EQ(2u, e["counts"]["labels"]["by_support"]["label_intersection"]["value"].asUInt64());
+    EXPECT_EQ(std::make_pair(400, std::string("support_unavailable")),
+              refusal(idx, body("{\"dna\": \"ACGTACC\"}", "\"require_support\": "
+                                "\"record_verified\""), false));
+}
+
+TEST(PatternPaths, WithoutCoordinatesTheIntersectionOnly) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, false);
+    Json::Value out = run(idx, body("{\"dna\": \"ACGTACC\"}"), {}, false);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("none", e["placement"].asString());
+    EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+    std::set<std::string> notes;
+    for (const Json::Value &n : e["notes"]) {
+        notes.insert(n.asString());
+    }
+    EXPECT_TRUE(notes.count("label_intersection_only"));
+    ASSERT_EQ(1u, e["results"].size());
+    std::set<std::string> got;
+    for (const Json::Value &l : e["results"][0]["labels"]) {
+        got.insert(l["column"].asString());
+        EXPECT_EQ("label_intersection", l["support"].asString());
+        EXPECT_FALSE(l.isMember("occurrences"));
+        EXPECT_FALSE(l.isMember("occurrence_list"));
+    }
+    EXPECT_EQ(std::set<std::string>({ "A", "B" }), got);
+    EXPECT_EQ(std::make_pair(400, std::string("support_unavailable")),
+              refusal(idx, body("{\"dna\": \"ACGTACC\"}", "\"require_support\": "
+                                "\"record_verified\""), false));
+}
+
+TEST(PatternPaths, OccurrencesNotRequested) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    Json::Value out = run(idx, "{\"patterns\": [{\"dna\": \"ACGTACC\"}], \"long_search\": "
+                               "\"paths\", \"output\": {\"labels\": \"all\", \"occurrences\": "
+                               "false}}");
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("not_requested", e["placement"].asString());
+    EXPECT_TRUE(e["retrieval_complete"].asBool());
+    bool note = false;
+    for (const Json::Value &n : e["notes"]) {
+        note |= n.asString() == "label_intersection_only";
+    }
+    EXPECT_TRUE(note);
+    for (const Json::Value &l : e["results"][0]["labels"]) {
+        EXPECT_EQ("label_intersection", l["support"].asString());
+    }
+    EXPECT_EQ(std::make_pair(400, std::string("invalid_request")),
+              refusal(idx, "{\"patterns\": [{\"dna\": \"ACGTACC\"}], \"long_search\": \"paths\", "
+                           "\"require_support\": \"record_verified\", \"output\": {\"labels\": "
+                           "\"all\", \"occurrences\": false}}"));
+}
+
+TEST(PatternPaths, CountMode) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    Json::Value out = run(idx, "{\"patterns\": [{\"dna\": \"ACGTACC\"}, {\"dna\": \"ACCAAG\"}], "
+                               "\"long_search\": \"paths\", \"mode\": \"count\"}");
+    EXPECT_TRUE(out["output"].isNull());
+    for (int i : { 0, 1 }) {
+        const Json::Value &e = out["patterns"][i];
+        check_path_counts(idx, e, i ? "ACCAAG" : "ACGTACC");
+        EXPECT_FALSE(e.isMember("results"));
+        EXPECT_FALSE(e["retrieval_complete"].asBool());
+    }
+    // the CLI answers alike
+    std::ostringstream text;
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    RetrievalHooks hooks;
+    hooks.coord_to_header = idx.cth.get();
+    ASSERT_TRUE(write_pattern_answer("{\"patterns\": [{\"dna\": \"ACGTACC\"}], \"long_search\": "
+                                     "\"paths\", \"output\": {\"labels\": \"all\"}}",
+                                     *idx.anno, limits(), "rel", nullptr, builder, text,
+                                     "the request", &hooks));
+    Json::Value cli;
+    std::istringstream in(text.str());
+    in >> cli;
+    Json::Value server = run(idx, body("{\"dna\": \"ACGTACC\"}"));
+    // (as text: a parsed number is a signed JSON value, the route's unsigned)
+    EXPECT_EQ(Json::writeString(builder, untimed(server)), Json::writeString(builder, untimed(cli)));
+}
+
+
+} // namespace

@@ -3,7 +3,9 @@
 
 /**
  * The labelled retrieval of POST /pattern (docs/DESIGN-pattern-search.md §4.3, §5.2-§5.5,
- * §7.2; increment 3): output.labels "all" for patterns of L <= k. The engine
+ * §7.2; increment 3): output.labels "all" for patterns of L <= k, and (increment 4,
+ * long_search "paths") for the paths of patterns longer than k (retrieve_paths: the labels on
+ * every k-mer of a path, each with its support). The engine
  * (graph::pattern::PatternSearch::enumerate) releases the graph contexts; this module reads
  * their labels and places them, in two steps on the traversal's budget-aware, paced classes:
  *
@@ -173,6 +175,27 @@ struct RetrievalContext {
     uint64_t key = 0;
 };
 
+/**
+ * One released path of a pattern longer than k (long_search "paths", increment 4; §4.2), as
+ * the route collected it from the engine (in answer order): its orientation, the L bases it
+ * spells, and the annotation key of each of its n = L - k + 1 k-mers in reading order (row + 1,
+ * as RetrievalContext::key; npos when one has no row).
+ */
+struct RetrievalPath {
+    graph::pattern::Orientation orientation = graph::pattern::Orientation::FORWARD;
+    std::string sequence;
+    std::vector<uint64_t> keys;
+};
+
+/**
+ * The memory model's price of one released path (§5.3, item 3: the retained paths are charged
+ * before they are built): its result object — sequence, instance and anchor_kmer, its nodes
+ * and rows arrays (n = L - k + 1 entries each, an array element of the JSON library and its
+ * text) — its descriptor, and the retrieval's copy of its sequence and keys. A deterministic
+ * model, as context_bytes: 512 + 2k + 3L + 192n.
+ */
+uint64_t path_descriptor_bytes(size_t k, size_t length);
+
 // Tests: a record mapping instead of the index's; a hook called before every annotation read
 // with its row count (to slow the reads down on a virtual clock); the memory account in bytes
 // instead of the request's MiB (0: the request's); a hook asked at every charge of a read's
@@ -256,6 +279,8 @@ class PatternRetrieval {
      * them (partial: the list is cut, max_memory; all_or_count: withheld, output_budget).
      */
     bool admit_context();
+    // the same for one released path of a pattern of |length| bases (path_descriptor_bytes)
+    bool admit_path(size_t length);
 
     /**
      * Reads the labels of the admitted contexts of one pattern (L <= k, or a long pattern's
@@ -269,6 +294,31 @@ class PatternRetrieval {
                           const graph::pattern::Extraction &extraction,
                           const Json::Value &graph_name);
 
+    /**
+     * The labels of the admitted paths of one pattern longer than k (long_search "paths",
+     * increment 4; DESIGN §4.3 "Label consistency for long", owner decision #14), as
+     * retrieve() for contexts, with the same budgets, statements and modes:
+     *  1. discovery: the rows of every k-mer of every admitted path (each distinct row read
+     *     once, one row per read, in answer order of first appearance); a path's labels are
+     *     the labels present on EVERY one of its k-mers (support label_intersection);
+     *  2. verification (placement record, occurrences requested): the coordinates of the rows
+     *     of the paths with at least one such label; a label is record_verified on a path when
+     *     its coordinates show one contiguous occurrence of the whole path in ONE record: a
+     *     column coordinate c of the first k-mer with c + i a coordinate of the i-th k-mer for
+     *     every i, c mapped to (seq_id, local) first, and local + n - 1 inside the record's
+     *     k-mers (a chain crossing into the next record of the column is not one). Each such
+     *     occurrence is placed: (seq_id, 1-based local + 1, the path's strand), nt_coords over
+     *     the L bases. Placement global: the chains (kmer_coord, offset 0), record bounds
+     *     unknown, nothing verified. Elsewhere label_intersection only.
+     * |require_verified| (require_support "record_verified"; placement record, checked by the
+     * route): only the verified labels are listed, the others counted per path and per entry
+     * (labels_excluded_unverified). Mode ALL_OR_COUNT or PARTIAL.
+     */
+    LabelsAnswer retrieve_paths(const std::vector<RetrievalPath> &paths, uint64_t released,
+                                size_t length, graph::pattern::Mode mode,
+                                const graph::pattern::Extraction &extraction,
+                                const Json::Value &graph_name, bool require_verified);
+
     // the memory account's peak so far (bytes of the model) and what it holds now
     uint64_t memory_peak() const;
     uint64_t memory_held() const;
@@ -278,6 +328,8 @@ class PatternRetrieval {
     std::unique_ptr<Impl> impl_;
     RetrievalLimits limits_;
     AnnotationDescription description_;
+
+    bool admit(uint64_t bytes);
 };
 
 /**

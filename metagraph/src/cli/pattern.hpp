@@ -3,7 +3,8 @@
 
 /**
  * POST /pattern and `metagraph pattern`: count and extract the graph contexts of short motifs
- * and IUPAC patterns, and read their labels (docs/DESIGN-pattern-search.md, increments 0-3).
+ * and IUPAC patterns, and read their labels (docs/DESIGN-pattern-search.md, increments 0-3),
+ * and the paths of patterns longer than k (increment 4, opt-in).
  * The engine is graph::pattern::PatternSearch (src/graph/alignment/pattern_search.hpp), the
  * labelled retrieval PatternRetrieval (pattern_retrieval.hpp); this file turns their results
  * into the JSON of the route's contract (pattern_contract_version 1):
@@ -11,8 +12,13 @@
  *    (the label-free path, §4.3: contexts with k-mer, instance, offset, strand, node and row
  *    ids, no annotation row read) or "all" (increment 3: each context's labels, placed where
  *    the index can place them, under the annotation budgets);
- *  - single-graph servers only; no predicate, no extension beyond k (a pattern longer than k
- *    has its anchors counted and nothing extracted).
+ *  - a pattern longer than k: its anchors counted and nothing extracted (long_search
+ *    "anchors", the default), or with long_search "paths" (increment 4, owner decisions #13
+ *    and #14) the anchors extended into paths (§4.2): counts.paths, path results with the new
+ *    fields sequence, anchor_kmer, nodes and rows (never kmer), and with output.labels "all"
+ *    each path's labels, each with its support (label_intersection, record_verified) and
+ *    require_support "record_verified" listing the verified ones only;
+ *  - single-graph servers only; no predicate.
  * Everything a later increment adds is refused (400 "later_increment"), never ignored: the
  * owner's guarantee rule, nothing weakened silently.
  */
@@ -73,6 +79,9 @@ class PatternRefusal : public std::runtime_error {
 struct PatternLimits {
     uint64_t max_contexts = 10'000;
     uint64_t max_anchors = 1'000;
+    // increment 4, long_search "paths": the retrieval threshold on the completed paths of a
+    // pattern longer than k (all_or_count) and partial's cap on them
+    uint64_t max_paths = 1'000;
     uint64_t max_steps = 100'000'000;
     double default_time_ms = 60'000;
     double max_time_ms = 600'000;

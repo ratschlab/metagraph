@@ -175,14 +175,46 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"allow_unbudgeted_annotation\": 1}", 400, "invalid_request" },
         { "{" + p + ", \"max_labels\": 0, \"max_occurrences_per_label\": 0}", 200, "" },
         { "{" + p + ", \"predicate\": null}", 400, "later_increment" },
-        // owner decision #13: long_search is reserved for increment 4 (paths opt-in), refused
-        // by name whatever its value, the default "anchors" included
-        { "{" + p + ", \"long_search\": \"paths\"}", 400, "later_increment" },
-        { "{" + p + ", \"long_search\": \"anchors\"}", 400, "later_increment" },
-        { "{" + p + ", \"long_search\": null}", 400, "later_increment" },
+        // owner decision #13: long_search, reserved until increment 4, is served (paths
+        // opt-in); its values are "anchors" (the default) and "paths", nothing else
+        { "{" + p + ", \"long_search\": \"paths\"}", 200, "" },
+        { "{" + p + ", \"long_search\": \"anchors\"}", 200, "" },
+        { "{" + p + ", \"long_search\": null}", 400, "invalid_request" },
+        { "{" + p + ", \"long_search\": \"Paths\"}", 400, "invalid_request" },
+        { "{" + p + ", \"long_search\": true}", 400, "invalid_request" },
+        // max_paths: an integer >= 0 like max_anchors, accepted with any request
+        { "{" + p + ", \"max_paths\": 0}", 200, "" },
+        { "{" + p + ", \"max_paths\": -1}", 400, "invalid_request" },
+        { "{" + p + ", \"max_paths\": 1.5}", 400, "invalid_request" },
+        { "{" + p + ", \"max_paths\": null}", 400, "invalid_request" },
+        // require_support (owner decision #14): label_intersection or record_verified
+        { "{" + p + ", \"require_support\": \"label_intersection\"}", 200, "" },
+        { "{" + p + ", \"require_support\": \"record_verified\"}", 200, "" },
+        { "{" + p + ", \"require_support\": \"kmer\"}", 400, "invalid_request" },
+        { "{" + p + ", \"require_support\": null}", 400, "invalid_request" },
+        // the verification reads the coordinates, which occurrences false declines
+        { "{" + p + ", \"require_support\": \"record_verified\", \"output\": {\"labels\": "
+          "\"all\", \"occurrences\": false}, \"allow_unbudgeted_annotation\": true}", 400,
+          "invalid_request" },
+        // record_verified on an index that cannot verify (no coordinates): refused where it
+        // acts (labels read, long_search paths), not in a request that reads no labels
+        { "{" + p + ", \"require_support\": \"record_verified\", \"long_search\": \"paths\", "
+          "\"output\": {\"labels\": \"all\"}, \"allow_unbudgeted_annotation\": true}", 400,
+          "support_unavailable" },
+        { "{" + p + ", \"require_support\": \"record_verified\", \"long_search\": \"paths\", "
+          "\"mode\": \"count\", \"output\": {\"labels\": \"all\"}}", 200, "" },
+        { "{" + p + ", \"require_support\": \"label_intersection\", \"long_search\": "
+          "\"paths\", \"output\": {\"labels\": \"all\"}, \"allow_unbudgeted_annotation\": "
+          "true}", 200, "" },
+        // increment 5's protein and genetic_code are still refused by name
         { "{\"patterns\": [{\"protein\": \"MK\"}]}", 400, "later_increment" },
+        { "{" + p + ", \"genetic_code\": 1}", 400, "later_increment" },
         { "{" + p + ", \"in_ram\": true}", 400, "resident_only" },
         { "{" + p + ", \"output\": {\"labels\": \"none\", \"paths\": false}}", 200, "" },
+        // increment 4: output.paths is accepted with either value and changes nothing (a path
+        // result always carries its node path)
+        { "{" + p + ", \"output\": {\"labels\": \"none\", \"paths\": true}}", 200, "" },
+        { "{" + p + ", \"output\": {\"paths\": 1}}", 400, "invalid_request" },
         // review of 2026-10-07, R1-02: one RFC 8259 JSON text with unique member names, nothing
         // else (each was answered 200 as if it were the leading object, or with the last of a
         // duplicated member's values)
@@ -232,11 +264,11 @@ TEST(PatternRoute, RefusalOrder) {
         // 6, alphabetical: graphs < in_ram; in_ram < max_paths
         { "{" + p + ", \"in_ram\": true, \"graphs\": []}", "later_increment", "request.graphs" },
         { "{" + p + ", \"in_ram\": true, \"max_paths\": 1}", "resident_only", "request.in_ram" },
-        // (in_ram < long_search; long_search before the patterns)
+        // (long_search is served since increment 4: checked after the patterns, step 8)
         { "{" + p + ", \"in_ram\": true, \"long_search\": \"paths\"}", "resident_only",
           "request.in_ram" },
-        { "{\"patterns\": \"x\", \"long_search\": \"anchors\"}", "later_increment",
-          "request.long_search" },
+        { "{\"patterns\": \"x\", \"long_search\": \"x\"}", "invalid_request",
+          "request.patterns" },
         // 7 before 8
         { "{\"patterns\": [], \"mode\": \"x\"}", "invalid_request", "request.patterns" },
         // within 7: protein, id, exactly one of dna / iupac, its type, an unknown field
@@ -254,8 +286,10 @@ TEST(PatternRoute, RefusalOrder) {
           "invalid_request", "request.mode" },
         { "{" + p + ", \"output\": {\"labels\": \"x\"}, \"scope\": \"x\"}", "invalid_request",
           "request.output.labels" },
-        { "{" + p + ", \"output\": {\"paths\": true, \"x\": 1}}", "later_increment",
+        { "{" + p + ", \"output\": {\"paths\": 1, \"x\": 1}}", "invalid_request",
           "request.output.paths" },
+        { "{" + p + ", \"output\": {\"paths\": true, \"x\": 1}}", "invalid_request",
+          "request.output: unknown field 'x'" },
         { "{" + p + ", \"scope\": \"x\", \"strands\": \"x\"}", "invalid_request",
           "request.scope" },
         { "{" + p + ", \"strands\": \"x\", \"stop_at_threshold\": 1}", "invalid_request",
@@ -275,11 +309,28 @@ TEST(PatternRoute, RefusalOrder) {
         { "{" + p + ", \"max_occurrences_per_label\": -1, "
           "\"allow_unbudgeted_annotation\": 1}", "invalid_request",
           "request.max_occurrences_per_label" },
+        // then increment 4's: long_search, max_paths, require_support (and its contradiction
+        // with output.occurrences false)
+        { "{" + p + ", \"allow_unbudgeted_annotation\": 1, \"long_search\": \"x\"}",
+          "invalid_request", "request.allow_unbudgeted_annotation" },
+        { "{" + p + ", \"long_search\": \"x\", \"max_paths\": -1}", "invalid_request",
+          "request.long_search" },
+        { "{" + p + ", \"max_paths\": -1, \"require_support\": \"x\"}", "invalid_request",
+          "request.max_paths" },
+        { "{" + p + ", \"require_support\": \"x\", \"bogus\": 1}", "invalid_request",
+          "request.require_support" },
+        { "{" + p + ", \"require_support\": \"record_verified\", \"output\": {\"labels\": "
+          "\"all\", \"occurrences\": false}, \"bogus\": 1}", "invalid_request",
+          "request.require_support" },
         // 8 before 9
         { "{" + p + ", \"max_steps\": 0, \"bogus\": 1}", "invalid_request", "request.max_steps" },
         // 9 before 10: on this column annotation labels "all" would be annotation_unbudgeted
         { "{" + p + ", \"output\": {\"labels\": \"all\"}, \"bogus\": 1}", "invalid_request",
           "request: unknown field 'bogus'" },
+        // 10 before 11: the unbudgeted annotation before the support it cannot give
+        { "{" + p + ", \"output\": {\"labels\": \"all\"}, \"long_search\": \"paths\", "
+          "\"require_support\": \"record_verified\"}", "annotation_unbudgeted",
+          "pattern: output.labels" },
     };
     for (const auto &[body, code, first] : cases) {
         std::string error;
@@ -854,7 +905,22 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ(256u, caps["caps"]["max_memory_mb"].asUInt64());
     EXPECT_EQ(1000u, caps["caps"]["max_labels"].asUInt64());
     EXPECT_EQ(16u, caps["caps"]["max_occurrences_per_label"].asUInt64());
+    // increment 4: paths opt-in (owner decision #13); without the option a long pattern keeps
+    // its anchor-only answer, which long_patterns describes
+    EXPECT_EQ(1000u, caps["caps"]["max_paths"].asUInt64());
+    EXPECT_EQ("anchors_counted", caps["long_patterns"].asString());
+    ASSERT_EQ(2u, caps["long_search"].size());
+    EXPECT_EQ("anchors", caps["long_search"][0].asString());
+    EXPECT_EQ("paths", caps["long_search"][1].asString());
+    EXPECT_EQ("anchors", caps["default_long_search"].asString());
+    EXPECT_NE(std::string::npos, caps["caps_rule"].asString().find("max_paths are the maxima"));
+    EXPECT_NE(std::string::npos, caps["caps_rule"].asString().find("long_search \"paths\""));
+    PatternLimits other = limits();
+    other.max_paths = 7;
+    EXPECT_EQ(7u, pattern_capabilities_json(g.get(), other, false)["caps"]["max_paths"].asUInt64());
     EXPECT_EQ("none", caps["placement"].asString());
+    // no coordinates: a path's labels can only be the intersection of its k-mers'
+    EXPECT_EQ("label_intersection", caps["support"].asString());
     // a column annotation: no budget-aware decode
     EXPECT_EQ("unbudgeted", caps["annotation"].asString());
 

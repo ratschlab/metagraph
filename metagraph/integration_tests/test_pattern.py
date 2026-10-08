@@ -83,7 +83,9 @@ DEFAULT_CAPS = {'max_contexts': 10000, 'max_anchors': 1000, 'max_steps': 1000000
                 'time_budget_ms': 600000, 'min_information_bits': 24, 'max_patterns': 16,
                 # output.labels "all" (increment 3)
                 'max_labels_per_anchor': 64, 'max_annotation_work': 100000000,
-                'max_memory_mb': 256, 'max_labels': 1000, 'max_occurrences_per_label': 16}
+                'max_memory_mb': 256, 'max_labels': 1000, 'max_occurrences_per_label': 16,
+                # long_search "paths" (increment 4)
+                'max_paths': 1000}
 DEFAULT_TIME_MS = 60000
 DEFAULT_FINALIZE_MS = 250
 
@@ -199,6 +201,43 @@ class Records:
                 for m in rx.finditer(seq):
                     if m.start() + k <= len(seq):
                         out.add((strand, seq[m.start():m.start() + k]))
+        return out
+
+    def has_kmer(self, kmer, canonical=False):
+        """Whether a k-mer of the graph built from these records spells |kmer|: one of the
+        islands holds it (a DNA4 graph keeps every k-mer of an island and nothing else), or its
+        reverse complement on a graph holding both orientations."""
+        key = ('kmer', kmer, canonical)
+        if key not in self._cache:
+            if not hasattr(self, '_joined'):
+                self._joined = '|'.join(island for _, _, island in self.islands)
+            self._cache[key] = kmer in self._joined or (canonical and revcomp(kmer)
+                                                        in self._joined)
+        return self._cache[key]
+
+    def paths(self, pattern, k, strands='both', canonical=False):
+        """{(strand or orientation, sequence)}: the graph paths of a pattern longer than k
+        (§4.2) — every string of its length that instantiates the oriented pattern and whose
+        every k-window is a k-mer of the graph (has_kmer), found by extending each instance of
+        its first k positions one base at a time (the graph-walk oracle over the records'
+        k-mers: a path need not lie in one record)."""
+        assert len(pattern) > k
+        out = set()
+        for strand, q in self.oriented(pattern, strands, not canonical):
+            def extend(s):
+                if len(s) == len(q):
+                    out.add((strand, s))
+                    return
+                for b in IUPAC[q[len(s)]]:
+                    if self.has_kmer(s[len(s) - k + 1:] + b, canonical):
+                        extend(s + b)
+            # the instances of the anchor window that are k-mers of the graph
+            starts = {''}
+            for c in q[:k]:
+                starts = {x + b for x in starts for b in IUPAC[c]}
+            for x in sorted(starts):
+                if self.has_kmer(x, canonical):
+                    extend(x)
         return out
 
     def names_with_kmer(self, kmer):
@@ -630,9 +669,20 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
              'later_increment', 'labels'),
             # occurrences are placed per label (increment 3): they need labels "all"
             ({'patterns': p, 'output': {'occurrences': True}}, 'invalid_request', 'occurrences'),
-            ({'patterns': p, 'output': {'paths': True}}, 'later_increment', 'paths'),
+            # output.paths is accepted with either value since increment 4 (a path result
+            # always carries its node path); another type is refused
+            ({'patterns': p, 'output': {'paths': 1}}, 'invalid_request', 'paths'),
             ({'patterns': p, 'predicate': {'any': ['562']}}, 'later_increment', 'predicate'),
-            ({'patterns': p, 'max_paths': None}, 'later_increment', 'max_paths'),
+            # increment 4: long_search, max_paths and require_support are served (paths
+            # opt-in, owner decisions #13 and #14); their values are checked
+            ({'patterns': p, 'max_paths': None}, 'invalid_request', 'max_paths'),
+            ({'patterns': p, 'max_paths': -1}, 'invalid_request', 'max_paths'),
+            ({'patterns': p, 'long_search': 'path'}, 'invalid_request', 'long_search'),
+            ({'patterns': p, 'long_search': None}, 'invalid_request', 'long_search'),
+            ({'patterns': p, 'require_support': 'kmer'}, 'invalid_request', 'require_support'),
+            ({'patterns': p, 'require_support': 'record_verified',
+              'output': {'labels': 'all', 'occurrences': False}}, 'invalid_request',
+             'require_support'),
             ({'patterns': p, 'max_labels': None}, 'invalid_request', 'max_labels'),
             ({'patterns': p, 'max_labels_per_anchor': 0}, 'invalid_request',
              'max_labels_per_anchor'),
@@ -665,12 +715,17 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertEqual(400, ret.status_code, raw[:100])
             self.assertEqual({'error', 'code'}, set(ret.json()), raw[:100])
             self.assertEqual('invalid_request', ret.json()['code'], raw[:100])
-        # false projections and occurrences are accepted and change nothing
+        # false projections and occurrences are accepted and change nothing; so are
+        # output.paths true and long_search for a pattern of at most k bases
         out = self.pattern(self.server, {'patterns': p, 'mode': 'count',
                                          'output': {'labels': 'none', 'occurrences': False,
                                                     'paths': False}})
         self.assertContextCounts(out['patterns'][0], self.contexts(self.p16), self.k, 16,
                                  'any_offset')
+        for extra in ({'output': {'labels': 'none', 'paths': True}},
+                      {'long_search': 'paths'}, {'long_search': 'anchors'}):
+            again = self.pattern(self.server, dict({'patterns': p, 'mode': 'count'}, **extra))
+            self.assertEqual(untimed(out['patterns']), untimed(again['patterns']), extra)
 
     def test_max_steps_and_clamps(self):
         out = self.pattern(self.server, {'patterns': [{'dna': self.p16}, {'dna': self.p14}],
@@ -730,6 +785,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'projections_later_increment': ['predicate_only'], 'default_occurrences': True,
             'kinds': ['dna', 'iupac'], 'scopes': ['suffix', 'any_offset'],
             'default_scope': 'any_offset', 'long_patterns': 'anchors_counted',
+            # increment 4: the paths of long patterns, opt-in
+            'long_search': ['anchors', 'paths'], 'default_long_search': 'anchors',
             'strands': ['both', 'forward', 'reverse'], 'graph_mode': 'basic', 'k': self.k,
             'alphabet': '$ACGT', 'strand_stated': True, 'mask': 'file',
             'graph_cleaned': 'unknown', 'records_shorter_than_k': 'not_indexed',
@@ -1026,6 +1083,285 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertCount(absent['counts']['paths'], 0, unit='paths')
         self.assertTrue(absent['retrieval_complete'])
         self.assertIsNone(absent['withheld'])
+
+    # ------------------------------------------------------------ paths (increment 4)
+
+    def long_patterns(self):
+        """Patterns of 35-50 bases taken from the mini's records (so present): the blaNDM-1
+        region around NDM-F (in several taxa), windows of the two longest islands, an IUPAC
+        40-mer with two ambiguous positions; and an absent 40-mer (no anchor)."""
+        ndm = next(seq for recs in self.columns.values() for _, seq in recs
+                   if self.NDM_F in seq.upper()).upper()
+        i = ndm.find(self.NDM_F)
+        islands = sorted((island for _, _, island in self.records.islands),
+                         key=lambda s: (-len(s), s[:64]))
+        w = list(islands[0][3000:3040])
+        w[2] = 'R' if w[2] in 'AG' else 'Y'
+        w[36] = 'N'
+        return [ndm[i - 10:i + 35], self.p40, islands[1][7000:7050], islands[0][6000:6035],
+                ''.join(w), self.absent40]
+
+    def path_columns(self, path):
+        """The record-scan oracle of a path (§4.3): the columns carrying it (every k-mer of it
+        in one of their records) and, for those whose records hold it whole (record_verified),
+        {column: {(seq_id, 1-based start)}}."""
+        k = self.k
+        carriers = {c for c, r in self.column_records.items()
+                    if all(r.has_kmer(path[i:i + k]) for i in range(len(path) - k + 1))}
+        verified = {}
+        for c in carriers:
+            occ = {(i, m.start() + 1) for i, (_, seq) in enumerate(self.columns[c])
+                   for m in re.finditer('(?=' + path + ')', seq.upper())}
+            if occ:
+                verified[c] = occ
+        return carriers, verified
+
+    def assertPaths(self, entry, pattern, labels=True, require_verified=False):
+        """An answer of long_search "paths" against both oracles: the graph-walk oracle's paths
+        (Records.paths) with their counts, each path result with its sequence, anchor k-mer and
+        node and row ids; with labels, each path's columns those carrying it (or verifying it,
+        with require_support), each with its support and its occurrences of the whole path, the
+        summaries exact, and the placed occurrences the FASTA scan's (placed_oracle)."""
+        k, L = self.k, len(pattern)
+        n = L - k + 1
+        expected = self.records.paths(pattern, k)
+        anchors = self.records.anchors(pattern, k)
+        self.assertEqual('long', entry['scope'])
+        self.assertNotIn('paths_later_increment', entry['notes'])
+        self.assertCount({x: entry['counts']['anchors'][x] for x in ('value', 'relation', 'unit')},
+                         len(anchors), unit='anchors')
+        c = entry['counts']['paths']
+        self.assertCount({x: c[x] for x in ('value', 'relation', 'unit')}, len(expected),
+                         unit='paths')
+        self.assertEqual('completed' if anchors else 'no_anchors', c['extension'])
+        for s in entry['strands']:
+            self.assertCount(c['by_strand']['both' if s == '=' else s],
+                             sum(1 for t, _ in expected if t == s), unit='paths')
+        # every path enters its n - 1 prefixes beyond the anchor (shared prefixes once)
+        if expected:
+            self.assertGreaterEqual(c['candidates_examined'], max(len(expected), n - 1))
+        self.assertIn('extension_edges', entry['work'])
+        self.assertIn('extension_ms', entry['timing'])
+        if 'results' not in entry:
+            return
+        self.assertCompleteRetrieval(entry)
+        got = {(r['strand'], r['sequence']) for r in entry['results']}
+        self.assertEqual(expected, got)
+        self.assertEqual(len(expected), entry['returned'])
+        order = []
+        for r in entry['results']:
+            keys = {'sequence', 'anchor_kmer', 'instance', 'offset', 'strand', 'nodes', 'rows'}
+            if labels:
+                keys |= {'support', 'labels_status', 'labels_total', 'labels'}
+                if require_verified:
+                    keys.add('labels_excluded_unverified')
+            self.assertEqual(keys, set(r))
+            self.assertEqual((r['sequence'], r['sequence'][:k], 0),
+                             (r['instance'], r['anchor_kmer'], r['offset']))
+            self.assertEqual(n, len(r['nodes']))
+            self.assertEqual([x - 1 for x in r['nodes']], r['rows'])
+            order.append((r['nodes'][0], self.ORIENTATION_RANK[r['strand']], r['sequence']))
+        self.assertEqual(sorted(order), order)
+        if not labels:
+            return
+
+        unions, paths_of, verified_of = {}, {}, {}
+        for r in entry['results']:
+            s, strand = r['sequence'], r['strand']
+            carriers, verified = self.path_columns(s)
+            listed = set(verified) if require_verified else carriers
+            self.assertEqual(('complete', len(carriers)), (r['labels_status'], r['labels_total']))
+            if require_verified:
+                self.assertEqual(len(carriers) - len(verified), r['labels_excluded_unverified'])
+            self.assertEqual(listed, {x['column'] for x in r['labels']}, s)
+            support = (None if not listed else 'record_verified' if listed <= set(verified)
+                       else 'label_intersection' if not set(verified) & listed else 'mixed')
+            self.assertEqual(support, r['support'])
+            for label in r['labels']:
+                col = label['column']
+                occ = verified.get(col, set())
+                self.assertEqual('record_verified' if occ else 'label_intersection',
+                                 label['support'], (s, col))
+                self.assertCount(label['occurrences'], len(occ), unit='placed_occurrences')
+                got_occ = set()
+                for o in label['occurrence_list']:
+                    name, seq = self.columns[col][o['seq_id']]
+                    self.assertEqual((name, len(seq), strand),
+                                     (o['record'], o['nt_length'], o['strand']))
+                    a, b = (int(x) for x in o['nt_coords'].split('-'))
+                    self.assertEqual(a + L - 1, b)
+                    self.assertEqual(s, seq[a - 1:b].upper())
+                    got_occ.add((o['seq_id'], a))
+                    unions.setdefault(col, set()).add((o['seq_id'], a, strand))
+                self.assertEqual(occ, got_occ, (s, col))
+                paths_of[col] = paths_of.get(col, 0) + 1
+                verified_of[col] = verified_of.get(col, 0) + bool(occ)
+        # by_label: (paths desc, column asc), exact
+        keys = [(-b['paths']['value'], b['column']) for b in entry['by_label']]
+        self.assertEqual(sorted(keys), keys)
+        self.assertEqual(set(paths_of), {b['column'] for b in entry['by_label']})
+        for b in entry['by_label']:
+            col = b['column']
+            self.assertEqual({'graph', 'column', 'paths', 'paths_record_verified', 'occurrences'},
+                             set(b))
+            self.assertCount(b['paths'], paths_of[col], unit='paths')
+            self.assertCount(b['paths_record_verified'], verified_of[col], unit='paths')
+            self.assertCount(b['occurrences'], len(unions.get(col, ())), unit='placed_occurrences')
+        labels_count = entry['counts']['labels']
+        self.assertCount({x: labels_count[x] for x in ('value', 'relation', 'unit')},
+                         len(paths_of), unit='labels')
+        rv = sum(1 for col in paths_of if verified_of[col])
+        self.assertCount(labels_count['by_support']['record_verified'], rv, unit='labels')
+        self.assertCount(labels_count['by_support']['label_intersection'], len(paths_of) - rv,
+                         unit='labels')
+        placed = {(col, i, a, st) for col, x in unions.items() for i, a, st in x}
+        self.assertCount(entry['counts']['occurrences'], len(placed), unit='placed_occurrences')
+        # every occurrence of the oriented pattern in the FASTA records, each once
+        self.assertEqual(self.placed_oracle(pattern), placed)
+
+    def paths_request(self, patterns, **kw):
+        return dict({'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
+                                  for p in patterns], 'long_search': 'paths'}, **kw)
+
+    def test_long_paths_against_the_fasta(self):
+        """Patterns of 35-50 bases (long_search "paths", increment 4): every path with every
+        column carrying it and, where one record of the column holds the whole path, its
+        support record_verified and its occurrences; the occurrences the FASTA scan's."""
+        patterns = self.long_patterns()
+        out = self.pattern(self.server, self.paths_request(patterns, output={'labels': 'all'}))
+        self.assertEqual(('paths', 1000, 'label_intersection'),
+                         (out['limits']['long_search'], out['limits']['max_paths'],
+                          out['limits']['require_support']))
+        for entry, p in zip(out['patterns'], patterns):
+            with self.subTest(pattern=p):
+                self.assertPaths(entry, p)
+                self.assertEqual(('record', 'budgeted'), (entry['placement'], entry['annotation']))
+        ndm = out['patterns'][0]
+        self.assertEqual(2, ndm['counts']['paths']['value'])
+        self.assertGreater(len(ndm['by_label']), 1)
+        self.assertGreater(sum(len(self.records.paths(p, self.k)) for p in patterns), 5)
+        # the absent one: no anchor, no path, the empty answer complete
+        absent = out['patterns'][-1]
+        self.assertEqual(('no_anchors', 0, []), (absent['counts']['paths']['extension'],
+                                                 absent['counts']['paths']['value'],
+                                                 absent['results']))
+        # require_support "record_verified": the verified columns only
+        req = self.paths_request(patterns, output={'labels': 'all'},
+                                 require_support='record_verified')
+        verified = self.pattern(self.server, req)
+        for entry, p in zip(verified['patterns'], patterns):
+            with self.subTest(pattern=p, require_support='record_verified'):
+                self.assertPaths(entry, p, require_verified=True)
+                self.assertEqual('exact', entry['labels_excluded_unverified']['relation'])
+        # deterministic
+        self.assertEqual(untimed(verified), untimed(self.pattern(self.server, req)))
+
+    def test_long_paths_label_free_and_count(self):
+        patterns = self.long_patterns()
+        count = self.pattern(self.server, self.paths_request(patterns, mode='count'))
+        none = self.pattern(self.server, self.paths_request(patterns, output={'labels': 'none'}))
+        partial = self.pattern(self.server, self.paths_request(patterns, mode='partial'))
+        for c, e, q, p in zip(count['patterns'], none['patterns'], partial['patterns'], patterns):
+            with self.subTest(pattern=p):
+                self.assertPaths(c, p, labels=False)
+                self.assertPaths(e, p, labels=False)
+                self.assertPaths(q, p, labels=False)
+                self.assertNotIn('results', c)
+                self.assertFalse(c['retrieval_complete'])
+                self.assertEqual(e['counts'], c['counts'])
+                self.assertEqual(e['results'], q['results'])
+                self.assertUnknownLabels(e)
+        # the option is opt-in: without it, or with "anchors", the answer of increments 1-3
+        plain = self.pattern(self.server, {'patterns': [{'dna': self.p40}]})
+        anchors = self.pattern(self.server, {'patterns': [{'dna': self.p40}],
+                                             'long_search': 'anchors'})
+        self.assertEqual(untimed(plain), untimed(anchors))
+        self.assertIn('paths_later_increment', plain['patterns'][0]['notes'])
+        self.assertNotIn('long_search', plain['limits'])
+
+    def test_long_paths_thresholds(self):
+        """max_anchors admits the extension, max_paths the release (§4.2, §5.2), on the
+        blaNDM-1 region: in records of both orientations, a path on each strand."""
+        ndm = self.long_patterns()[0]
+        paths = self.records.paths(ndm, self.k)
+        self.assertGreater(len(paths), 1)
+        entry = self.pattern(self.server, self.paths_request([ndm], max_anchors=0))['patterns'][0]
+        self.assertEqual({'reason': 'anchors_above_threshold'}, entry['withheld'])
+        self.assertCount({x: entry['counts']['paths'][x] for x in ('value', 'relation', 'unit')},
+                         None, 'unknown', 'paths')
+        self.assertEqual('not_admitted', entry['counts']['paths']['extension'])
+        entry = self.pattern(self.server, self.paths_request([ndm], max_paths=1))['patterns'][0]
+        self.assertEqual({'reason': 'count_above_threshold'}, entry['withheld'])
+        self.assertEqual(('exact', len(paths)), (entry['counts']['paths']['relation'],
+                                                 entry['counts']['paths']['value']))
+        full = self.pattern(self.server, self.paths_request([ndm]))['patterns'][0]
+        entry = self.pattern(self.server, self.paths_request([ndm], max_paths=1,
+                                                             mode='partial'))['patterns'][0]
+        self.assertEqual(({'reason': 'max_paths'}, 1), (entry['cut'], entry['returned']))
+        self.assertEqual(full['results'][:1], entry['results'])
+        self.assertFalse(entry['retrieval_complete'])
+        # above the server's cap: lowered and listed
+        out = self.pattern(self.server, self.paths_request([ndm], max_paths=10 ** 6))
+        self.assertEqual([{'field': 'max_paths', 'requested': 10 ** 6,
+                           'effective': DEFAULT_CAPS['max_paths']}], out['limits']['clamped'])
+
+    def test_long_paths_cli_answers_as_the_server(self):
+        request = self.paths_request(self.long_patterns()[:3], mode='partial', max_paths=1,
+                                     output={'labels': 'all'}, require_support='record_verified')
+        server_out = self.pattern(self.server, request)
+        path = os.path.join(self.tempdir.name, 'request_paths.json')
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
+                                                       '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
+
+    def test_long_paths_without_record_mapping(self):
+        """--no-coord-mapping: the coordinates without the .seqs. A path's labels are the
+        columns carrying it, none record_verified (record bounds unknown: a chain of
+        consecutive column coordinates may cross from one record into the next); each lists
+        its chains (kmer_coord of the first k-mer, offset 0). require_support "record_verified"
+        is refused there."""
+        server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno, '--no-coord-mapping'],
+                        os.path.join(self.tempdir.name, 'server_paths_no_map.log'))
+        try:
+            p = self.long_patterns()[0]
+            entry = self.pattern(server, self.paths_request([p], output={'labels': 'all'})
+                                 )['patterns'][0]
+            ret = server.post('pattern', self.paths_request([p], output={'labels': 'all'},
+                                                            require_support='record_verified'))
+        finally:
+            server.stop()
+        self.assertEqual((400, 'support_unavailable'), (ret.status_code, ret.json()['code']))
+        self.assertEqual('global', entry['placement'])
+        self.assertIn('record_bounds_unknown', entry['notes'])
+        self.assertCompleteRetrieval(entry)
+        self.assertCount(entry['counts']['occurrences'], None, 'unknown', 'placed_occurrences')
+        starts = {}
+        for column, recs in self.columns.items():
+            s, at = [], 0
+            for _, seq in recs:
+                s.append(at)
+                at += len(seq) - self.k + 1
+            starts[column] = s
+        for r in entry['results']:
+            carriers, verified = self.path_columns(r['sequence'])
+            self.assertEqual(carriers, {x['column'] for x in r['labels']})
+            for label in r['labels']:
+                self.assertEqual('label_intersection', label['support'])
+                self.assertNotIn('occurrences', label)
+                recs = self.columns[label['column']]
+                chains = set()
+                for o in label['occurrence_list']:
+                    self.assertEqual((0, r['strand']), (o['offset'], o['strand']))
+                    c = o['kmer_coord']
+                    j = max(i for i, s in enumerate(starts[label['column']]) if s <= c)
+                    chains.add((j, c - starts[label['column']][j]))
+                # every whole occurrence in a record is a chain (a chain may also cross)
+                self.assertLessEqual({(i, a - 1) for i, a in verified.get(label['column'], ())},
+                                     chains)
 
     # ------------------------------------------------------------ labels (increment 3)
 
@@ -1567,6 +1903,57 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                                 # x, p) has its (reverse, rc(x), k - L - p), an offset that
                                 # only any_offset scope covers
                                 self.assertEqual(by['forward'], by['reverse'])
+
+    def test_paths_in_every_graph_mode(self):
+        """long_search "paths" (increment 4) on BASIC, CANONICAL and PRIMARY graphs: exactly
+        the graph-walk oracle's paths (over both orientations of every k-mer on the last two),
+        and with labels (a column per record, unbudgeted) each path's columns the records
+        holding every k-mer of it (either orientation there), support label_intersection: no
+        coordinates, nothing verified."""
+        rng = random.Random(23)
+        islands = [island for _, _, island in self.records.islands if len(island) > 100]
+        patterns = []
+        for _ in range(4):
+            island = rng.choice(islands)
+            L = rng.randint(20, 30)
+            i = rng.randrange(len(island) - L)
+            patterns.append(island[i:i + L])
+        w = list(patterns[0])
+        w[17] = 'N'
+        patterns.append(''.join(w))
+        # rec_motifs: a repeat, its paths along the copies
+        patterns.append('TTTACGACGACTTTGAATTCGAA')
+        by_name = {}
+        for _, name, island in self.records.islands:
+            by_name.setdefault(name, []).append(island)
+        for mode, server in self.servers.items():
+            stated = mode == 'basic'
+            key = 'strand' if stated else 'orientation'
+            request = {'patterns': [{'iupac': p} for p in patterns], 'long_search': 'paths',
+                       'output': {'labels': 'all'}, 'allow_unbudgeted_annotation': True}
+            out = self.pattern(server, request)
+            for entry, p in zip(out['patterns'], patterns):
+                with self.subTest(mode=mode, pattern=p):
+                    expected = self.records.paths(p, self.K, canonical=not stated)
+                    self.assertGreater(len(expected), 0)
+                    c = entry['counts']['paths']
+                    self.assertEqual(('exact', len(expected), 'completed'),
+                                     (c['relation'], c['value'], c['extension']))
+                    self.assertCompleteRetrieval(entry)
+                    self.assertEqual(expected, {(r[key], r['sequence'])
+                                                for r in entry['results']})
+                    self.assertIn('label_intersection_only', entry['notes'])
+                    for r in entry['results']:
+                        s = r['sequence']
+                        self.assertEqual(s[:self.K], r['anchor_kmer'])
+                        self.assertNotIn('kmer', r)
+                        windows = [s[i:i + self.K] for i in range(len(s) - self.K + 1)]
+                        carriers = {name for name, isl in by_name.items()
+                                    if all(any(x in y or (not stated and revcomp(x) in y)
+                                               for y in isl) for x in windows)}
+                        self.assertEqual(carriers, {x['column'] for x in r['labels']}, s)
+                        for label in r['labels']:
+                            self.assertEqual('label_intersection', label['support'])
 
     def test_rows(self):
         """The row is the annotation row of the context's k-mer: node - 1 on BASIC; on the
