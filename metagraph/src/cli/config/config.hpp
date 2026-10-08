@@ -181,6 +181,13 @@ class Config {
     // and, but for the time budget, its default; the CLI applies the same ones, so that both
     // answer alike
     double pattern_min_information_bits = 24;
+    // owner decision #24 of 2026-10-08: on a graph without its dummy-edge mask, a pattern whose
+    // unchecked candidates number at most this has each of them tested at query time (k - 1
+    // steps each, charged to max_steps), its counts then exact; 0 tests none. Capped low (the
+    // owner: per-query checking of large blocks is too expensive): at most
+    // kMaxPatternCheckedEntries. Not a request field (stated in the capabilities' caps)
+    uint64_t pattern_max_checked_entries = 50;
+    static constexpr uint64_t kMaxPatternCheckedEntries = 1'000;
     uint64_t pattern_max_contexts = 10'000;
     uint64_t pattern_max_anchors = 1'000;
     // increment 4 (long_search "paths", §4.2): the default and maximum of max_paths, the

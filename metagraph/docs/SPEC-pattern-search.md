@@ -246,6 +246,7 @@ They are served now, §4.1–§4.3.)
 | `--pattern-delivery-build-mbps` | 10 | — (the rate, MB/s, at which the answer's JSON text is assumed to be built and written, §7.6) | — |
 | `--pattern-delivery-compress-mbps` | 50 | — (the rate, MB/s, at which it is assumed to be compressed, §7.6) | — |
 | `--pattern-min-information-bits` | 24 | — (the floor, §7.8) | — |
+| `--pattern-max-checked-entries` | 50 | — (a graph without its mask: a pattern with at most this many unchecked candidates has each tested, its counts `exact`, §7.4; 0: none; the owner's decision #24) | refused at start-up above 1,000 (or not an integer) |
 | `--pattern-max-patterns` | 16 | length of `patterns` | refused (400), never cut |
 | `--pattern-max-labels-per-anchor` | 64 | `max_labels_per_anchor` (default = cap) | lowered, listed |
 | `--pattern-max-annotation-work` | 100,000,000 | `max_annotation_work` (default = cap) | lowered, listed |
@@ -255,7 +256,8 @@ They are served now, §4.1–§4.3.)
 | `--traverse-chunk-target-ms` | 50 | — (not a cap: the annotation reads under the deadline are decoded in chunks of about this duration, as `/traverse`'s) | — |
 
 The capabilities state every value in force (`caps`, `default_time_budget_ms`, `finalize_reserve_ms`; the two
-delivery rates in `caps_rule`), and every answer echoes the effective ones (`limits`, §8.3). The delivery rates
+delivery rates in `caps_rule`), and every answer echoes the effective ones (`limits`, §8.3), except
+`max_checked_entries`, which no request field sets and only `caps` states (§18). The delivery rates
 are starting estimates, conservative on the hosts measured (§7.6); an operator who raises
 `--pattern-max-contexts` or `--pattern-max-patterns`, or serves on a slow or busy host, lowers them or raises
 `--pattern-finalize-ms`. A clamp is never silent: `limits.clamped` lists it. The
@@ -385,7 +387,7 @@ Every count is `{value, relation, unit}` (design §3):
 |---|---|---|
 | `exact` | the discovery behind it completed: no step, time or threshold stop touched it | the count |
 | `at_least` | a stop interrupted discovery; an undiscovered branch, offset or strand has no upper bound | the sum of the lower bounds of what was explored (0 for a search the stop met at its first step) |
-| `bounds` | every range of every branch, offset and orientation was discovered, and either only the deferred scans (§7.6) were interrupted, or (on a graph without its mask, `counting: "upper_bound"`, below) some candidates were not checked for source dummies; `lower` ≤ true ≤ `upper` | `lower` |
+| `bounds` | every range of every branch, offset and orientation was discovered, and either only the deferred scans (§7.6) were interrupted, or (on a graph without its mask, `counting: "upper_bound"`, below) some candidates were not checked for source dummies (more of them than `caps.max_checked_entries`); `lower` ≤ true ≤ `upper` | `lower` |
 | `unknown` | the phase never ran: after a stop, or not in this increment | `null` |
 
 - `bounds` carries `lower` and `upper`; no other relation does. `bounds` stays `bounds` when `lower` = `upper`.
@@ -433,10 +435,31 @@ spelling it, so it counts candidates:
   whose searched anchor windows start with no N run (its anchors are `exact`, and its extension runs as on a
   masked graph). On an even-k wrapped PRIMARY graph the palindrome scans spell every candidate they check, which
   settles those too.
+- **Few unchecked candidates are checked** (the owner's decision #24 of 2026-10-08). When discovery and the
+  deferred scans completed without a stop and the pattern's unchecked candidates — the entries counted into U
+  and not into `lower`, over all its orientations and offsets: on a BASIC or CANONICAL graph its total's
+  `upper` − `lower`; on a wrapped PRIMARY graph an entry can enter both orientations' counts, so there they can
+  be as few as half of it — number at most `caps.max_checked_entries` (the server's
+  `--pattern-max-checked-entries`, 50 by default, at most 1,000; 0 checks none), each of them is tested at
+  query time (its node walked back for a `$`, at most k − 1 symbols): the k-mers are counted, the source
+  dummies dropped, and **every count of the pattern is `exact`** — the total, `suffix`, `by_offset`,
+  `by_strand` / `by_orientation`, the anchors of a pattern longer than k — the count a masked graph gives;
+  `exact` 0 when all of them were dummies (an absence claim, §7.2). Each candidate tested is charged k − 1
+  steps to `max_steps` (`work.steps`; `work.mask_scans` counts the ranges checked), so the check costs at most
+  `max_checked_entries` × (k − 1) steps, about 1,500 at k = 31. It runs after the deferred scans, in every mode,
+  before any release, so a count and a retrieval of the same request state the same counts. A stop during it
+  (`max_steps` or `time`, phase `mask_scan`) leaves every count as discovery left it, `bounds`, stated as for
+  any stop (§7.5: `discovery_budget` or `deadline` in `all_or_count`, the `cut` in `partial`). A pattern with
+  more unchecked candidates is answered as if the check did not exist, field for field: no candidate is
+  sampled or tested (the owner: per-query checking of large blocks costs too much). Examples on the mini
+  (fixture `unmasked_checked`): blaNDM-1's forward primer, `bounds` [2, 24] without the check, 22 candidates
+  tested, `exact` 24; an island start, [2, 32], 30 tested, `exact` 17; its first 14 bases, [4, 72], 68
+  unchecked, `bounds` with its estimate; the island start in `suffix` scope on the forward strand, one
+  candidate, a dummy: `exact` 0 (`unmasked_checked_dummies`).
 - A count is `exact` when nothing of it is unchecked, when U = 0 (an empty block: `exact` 0, the
-  absence claim of §7.2 holds), or after a release that enumerated every candidate (§7.5); otherwise `bounds`
-  {`lower`, `upper`: U}. A stop leaves `at_least` and `unknown` as on a masked graph; an `at_least` value is a
-  true lower bound (the lower parts only). The algebra above sums them alike.
+  absence claim of §7.2 holds), after the check above, or after a release that enumerated every candidate
+  (§7.5); otherwise `bounds` {`lower`, `upper`: U}. A stop leaves `at_least` and `unknown` as on a masked
+  graph; an `at_least` value is a true lower bound (the lower parts only). The algebra above sums them alike.
 - **`estimate`**: every count with relation `bounds` of a graph without its mask (`counts.contexts` with its
   `suffix`, `by_offset` and `by_strand` / `by_orientation` parts, `counts.anchors` and its parts, `counts.paths`
   and its parts) carries `estimate` = round(U × f), kept inside [`lower`, U], f the graph's dummy fraction
@@ -450,13 +473,16 @@ spelling it, so it counts candidates:
 - The **thresholds** compare U (§7.5): conservative, so that nothing whose count may pass a threshold is
   admitted; the note
   `threshold_upper_bound` says when such a decision went against the request while the lower bound was within
-  the threshold.
+  the threshold. A count the check made `exact` is compared as on a masked graph (`all_or_count`'s threshold,
+  the extension's admission). `stop_at_threshold` still stops discovery on the running U (the check comes after
+  discovery), so it can stop a pattern the check would have made `exact` within its threshold.
 - The **lists stay exact**: the release tests each unchecked candidate (at most k − 1 symbols read, under the
   deadline, not charged as steps) and never releases a source dummy; every released context and path is made
   of real k-mers, the list a masked graph releases.
-- Mode `count` never releases contexts, so its counts of a pattern of L ≤ k stay `bounds` where a retrieval
-  request with the same body states `exact` after a complete release; the steps charged are the same. (The
-  listing of a long pattern's anchors before its extension, `long_search: "paths"`, runs in every mode.)
+- Mode `count` never releases contexts, so its counts of a pattern of L ≤ k with more unchecked candidates than
+  `max_checked_entries` stay `bounds` where a retrieval request with the same body states `exact` after a
+  complete release; the steps charged are the same. (With at most that many, the check makes both `exact`.
+  The listing of a long pattern's anchors before its extension, `long_search: "paths"`, runs in every mode.)
 
 ### 7.5 Modes, `withheld` and `cut`
 
@@ -556,9 +582,10 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   compression blocks, and once more before it is handed to the transport. If it cannot be written by
   `time_budget_ms`, the answer is 503 `deadline` and nothing partial is sent.
 - `stop` names **the first stop that touched the pattern**: `{phase, reason}` with phase `discovery` (the range
-  search), `mask_scan` (the deferred scans: a range's masked edges, and on an even-k wrapped PRIMARY graph the
-  palindrome check of every context at an offset where a palindromic k-mer can hold the pattern; the only phase
-  whose stop can leave `bounds`) or `extraction` (the release, and `all_or_count`'s delivery of it to the
+  search), `mask_scan` (the deferred scans: a range's masked edges, on an even-k wrapped PRIMARY graph the
+  palindrome check of every context at an offset where a palindromic k-mer can hold the pattern, and on a graph
+  without its mask the check of a pattern's few unchecked candidates, §7.4; the only phase whose stop can leave
+  `bounds`) or `extraction` (the release, and `all_or_count`'s delivery of it to the
   route), and reason `max_steps`, `time`, `max_contexts` or `max_anchors` (the last two: `stop_at_threshold`).
   Increment 4 (`long_search: "paths"`) adds the phase `extension` (the depth-first extension of the anchors,
   §12.1) and the reason `max_paths` (`stop_at_threshold` in the extension).
@@ -573,8 +600,9 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   stop of the output) or `not_read`, `cut: time`, `withheld`, while `stop` names an earlier phase. Any time stop,
   stated in `stop` or not, sets `determinism: "time_limited"` (§7.9).
 - `work` per pattern: `ranges_visited` (range evaluations), `mask_scans` (ranges whose deferred scan began),
-  `steps` (every step charged: `ranges_visited` plus the items the deferred scans examined, plus, with
-  `long_search: "paths"`, the outgoing edges the extension examined, stated as `extension_edges`). The `steps` of
+  `steps` (every step charged: `ranges_visited` plus the items the deferred scans examined, plus k − 1 per
+  candidate the check of §7.4 tested, plus, with `long_search: "paths"`, the outgoing edges the extension
+  examined, stated as `extension_edges`). The `steps` of
   all patterns sum to at most `max_steps`. On an even-k wrapped PRIMARY graph the deferred scans check every context
   at a palindrome-capable offset, one k-mer spelling each, so an `any_offset` count there costs time and steps
   linear in those contexts (`index.graph_mode` and `index.k` tell a client so).
@@ -592,7 +620,10 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
     `max_contexts` 0. The release indexes them with 40 bytes each. On a graph without its mask the retention
     bound counts only the contexts it is sure of, which a range not spelled whole is not: `partial` then keeps
     every discovered range not spelled whole (24 bytes each, at most one per step charged), not about
-    `max_contexts` of them (a stated limitation of the owner's decision #16);
+    `max_contexts` of them (a stated limitation of the owner's decision #16); `all_or_count` and the extension
+    keep theirs while the running lower bound is ≤ the threshold as long as the unchecked candidates are at most
+    `max_checked_entries` (the check may still make the count `exact` within it), and every mode keeps the
+    unchecked ranges for the check while they are that few (at most `max_checked_entries` of them);
   - the results built for the answer: at most `max_contexts` per pattern.
 
   With `output.labels: "all"`, `max_memory_mb` bounds the labelled retrieval (§14.4).
@@ -884,8 +915,8 @@ and the labels count of the paths (with `labels: "all"`) has:
 | field | type | meaning |
 |---|---|---|
 | `ranges_visited` | integer | range evaluations (one step each) |
-| `mask_scans` | integer | ranges whose deferred scan began (§7.6): a range's masked edges — 0 on BASIC, CANONICAL and odd-k PRIMARY graphs unless masked edges lie among the candidates — and, on an even-k wrapped PRIMARY graph, the palindrome check of each range at a palindrome-capable offset (about one per such range). On a graph without its mask only the palindrome checks exist (each also tells a source dummy from a k-mer, §7.4) |
-| `steps` | integer | every step this pattern charged |
+| `mask_scans` | integer | ranges whose deferred scan began (§7.6): a range's masked edges — 0 on BASIC, CANONICAL and odd-k PRIMARY graphs unless masked edges lie among the candidates — and, on an even-k wrapped PRIMARY graph, the palindrome check of each range at a palindrome-capable offset (about one per such range). On a graph without its mask only the palindrome checks exist (each also tells a source dummy from a k-mer, §7.4), and the ranges whose few unchecked candidates were checked (§7.4, the owner's decision #24) |
+| `steps` | integer | every step this pattern charged (k − 1 for each candidate the check of §7.4 tested) |
 | `annotation_rows` | integer | increment 3, `labels: "all"`: the rows this pattern's reads returned (both steps) |
 | `annotation_units` | integer | likewise: the work units of this pattern's reads, refused ones included (§14.4) |
 | `memory_bytes` | integer | likewise: the request's memory account at its peak so far (the model of §14.4) |
@@ -1039,10 +1070,10 @@ It costs no step.
 | `graph_cleaned` | string | `"unknown"` | whether graph cleaning may have pruned k-mers (design §3); not known in version 1 |
 | `records_shorter_than_k` | string | `"not_indexed"` | such records have no k-mer |
 | `resident_only` | boolean | `true` | the route never loads an index (`in_ram` refused) |
-| `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths` |
+| `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths`; the owner's decision #24: `max_checked_entries` (no request field: the unchecked candidates a pattern on a graph without its mask may have for each to be tested, §7.4; on every server, masked or not) |
 | `default_time_budget_ms` | number | 60,000 | the budget of a request that names none, below `caps.time_budget_ms` |
 | `finalize_reserve_ms` | number | 250 | §7.6 |
-| `caps_rule` | string | | in prose: the clamp rule (which caps are request fields' maxima, `max_patterns` and `min_information_bits`), the rule of the time kept back for the answer with the delivery rates in force (§7.6) and, since increment 4, the rule of `long_search` (the two admissions, `max_anchors` and `max_paths`) |
+| `caps_rule` | string | | in prose: the clamp rule (which caps are request fields' maxima, `max_patterns` and `min_information_bits`), the rule of the time kept back for the answer with the delivery rates in force (§7.6), since increment 4 the rule of `long_search` (the two admissions, `max_anchors` and `max_paths`), and since the owner's decision #24 one sentence on `max_checked_entries` |
 | `graph_mode` | string \| null | | `basic`, `canonical`, `primary` |
 | `k` | integer \| null | | |
 | `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN`: `available: false`, `alphabet_untested`, §8.2) |
@@ -1127,7 +1158,8 @@ before increment 4).
 `scripts/traversal/pattern_fixtures.py` from a server of this build on copies of the mini index
 (`build/mini_refseq`, a BASIC index of refseq33m's format at k = 31: its graph given the `.edgemask` by
 `metagraph transform --mask-dummy`, as a host gets it; served as built for `mask: absent`, `counting:
-"upper_bound"` (the `unmasked_*` fixtures, §18), and with `--pattern-build-mask` for `mask: built_at_load`;
+"upper_bound"` (the `unmasked_*` fixtures, §18; server `unmasked` at the default `--pattern-max-checked-entries`,
+server `unmasked_unchecked` with 0), and with `--pattern-build-mask` for `mask: built_at_load`;
 served with `--no-coord-mapping` for `placement: global`), a
 PRIMARY index of two of its record files (a column annotation: `annotation: unbudgeted`), and a hash graph of one
 of its records (a graph the engine does not recognise: `representation_unsupported`). `index.json` states each
@@ -1200,7 +1232,13 @@ occurrences as on the masked graph), `unmasked_threshold_upper_bound` (`max_cont
 `count_above_threshold` on U = 32, note `threshold_upper_bound`; the masked graph releases the 17),
 `unmasked_stop_at_threshold` (the running upper bound stops discovery: `at_least` 0, `threshold_crossed`, the
 note), `unmasked_partial` (`max_contexts` 5: the masked graph's first five, `bounds` [6, 24] after the release
-raised the lower bound) and `unmasked_paths` (anchors spelled whole, `exact`; the paths the masked graph's); the
+raised the lower bound) and `unmasked_paths` (anchors spelled whole, `exact`; the paths the masked graph's);
+`unmasked_count`, `unmasked_labels_all`, `unmasked_threshold_upper_bound` and `unmasked_partial` are served with
+`--pattern-max-checked-entries 0` (server `unmasked_unchecked`, their bodies unchanged), what any pattern above
+the limit gets; at the default the owner's decision #24 checks those few candidates: `unmasked_checked` (the
+primer `exact` 24, the island start `exact` 17, its first 14 bases, 68 unchecked, still `bounds` [4, 72] with
+`estimate` 72) and `unmasked_checked_dummies` (the island start in `suffix` scope, forward: its one candidate a
+source dummy, `exact` 0). The
 unmasked server's two capabilities bodies say `available: true`, `counting: "upper_bound"` and its
 `dummy_fraction` (f 0.9999, interval [0.999434, 0.999982], the exact f 0.999955 inside it). And the stop `*`:
 `peptide_stop` (NDM-1's last 9 residues and its stop, table 1: 4 contexts whose instances end in its stop codon
@@ -2145,3 +2183,76 @@ engine skips (§7.8), U also counts the source dummies whose `$` run ends inside
 they do not hold the pattern). No relation was wrong, only that equality: corrected, and pinned by
 `PatternUnmasked.LeadingNRunCountsDummiesWithTheirSentinelUnderTheN` (a named case and the decomposition of U
 against the spelled entries, BASIC and CANONICAL).
+
+**Owner decision #24 of 2026-10-08: tiny blocks exact** (after `226bc934`; the decision #22 it corrects allowed
+no per-query check). On a graph without its mask, a pattern whose discovery and deferred scans completed with at
+most `max_checked_entries` unchecked candidates (§7.4: the entries in U and not in `lower`, over its orientations
+and offsets; `upper` − `lower` of its total on a BASIC or CANONICAL graph) has each of them tested at query time
+(`BOSS::node_has_sentinel`, k − 1 steps each, charged to `max_steps`, phase `mask_scan`), and every count of the
+pattern is then `exact` — the total, `suffix`, `by_offset`, `by_strand` / `by_orientation`, the anchors of a long
+pattern — in every mode, before any release, so that a count and a retrieval of the same request agree. A block
+of dummies only is `exact` 0. A larger block is not touched (no in-block sampling: the owner rejected per-query
+checks of large blocks as too expensive) and answers as before, field for field. Contract version 1 stays:
+additions only.
+- **Server and CLI:** the flag `--pattern-max-checked-entries` (default 50; any integer in [0, 1,000], refused at
+  start-up beyond it; 0 checks nothing and answers exactly as `226bc934`), §4.5. Not a request field, not echoed
+  in `limits`.
+- **Capabilities** (both routes, every single-graph server, masked or not): `caps.max_checked_entries` and one
+  sentence of `caps_rule` ("max_checked_entries: unmasked, so few unchecked candidates are tested: exact.").
+  For room under the 32 KiB ceiling of the capabilities document a service's MCP tool returns whole (§10.2 and
+  the 172 bytes above), `caps_rule` also drops "(long_search lists the values served)", which the field
+  `long_search` itself states: the mini's `/traverse/capabilities` (`-i`/`-a` only, as
+  `integration_tests/test_pattern.py` serves it) grows from 32,634 to 32,699 bytes as served, under that
+  test's guard of 32,704 (the ceiling less 64); the fixture servers' (compact JSON, as above) from 32,490 and
+  32,596 to 32,555 and 32,661.
+- **Engine** (`pattern_search.{hpp,cpp}`): `Request::max_checked_entries` (0 by default in the engine; the route
+  passes the server's), `kDefaultMaxCheckedEntries`; the unchecked ranges are kept for the check while their
+  candidates are at most the limit (at most that many ranges) and freed once above; while within it, the
+  retention of `all_or_count` and of the extension compares the running lower bound (the check may still make the
+  count `exact` within the threshold); `stop_at_threshold` still compares the running U, so it can stop a
+  pattern the check would have made `exact`. `work.mask_scans` counts the ranges checked, `work.steps` the k − 1
+  per candidate.
+
+**Answers that change** (a graph without its mask only; with the check off they are `226bc934`'s byte for byte):
+- A count with 1 to 50 unchecked candidates and no stop: `exact` (the masked graph's count) where it was `bounds`
+  with an `estimate` and the note `estimate_sampled_dummy_fraction`, its `work.steps` 30 per candidate more at
+  k = 31; in `all_or_count` it is then admitted on its `exact` count (no `threshold_upper_bound` where U was above
+  `max_contexts`); in `partial` a cut list keeps the masked graph's `exact` counts instead of raised bounds. On the
+  mini: blaNDM-1's primers `exact` 24 (22 tested), the 16S V4 primers `exact` 26 and 24, the island start
+  `GATGCCGGTGAACAAC` `exact` 17 (30 tested, 15 source dummies dropped), its `suffix`-scope forward count `exact` 0;
+  its first 14 bases (68 unchecked) and `GCCGAATTCGGC` (209) stay `bounds`.
+- A count that a complete release made `exact` before: the same counts and list, the check's steps added.
+- The check's steps come out of the request's `max_steps`: a request near its step cap can stop earlier, in the
+  check (`mask_scan`, the counts `bounds` as before) or at a later pattern (`unknown` where it was `at_least` 0).
+- **Masked graphs: nothing** but the capabilities' `caps.max_checked_entries` and `caps_rule`. Checked against
+  `bin_226bc934` on a masked copy of the mini (`transform --mask-dummy`): 166 `/pattern` requests (every stored
+  request of a mini server without a time budget, and variants: three modes, both scopes, three strand settings,
+  thresholds, `stop_at_threshold`, `max_steps`, labels `all`, long patterns with and without paths, peptides)
+  identical apart from `timing`; and the same panel on the unmasked mini with `--pattern-max-checked-entries 0`
+  identical apart from `timing`.
+
+**Fixtures** (§11; 90 in all): new `unmasked_checked` and `unmasked_checked_dummies` (server `unmasked`, the
+default); a new server `unmasked_unchecked` (`--pattern-max-checked-entries 0`) now carries `unmasked_count`,
+`unmasked_labels_all`, `unmasked_threshold_upper_bound` and `unmasked_partial`, their bodies unchanged (each shows
+what a pattern above the limit answers; at the default their small blocks are checked); changed: the nine
+capabilities bodies of the single-graph servers (`caps.max_checked_entries`, `caps_rule`), `README.md`,
+`index.json`. Every other stored body is unchanged (`--check`). The validator knows the cap (`CAPS`) and refuses a
+`bounds` total without a stop whose unchecked candidates (BASIC, CANONICAL; not in `partial`) are within the
+server's `max_checked_entries` (a mutated `unmasked_checked`).
+
+**Tests:** `PatternUnmasked.TinyBlocksCheckedExact` (named cases: ACG on ACGTTGCA, `bounds` [1, 3], 2 checked:
+`exact` 1, 8 steps; the limit 1 as 0; step stops in the check; `all_or_count` at 1 released; `stop_at_threshold`
+unchanged; a block of one dummy, and NC's four, `exact` 0), `TinyBlocksAgainstTheMaskedTwin` (360 random cases on
+twins of every mode, an oracle of the unchecked candidates from the spelled entries: at the limit E every count the
+masked twin's and k − 1 steps per candidate; at E − 1 and 0 the answer without the check, field for field;
+`all_or_count`, `partial`, the extension, step stops at three points of the check),
+`TinyBlocksOfLongPatternsAndPeptides`; the route's `PatternRoute.UnmaskedTinyBlocksAreExact` (three modes, both limits, every mode of
+request) and `PatternMaskUnmasked.CheckedEntriesFlag` (the flag through the real Config and loader, refusals);
+`integration_tests/test_pattern.py` `test_unmasked_tiny_blocks_are_exact` (the mini: the default server against
+the masked one and the server with the check off, both scopes and strand settings, three modes, long patterns
+behind a leading N, the step stop) and the CLI with the flag.
+
+**Stated limitations:** the limit counts candidates, not the pattern's U: on a wrapped PRIMARY graph a candidate
+enters both orientations' counts, so `upper` − `lower` there can be up to twice the number checked; a cut
+`partial` raises `lower`, so its `upper` − `lower` says nothing of the check; `stop_at_threshold` compares U before
+the check; the capabilities document keeps 5 bytes under the integration test's guard on the mini.

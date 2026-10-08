@@ -1162,6 +1162,553 @@ TEST(PatternUnmasked, PeptidesWithoutTheMask) {
 }
 
 
+// ---------------------------------------------------------------- tiny blocks (decision #24)
+
+// Owner decision #24 of 2026-10-08: on a graph without its mask, a pattern whose unchecked
+// candidates number at most Request::max_checked_entries has each of them tested at query time
+// (k - 1 steps each): every count EXACT. Above the limit nothing changes.
+
+Request with_checked(Request request, uint64_t limit) {
+    request.max_checked_entries = limit;
+    return request;
+}
+
+std::string count_line(const std::string &name, const Count &c) {
+    return name + ": " + to_string(c.unit) + " " + to_string(c.relation) + " "
+        + std::to_string(c.value) + " [" + std::to_string(c.lower) + ", "
+        + std::to_string(c.upper) + "]";
+}
+
+// every count of a result, one line each: total, suffix, by_offset and by_orientation, or the
+// anchors with the paths and what the extension did
+std::vector<std::string> count_lines(const Result &r) {
+    std::vector<std::string> out;
+    if (r.contexts) {
+        out.push_back(count_line("total", r.contexts->total));
+        out.push_back(count_line("suffix", r.contexts->suffix));
+        for (const auto &[p, c] : r.contexts->by_offset) {
+            out.push_back(count_line("offset " + std::to_string(p), c));
+        }
+        for (const auto &[o, c] : r.contexts->by_orientation) {
+            out.push_back(count_line(orientation_key(o), c));
+        }
+    }
+    if (r.anchors) {
+        out.push_back(count_line("anchors", r.anchors->total));
+        for (const auto &[o, c] : r.anchors->by_orientation) {
+            out.push_back(count_line(std::string("anchors ") + orientation_key(o), c));
+        }
+        out.push_back(count_line("paths", r.anchors->paths));
+        for (const auto &[o, c] : r.anchors->paths_by_orientation) {
+            out.push_back(count_line(std::string("paths ") + orientation_key(o), c));
+        }
+        out.push_back("candidates examined " + std::to_string(r.anchors->candidates_examined));
+        out.push_back(std::string("extension ") + to_string(r.anchors->extension));
+    }
+    return out;
+}
+
+// the whole answer but its timing (and the diagnostic retention peak, not a JSON field)
+std::vector<std::string> answer_lines(const Result &r) {
+    std::vector<std::string> out;
+    if (r.refusal)
+        out.push_back("refusal " + r.refusal->code + ": " + r.refusal->message);
+    out.push_back(std::string("scope ") + to_string(r.scope) + " palindromic "
+                  + std::to_string(r.palindromic));
+    for (Orientation o : r.searched) {
+        out.push_back(std::string("searched ") + orientation_key(o));
+    }
+    for (const std::string &line : count_lines(r)) {
+        out.push_back(line);
+    }
+    out.push_back("work " + std::to_string(r.work.ranges_visited) + " ranges, "
+                  + std::to_string(r.work.mask_scans) + " scans, "
+                  + std::to_string(r.work.extension_edges) + " extension edges, "
+                  + std::to_string(r.work.steps) + " steps");
+    out.push_back(r.stop ? std::string("stop ") + to_string(r.stop->phase) + " "
+                               + to_string(r.stop->reason)
+                         : std::string("no stop"));
+    out.push_back("time limited " + std::to_string(r.time_limited));
+    if (r.extraction) {
+        const Extraction &x = *r.extraction;
+        out.push_back("returned " + std::to_string(x.returned) + " complete "
+                      + std::to_string(x.complete) + " withheld "
+                      + (x.withheld ? to_string(*x.withheld) : "-") + " cut "
+                      + (x.cut ? to_string(*x.cut) : "-"));
+    }
+    for (const std::string &note : r.notes) {
+        out.push_back("note " + note);
+    }
+    return out;
+}
+
+// whether a k-mer equal to its reverse complement can hold |q| at |p| (even k only): where the
+// window covers both i and k - 1 - i, the two positions must admit complementary bases
+bool palindrome_capable(const Bases &q, size_t p, size_t k) {
+    if (k % 2)
+        return false;
+    for (size_t i = 0; i < q.size(); ++i) {
+        const size_t mirror = k - 1 - (p + i);
+        if (mirror < p || mirror >= p + q.size())
+            continue;
+        bool any = false;
+        for (char b : q[mirror - p]) {
+            any |= q[i].find(complement_base(b)) != std::string::npos;
+        }
+        if (!any)
+            return false;
+    }
+    return true;
+}
+
+/**
+ * The unchecked candidates of a pattern (decision #24), from the spelled entries of the
+ * unmasked twin, never the engine: the base searches of the plan (each orientation's window
+ * and, on a wrapped PRIMARY graph, its reverse complement; identical windows searched once;
+ * on an even-k wrapped PRIMARY graph a window counts the palindromes unless its reverse
+ * complement already does), and per search and offset of the scope the entries whose spelled
+ * k-mer holds the window there with a '$' allowed in the unsearched lead, except where the
+ * nodes are spelled whole (offset 0 without a lead: k-mers, counted exactly) and where a
+ * palindrome scan checks every candidate (a palindrome-counting search at a palindrome-capable
+ * offset).
+ */
+uint64_t unchecked_oracle(const DeBruijnGraph &unmasked, const std::string &text,
+                          const Request &request) {
+    const DBGSuccinct &stored = base_dbg(unmasked);
+    const size_t k = stored.get_k();
+    const bool primary = dynamic_cast<const CanonicalDBG*>(&unmasked);
+    const bool even_primary = primary && !(k % 2);
+    struct Search {
+        Bases q;
+        bool palindromes;
+    };
+    std::vector<Search> searches;
+    auto add = [&](const Bases &q, bool palindromes) {
+        for (Search &s : searches) {
+            if (s.q == q) {
+                s.palindromes |= palindromes;
+                return;
+            }
+        }
+        searches.push_back(Search { q, palindromes });
+    };
+    for (const auto &[o, q] : orientations(text, request.strands)) {
+        const Bases w(q.begin(), q.begin() + std::min(q.size(), k));
+        if (!primary) {
+            add(w, false);
+            continue;
+        }
+        const Bases wr = oracle_rc(w);
+        bool mirrored = false;
+        for (const Search &s : searches) {
+            mirrored |= even_primary && s.q == wr && s.palindromes;
+        }
+        add(w, even_primary && !mirrored);
+        add(wr, false);
+    }
+    uint64_t entries = 0;
+    for (const Search &s : searches) {
+        const size_t lead = unsearched_lead(s.q);
+        for (uint32_t p : scope_offsets(text.size(), k, request.scope)) {
+            if ((!p && !lead) || (s.palindromes && palindrome_capable(s.q, p, k)))
+                continue;
+            for (node_index e = 1; e <= stored.max_index(); ++e) {
+                const std::string kmer = stored.get_node_sequence(e);
+                if (kmer.back() != '$')
+                    entries += matches_entry(s.q, std::string_view(kmer).substr(p, s.q.size()));
+            }
+        }
+    }
+    return entries;
+}
+
+struct TinyStats {
+    size_t cases = 0;
+    // with unchecked candidates, all of them checked at the limit E
+    size_t checked = 0;
+    // ... some of them source dummies (U above the true count)
+    size_t with_dummies = 0;
+    // ... every one of them a source dummy: an exact 0 from bounds [0, U]
+    size_t only_dummies = 0;
+    // L > k among the checked
+    size_t long_checked = 0;
+};
+
+/**
+ * One (twin, pattern, request) under decision #24. E, the unchecked candidates, from the
+ * oracle above. With the limit at E (or above it): every count EXACT and the masked twin's,
+ * k - 1 steps per candidate, the same ranges; with the limit at E - 1 (and 0): the answer
+ * without the check, field for field. In every mode: count() and enumerate() agree, the lists
+ * are the masked twin's, all_or_count releases at the true count, partial's prefix. A step stop
+ * during the check: stop {mask_scan, max_steps}, the counts as without the check.
+ * stop_at_threshold still compares U. Long patterns: the extension as on the masked twin.
+ */
+void check_tiny(const Twin &twin, const std::string &text, PatternKind kind,
+                const Request &request, TinyStats *stats) {
+    const DeBruijnGraph &masked = *twin.masked;
+    const DeBruijnGraph &unmasked = *twin.unmasked;
+    const size_t k = unmasked.get_k();
+    const size_t L = text.size();
+    const bool primary = dynamic_cast<const CanonicalDBG*>(&unmasked);
+    const Pattern pattern = Pattern::parse(kind, text);
+    SCOPED_TRACE("pattern " + text + " k " + std::to_string(k) + " primary "
+                 + std::to_string(primary) + " scope " + to_string(request.scope)
+                 + " strands " + to_string(request.strands));
+
+    const Result r0 = count_of(unmasked, pattern, with_checked(request, 0));
+    if (r0.refusal)
+        return;
+    ASSERT_FALSE(r0.stop);
+    ++stats->cases;
+    // the masked twin: exact everywhere, and blind to the limit
+    const Result truth = count_of(masked, pattern, request);
+    EXPECT_EQ(answer_lines(truth),
+              answer_lines(count_of(masked, pattern, with_checked(request, 1000))));
+    const Count &total0 = L > k ? r0.anchors->total : r0.contexts->total;
+    const uint64_t true_total = L > k ? truth.anchors->total.value : truth.contexts->total.value;
+    ASSERT_EQ(Relation::EXACT, (L > k ? truth.anchors->total : truth.contexts->total).relation);
+
+    const uint64_t E = unchecked_oracle(unmasked, text, request);
+    // nothing unchecked: exact already, nothing to check
+    EXPECT_EQ(E == 0, total0.relation == Relation::EXACT) << E;
+    if (!primary && total0.relation == Relation::BOUNDS) {
+        // BASIC and CANONICAL: one base search per orientation, so E is U - lower
+        EXPECT_EQ(total0.upper - total0.lower, E);
+    }
+
+    // at the limit E: exact, the masked twin's counts, k - 1 steps per candidate
+    const Result rE = count_of(unmasked, pattern, with_checked(request, E));
+    EXPECT_EQ(count_lines(truth), count_lines(rE)) << "E " << E;
+    EXPECT_FALSE(rE.stop);
+    EXPECT_FALSE(rE.time_limited);
+    EXPECT_EQ(r0.work.ranges_visited, rE.work.ranges_visited);
+    EXPECT_EQ(r0.work.steps + E * (k - 1), rE.work.steps) << "E " << E;
+    EXPECT_LE(r0.work.mask_scans + (E > 0), rE.work.mask_scans);
+    EXPECT_LE(rE.work.mask_scans, r0.work.mask_scans + E);
+    EXPECT_EQ(r0.notes, rE.notes);
+    // above it: the same answer; the same request twice: the same answer
+    EXPECT_EQ(answer_lines(rE),
+              answer_lines(count_of(unmasked, pattern, with_checked(request, E + 1000))));
+    EXPECT_EQ(answer_lines(rE),
+              answer_lines(count_of(unmasked, pattern, with_checked(request, E))));
+    if (!E)
+        return;
+
+    ++stats->checked;
+    stats->with_dummies += upper_of(total0) > true_total;
+    stats->only_dummies += true_total == 0;
+    stats->long_checked += L > k;
+    // just below it: nothing checked, the answer of the limit 0, field for field
+    EXPECT_EQ(answer_lines(r0),
+              answer_lines(count_of(unmasked, pattern, with_checked(request, E - 1))));
+
+    // all_or_count (anchors released for L > k): the masked twin's list and counts, the steps
+    // of count()
+    Request all = with_checked(request, E);
+    all.mode = Mode::ALL_OR_COUNT;
+    if (L > k)
+        all.release_anchors = true;
+    Result listed_m, listed_u;
+    const std::vector<Ctx> expected = enumerate_of(masked, pattern, all, &listed_m);
+    EXPECT_EQ(expected, enumerate_of(unmasked, pattern, all, &listed_u));
+    EXPECT_EQ(count_lines(listed_m), count_lines(listed_u));
+    EXPECT_EQ(rE.work.steps, listed_u.work.steps);
+    EXPECT_TRUE(listed_u.extraction->complete);
+    EXPECT_EQ(true_total, expected.size());
+
+    // at the true count as threshold: released, where without the check U is compared
+    Request at = all;
+    (L > k ? at.max_anchors : at.max_contexts) = true_total;
+    Result released;
+    EXPECT_EQ(expected, enumerate_of(unmasked, pattern, at, &released));
+    EXPECT_TRUE(released.extraction->complete);
+    EXPECT_FALSE(has_note(released, kNoteThresholdUpperBound));
+    EXPECT_EQ(count_lines(truth), count_lines(released));
+    Result off, below;
+    const std::vector<Ctx> listed_off = enumerate_of(unmasked, pattern, with_checked(at, 0),
+                                                     &off);
+    EXPECT_EQ(listed_off, enumerate_of(unmasked, pattern, with_checked(at, E - 1), &below));
+    EXPECT_EQ(answer_lines(off), answer_lines(below));
+    if (upper_of(total0) > true_total) {
+        EXPECT_TRUE(listed_off.empty());
+        EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, off.extraction->withheld);
+    }
+
+    // partial, cut at half the list: its prefix, the counts exact
+    Request part = with_checked(request, E);
+    part.mode = Mode::PARTIAL;
+    if (L > k)
+        part.release_anchors = true;
+    const size_t cap = expected.size() / 2;
+    (L > k ? part.max_anchors : part.max_contexts) = cap;
+    Result cut;
+    EXPECT_EQ(std::vector<Ctx>(expected.begin(), expected.begin() + cap),
+              enumerate_of(unmasked, pattern, part, &cut));
+    EXPECT_EQ(count_lines(truth), count_lines(cut));
+    EXPECT_EQ(cap == expected.size(), cut.extraction->complete);
+    EXPECT_EQ(cap < expected.size(), bool(cut.extraction->cut));
+
+    // a step stop during the check: {mask_scan, max_steps}, the counts as without the check,
+    // the steps charged up to it; all_or_count withholds, partial lists real contexts only
+    for (uint64_t j : { uint64_t(0), E / 2, E - 1 }) {
+        const uint64_t max_steps = r0.work.steps + j * (k - 1) + (k - 2);
+        SCOPED_TRACE("max_steps " + std::to_string(max_steps));
+        const Result s = count_of(unmasked, pattern, with_checked(request, E), max_steps);
+        ASSERT_TRUE(s.stop);
+        EXPECT_EQ(StopPhase::MASK_SCAN, s.stop->phase);
+        EXPECT_EQ(StopReason::MAX_STEPS, s.stop->reason);
+        EXPECT_FALSE(s.time_limited);
+        EXPECT_EQ(count_lines(r0), count_lines(s));
+        EXPECT_EQ(r0.work.steps + j * (k - 1), s.work.steps);
+        Result withheld;
+        EXPECT_TRUE(enumerate_of(unmasked, pattern, all, &withheld, max_steps).empty());
+        EXPECT_EQ(Withheld::DISCOVERY_BUDGET, withheld.extraction->withheld);
+        Request part_all = part;
+        (L > k ? part_all.max_anchors : part_all.max_contexts) = 1'000'000'000;
+        Result partial;
+        const std::vector<Ctx> some = enumerate_of(unmasked, pattern, part_all, &partial,
+                                                   max_steps);
+        EXPECT_TRUE(std::includes(expected.begin(), expected.end(), some.begin(), some.end()));
+        EXPECT_FALSE(partial.extraction->complete);
+        EXPECT_EQ(StopReason::MAX_STEPS, partial.extraction->cut);
+        const Count &t = L > k ? partial.anchors->total : partial.contexts->total;
+        EXPECT_TRUE(true_relation(t, true_total));
+    }
+    // exactly the steps it needs: no stop
+    EXPECT_EQ(answer_lines(rE), answer_lines(count_of(unmasked, pattern,
+                                                      with_checked(request, E),
+                                                      r0.work.steps + E * (k - 1))));
+
+    // stop_at_threshold still compares U (BASIC, CANONICAL: the running U reaches the final U)
+    if (!primary && upper_of(total0) > true_total) {
+        Request stop = with_checked(request, E);
+        stop.stop_at_threshold = true;
+        (L > k ? stop.max_anchors : stop.max_contexts) = true_total;
+        EXPECT_EQ(answer_lines(count_of(unmasked, pattern, with_checked(stop, 0))),
+                  answer_lines(count_of(unmasked, pattern, stop)));
+    }
+
+    // L > k: the extension as on the masked twin, admitted at the exact anchor count
+    if (L > k) {
+        Request extend = with_checked(request, E);
+        extend.extend_paths = true;
+        extend.max_anchors = true_total;
+        EXPECT_EQ(count_lines(count_of(masked, pattern, extend)),
+                  count_lines(count_of(unmasked, pattern, extend)));
+        extend.mode = Mode::ALL_OR_COUNT;
+        std::vector<std::pair<std::string, std::vector<node_index>>> paths[2];
+        Result results[2];
+        for (int m = 0; m < 2; ++m) {
+            Budget budget(kManySteps, Deadline::unbounded());
+            results[m] = PatternSearch(m ? masked : unmasked)
+                .enumerate(pattern, extend, budget, [&](const Context &c) {
+                    paths[m].emplace_back(c.sequence, c.path);
+                });
+        }
+        EXPECT_EQ(paths[1], paths[0]);
+        EXPECT_EQ(count_lines(results[1]), count_lines(results[0]));
+        EXPECT_EQ(results[1].extraction->complete, results[0].extraction->complete);
+        EXPECT_EQ(results[1].extraction->returned, results[0].extraction->returned);
+    }
+}
+
+TEST(PatternUnmasked, TinyBlocksCheckedExact) {
+    // the engine's default checks nothing; the server's is 50
+    EXPECT_EQ(0u, Request().max_checked_entries);
+    EXPECT_EQ(50u, kDefaultMaxCheckedEntries);
+    // k = 5, one record ACGTTGCA: ACG forward has U = 3 (the k-mer ACGTT at offset 0, spelled
+    // whole, and the source dummies $ACGT and $$ACG at offsets 1 and 2): 2 unchecked
+    for (bool batch : { false, true }) {
+        SCOPED_TRACE(batch);
+        Twin twin = build_twin(5, { "ACGTTGCA" }, DeBruijnGraph::BASIC, batch);
+        const Pattern acg = Pattern::parse(PatternKind::DNA, "ACG");
+        const Request forward = make_request(Scope::ANY_OFFSET, Strands::FORWARD);
+
+        const Result r0 = count_of(*twin.unmasked, acg, forward);
+        ASSERT_EQ(Relation::BOUNDS, r0.contexts->total.relation);
+        EXPECT_EQ(1u, r0.contexts->total.lower);
+        EXPECT_EQ(3u, r0.contexts->total.upper);
+        const Result r2 = count_of(*twin.unmasked, acg, with_checked(forward, 2));
+        EXPECT_EQ((std::vector<std::string>{
+                      "total: graph_contexts exact 1 [0, 0]",
+                      "suffix: graph_contexts exact 0 [0, 0]",
+                      "offset 0: graph_contexts exact 1 [0, 0]",
+                      "offset 1: graph_contexts exact 0 [0, 0]",
+                      "offset 2: graph_contexts exact 0 [0, 0]",
+                      "forward: graph_contexts exact 1 [0, 0]" }),
+                  count_lines(r2));
+        EXPECT_EQ(count_lines(count_of(*twin.masked, acg, forward)), count_lines(r2));
+        // two candidates tested, k - 1 = 4 steps each
+        EXPECT_EQ(r0.work.steps + 8, r2.work.steps);
+        EXPECT_FALSE(r2.stop);
+        // the limit 1: nothing tested, the answer without the check
+        EXPECT_EQ(answer_lines(r0), answer_lines(count_of(*twin.unmasked, acg,
+                                                          with_checked(forward, 1))));
+
+        // a step stop in the check (one candidate tested, the second refused): mask_scan,
+        // the bounds as without it
+        Result s = count_of(*twin.unmasked, acg, with_checked(forward, 2), r0.work.steps + 7);
+        ASSERT_TRUE(s.stop);
+        EXPECT_EQ(StopPhase::MASK_SCAN, s.stop->phase);
+        EXPECT_EQ(StopReason::MAX_STEPS, s.stop->reason);
+        EXPECT_EQ(count_lines(r0), count_lines(s));
+        EXPECT_EQ(r0.work.steps + 4, s.work.steps);
+        // the first refused: nothing tested
+        s = count_of(*twin.unmasked, acg, with_checked(forward, 2), r0.work.steps + 3);
+        ASSERT_TRUE(s.stop);
+        EXPECT_EQ(r0.work.steps, s.work.steps);
+        EXPECT_EQ(count_lines(r0), count_lines(s));
+
+        // all_or_count at 1: released (the exact 1), where without the check U = 3 is compared
+        Request all = with_checked(forward, 2);
+        all.mode = Mode::ALL_OR_COUNT;
+        all.max_contexts = 1;
+        Result e;
+        std::vector<Ctx> listed = enumerate_of(*twin.unmasked, acg, all, &e);
+        ASSERT_EQ(1u, listed.size());
+        EXPECT_EQ("ACGTT", twin.unmasked->get_node_sequence(listed[0].node));
+        EXPECT_TRUE(e.extraction->complete);
+        EXPECT_FALSE(has_note(e, kNoteThresholdUpperBound));
+        EXPECT_EQ(count_lines(r2), count_lines(e));
+        EXPECT_EQ(r2.work.steps, e.work.steps);
+        EXPECT_TRUE(enumerate_of(*twin.unmasked, acg, with_checked(all, 0), &e).empty());
+        EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, e.extraction->withheld);
+        EXPECT_TRUE(has_note(e, kNoteThresholdUpperBound));
+
+        // stop_at_threshold at 1 still compares U: stopped as without the check
+        Request stop = with_checked(forward, 2);
+        stop.stop_at_threshold = true;
+        stop.max_contexts = 1;
+        EXPECT_EQ(answer_lines(count_of(*twin.unmasked, acg, with_checked(stop, 0))),
+                  answer_lines(count_of(*twin.unmasked, acg, stop)));
+
+        // suffix scope: U = 1, the dummy $$ACG alone: exact 0 once checked, an absence
+        const Request suffix = make_request(Scope::SUFFIX, Strands::FORWARD);
+        const Result z0 = count_of(*twin.unmasked, acg, suffix);
+        EXPECT_EQ(Relation::BOUNDS, z0.contexts->total.relation);
+        const Result z = count_of(*twin.unmasked, acg, with_checked(suffix, 1));
+        EXPECT_EQ(Relation::EXACT, z.contexts->total.relation);
+        EXPECT_EQ(0u, z.contexts->total.value);
+        EXPECT_EQ(z0.work.steps + 4, z.work.steps);
+        Request suffix_all = with_checked(suffix, 1);
+        suffix_all.mode = Mode::ALL_OR_COUNT;
+        EXPECT_TRUE(enumerate_of(*twin.unmasked, acg, suffix_all, &e).empty());
+        EXPECT_TRUE(e.extraction->complete);
+        EXPECT_EQ(count_lines(z), count_lines(e));
+    }
+
+    // a leading N run (skipped on $ACGT): NC forward on CAGTA at k = 5 is U = 1 at each of its
+    // four offsets, every one a source dummy with its '$' under the N: E = 4, exact 0
+#if !_DNA5_GRAPH
+    Twin twin = build_twin(5, { "CAGTA" }, DeBruijnGraph::BASIC);
+    const Pattern nc = Pattern::parse(PatternKind::IUPAC, "NC");
+    const Request forward = make_request(Scope::ANY_OFFSET, Strands::FORWARD);
+    const Result n0 = count_of(*twin.unmasked, nc, forward);
+    EXPECT_EQ(Relation::BOUNDS, n0.contexts->total.relation);
+    EXPECT_EQ(4u, n0.contexts->total.upper);
+    const Result n4 = count_of(*twin.unmasked, nc, with_checked(forward, 4));
+    for (const std::string &line : count_lines(n4)) {
+        EXPECT_NE(std::string::npos, line.find("exact 0 [0, 0]")) << line;
+    }
+    EXPECT_EQ(answer_lines(n0), answer_lines(count_of(*twin.unmasked, nc,
+                                                      with_checked(forward, 3))));
+    TinyStats stats;
+    check_tiny(twin, "NC", PatternKind::IUPAC, forward, &stats);
+    EXPECT_EQ(1u, stats.only_dummies);
+#endif
+}
+
+TEST(PatternUnmasked, TinyBlocksAgainstTheMaskedTwin) {
+    // the random cases of RandomPatternsAgainstOracles' kind (other seeds): graphs of every
+    // mode and both builders, k 3 to 12, short records (many source dummies), patterns from the
+    // records' starts, IUPAC with leading N runs, short and long, every strand and scope
+    TinyStats stats;
+    for (uint32_t seed = 1; seed <= 60; ++seed) {
+        std::mt19937 rng(7100 + seed);
+        const size_t k = 3 + rng() % 10;
+        const auto mode = static_cast<DeBruijnGraph::Mode>(rng() % 3);
+        const bool batch = rng() % 2;
+        std::vector<std::string> records(1 + rng() % 6);
+        for (std::string &record : records) {
+            for (size_t i = 0, n = k + rng() % 12; i < n; ++i) {
+                record.push_back("ACGT"[rng() % 4]);
+            }
+        }
+        const Twin twin = build_twin(k, records, mode, batch);
+        for (int t = 0; t < 6; ++t) {
+            const std::string &record = records[rng() % records.size()];
+            const size_t L = 1 + rng() % std::min(record.size(), k + 3);
+            const size_t start = rng() % 3 ? 0 : rng() % (record.size() - L + 1);
+            std::string text = record.substr(start, L);
+            PatternKind kind = PatternKind::DNA;
+            if (rng() % 2) {
+                kind = PatternKind::IUPAC;
+                for (char &c : text) {
+                    if (rng() % 4 == 0)
+                        c = "RYSWKMBDHVN"[rng() % 11];
+                }
+                for (size_t i = 0, n = rng() % 3; i < n && i < text.size(); ++i) {
+                    text[i] = 'N';
+                }
+            }
+            Scope scope = Scope::ANY_OFFSET;
+            if (text.size() <= k && mode != DeBruijnGraph::PRIMARY && rng() % 3 == 0)
+                scope = Scope::SUFFIX;
+            const auto strands = static_cast<Strands>(rng() % 3);
+            SCOPED_TRACE("seed " + std::to_string(seed) + " batch " + std::to_string(batch)
+                         + " mode " + std::to_string(mode));
+            check_tiny(twin, text, kind, make_request(scope, strands), &stats);
+        }
+    }
+    std::cerr << "tiny blocks: " << stats.cases << " cases, " << stats.checked
+              << " checked, " << stats.with_dummies << " with source dummies, "
+              << stats.only_dummies << " of only dummies, " << stats.long_checked
+              << " long" << std::endl;
+    EXPECT_EQ(360u, stats.cases);
+    // not vacuous
+    EXPECT_LT(150u, stats.checked);
+    EXPECT_LT(50u, stats.with_dummies);
+    EXPECT_LT(5u, stats.only_dummies);
+    EXPECT_LT(5u, stats.long_checked);
+}
+
+TEST(PatternUnmasked, TinyBlocksOfLongPatternsAndPeptides) {
+    // anchors behind a leading N run (unchecked) and peptides: checked, the masked twin's
+    // counts, paths and lists
+    const std::vector<std::string> records { "ACGTTGCAACGT", "ACGTAGGA", "TTACGTTGCAT" };
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
+                       DeBruijnGraph::PRIMARY }) {
+        Twin twin = build_twin(5, records, mode);
+        TinyStats stats;
+        for (const char *text : { "NCGTTGCA", "NNGTTGCAA", "NACGT", "NNCG", "ACGTNGCA" }) {
+            check_tiny(twin, text, PatternKind::IUPAC, make_request(), &stats);
+        }
+        EXPECT_LT(2u, stats.checked) << mode;
+        EXPECT_LT(0u, stats.long_checked) << mode;
+    }
+    const std::vector<std::string> coding { "ATGTAAGGCTGGTGAATGCCC", "ATGAAATAGTGGCC" };
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
+                       DeBruijnGraph::PRIMARY }) {
+        for (size_t k : { size_t(4), size_t(6), size_t(9) }) {
+            Twin twin = build_twin(k, coding, mode);
+            for (const char *peptide : { "M*", "MK*", "W*", "MX", "*G", "M*GW" }) {
+                const Pattern p = Pattern::parse(PatternKind::PROTEIN, peptide);
+                Request request = make_request();
+                request.extend_paths = p.length() > k;
+                const Result r0 = count_of(*twin.unmasked, p, request);
+                const Result r = count_of(*twin.unmasked, p, with_checked(request, 1000));
+                const Result m = count_of(*twin.masked, p, request);
+                SCOPED_TRACE(std::string(peptide) + " k " + std::to_string(k));
+                EXPECT_EQ(count_lines(m), count_lines(r));
+                EXPECT_FALSE(r.stop);
+                EXPECT_EQ(r0.work.ranges_visited, r.work.ranges_visited);
+                EXPECT_EQ(0u, (r.work.steps - r0.work.steps) % (k - 1));
+            }
+        }
+    }
+}
+
+
 // ---------------------------------------------------------------- the real fraction f
 
 // the draws re-implemented here (the generator, the modulo, the redraw of a W = $ entry) with

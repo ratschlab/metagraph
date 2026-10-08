@@ -2,8 +2,9 @@
 scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, contract version 1
 (milestone 1, increment 3's output.labels "all", SPEC §14, and increments 4 and 5, SPEC §12.1,
 §12.2, §17: the paths of long_search "paths" with their labels' support, and protein patterns;
-and SPEC §18, the owner's decisions #16, #17 and #19 of 2026-10-08: graphs without their
-dummy-edge mask answered with bounds and an estimate, and the stop '*' in peptides):
+and SPEC §18, the owner's decisions #16, #17, #19 and #24 of 2026-10-08: graphs without their
+dummy-edge mask answered with bounds and an estimate, their tiny blocks checked and exact, and
+the stop '*' in peptides):
 
   - the field lists: every table of the SPEC marked `<!-- schema: NAME -->` names exactly the
     fields SCHEMA[NAME] below knows, so that the SPEC and this check cannot drift apart;
@@ -266,8 +267,10 @@ ENTRY_LABELS = ['placement', 'annotation', 'by_label', 'rows_refused', 'anchors_
                 'labels_cut', 'occurrences_cut']
 LIMITS_LABELS = ['max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb', 'max_labels',
                  'max_occurrences_per_label']
+# (owner decision #24: max_checked_entries, the server's limit of the unchecked candidates a
+# pattern on a graph without its mask has tested; no request field)
 CAPS = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms', 'min_information_bits',
-        'max_patterns'] + LIMITS_LABELS + ['max_paths']
+        'max_patterns'] + LIMITS_LABELS + ['max_paths', 'max_checked_entries']
 
 
 def load(*path):
@@ -433,6 +436,10 @@ class Checker:
         self.fraction = None
         # whether a count of the entry being checked states an estimate
         self.estimated = False
+        # owner decision #24: on a graph without its mask whose capabilities are known, the
+        # server's max_checked_entries; and the answer's graph mode. Set by answer()
+        self.checked_limit = None
+        self.graph_mode = None
 
     def ok(self, condition, path, what=''):
         if not condition:
@@ -569,6 +576,9 @@ class Checker:
                     'stated only on a graph without its mask')
             self.dummy_fraction(index['dummy_fraction'], 'index.dummy_fraction')
             self.fraction = index['dummy_fraction']['value']
+        self.graph_mode = index['graph_mode']
+        self.checked_limit = capabilities['caps']['max_checked_entries'] \
+            if capabilities is not None and unmasked else None
         if capabilities is not None:
             # the graph's counting and its dummy fraction, sampled once: the capabilities'
             self.ok(capabilities['counting'] == ('upper_bound' if unmasked else 'exact'),
@@ -975,6 +985,17 @@ class Checker:
                 'estimate')
         self.ok(('no_stop_codon' in e['notes']) is (not pk.has_instances()), path + '.notes',
                 'no_stop_codon exactly for a peptide whose * has no codon in its table')
+        # owner decision #24 (SPEC §7.4): a pattern whose discovery completed with at most
+        # caps.max_checked_entries unchecked candidates had each of them tested and is exact,
+        # so a bounds total stated without a stop has more of them: on a BASIC or CANONICAL
+        # graph they number its upper - lower (a wrapped PRIMARY graph counts an entry in both
+        # orientations; partial's release raises the lower bounds to what it listed)
+        if self.checked_limit is not None and e['stop'] is None \
+                and self.graph_mode != 'primary' and mode != 'partial' \
+                and total['relation'] == 'bounds':
+            self.ok(total['upper'] - total['lower'] > self.checked_limit, path + '.counts',
+                    f'bounds with {total["upper"] - total["lower"]} unchecked candidates, at most '
+                    f'max_checked_entries ({self.checked_limit}): they are checked, exact')
         if not pk.has_instances():
             if L <= k:
                 self.ok(total['relation'] == 'exact' and total['value'] == 0, path + '.counts',
@@ -2245,7 +2266,9 @@ class TestPatternFixtures(unittest.TestCase):
         graph, the estimate note missing, a bounds count stated without a stop on a masked
         graph, threshold_upper_bound missing or on a masked graph, an index without its dummy
         fraction, a '*' instance that is no stop codon, no_stop_codon missing or a no-instance
-        peptide with a context, and the unsearched peptide after a stop stated stopped."""
+        peptide with a context, and the unsearched peptide after a stop stated stopped; and
+        (owner decision #24) bounds left on a pattern with no more unchecked candidates than the
+        server's max_checked_entries."""
         class Stub:
             def fail(self, message):
                 raise AssertionError(message)
@@ -2264,6 +2287,7 @@ class TestPatternFixtures(unittest.TestCase):
 
         for name in ('unmasked_count', 'unmasked_labels_all', 'unmasked_threshold_upper_bound',
                      'unmasked_stop_at_threshold', 'unmasked_partial', 'unmasked_paths',
+                     'unmasked_checked', 'unmasked_checked_dummies',
                      'peptide_stop', 'peptide_no_stop_codon', 'peptide_no_stop_codon_after_stop',
                      'peptide_bad_residue'):
             check(name)
@@ -2275,6 +2299,12 @@ class TestPatternFixtures(unittest.TestCase):
             # the same body as if it came from a masked graph
             for f in ('counting', 'dummy_fraction'):
                 del a['index'][f]
+
+        def unchecked_start(a):
+            # the island start's entry of unmasked_count (the check off), in unmasked_checked
+            e = self.bodies['unmasked_count'][1]['patterns'][1]
+            self.assertEqual('start', e['id'])
+            a['patterns'][1].update({f: copy.deepcopy(e[f]) for f in ('counts', 'notes', 'work')})
 
         def stop_codon_read_as(codon):
             # the first context's instance (and its k-mer) with its stop codon TGA replaced
@@ -2308,6 +2338,9 @@ class TestPatternFixtures(unittest.TestCase):
             ('peptide_no_stop_codon_after_stop',
              lambda a: a['patterns'][1]['work'].update(mask_scans=1),
              'answered without a search'),
+            # owner decision #24: the island start answered as with the check off (its 30
+            # unchecked candidates in bounds [2, 32]) by the server that checks 50
+            ('unmasked_checked', unchecked_start, 'they are checked, exact'),
         ]
         for name, mutate, says in cases:
             with self.subTest(fixture=name, says=says):

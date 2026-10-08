@@ -4,7 +4,8 @@
  "spec": "docs/SPEC-pattern-search.md",
  "servers": {
   "masked": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --index-name mini_refseq --index-release fixtures-mini_refseq  (a copy of the mini graph with the .edgemask of transform --mask-dummy; annotation, .seqs and sidecars linked from the mini)",
-  "unmasked": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built: no .edgemask; counting upper_bound)",
+  "unmasked": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built: no .edgemask; counting upper_bound; at most 50 unchecked candidates tested, the default)",
+  "unmasked_unchecked": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-checked-entries 0 --index-name mini_refseq --index-release fixtures-mini_refseq  (the same, no unchecked candidate tested: every count with unchecked candidates bounds)",
   "built_at_load": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-build-mask --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built, its mask built in memory at start-up)",
   "multi": "server_query {work}/graphs.csv --index-release fixtures-mini_refseq  (one line: mini_refseq,{work}/masked/graph_k31.dbg,{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg)",
   "primary": "server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg --index-name mini_primary --index-release fixtures-mini_refseq  (a PRIMARY graph of 562.fa and 573.fa at k = 31 with --mask-dummy, column annotation by file name)",
@@ -670,31 +671,49 @@
    "shows": "400 genetic_code_unknown: genetic_code is not an NCBI translation table id (7 was merged into 4; capabilities genetic_codes lists the ids)"
   },
   "unmasked_count": {
+   "server": "unmasked_unchecked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a graph without its dummy-edge mask (owner decision #16; it answered 400 mask_required before), the check of decision #24 off (--pattern-max-checked-entries 0: what a pattern above the limit answers): index counting upper_bound and dummy_fraction; a count the search could not resolve is bounds [lower, upper], upper the candidate entries (the source dummies among them), lower what was spelled whole (offset 0), each with its estimate round(upper x f) and the note estimate_sampled_dummy_fraction. NDM-F: [2, 24], estimate 24 (exact 24 with the mask); an island start: [2, 32], estimate 32, while the masked graph counts 17 -- the estimate is not a bound; an absent primer: an empty block, exact 0 (at the default limit the first two are checked: unmasked_checked)"
+  },
+  "unmasked_checked": {
    "server": "unmasked",
    "method": "POST",
    "path": "/pattern",
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a graph without its dummy-edge mask (owner decision #16; it answered 400 mask_required before): index counting upper_bound and dummy_fraction; a count the search could not resolve is bounds [lower, upper], upper the candidate entries (the source dummies among them), lower what was spelled whole (offset 0), each with its estimate round(upper x f) and the note estimate_sampled_dummy_fraction. NDM-F: [2, 24], estimate 24 (exact 24 with the mask); an island start: [2, 32], estimate 32, while the masked graph counts 17 -- the estimate is not a bound; an absent primer: an empty block, exact 0"
+   "shows": "owner decision #24 on the default server (max_checked_entries 50): a pattern with at most 50 unchecked candidates has each tested at query time (k - 1 = 30 steps each, in work.steps and mask_scans): NDM-F, [2, 24] unchecked (unmasked_count), its 22 candidates tested: exact 24, the masked count; the island start, [2, 32]: its 30 tested, the 15 source dummies dropped: exact 17, no estimate, no note; the first 14 bases of that start, [4, 72], 68 unchecked: above the limit, bounds with its estimate as with the check off; the absent primer exact 0"
+  },
+  "unmasked_checked_dummies": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "owner decision #24: the island start in suffix scope on the forward strand has one candidate, the source dummy that holds it after 15 $ ([0, 1] with the check off); tested, it is a dummy: exact 0, an absence claim (absence_scope suffix_only) where the check off states only bounds"
   },
   "unmasked_labels_all": {
-   "server": "unmasked",
+   "server": "unmasked_unchecked",
    "method": "POST",
    "path": "/pattern",
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "all_or_count with labels \"all\" without the mask: the upper bound (24) within max_contexts, so every candidate is enumerated and the source dummies dropped: the list is exact (the masked graph's 24 contexts, 9 labels, 42 placed occurrences), and the counts, made from it, exact; the absent primer complete"
+   "shows": "all_or_count with labels \"all\" without the mask, the check of decision #24 off: the upper bound (24) within max_contexts, so every candidate is enumerated and the source dummies dropped: the list is exact (the masked graph's 24 contexts, 9 labels, 42 placed occurrences), and the counts, made from it, exact; the absent primer complete"
   },
   "unmasked_threshold_upper_bound": {
-   "server": "unmasked",
+   "server": "unmasked_unchecked",
    "method": "POST",
    "path": "/pattern",
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "all_or_count admits on the upper bound without the mask (conservative): the island start's 17 contexts would fit max_contexts 17 (the masked graph returns them), its upper bound 32 does not: withheld count_above_threshold with the count bounds, and the note threshold_upper_bound says that the lower bound was within the threshold"
+   "shows": "all_or_count admits on the upper bound without the mask (conservative), the check of decision #24 off: the island start's 17 contexts would fit max_contexts 17 (the masked graph returns them), its upper bound 32 does not: withheld count_above_threshold with the count bounds, and the note threshold_upper_bound says that the lower bound was within the threshold (at the default limit its 30 unchecked candidates are tested and the 17 contexts released)"
   },
   "unmasked_stop_at_threshold": {
    "server": "unmasked",
@@ -703,16 +722,16 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "stop_at_threshold without the mask compares the running upper bound: discovery stops earlier than on the masked graph (at_least 0 here, 6 there), withheld threshold_crossed, note threshold_upper_bound (the lower bound had not crossed)"
+   "shows": "stop_at_threshold without the mask compares the running upper bound (also with the check of decision #24 on: the stop comes before it): discovery stops earlier than on the masked graph (at_least 0 here, 6 there), withheld threshold_crossed, note threshold_upper_bound (the lower bound had not crossed)"
   },
   "unmasked_partial": {
-   "server": "unmasked",
+   "server": "unmasked_unchecked",
    "method": "POST",
    "path": "/pattern",
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "partial without the mask: the first 5 contexts (the masked graph's first 5, no source dummy among them), cut max_contexts; the release raises each lower bound to what it released at that strand and offset: bounds [6, 24]"
+   "shows": "partial without the mask, the check of decision #24 off: the first 5 contexts (the masked graph's first 5, no source dummy among them), cut max_contexts; the release raises each lower bound to what it released at that strand and offset: bounds [6, 24]"
   },
   "unmasked_paths": {
    "server": "unmasked",

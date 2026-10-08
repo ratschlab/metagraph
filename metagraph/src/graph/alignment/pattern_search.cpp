@@ -518,6 +518,19 @@ struct Span {
 static_assert(sizeof(Span) == 24, "a retained range stays 24 bytes");
 
 /**
+ * A graph without the dummy-edge mask (owner decision #24): an unchecked range kept for the
+ * check after discovery, while the pattern's unchecked candidates number at most
+ * Request::max_checked_entries (so at most that many of these). Its candidates: a flank's
+ * non-sink edges (c == 0), a W rule's edges with W in {c, c + alph_size}.
+ */
+struct CheckRange {
+    edge_index first;
+    edge_index last;
+    uint32_t offset;
+    TAlphabet c;
+};
+
+/**
  * What is known of one count: started or not, its offset discovered completely or not,
  * every scan behind it finished or not, and its bounds.
  */
@@ -633,6 +646,9 @@ struct BaseSearch {
     // per offset, a graph without the mask: the unchecked candidates of the ranges no scan
     // reads (Item::unchecked), counted into the upper bound only
     std::vector<uint64_t> unchecked;
+    // a graph without the mask: those ranges, kept for the check of
+    // Request::max_checked_entries while the pattern's unchecked candidates are within it
+    std::vector<CheckRange> checks;
     // the ranges that need a scan, in discovery order
     std::vector<Item> pending;
     // enumerate(): the ranges with candidates the release may need, in discovery order
@@ -773,7 +789,10 @@ class PatternRun {
             // PARTIAL releases at most cap_ contexts: keep only the ranges that can hold one
             // of the first cap_ in answer order (E4-01)
             prune_(retain && !extending_ && request.mode == Mode::PARTIAL),
-            masked_(support.mask_present) {
+            masked_(support.mask_present),
+            // the check of a few unchecked candidates (owner decision #24): never with the mask
+            check_limit_(support.mask_present ? 0 : request.max_checked_entries),
+            checkable_(check_limit_ > 0) {
         for (char base : { 'A', 'C', 'G', 'T' }) {
             codes_.push_back(boss_.encode(base));
         }
@@ -855,6 +874,10 @@ class PatternRun {
             }
             if (!stop_)
                 scan_all(order);
+            // a graph without the mask, every range discovered and scanned: a few unchecked
+            // candidates are tested one by one (owner decision #24)
+            if (!stop_)
+                check_unchecked(order);
         }
 
         work_.steps = budget_.steps_used() - steps_before_;
@@ -1039,6 +1062,13 @@ class PatternRun {
     // range not wholly spelled are unchecked, the thresholds compare upper bounds, and the
     // release tests every unchecked candidate for a source dummy
     const bool masked_;
+    // a graph without the mask (owner decision #24): the most unchecked candidates the check
+    // after discovery tests (Request::max_checked_entries; 0 with the mask or when disabled),
+    // the unchecked candidates counted so far over every base search, and whether they are
+    // still within the limit (their ranges kept in BaseSearch::checks)
+    const uint64_t check_limit_;
+    uint64_t unchecked_entries_ = 0;
+    bool checkable_;
     // a threshold decision went against the request on an upper bound its lower bound did
     // not cross (kNoteThresholdUpperBound)
     bool upper_bound_decision_ = false;
@@ -1240,14 +1270,18 @@ class PatternRun {
     // without it (owner decision #16: conservative, as the admissions after discovery)
     bool threshold_crossed() {
         const uint64_t threshold = long_ ? request_.max_anchors : request_.max_contexts;
-        uint64_t lower = masked_ ? running_lower() : running_upper();
+        const uint64_t compared = masked_ ? running_lower() : running_upper();
         // ALL_OR_COUNT releases nothing above its threshold, and the extension is not
-        // admitted above max_anchors in any mode (§5.2: anchors kept through the admission)
+        // admitted above max_anchors in any mode (§5.2: anchors kept through the admission).
+        // Without the mask, while the unchecked candidates are few enough for the check after
+        // discovery (owner decision #24), the count may still become EXACT and within the
+        // threshold: the ranges are dropped only once the lower bound is above it
+        const uint64_t retained_on = !masked_ && checkable_ ? running_lower() : compared;
         if (retain_ && (request_.mode == Mode::ALL_OR_COUNT || extending_)
-                && lower > threshold) {
+                && retained_on > threshold) {
             drop_anchors();
         }
-        if (request_.stop_at_threshold && lower > threshold) {
+        if (request_.stop_at_threshold && compared > threshold) {
             if (!masked_ && running_lower() <= threshold)
                 upper_bound_decision_ = true;
             record_stop(StopPhase::DISCOVERY,
@@ -1302,6 +1336,7 @@ class PatternRun {
             search.pending.push_back(item);
         } else if (item.unchecked) {
             search.unchecked[item.offset] += item.candidates;
+            keep_for_check(search, item);
         } else {
             search.exact[item.offset] += item.candidates;
         }
@@ -1315,6 +1350,25 @@ class PatternRun {
             search.running_upper += item.upper();
         if (item.count_palindromes)
             search.running_palindrome_candidates += item.candidates;
+    }
+
+    /**
+     * A graph without the mask (owner decision #24): an unchecked range no scan reads, kept
+     * for the check after discovery while the pattern's unchecked candidates number at most
+     * check_limit_; once they are more, nothing will be checked and every kept range is freed.
+     */
+    void keep_for_check(BaseSearch &search, const Item &item) {
+        if (!checkable_)
+            return;
+        unchecked_entries_ += item.candidates;
+        if (unchecked_entries_ <= check_limit_) {
+            search.checks.push_back(CheckRange { item.first, item.last, item.offset, item.c });
+            return;
+        }
+        checkable_ = false;
+        for (BaseSearch &s : searches_) {
+            std::vector<CheckRange>().swap(s.checks);
+        }
     }
 
     /**
@@ -1896,6 +1950,68 @@ class PatternRun {
                 if (!scan(item))
                     return;
             }
+        }
+    }
+
+    // one candidate tested by the check (owner decision #24): k - 1 steps, the most symbols
+    // BOSS::node_has_sentinel reads
+    bool charge_check() {
+        if (!budget_.charge(k_ - 1)) {
+            record_stop(StopPhase::MASK_SCAN, *budget_.stopped());
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * A graph without the mask, discovery and the deferred scans complete (owner decision
+     * #24): when the pattern's unchecked candidates number at most check_limit_, each is
+     * tested with BOSS::node_has_sentinel, in the order of the base searches (as the scans)
+     * and of their ranges' discovery, edge by edge: the real k-mers become exact contexts and
+     * the source dummies drop out, so that every count of the pattern is EXACT. Nothing is
+     * applied before the last candidate is tested: a stop on the way (phase MASK_SCAN) leaves
+     * every count as discovery left it, BOUNDS.
+     */
+    void check_unchecked(const std::vector<size_t> &order) {
+        if (!checkable_ || !unchecked_entries_)
+            return;
+
+        std::vector<std::vector<uint64_t>> real(searches_.size());
+        uint64_t tested = 0;
+        for (size_t i : order) {
+            BaseSearch &search = searches_[i];
+            real[i].assign(search.unchecked.size(), 0);
+            for (const CheckRange &range : search.checks) {
+                ++work_.mask_scans;
+                auto next = [&](edge_index from) {
+                    return !range.c
+                        ? dbg_succ_.next_non_sink_edge(from, range.last)
+                        : dbg_succ_.next_edge_with_last_symbol(from, range.last, range.c);
+                };
+                for (edge_index e = next(range.first); e; e = next(e + 1)) {
+                    if (!charge_check())
+                        return;
+                    ++tested;
+                    real[i][range.offset] += !boss_.node_has_sentinel(e);
+                }
+            }
+        }
+        // every unchecked candidate counted is among those tested (a broken invariant is never
+        // published as an exact count)
+        if (tested != unchecked_entries_) {
+            throw std::logic_error("pattern: " + std::to_string(tested)
+                                   + " candidates checked of "
+                                   + std::to_string(unchecked_entries_) + " unchecked");
+        }
+        for (size_t i = 0; i < searches_.size(); ++i) {
+            BaseSearch &search = searches_[i];
+            for (size_t p = 0; p < search.unchecked.size(); ++p) {
+                assert(real[i].size() == search.unchecked.size());
+                assert(real[i][p] <= search.unchecked[p]);
+                search.exact[p] += real[i][p];
+                search.unchecked[p] = 0;
+            }
+            std::vector<CheckRange>().swap(search.checks);
         }
     }
 

@@ -384,6 +384,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                                              &req.clamped);
     req.max_steps = capped_integer(f, "max_steps", limits.max_steps, 1, &req.clamped);
     req.request.min_information_bits = limits.min_information_bits;
+    // owner decision #24: the server's policy, read on a graph without its mask only
+    req.request.max_checked_entries = limits.max_checked_entries;
 
     req.time_budget_ms = limits.default_time_ms;
     if (f.has("time_budget_ms")) {
@@ -881,6 +883,7 @@ PatternLimits pattern_limits(const Config &config) {
     limits.max_time_ms = static_cast<double>(config.pattern_max_time_ms);
     limits.finalize_ms = static_cast<double>(config.pattern_finalize_ms);
     limits.min_information_bits = config.pattern_min_information_bits;
+    limits.max_checked_entries = config.pattern_max_checked_entries;
     limits.max_patterns = config.pattern_max_patterns;
     limits.max_labels_per_anchor = config.pattern_max_labels_per_anchor;
     limits.max_annotation_work = config.pattern_max_annotation_work;
@@ -1404,6 +1407,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     caps["max_anchors"] = uint_json(limits.max_anchors);
     // increment 4: long_search "paths"
     caps["max_paths"] = uint_json(limits.max_paths);
+    // owner decision #24: not a request field (caps_rule)
+    caps["max_checked_entries"] = uint_json(limits.max_checked_entries);
     caps["max_steps"] = uint_json(limits.max_steps);
     caps["time_budget_ms"] = number_json(limits.max_time_ms);
     caps["min_information_bits"] = number_json(limits.min_information_bits);
@@ -1420,14 +1425,20 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["finalize_reserve_ms"] = number_json(limits.finalize_ms);
     // review of 2026-10-07: R2-04 (min_information_bits and max_patterns are no request
     // field's maximum) and X-EFFICIENCY-04 (the time kept back from the work grows with what
-    // the answer holds)
+    // the answer holds); owner decision #24 (max_checked_entries, no request field either: on a
+    // graph without its mask, a pattern with at most that many unchecked candidates has each
+    // tested, its counts exact; SPEC §7.4)
     p["caps_rule"] = "max_contexts, max_anchors, max_steps, time_budget_ms, "
         "max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels, "
         "max_occurrences_per_label and max_paths are the maxima of their request fields: a "
         "larger request value is lowered to the cap and listed in limits.clamped; each is also "
         "its field's default, except time_budget_ms, whose default is default_time_budget_ms. "
         "max_patterns bounds the length of patterns: a longer list is refused, never cut. "
-        "min_information_bits is the server's information floor, not a request field. Of "
+        "min_information_bits is the server's information floor, not a request field. "
+        // owner decision #24, compact (see protein_rule's note on the document's ceiling;
+        // "(long_search lists the values served)", which the field long_search itself says,
+        // was dropped below to make room)
+        "max_checked_entries: unmasked, so few unchecked candidates are tested: exact. Of "
         "time_budget_ms, the work stops at least finalize_reserve_ms before the deadline, and "
         "earlier by the time the answer built so far is estimated to take to write: "
         + ms_text(kAnswerVolumeMargin) + " x (B / (" + ms_text(limits.delivery_build_mbps)
@@ -1435,10 +1446,10 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
         "bytes of its compact JSON text (the labels about to be built counted once more at the "
         "first rate; rates in MB/s), so that a stopped request still answers with its counts. "
         "A pattern longer than k is answered by its anchors (long_patterns) unless the request "
-        "sets long_search \"paths\" (long_search lists the values served): then an exact "
-        "anchor count of at most max_anchors admits the extension, and an exact path count of "
-        "at most max_paths the release of the paths (partial: the first max_paths); "
-        "long_search changes nothing for a pattern of at most k bases";
+        "sets long_search \"paths\": then an exact anchor count of at most max_anchors admits "
+        "the extension, and an exact path count of at most max_paths the release of the paths "
+        "(partial: the first max_paths); long_search changes nothing for a pattern of at most k "
+        "bases";
 
     const char *graph_fields[] = { "graph_mode", "k", "alphabet", "strand_stated", "mask",
                                    "counting", "dummy_fraction", "scopes", "placement",

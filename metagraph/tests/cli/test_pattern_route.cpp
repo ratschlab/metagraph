@@ -1198,7 +1198,13 @@ TEST(PatternRoute, UnmaskedCountsAgainstTheEdgeOracle) {
         }
         EXPECT_EQ(b, a);
 
+        // the counts with the check of decision #24 off (every count of a pattern with
+        // unchecked candidates bounds) and at the default (the few checked: exact)
+        for (uint64_t checked : { uint64_t(0), pattern::kDefaultMaxCheckedEntries })
         for (const char *scope : { "any_offset", "suffix" }) {
+            SCOPED_TRACE("max_checked_entries " + std::to_string(checked));
+            PatternLimits caps_checked = limits();
+            caps_checked.max_checked_entries = checked;
             const bool suffix = std::string(scope) == "suffix";
             std::string body = "{\"patterns\": [";
             for (size_t i = 0; i < kUnmaskedPatterns.size(); ++i) {
@@ -1206,8 +1212,8 @@ TEST(PatternRoute, UnmaskedCountsAgainstTheEdgeOracle) {
                         + "\"}";
             }
             body += "], \"mode\": \"count\", \"scope\": \"" + std::string(scope) + "\"}";
-            const Json::Value out = run(*g, body);
-            const Json::Value exact = run(*masked, body);
+            const Json::Value out = run(*g, body, nullptr, nullptr, caps_checked);
+            const Json::Value exact = run(*masked, body, nullptr, nullptr, caps_checked);
             // the answer's index states the counting and the fraction; the masked one does not
             EXPECT_EQ("upper_bound", out["index"]["counting"].asString());
             EXPECT_EQ(dummy_fraction_json(*f), out["index"]["dummy_fraction"]);
@@ -1365,16 +1371,28 @@ TEST(PatternRoute, UnmaskedRetrievalListsAreExact) {
     // all_or_count admits on the upper bound (conservative): ACGT's real contexts fit
     // max_contexts, its candidates (3 source dummies among them) do not. The masked graph
     // releases them; without the mask they are withheld, the count still a true bound, and the
-    // engine says why (threshold_upper_bound)
+    // engine says why (threshold_upper_bound). That is the answer of a count whose unchecked
+    // candidates are more than max_checked_entries: shown here with the check off (0); with
+    // the default its few unchecked candidates (the 3 dummies among them) are checked and the
+    // contexts released (owner decision #24)
     auto masked = tiny();
     auto g = unmasked(*masked, "admission");
+    PatternLimits unchecked = limits();
+    unchecked.max_checked_entries = 0;
     const uint64_t real = oracle("ACGT").size();
     const std::string body = "{\"patterns\": [{\"dna\": \"ACGT\"}], \"max_contexts\": "
                              + std::to_string(real) + "}";
     const Json::Value x = run(*masked, body)["patterns"][0];
     EXPECT_TRUE(x["retrieval_complete"].asBool());
     EXPECT_EQ(real, x["returned"].asUInt64());
-    const Json::Value e = run(*g, body)["patterns"][0];
+    const Json::Value checked = run(*g, body)["patterns"][0];
+    EXPECT_TRUE(checked["retrieval_complete"].asBool()) << checked;
+    EXPECT_EQ(x["results"], checked["results"]);
+    EXPECT_EQ(x["counts"], checked["counts"]);
+    for (const auto &n : checked["notes"]) {
+        EXPECT_NE("threshold_upper_bound", n.asString());
+    }
+    const Json::Value e = run(*g, body, nullptr, nullptr, unchecked)["patterns"][0];
     EXPECT_FALSE(e["retrieval_complete"].asBool());
     EXPECT_EQ("count_above_threshold", e["withheld"]["reason"].asString()) << e;
     EXPECT_EQ(0u, e["returned"].asUInt64());
@@ -1389,11 +1407,187 @@ TEST(PatternRoute, UnmaskedRetrievalListsAreExact) {
     EXPECT_TRUE(noted) << e;
     // with room for the candidates: released, every one real, the count exact
     const Json::Value ok = run(*g, "{\"patterns\": [{\"dna\": \"ACGT\"}], \"max_contexts\": "
-                                   + std::to_string(real + 3) + "}")["patterns"][0];
+                                   + std::to_string(real + 3) + "}", nullptr, nullptr,
+                               unchecked)["patterns"][0];
     EXPECT_TRUE(ok["retrieval_complete"].asBool());
     EXPECT_EQ(real, ok["returned"].asUInt64());
     EXPECT_EQ("exact", ok["counts"]["contexts"]["relation"].asString());
     EXPECT_EQ(real, ok["counts"]["contexts"]["value"].asUInt64());
+}
+
+// an entry without its timing (the rest of it is deterministic)
+Json::Value untimed(Json::Value entry) {
+    entry.removeMember("timing");
+    return entry;
+}
+
+// Owner decision #24: on a graph without its mask, a pattern whose unchecked candidates number
+// at most max_checked_entries (the server's --pattern-max-checked-entries, default 50) has
+// each of them tested: every count exact, the masked graph's, with no estimate and no note,
+// k - 1 steps per candidate; above the limit (and with 0) the answer is the one without the
+// check, field for field but its timing. In every mode, so that count and retrieval agree; a
+// step stop in the check (mask_scan) leaves the bounds as without it; the capabilities state
+// the limit, in caps and in caps_rule, on every graph
+TEST(PatternRoute, UnmaskedTinyBlocksAreExact) {
+    PatternLimits off = limits();
+    off.max_checked_entries = 0;
+    // a long pattern whose anchor window starts with N (its anchors unchecked) beside the
+    // short ones
+    std::vector<std::string> panel = kUnmaskedPatterns;
+    panel.push_back("NCGTTGCAACG");
+    std::string patterns;
+    for (size_t i = 0; i < panel.size(); ++i) {
+        patterns += std::string(i ? ", " : "") + "{\"iupac\": \"" + panel[i] + "\"}";
+    }
+    size_t all_dummies = 0;
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        const std::string name = mode == DeBruijnGraph::BASIC ? "basic"
+                               : mode == DeBruijnGraph::CANONICAL ? "canonical" : "primary";
+        SCOPED_TRACE(name);
+        auto masked = tiny(mode);
+        auto g = unmasked(*masked, "tiny_" + name);
+
+        // the capabilities: the limit in force, named by the rule; a masked graph's alike
+        for (const AnnotatedDBG *graph : { g.get(), masked.get() }) {
+            const Json::Value caps = pattern_capabilities_json(graph, limits(), false);
+            EXPECT_EQ(50u, caps["caps"]["max_checked_entries"].asUInt64());
+            EXPECT_NE(std::string::npos,
+                      caps["caps_rule"].asString().find("max_checked_entries"));
+            EXPECT_EQ(0u, pattern_capabilities_json(graph, off, false)["caps"]
+                                  ["max_checked_entries"].asUInt64());
+        }
+
+        size_t checked = 0, above = 0;
+        for (const char *scope : { "any_offset", "suffix" }) {
+            if (mode == DeBruijnGraph::PRIMARY && std::string(scope) == "suffix")
+                continue;
+            SCOPED_TRACE(scope);
+            const std::string count_body = "{\"patterns\": [" + patterns + "], \"mode\": "
+                                           "\"count\", \"scope\": \"" + scope + "\"}";
+            // which patterns the check resolves: bounds without it, exact with it
+            const Json::Value c0 = run(*g, count_body, nullptr, nullptr, off);
+            const Json::Value c = run(*g, count_body);
+            std::vector<bool> resolved(panel.size());
+            for (size_t i = 0; i < panel.size(); ++i) {
+                const Json::Value &e0 = c0["patterns"][Json::ArrayIndex(i)];
+                const Json::Value &e = c["patterns"][Json::ArrayIndex(i)];
+                ASSERT_FALSE(e.isMember("error")) << e;
+                const Json::Value &t0 = e0["counts"].isMember("contexts")
+                        ? e0["counts"]["contexts"] : e0["counts"]["anchors"];
+                const Json::Value &t = e["counts"].isMember("contexts")
+                        ? e["counts"]["contexts"] : e["counts"]["anchors"];
+                EXPECT_TRUE(e0["stop"].isNull());
+                const bool bounded = t0["relation"].asString() == "bounds";
+                resolved[i] = bounded && t["relation"].asString() == "exact";
+                if (bounded && mode != DeBruijnGraph::PRIMARY) {
+                    // BASIC and CANONICAL: the unchecked candidates are upper - lower
+                    const uint64_t width = t0["upper"].asUInt64() - t0["lower"].asUInt64();
+                    EXPECT_EQ(width <= 50, resolved[i]) << e0;
+                }
+                if (resolved[i]) {
+                    // k - 1 steps per candidate tested, at most 50 of them
+                    const uint64_t more = e["work"]["steps"].asUInt64()
+                                          - e0["work"]["steps"].asUInt64();
+                    EXPECT_EQ(0u, more % (kK - 1));
+                    EXPECT_LT(0u, more);
+                    EXPECT_LE(more, 50 * (kK - 1));
+                    EXPECT_EQ(e0["work"]["ranges_visited"], e["work"]["ranges_visited"]);
+                    // every count bounds without the check is exact with it; those whose
+                    // candidates were all source dummies exact 0
+                    std::function<void(const Json::Value&, const Json::Value&)> walk
+                            = [&](const Json::Value &before, const Json::Value &after) {
+                        if (!before.isObject())
+                            return;
+                        if (before.isMember("relation")
+                                && before["relation"].asString() == "bounds") {
+                            EXPECT_EQ("exact", after["relation"].asString()) << after;
+                            all_dummies += after["value"].asUInt64() == 0;
+                        }
+                        for (const std::string &key : before.getMemberNames()) {
+                            walk(before[key], after[key]);
+                        }
+                    };
+                    walk(e0["counts"], e["counts"]);
+                }
+            }
+            for (const char *m : { "count", "all_or_count", "partial" }) {
+                SCOPED_TRACE(m);
+                const std::string body = "{\"patterns\": [" + patterns + "], \"mode\": \""
+                                         + m + "\", \"scope\": \"" + scope
+                                         + "\", \"max_contexts\": "
+                                         + (std::string(m) == "partial" ? "2" : "1000") + "}";
+                const Json::Value out = run(*g, body);
+                const Json::Value out0 = run(*g, body, nullptr, nullptr, off);
+                const Json::Value x = run(*masked, body);
+                EXPECT_EQ(out0["index"], out["index"]);
+                EXPECT_EQ(out0["limits"], out["limits"]);
+                for (size_t i = 0; i < panel.size(); ++i) {
+                    SCOPED_TRACE(panel[i]);
+                    const Json::Value &e = out["patterns"][Json::ArrayIndex(i)];
+                    const Json::Value &e0 = out0["patterns"][Json::ArrayIndex(i)];
+                    const Json::Value &xm = x["patterns"][Json::ArrayIndex(i)];
+                    if (!resolved[i]) {
+                        // nothing checked: the answer without the check
+                        ++above;
+                        EXPECT_EQ(untimed(e0), untimed(e));
+                        continue;
+                    }
+                    ++checked;
+                    // checked: the masked graph's counts, notes, lists and their state; the
+                    // steps of count()
+                    EXPECT_EQ(xm["counts"], e["counts"]);
+                    EXPECT_EQ(xm["notes"], e["notes"]);
+                    for (const char *field : { "results", "returned", "withheld", "cut",
+                                               "retrieval_complete", "stop" }) {
+                        EXPECT_EQ(xm[field], e[field]) << field;
+                    }
+                    EXPECT_EQ(c["patterns"][Json::ArrayIndex(i)]["work"], e["work"]);
+                    EXPECT_EQ(c["patterns"][Json::ArrayIndex(i)]["counts"], e["counts"]);
+                }
+            }
+        }
+        // not vacuous: the tiny records' patterns are checked
+        EXPECT_LT(10u, checked);
+        std::cerr << name << ": " << checked << " entries checked, " << above
+                  << " as without the check, " << all_dummies
+                  << " counts exact 0 of dummies so far" << std::endl;
+    }
+    // some counts (a strand, an offset) held by source dummies only: exact 0 once checked
+    EXPECT_LT(0u, all_dummies);
+
+    // a step stop in the check: ACGT (3 source dummies among its unchecked candidates) with
+    // the steps of its discovery and k - 2 more, too few for one candidate: stop {mask_scan,
+    // max_steps}, the bounds and the estimate as without the check; all_or_count withholds it
+    // for the budget
+    auto masked = tiny();
+    auto g = unmasked(*masked, "tiny_stop");
+    const Json::Value e0 = run(*g, "{\"patterns\": [{\"dna\": \"ACGT\"}], \"mode\": \"count\"}",
+                               nullptr, nullptr, off)["patterns"][0];
+    ASSERT_EQ("bounds", e0["counts"]["contexts"]["relation"].asString()) << e0;
+    const uint64_t steps = e0["work"]["steps"].asUInt64();
+    const uint64_t unchecked = e0["counts"]["contexts"]["upper"].asUInt64()
+                               - e0["counts"]["contexts"]["lower"].asUInt64();
+    ASSERT_LE(unchecked, 50u);
+    const std::string budget = std::to_string(steps + kK - 2);
+    const Json::Value s = run(*g, "{\"patterns\": [{\"dna\": \"ACGT\"}], \"mode\": \"count\", "
+                                  "\"max_steps\": " + budget + "}")["patterns"][0];
+    EXPECT_EQ("mask_scan", s["stop"]["phase"].asString()) << s;
+    EXPECT_EQ("max_steps", s["stop"]["reason"].asString());
+    EXPECT_EQ(e0["counts"], s["counts"]);
+    EXPECT_EQ(e0["notes"], s["notes"]);
+    EXPECT_EQ(steps, s["work"]["steps"].asUInt64());
+    EXPECT_EQ("full", s["determinism"].asString());
+    const Json::Value w = run(*g, "{\"patterns\": [{\"dna\": \"ACGT\"}], \"max_steps\": "
+                                  + budget + "}")["patterns"][0];
+    EXPECT_EQ("discovery_budget", w["withheld"]["reason"].asString()) << w;
+    EXPECT_EQ(e0["counts"], w["counts"]);
+    // with the steps for every candidate: exact, the masked count
+    const Json::Value ok = run(*g, "{\"patterns\": [{\"dna\": \"ACGT\"}], \"mode\": \"count\", "
+                                   "\"max_steps\": " + std::to_string(steps + unchecked * (kK - 1))
+                                   + "}")["patterns"][0];
+    EXPECT_TRUE(ok["stop"].isNull()) << ok;
+    EXPECT_EQ(run(*masked, "{\"patterns\": [{\"dna\": \"ACGT\"}], \"mode\": \"count\"}")
+                      ["patterns"][0]["counts"], ok["counts"]);
 }
 
 // Owner decision #16: the dummy fraction is sampled once per graph and kept (the loader samples

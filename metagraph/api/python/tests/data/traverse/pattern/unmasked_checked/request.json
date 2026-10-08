@@ -1,0 +1,21 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  },
+  {
+   "dna": "GATGCCGGTGAACAAC",
+   "id": "start"
+  },
+  {
+   "dna": "GATGCCGGTGAACA",
+   "id": "start14"
+  },
+  {
+   "dna": "CTAGGAGATGGGCCAGCTAC",
+   "id": "absent"
+  }
+ ],
+ "mode": "count"
+}

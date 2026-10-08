@@ -19,7 +19,13 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
              #16 of 2026-10-08 (capabilities counting upper_bound): a count the search could not
              resolve is the bounds [lower, U], U the graph's candidate entries (its source dummies
              among them), with the additive estimate U x f (f the dummy fraction sampled at
-             load, index.dummy_fraction); the lists stay exact (it answered mask_required before)
+             load, index.dummy_fraction); the lists stay exact (it answered mask_required before).
+             Owner decision #24: a pattern with at most --pattern-max-checked-entries (default
+             50) unchecked candidates has each tested at query time, its counts then exact
+  unmasked_unchecked
+             the same with --pattern-max-checked-entries 0: no candidate is tested, so every
+             count with unchecked candidates is the bounds [lower, U] -- what any pattern above
+             the limit answers on the default server, shown on numbers small enough to follow
   built_at_load
              the mini index as built, served with --pattern-build-mask: the same mask built in
              memory at start-up (capabilities mask: built_at_load)
@@ -133,6 +139,12 @@ HASH_RECORD = '1296536.fa'
 START16 = 'GATGCCGGTGAACAAC'
 START16_EXACT = 17
 START16_UPPER = 32
+# owner decision #24 (few unchecked candidates are tested): the first 14 bases of the same record,
+# [4, 72] without the check: 68 unchecked candidates, more than the default limit of 50, so it
+# stays bounds on the default server too
+START14 = START16[:14]
+START14_LOWER = 4
+START14_UPPER = 72
 # increment 4 (paths, long_search "paths"): a 51-mer of two copies of a repeated 31-mer of the
 # E. coli records (562): 10 bases before one copy, the 31-mer, 10 bases after another. Every
 # k-mer of it is in the index (each window lies in one copy), so it is a path of the graph, but
@@ -944,53 +956,82 @@ FIXTURES = [
          refused('genetic_code_unknown')),
 
     # ---------------------------------------------------------------- without a mask (#16)
-    post('unmasked_count', 'unmasked',
+    post('unmasked_count', 'unmasked_unchecked',
          {'patterns': [p(NDM_F, ident='NDM-F'), p(START16, ident='start'),
                        p(ABSENT_20, ident='absent')], 'mode': 'count'}, 200,
          'a graph without its dummy-edge mask (owner decision #16; it answered 400 mask_required '
-         'before): index counting upper_bound and dummy_fraction; a count the search could not '
-         'resolve is bounds [lower, upper], upper the candidate entries (the source dummies '
-         'among them), lower what was spelled whole (offset 0), each with its estimate round(upper '
-         'x f) and the note estimate_sampled_dummy_fraction. NDM-F: [2, 24], estimate 24 (exact '
-         '24 with the mask); an island start: [2, 32], estimate 32, while the masked graph counts '
-         '17 -- the estimate is not a bound; an absent primer: an empty block, exact 0',
+         'before), the check of decision #24 off (--pattern-max-checked-entries 0: what a '
+         'pattern above the limit answers): index counting upper_bound and dummy_fraction; a '
+         'count the search could not resolve is bounds [lower, upper], upper the candidate '
+         'entries (the source dummies among them), lower what was spelled whole (offset 0), '
+         'each with its estimate round(upper x f) and the note estimate_sampled_dummy_fraction. '
+         'NDM-F: [2, 24], estimate 24 (exact 24 with the mask); an island start: [2, 32], '
+         'estimate 32, while the masked graph counts 17 -- the estimate is not a bound; an '
+         'absent primer: an empty block, exact 0 (at the default limit the first two are '
+         'checked: unmasked_checked)',
          entries(estimated(2, 24, 24), estimated(2, START16_UPPER, START16_UPPER),
                  expect_all(exact(0), field('notes', [])))),
-    post('unmasked_labels_all', 'unmasked',
+    post('unmasked_checked', 'unmasked',
+         {'patterns': [p(NDM_F, ident='NDM-F'), p(START16, ident='start'),
+                       p(START14, ident='start14'), p(ABSENT_20, ident='absent')],
+          'mode': 'count'}, 200,
+         'owner decision #24 on the default server (max_checked_entries 50): a pattern with at '
+         'most 50 unchecked candidates has each tested at query time (k - 1 = 30 steps each, in '
+         'work.steps and mask_scans): NDM-F, [2, 24] unchecked (unmasked_count), its 22 '
+         'candidates tested: exact 24, the masked count; the island start, [2, 32]: its 30 '
+         'tested, the 15 source dummies dropped: exact 17, no estimate, no note; the first 14 '
+         'bases of that start, [4, 72], 68 unchecked: above the limit, bounds with its estimate '
+         'as with the check off; the absent primer exact 0',
+         entries(expect_all(exact(24), field('notes', [])),
+                 expect_all(exact(START16_EXACT), field('notes', [])),
+                 estimated(START14_LOWER, START14_UPPER, START14_UPPER),
+                 expect_all(exact(0), field('notes', [])))),
+    post('unmasked_checked_dummies', 'unmasked',
+         {'patterns': [p(START16, ident='start')], 'mode': 'count', 'scope': 'suffix',
+          'strands': 'forward'}, 200,
+         'owner decision #24: the island start in suffix scope on the forward strand has one '
+         'candidate, the source dummy that holds it after 15 $ ([0, 1] with the check off); '
+         'tested, it is a dummy: exact 0, an absence claim (absence_scope suffix_only) where the '
+         'check off states only bounds',
+         entries(expect_all(exact(0), field('notes', [])))),
+    post('unmasked_labels_all', 'unmasked_unchecked',
          {'patterns': [p(NDM_F, ident='NDM-F'), p(ABSENT_20, ident='absent')],
           'output': {'labels': 'all'}}, 200,
-         'all_or_count with labels "all" without the mask: the upper bound (24) within '
-         'max_contexts, so every candidate is enumerated and the source dummies dropped: the '
-         'list is exact (the masked graph\'s 24 contexts, 9 labels, 42 placed occurrences), and '
-         'the counts, made from it, exact; the absent primer complete',
+         'all_or_count with labels "all" without the mask, the check of decision #24 off: the '
+         'upper bound (24) within max_contexts, so every candidate is enumerated and the source '
+         'dummies dropped: the list is exact (the masked graph\'s 24 contexts, 9 labels, 42 '
+         'placed occurrences), and the counts, made from it, exact; the absent primer complete',
          entries(expect_all(exact(24), complete, labelled, counted('labels', 'exact', 9),
                             counted('occurrences', 'exact', 42)),
                  expect_all(exact(0), complete, counted('labels', 'exact', 0)))),
-    post('unmasked_threshold_upper_bound', 'unmasked',
+    post('unmasked_threshold_upper_bound', 'unmasked_unchecked',
          {'patterns': [p(START16, ident='start')], 'max_contexts': START16_EXACT,
           'output': {'labels': 'none'}}, 200,
-         'all_or_count admits on the upper bound without the mask (conservative): the island '
-         'start\'s 17 contexts would fit max_contexts 17 (the masked graph returns them), its '
-         'upper bound 32 does not: withheld count_above_threshold with the count bounds, and '
-         'the note threshold_upper_bound says that the lower bound was within the threshold',
+         'all_or_count admits on the upper bound without the mask (conservative), the check of '
+         'decision #24 off: the island start\'s 17 contexts would fit max_contexts 17 (the '
+         'masked graph returns them), its upper bound 32 does not: withheld '
+         'count_above_threshold with the count bounds, and the note threshold_upper_bound says '
+         'that the lower bound was within the threshold (at the default limit its 30 unchecked '
+         'candidates are tested and the 17 contexts released)',
          entries(expect_all(withheld('count_above_threshold'),
                             estimated(2, START16_UPPER, START16_UPPER),
                             has_note('threshold_upper_bound')))),
     post('unmasked_stop_at_threshold', 'unmasked',
          {'patterns': [p(NDM_F, ident='NDM-F')], 'max_contexts': 5, 'stop_at_threshold': True,
           'output': {'labels': 'none'}}, 200,
-         'stop_at_threshold without the mask compares the running upper bound: discovery stops '
-         'earlier than on the masked graph (at_least 0 here, 6 there), withheld '
-         'threshold_crossed, note threshold_upper_bound (the lower bound had not crossed)',
+         'stop_at_threshold without the mask compares the running upper bound (also with the '
+         'check of decision #24 on: the stop comes before it): discovery stops earlier than on '
+         'the masked graph (at_least 0 here, 6 there), withheld threshold_crossed, note '
+         'threshold_upper_bound (the lower bound had not crossed)',
          entries(expect_all(withheld('threshold_crossed'), relation('at_least'),
                             field('stop', {'phase': 'discovery', 'reason': 'max_contexts'}),
                             has_note('threshold_upper_bound')))),
-    post('unmasked_partial', 'unmasked',
+    post('unmasked_partial', 'unmasked_unchecked',
          {'patterns': [p(NDM_F, ident='NDM-F')], 'mode': 'partial', 'max_contexts': 5,
           'output': {'labels': 'none'}}, 200,
-         'partial without the mask: the first 5 contexts (the masked graph\'s first 5, no '
-         'source dummy among them), cut max_contexts; the release raises each lower bound to '
-         'what it released at that strand and offset: bounds [6, 24]',
+         'partial without the mask, the check of decision #24 off: the first 5 contexts (the '
+         'masked graph\'s first 5, no source dummy among them), cut max_contexts; the release '
+         'raises each lower bound to what it released at that strand and offset: bounds [6, 24]',
          entries(expect_all(cut('max_contexts'), field('returned', 5), estimated(6, 24, 24)))),
     post('unmasked_paths', 'unmasked',
          {'patterns': [p(NDM_40, ident='NDM-40'), p(ABSENT_40, ident='absent')],
@@ -1063,7 +1104,13 @@ SERVERS = {
                 'annotation, .seqs and sidecars linked from the mini)',
     'unmasked': 'server_query -i {mini}/graph_k31.dbg -a {mini}/' + MINI_ANNO
                 + ' --index-name ' + INDEX_NAME + ' --index-release ' + INDEX_RELEASE
-                + '  (the mini index as built: no .edgemask; counting upper_bound)',
+                + '  (the mini index as built: no .edgemask; counting upper_bound; at most 50 '
+                  'unchecked candidates tested, the default)',
+    'unmasked_unchecked': 'server_query -i {mini}/graph_k31.dbg -a {mini}/' + MINI_ANNO
+                          + ' --pattern-max-checked-entries 0 --index-name ' + INDEX_NAME
+                          + ' --index-release ' + INDEX_RELEASE
+                          + '  (the same, no unchecked candidate tested: every count with '
+                            'unchecked candidates bounds)',
     'built_at_load': 'server_query -i {mini}/graph_k31.dbg -a {mini}/' + MINI_ANNO
                      + ' --pattern-build-mask --index-name ' + INDEX_NAME + ' --index-release '
                      + INDEX_RELEASE + '  (the mini index as built, its mask built in memory at '
@@ -1220,6 +1267,9 @@ def server_args(name, mini, work):
     if name == 'unmasked':
         return ['-i', os.path.join(mini, MINI_GRAPH), '-a', os.path.join(mini, MINI_ANNO)] \
             + ident
+    if name == 'unmasked_unchecked':
+        return ['-i', os.path.join(mini, MINI_GRAPH), '-a', os.path.join(mini, MINI_ANNO),
+                '--pattern-max-checked-entries', '0'] + ident
     if name == 'built_at_load':
         return ['-i', os.path.join(mini, MINI_GRAPH), '-a', os.path.join(mini, MINI_ANNO),
                 '--pattern-build-mask'] + ident
@@ -1349,7 +1399,10 @@ def readme(fixtures):
         '`alphabet_untested` (a DNA5 build); test_pattern_fixtures.py names them in NO_FIXTURE.',
         '`mask_required` is retired (owner decision #16 of 2026-10-08): a graph without its',
         'dummy-edge mask is served with upper bounds and estimates (the `unmasked_*` fixtures),',
-        'and no build since answers it; test_pattern_fixtures.py names it in RETIRED.',
+        'and no build since answers it; test_pattern_fixtures.py names it in RETIRED. A pattern',
+        'with few unchecked candidates there (at most `caps.max_checked_entries`, 50 by default)',
+        'has each tested and its counts exact (owner decision #24: `unmasked_checked`,',
+        '`unmasked_checked_dummies`); the server `unmasked_unchecked` has the check off.',
         '',
     ]
     for f in fixtures:

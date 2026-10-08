@@ -471,6 +471,10 @@ Config::Config(int argc, char *argv[]) {
                           << text << "'" << std::endl;
                 print_usage_and_exit = true;
             }
+        } else if (!strcmp(argv[i], "--pattern-max-checked-entries")) {
+            bounded(argv[i], get_value(i), kMaxPatternCheckedEntries,
+                    &pattern_max_checked_entries);
+            i++;
         } else if (!strcmp(argv[i], "--pattern-max-contexts")) {
             exact_ms(argv[i], get_value(i), &pattern_max_contexts);
             i++;
@@ -1755,6 +1759,7 @@ if (advanced) {
             fprintf(stderr, "\t   --index-name [STR]\t\tname of the index in answers, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE]\tmanifest of the index bundle; its digest is the index identity []\n");
             fprintf(stderr, "\t   --pattern-min-information-bits [FLOAT] \tinformation floor of a pattern (bits; an exact pattern in suffix scope is exempt) [24]\n");
+            fprintf(stderr, "\t   --pattern-max-checked-entries [INT] \twithout a dummy-edge mask: a pattern with at most this many unchecked candidate k-mers has each tested (k - 1 steps each), its counts exact; 0: none; at most 1000 [50]\n");
             fprintf(stderr, "\t   --pattern-max-contexts [INT] \tdefault and maximum of max_contexts per pattern (retrieval threshold, partial's cap) [10000]\n");
             fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
             fprintf(stderr, "\t   --pattern-max-paths [INT] \tdefault and maximum of max_paths per pattern longer than k with long_search paths (retrieval threshold, partial's cap) [1000]\n");
@@ -1818,6 +1823,7 @@ if (advanced) {
             fprintf(stderr, "\t   --traverse-delivery-compress-mbps [FLOAT] \tcompression rate the delivery reserve of an attempt assumes [50]\n");
             fprintf(stderr, "\t   --traverse-delivery-build-mbps [FLOAT] \tresponse-building rate it assumes until the attempt measures its own [10]\n");
             fprintf(stderr, "\t   --pattern-min-information-bits [FLOAT] \tinformation floor of a pattern (bits; an exact pattern in suffix scope is exempt) [24]\n");
+            fprintf(stderr, "\t   --pattern-max-checked-entries [INT] \twithout a dummy-edge mask: a pattern with at most this many unchecked candidate k-mers has each tested (k - 1 steps each), its counts exact; 0: none; at most 1000 [50]\n");
             fprintf(stderr, "\t   --pattern-max-contexts [INT] \tdefault and maximum of max_contexts per pattern (retrieval threshold, partial's cap) [10000]\n");
             fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
             fprintf(stderr, "\t   --pattern-max-paths [INT] \tdefault and maximum of max_paths per pattern longer than k with long_search paths (retrieval threshold, partial's cap) [1000]\n");

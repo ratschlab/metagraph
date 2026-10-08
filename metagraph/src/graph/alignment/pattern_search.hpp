@@ -49,7 +49,9 @@
  *  - graphs without the dummy-edge mask (owner decision #16 of 2026-10-08): served, see
  *    "Graphs without the dummy-edge mask" at PatternSearch. Their counts that the engine could
  *    not resolve are BOUNDS [lower, U] (Count), the route adding the estimate U x f with f
- *    from sample_real_fraction(); the lists stay exact.
+ *    from sample_real_fraction(); the lists stay exact. A pattern with few unchecked
+ *    candidates is checked entry by entry and counted exactly (owner decision #24,
+ *    Request::max_checked_entries; the route passes --pattern-max-checked-entries).
  *
  * The owner's guarantee rule holds for every type here: nothing is weakened silently, every
  * count carries its unit and its relation, and a count is never promoted by assumption.
@@ -103,9 +105,9 @@ enum class Unit { GRAPH_CONTEXTS, ANCHORS, PATHS, PLACED_OCCURRENCES, LABELS };
  *  BOUNDS    every range of every branch, offset and orientation was discovered and only the
  *            deferred scans were interrupted: lower <= true <= upper. On a graph without the
  *            dummy-edge mask also (and mostly) a completed discovery whose candidates were not
- *            all checked for source dummies: upper = U, the candidate entries (source dummies
- *            included), lower = the part known exactly (PatternSearch, "Graphs without the
- *            dummy-edge mask").
+ *            all checked for source dummies (more of them than Request::max_checked_entries):
+ *            upper = U, the candidate entries (source dummies included), lower = the part
+ *            known exactly (PatternSearch, "Graphs without the dummy-edge mask").
  *  UNKNOWN   the phase never ran: a stop came before it started, or not in this increment.
  * A search whose discovery was entered is AT_LEAST even when the stop refused its very first
  * step (AT_LEAST 0): it was interrupted, not skipped (SPEC §7.4). After any discovery stop
@@ -437,7 +439,10 @@ struct Request {
     // even-k wrapped PRIMARY graph the running U leaves out the ranges whose palindrome scan
     // is pending (the scan can only lower their share), so that it never exceeds the final U:
     // there the stop can fire late or not at all, the admission after discovery then
-    // comparing the final U.
+    // comparing the final U. (While the pattern's unchecked candidates are at most
+    // max_checked_entries, the retention compares the running lower bound instead, since the
+    // check after discovery may make the count EXACT and within the threshold; this stop
+    // still compares U.)
     bool stop_at_threshold = false;
     /**
      * Per pattern, all offsets and orientations (§5.3): the stop_at_threshold threshold for
@@ -500,7 +505,28 @@ struct Request {
      * (--pattern-min-information-bits), not a request field.
      */
     double min_information_bits = 24;
+    /**
+     * A graph without the dummy-edge mask only (owner decision #24 of 2026-10-08; never read
+     * with the mask): when discovery and its deferred scans completed with no stop and the
+     * pattern's unchecked candidates (the entries counted into U and not into the lower
+     * bound, summed over its base searches: U - lower of the total on a BASIC or CANONICAL
+     * graph; on a wrapped PRIMARY graph each entry enters both orientations' counts) number
+     * at most this, each is tested with BOSS::node_has_sentinel and only the real k-mers are
+     * counted: every count of the pattern (total, suffix, by_offset, by_orientation; the
+     * anchors of a long one) is then EXACT, 0 when all of them were source dummies. Each
+     * entry tested is charged k - 1 steps (the most symbols the test reads), so the check
+     * costs at most max_checked_entries x (k - 1) steps; a stop during it (phase MASK_SCAN)
+     * leaves the counts BOUNDS. With more unchecked candidates nothing is tested (BOUNDS, as
+     * before). 0 tests nothing (the default here; the route passes the server's
+     * --pattern-max-checked-entries, kDefaultMaxCheckedEntries unless set). Server policy,
+     * not a request field.
+     */
+    uint64_t max_checked_entries = 0;
 };
+
+// the server's default of Request::max_checked_entries (--pattern-max-checked-entries; owner
+// decision #24: a block of at most ~50 entries, about 1,500 backward steps at k = 31)
+constexpr uint64_t kDefaultMaxCheckedEntries = 50;
 
 /**
  * Thrown by a Budget whose abort predicate (Budget::set_abort) answers true at a clock reading:
@@ -553,9 +579,11 @@ enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS, MAX_PATHS };
  * Where it stopped (JSON stop.phase):
  *  DISCOVERY   the range DFS over node ranges, the W rule, the flank ranges;
  *  MASK_SCAN   the scans deferred until every range is discovered: a W-rule range's invalid
- *              edges or candidates (§4.1), and on an even-k wrapped PRIMARY graph the check
- *              of which contexts are palindromic k-mers — the only stop that, after complete
- *              discovery, can leave BOUNDS; every other discovery stop leaves AT_LEAST;
+ *              edges or candidates (§4.1), on an even-k wrapped PRIMARY graph the check
+ *              of which contexts are palindromic k-mers, and on a graph without the mask the
+ *              check of a pattern's few unchecked candidates (Request::max_checked_entries,
+ *              after the other scans) — the only stop that, after complete discovery, can
+ *              leave BOUNDS; every other discovery stop leaves AT_LEAST;
  *  EXTRACTION  enumerate()'s release of contexts or paths, stopped by the deadline after
  *              discovery (and extension) completed or stopped (its counts keep their
  *              relation: extraction counts nothing);
@@ -863,13 +891,14 @@ struct Work {
     // at an offset where a palindromic k-mer can hold the pattern (one get_node_sequence, k - 1
     // BOSS steps, per context, one step each): there about one per such range. On a graph
     // without the dummy-edge mask only these palindrome checks exist (each also tells a source
-    // dummy from a k-mer)
+    // dummy from a k-mer), and the ranges of a pattern whose few unchecked candidates were
+    // checked (Request::max_checked_entries: k - 1 steps per candidate)
     uint64_t mask_scans = 0;
     // L > k with extend_paths: the outgoing edges the extension examined, one step each
     // (allowed or not); 0 otherwise
     uint64_t extension_edges = 0;
     // every step this pattern charged: ranges_visited, plus the edges its scans examined,
-    // plus extension_edges
+    // plus k - 1 per candidate checked (Request::max_checked_entries), plus extension_edges
     uint64_t steps = 0;
     // diagnostic, not a JSON field of contract version 1: the most range descriptors held at
     // once for the release (24 bytes each; see PatternSearch::enumerate, "Memory")
@@ -1111,11 +1140,20 @@ struct Result {
  *    they are UNCHECKED, counted into the upper bound U and not into the lower bound;
  *  - the palindrome scans of an even-k wrapped PRIMARY graph spell every candidate anyway,
  *    which checks it too (a k-mer holding '$' is a dummy, and never a palindrome).
+ *  - a pattern whose discovery and scans completed with at most Request::max_checked_entries
+ *    unchecked candidates in all (owner decision #24) has each of them tested after the scans
+ *    (BOSS::node_has_sentinel, k - 1 steps each, phase MASK_SCAN): the real ones are counted
+ *    exactly and the rest dropped, so every count of the pattern is EXACT. Its unchecked
+ *    ranges are kept for that while their candidates number at most the limit (at most that
+ *    many ranges), and freed once there are more.
  * A count is then EXACT when nothing of it is unchecked (an empty block, U = 0, included:
  * absence holds), else BOUNDS {lower, U}; stops as on a masked graph (AT_LEAST, UNKNOWN). The
  * admission decisions compare U (Request::stop_at_threshold, ALL_OR_COUNT's threshold, the
  * extension's admission): conservative, stated with kNoteThresholdUpperBound when the lower
- * bound did not cross. The lists stay exact: the release tests every unchecked candidate with
+ * bound did not cross (after a check the count is EXACT, and they compare it as with the
+ * mask; while the unchecked candidates are at most the limit, the retention for ALL_OR_COUNT
+ * and the extension compares the lower bound, so that what the check admits is still there to
+ * release). The lists stay exact: the release tests every unchecked candidate with
  * BOSS::node_has_sentinel (at most k - 1 symbols read, about the cost of the spelling the
  * route does per context anyway) and never releases a source dummy, and a release that
  * enumerated every candidate makes the counts EXACT (enumerate()). Memory: PARTIAL's
@@ -1160,7 +1198,9 @@ class PatternSearch {
      * case, but on an even-k wrapped PRIMARY graph one per range at an offset where a
      * palindromic k-mer can hold the pattern, which for a short or degenerate pattern is
      * nearly every range, so up to max_steps of them; the rest of the memory is the DFS
-     * frontier, O(k * alphabet). Refusals (information floor, SUFFIX on a wrapped PRIMARY graph) come
+     * frontier, O(k * alphabet); on a graph without the mask also the unchecked ranges kept for
+     * the check of Request::max_checked_entries (at most that many). Refusals (information
+     * floor, SUFFIX on a wrapped PRIMARY graph) come
      * back as Result::refusal without charging anything. On a budget already stopped (or
      * whose work time has passed at the pattern's check_time) every count is UNKNOWN and
      * stop is {DISCOVERY, the budget's reason}. A pattern without instances
@@ -1233,7 +1273,10 @@ class PatternSearch {
      * count's lower bound to the contexts it released at that orientation and offset. With
      * extend_paths, anchors BOUNDS and U <= max_anchors, the anchors are listed (dummies
      * dropped, their counts EXACT) and extended. count() never enumerates: its counts stay
-     * BOUNDS, and the steps charged are the same in both.
+     * BOUNDS, and the steps charged are the same in both. The check of a pattern with at most
+     * Request::max_checked_entries unchecked candidates runs in both alike (before any
+     * release): its counts are then EXACT in count() as in enumerate(), the same steps
+     * charged.
      * Release runs only while the deadline's work time has not passed, reading the clock
      * before it starts, every kClockStride descriptors it prepares, every kClockStride edges
      * it examines and every kReleaseClockStride contexts it passes on (the caller's work per

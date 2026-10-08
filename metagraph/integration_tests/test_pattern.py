@@ -46,8 +46,10 @@ Fixtures:
     answers) and a server started with --pattern-build-mask on the unmasked graph (the same
     answers, mask: built_at_load). The graph as built is served too (owner decision #16 of
     2026-10-08): counts upper bounds with estimates, checked against the masked copy's exact
-    counts and an oracle of the source dummies, lists exact. Skipped when the mini index is not
-    built.
+    counts and an oracle of the source dummies, lists exact; once with the server's default
+    --pattern-max-checked-entries (owner decision #24: a pattern with at most 50 unchecked
+    candidates has each tested, its counts exact) and once with 0 (the bounds of #16 for every
+    pattern with unchecked candidates). Skipped when the mini index is not built.
   - TestPatternSynthetic: random records, BASIC, CANONICAL and PRIMARY graphs at k = 15 (and a
     multi-graph server), always run.
   - TestPatternFixtureBodies: the frozen fixture bodies (api/python/tests/data/traverse/pattern)
@@ -88,7 +90,10 @@ DEFAULT_CAPS = {'max_contexts': 10000, 'max_anchors': 1000, 'max_steps': 1000000
                 'max_labels_per_anchor': 64, 'max_annotation_work': 100000000,
                 'max_memory_mb': 256, 'max_labels': 1000, 'max_occurrences_per_label': 16,
                 # long_search "paths" (increment 4)
-                'max_paths': 1000}
+                'max_paths': 1000,
+                # owner decision #24: no request field, the unchecked candidates a pattern on a
+                # graph without its mask may have for each to be tested
+                'max_checked_entries': 50}
 DEFAULT_TIME_MS = 60000
 DEFAULT_FINALIZE_MS = 250
 
@@ -580,12 +585,19 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         cls.unmasked_server = Server(METAGRAPH, ['-i', cls.unmasked_graph,
                                                  '-a', cls.unmasked_anno],
                                      os.path.join(d, 'server_unmasked.log'))
+        # the same with the check of owner decision #24 off: every count with unchecked
+        # candidates is bounds, as any count above the limit (the tests of decision #16)
+        cls.unchecked_server = Server(METAGRAPH, ['-i', cls.unmasked_graph,
+                                                  '-a', cls.unmasked_anno,
+                                                  '--pattern-max-checked-entries', '0'],
+                                      os.path.join(d, 'server_unchecked.log'))
         cls._choose_patterns()
 
     @classmethod
     def tearDownClass(cls):
         cls.server.stop()
         cls.unmasked_server.stop()
+        cls.unchecked_server.stop()
         cls.tempdir.cleanup()
 
     @classmethod
@@ -2082,6 +2094,12 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         caps = self.unmasked_server.get('capabilities').json()['pattern']
         self.assertEqual(caps['dummy_fraction'], out['index']['dummy_fraction'])
         self.assertEqual(untimed(self.pattern(self.unmasked_server, request)), untimed(out))
+        # the check of decision #24 off: as the server started so
+        res0 = subprocess.run(cli + ['--pattern-max-checked-entries', '0'] + args,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res0.returncode, res0.stderr.decode())
+        self.assertEqual(untimed(self.pattern(self.unchecked_server, request)),
+                         untimed(json.loads(res0.stdout)))
         # the start-up note names the remedies for exact counts
         self.assertIn('the pattern search counts upper bounds with estimates (counting: '
                       'upper_bound). For exact counts: `metagraph transform --mask-dummy '
@@ -2278,7 +2296,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api',
                                         'python'))
         from metagraph.traverse.mcp_tools import CAPABILITIES_MAX_BYTES
-        for server in (self.server, self.unmasked_server):
+        for server in (self.server, self.unmasked_server, self.unchecked_server):
             text = server.get('traverse/capabilities').text
             self.assertLess(len(text.encode()) + 64, CAPABILITIES_MAX_BYTES)
         # the log names it once, at start-up
@@ -2320,8 +2338,11 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         bound never passes the exact count, an absent pattern is exact 0, the estimate of an
         ordinary pattern (no dummy holds it) is the exact count; a pattern at an island's start
         (its source dummies hold it) has an upper bound above the exact count. Anchors of a
-        pattern longer than k: a dummy never holds an anchor window (its first symbol is $)."""
-        fraction = self.unmasked_server.get('capabilities').json()['pattern'][
+        pattern longer than k: a dummy never holds an anchor window (its first symbol is $).
+        Served with the check of decision #24 off (--pattern-max-checked-entries 0), so that
+        every count with unchecked candidates is bounds, as any count above the limit is
+        (test_unmasked_tiny_blocks_are_exact compares the default with it)."""
+        fraction = self.unchecked_server.get('capabilities').json()['pattern'][
             'dummy_fraction']['value']
         long_ = [self.p40, self.absent40, self.start40]
         for scope in ('any_offset', 'suffix'):
@@ -2330,7 +2351,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                      self.start14] + ([SCAN_10] if scope == 'suffix' else [])
             request = {'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
                                     for p in short + long_], 'mode': 'count', 'scope': scope}
-            out = self.pattern(self.unmasked_server, request)
+            out = self.pattern(self.unchecked_server, request)
             masked = self.pattern(self.server, request)
             self.assertEqual('upper_bound', out['index']['counting'])
             self.assertNotIn('counting', masked['index'])
@@ -2388,7 +2409,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         labels and placed occurrences included, and a complete release makes the counts exact
         (the masked graph's); partial's cut lists are the masked graph's first ones; all_or_count
         admits on the upper bound (stated: threshold_upper_bound) and withholds a pattern whose
-        real contexts fit but whose candidates do not."""
+        real contexts fit but whose candidates do not. With the check of decision #24 off, as
+        any pattern above its limit; at the default (the last part) the few unchecked
+        candidates of start16 are checked and its contexts released."""
         panel = []
         for scope in ('any_offset', 'suffix'):
             # (SCAN_10, 20 bits, is below the floor but in suffix scope, as an exact pattern)
@@ -2403,7 +2426,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                    {'dna': self.absent40}], 'long_search': 'paths',
                       'output': {'labels': 'all'}})
         for request in panel:
-            out = self.pattern(self.unmasked_server, request)
+            out = self.pattern(self.unchecked_server, request)
             masked = self.pattern(self.server, request)
             for e, m in zip(out['patterns'], masked['patterns']):
                 with self.subTest(pattern=m['pattern'], request=request):
@@ -2429,7 +2452,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         request = {'patterns': [{'dna': self.start16}], 'max_contexts': exact}
         m = self.pattern(self.server, request)['patterns'][0]
         self.assertCompleteRetrieval(m)
-        e = self.pattern(self.unmasked_server, request)['patterns'][0]
+        e = self.pattern(self.unchecked_server, request)['patterns'][0]
         self.assertEqual({'reason': 'count_above_threshold'}, e['withheld'])
         self.assertFalse(e['retrieval_complete'])
         self.assertEqual(('bounds', upper), (e['counts']['contexts']['relation'],
@@ -2437,10 +2460,23 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertIn(NOTE_THRESHOLD_UPPER, e['notes'])
         self.assertIn(NOTE_ESTIMATE, e['notes'])
         # room for every candidate: released, the masked graph's list, the count exact
-        e = self.pattern(self.unmasked_server, dict(request, max_contexts=upper))['patterns'][0]
+        e = self.pattern(self.unchecked_server, dict(request, max_contexts=upper))['patterns'][0]
         self.assertCompleteRetrieval(e)
         self.assertEqual(m['results'], e['results'])
         self.assertEqual(m['counts'], e['counts'])
+        # at the default limit (decision #24) its unchecked candidates are few: checked, the
+        # count exact, and the contexts released at max_contexts = the exact count
+        c = self.pattern(self.unchecked_server, {'patterns': [{'dna': self.start16}],
+                                                 'mode': 'count'})['patterns'][0]
+        unchecked = c['counts']['contexts']['upper'] - c['counts']['contexts']['lower']
+        limit = self.unmasked_server.get('capabilities').json()['pattern']['caps'][
+            'max_checked_entries']
+        self.assertLessEqual(unchecked, limit)
+        e = self.pattern(self.unmasked_server, request)['patterns'][0]
+        self.assertCompleteRetrieval(e)
+        self.assertEqual(m['results'], e['results'])
+        self.assertEqual(m['counts'], e['counts'])
+        self.assertNotIn(NOTE_THRESHOLD_UPPER, e['notes'])
 
     def test_unmasked_stop_at_threshold_is_conservative(self):
         """stop_at_threshold on the unmasked graph compares the running upper bound: it stops
@@ -2465,6 +2501,82 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                     self.assertEqual([], e['results'])
                     if m['withheld'] is None:
                         self.assertIn(NOTE_THRESHOLD_UPPER, e['notes'])
+
+    def test_unmasked_tiny_blocks_are_exact(self):
+        """Owner decision #24: on the graph without its mask, a pattern whose unchecked candidates
+        (U - lower, on this BASIC graph) number at most the server's max_checked_entries (the
+        default, 50; capabilities caps and caps_rule) has each tested at query time: every count
+        exact, the masked graph's, with neither estimate nor estimate note, k - 1 = 30 steps per
+        candidate; a pattern with more is answered as with the check off, field for field but
+        the timing. In every mode (count, all_or_count, partial) and both scopes, short patterns
+        and long ones (anchors behind a leading N), so that a count and a retrieval of the same
+        request agree; the lists are the masked graph's. A step stop in the check (phase
+        mask_scan) leaves the bounds of the check off."""
+        caps = self.unmasked_server.get('capabilities').json()['pattern']
+        limit = caps['caps']['max_checked_entries']
+        self.assertEqual(50, limit)
+        self.assertIn('max_checked_entries', caps['caps_rule'])
+        self.assertEqual(0, self.unchecked_server.get('capabilities').json()['pattern']['caps'][
+            'max_checked_entries'])
+        long_n = 'N' + self.p40[1:]
+        checked, above = 0, 0
+        for scope in ('any_offset', 'suffix'):
+            # (SCAN_10, 20 bits, is below the floor but in suffix scope, as an exact pattern)
+            short = [self.p16, self.p14, self.iupac16, self.pal12, self.absent16, self.start16,
+                     self.start14] + ([SCAN_10] if scope == 'suffix' else [])
+            patterns = [{'iupac' if set(p) - set('ACGT') else 'dna': p}
+                        for p in short + [self.p40, self.start40, long_n]]
+            for strands in ('both', 'forward'):
+                # which patterns the check resolves: bounds with the check off, at most the
+                # limit of candidates unchecked
+                base = {'patterns': patterns, 'scope': scope, 'strands': strands}
+                off = self.pattern(self.unchecked_server, dict(base, mode='count'))
+                widths = []
+                for e in off['patterns']:
+                    c = e['counts'].get('contexts') or e['counts']['anchors']
+                    self.assertIsNone(e['stop'])
+                    widths.append(c['upper'] - c['lower'] if c['relation'] == 'bounds'
+                                  else None)
+                for mode in ('count', 'all_or_count', 'partial'):
+                    request = dict(base, mode=mode,
+                                   max_contexts=5 if mode == 'partial' else 10000)
+                    out = self.pattern(self.unmasked_server, request)
+                    out0 = self.pattern(self.unchecked_server, request)
+                    masked = self.pattern(self.server, request)
+                    self.assertEqual(out0['index'], out['index'])
+                    self.assertEqual(out0['limits'], out['limits'])
+                    for e, e0, m, width in zip(out['patterns'], out0['patterns'],
+                                               masked['patterns'], widths):
+                        with self.subTest(pattern=m['pattern'], scope=scope, strands=strands,
+                                          mode=mode):
+                            if width is None or width > limit:
+                                above += 1
+                                self.assertEqual(untimed(e0), untimed(e))
+                                continue
+                            checked += 1
+                            self.assertEqual(m['counts'], e['counts'])
+                            self.assertEqual(m['notes'], e['notes'])
+                            self.assertNotIn(NOTE_ESTIMATE, e['notes'])
+                            for field in ('results', 'returned', 'withheld', 'cut',
+                                          'retrieval_complete', 'stop'):
+                                self.assertEqual(m.get(field), e.get(field), field)
+                            self.assertEqual(e0['work']['ranges_visited'],
+                                             e['work']['ranges_visited'])
+                            self.assertEqual(e0['work']['steps'] + width * (self.k - 1),
+                                             e['work']['steps'])
+        self.assertGreater(checked, 20)
+        self.assertGreater(above, 20)
+        # the step stop: start16 with the steps of its discovery and 29 more (one candidate
+        # needs 30): stop {mask_scan, max_steps}, the bounds and the estimate of the check off
+        request = {'patterns': [{'dna': self.start16}], 'mode': 'count'}
+        e0 = self.pattern(self.unchecked_server, request)['patterns'][0]
+        budget = e0['work']['steps'] + self.k - 2
+        e = self.pattern(self.unmasked_server, dict(request, max_steps=budget))['patterns'][0]
+        self.assertEqual({'phase': 'mask_scan', 'reason': 'max_steps'}, e['stop'])
+        self.assertEqual(e0['counts'], e['counts'])
+        self.assertEqual(e0['notes'], e['notes'])
+        self.assertEqual(e0['work']['steps'], e['work']['steps'])
+        self.assertEqual('full', e['determinism'])
 
 @unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")

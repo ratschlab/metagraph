@@ -96,7 +96,9 @@ version 1, both opt-in, each gated on the capabilities block, never on a milesto
   [`lower`, `upper`] with an `estimate` (round(upper × f)): show the estimate **as an estimate**, beside its bounds
   and the host's `dummy_fraction`, never as the count and never as a bound (a pattern at a record start can sit far
   below it). The merge algebra of §3.1 item 2 adds `lower` and `upper` and leaves estimates out; a merged estimate,
-  if the service shows one, is labelled as such. The host admits on the upper bound (`all_or_count` can withhold a
+  if the service shows one, is labelled as such. Tiny counts can be exact there too (owner decision #24): a pattern
+  with at most `caps.max_checked_entries` (default 50) unchecked candidates has each checked by the host, its counts
+  `exact` without `estimate`, as on a masked host. The host admits on the upper bound (`all_or_count` can withhold a
   pattern whose true count fits, note `threshold_upper_bound`; `partial` lists it); its lists are exact. New notes:
   `estimate_sampled_dummy_fraction`, `threshold_upper_bound`, `no_stop_codon`. `mask_required` is retired: no
   current build answers it (an older one may: keep passing it through).

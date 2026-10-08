@@ -454,7 +454,10 @@ place that read the mask counts candidates instead:
   PRIMARY graph the palindrome scans spell every candidate they check, which settles it too.
 - **The count** is `exact` when nothing of it is unchecked, when U = 0 (an empty block: absence holds), or after a
   release that enumerated every candidate; otherwise `bounds` {lower, U}. Stops leave `at_least` and `unknown` as
-  on a masked graph.
+  on a masked graph. **Tiny blocks are checked** (the owner's decision #24): when discovery and its scans complete
+  with at most `--pattern-max-checked-entries` (default 50, at most 1,000, 0 off; `caps.max_checked_entries`)
+  unchecked candidates in all, each is tested with `node_has_sentinel` after the scans (k − 1 steps each, phase
+  `mask_scan`), so every count of the pattern is `exact` in every mode; larger blocks are not touched (no sampling).
 - **The estimate** U × f, rounded and kept inside [lower, U], is stated beside every `bounds` count (the route,
   `count_json`), with the note `estimate_sampled_dummy_fraction`. f is the fraction of real k-mers among the
   graph's entries whose W is not `$`, sampled once per graph at load (`pattern::sample_real_fraction`: 10,000

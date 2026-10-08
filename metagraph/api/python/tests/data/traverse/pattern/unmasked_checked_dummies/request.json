@@ -1,0 +1,11 @@
+{
+ "patterns": [
+  {
+   "dna": "GATGCCGGTGAACAAC",
+   "id": "start"
+  }
+ ],
+ "mode": "count",
+ "scope": "suffix",
+ "strands": "forward"
+}

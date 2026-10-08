@@ -23,7 +23,8 @@
  *    2026-10-08, without it (counting "upper_bound"): a count is then the bounds [lower, U],
  *    U the BOSS entries of its ranges (source dummies among them), with the additive estimate
  *    U x f (f the graph's sampled dummy fraction, DummyFraction), while every list stays exact
- *    (the engine drops the dummies it releases);
+ *    (the engine drops the dummies it releases); a pattern with at most max_checked_entries
+ *    unchecked candidates has them tested and its counts exact (owner decision #24);
  *  - peptides with the stop '*' (owner decision #19): a stop codon of the request's genetic
  *    code; a table without an unconditional stop codon matches nothing there, stated in a note.
  * Everything a later increment adds is refused (400 "later_increment"), never ignored: the
@@ -97,6 +98,11 @@ struct PatternLimits {
     // the estimated finalisation of what the answer buffers: delivery_* below)
     double finalize_ms = 250;
     double min_information_bits = 24;
+    // owner decision #24, a graph without its dummy-edge mask only: a pattern whose unchecked
+    // candidates number at most this has each of them tested (k - 1 steps each), its counts
+    // then exact (graph::pattern::Request::max_checked_entries); 0 tests none. Not a request
+    // field: the server's policy (--pattern-max-checked-entries), stated in caps
+    uint64_t max_checked_entries = graph::pattern::kDefaultMaxCheckedEntries;
     // patterns per request: above it the request is refused (a list is not cut)
     uint64_t max_patterns = 16;
     // the labelled retrieval (output.labels "all", increment 3; §4.3, §5.3): the labels kept

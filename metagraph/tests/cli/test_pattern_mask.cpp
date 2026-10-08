@@ -690,4 +690,93 @@ TEST(PatternMaskUnmasked, DummyFractionJson) {
     EXPECT_GT(g.lower, 0.999);
 }
 
+// Owner decision #24: --pattern-max-checked-entries, as `metagraph pattern` and the server read
+// it (the same Config): default 50, any integer in [0, 1000], refused at start-up beyond it or
+// when not an integer; through the real loader the capabilities state it, and on the graph
+// without its mask a count with few unchecked candidates is exact at the default, the masked
+// count, and bounds with 0
+TEST(PatternMaskUnmasked, CheckedEntriesFlag) {
+    const std::string dir = make_dir("checked_flag");
+    const std::string built = build_masked(dir, "basic", "stat");
+    const std::string stripped = strip(dir, built);
+    const std::string anno = dir + "/anno.column.annodbg";
+    {
+        auto graph = load(built);
+        annot::ColumnCompressed<> annotation(graph->max_index());
+        std::vector<uint64_t> rows(graph->max_index());
+        std::iota(rows.begin(), rows.end(), 0);
+        annotation.add_labels(rows, { "records" });
+        annotation.serialize(anno);
+    }
+    std::ofstream(dir + "/request.json") << "{}";
+    auto config_of = [&](const std::string &graph, std::vector<std::string> flags) {
+        std::vector<std::string> args = { "pattern" };
+        args.insert(args.end(), flags.begin(), flags.end());
+        for (const std::string &a : { std::string("-i"), graph, std::string("-a"), anno,
+                                      dir + "/request.json" }) {
+            args.push_back(a);
+        }
+        return make_config(args);
+    };
+    EXPECT_EQ(50u, config_of(stripped, {})->pattern_max_checked_entries);
+    EXPECT_EQ(50u, pattern_limits(*config_of(stripped, {})).max_checked_entries);
+    for (const char *value : { "0", "7", "1000" }) {
+        EXPECT_EQ(std::stoull(value), pattern_limits(*config_of(
+                stripped, { "--pattern-max-checked-entries", value })).max_checked_entries);
+    }
+    for (const char *value : { "1001", "-1", "x", "5.5", "" }) {
+        EXPECT_DEATH(config_of(stripped, { "--pattern-max-checked-entries", value }),
+                     "--pattern-max-checked-entries must be an integer in \\[0, 1000\\]")
+            << value;
+    }
+
+    // through the loader: the capabilities state the limit; the few unchecked candidates of
+    // short patterns at the records' and islands' starts (their source dummies, and their
+    // contexts past offset 0) are checked at the default, each count then the masked graph's
+    auto masked = initialize_annotated_dbg(*config_of(built, {}));
+    auto absent = initialize_annotated_dbg(*config_of(stripped, {}));
+    PatternLimits on = pattern_limits(*config_of(stripped, {}));
+    PatternLimits off = pattern_limits(*config_of(stripped,
+                                                  { "--pattern-max-checked-entries", "0" }));
+    on.min_information_bits = 4;
+    off.min_information_bits = 4;
+    EXPECT_EQ(50u, pattern_capabilities_json(absent.get(), on, false)["caps"]
+                           ["max_checked_entries"].asUInt64());
+    EXPECT_EQ(0u, pattern_capabilities_json(absent.get(), off, false)["caps"]
+                          ["max_checked_entries"].asUInt64());
+    const std::vector<std::string> patterns = { "ACGG", "GAGA", "GAG", "CAGT", "GTAAC" };
+    std::string body = "{\"patterns\": [";
+    for (size_t i = 0; i < patterns.size(); ++i) {
+        body += std::string(i ? ", " : "") + "{\"dna\": \"" + patterns[i] + "\"}";
+    }
+    const Json::Value json = parse_pattern_body(body + "], \"mode\": \"count\"}");
+    const Json::Value exact = process_pattern_request(json, *masked, on, "");
+    const Json::Value at = process_pattern_request(json, *absent, on, "");
+    const Json::Value without = process_pattern_request(json, *absent, off, "");
+    size_t resolved = 0;
+    for (Json::ArrayIndex i = 0; i < patterns.size(); ++i) {
+        SCOPED_TRACE(patterns[i]);
+        const Json::Value &x = exact["patterns"][i]["counts"]["contexts"];
+        const Json::Value &c = at["patterns"][i]["counts"]["contexts"];
+        const Json::Value &b = without["patterns"][i]["counts"]["contexts"];
+        EXPECT_EQ(exact["patterns"][i]["counts"], at["patterns"][i]["counts"]);
+        EXPECT_EQ("exact", c["relation"].asString());
+        if (b["relation"].asString() == "exact") {
+            // nothing unchecked (a pattern of length k is spelled whole): nothing to check
+            EXPECT_EQ(without["patterns"][i]["counts"], at["patterns"][i]["counts"]);
+            EXPECT_EQ(without["patterns"][i]["work"], at["patterns"][i]["work"]);
+            continue;
+        }
+        ++resolved;
+        ASSERT_EQ("bounds", b["relation"].asString()) << b;
+        const uint64_t unchecked = b["upper"].asUInt64() - b["lower"].asUInt64();
+        ASSERT_LE(unchecked, 50u) << b;
+        EXPECT_LE(b["lower"].asUInt64(), x["value"].asUInt64());
+        EXPECT_GE(b["upper"].asUInt64(), x["value"].asUInt64());
+        EXPECT_EQ(without["patterns"][i]["work"]["steps"].asUInt64() + unchecked * (kK - 1),
+                  at["patterns"][i]["work"]["steps"].asUInt64());
+    }
+    EXPECT_LT(2u, resolved);
+}
+
 } // namespace
