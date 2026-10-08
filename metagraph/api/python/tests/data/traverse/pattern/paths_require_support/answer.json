@@ -848,20 +848,26 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.079666,
-    "extension_ms": 0.029167,
-    "label_discovery_ms": 0.421583,
-    "placement_ms": 0.444333
+    "elapsed_ms": 0.052667,
+    "extension_ms": 0.018959,
+    "label_discovery_ms": 0.323875,
+    "label_intersection_ms": 0.0025,
+    "placement_ms": 0.25075,
+    "verification_ms": 0.010167
    },
    "withheld": null,
    "work": {
     "annotation_rows": 40,
+    "annotation_rows_distinct": 20,
     "annotation_units": 21980,
+    "extension_anchors": 2,
+    "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
     "memory_bytes": 44518,
     "ranges_visited": 62,
-    "steps": 80
+    "steps": 80,
+    "verification_steps": 740
    }
   },
   {
@@ -1077,24 +1083,30 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.103458,
-    "extension_ms": 0.046,
-    "label_discovery_ms": 0.756375,
-    "placement_ms": 0.795625
+    "elapsed_ms": 0.054916,
+    "extension_ms": 0.025792,
+    "label_discovery_ms": 0.611458,
+    "label_intersection_ms": 0.001667,
+    "placement_ms": 0.515583,
+    "verification_ms": 0.002458
    },
    "withheld": null,
    "work": {
     "annotation_rows": 84,
+    "annotation_rows_distinct": 42,
     "annotation_units": 47240,
+    "extension_anchors": 2,
+    "extension_branches": 0,
     "extension_edges": 43,
     "mask_scans": 0,
     "memory_bytes": 45204,
     "ranges_visited": 62,
-    "steps": 105
+    "steps": 105,
+    "verification_steps": 178
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 2.779417
+  "elapsed_ms": 1.922333
  }
 }

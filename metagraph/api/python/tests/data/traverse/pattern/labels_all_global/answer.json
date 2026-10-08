@@ -4318,13 +4318,14 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.1955,
-    "label_discovery_ms": 0.348375,
-    "placement_ms": 0.189042
+    "elapsed_ms": 0.239334,
+    "label_discovery_ms": 0.543292,
+    "placement_ms": 0.274167
    },
    "withheld": null,
    "work": {
     "annotation_rows": 48,
+    "annotation_rows_distinct": 24,
     "annotation_units": 24440,
     "mask_scans": 0,
     "memory_bytes": 215316,
@@ -4334,6 +4335,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.999
+  "elapsed_ms": 1.49
  }
 }

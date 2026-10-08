@@ -1,8 +1,10 @@
 # by_label_null_partial (validator regression, not a generated fixture)
 
-A real answer of `metagraph pattern --json` (the CLI, built at d0491f7d) on a tiny index the outside review GPT-2
-built for its recheck: a graph `varying.dbg` with one 512 KiB label in a row-diff annotation (`long-label.row_diff
-.annodbg`), `--pattern-build-mask --pattern-min-information-bits 0`, the request in `request.json`.
+A real answer of `metagraph pattern --json` (the CLI, built at d0491f7d; answered again by the build of round fix3,
+2026-10-08, identical apart from `timing` and the counter `work.annotation_rows_distinct` it adds) on a tiny index
+the outside review GPT-2 built for its recheck: a graph `varying.dbg` with one 512 KiB label in a row-diff
+annotation (`long-label.row_diff.annodbg`), `--pattern-build-mask --pattern-min-information-bits 0`, the request in
+`request.json`.
 
 Its second pattern (`AAA`) shows what no fixture of the mini index can: in `partial`, the memory account could not
 hold `by_label` (SPEC §14.4), so `by_label: null`, every context read `labels_status: "output_budget"`, `stop

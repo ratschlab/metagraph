@@ -136,11 +136,13 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.054459,
-    "extension_ms": 0.02125
+    "elapsed_ms": 0.028542,
+    "extension_ms": 0.01225
    },
    "withheld": null,
    "work": {
+    "extension_anchors": 2,
+    "extension_branches": 0,
     "extension_edges": 13,
     "mask_scans": 0,
     "ranges_visited": 62,
@@ -272,7 +274,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.004875
+    "elapsed_ms": 0.00425
    },
    "withheld": null,
    "work": {
@@ -283,6 +285,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.074542
+  "elapsed_ms": 0.040833
  }
 }

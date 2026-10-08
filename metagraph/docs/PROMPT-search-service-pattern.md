@@ -113,6 +113,22 @@ version 1, both opt-in, each gated on the capabilities block, never on a milesto
 - **Identity**: the mask and the Bloom filter are derived data of the graph, outside `index_fp`; a host that gains
   a mask keeps its `index_fp` (only its counting becomes `exact`).
 
+**Review GPT-3 and the owner's decision P9 (in the build, round fix3 of 2026-10-08; SPEC §18).** Additions only:
+- Work that ran past its time budget into a 503 `deadline` now stops on time with a stated stop (`{extension,
+  time}`, `{placement, time}`, `{output, time}`): long paths, homopolymer and repeat paths, and many occurrences
+  under a small `max_occurrences_per_label` are answered or stopped, not lost.
+- `determinism: "time_limited"` can come with `stop: null` (a completed pattern of more than 191 bases whose
+  low-complexity diagnostic the clock cut: complete counts, the note left out). Never infer a stop from
+  `time_limited`; keep showing `time_limited` as "not reproducible".
+- The note `low_complexity_pattern` is never stated beside a stop; its absence says nothing about the pattern.
+- New counters in an entry's `work` and `timing` (`extension_anchors`, `extension_branches`,
+  `annotation_rows_distinct`, `verification_steps`, `label_intersection_ms`, `verification_ms`): pass them through;
+  they describe the work, never the pattern.
+- Capabilities: `caps_rule` and `protein_rule` are references to the SPEC (never parse them; act on `caps`,
+  `protein_residues`, `genetic_codes`); the delivery rates are numbers (`delivery_mbps`). The fixture servers' documents keep
+  at least 1 KiB under the 32 KiB ceiling of the tool that returns it whole (`CAPABILITIES_MAX_BYTES`; a test holds
+  them to it), 1,643 bytes shorter than before.
+
 ## 2. When
 
 | backend milestone | content | state |

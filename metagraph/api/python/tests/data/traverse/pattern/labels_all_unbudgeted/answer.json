@@ -706,13 +706,14 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.078375,
-    "label_discovery_ms": 0.015792,
+    "elapsed_ms": 0.116834,
+    "label_discovery_ms": 0.020334,
     "placement_ms": 0.0
    },
    "withheld": null,
    "work": {
     "annotation_rows": 12,
+    "annotation_rows_distinct": 12,
     "annotation_units": 120,
     "mask_scans": 0,
     "memory_bytes": 27988,
@@ -722,6 +723,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.137375
+  "elapsed_ms": 0.191292
  }
 }

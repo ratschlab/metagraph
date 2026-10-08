@@ -258,24 +258,30 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.255916,
-    "extension_ms": 0.117291,
-    "label_discovery_ms": 0.026625,
-    "placement_ms": 0.0
+    "elapsed_ms": 0.128166,
+    "extension_ms": 0.075458,
+    "label_discovery_ms": 0.011375,
+    "label_intersection_ms": 0.002084,
+    "placement_ms": 0.0,
+    "verification_ms": 0.000167
    },
    "withheld": null,
    "work": {
     "annotation_rows": 10,
+    "annotation_rows_distinct": 10,
     "annotation_units": 100,
+    "extension_anchors": 2,
+    "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
     "memory_bytes": 7976,
     "ranges_visited": 82,
-    "steps": 100
+    "steps": 100,
+    "verification_steps": 0
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.460959
+  "elapsed_ms": 0.175
  }
 }

@@ -251,11 +251,12 @@ Json::Value process_pattern_request(const Json::Value &json,
  * The `pattern` block of GET /capabilities (§7.3): the contract version, whether this server
  * can answer /pattern (available: true | false | null while the single index loads, with the
  * reason when false), the modes, projections, kinds, scopes and strands, the caps and the
- * finalisation reserve, and what the graph is (mode, k, alphabet, mask, counting: exact with
- * the mask, upper_bound without it, and then its dummy_fraction; owner decision #16) and what
- * its annotation gives the labelled retrieval (placement, support, annotation: budgeted or
- * unbudgeted). |anno_graph| is null while the index loads; |multi_graph| servers answer only
- * that they are not served yet.
+ * finalisation reserve with the delivery rates (delivery_mbps; caps_rule and protein_rule are
+ * references to the SPEC, owner decision P9), and what the graph is (mode, k, alphabet, mask,
+ * counting: exact with the mask, upper_bound without it, and then its dummy_fraction; owner
+ * decision #16) and what its annotation gives the labelled retrieval (placement, support,
+ * annotation: budgeted or unbudgeted). |anno_graph| is null while the index loads;
+ * |multi_graph| servers answer only that they are not served yet.
  */
 Json::Value pattern_capabilities_json(const graph::AnnotatedDBG *anno_graph,
                                       const PatternLimits &limits, bool multi_graph);

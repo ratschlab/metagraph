@@ -22522,13 +22522,14 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 6.707667,
-    "label_discovery_ms": 25.117292,
-    "placement_ms": 25.628542
+    "elapsed_ms": 3.98875,
+    "label_discovery_ms": 14.258625,
+    "placement_ms": 12.195417
    },
    "withheld": null,
    "work": {
     "annotation_rows": 1778,
+    "annotation_rows_distinct": 889,
     "annotation_units": 679143,
     "mask_scans": 0,
     "memory_bytes": 1048138,
@@ -27506,13 +27507,14 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 4.412,
-    "label_discovery_ms": 7.641791,
-    "placement_ms": 6.301333
+    "elapsed_ms": 2.366083,
+    "label_discovery_ms": 3.722042,
+    "placement_ms": 3.297792
    },
    "withheld": null,
    "work": {
     "annotation_rows": 412,
+    "annotation_rows_distinct": 206,
     "annotation_units": 160651,
     "mask_scans": 0,
     "memory_bytes": 1048138,
@@ -28993,13 +28995,14 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 2.357625,
-    "label_discovery_ms": 1.270417,
-    "placement_ms": 1.489625
+    "elapsed_ms": 1.431541,
+    "label_discovery_ms": 0.84975,
+    "placement_ms": 0.656917
    },
    "withheld": null,
    "work": {
     "annotation_rows": 100,
+    "annotation_rows_distinct": 51,
     "annotation_units": 40548,
     "mask_scans": 0,
     "memory_bytes": 1048138,
@@ -29392,13 +29395,14 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 1.532459,
-    "label_discovery_ms": 0.108458,
-    "placement_ms": 0.007334
+    "elapsed_ms": 1.006,
+    "label_discovery_ms": 0.054625,
+    "placement_ms": 0.00425
    },
    "withheld": null,
    "work": {
     "annotation_rows": 1,
+    "annotation_rows_distinct": 1,
     "annotation_units": 290,
     "mask_scans": 0,
     "memory_bytes": 1048138,
@@ -29408,6 +29412,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 85.552
+  "elapsed_ms": 45.721
  }
 }

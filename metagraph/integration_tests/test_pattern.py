@@ -315,6 +315,30 @@ class Records:
                     extend(x)
         return out
 
+    def branchings(self, pattern, k, strands='both', canonical=False):
+        """The walks of k to L - 1 bases of the graph-walk oracle of paths (anchors included)
+        that two or more k-mers of the graph extend at the next position: where the extension
+        branches (work.extension_branches, review GPT-3)."""
+        assert len(pattern) > k
+        count = 0
+        for _, q in self.oriented(pattern, strands, not canonical):
+            def extend(s):
+                nonlocal count
+                if len(s) == len(q):
+                    return
+                nxt = [b for b in IUPAC[q[len(s)]]
+                       if self.has_kmer(s[len(s) - k + 1:] + b, canonical)]
+                count += len(nxt) > 1
+                for b in nxt:
+                    extend(s + b)
+            starts = {''}
+            for c in q[:k]:
+                starts = {x + b for x in starts for b in IUPAC[c]}
+            for x in sorted(starts):
+                if self.has_kmer(x, canonical):
+                    extend(x)
+        return count
+
     def source_dummies(self, k, canonical=False):
         """The source dummy k-mers of the BOSS graph of these records (owner decision #16:
         what a graph without its dummy-edge mask counts besides its k-mers): '$' * j + x[:k - j]
@@ -936,9 +960,15 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'resident_only': True, 'caps': DEFAULT_CAPS,
             'default_time_budget_ms': DEFAULT_TIME_MS,
             'finalize_reserve_ms': DEFAULT_FINALIZE_MS,
+            # owner decision P9: the delivery rates as numbers (MB/s), the prose rules SPEC
+            # references
+            'delivery_mbps': {'build': 10, 'compress': 50},
         }
         self.assertEqual(expected, {x: p[x] for x in expected})
         self.assertEqual(['any_offset'], p['scopes_by_graph_mode']['primary'])
+        for rule, sections in (('caps_rule', '4.5, 7.4, 7.6, 12.1'), ('protein_rule', '12.2, 18')):
+            self.assertTrue(p[rule].endswith('SPEC-pattern-search.md sections ' + sections), rule)
+        self.assertTrue(all(cap in p['caps_rule'] for cap in p['caps']))
         # the same block on the probe a service reads (§7.3)
         probe = self.server.get('traverse/capabilities').json()
         self.assertEqual(p, probe['pattern'])
@@ -1285,6 +1315,16 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertGreaterEqual(c['candidates_examined'], max(len(expected), n - 1))
         self.assertIn('extension_edges', entry['work'])
         self.assertIn('extension_ms', entry['timing'])
+        # review GPT-3 (round fix3): the anchors whose extension began (every anchor: it
+        # completed) and the walks where it branched, against the graph-walk oracle
+        self.assertEqual((len(anchors), self.records.branchings(pattern, k)),
+                         (entry['work']['extension_anchors'],
+                          entry['work']['extension_branches']))
+        labelled = labels and 'results' in entry
+        for field in ('annotation_rows_distinct', 'verification_steps'):
+            self.assertEqual(labelled, field in entry['work'], field)
+        for field in ('label_intersection_ms', 'verification_ms'):
+            self.assertEqual(labelled, field in entry['timing'], field)
         if 'results' not in entry:
             return
         self.assertCompleteRetrieval(entry)
@@ -1308,10 +1348,15 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         if not labels:
             return
 
+        # the rows read: each distinct k-mer of the paths once (BASIC: a k-mer is its row)
+        self.assertEqual(len({s[i:i + k] for _, s in expected for i in range(n)}),
+                         entry['work']['annotation_rows_distinct'])
         unions, paths_of, verified_of = {}, {}, {}
+        carried = 0
         for r in entry['results']:
             s, strand = r['sequence'], r['strand']
             carriers, verified = self.path_columns(s)
+            carried += len(carriers)
             listed = set(verified) if require_verified else carriers
             self.assertEqual(('complete', len(carriers)), (r['labels_status'], r['labels_total']))
             if require_verified:
@@ -1361,6 +1406,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertCount(entry['counts']['occurrences'], len(placed), unit='placed_occurrences')
         # every occurrence of the oriented pattern in the FASTA records, each once
         self.assertEqual(self.placed_oracle(pattern), placed)
+        # the verification (record placement) looks up the rows of the n k-mers of every path
+        # for every label carrying it, one unit each, before its joins and record steps
+        self.assertGreaterEqual(entry['work']['verification_steps'], n * carried)
 
     def paths_request(self, patterns, **kw):
         return dict({'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
@@ -1823,6 +1871,12 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(('record', 'budgeted'), (entry['placement'], entry['annotation']))
         self.assertEqual(([], []), (entry['rows_refused'], entry['anchors_truncated']))
         self.assertEqual(len(expected), len(entry['results']))
+        # review GPT-3 (round fix3): the rows read, each distinct k-mer once (BASIC: a k-mer is
+        # its row); the paths' counters are not a context's
+        self.assertEqual(len({kmer for _, kmer, _ in expected}),
+                         entry['work']['annotation_rows_distinct'])
+        self.assertNotIn('verification_steps', entry['work'])
+        self.assertNotIn('verification_ms', entry['timing'])
         rank = {b['column']: i for i, b in enumerate(entry['by_label'])}
         unions = {}
         for r in entry['results']:
@@ -2290,21 +2344,32 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                                        q['dummy_fraction']))
             self.assertEqual(dict(q, mask='absent', counting='upper_bound', dummy_fraction=frac),
                              p)
-        # the probe's document stays within the ceiling of the MCP tool that returns it in one
-        # piece (traverse_capabilities, CAPABILITIES_MAX_BYTES of the Python API), which the
-        # mini index's document nearly fills: the pattern block's additions are small
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api',
-                                        'python'))
-        from metagraph.traverse.mcp_tools import CAPABILITIES_MAX_BYTES
-        for server in (self.server, self.unmasked_server, self.unchecked_server):
-            text = server.get('traverse/capabilities').text
-            self.assertLess(len(text.encode()) + 64, CAPABILITIES_MAX_BYTES)
+        # (the probe's size under the MCP tool's ceiling: test_capabilities_byte_budget)
         # the log names it once, at start-up
         with open(os.path.join(self.tempdir.name, 'server_unmasked.log')) as log:
             text = log.read()
         self.assertRegex(text, r'Dummy fraction sampled for the pattern search in [\d.]+ s')
         self.assertIn('The graph has no dummy-edge mask (.edgemask): the pattern search counts '
                       'upper bounds with estimates', text)
+
+    def test_capabilities_byte_budget(self):
+        """The probe's document (GET /traverse/capabilities, as served: compact JSON) stays 1 KiB
+        under the ceiling of the MCP tool that returns it in one piece (traverse_capabilities,
+        CAPABILITIES_MAX_BYTES of the Python API), on the masked, the unmasked and the unchecked
+        mini servers (owner decision P9 of 2026-10-08): the room the next increment's additions
+        need. The pattern block's prose fields are SPEC references (the document of the
+        unmasked mini had 5 bytes left under the old guard of 64 bytes before); the fixture
+        servers' stored documents are held to the same budget by test_pattern_fixtures.py."""
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api',
+                                        'python'))
+        from metagraph.traverse.mcp_tools import CAPABILITIES_MAX_BYTES
+        budget = CAPABILITIES_MAX_BYTES - 1024
+        for name, server in (('masked', self.server), ('unmasked', self.unmasked_server),
+                             ('unchecked', self.unchecked_server)):
+            for route in ('traverse/capabilities', 'capabilities'):
+                size = len(server.get(route).content)
+                self.assertLessEqual(size, budget, f'{name} {route}: {size} bytes, '
+                                                   f'{budget - size} left under {budget}')
 
     def assertUnmaskedCount(self, count, exact, upper, fraction, where=''):
         """A count of the unmasked graph against the masked graph's exact count and the oracle's

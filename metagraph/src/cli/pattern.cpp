@@ -70,6 +70,16 @@ constexpr const char kSupportVerified[] = "record_verified";
 // them; listed in the capabilities
 constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ*";
 
+// The two prose fields of the capabilities, references to the SPEC since owner decision P9 of
+// 2026-10-08 (pattern_capabilities_json): every cap named in the first (the rule names each,
+// review of 2026-10-07, R2-04)
+constexpr const char kCapsRule[] = "max_contexts, max_anchors, max_paths, max_steps, "
+    "time_budget_ms, max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels, "
+    "max_occurrences_per_label: maxima of request fields (lowered, in limits.clamped); "
+    "max_patterns, min_information_bits, max_checked_entries: server policy. "
+    "SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1";
+constexpr const char kProteinRule[] = "SPEC-pattern-search.md sections 12.2, 18";
+
 // The note of an entry answered on a graph without its dummy-edge mask (counting
 // "upper_bound", owner decision #16) where a count carries an estimate: each such count is the
 // bounds [lower, upper], upper the BOSS entries of its ranges (source dummies included), and
@@ -690,6 +700,11 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     if (long_paths && result->anchors) {
         // the outgoing edges the extension examined, one step each (part of steps)
         work["extension_edges"] = uint_json(result->work.extension_edges);
+        // (review GPT-3, round fix3; not steps) the anchors whose extension began, each spelled
+        // once (k - 1 BOSS steps no step charges), and the nodes the extension expanded with
+        // two or more k-mers allowed at the next position
+        work["extension_anchors"] = uint_json(result->work.extension_anchors);
+        work["extension_branches"] = uint_json(result->work.extension_branches);
     }
     e["work"] = std::move(work);
     e["stop"] = stop_json(result->stop);
@@ -736,6 +751,26 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
         timing["extension_ms"] = result->extension_ms;
     e["timing"] = std::move(timing);
     return e;
+}
+
+/**
+ * The labelled retrieval's counters of one entry (review GPT-3, round fix3), which apply_labels
+ * does not merge: in every entry with labels (0 where none were read, e.g. a withheld count),
+ * the distinct rows read beside the reads (work.annotation_rows counts both steps' reads); for
+ * the paths of a long pattern also the verification's units of work and the time of the paths'
+ * label lists and of their verification. Additive fields of work and timing; nothing for a
+ * refused slot.
+ */
+void put_retrieval_counters(Json::Value *entry, const RetrievalCounters &c, bool paths) {
+    Json::Value &e = *entry;
+    if (e.isMember("error"))
+        return;
+    e["work"]["annotation_rows_distinct"] = uint_json(c.rows_distinct);
+    if (!paths)
+        return;
+    e["work"]["verification_steps"] = uint_json(c.verification_steps);
+    e["timing"]["label_intersection_ms"] = c.label_intersection_ms;
+    e["timing"]["verification_ms"] = c.verification_ms;
 }
 
 } // namespace
@@ -1178,6 +1213,8 @@ Json::Value process_pattern_request(
         uint64_t released = 0;
         // output.labels "all": the pattern's labels, read in the work phase
         std::optional<LabelsAnswer> labels;
+        // the labels are a long pattern's paths' (retrieve_paths)
+        bool label_paths = false;
     };
     std::vector<Answered> answered;
     answered.reserve(req.patterns.size());
@@ -1215,6 +1252,7 @@ Json::Value process_pattern_request(
                     a.labels = retrieval->retrieve_paths(collected, a.released, length, mode,
                                                          *a.result->extraction, graph_name,
                                                          req.require_verified);
+                    a.label_paths = true;
                 }
             } else {
                 const size_t length = spec.pattern->length();
@@ -1260,7 +1298,9 @@ Json::Value process_pattern_request(
                                        strand_stated, std::move(a.results), a.released,
                                        req.long_paths, fraction ? &*fraction : nullptr);
         if (a.labels) {
+            const RetrievalCounters counters = a.labels->counters;
             apply_labels(&entry, std::move(*a.labels), mode);
+            put_retrieval_counters(&entry, counters, a.label_paths);
         } else if (req.annotation_named && !read_labels && entry.isMember("notes")) {
             // the labels were asked for (or bounded) and none are read here: said, not
             // ignored (mode count, or output.labels "none")
@@ -1373,18 +1413,12 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     }
     p["genetic_codes"] = std::move(codes);
     p["default_genetic_code"] = GeneticCode::kStandard;
-    // (compact: the capabilities document a service's MCP tool returns in one piece has a
-    // ceiling of 32 KiB, api/python/metagraph/traverse/mcp_tools.py CAPABILITIES_MAX_BYTES,
-    // which the mini index's document nearly fills)
-    p["protein_rule"] = "A protein pattern (patterns[i].protein) is a peptide over "
-        "protein_residues (any case): the 20 amino acids, X (any residue, never a stop), B (D "
-        "or N), Z (E or Q), J (I or L) and the stop '*' (a stop codon). It is searched as its "
-        "codon automaton in genetic_code (an id of genetic_codes, default_genetic_code when "
-        "omitted): its instances are exactly the codon strings that translate to it, on both "
-        "strands. Its length is in bases (3 per residue), so more than k / 3 residues make a "
-        "pattern longer than k (long_search). Any other character: bad_alphabet in its slot. "
-        "Tables 27, 28 and 31 code some codons as a residue and as a stop in context: they "
-        "match as their residue, and '*' matches nothing there (note no_stop_codon)";
+    // a reference, not the rule (owner decision P9 of 2026-10-08): the capabilities document a
+    // service's MCP tool returns in one piece has a ceiling of 32 KiB
+    // (api/python/metagraph/traverse/mcp_tools.py CAPABILITIES_MAX_BYTES), which the
+    // document of the mini index nearly filled; the rule is the SPEC's, and the machine-readable
+    // part is in the fields above. ASCII only: the writers escape any other byte as \uXXXX
+    p["protein_rule"] = kProteinRule;
     p["default_scope"] = to_string(Scope::ANY_OFFSET);
     Json::Value by_mode;
     by_mode["basic"] = strings_json({ "suffix", "any_offset" });
@@ -1423,33 +1457,18 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // the budget of a request that names none: unlike the other caps, below the maximum
     p["default_time_budget_ms"] = number_json(limits.default_time_ms);
     p["finalize_reserve_ms"] = number_json(limits.finalize_ms);
-    // review of 2026-10-07: R2-04 (min_information_bits and max_patterns are no request
-    // field's maximum) and X-EFFICIENCY-04 (the time kept back from the work grows with what
-    // the answer holds); owner decision #24 (max_checked_entries, no request field either: on a
-    // graph without its mask, a pattern with at most that many unchecked candidates has each
-    // tested, its counts exact; SPEC §7.4)
-    p["caps_rule"] = "max_contexts, max_anchors, max_steps, time_budget_ms, "
-        "max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels, "
-        "max_occurrences_per_label and max_paths are the maxima of their request fields: a "
-        "larger request value is lowered to the cap and listed in limits.clamped; each is also "
-        "its field's default, except time_budget_ms, whose default is default_time_budget_ms. "
-        "max_patterns bounds the length of patterns: a longer list is refused, never cut. "
-        "min_information_bits is the server's information floor, not a request field. "
-        // owner decision #24, compact (see protein_rule's note on the document's ceiling;
-        // "(long_search lists the values served)", which the field long_search itself says,
-        // was dropped below to make room)
-        "max_checked_entries: unmasked, so few unchecked candidates are tested: exact. Of "
-        "time_budget_ms, the work stops at least finalize_reserve_ms before the deadline, and "
-        "earlier by the time the answer built so far is estimated to take to write: "
-        + ms_text(kAnswerVolumeMargin) + " x (B / (" + ms_text(limits.delivery_build_mbps)
-        + " x 1000) + B / (" + ms_text(limits.delivery_compress_mbps) + " x 1000)) ms for B "
-        "bytes of its compact JSON text (the labels about to be built counted once more at the "
-        "first rate; rates in MB/s), so that a stopped request still answers with its counts. "
-        "A pattern longer than k is answered by its anchors (long_patterns) unless the request "
-        "sets long_search \"paths\": then an exact anchor count of at most max_anchors admits "
-        "the extension, and an exact path count of at most max_paths the release of the paths "
-        "(partial: the first max_paths); long_search changes nothing for a pattern of at most k "
-        "bases";
+    // the rates of the time kept back for the answer (review of 2026-10-07, X-EFFICIENCY-04;
+    // SPEC §7.6), MB/s: stated as numbers since owner decision P9, where caps_rule's prose
+    // stated them before
+    Json::Value delivery;
+    delivery["build"] = number_json(limits.delivery_build_mbps);
+    delivery["compress"] = number_json(limits.delivery_compress_mbps);
+    p["delivery_mbps"] = std::move(delivery);
+    // which caps are request fields' maxima (review of 2026-10-07, R2-04) and which are the
+    // server's policy (max_patterns, min_information_bits; owner decision #24's
+    // max_checked_entries), every cap named; the rules themselves are the SPEC's (owner
+    // decision P9, as protein_rule)
+    p["caps_rule"] = kCapsRule;
 
     const char *graph_fields[] = { "graph_mode", "k", "alphabet", "strand_stated", "mask",
                                    "counting", "dummy_fraction", "scopes", "placement",

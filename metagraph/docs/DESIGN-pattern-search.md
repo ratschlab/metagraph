@@ -329,7 +329,12 @@ Three graph modes, told apart by `get_mode()` and the wrapper:
 For `long`, each anchor (a k-mer instantiating positions [0, k)) is extended one base at a time along outgoing
 edges (`DeBruijnGraph::call_outgoing_kmers`, `sequence_graph.hpp:224`), keeping only the symbols
 `allowed(position, prefix)` at the next position, by depth-first search to position L. Every complete path is a
-context. The search stops at the first disallowed base, so it is complete and never scores anything.
+context. The search stops at the first disallowed base, so it is complete and never scores anything. As built
+(review GPT-3, SPEC §18), the clock is read before each anchor's extension (its spelling, k − 1 BOSS steps that no
+step charges, and its search), every 64 anchors listed and before every 64th node expanded, besides the
+4,096-step readings: an extension whose 1,129 steps never reached one ran past the work time on refseq33m. The
+answer states `work.extension_anchors` (the anchors whose extension began) and `work.extension_branches` (the
+nodes with two or more allowed successors) beside `extension_edges`.
 
 Why not the extender: `DefaultColumnExtender` keeps the best DP cell per node and query position and prunes by
 `xdrop`, `rel_score_cutoff` and `num_alternative_paths` (`aligner_config.hpp`, `aligner_extender_methods.cpp`).
@@ -406,7 +411,12 @@ the intersection is taken on consecutive coordinates (the `utils::set_intersecti
 prove one record: a column's records are concatenated without separators, so records `ACG` and `CGT` at
 coordinates 0 and 1 make the path `ACGT` look consecutive, and the aligner's own test allows exactly that
 (`test_aligner_labeled.cpp:320`, `CrossBoundary`). Support is therefore a property of **each label** of a path, not of the path: one label can be
-verified while another only carries the constituent k-mers. Each returned label states its `support`:
+verified while another only carries the constituent k-mers. As built (review GPT-3, SPEC §12.1, §18) each
+(path, label) is verified once: its chains are the intersection of its k-mers' coordinate lists, each shifted by
+its k-mer's position, found by a leapfrog join from the shortest list with galloping seeks; consecutive chains are
+one run (a homopolymer's path is a few units of work per k-mer, not one per coordinate), each run is placed record
+by record, and the runs are kept (charged to the memory account) for the output, which no longer joins again;
+every seek, run and record is clocked. Each returned label states its `support`:
 - `record_verified`: the label's coordinates for the path are consecutive, the first maps to (`seq_id`, local)
   through the `CoordToHeader`, and local + n − 1 < `num_kmers_in_sequence(column, seq_id)`
   (`coord_to_header.hpp`), so the last k-mer is inside the same record. Possible only on a **BASIC** index with
@@ -476,7 +486,10 @@ place that read the mask counts candidates instead:
   symbols, about the spelling the route does per context anyway, under the deadline and not charged as steps) and
   never releases a source dummy. A release that enumerated every candidate (`all_or_count` within U; `partial`
   drained; a long pattern's anchors listed before their extension) makes the counts `exact`; a cut `partial`
-  release raises each lower bound to what it released.
+  release raises each lower bound to what it released. The release, the palindrome scans and the check step over
+  a range's sink edges (W = `$`) with `DBGSuccinct::next_non_sink_edge`: W read at the first 16, then a jump to the
+  next symbol that is not `$` by rank and select, so a run of sinks costs the same whatever its length (review
+  GPT-3; 100,000 sinks had cost 2.5 ms, past a work time of 1 ms, one edge at a time).
 - **Stated limitations**: without the mask `partial` keeps every unchecked range it discovers (24 bytes each, at
   most one per step) rather than about `max_contexts`; on an even-k wrapped PRIMARY graph `stop_at_threshold` can
   fire late or not at all (the running U leaves out ranges whose palindrome scan is pending; the admission after
@@ -584,7 +597,12 @@ pattern and before every release, and inside every loop: the range DFS, the defe
 every 4,096 steps (one step count, so the boundary from discovery to the scans has no reading of its own); the
 release every 4,096 descriptors prepared and edges examined, and every 64 contexts handed to the route, as
 `all_or_count`'s delivery of its buffered release; the paced reads at their run boundaries as in `/resolve` and
-`/traverse`, and before the labels of each context are built; serialisation every 4,096 objects. The route keeps
+`/traverse`, and before the labels of each context are built; serialisation every 4,096 objects. As built since
+the review GPT-3 (SPEC §7.6, §18) also: the extension before each anchor, every 64 anchors listed and every 64th
+node expanded (§4.2); the low-complexity diagnostic between its pieces (below); and the labelled retrieval's own
+work between its reads — the occurrences of each context or path, the paths' label lists and their verification —
+at least every 4,096 units, before the work. A stop there is stated (`{extension | placement | output, time}`),
+never a 503 after the budget. The route keeps
 a **finalisation reserve** (`--pattern-finalize-ms`, default 250 ms, stated in the capabilities) and, as built,
 more: the time it estimates writing the answer built so far will take, from the bytes of its results and the
 configured delivery rates (SPEC §7.6, as `/traverse`'s delivery reserve). The count answer of every pattern is
@@ -648,7 +666,10 @@ and an internal anchor (§12) is what would remove it.
 
 Low-complexity patterns are not refused: they are legitimate questions, the caps bound them, and
 `is_low_complexity` (`aligner_seeder_methods.cpp:22`) marks them in `notes` so the reader knows why the counts
-are large.
+are large. As built (review GPT-3, SPEC §7.8, §18): on a completed search only (never beside a stop), with sdust
+read in pieces of 128 + 63 bases that stop at the first flagged one and read the clock before every piece but the
+first; one sdust over a 30,000-base repeat had taken 0.8 s without a reading. A pattern of more than 191 bases
+whose diagnostic the work time cuts loses the note and says `time_limited` with no stop.
 
 ### 5.4 Deduplication
 
@@ -662,7 +683,8 @@ Contexts are enumerated in BOSS edge order, then by offset; labels are ordered b
 occurrences by (`seq_id`, start, strand); shards by (graph name, `index_fp`) (§8). The same request on the same
 index gives the same answer, including which results a cap cut, because every budget a shard spends is its own
 fixed share. The exception is a deadline stop, which depends on the machine and is stated
-(`determinism: time_limited`).
+(`determinism: time_limited`); as built, also a low-complexity diagnostic the deadline cut, whose answer is
+`time_limited` with no stop and complete counts (SPEC §7.9).
 
 ### 5.6 Annotation predicates: select contexts by a condition on their labels (extension, the owner's request)
 
@@ -915,7 +937,9 @@ malformed request is a 400 for the whole; a request whose finalisation reserve i
 ### 7.3 Capabilities
 
 `GET /capabilities` lists `"pattern"` under `features` and `routes.pattern = "POST /pattern"`
-(`server.cpp:1421-1480`), with a `pattern` block: the floors, caps and the finalisation reserve, the modes, the projections (`none`,
+(`server.cpp:1421-1480`), with a `pattern` block: the floors, caps and the finalisation reserve (with the delivery rates of the time kept back for the answer,
+`delivery_mbps`; the prose rules are references to the SPEC since the owner's decision P9, so that the document
+an MCP tool returns whole keeps 1 KiB under its 32 KiB ceiling), the modes, the projections (`none`,
 `all`, `predicate_only`, with `none` available everywhere) and scopes (and which scope each graph mode supports), `placement` (the best this index can give), `strand_stated`,
 `mask: file | built_at_load | absent` with `counting: exact | upper_bound` and the sampled `dummy_fraction` (§4.4), `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
 resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. The same `pattern`
@@ -1270,9 +1294,9 @@ Limitations of the build, found or confirmed by the review of 2026-10-07 and sta
 - **N runs inside a pattern** cost about min(4^run, edges / 4^a) ranges per level whatever the bits (§5.3); only
   a run at the start of a searched window is skipped, and only on `$ACGT`. Internal anchors (§12) would remove
   the rest.
-- **O(L) per pattern** (parsing, its bits, its palindrome test, the low-complexity note) is inside the deadline
-  but charged no step and interrupted by no clock reading: many very long patterns can make a request's 503 come
-  after its `time_budget_ms`.
+- **O(L) per pattern** (parsing, its bits, its palindrome test) is inside the deadline but charged no step and
+  interrupted by no clock reading: many very long patterns can make a request's 503 come after its
+  `time_budget_ms`. The low-complexity note reads the clock between its pieces since the review GPT-3 (§5.3).
 - **The time kept back for the answer** grows with what the answer holds, at configured delivery rates (10 and
   50 MB/s, `/traverse`'s starting values), not rates measured on the host: on a fast host a request with many
   results stops its work earlier than it needed to (on an M-series Mac, a 2 s request of 15 patterns with 19,283

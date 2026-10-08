@@ -6294,13 +6294,14 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.164,
-    "label_discovery_ms": 0.284125,
-    "placement_ms": 0.189833
+    "elapsed_ms": 0.2365,
+    "label_discovery_ms": 0.425042,
+    "placement_ms": 0.263042
    },
    "withheld": null,
    "work": {
     "annotation_rows": 48,
+    "annotation_rows_distinct": 24,
     "annotation_units": 24440,
     "mask_scans": 0,
     "memory_bytes": 225828,
@@ -6435,13 +6436,14 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.006958,
-    "label_discovery_ms": 0.0,
-    "placement_ms": 0.0
+    "elapsed_ms": 0.011375,
+    "label_discovery_ms": 4.1e-05,
+    "placement_ms": 4.2e-05
    },
    "withheld": null,
    "work": {
     "annotation_rows": 0,
+    "annotation_rows_distinct": 0,
     "annotation_units": 0,
     "mask_scans": 0,
     "memory_bytes": 225828,
@@ -6451,6 +6453,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 1.015167
+  "elapsed_ms": 1.4605
  }
 }

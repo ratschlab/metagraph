@@ -67,7 +67,8 @@ other client. Source references are to this checkout (paths relative to `metagra
     The design's default (`"all"`, design §7.1) would change what an omitted field means, so a server whose
     default were `"all"` would state a higher version.
 - **Messages are prose.** `error` texts and slot `message`s are for people and may change; clients act on
-  `code`.
+  `code`. So are the capabilities' `caps_rule` and `protein_rule` (references to this document since the owner's
+  decision P9, §18): clients act on the fields they describe.
 
 What this build serves (milestone 1, and increment 3 where marked), against the design:
 
@@ -201,9 +202,10 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   in a `protein` pattern) or an empty string is answered in the pattern's slot with `bad_alphabet` (§8.9); the
   other patterns are answered. The stop `*` is a residue of a `protein` pattern (§12.2).
 - No length cap: a pattern longer than k is charged steps for its anchor windows only (§7.7); parsing it, its
-  `information_bits`, its palindrome test and its `low_complexity_pattern` note cost O(L) time inside the
-  deadline that no step charges and no clock reading interrupts (a few ns per base; many long patterns can
-  therefore end in a 503 after `time_budget_ms`).
+  `information_bits` and its palindrome test cost O(L) time inside the deadline that no step charges and no clock
+  reading interrupts (a few ns per base; many long patterns can therefore end in a 503 after `time_budget_ms`).
+  Its `low_complexity_pattern` diagnostic reads the clock (since the review GPT-3, §7.8, §18): before every piece
+  of 128 bases but the first.
 - A peptide's length L is in bases (3 per residue): with k = 31, peptides of up to 10 residues are within one
   k-mer; longer ones are patterns longer than k (§7.7, §12.1).
 
@@ -256,7 +258,8 @@ They are served now, §4.1–§4.3.)
 | `--traverse-chunk-target-ms` | 50 | — (not a cap: the annotation reads under the deadline are decoded in chunks of about this duration, as `/traverse`'s) | — |
 
 The capabilities state every value in force (`caps`, `default_time_budget_ms`, `finalize_reserve_ms`; the two
-delivery rates in `caps_rule`), and every answer echoes the effective ones (`limits`, §8.3), except
+delivery rates in `delivery_mbps`, since the owner's decision P9, §18, in `caps_rule`'s prose before), and every
+answer echoes the effective ones (`limits`, §8.3), except
 `max_checked_entries`, which no request field sets and only `caps` states (§18). The delivery rates
 are starting estimates, conservative on the hosts measured (§7.6); an operator who raises
 `--pattern-max-contexts` or `--pattern-max-patterns`, or serves on a slow or busy host, lowers them or raises
@@ -550,7 +553,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   built so far: E = 1.25 × (B / (b × 1000) + B / (c × 1000)) ms for B bytes of compact JSON text of the results
   built (with `labels: "all"` the label objects about to be built are counted in B, and once more at the rate
   b, before they are built), b and c the delivery rates in MB/s (`--pattern-delivery-build-mbps` 10,
-  `--pattern-delivery-compress-mbps` 50; `caps_rule` states the rule with the values in force). E is read with
+  `--pattern-delivery-compress-mbps` 50; the capabilities' `delivery_mbps` states the values in force). E is read with
   the work time at every reading, so it grows as results are built: about 0.15 ms per KB of results at the
   defaults, 2.8 s for 16 × 10,000 results (18.4 MB of text, which an M-series Mac wrote and gzipped in 0.3–0.45 s:
   the rates are conservative starting estimates, not measurements of the host). The answer — the counts kept up
@@ -573,10 +576,16 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   - every 64 contexts handed to the route — in `partial`'s release and in `all_or_count`'s delivery of its
     buffered release — since each costs the route a k-mer spelling (k − 1 graph steps) and its result object;
   - with `labels: "all"`: before each annotation read and between its chunks (§14.4), and before the labels of
-    each context are built for the answer.
+    each context are built for the answer;
+  - since the review GPT-3 (§18): for L > k with `long_search: "paths"`, before each anchor's extension (its
+    spelling and its depth-first search), every 64 anchors listed and before every 64th node the search
+    expands; after a completed exact pattern's search, before every piece but the first of its low-complexity
+    diagnostic (§7.8); with `labels: "all"`, in the work between the reads — the occurrences of each context or
+    path (made in pieces of at most 4,096), the paths' label lists and their verification — at least every 4,096
+    units of it, before the work (§12.1, §14.4).
 
-  Work therefore ends within one such stride after the work time. Not read: the O(L) handling of each pattern's
-  text (§4.2).
+  Work therefore ends within one such stride after the work time. Not read: the O(L) parsing, bits and palindrome
+  test of each pattern's text (§4.2), and the spelling of one anchor (k − 1 BOSS steps).
 - **503 `deadline`.** The answer is assembled, serialised and compressed under the same deadline, read every
   4,096 entries and results while it is assembled, every 64 KiB of text while it is written, between
   compression blocks, and once more before it is handed to the transport. If it cannot be written by
@@ -598,7 +607,8 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   `stop` in this document applies only while `stop` is still `null` (first stop wins, the owner's decision of
   2026-10-07). So a later stop shows only in what it left: `labels_status: "output_budget"` (a memory or a time
   stop of the output) or `not_read`, `cut: time`, `withheld`, while `stop` names an earlier phase. Any time stop,
-  stated in `stop` or not, sets `determinism: "time_limited"` (§7.9).
+  stated in `stop` or not, sets `determinism: "time_limited"` (§7.9); so does a low-complexity diagnostic the work
+  time cut (§7.8), with `stop` `null`.
 - `work` per pattern: `ranges_visited` (range evaluations), `mask_scans` (ranges whose deferred scan began),
   `steps` (every step charged: `ranges_visited` plus the items the deferred scans examined, plus k − 1 per
   candidate the check of §7.4 tested, plus, with `long_search: "paths"`, the outgoing edges the extension
@@ -676,7 +686,15 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   A pattern's base searches run cheapest first by that estimate, so that a budget stop leaves the cheaper
   orientation complete and the other interrupted (§7.9).
 - Low-complexity patterns are not refused; an exact one that sdust flags over its whole text carries the note
-  `low_complexity_pattern` (for L > k the flag can come from bases outside the anchor windows).
+  `low_complexity_pattern` (for L > k the flag can come from bases outside the anchor windows) — when its answer
+  states no stop. Since the review GPT-3 (§18) the diagnostic runs on a completed search only: not after a stop of
+  the pattern's own nor after an earlier pattern's request-wide one, threshold stops included (a stopped answer's
+  counts say what they are; the note is a hint about large counts). sdust reads the text in pieces of 128 bases,
+  each overlapping the next by 63 (its window less one), and stops at the first piece it flags; the flag is the
+  one over the whole text, since sdust's state at a base depends only on the 64 bases ending there. The clock is
+  read before every piece but the first, so a pattern of at most 191 bases (a peptide of at most 63 residues) is
+  always diagnosed; for a longer one, a work time that passes between two pieces leaves the note out and states
+  `determinism: "time_limited"` with `stop` `null`, the counts complete (§7.9).
 
 ### 7.9 Ordering and determinism
 
@@ -706,7 +724,10 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   answer, byte for byte apart from `timing`, including which contexts a cut kept, because every budget is spent
   in a fixed order. The exception is a time stop: the entry it touched (also when it shows only as `cut: time`
   or `labels_status: "output_budget"`, §7.6) and every answered entry after it state `determinism:
-  "time_limited"`; their counts, `work` and released contexts depend on the machine. A 503 `deadline` depends on
+  "time_limited"`; their counts, `work` and released contexts depend on the machine. One `time_limited` entry
+  states no stop (§7.8, §18): a completed exact pattern of more than 191 bases whose low-complexity diagnostic the
+  work time cut — its counts, `work` and results are complete and deterministic, only the note's absence depends
+  on the machine (a client must not read `time_limited` as "a stop is stated"). A 503 `deadline` depends on
   the machine too. `determinism: "full"` promises nothing across builds: another build of version 1 keeps the
   meaning of every field and count but may spend its budgets otherwise (§1), so its `work`, its stops and its
   `at_least` and `bounds` values can differ.
@@ -803,6 +824,8 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `label_discovery_ms` | number | increment 3, entries with `labels: "all"`: the first read (§14.2). Varies between runs |
 | `placement_ms` | number | likewise, the second read (§14.3) |
 | `extension_ms` | number | increment 4, entries of a pattern longer than k with `long_search: "paths"`: the extension (§12.1). Varies between runs |
+| `label_intersection_ms` | number | review GPT-3 (§18), entries of a pattern longer than k with `long_search: "paths"` and `labels: "all"`: the intersection of the label lists of each path's rows (§12.1). Varies between runs |
+| `verification_ms` | number | likewise: the verification of the labels carrying the paths — the chains' join, their record placement, the runs kept for the output (§12.1) — apart from `placement_ms`, the coordinates' reads; the loop's time also where nothing is verified (no coordinates). Varies between runs |
 
 ### 8.5 A pattern's entry
 
@@ -921,6 +944,10 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `annotation_units` | integer | likewise: the work units of this pattern's reads, refused ones included (§14.4) |
 | `memory_bytes` | integer | likewise: the request's memory account at its peak so far (the model of §14.4) |
 | `extension_edges` | integer | increment 4, entries of a pattern longer than k with `long_search: "paths"`: the outgoing edges the extension examined, one step each (part of `steps`) |
+| `extension_anchors` | integer | review GPT-3 (§18), likewise: the anchors whose extension began, each spelled once (k − 1 BOSS steps that no step charges) before its depth-first search; every anchor when the extension `completed`, 0 when it did not run (`no_anchors`, `not_started`, `not_admitted`), at most the anchors listed when a stop cut it. Not part of `steps`; deterministic unless a time stop cut the extension |
+| `extension_branches` | integer | likewise: the nodes the extension expanded (anchors included) with two or more k-mers allowed at the next pattern position, where its paths fan out (each enters two candidates or more, `counts.paths.candidates_examined`); 0 when it did not run. Not part of `steps` |
+| `annotation_rows_distinct` | integer | review GPT-3 (§18), every entry with `labels: "all"`: the distinct rows whose labels this pattern read (complete or truncated), each once however many contexts or path k-mers share it, the placement's second read not counted again; refused and unread rows not counted (0 where nothing was read, e.g. a withheld count). At most `annotation_rows`, which counts the reads of both steps |
+| `verification_steps` | integer | likewise, entries of a pattern longer than k with `long_search: "paths"`: the verification's units of work (§12.1) — one per k-mer row looked up for a label carrying a path, per list ordered, per galloping seek, per run of chains extended and per record a run crosses; the work time is read at least every 4,096 of them. 0 where no coordinate is read. Not part of `annotation_units`; deterministic |
 
 <!-- schema: stop -->
 | field | type | meaning |
@@ -975,7 +1002,7 @@ It costs no step.
 
 | note | meaning |
 |---|---|
-| `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows |
+| `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows. Since the review GPT-3 (§18) stated only in an answer without a stop (never beside one, whatever its phase and reason, an earlier pattern's request-wide stop included), and left out of a pattern of more than 191 bases whose diagnostic the work time cut (`determinism: "time_limited"`, `stop` `null`; §7.8). Its absence is no claim that a pattern is not low-complexity |
 | `strand_unknown_canonical` | a CANONICAL or PRIMARY graph: orientations, not strands |
 | `paths_later_increment` | L > k without `long_search: "paths"`: anchors counted, paths neither extended nor extracted (ask with `long_search: "paths"`, §12.1) |
 | `annotation_unbudgeted` | increment 3: the labels were read without the budget-aware decode (`allow_unbudgeted_annotation`): no memory bound on the reads themselves (what they returned is in the account), the deadline checked between chunks of keys |
@@ -1058,7 +1085,7 @@ It costs no step.
 | `protein_residues` | list of one-letter strings | the 20 amino acids then `X`, `B`, `Z`, `J`, `*` | increment 5: the residues a `protein` pattern may hold (§12.2); the stop `*` since the owner's decision #19 of 2026-10-08 (it was not among them before) |
 | `genetic_codes` | list of integers | `[1, 2, 3, 4, 5, 6, 9, 10, …, 16, 21, …, 33]` | increment 5: the NCBI translation table ids `genetic_code` accepts (gc.prt version 4.6) |
 | `default_genetic_code` | integer | `1` | increment 5: an omitted `genetic_code` (the standard code) |
-| `protein_rule` | string | | increment 5: in prose, how a peptide is read (the ambiguity codes, the stop `*`, the codon automaton, the length in bases, the slot error, the context stops of tables 27, 28 and 31 and the note `no_stop_codon`) |
+| `protein_rule` | string | `"SPEC-pattern-search.md sections 12.2, 18"` | increment 5: a reference to the rule of how a peptide is read (§12.2: the ambiguity codes, the stop `*`, the codon automaton, the length in bases, the slot error, the context stops of tables 27, 28 and 31 and the note `no_stop_codon`; §18); since the owner's decision P9 (§18) a reference, the rule in prose before. Printable ASCII; for people, not parsed |
 | `default_scope` | string | `"any_offset"` | |
 | `scopes_by_graph_mode` | object | `basic`, `canonical`: `["suffix", "any_offset"]`; `primary`: `["any_offset"]` | the rule |
 | `scopes` | list \| null | | this graph's requestable scopes |
@@ -1073,7 +1100,8 @@ It costs no step.
 | `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths`; the owner's decision #24: `max_checked_entries` (no request field: the unchecked candidates a pattern on a graph without its mask may have for each to be tested, §7.4; on every server, masked or not) |
 | `default_time_budget_ms` | number | 60,000 | the budget of a request that names none, below `caps.time_budget_ms` |
 | `finalize_reserve_ms` | number | 250 | §7.6 |
-| `caps_rule` | string | | in prose: the clamp rule (which caps are request fields' maxima, `max_patterns` and `min_information_bits`), the rule of the time kept back for the answer with the delivery rates in force (§7.6), since increment 4 the rule of `long_search` (the two admissions, `max_anchors` and `max_paths`), and since the owner's decision #24 one sentence on `max_checked_entries` |
+| `caps_rule` | string | | which caps are request fields' maxima (each named: lowered and listed in `limits.clamped` above it) and which are the server's policy (`max_patterns`, `min_information_bits`, `max_checked_entries`), and a reference to the sections stating the rules (`SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1`: the caps and defaults, the check of few unchecked candidates, the time kept back for the answer, the two admissions of `long_search: "paths"`). Since the owner's decision P9 (§18) a reference: it stated those rules in prose before, the delivery rates among them (now `delivery_mbps`). Printable ASCII; every cap of `caps` is named in it; for people, not parsed |
+| `delivery_mbps` | object (`delivery_mbps` below) | | the owner's decision P9 (§18): the rates in force of the time kept back for the answer (§7.6) |
 | `graph_mode` | string \| null | | `basic`, `canonical`, `primary` |
 | `k` | integer \| null | | |
 | `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN`: `available: false`, `alphabet_untested`, §8.2) |
@@ -1088,6 +1116,12 @@ It costs no step.
 The graph fields (`graph_mode` to `annotation`) are `null` while the index loads; when the graph is not
 recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; `placement`, `support` and
 `annotation` are `null` if the annotation could not be described.
+
+<!-- schema: delivery_mbps -->
+| field | type | meaning |
+|---|---|---|
+| `build` | number | MB/s at which the answer's JSON text is assumed to be built and written (`--pattern-delivery-build-mbps`, 10; a positive number, the server refuses another at start-up) |
+| `compress` | number | MB/s at which it is assumed to be compressed (`--pattern-delivery-compress-mbps`, 50; likewise) |
 
 **The mask, for a client** (the operator's side is design §4):
 - It is read when the graph is loaded: an `.edgemask` written beside a running server changes nothing until
@@ -1307,7 +1341,12 @@ only the bases the pattern allows at the next position (for a peptide, its codon
 recomputed at the k boundary from the anchor's bases, §12.2), by depth-first search to L bases. Every complete
 walk is a **path**: n = L − k + 1 k-mers of the graph spelling an instance of the oriented pattern. A path need not
 lie in one record. Each outgoing edge examined is one step (`work.extension_edges`, inside `steps`, under the
-request's one `max_steps`); the work time is read at every 4,096 steps as in discovery (§7.6). The paths are
+request's one `max_steps`); the work time is read at every 4,096 steps as in discovery (§7.6) and, since the
+review GPT-3 (§18), before each anchor's extension, every 64 anchors listed and before every 64th node the search
+expands, so that a late clock stops the extension on time (`stop {extension, time}`, `extension: "stopped"`)
+rather than after it. Beside the steps (no step charges them): `work.extension_anchors`, the anchors whose
+extension began, each spelled once (k − 1 BOSS steps) before its search, and `work.extension_branches`, the nodes
+where the search branched (§8.7). The paths are
 released when they are `exact` and at most `max_paths` in `all_or_count` (the second admission), the first
 `max_paths` in `partial`.
 
@@ -1426,13 +1465,33 @@ as the label-free descriptors (§7.6, "Memory"): the paths the engine retains du
 `max_paths`, O(L) each) before their release; without labels the route has no account (bounded by `max_paths`
 × O(L); a pattern has no length cap, §4.2). The work time is read before each annotation read and between its
 chunks, before each path's label list (`stop {output, time}`), before each path's verification (`stop {placement,
-time}`: the later paths' labels unverified) and before each path's labels are built (`stop {output, time}`).
+time}`: the later paths' labels unverified) and before each path's labels are built (`stop {output, time}`); since
+the review GPT-3 (§18) also inside that work, at least every 4,096 of its units and before them: in the label
+lists' intersection (`stop {output, time}`), in a path's verification (`stop {placement, time}`: that path and the
+later ones unverified) and in the occurrences made for a path's output, in pieces of at most 4,096 (`stop {output,
+time}`).
+
+**The verification** (review GPT-3, finding 1, §18). The label lists of a path are intersected in place, from the
+shortest row list (each row's list sorted once, not copied per path; `timing.label_intersection_ms`). Each (path,
+label) is then verified once: its chains are the intersection of the k-mers' coordinate lists, each shifted by
+its k-mer's position, found by a leapfrog join that starts from the shortest list and seeks by galloping;
+consecutive chains are extended as one run by a density check (a homopolymer's are one run, a few units per
+k-mer), and each run is placed record by record (one record mapping per record it crosses: `record`, a chain
+whose first k-mer is in one record and whose last is past that record's k-mers is cut, §4.3; `global`, the run
+of chains as it is). Its units are `work.verification_steps` (§8.7), its time `timing.verification_ms`. The runs
+of occurrences are kept for the output, charged before they are held (32 bytes for a label with occurrences, 32
+per run), so the output does not join the chains again; when the account cannot hold a path's runs, `stop
+{output, max_memory}`: that path and the later ones are not output (`labels_status: "output_budget"`), their
+labels still verified. When the label lists stop (time or memory) at a path, the paths before it are answered
+`labels_status: "output_budget"` with `labels: null` (an earlier build said `complete` with `labels: []` and
+`labels_total` above 0).
 
 **Limits echo** (answers to `long_search: "paths"` only): `limits.long_search` `"paths"`, `limits.max_paths`; and
 `limits.require_support` in those that read labels.
 
 **Capabilities**: `long_search` `["anchors", "paths"]`, `default_long_search` `"anchors"`, `caps.max_paths`
-(1,000, `--pattern-max-paths`), `caps_rule` naming `max_paths` among the clamped caps and stating the rule;
+(1,000, `--pattern-max-paths`), `caps_rule` naming `max_paths` among the clamped caps (the rule is the one above; a reference since the
+owner's decision P9, §18);
 `long_patterns` stays `"anchors_counted"`; `support` states the best support of a path on the index.
 
 ### 12.2 Increment 5, served: peptides (`protein`)
@@ -1664,6 +1723,14 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
     max_memory}`: `all_or_count` withholds (`output_budget`), `partial` returns it and the later ones with
     `labels_status: "output_budget"`.
 
+  Since the review GPT-3 (finding 4, §18), in `partial` a context's (or path's) label holds, and the account and
+  the estimate E of §7.6 are charged for, only the first `max_occurrences_per_label` of its placed occurrences;
+  every occurrence still enters its label's deduplication set (64 each, repeated coordinates once), so the counts
+  stay exact. Once the sets are complete, each list is cut to its set's first `max_occurrences_per_label` (§14.5)
+  and what the cut takes is given back to the account and to E. A set is checked against the account as it grows
+  (the decision the context's final charge would make, made earlier). Before, every occurrence was held and
+  charged, and E counted the text of occurrences no list would show.
+
   `work.memory_bytes` is the account's peak so far. Apart from the forced names of an unbudgeted read (above),
   it never passes `max_memory_mb`.
 - **Work** (`max_annotation_work`, the oracle's units, one budget per request): a row read costs 8, plus 1 per
@@ -1679,7 +1746,9 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
 - **The deadline.** The reads and the output of the labels are work (§7.6): the work time is checked before each
   read and, within a read, between its chunks (paced at `--traverse-chunk-target-ms`, as `/traverse`'s reads; an
   interrupted read returns nothing), and before the labels of each context are built for the answer, with the
-  labels about to be built counted in the estimate E of §7.6. A time stop of the reads: `stop {label_discovery |
+  labels about to be built counted in the estimate E of §7.6; since the review GPT-3 (§18) also while the
+  occurrences of a context are made, in pieces of at most 4,096, the clock read before each piece (`stop {output,
+  time}`). A time stop of the reads: `stop {label_discovery |
   placement, time}`; of the output: `stop {output, time}` — each, like every `stop` of this section, only when no
   earlier stop of the pattern is stated (first stop wins, §7.6: after a `max_steps` stop of the engine, or a
   `max_annotation_work` stop of the reads, a time stop of the output shows only as `labels_status:
@@ -1792,7 +1861,7 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
     "occurrences": {"value": 2, "relation": "exact", "unit": "placed_occurrences"}},
    "... 8 more"],
  "work": {"ranges_visited": 122, "mask_scans": 0, "steps": 122, "annotation_rows": 48,
-          "annotation_units": 24440, "memory_bytes": 225828},
+          "annotation_rows_distinct": 24, "annotation_units": 24440, "memory_bytes": 225828},
  "timing": {"elapsed_ms": "...", "label_discovery_ms": "...", "placement_ms": "..."}}
 ```
 
@@ -2256,3 +2325,165 @@ behind a leading N, the step stop) and the CLI with the flag.
 enters both orientations' counts, so `upper` − `lower` there can be up to twice the number checked; a cut
 `partial` raises `lower`, so its `upper` − `lower` says nothing of the check; `stop_at_threshold` compares U before
 the check; the capabilities document keeps 5 bytes under the integration test's guard on the mini.
+
+**Review GPT-3 and the owner's decision P9 (round fix3, 2026-10-08, after `7b8354f2`).** Five findings of the third
+outside review fixed in the engine (`pattern_search.{hpp,cpp}`, `dbg_succinct.{hpp,cpp}`) and the labelled retrieval
+(`pattern_retrieval.{hpp,cpp}`), their counters stated by the route (`pattern.cpp`), and room made in the
+capabilities (P9 of the owner's decisions of 2026-10-08 on increments 5b and 5s). **Contract version 1 stays:
+additions only.** No field changes its meaning or its guarantee; what changes is where the work stops — on time and
+stated, where the base binary ran past its work time into a late answer or a 503 —, what the memory account holds,
+and when the note `low_complexity_pattern` is stated. The rule each loop keeps: the work is charged and the clock
+read before it (at most every 4,096 units), memory admitted before a copy, a result kept rather than computed again,
+and a stop stated in the answer rather than a 503 after the budget.
+- **The extension reads the clock (finding 5).** It listed, spelled and extended the anchors with the clock read
+  only every 4,096 steps, and spelling an anchor (k − 1 BOSS steps) is charged no step: the 40 bp half-N pattern of
+  the staging benchmark (674 anchors on refseq33m, 1,129 extension steps) never reached a reading and, cold, ran
+  past its work time into a 503; on the mini, with the base binary, `GNNNCNNNTNNNANNNGNNNCNNNTNNNANNNGNNNCNNN` (331
+  anchors, 615 extension edges) under a 165 ms budget and a 1 ms reserve extended for 3.4 ms without a reading and
+  answered 503. The clock is now read before every anchor's extension, every 64 anchors listed and before every
+  64th node expanded (§7.6, §12.1): a late clock gives `stop {extension, time}`, `extension: "stopped"`, the paths
+  `at_least` (`all_or_count`: `withheld: deadline`; `partial`: `cut: time`).
+- **The low-complexity diagnostic (finding 2).** One sdust over the whole text took 786 ms on ATG × 10,000 without
+  a clock reading. It now reads pieces of 128 + 63 bases, stops at the first piece flagged (about 6 ms there; 30 kb
+  of random sequence about 0.2 ms), reads the clock before every piece but the first, and runs on a completed
+  search only (§7.8): its flag is the whole text's (`PatternSearchFixes.LowComplexityNoteAsSdustOverTheWholePattern`,
+  300 texts against sdust over the whole text).
+- **Runs of sink edges (finding 3; graphs without the mask).** The release, the palindrome scans and the check of
+  few unchecked candidates stepped over the sink edges (W = `$`) of a range one at a time;
+  `DBGSuccinct::next_non_sink_edge` reads W at the first 16 and then jumps to the next symbol that is not `$` by
+  rank and select: about 5.5 µs over 100,000 sinks as over 40 (a graph of 100,000 sinks: 2.5–2.8 ms against a work
+  time of 0.1–1 ms before, 0.1–0.2 ms now). Same results.
+- **Verifying long paths (finding 1).** The verification of §12.1: each (path, label) once, by a leapfrog join of
+  its k-mers' shifted coordinate lists with consecutive chains as one run, each run placed record by record, the
+  runs kept (charged) for the output, which no longer joins the chains again; every seek, run and record clocked;
+  the label lists of the paths intersected in place from the shortest (each row's list sorted once). A homopolymer
+  path of 1,500 bases with one occurrence per record (28,501 occurrences, `record_verified`) was a 503 after
+  2.4–3.8 s; it is answered in 7–9 ms. `(AC)^750` as a path, 500 ms: a 503 after 1.75 s, now answered in 75 ms;
+  `(AC)^5000`: `stop {label_discovery, time}` at 477 ms before, `stop {placement, time}` at 241 ms now (work time 250
+  ms).
+- **The occurrence cap (finding 4).** §14.4: in `partial` a context's or path's label holds, and the account and the
+  estimate E count, only its first `max_occurrences_per_label` occurrences; the unions take every one (the counts
+  stay exact); once complete, the lists are cut to their union's first and the rest is given back. Ten patterns of
+  29,998 occurrences each under a cap of 1: before, the first stopped `{output, time}` (E counted 10 MB of text no
+  list would show; its occurrences `at_least` 0) and the nine after it `{discovery, time}`; now all ten are answered,
+  `exact`, about 2.2 MB in the account, in 52–64 ms.
+- **The counters** (§8.4, §8.7), additive fields of an entry's `work` and `timing`: `extension_anchors`,
+  `extension_branches` (every entry of a path search, beside `extension_edges`), `annotation_rows_distinct` (every
+  entry with `labels: "all"`, 0 where nothing was read), `verification_steps`, `label_intersection_ms`,
+  `verification_ms` (entries of a path search with `labels: "all"`). The request's totals are the sums of its
+  entries' and are not stated apart. For a benchmark: the anchors' uncharged spelling is about `extension_anchors`
+  × (k − 1) BOSS steps, the search's work `extension_edges` (charged), `extension_branches` says whether the paths
+  fan out, and `timing.extension_ms` gives the time. `scripts/traversal/bench_pattern_retrieval.py` reruns the
+  benchmark of this round, the retrieval's and the engine's repros (it builds its homopolymer, dinucleotide and
+  100,000-sink indexes, runs `(ATG)^10,000`, `M^10,000` and the half-N count's budget sweep on the mini, and
+  compares a base binary with a candidate: untimed bodies, stops and refused runs).
+- **Capabilities (P9).** `caps_rule` and `protein_rule` are references to this document (§10.2), printable ASCII (a
+  section sign would be written `§`), and the delivery rates of §7.6 are numbers, `delivery_mbps` (`build`,
+  `compress`). Every machine-readable field is kept. Measured as served (the body's bytes, compact JSON), the base
+  binary against this build:
+
+| server (fixtures, §11; the integration test's mini servers) | `/traverse/capabilities` before → after | left under 32,768 | under 32,768 − 1,024 |
+|---|---|---|---|
+| `masked` | 32,609 → 30,966 | 1,802 | 778 |
+| `unmasked` | 32,728 → 31,085 | 1,683 | 659 |
+| `unmasked_unchecked` | 32,727 → 31,084 | 1,684 | 660 |
+| `built_at_load` | 32,618 → 30,975 | 1,793 | 769 |
+| `primary` | 32,597 → 30,954 | 1,814 | 790 |
+| `masked_no_map` | 32,596 → 30,953 | 1,815 | 791 |
+| `hash` | 32,549 → 30,906 | 1,862 | 838 |
+| `multi` (`?graph=mini_refseq`, the reduced block) | 29,164 → 29,164 | 3,604 | 2,580 |
+| mini, `-i`/`-a` only: masked, unmasked, unchecked | 32,580, 32,699, 32,698 → 30,937, 31,056, 31,055 | 1,712 at least | 688 at least |
+
+  Every single-graph document is 1,643 bytes shorter; `/capabilities` likewise (the largest, `unmasked`, 25,790
+  bytes). The largest probe document keeps 659 bytes under the budget a test now holds every document to,
+  32,768 − 1,024 (the room the next increment's additions need): the predicate block P9 plans for increment 5b
+  (about 356 bytes) fits. This replaces the 5 bytes left under the old guard of 64 (above).
+
+**Answers that change** (against the base binary `8f49cc88`, whose code `7b8354f2` serves, on a masked copy of the
+mini and on the mini as built):
+- **The counters** above, in every entry they belong to, and in the capabilities `delivery_mbps` and the two rules
+  rewritten. Nothing else of a capabilities document.
+- **`low_complexity_pattern` is no longer stated beside a stop**, of any phase and reason: threshold stops
+  (`max_contexts`, `max_anchors`, `max_paths` with `stop_at_threshold`) and an earlier pattern's request-wide stop
+  included. The base binary stated it whenever sdust flagged an exact pattern. A pattern of more than 191 bases
+  whose diagnostic the work time cut loses the note and is `time_limited` with `stop` `null` and complete counts
+  (§7.8, §7.9). A withheld `count_above_threshold` (no stop) keeps it.
+- **Time stops on time** in the extension, in the verification and the label lists of paths, and in the
+  occurrences made for the output (§7.6, §12.1, §14.4): stated stops (`{extension, time}`, `{placement, time}`,
+  `{output, time}`) where the base binary ran past its work time into an answer after the deadline or a 503. The
+  readings are denser, so with the same budget a stop can come earlier; `deadline` 503s are rarer.
+- **`partial` with the occurrence cap cutting** (a label's union holds more than `max_occurrences_per_label`):
+  `work.memory_bytes` is lower — only the listed prefix is charged (on the mini: the short panel of the identity
+  check with cap 1, 225,828 → 140,940 bytes for NDM-F; `labels_all_partial` 17,721 → 17,448;
+  `labels_all_partial_exact_cut` 64,361 → 61,085; NDM's 40-mer paths with cap 1, 44,518 → 37,444) — and so is the
+  estimate E: stops the inflated estimate caused no longer fire. The listed occurrences, the counts and
+  `occurrences_cut` are unchanged where nothing stops.
+- **Paths under memory pressure:** the runs a verification keeps are charged before the output, so the output's
+  `max_memory` stop can come one or more paths earlier; when the account cannot hold a path's runs, it and the later
+  paths are not output (`stop {output, max_memory}`, `labels_status: "output_budget"`), their labels verified all
+  the same.
+- **A quirk fixed:** when the paths' label lists stopped (time or memory) at a path after the first, the paths
+  before it said `labels_status: "complete"` with `labels: []` and `labels_total` above 0; they say
+  `output_budget` with `labels: null`.
+- **After an output stop** the unions and occurrence counts can include more of the request than the base binary's:
+  they stay `at_least` (true), possibly larger.
+- **Graphs without the mask:** the same results, faster over runs of sink edges.
+
+Checked with the identity panel (`2026-10-07/pattern/tiny-identity/panel.py` and this round's cases: the
+occurrence cap at 0, 1 and 2 with `max_labels` 2, labelled paths in both modes with the cap and with
+`require_support`, a low-complexity pattern after an earlier pattern's `max_steps` stop, and `GCGCGCGCGCGC` (60
+contexts on the mini, flagged) under `stop_at_threshold` in both modes, withheld, and complete; 184 comparisons a
+graph, both capabilities routes included, on the masked copy and on the mini as built): 119 identical apart from
+`timing`, 57 different by the additions only, 8 different beyond them, each one of the changes above — `memory_bytes`
+with the cap cutting (5) and the note left out beside a stop (3). The same on both graphs (without the mask the
+threshold stop keeps `threshold_upper_bound`).
+
+**Fixtures** (§11; 90, none new or removed). 38 bodies changed: the nine capabilities bodies of the single-graph
+servers (`delivery_mbps`, the two rules); the 13 `labels_all*` with labels read and `unmasked_labels_all`
+(`annotation_rows_distinct`), `peptide` likewise; the 11 `paths*`, `unmasked_paths`, `peptide_paths` and
+`peptide_no_stop_codon` (the extension's counters, and with labels the retrieval's); and `memory_bytes` of
+`labels_all_partial` and `labels_all_partial_exact_cut` (the cap, above). Every other stored body is unchanged
+(`--check`). No fixture shows `extension_branches` above 0 (no path of the mini branches); the tests below do. The
+validator knows the new fields (`SCHEMA`: `work`, `timing`, `capabilities`, the table `delivery_mbps`) and refuses
+what version 1 never answers (`test_round_fix3_rules_refuse_what_v1_never_answers`: a counter where its entry has none
+or missing where it has one, a completed extension that did not begin at every anchor, an extension that did not run
+with work of its own, more branchings than half the candidates, more distinct rows than rows read, verification
+steps without coordinates, the note beside a stop, `time_limited` without a stop on a pattern its diagnostic reads
+whole, a prose field that is no ASCII reference, a delivery rate that is not a positive number); every fixture
+server's capabilities documents are held to 32,768 − 1,024 bytes as the server writes them (floats counted at 24
+characters; `test_capabilities_documents_keep_a_kibibyte`, which also reads the ceiling from `mcp_tools.py`). Its
+regression body `pattern_validator/by_label_null_partial` was answered again by this build (identical apart from
+`timing` and `annotation_rows_distinct`). The code lists name `pattern_predicate.cpp` (increment 5b's predicate
+language, built and unit-tested, not called by the route: `predicate` is still refused by name) as a source whose
+new code `predicate_too_large` no answer of this build carries (`NOT_SERVED_SOURCES`).
+
+**Tests with independent oracles:** the engine's `PatternUnmasked.LongSinkRunSkippedByRankAndSelect` (against a read
+of W; the cost over 100,000 sinks under 20 times the cost over 40), `PatternSearchFixes.LowComplexity*` (sdust over
+the whole text, the note after a stop, the clock) and `ExtensionReadsTheClockBeforeEveryAnchor`, and in every
+`PatternSearch.Extension*` case `extension_anchors` and `extension_branches` against a path oracle; the retrieval's
+`PatternPaths.RepeatsAgainstTheOracles` (graph-walk and record-scan oracles, plain and `record_verified`),
+`TheCapListsTheFirstOccurrencesOfEachUnion`, `AHomopolymersChainsAreOneRun`, `TheVerificationReadsTheClock`,
+`MemorySweepOverRepeats`, `TimeSweepOverRepeats`, `TheRetrievalCounters` and
+`PatternRetrieval.TheCapListsTheFirstOfEachUnion`, `TheCapEstimatesOnlyWhatIsListed`, `TheOccurrencesReadTheClock`;
+the route's `PatternRoute.TheCountersOfTheExtensionAndOfTheLabels` (a brute force over the records' k-mers: the
+anchors, the branchings, the paths and the distinct rows of contexts and paths, in every mode, with and without
+labels and paths, and the extension not admitted) and `PatternRoute.Capabilities` (the references, ASCII, every cap
+named, the rates as configured); the integration's `assertPaths` (`extension_anchors` and `extension_branches`
+against the graph-walk oracle `Records.branchings`, the distinct rows against the paths' k-mers,
+`verification_steps` at least n × the labels carrying the paths), `assertLabelled` (the distinct rows),
+`test_capabilities` and `test_capabilities_byte_budget` (the three mini servers, both routes, at most
+32,768 − 1,024 bytes). Each engine and retrieval test fails on a mutant without its fix.
+
+**Stated limitations:**
+- Discovery still reads the clock every 4,096 steps: cold on refseq33m about 12 µs a step (4.5 million steps in
+  about 60 s), so up to about 50 ms between readings.
+- The reading before each anchor also asks whether the client has left (two system calls), at most `max_anchors`
+  times a pattern; small next to spelling the anchor.
+- The note is left out beside threshold stops too, which are exactly the answers whose counts are large; since the
+  diagnostic is bounded and clocked, leaving it out after budget stops only (`max_steps`, `time`) is open for the
+  owner.
+- The join of a path's verification assumes a row's coordinates of one label distinct (each one k-mer position);
+  the occurrences of contexts tolerate repeated coordinates (counted once).
+- The 100,000-sink test compares costs (a ratio, not machine speed): a timing test still.
+- The item-5 cause was confirmed on the mini, not re-measured cold on refseq33m: rerunning the staging benchmark's
+  `GNCNGNTNCNGNANANANTNANGNTNTNCNCNANGNGNTN` cold should now give a stated stop.

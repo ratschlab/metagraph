@@ -946,11 +946,33 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("anchors", caps["long_search"][0].asString());
     EXPECT_EQ("paths", caps["long_search"][1].asString());
     EXPECT_EQ("anchors", caps["default_long_search"].asString());
-    EXPECT_NE(std::string::npos, caps["caps_rule"].asString().find("max_paths are the maxima"));
-    EXPECT_NE(std::string::npos, caps["caps_rule"].asString().find("long_search \"paths\""));
     PatternLimits other = limits();
     other.max_paths = 7;
+    other.delivery_build_mbps = 2.5;
+    other.delivery_compress_mbps = 12.5;
     EXPECT_EQ(7u, pattern_capabilities_json(g.get(), other, false)["caps"]["max_paths"].asUInt64());
+    // owner decision P9: the prose fields are references to the SPEC, the rates of the time
+    // kept back for the answer numbers (MB/s, the server's flags as configured)
+    EXPECT_EQ(10.0, caps["delivery_mbps"]["build"].asDouble());
+    EXPECT_EQ(50.0, caps["delivery_mbps"]["compress"].asDouble());
+    EXPECT_EQ(2u, caps["delivery_mbps"].size());
+    EXPECT_EQ(2.5, pattern_capabilities_json(g.get(), other, false)["delivery_mbps"]["build"]
+                           .asDouble());
+    EXPECT_EQ(12.5, pattern_capabilities_json(g.get(), other, false)["delivery_mbps"]["compress"]
+                            .asDouble());
+    for (const char *rule : { "caps_rule", "protein_rule" }) {
+        const std::string text = caps[rule].asString();
+        EXPECT_NE(std::string::npos, text.find("SPEC-pattern-search.md sections ")) << rule;
+        // written as it is (a byte outside printable ASCII would be escaped as \uXXXX)
+        EXPECT_TRUE(std::all_of(text.begin(), text.end(),
+                                [](char c) { return c >= 0x20 && c < 0x7f; })) << rule;
+        // a reference, not the rule: a sentence
+        EXPECT_GE(512u, text.size()) << rule;
+    }
+    // the rule names every cap: which bound a request field, which are the server's policy
+    for (const std::string &cap : caps["caps"].getMemberNames()) {
+        EXPECT_NE(std::string::npos, caps["caps_rule"].asString().find(cap)) << cap;
+    }
     EXPECT_EQ("none", caps["placement"].asString());
     // no coordinates: a path's labels can only be the intersection of its k-mers'
     EXPECT_EQ("label_intersection", caps["support"].asString());
@@ -991,8 +1013,8 @@ TEST(PatternRoute, Capabilities) {
                                  24, 25, 26, 27, 28, 29, 30, 31, 32, 33 }), codes);
     EXPECT_EQ(1, caps["default_genetic_code"].asInt());
     EXPECT_EQ(std::string::npos, caps["protein_rule"].asString().find("stop_unsupported"));
-    EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("the stop '*'"));
-    EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("no_stop_codon"));
+    // §12.2 holds the rule (residues, the stop '*', no_stop_codon), §18 the stop's decisions
+    EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("12.2, 18"));
     // owner decision #16: a graph with its mask counts exactly, and has no dummy fraction
     EXPECT_EQ("exact", caps["counting"].asString());
     EXPECT_TRUE(caps.isMember("dummy_fraction"));
@@ -1610,6 +1632,181 @@ TEST(PatternRoute, UnmaskedDummyFractionIsKeptPerGraph) {
     auto again = unmasked(*masked, "kept_again");
     EXPECT_EQ(a->real, dummy_fraction(*again)->real);
     EXPECT_FALSE(dummy_fraction(*masked));
+}
+
+
+// ---------------------------------------------------------------- the work's counters
+
+/**
+ * The extension of a pattern longer than k on the BASIC tiny graph, by brute force over the
+ * records' k-mers (never the engine): for each oriented pattern (P and rc(P), P once when
+ * palindromic), its anchors (the k-mers instantiating its first k positions) and from each a
+ * depth-first walk over strings: the walks of k to L - 1 bases that two or more k-mers extend
+ * at the next position (the extension's branchings), the complete paths, and the distinct
+ * k-mers on them (on BASIC, each its own annotation row).
+ */
+struct ExtensionOracle {
+    uint64_t anchors = 0;
+    uint64_t branchings = 0;
+    uint64_t paths = 0;
+    std::set<std::string> path_kmers;
+};
+
+ExtensionOracle extension_oracle(const std::string &p) {
+    std::set<std::string> kmers;
+    for (const std::string &r : kRecords) {
+        for (size_t i = 0; i + kK <= r.size(); ++i) {
+            kmers.insert(r.substr(i, kK));
+        }
+    }
+    std::vector<std::string> oriented { p };
+    if (iupac_rc(p) != p)
+        oriented.push_back(iupac_rc(p));
+    ExtensionOracle o;
+    for (const std::string &q : oriented) {
+        std::function<void(std::string&)> grow = [&](std::string &s) {
+            if (s.size() == q.size()) {
+                ++o.paths;
+                for (size_t i = 0; i + kK <= s.size(); ++i) {
+                    o.path_kmers.insert(s.substr(i, kK));
+                }
+                return;
+            }
+            std::string next;
+            for (char b : std::string("ACGT")) {
+                if (iupac_matches(q[s.size()], b) && kmers.count(s.substr(s.size() - kK + 1) + b))
+                    next.push_back(b);
+            }
+            o.branchings += next.size() > 1;
+            for (char b : next) {
+                s.push_back(b);
+                grow(s);
+                s.pop_back();
+            }
+        };
+        for (const std::string &kmer : kmers) {
+            bool anchor = true;
+            for (size_t i = 0; i < kK; ++i) {
+                anchor = anchor && iupac_matches(q[i], kmer[i]);
+            }
+            if (!anchor)
+                continue;
+            ++o.anchors;
+            std::string s = kmer;
+            grow(s);
+        }
+    }
+    return o;
+}
+
+// Review GPT-3 (round fix3): the counters the route states beside the work. The extension's,
+// in every entry of a path search (with extension_edges): work.extension_anchors (the anchors
+// whose extension began; the anchors when it completed, 0 when it did not run) and
+// work.extension_branches (the walks the extension branched at). The labelled retrieval's, which
+// apply_labels does not merge: work.annotation_rows_distinct in every entry that read labels,
+// and for paths work.verification_steps (0 here: no coordinates, nothing verified),
+// timing.label_intersection_ms and timing.verification_ms. Against the brute force over the
+// records; absent from every other entry
+TEST(PatternRoute, TheCountersOfTheExtensionAndOfTheLabels) {
+    auto g = tiny();
+    // the anchor CAACGTA is in both records, followed by A in one and C in the other
+    const std::vector<std::string> panel = { "CAACGTANN", "ACGTTGCAACG", "AACGTNCGTT",
+                                             "GGCTTACGNTCC", "TTTTTTTTTT" };
+    std::string patterns;
+    for (const std::string &p : panel) {
+        patterns += "{\"iupac\": \"" + p + "\"}, ";
+    }
+    // a pattern of at most k bases and a refused slot beside them
+    patterns += "{\"dna\": \"AACG\"}, {\"dna\": \"ACGU\"}";
+    const std::set<std::string> short_rows = [] {
+        std::set<std::string> rows;
+        for (const auto &[strand, kmer, offset] : oracle("AACG")) {
+            rows.insert(kmer);
+        }
+        return rows;
+    }();
+    uint64_t branchings = 0, paths = 0;
+    for (const std::string &p : panel) {
+        const ExtensionOracle o = extension_oracle(p);
+        branchings += o.branchings;
+        paths += o.paths;
+    }
+    // the panel branches, and finds paths
+    ASSERT_LT(0u, branchings);
+    ASSERT_LT(0u, paths);
+
+    const std::string labelled = "\"output\": {\"labels\": \"all\"}, "
+                                 "\"allow_unbudgeted_annotation\": true";
+    for (const std::string mode : { "count", "all_or_count", "partial" }) {
+        for (bool labels : { false, true }) {
+            for (const std::string search : { "anchors", "paths" }) {
+                if (mode == "count" && labels)
+                    continue;
+                SCOPED_TRACE(mode + (labels ? " labels" : "") + " " + search);
+                const Json::Value out = run(*g, "{\"patterns\": [" + patterns + "], \"mode\": \""
+                                                + mode + "\", \"long_search\": \"" + search + "\""
+                                                + (labels ? ", " + labelled : "") + "}");
+                ASSERT_EQ(panel.size() + 2, out["patterns"].size());
+                const bool read = labels && mode != "count";
+                for (size_t i = 0; i < panel.size(); ++i) {
+                    SCOPED_TRACE(panel[i]);
+                    const Json::Value &e = out["patterns"][Json::ArrayIndex(i)];
+                    ASSERT_FALSE(e.isMember("error")) << e["error"];
+                    const ExtensionOracle o = extension_oracle(panel[i]);
+                    EXPECT_EQ(o.anchors, e["counts"]["anchors"]["value"].asUInt64());
+                    if (search == "anchors") {
+                        EXPECT_FALSE(e["work"].isMember("extension_anchors"));
+                        EXPECT_FALSE(e["work"].isMember("extension_branches"));
+                    } else {
+                        ASSERT_EQ(o.anchors ? "completed" : "no_anchors",
+                                  e["counts"]["paths"]["extension"].asString());
+                        EXPECT_EQ(o.paths, e["counts"]["paths"]["value"].asUInt64());
+                        EXPECT_EQ(o.anchors, e["work"]["extension_anchors"].asUInt64());
+                        EXPECT_EQ(o.branchings, e["work"]["extension_branches"].asUInt64());
+                    }
+                    const bool paths_read = read && search == "paths";
+                    EXPECT_EQ(read, e["work"].isMember("annotation_rows_distinct"));
+                    if (read) {
+                        // an L > k pattern without paths releases nothing: no row read
+                        EXPECT_EQ(paths_read ? o.path_kmers.size() : 0u,
+                                  e["work"]["annotation_rows_distinct"].asUInt64());
+                        EXPECT_LE(e["work"]["annotation_rows_distinct"].asUInt64(),
+                                  e["work"]["annotation_rows"].asUInt64());
+                    }
+                    EXPECT_EQ(paths_read, e["work"].isMember("verification_steps"));
+                    EXPECT_EQ(paths_read, e["timing"].isMember("label_intersection_ms"));
+                    EXPECT_EQ(paths_read, e["timing"].isMember("verification_ms"));
+                    if (paths_read) {
+                        EXPECT_EQ(0u, e["work"]["verification_steps"].asUInt64());
+                        EXPECT_LE(0.0, e["timing"]["label_intersection_ms"].asDouble());
+                        EXPECT_LE(0.0, e["timing"]["verification_ms"].asDouble());
+                    }
+                }
+                const Json::Value &s = out["patterns"][Json::ArrayIndex(panel.size())];
+                EXPECT_FALSE(s["work"].isMember("extension_anchors"));
+                EXPECT_FALSE(s["work"].isMember("extension_branches"));
+                EXPECT_FALSE(s["work"].isMember("verification_steps"));
+                EXPECT_FALSE(s["timing"].isMember("verification_ms"));
+                EXPECT_EQ(read, s["work"].isMember("annotation_rows_distinct"));
+                if (read) {
+                    EXPECT_EQ(short_rows.size(),
+                              s["work"]["annotation_rows_distinct"].asUInt64());
+                }
+                const Json::Value &bad = out["patterns"][Json::ArrayIndex(panel.size() + 1)];
+                EXPECT_EQ("bad_alphabet", bad["error"]["code"].asString());
+                EXPECT_FALSE(bad.isMember("work"));
+            }
+        }
+    }
+
+    // the extension not admitted (the anchors above max_anchors): it did not run, 0 each
+    const Json::Value e = run(*g, "{\"patterns\": [{\"iupac\": \"CAACGTANN\"}], \"mode\": "
+                                  "\"count\", \"long_search\": \"paths\", \"max_anchors\": 0}")
+                                 ["patterns"][0];
+    ASSERT_EQ("not_admitted", e["counts"]["paths"]["extension"].asString());
+    EXPECT_EQ(0u, e["work"]["extension_anchors"].asUInt64());
+    EXPECT_EQ(0u, e["work"]["extension_branches"].asUInt64());
+    EXPECT_EQ(0u, e["work"]["extension_edges"].asUInt64());
 }
 
 } // namespace

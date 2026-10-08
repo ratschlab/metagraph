@@ -304,8 +304,8 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.069084,
-    "label_discovery_ms": 0.205584,
+    "elapsed_ms": 0.137792,
+    "label_discovery_ms": 0.363416,
     "placement_ms": 0.0
    },
    "withheld": {
@@ -313,6 +313,7 @@
    },
    "work": {
     "annotation_rows": 24,
+    "annotation_rows_distinct": 24,
     "annotation_units": 11968,
     "mask_scans": 0,
     "memory_bytes": 39447,
@@ -322,6 +323,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.299333
+  "elapsed_ms": 0.539541
  }
 }

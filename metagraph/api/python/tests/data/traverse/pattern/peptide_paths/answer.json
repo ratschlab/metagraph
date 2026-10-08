@@ -851,24 +851,30 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.409125,
-    "extension_ms": 0.046083,
-    "label_discovery_ms": 0.641875,
-    "placement_ms": 0.387583
+    "elapsed_ms": 0.293083,
+    "extension_ms": 0.018542,
+    "label_discovery_ms": 0.302917,
+    "label_intersection_ms": 0.002417,
+    "placement_ms": 0.256625,
+    "verification_ms": 0.009833
    },
    "withheld": null,
    "work": {
     "annotation_rows": 48,
+    "annotation_rows_distinct": 24,
     "annotation_units": 26376,
+    "extension_anchors": 2,
+    "extension_branches": 0,
     "extension_edges": 22,
     "mask_scans": 0,
     "memory_bytes": 47026,
     "ranges_visited": 1478,
-    "steps": 1500
+    "steps": 1500,
+    "verification_steps": 888
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 1.580292
+  "elapsed_ms": 0.92825
  }
 }

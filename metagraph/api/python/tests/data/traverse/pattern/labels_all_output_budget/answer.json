@@ -202,7 +202,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 9.62625,
+    "elapsed_ms": 7.510375,
     "label_discovery_ms": 0.0,
     "placement_ms": 0.0
    },
@@ -211,6 +211,7 @@
    },
    "work": {
     "annotation_rows": 0,
+    "annotation_rows_distinct": 0,
     "annotation_units": 0,
     "mask_scans": 0,
     "memory_bytes": 1048124,
@@ -220,6 +221,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 9.66425
+  "elapsed_ms": 7.551416
  }
 }

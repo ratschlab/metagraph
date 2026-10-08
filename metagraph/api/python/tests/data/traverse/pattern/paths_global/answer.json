@@ -679,24 +679,30 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.175125,
-    "extension_ms": 0.052417,
-    "label_discovery_ms": 0.46325,
-    "placement_ms": 0.411042
+    "elapsed_ms": 0.120375,
+    "extension_ms": 0.047958,
+    "label_discovery_ms": 0.377417,
+    "label_intersection_ms": 0.005833,
+    "placement_ms": 0.240166,
+    "verification_ms": 0.006417
    },
    "withheld": null,
    "work": {
     "annotation_rows": 40,
+    "annotation_rows_distinct": 20,
     "annotation_units": 21980,
+    "extension_anchors": 2,
+    "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
     "memory_bytes": 41178,
     "ranges_visited": 62,
-    "steps": 80
+    "steps": 80,
+    "verification_steps": 698
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 1.240542
+  "elapsed_ms": 0.820042
  }
 }

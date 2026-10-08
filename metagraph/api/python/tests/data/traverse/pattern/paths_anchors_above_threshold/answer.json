@@ -99,13 +99,15 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.040375,
+    "elapsed_ms": 0.014791,
     "extension_ms": 0.0
    },
    "withheld": {
     "reason": "anchors_above_threshold"
    },
    "work": {
+    "extension_anchors": 0,
+    "extension_branches": 0,
     "extension_edges": 0,
     "mask_scans": 0,
     "ranges_visited": 62,
@@ -114,6 +116,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.053541
+  "elapsed_ms": 0.022167
  }
 }

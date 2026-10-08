@@ -133,11 +133,13 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.066625,
-    "extension_ms": 0.02475
+    "elapsed_ms": 0.031542,
+    "extension_ms": 0.012959
    },
    "withheld": null,
    "work": {
+    "extension_anchors": 2,
+    "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
     "ranges_visited": 62,
@@ -146,6 +148,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.078834
+  "elapsed_ms": 0.038917
  }
 }

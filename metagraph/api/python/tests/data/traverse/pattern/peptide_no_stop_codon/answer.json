@@ -96,7 +96,7 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.001208
+    "elapsed_ms": 0.001083
    },
    "work": {
     "mask_scans": 0,
@@ -177,10 +177,12 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.0375,
-    "extension_ms": 0.008209
+    "elapsed_ms": 0.044,
+    "extension_ms": 0.01025
    },
    "work": {
+    "extension_anchors": 1,
+    "extension_branches": 0,
     "extension_edges": 12,
     "mask_scans": 0,
     "ranges_visited": 124,
@@ -189,6 +191,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.049
+  "elapsed_ms": 0.059625
  }
 }

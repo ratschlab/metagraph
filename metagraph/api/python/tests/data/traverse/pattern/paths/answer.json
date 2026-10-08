@@ -162,11 +162,13 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.153,
-    "extension_ms": 0.048833
+    "elapsed_ms": 0.091625,
+    "extension_ms": 0.042792
    },
    "withheld": null,
    "work": {
+    "extension_anchors": 2,
+    "extension_branches": 0,
     "extension_edges": 18,
     "mask_scans": 0,
     "ranges_visited": 62,
@@ -245,11 +247,13 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.016083,
+    "elapsed_ms": 0.014792,
     "extension_ms": 0.0
    },
    "withheld": null,
    "work": {
+    "extension_anchors": 0,
+    "extension_branches": 0,
     "extension_edges": 0,
     "mask_scans": 0,
     "ranges_visited": 23,
@@ -258,6 +262,6 @@
   }
  ],
  "timing": {
-  "elapsed_ms": 0.230459
+  "elapsed_ms": 0.118375
  }
 }

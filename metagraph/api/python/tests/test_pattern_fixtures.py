@@ -4,7 +4,9 @@ scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, cont
 §12.2, §17: the paths of long_search "paths" with their labels' support, and protein patterns;
 and SPEC §18, the owner's decisions #16, #17, #19 and #24 of 2026-10-08: graphs without their
 dummy-edge mask answered with bounds and an estimate, their tiny blocks checked and exact, and
-the stop '*' in peptides):
+the stop '*' in peptides; and the review GPT-3 with the owner's decision P9: the work counters,
+the low-complexity note on completed searches only, the capabilities' references and their byte
+budget):
 
   - the field lists: every table of the SPEC marked `<!-- schema: NAME -->` names exactly the
     fields SCHEMA[NAME] below knows, so that the SPEC and this check cannot drift apart;
@@ -78,6 +80,10 @@ NOTES = ('low_complexity_pattern', 'strand_unknown_canonical', 'paths_later_incr
          'threshold_upper_bound', 'no_stop_codon', 'estimate_sampled_dummy_fraction',
          'annotation_unbudgeted', 'record_bounds_unknown', 'annotation_not_read',
          'label_intersection_only')
+# review GPT-3 (round fix3, SPEC §7.8): the bases of a pattern its low-complexity diagnostic always
+# reads (one piece of sdust, 128 + 63, before any clock reading); a longer one's can be cut by
+# the work time, its note then left out
+LOW_COMPLEXITY_UNCUT = 191
 # (stop_unsupported, a slot code that only 4596bb3b answers, is retired: '*' is a residue since
 # owner decision #19 of 2026-10-08; no source writes it and no fixture holds it)
 SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported')
@@ -204,7 +210,9 @@ SCHEMA = {
                'allow_unbudgeted_annotation', 'long_search', 'max_paths', 'require_support',
                'clamped'],
     'clamped': ['field', 'requested', 'effective'],
-    'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms', 'extension_ms'],
+    'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms', 'extension_ms',
+               # review GPT-3 (round fix3, SPEC §18): the labels of paths
+               'label_intersection_ms', 'verification_ms'],
     'entry': ['id', 'kind', 'pattern', 'length', 'residues', 'genetic_code', 'information_bits',
               'anchor_information_bits', 'min_anchor_information_bits', 'error', 'mode', 'scope',
               'strands', 'palindromic', 'counts', 'work', 'stop',
@@ -221,7 +229,10 @@ SCHEMA = {
     'labels_count': ['by_support'],
     'by_support': ['record_verified', 'label_intersection'],
     'work': ['ranges_visited', 'mask_scans', 'steps', 'annotation_rows', 'annotation_units',
-             'memory_bytes', 'extension_edges'],
+             'memory_bytes', 'extension_edges',
+             # review GPT-3 (round fix3, SPEC §18): counters beside the steps
+             'extension_anchors', 'extension_branches', 'annotation_rows_distinct',
+             'verification_steps'],
     'stop': ['phase', 'reason'],
     'reason': ['reason'],
     'result': ['kmer', 'instance', 'offset', 'strand', 'orientation', 'node', 'row', 'support',
@@ -243,7 +254,10 @@ SCHEMA = {
                      'long_search', 'default_long_search', 'protein_residues', 'genetic_codes',
                      'default_genetic_code', 'protein_rule',
                      # owner decision #16
-                     'counting', 'dummy_fraction'],
+                     'counting', 'dummy_fraction',
+                     # owner decision P9 (round fix3, SPEC §18)
+                     'delivery_mbps'],
+    'delivery_mbps': ['build', 'compress'],
     'capabilities_multi': ['pattern_contract_version', 'available', 'unavailable_reason'],
     # increment 3 (SPEC §14)
     'anchor_truncated': ['kmer', 'row', 'cap', 'total'],
@@ -276,6 +290,35 @@ CAPS = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms', 'min_infor
 def load(*path):
     with open(os.path.join(DATA, *path), encoding='utf-8') as f:
         return json.load(f)
+
+
+def served_bytes(value):
+    """The length of |value| as the server writes it (jsoncpp, compact JSON, every byte outside
+    ASCII escaped as \\uXXXX), from above: each float counted as 24 characters (jsoncpp writes
+    up to 17 significant digits, json.dumps the shortest that reads back), the rest exactly."""
+    if isinstance(value, float):
+        return 24
+    # the brackets, the commas between the members, a colon per key
+    if isinstance(value, dict):
+        return 2 + max(len(value) - 1, 0) + sum(served_bytes(k) + 1 + served_bytes(v)
+                                                for k, v in value.items())
+    if isinstance(value, list):
+        return 2 + max(len(value) - 1, 0) + sum(served_bytes(v) for v in value)
+    return len(json.dumps(value, ensure_ascii=True))
+
+
+# The route's sources (src/cli/*.cpp) that the route does not call yet, with the refusal codes
+# they write: increment 5b's predicate language (pattern_predicate.cpp, built and unit-tested
+# since round fix3, not wired: `predicate` is still refused by name, later_increment)
+NOT_SERVED_SOURCES = {'pattern_predicate.cpp': ('predicate_too_large',)}
+
+# The ceiling of the capabilities document the service's MCP tool returns in one piece
+# (api/python/metagraph/traverse/mcp_tools.py, CAPABILITIES_MAX_BYTES; read from its source by
+# test_capabilities_documents_keep_a_kibibyte, no import), and the room every fixture server's
+# document keeps under it since owner decision P9 of 2026-10-08 (SPEC §18)
+MCP_TOOLS = os.path.join(REPO, 'api', 'python', 'metagraph', 'traverse', 'mcp_tools.py')
+CAPABILITIES_MAX_BYTES = 32 * 1024
+CAPABILITIES_ROOM = 1024
 
 
 def spec_tables(text):
@@ -684,7 +727,8 @@ class Checker:
             path = f'patterns[{i}]'
             if Kind(request['patterns'][i], request).answered_unsearched(k):
                 # (memory_bytes, with labels "all", is the request's account so far)
-                engine = ('ranges_visited', 'mask_scans', 'steps', 'extension_edges')
+                engine = ('ranges_visited', 'mask_scans', 'steps', 'extension_edges',
+                          'extension_anchors', 'extension_branches')
                 self.ok(e['stop'] is None and e['determinism'] == 'full'
                         and all(e['work'][f] == 0 for f in engine if f in e['work']),
                         path, 'answered without a search: no stop, determinism full, no work')
@@ -697,7 +741,8 @@ class Checker:
             if sticky is not None:
                 self.ok(e['stop'] == {'phase': 'discovery', 'reason': sticky}, path + '.stop',
                         f'the {sticky} stop of an earlier pattern, in discovery')
-                engine = ('ranges_visited', 'mask_scans', 'steps', 'extension_edges')
+                engine = ('ranges_visited', 'mask_scans', 'steps', 'extension_edges',
+                          'extension_anchors', 'extension_branches')
                 self.ok(all(e['work'][f] == 0 for f in engine if f in e['work']), path + '.work',
                         'no work after a budget stop')
                 for name, c in self.counts_of(e):
@@ -725,7 +770,9 @@ class Checker:
 
     def timing(self, t, path, labelled=False, extension=False):
         self.keys(t, ['elapsed_ms'] + (['label_discovery_ms', 'placement_ms'] if labelled else [])
-                  + (['extension_ms'] if extension else []), path)
+                  + (['extension_ms'] if extension else [])
+                  + (['label_intersection_ms', 'verification_ms'] if labelled and extension
+                     else []), path)
         for k, v in t.items():
             self.ok(is_num(v) and v >= 0, f'{path}.{k}')
 
@@ -913,11 +960,35 @@ class Checker:
         # work, stop, determinism, notes
         w = e['work']
         self.keys(w, ['ranges_visited', 'mask_scans', 'steps']
-                  + (['annotation_rows', 'annotation_units', 'memory_bytes'] if labelled else [])
-                  + (['extension_edges'] if paths else []), path + '.work')
+                  + (['annotation_rows', 'annotation_units', 'memory_bytes',
+                      'annotation_rows_distinct'] if labelled else [])
+                  + (['extension_edges', 'extension_anchors', 'extension_branches']
+                     if paths else [])
+                  + (['verification_steps'] if labelled and paths else []), path + '.work')
         self.ok(all(is_int(v) and v >= 0 for v in w.values()), path + '.work')
         self.ok(w['steps'] >= w['ranges_visited'] + w.get('extension_edges', 0), path + '.work',
                 'steps >= ranges_visited (+ extension_edges, one step each)')
+        # review GPT-3 (round fix3, SPEC §8.7, §18): the counters beside the steps
+        if paths:
+            ext = counts['paths']['extension']
+            if ext in ('no_anchors', 'not_started', 'not_admitted'):
+                self.ok((w['extension_edges'], w['extension_anchors'], w['extension_branches'])
+                        == (0, 0, 0), path + '.work', f'an extension {ext}: it did not run')
+            if ext == 'completed':
+                self.ok(w['extension_anchors'] == anchors['value'], path + '.work',
+                        'a completed extension began at every anchor')
+                # each branching enters two candidates or more, its own
+                self.ok(2 * w['extension_branches'] <= counts['paths']['candidates_examined'],
+                        path + '.work', 'two candidates per branching')
+            if anchors['relation'] == 'exact':
+                self.ok(w['extension_anchors'] <= anchors['value'], path + '.work',
+                        'at most the anchors listed')
+        if labelled:
+            self.ok(w['annotation_rows_distinct'] <= w['annotation_rows'], path + '.work',
+                    'each distinct row read is a row read')
+            if paths and e['placement'] in ('none', 'none_canonical', 'not_requested'):
+                self.ok(w['verification_steps'] == 0, path + '.work',
+                        'no coordinates read: nothing verified')
         stop = e['stop']
         if stop is not None:
             self.keys(stop, SCHEMA['stop'], path + '.stop')
@@ -968,11 +1039,19 @@ class Checker:
             self.ok(e['determinism'] == 'time_limited', path + '.determinism',
                     'a time stop or a time cut is not deterministic')
         if e['determinism'] == 'time_limited':
-            self.ok(clocked or (labelled and stop is not None), path + '.stop',
+            # (review GPT-3, round fix3, SPEC §7.8: the low-complexity diagnostic of a completed
+            # pattern of more than 191 bases, cut by the work time, leaves its note out and
+            # states time_limited with no stop)
+            diagnosis_cut = stop is None and L > LOW_COMPLEXITY_UNCUT \
+                and 'low_complexity_pattern' not in e['notes']
+            self.ok(clocked or (labelled and stop is not None) or diagnosis_cut, path + '.stop',
                     'time_limited without a time stop or a time cut')
         self.ok(isinstance(e['notes'], list) and all(n in NOTES for n in e['notes']),
                 path + '.notes', repr(e['notes']))
         self.ok(e['notes'] == [n for n in NOTES if n in e['notes']], path + '.notes', 'order')
+        # review GPT-3 (round fix3, SPEC §7.8): the diagnostic runs on a completed search only
+        self.ok('low_complexity_pattern' not in e['notes'] or stop is None, path + '.notes',
+                'low_complexity_pattern with a stop')
         self.ok(('strand_unknown_canonical' in e['notes']) is (not strand_stated),
                 path + '.notes', 'strand_unknown_canonical exactly where no strand is known')
         self.ok(('paths_later_increment' in e['notes']) is (L > k and not paths),
@@ -1592,8 +1671,16 @@ class Checker:
                 and all(c in GENETIC_CODES for c in b['genetic_codes']), path + '.genetic_codes',
                 'NCBI translation table ids')
         self.ok(b['default_genetic_code'] in b['genetic_codes'], path + '.default_genetic_code')
-        self.ok(isinstance(b['protein_rule'], str) and b['protein_rule'],
-                path + '.protein_rule')
+        # owner decision P9 (SPEC §18): the two prose fields are references to the SPEC, in
+        # printable ASCII (the server escapes any other byte as \uXXXX), and the delivery rates
+        # of the time kept back for the answer (§7.6) are numbers
+        for f in ('protein_rule', 'caps_rule'):
+            self.ok(isinstance(b[f], str) and 'SPEC-pattern-search.md sections ' in b[f]
+                    and all(' ' <= c <= '~' for c in b[f]), f'{path}.{f}',
+                    'a reference to the SPEC, printable ASCII')
+        self.keys(b['delivery_mbps'], SCHEMA['delivery_mbps'], path + '.delivery_mbps')
+        self.ok(all(is_num(v) and v > 0 for v in b['delivery_mbps'].values()),
+                path + '.delivery_mbps', 'positive rates in MB/s')
         self.ok(('protein' in b['kinds']) is bool(b['protein_residues']), path + '.kinds',
                 'protein served exactly with its residues')
         self.ok(b['modes'] == list(MODES), path + '.modes')
@@ -1994,8 +2081,17 @@ class TestPatternFixtures(unittest.TestCase):
                 with open(os.path.join(cli, name), encoding='utf-8') as f:
                     sources[name] = f.read()
         literal = set()
-        for text in sources.values():
-            literal |= set(re.findall(r'PatternRefusal\(\s*\d+\s*,\s*"(\w+)"', text))
+        for name, text in sources.items():
+            codes = set(re.findall(r'PatternRefusal\(\s*\d+\s*,\s*"(\w+)"', text))
+            if name in NOT_SERVED_SOURCES:
+                # a later increment's module, built and tested but not called by the route yet
+                # (the request field it reads is refused by name, later_increment): its new
+                # codes are no answer of this build
+                self.assertEqual(set(NOT_SERVED_SOURCES[name]), codes - set(REFUSALS), name)
+                self.assertNotIn(f'#include "{name[:-len(".cpp")]}.hpp"', sources['pattern.cpp'],
+                                 f'{name} is served now: its codes belong in REFUSALS')
+                continue
+            literal |= codes
         support = set(re.findall(r'support\.reason == "(\w+)"', sources['pattern.cpp']))
         self.assertIn('PatternRefusal(400, support.reason, support_message(support))',
                       sources['pattern.cpp'], 'a graph-support refusal is its reason')
@@ -2360,6 +2456,85 @@ class TestPatternFixtures(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'only on a graph without its mask'):
             Checker(Stub(), 'count').answer(a, request, self.capabilities_of('masked'))
 
+    def test_round_fix3_rules_refuse_what_v1_never_answers(self):
+        """SPEC §18 (review GPT-3, round fix3, and the owner's decision P9): the stored bodies
+        pass, and each new rule refuses an answer that breaks it: a counter missing where its
+        entry has it, or present where it has not; a completed extension that did not begin at
+        every anchor; an extension that did not run with work of its own; more branchings than
+        half the candidates entered; more distinct rows than rows read; verification steps
+        without coordinates; low_complexity_pattern beside a stop; time_limited without a stop
+        on a pattern its diagnostic reads whole; and capabilities whose prose fields are not
+        references in ASCII, or whose delivery rates are not numbers."""
+        class Stub:
+            def fail(self, message):
+                raise AssertionError(message)
+
+        def check(name, mutate=None):
+            request, answer = self.bodies[name]
+            answer = copy.deepcopy(answer)
+            if mutate:
+                mutate(answer)
+            Checker(Stub(), name).answer(answer, request,
+                                         self.capabilities_of(self.fixtures[name]['server']))
+
+        def work(i, **fields):
+            return lambda a: a['patterns'][i]['work'].update(fields)
+
+        def drop(i, block, field):
+            return lambda a: a['patterns'][i][block].pop(field)
+
+        def with_placement(placement):
+            def run(a):
+                a['patterns'][0]['placement'] = placement
+            return run
+
+        for name in ('paths', 'paths_labels', 'paths_global', 'paths_anchors_above_threshold',
+                     'labels_all', 'count_low_complexity', 'count'):
+            check(name)
+        cases = [
+            ('paths', drop(0, 'work', 'extension_anchors'), 'fields'),
+            ('paths', drop(0, 'work', 'extension_branches'), 'fields'),
+            ('count', work(0, extension_anchors=0), 'fields'),
+            ('paths', work(0, extension_anchors=1), 'began at every anchor'),
+            ('paths', work(0, extension_branches=10), 'two candidates per branching'),
+            ('paths_anchors_above_threshold', work(0, extension_anchors=1), 'did not run'),
+            ('paths', work(1, extension_branches=1), 'did not run'),
+            ('labels_all', drop(0, 'work', 'annotation_rows_distinct'), 'fields'),
+            ('labels_all', work(0, annotation_rows_distinct=49), 'a row read'),
+            ('labels_all', work(0, verification_steps=0), 'fields'),
+            ('paths_labels', drop(0, 'work', 'verification_steps'), 'fields'),
+            ('paths_labels', drop(0, 'timing', 'verification_ms'), 'fields'),
+            ('paths_labels', drop(0, 'timing', 'label_intersection_ms'), 'fields'),
+            ('labels_all', lambda a: a['patterns'][0]['timing'].update(verification_ms=0.1),
+             'fields'),
+            ('paths_global',
+             lambda a: (with_placement('none')(a),
+                        a['patterns'][0]['notes'].__setitem__(0, 'label_intersection_only')),
+             'nothing verified'),
+            ('count_low_complexity',
+             lambda a: a['patterns'][0].update(stop={'phase': 'extraction', 'reason': 'time'},
+                                               determinism='time_limited'),
+             'low_complexity_pattern with a stop'),
+            ('count', lambda a: a['patterns'][0].update(determinism='time_limited'),
+             'time_limited without a time stop'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                with self.assertRaisesRegex(AssertionError, says):
+                    check(name, mutate)
+        # the capabilities (P9)
+        for field, value, says in (('caps_rule', 'max_contexts ... see the SPEC', 'reference'),
+                                   ('protein_rule', 'SPEC-pattern-search.md sections §12.2',
+                                    'ASCII'),
+                                   ('delivery_mbps', {'build': 10}, 'fields'),
+                                   ('delivery_mbps', {'build': 10, 'compress': '50'}, 'MB/s'),
+                                   ('delivery_mbps', {'build': 0, 'compress': 50}, 'MB/s')):
+            b = copy.deepcopy(self.capabilities_of('masked'))
+            b[field] = value
+            with self.subTest(field=field, value=value):
+                with self.assertRaisesRegex(AssertionError, says):
+                    Checker(Stub(), 'capabilities').block(b, 'pattern', False)
+
     def test_every_mask_value_has_a_capabilities_fixture(self):
         """file, built_at_load and absent (DESIGN §4), each on both capabilities routes."""
         seen = {}
@@ -2399,6 +2574,38 @@ class TestPatternFixtures(unittest.TestCase):
             for flag, value in (('--pattern-default-time-ms', caps['default_time_budget_ms']),
                                 ('--pattern-max-time-ms', caps['caps']['time_budget_ms'])):
                 self.assertIn(f'| `{flag}` | {value:,} |', spec, flag)
+
+    def test_capabilities_documents_keep_a_kibibyte(self):
+        """Owner decision P9 of 2026-10-08 (SPEC §18): every capabilities document of every
+        fixture server -- GET /traverse/capabilities is the one a service's MCP tool returns in
+        one piece, under CAPABILITIES_MAX_BYTES -- keeps CAPABILITIES_ROOM bytes under that
+        ceiling as the server writes it (served_bytes, from above), so that the next
+        increment's additions fit. The paths a multi-graph server names are measured as stored
+        ({work}/...): a host's own paths are its own."""
+        if os.path.isfile(MCP_TOOLS):
+            with open(MCP_TOOLS, encoding='utf-8') as f:
+                m = re.search(r'^CAPABILITIES_MAX_BYTES = (\d+) \* 1024$', f.read(), re.M)
+            self.assertTrue(m, 'CAPABILITIES_MAX_BYTES in mcp_tools.py')
+            self.assertEqual(CAPABILITIES_MAX_BYTES, int(m.group(1)) * 1024)
+        budget = CAPABILITIES_MAX_BYTES - CAPABILITIES_ROOM
+        servers = set()
+        for name, f in self.fixtures.items():
+            if f['method'] != 'GET':
+                continue
+            servers.add(f['server'])
+            size = served_bytes(self.bodies[name][1])
+            with self.subTest(fixture=name):
+                self.assertLessEqual(size, budget, f'{name}: {size} bytes, {budget - size} '
+                                                   f'over the budget of {budget}')
+        # every server a fixture runs on but the ones answering no GET
+        self.assertEqual({f['server'] for f in self.fixtures.values()} - {'masked_no_map',
+                                                                          'unmasked_unchecked'},
+                         servers)
+        # the measure: exact on what it does not bound from above
+        self.assertEqual(len(json.dumps({'a': [1, 'b', None, True, {}]}, separators=(',', ':'))),
+                         served_bytes({'a': [1, 'b', None, True, {}]}))
+        self.assertEqual(len('{"x":"\\u00a7"}'), served_bytes({'x': '§'}))
+        self.assertEqual(len('{"f":}') + 24, served_bytes({'f': 0.5}))
 
 
 if __name__ == '__main__':
