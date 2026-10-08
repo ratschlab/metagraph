@@ -1737,7 +1737,7 @@ if (advanced) {
             fprintf(stderr, "\t   --index-release [STR]\trelease id echoed in results; requests may pin it []\n");
             fprintf(stderr, "\t   --index-name [STR]\t\tname of the index in capabilities and graphlets, [A-Za-z0-9._-]+ []\n");
             fprintf(stderr, "\t   --index-manifest [FILE]\tmanifest of the index bundle (files with size and sha256); its digest is the index identity []\n");
-            fprintf(stderr, "\t   --index-inventory \t\tprint the files the loaders open for -i / -a (JSON) and exit, loading nothing [off]\n");
+            fprintf(stderr, "\t   --index-inventory \t\tprint the files the loaders open for -i / -a (JSON: the identity files a manifest lists, and apart the graph's derived mask and Bloom filter, which it never lists) and exit, loading nothing [off]\n");
             fprintf(stderr, "\t   --traverse-chunk-target-ms [INT]\tdecode an annotation read a deadline may fall into in chunks of about this duration, the deadline checked between them; 0 = one piece per read [50]\n");
             fprintf(stderr, "\t   --traverse-path-cache-mb [INT]\tbound of a request's row-diff path cache (decoded rows kept so that later reads stop their row-diff paths at them), within the label cache's allotment under a memory budget; 0 = off [128]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");

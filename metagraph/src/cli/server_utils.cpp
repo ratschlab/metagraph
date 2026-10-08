@@ -539,7 +539,8 @@ graph_list_identities(const std::vector<GraphListEntry> &entries,
     };
     // One index is one set of loaded files, however its paths are spelled: the lines are
     // grouped by the real paths of the pair's COMPLETE loader inventory (index_load_inventory:
-    // the main files and every sidecar, derived from the spelling as the loaders derive them),
+    // the main files and every identity sidecar, derived from the spelling as the loaders derive
+    // them; the graph's derived data, its mask and Bloom filter, is not part of an identity),
     // so that two spellings of one index agree, and two pairs whose main files are symlinks to
     // the same files but whose sidecars differ are two indexes, each validated against its
     // manifest (review of pass 5, finding 2: grouped by the main files' real paths, the second

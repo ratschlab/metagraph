@@ -112,24 +112,24 @@ bool valid_index_name(const std::string &name);
 std::string index_meta_fingerprint(const graph::traversal::LabelOracle &oracle);
 /**
  * The loader dependency inventory of an index listed as |graph| and |annotation| (review of
- * pass 5, findings 2 and 3): every file the server's loaders open for the pair, its path
- * derived from the LISTED spelling exactly as the loaders derive it (a sidecar next to a
- * symlink, not next to its target), in loading order —
+ * pass 5, findings 2 and 3): every file of the index's IDENTITY that the server's loaders open
+ * for the pair, its path derived from the LISTED spelling exactly as the loaders derive it (a
+ * sidecar next to a symlink, not next to its target), in loading order —
  *   graph               the graph file (required)
- *   graph_mask          <graph without .dbg>.edgemask, when it opens (DBGSuccinct::load)
- *   graph_bloom         <graph without .dbg>.bloom, when it exists and the mask was read
  *   annotation          the annotation file (required)
  *   row_diff_anchors    <graph>.anchors and
  *   row_diff_fork_succ  <graph>.rd_succ, for a .row_diff.annodbg (required: build_annotated_dbg)
  *   coord_to_header     <annotation without .<type>.annodbg>.seqs, for a coordinate
  *                       annotation when it exists and |coord_mapping| (not --no-coord-mapping)
  * A required file is listed whether it exists or not (the loader fails without it), an
- * optional one only when the loader would read it. Deliberately not listed: what the server
- * does not open — a column annotation's .coords (merge_load reads the columns only), the graph's
- * .weights, any leftover <graph>.anchors beside another annotation type (theirs are inside the
- * annotation file) — and the header index of the coordinate mapping, which is built in memory
- * from the .seqs. scripts/traversal/index_manifest.py mirrors this list (load_inventory; an
- * integration test compares the two on every sidecar kind through `traverse --index-inventory`).
+ * optional one only when the loader would read it. Deliberately not listed: the graph's
+ * DERIVED data, which the loader reads too (index_derived_files: the dummy-edge mask and the
+ * Bloom filter; the owner's decision #17 of 2026-10-08), what the server does not open — a
+ * column annotation's .coords (merge_load reads the columns only), the graph's .weights, any
+ * leftover <graph>.anchors beside another annotation type (theirs are inside the annotation
+ * file) — and the header index of the coordinate mapping, which is built in memory from the
+ * .seqs. scripts/traversal/index_manifest.py mirrors this list (load_inventory; an integration
+ * test compares the two on every sidecar kind through `traverse --index-inventory`).
  */
 struct IndexFile {
     std::string path;
@@ -139,6 +139,33 @@ struct IndexFile {
 std::vector<IndexFile> index_load_inventory(const std::string &graph,
                                             const std::string &annotation,
                                             bool coord_mapping = true);
+/**
+ * The derived data of the graph listed as |graph| (the owner's decision #17 of 2026-10-08):
+ * files computed from the graph alone that DBGSuccinct::load reads beside it, and that are
+ * NOT part of the index identity (index_fp) — an exact answer is the same with and without
+ * them, and a manifest must not list them (index_manifest_fingerprint refuses one that does),
+ * so that adding, removing or rebuilding them leaves an index's index_fp unchanged:
+ *   graph_mask   <graph without .dbg>.edgemask: loaded when it opens
+ *   graph_bloom  <graph without .dbg>.bloom: loaded when it exists and the mask was loaded
+ * Both candidates of a .dbg graph are listed, whether they exist or not, with |exists| and
+ * whether the loader reads them (|loaded|), so that an operator sees what is loaded; none for
+ * another graph type. Paths derived from the LISTED spelling, as the loader derives them.
+ * scripts/traversal/index_manifest.py mirrors it (derived_files).
+ */
+struct IndexDerivedFile {
+    std::string path;
+    const char *role;
+    bool exists;
+    bool loaded;
+};
+std::vector<IndexDerivedFile> index_derived_files(const std::string &graph);
+// The rule of index_derived_files, stated by `traverse --index-inventory` and the refusal of
+// a manifest that lists derived data
+extern const char *const kIndexDerivedDataRule;
+// the role of a file whose base name marks it as the derived data of a graph (it ends in
+// .edgemask or .bloom), nullptr for any other: a manifest lists none (by extension, whichever
+// graph it belongs to)
+const char* index_derived_role(const std::string &path);
 // the annotation extensions the loader knows (parse_annotation_type's, in its order) and what
 // it reads beside each: the row-diff anchors beside the graph, the sequence headers
 struct IndexAnnotationKind {
@@ -147,18 +174,21 @@ struct IndexAnnotationKind {
     bool coordinates;
 };
 const std::vector<IndexAnnotationKind>& index_annotation_kinds();
-// the paths of index_load_inventory (what a manifest is checked against)
+// the paths of index_load_inventory (what a manifest is checked against; never a derived file)
 std::vector<std::string> index_bundle_files(const std::string &graph,
                                             const std::string &annotation,
                                             bool coord_mapping = true);
-// the optional files the inventory derives for the pair — <graph without .dbg>.edgemask and
-// .bloom, a coordinate annotation's .seqs — that index_load_inventory leaves out (missing, the
-// mask not read, |coord_mapping| false): a manifest must not list them (by base name)
+// the optional identity files the inventory derives for the pair — a coordinate annotation's
+// .seqs — that index_load_inventory leaves out (missing beside the listed spelling,
+// |coord_mapping| false): a manifest must not list them (by base name). The graph's mask and
+// Bloom filter are not among them: a manifest lists those never (index_derived_files)
 std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
                                                        const std::string &annotation,
                                                        bool coord_mapping = true);
 // `traverse --index-inventory`: {graph, annotation, coord_mapping, files: [{path, role,
-// required, exists}], annotation_kinds: [{extension, row_diff_anchors, coordinates}]}
+// required, exists}] (the identity: what a manifest lists), derived: [{path, role, exists,
+// loaded}] (index_derived_files: loaded or not, never in a manifest), derived_rule (the text of
+// kIndexDerivedDataRule), annotation_kinds: [{extension, row_diff_anchors, coordinates}]}
 Json::Value index_inventory_json(const std::string &graph, const std::string &annotation,
                                  bool coord_mapping = true);
 /**
@@ -172,10 +202,12 @@ Json::Value index_inventory_json(const std::string &graph, const std::string &an
  * dependency inventory) that exists on disk must be listed (by base name) with its size —
  * sizes, not digests: the server does not re-hash the bundle, so a replacement of one file by
  * another of the same size is not detected (index_manifest.py --verify re-hashes) — no file
- * of |not_loaded| (index_unloaded_optional_files) may be listed, and the manifest must list
+ * of |not_loaded| (index_unloaded_optional_files) may be listed, no derived data of a graph
+ * (an entry whose base name ends in .edgemask or .bloom, index_derived_role: not part of
+ * index_fp, kIndexDerivedDataRule) may be listed, and the manifest must list
  * no graph (*dbg) or annotation (*.annodbg) file other than those of |loaded|: a manifest of
  * another bundle, or of a directory holding several, must not lend its identity, and
- * index_fp identifies the loaded files. Throws
+ * index_fp identifies the loaded identity files. Throws
  * std::runtime_error naming the problem. |stated_name|, when given, receives the manifest's
  * own `index_ns` (metadata; "" when it states none): the server's name for the index comes
  * from its configuration, and a different one in the manifest is only logged.

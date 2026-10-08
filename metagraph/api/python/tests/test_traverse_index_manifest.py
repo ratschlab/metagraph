@@ -45,12 +45,14 @@ class TestIndexManifestBatch(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         d = self.root = self.tmp.name
         # two bundles sharing one graph (one graph, two annotations), and a third graph. The
-        # shared graph's mask and Bloom filter are loaded for both of its pairs, the coordinate
-        # annotation's .seqs for its own; the files the server never opens for these pairs
-        # (row-diff anchors without a .row_diff annotation, weights, a column's .coords) are
-        # in no bundle and never hashed
+        # coordinate annotation's .seqs is loaded for its own pair; the shared graph's mask and
+        # Bloom filter are loaded for both of its pairs but are derived data, not part of any
+        # identity (the owner's decision #17 of 2026-10-08); the files the server never opens
+        # for these pairs (row-diff anchors without a .row_diff annotation, weights, a column's
+        # .coords) are in no bundle either: none of these is ever hashed
         self.files = {}
-        self.unloaded = {'g1.dbg.anchors', 'g1.dbg.weights', 'a2.column.annodbg.coords'}
+        self.unloaded = {'g1.dbg.anchors', 'g1.dbg.weights', 'a2.column.annodbg.coords',
+                         'g1.edgemask', 'g1.bloom'}
         for name, data in (('g1.dbg', b'graph one' * 1000), ('g1.edgemask', b'mask'),
                            ('g1.bloom', b'bloom'), ('g1.dbg.anchors', b'anchors'),
                            ('g1.dbg.weights', b'weights'),
@@ -299,15 +301,24 @@ class TestIndexManifestBatch(unittest.TestCase):
             with open(os.path.join(d, name), 'w') as out:
                 out.write(name)
         p = lambda n: os.path.join(d, n)
-        # a column annotation: the graph's dummy-edge mask and, as the mask opens, its Bloom
-        # filter (finding 3: loaded, and able to change answers); never the weights, the
-        # column's .coords or a .seqs beside an annotation that is not a coordinate one
-        self.assertEqual([p('G.edgemask'), p('G.bloom')],
-                         im.sidecars(p('G.dbg'), p('X.column.annodbg')))
-        self.assertEqual([(p('G.dbg'), 'graph', True), (p('G.edgemask'), 'graph_mask', False),
-                          (p('G.bloom'), 'graph_bloom', False),
+        # a column annotation: no identity sidecar — never the graph's dummy-edge mask or its
+        # Bloom filter (derived data, decision #17: loaded, listed apart by derived_files, in
+        # no manifest), the weights, the column's .coords or a .seqs beside an annotation that
+        # is not a coordinate one
+        self.assertEqual([], im.sidecars(p('G.dbg'), p('X.column.annodbg')))
+        self.assertEqual([(p('G.dbg'), 'graph', True),
                           (p('X.column.annodbg'), 'annotation', True)],
                          im.load_inventory(p('G.dbg'), p('X.column.annodbg')))
+        # the derived data: the mask when it opens, and only then the Bloom filter
+        self.assertEqual([(p('G.edgemask'), 'graph_mask', True, True),
+                          (p('G.bloom'), 'graph_bloom', True, True)], im.derived_files(p('G.dbg')))
+        self.assertEqual([(p('H.edgemask'), 'graph_mask', False, False),
+                          (p('H.bloom'), 'graph_bloom', True, False)], im.derived_files(p('H.dbg')))
+        self.assertEqual([], im.derived_files(p('X.column.annodbg')))
+        self.assertEqual('graph_mask', im.derived_role('dir/G.edgemask'))
+        self.assertEqual('graph_bloom', im.derived_role('other.bloom'))
+        self.assertIsNone(im.derived_role('G.dbg'))
+        self.assertIsNone(im.derived_role('G.bloom.txt'))
         # a column row-diff annotation: the anchors and fork successors beside the GRAPH,
         # required
         self.assertEqual([(p('G.dbg.anchors'), 'row_diff_anchors', True),
@@ -315,14 +326,12 @@ class TestIndexManifestBatch(unittest.TestCase):
                          im.load_inventory(p('G.dbg'), p('Z.row_diff.annodbg'))[-2:])
         # a coordinate annotation: its sequence headers, unless the server runs with
         # --no-coord-mapping (it does not load them then)
-        self.assertEqual([p('G.edgemask'), p('G.bloom'), p('Y.seqs')],
+        self.assertEqual([p('Y.seqs')],
                          im.sidecars(p('G.dbg'), p('Y.row_diff_brwt_coord.annodbg')))
-        self.assertEqual([p('G.edgemask'), p('G.bloom')],
-                         im.sidecars(p('G.dbg'), p('Y.row_diff_brwt_coord.annodbg'),
-                                     coord_mapping=False))
+        self.assertEqual([], im.sidecars(p('G.dbg'), p('Y.row_diff_brwt_coord.annodbg'),
+                                         coord_mapping=False))
         self.assertEqual(p('Y.seqs'), im.coordinate_headers(p('Y.row_diff_brwt_coord.annodbg')))
         self.assertIsNone(im.coordinate_headers(p('X.column.annodbg')))
-        # the Bloom filter only after the mask: DBGSuccinct::load reads it only then
         self.assertEqual([], im.sidecars(p('H.dbg'), p('X.column.annodbg')))
         # required files are listed although missing (the server cannot load without them),
         # and the bundle is then refused, naming them
@@ -350,6 +359,58 @@ class TestIndexManifestBatch(unittest.TestCase):
         with self.assertRaises(im.ManifestError):
             im.bundle_files(p('G.dbg'), p('X.column.annodbg'),
                             [p('Y.row_diff_brwt_coord.annodbg')], fail=refuse)
+        # nor the graph's derived data, as an extra file
+        for extra in ('G.edgemask', 'G.bloom', 'H.bloom'):
+            with self.assertRaises(im.ManifestError) as cm:
+                im.bundle_files(p('G.dbg'), p('X.column.annodbg'), [p(extra)], fail=refuse)
+            self.assertIn(im.DERIVED_RULE, str(cm.exception))
+
+    def test_derived_data_is_never_in_a_manifest(self):
+        """The owner's decision #17 of 2026-10-08: the graph's mask and Bloom filter are
+        derived data, not part of index_fp. A manifest written with them beside the graph is
+        the one written without them (the same index_fp: adding a mask to a deployed index
+        leaves its identity unchanged), in single and in batch mode; --verify flags a manifest
+        that lists one (the server refuses it)."""
+        f = self.files
+        g, a = f['g1.dbg'], f['a2.column.annodbg']
+        with_derived = self._single(g, a, os.path.join(self.root, 'with.json'))
+        self.assertEqual(['a2.column.annodbg', 'g1.dbg'],
+                         [e['path'] for e in with_derived['files']])
+        for name in ('g1.edgemask', 'g1.bloom'):
+            os.rename(f[name], f[name] + '.away')
+        without = self._single(g, a, os.path.join(self.root, 'without.json'))
+        for name in ('g1.edgemask', 'g1.bloom'):
+            os.rename(f[name] + '.away', f[name])
+        self.assertEqual(without, with_derived)
+        csv = os.path.join(self.root, 'one.csv')
+        with open(csv, 'w') as out:
+            out.write('B,%s,%s\n' % (g, a))
+        written = im.batch(_args(server_csv=csv, out_dir=os.path.join(self.root, 'b')))
+        with open(written[(g, a)]) as fh:
+            self.assertEqual(without['index_fp'], json.load(fh)['index_fp'])
+        # --verify: the manifest as written passes; with the mask listed it is flagged
+        manifest = os.path.join(self.root, 'with.json')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            im.verify(manifest, root=self.root)
+        self.assertIn('OK', out.getvalue())
+        listed = dict(with_derived)
+        with open(f['g1.edgemask'], 'rb') as fh:
+            data = fh.read()
+        entries = list(with_derived['files']) + [{'path': 'g1.edgemask', 'size': len(data),
+                                                  'sha256': hashlib.sha256(data).hexdigest()}]
+        entries.sort(key=lambda e: e['path'].encode())
+        listed['files'] = entries
+        listed['index_fp'] = hashlib.sha256(im.canonical_lines(entries).encode()).hexdigest()
+        bad = os.path.join(self.root, 'listed.json')
+        with open(bad, 'w') as fh:
+            json.dump(listed, fh)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+            im.verify(bad, root=self.root)
+        self.assertIn('derived data listed: g1.edgemask (' + im.DERIVED_RULE, out.getvalue())
+        # (the digests and the stated index_fp are right: only the rule is broken)
+        self.assertEqual(1, out.getvalue().count('\n'))
 
     def test_no_coord_mapping_leaves_the_headers_out_in_both_modes(self):
         """--no-coord-mapping: the server does not load the .seqs, so neither single nor batch

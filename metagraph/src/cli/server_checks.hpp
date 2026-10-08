@@ -186,7 +186,8 @@ GraphListEntry parse_graph_list_line(const std::string &text, size_t line);
  * states nothing and takes what another line states — and a conflict throws
  * std::invalid_argument naming both lines. Two lines name the same index when the complete
  * loader inventories of their pairs (|inventory|, by default index_bundle_files of the listed
- * spellings) resolve to the same real paths in the same roles; two different indexes stating
+ * spellings: the identity files, never the graph's derived mask or Bloom filter) resolve to the
+ * same real paths in the same roles; two different indexes stating
  * one index_fp are refused too.
  */
 std::map<std::pair<std::string, std::string>, std::pair<std::string, std::string>>

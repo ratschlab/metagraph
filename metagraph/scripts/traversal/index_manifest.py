@@ -14,7 +14,8 @@ loads is listed with its size and that the stated index_fp is the digest of the 
 
     index_manifest.py -i GRAPH -a ANNOTATION [-o MANIFEST] [--name NAME] [--extra FILE ...]
                       [--no-coord-mapping]
-    index_manifest.py -i GRAPH -a ANNOTATION --inventory   # the files the server loads (JSON)
+    index_manifest.py -i GRAPH -a ANNOTATION --inventory   # the files the server loads (JSON:
+                                                 # files = the identity, derived = mask, Bloom)
     index_manifest.py --verify MANIFEST          # re-hash every listed file and compare
     index_manifest.py --server-csv GRAPHS.csv [--jobs N] [--digests FILE ...] [--digests-only]
                       [--match-base-names] [--out-dir DIR] [--write-csv OUT.csv] [--force]
@@ -45,18 +46,25 @@ filled with its pair's manifest (the index_ns column kept), ready for server_que
 The bundle is the loader dependency inventory of the pair (load_inventory, which mirrors
 metagraph's index_load_inventory; `metagraph traverse --index-inventory -i GRAPH -a ANNOTATION`
 prints the binary's, and an integration test compares the two): the graph and the annotation,
-and every sidecar the server loads for them, its path derived from the LISTED spelling as the
-loaders derive it (next to a symlink, not next to its target) -- <graph without .dbg>.edgemask
-when it opens and then <graph without .dbg>.bloom when it exists (DBGSuccinct), <graph>.anchors
-and <graph>.rd_succ for a .row_diff.annodbg (required), and <annotation without
-.<type>.annodbg>.seqs for a coordinate annotation unless --no-coord-mapping. Files the server
-does not open are not part of it (a column annotation's .coords, the graph's .weights): add them
-with --extra if wanted, except a further graph (*dbg) or annotation (*.annodbg): a manifest
-describes one graph with one annotation, and the server refuses one that lists another -- or
-an optional file of the pair's inventory that it does not load (a mask or Bloom filter the
-loader skips, a .seqs missing beside the listed spelling or under --no-coord-mapping), so that
-index_fp identifies the loaded files. The server refuses a manifest that does not cover a file
-of the inventory. Paths in the manifest are the files' BASE NAMES, so the identity does not
+and every identity sidecar the server loads for them, its path derived from the LISTED spelling
+as the loaders derive it (next to a symlink, not next to its target) -- <graph>.anchors and
+<graph>.rd_succ for a .row_diff.annodbg (required), and <annotation without
+.<type>.annodbg>.seqs for a coordinate annotation unless --no-coord-mapping. The graph's DERIVED
+data is not part of it (the owner's decision #17 of 2026-10-08; derived_files mirrors
+metagraph's index_derived_files): <graph without .dbg>.edgemask, loaded when it opens, and
+<graph without .dbg>.bloom, loaded when it exists and the mask was loaded, are computed from the
+graph alone and decide which counts are exact and how fast k-mers are looked up, never what an
+exact answer is; adding, removing or rebuilding them leaves index_fp unchanged. A manifest never
+lists them: this tool leaves them out, refuses them with --extra, --verify flags a manifest that
+lists one (any entry named *.edgemask or *.bloom), and the server refuses such a manifest.
+--inventory prints both, the identity files and the derived ones (with whether the loader reads
+them). Files the server does not open are not part of the bundle (a column annotation's .coords,
+the graph's .weights): add them with --extra if wanted, except a further graph (*dbg) or
+annotation (*.annodbg): a manifest describes one graph with one annotation, and the server
+refuses one that lists another -- or an optional file of the pair's inventory that it does not
+load (a .seqs missing beside the listed spelling or under --no-coord-mapping), so that index_fp
+identifies the loaded files. The server refuses a manifest that does not cover a file of the
+inventory. Paths in the manifest are the files' BASE NAMES, so the identity does not
 depend on where the bundle or the manifest lives (the server matches loaded files by base name
 too); the base names in one manifest must be distinct (the server, and --verify, refuse one
 that lists a base name twice). --verify looks for the files next to the manifest, or under
@@ -135,18 +143,48 @@ def _opens(path):
         return False
 
 
+# The rule of the graph's derived data, as metagraph states it (kIndexDerivedDataRule;
+# `traverse --index-inventory` prints it as derived_rule, and an integration test compares)
+DERIVED_RULE = ('the dummy-edge mask (.edgemask) and the Bloom filter (.bloom) are derived data of '
+                'the graph, not part of index_fp: they decide which counts are exact and how fast '
+                'k-mers are looked up, never what an exact answer is, so adding, removing or '
+                'rebuilding one leaves index_fp unchanged, and a manifest lists neither')
+
+
+def derived_role(path):
+    """'graph_mask' or 'graph_bloom' for a file whose base name ends in .edgemask or .bloom
+    (the derived data of a graph, whichever graph it belongs to), None for any other; as
+    metagraph's index_derived_role. A manifest lists none."""
+    name = os.path.basename(path)
+    if name.endswith('.edgemask'):
+        return 'graph_mask'
+    if name.endswith('.bloom'):
+        return 'graph_bloom'
+    return None
+
+
+def derived_files(graph):
+    """[(path, role, exists, loaded)]: the derived data DBGSuccinct::load reads beside the graph
+    listed as |graph| -- <graph without .dbg>.edgemask when it opens, and only then <graph
+    without .dbg>.bloom when it exists -- both candidates of a .dbg graph whether they exist or
+    not, none for another graph type; as metagraph's index_derived_files. Not part of index_fp
+    (DERIVED_RULE)."""
+    if not graph.endswith('.dbg'):
+        return []
+    prefix = graph[:-len('.dbg')]
+    mask, bloom = prefix + '.edgemask', prefix + '.bloom'
+    mask_loaded = _opens(mask)
+    bloom_exists = os.path.exists(bloom)
+    return [(mask, 'graph_mask', os.path.exists(mask), mask_loaded),
+            (bloom, 'graph_bloom', bloom_exists, mask_loaded and bloom_exists)]
+
+
 def load_inventory(graph, annotation, coord_mapping=True):
-    """[(path, role, required)]: every file the server's loaders open for the pair listed as
-    |graph| and |annotation|, as metagraph's index_load_inventory derives them (a required file
-    is listed whether it exists or not, an optional one only when the loader would read it)."""
+    """[(path, role, required)]: every identity file the server's loaders open for the pair
+    listed as |graph| and |annotation|, as metagraph's index_load_inventory derives them (a
+    required file is listed whether it exists or not, an optional one only when the loader
+    would read it). The graph's derived data (derived_files) is not among them."""
     files = [(graph, 'graph', True)]
-    if graph.endswith('.dbg'):
-        # DBGSuccinct::load: the dummy-edge mask when it opens, and only then the Bloom filter
-        prefix = graph[:-len('.dbg')]
-        if _opens(prefix + '.edgemask'):
-            files.append((prefix + '.edgemask', 'graph_mask', False))
-            if os.path.exists(prefix + '.bloom'):
-                files.append((prefix + '.bloom', 'graph_bloom', False))
     files.append((annotation, 'annotation', True))
     for extension, anchors, coordinates in ANNOTATION_KINDS:
         if not annotation.endswith(extension):
@@ -163,15 +201,12 @@ def load_inventory(graph, annotation, coord_mapping=True):
 
 
 def unloaded_optional(graph, annotation, coord_mapping=True):
-    """The optional files the inventory derives for the pair -- <graph without .dbg>.edgemask
-    and .bloom, a coordinate annotation's .seqs -- that it does not load (missing, the mask not
-    read, or coord_mapping off), as metagraph's index_unloaded_optional_files: the server
-    refuses a manifest that lists one (by base name), so that index_fp identifies the files it
-    loads."""
+    """The optional identity files the inventory derives for the pair -- a coordinate
+    annotation's .seqs -- that it does not load (missing beside the listed spelling, or
+    coord_mapping off), as metagraph's index_unloaded_optional_files: the server refuses a
+    manifest that lists one (by base name), so that index_fp identifies the files it loads.
+    (The graph's mask and Bloom filter are refused in any manifest: derived_role.)"""
     candidates = []
-    if graph.endswith('.dbg'):
-        prefix = graph[:-len('.dbg')]
-        candidates += [prefix + '.edgemask', prefix + '.bloom']
     seqs = coordinate_headers(annotation)
     if seqs:
         candidates.append(seqs)
@@ -187,8 +222,8 @@ def duplicate_base_names(paths):
 
 
 def sidecars(graph, annotation, coord_mapping=True):
-    """The files of the inventory besides the graph and the annotation (those the server loads
-    beside them)."""
+    """The files of the inventory besides the graph and the annotation (the identity files the
+    server loads beside them; never the graph's derived mask or Bloom filter)."""
     return [path for path, role, _ in load_inventory(graph, annotation, coord_mapping)
             if role not in ('graph', 'annotation')]
 
@@ -213,6 +248,10 @@ def bundle_files(graph, annotation, extra, *, fail=None, coord_mapping=True):
     if others:
         (fail or sys.exit)('--extra %s: a manifest describes one graph with one annotation (the '
                            'server refuses one that lists another)' % ', '.join(others))
+    derived = [f for f in extra if derived_role(f)]
+    if derived:
+        (fail or sys.exit)('--extra %s: %s (the server refuses a manifest that lists one)'
+                           % (', '.join(derived), DERIVED_RULE))
     unloaded = {os.path.basename(p) for p in unloaded_optional(graph, annotation, coord_mapping)}
     not_loaded = [f for f in extra if os.path.basename(f) in unloaded]
     if not_loaded:
@@ -523,6 +562,13 @@ def verify(path, root=None):
     for name in duplicate_base_names([e['path'] for e in manifest['files']]):
         problems.append(f'base name listed more than once: {name} (a manifest describes one '
                         f'bundle; the server refuses it)')
+    # the graph's derived data is not part of index_fp: the server refuses a manifest that
+    # lists it, however its digests compare
+    for e in manifest['files']:
+        if derived_role(e['path']):
+            problems.append(f'derived data listed: {e["path"]} ({DERIVED_RULE}; the server '
+                            f'refuses this manifest: write it again without the entry, which '
+                            f'changes its index_fp)')
     for e in manifest['files']:
         p = os.path.join(root, e['path'])
         if not os.path.isfile(p):
@@ -567,7 +613,9 @@ def main():
     ap.add_argument('--no-coord-mapping', action='store_true',
                     help='the server runs with --no-coord-mapping: it does not load the .seqs')
     ap.add_argument('--inventory', action='store_true',
-                    help='with -i and -a: print the loader dependency inventory (JSON) and exit')
+                    help='with -i and -a: print the loader dependency inventory (JSON: the '
+                         'identity files, and the derived mask and Bloom filter no manifest '
+                         'lists) and exit')
     args = ap.parse_args()
     if args.verify:
         verify(args.verify, args.root)
@@ -577,9 +625,15 @@ def main():
         except ManifestError as e:
             sys.exit('index_manifest.py: %s' % e)
     elif args.graph and args.annotation and args.inventory:
-        print(json.dumps([{'path': p, 'role': r, 'required': q, 'exists': os.path.exists(p)}
-                          for p, r, q in load_inventory(args.graph, args.annotation,
-                                                        not args.no_coord_mapping)], indent=1))
+        # as `metagraph traverse --index-inventory`: the identity files a manifest lists, and the
+        # graph's derived data the loader reads beside them, which no manifest lists
+        print(json.dumps({
+            'files': [{'path': p, 'role': r, 'required': q, 'exists': os.path.exists(p)}
+                      for p, r, q in load_inventory(args.graph, args.annotation,
+                                                    not args.no_coord_mapping)],
+            'derived': [{'path': p, 'role': r, 'exists': e, 'loaded': l}
+                        for p, r, e, l in derived_files(args.graph)],
+            'derived_rule': DERIVED_RULE}, indent=1))
     elif args.graph and args.annotation:
         write(args)
     else:

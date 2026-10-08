@@ -4,6 +4,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -27,6 +29,7 @@
 #include "cli/traverse.hpp"
 #include "cli/traverse_attempts.hpp"
 #include "cli/load/load_annotation.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -2375,6 +2378,122 @@ TEST(GraphletServer, InventoryTableMatchesTheLoadersTypes) {
         ++seen;
     }
     EXPECT_EQ(index_annotation_kinds().size(), seen);
+}
+
+// The owner's decision #17 of 2026-10-08: the graph's dummy-edge mask and Bloom filter are
+// derived data, not part of the identity. index_derived_files says which of them the loader
+// reads — checked here against what DBGSuccinct::load reads (an independent oracle: the loaded
+// graph's mask and Bloom filter) in every state a deployment passes through — and the identity
+// (the inventory a manifest is checked against, the manifest's fingerprint) is the same in each
+TEST(GraphletServer, DerivedDataIsWhatTheLoaderReadsAndNotTheIdentity) {
+    namespace fs = std::filesystem;
+    using mtg::graph::DBGSuccinct;
+    const fs::path dir = fs::absolute("temp_inventory_derived_" + std::to_string(getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir / "full");
+    const std::string graph = (dir / "graph.dbg").string(),
+                      anno = (dir / "annotation.column.annodbg").string(),
+                      mask = (dir / "graph.edgemask").string(),
+                      bloom = (dir / "graph.bloom").string();
+    const std::string seq = "ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG";
+    {
+        // the graph as built without a mask, and the same graph with its mask and Bloom filter
+        // in a directory of its own (their files are copied beside the first as a step adds them)
+        DBGSuccinct plain(11);
+        plain.add_sequence(seq);
+        plain.serialize(graph);
+        DBGSuccinct full(11);
+        full.add_sequence(seq);
+        full.mask_dummy_kmers(1, false);
+        full.initialize_bloom_filter(4.0, 1);
+        full.serialize((dir / "full" / "graph.dbg").string());
+    }
+    auto slurp = [](const std::string &path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    ASSERT_EQ(slurp(graph), slurp((dir / "full" / "graph.dbg").string()))
+            << "the mask and the Bloom filter must fit the unmasked graph's file";
+    ASSERT_TRUE(fs::exists(dir / "full" / "graph.edgemask"));
+    ASSERT_TRUE(fs::exists(dir / "full" / "graph.bloom"));
+    std::ofstream(anno, std::ios::binary) << "annotation bytes";   // a stand-in, never loaded
+    Json::Value m;
+    for (const std::string &path : { graph, anno }) {
+        Json::Value e;
+        e["path"] = fs::path(path).filename().string();
+        e["size"] = Json::UInt64(fs::file_size(path));
+        e["sha256"] = sha256_hex(slurp(path));
+        m["files"].append(e);
+    }
+    const std::string manifest = (dir / "manifest.json").string();
+    std::ofstream(manifest) << json_text(m, true);
+
+    // what the loader reads: (mask, Bloom filter)
+    auto loader = [&]() {
+        DBGSuccinct g(2);
+        EXPECT_TRUE(g.load(graph));
+        return std::make_pair(g.get_mask() != nullptr, g.get_bloom_filter() != nullptr);
+    };
+    // what the inventory says it reads, and which of the two exist
+    auto inventory = [&]() {
+        const std::vector<IndexDerivedFile> files = index_derived_files(graph);
+        EXPECT_EQ(2u, files.size());
+        EXPECT_EQ(mask, files.at(0).path);
+        EXPECT_STREQ("graph_mask", files.at(0).role);
+        EXPECT_EQ(bloom, files.at(1).path);
+        EXPECT_STREQ("graph_bloom", files.at(1).role);
+        EXPECT_EQ(fs::exists(mask), files.at(0).exists);
+        EXPECT_EQ(fs::exists(bloom), files.at(1).exists);
+        return std::make_pair(files.at(0).loaded, files.at(1).loaded);
+    };
+    auto identity = [&]() {
+        EXPECT_EQ((std::vector<std::string> { graph, anno }), index_bundle_files(graph, anno));
+        EXPECT_TRUE(index_unloaded_optional_files(graph, anno).empty());
+        return index_manifest_fingerprint(manifest, index_bundle_files(graph, anno), nullptr,
+                                          index_unloaded_optional_files(graph, anno));
+    };
+    const std::string fp = identity();
+    EXPECT_EQ(64u, fp.size());
+    // as built: neither
+    EXPECT_EQ(std::make_pair(false, false), loader());
+    EXPECT_EQ(loader(), inventory());
+    // a Bloom filter alone: not read (DBGSuccinct::load reads it only after the mask)
+    fs::copy_file(dir / "full" / "graph.bloom", bloom);
+    EXPECT_EQ(std::make_pair(false, false), loader());
+    EXPECT_EQ(loader(), inventory());
+    EXPECT_EQ(fp, identity());
+    // the mask added (transform --mask-dummy beside a deployed graph): both read, same identity
+    fs::copy_file(dir / "full" / "graph.edgemask", mask);
+    EXPECT_EQ(std::make_pair(true, true), loader());
+    EXPECT_EQ(loader(), inventory());
+    EXPECT_EQ(fp, identity());
+    // the mask alone
+    fs::remove(bloom);
+    EXPECT_EQ(std::make_pair(true, false), loader());
+    EXPECT_EQ(loader(), inventory());
+    EXPECT_EQ(fp, identity());
+    // a mask that exists but cannot be opened: not read (the loader says so in its log), and
+    // the inventory says it exists and is not loaded (skipped where permissions do not bind)
+    fs::permissions(mask, fs::perms::none);
+    if (!std::ifstream(mask).good()) {
+        EXPECT_EQ(std::make_pair(false, false), loader());
+        EXPECT_EQ(loader(), inventory());
+        EXPECT_TRUE(index_derived_files(graph).at(0).exists);
+        EXPECT_EQ(fp, identity());
+    }
+    fs::permissions(mask, fs::perms::owner_read | fs::perms::owner_write);
+    // the inventory's JSON keeps them apart from the identity files
+    const Json::Value json = index_inventory_json(graph, anno);
+    ASSERT_EQ(2u, json["files"].size());
+    EXPECT_EQ(graph, json["files"][0]["path"].asString());
+    EXPECT_EQ(anno, json["files"][1]["path"].asString());
+    ASSERT_EQ(2u, json["derived"].size());
+    EXPECT_EQ(mask, json["derived"][0]["path"].asString());
+    EXPECT_TRUE(json["derived"][0]["loaded"].asBool());
+    EXPECT_FALSE(json["derived"][1]["exists"].asBool());
+    EXPECT_FALSE(json["derived"][1]["loaded"].asBool());
+    EXPECT_EQ(std::string(kIndexDerivedDataRule), json["derived_rule"].asString());
+    fs::remove_all(dir);
 }
 
 // Finding 2 itself: two lines whose graph and annotation are symlinks to the same files, but

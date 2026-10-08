@@ -581,6 +581,20 @@ int run_server(Config *config) {
     // graph list's optional columns, checked before loading, and the meta fingerprint computed
     // on first use (a pair without them states null, as before).
     IndexIdentity single_identity;
+    // the graph's derived data the loader reads (index_derived_files: its mask and Bloom
+    // filter), named beside a checked manifest so that an operator sees what is loaded
+    // although index_fp does not cover it (the owner's decision #17 of 2026-10-08)
+    auto log_derived_data = [&](const std::string &graph) {
+        std::vector<std::string> loaded;
+        for (const IndexDerivedFile &f : index_derived_files(graph)) {
+            if (f.loaded)
+                loaded.push_back(f.path);
+        }
+        if (!loaded.empty()) {
+            logger->info("[Server] Derived data of {} loaded beside it, not part of index_fp: {}",
+                         graph, fmt::join(loaded, ", "));
+        }
+    };
     std::mutex identities_mutex;
     std::map<const AnnotatedDBG*, IndexIdentity> identities;
     auto identity_of = [&](const AnnotatedDBG &index) -> IndexIdentity {
@@ -609,6 +623,7 @@ int run_server(Config *config) {
                                                       !config->no_coord_mapping));
                 logger->info("[Server] Index manifest {}: index_fp {}", config->index_manifest,
                              single_identity.fp);
+                log_derived_data(config->infbase);
             }
         } catch (const std::exception &e) {
             logger->error("[Server] {}", e.what());
@@ -683,12 +698,15 @@ int run_server(Config *config) {
             logger->error("[Server] {}", e.what());
             std::exit(1);
         }
+        std::set<std::string> derived_logged;
         for (const auto &[pair, id] : pair_identity) {
             if (!id.first.empty() || !id.second.empty()) {
                 logger->info("[Server] Index ({}, {}): index_ns {}, index_fp {}", pair.first,
                              pair.second, id.first.empty() ? "null" : id.first,
                              id.second.empty() ? "null (no manifest)" : id.second);
             }
+            if (!id.second.empty() && derived_logged.insert(pair.first).second)
+                log_derived_data(pair.first);
         }
         std::vector<std::string> names;
         for (const auto &[name, _] : indexes) {

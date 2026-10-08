@@ -2959,25 +2959,14 @@ const std::vector<IndexAnnotationKind>& index_annotation_kinds() {
 std::vector<IndexFile> index_load_inventory(const std::string &graph,
                                             const std::string &annotation,
                                             bool coord_mapping) {
-    using graph::DBGSuccinct;
     std::vector<IndexFile> files;
     // The paths are derived from the LISTED spelling, as the loaders derive them: a sidecar is
     // looked up next to a symlinked main file, not next to its target (review of pass 5,
     // finding 2: two symlinks to one graph and annotation hid different .seqs files)
     files.push_back({ graph, "graph", true });
-    if (utils::ends_with(graph, DBGSuccinct::kExtension)) {
-        // DBGSuccinct::load: the dummy-edge mask when it opens, and only then the Bloom filter
-        // when it exists (review of pass 5, finding 3: the .bloom was loaded, could change
-        // answers, and no manifest covered it)
-        const std::string prefix = utils::remove_suffix(graph, DBGSuccinct::kExtension);
-        const std::string mask = prefix + DBGSuccinct::kDummyMaskExtension;
-        if (std::ifstream(mask).good()) {
-            files.push_back({ mask, "graph_mask", false });
-            const std::string bloom = prefix + DBGSuccinct::kBloomFilterExtension;
-            if (std::filesystem::exists(bloom))
-                files.push_back({ bloom, "graph_bloom", false });
-        }
-    }
+    // the dummy-edge mask and the Bloom filter DBGSuccinct::load reads beside the graph are
+    // its derived data, not part of the identity (the owner's decision #17 of 2026-10-08;
+    // until then they were listed here, review of pass 5, finding 3): index_derived_files
     files.push_back({ annotation, "annotation", true });
     for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
         if (!utils::ends_with(annotation, kind.extension))
@@ -3011,17 +3000,46 @@ std::vector<std::string> index_bundle_files(const std::string &graph,
     return files;
 }
 
+const char *const kIndexDerivedDataRule
+        = "the dummy-edge mask (.edgemask) and the Bloom filter (.bloom) are derived data of "
+          "the graph, not part of index_fp: they decide which counts are exact and how fast "
+          "k-mers are looked up, never what an exact answer is, so adding, removing or "
+          "rebuilding one leaves index_fp unchanged, and a manifest lists neither";
+
+const char* index_derived_role(const std::string &path) {
+    using graph::DBGSuccinct;
+    const size_t slash = path.find_last_of('/');
+    const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    if (ends_with(name, DBGSuccinct::kDummyMaskExtension))
+        return "graph_mask";
+    if (ends_with(name, DBGSuccinct::kBloomFilterExtension))
+        return "graph_bloom";
+    return nullptr;
+}
+
+std::vector<IndexDerivedFile> index_derived_files(const std::string &graph) {
+    using graph::DBGSuccinct;
+    std::vector<IndexDerivedFile> files;
+    if (!utils::ends_with(graph, DBGSuccinct::kExtension))
+        return files;
+    // DBGSuccinct::load: the dummy-edge mask when it opens, and only then the Bloom filter
+    // when it exists (a mask that opens but does not fit the graph fails the load)
+    const std::string prefix = utils::remove_suffix(graph, DBGSuccinct::kExtension);
+    const std::string mask = prefix + DBGSuccinct::kDummyMaskExtension;
+    const std::string bloom = prefix + DBGSuccinct::kBloomFilterExtension;
+    const bool mask_loaded = std::ifstream(mask).good();
+    const bool bloom_exists = std::filesystem::exists(bloom);
+    files.push_back({ mask, "graph_mask", std::filesystem::exists(mask), mask_loaded });
+    files.push_back({ bloom, "graph_bloom", bloom_exists, mask_loaded && bloom_exists });
+    return files;
+}
+
 std::vector<std::string> index_unloaded_optional_files(const std::string &graph,
                                                        const std::string &annotation,
                                                        bool coord_mapping) {
-    using graph::DBGSuccinct;
-    // every optional file the inventory could hold for the pair, as it derives the paths
+    // every optional identity file the inventory could hold for the pair, as it derives the
+    // paths (the graph's mask and Bloom filter are derived data: a manifest lists them never)
     std::vector<std::string> candidates;
-    if (utils::ends_with(graph, DBGSuccinct::kExtension)) {
-        const std::string prefix = utils::remove_suffix(graph, DBGSuccinct::kExtension);
-        candidates.push_back(prefix + DBGSuccinct::kDummyMaskExtension);
-        candidates.push_back(prefix + DBGSuccinct::kBloomFilterExtension);
-    }
     for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
         if (!utils::ends_with(annotation, kind.extension))
             continue;
@@ -3056,6 +3074,19 @@ Json::Value index_inventory_json(const std::string &graph, const std::string &an
         files.append(std::move(e));
     }
     j["files"] = std::move(files);
+    // what the loader reads beside the graph that is not part of the identity: shown so that
+    // an operator sees what is loaded, never listed in a manifest
+    Json::Value derived(Json::arrayValue);
+    for (const IndexDerivedFile &f : index_derived_files(graph)) {
+        Json::Value e;
+        e["path"] = f.path;
+        e["role"] = f.role;
+        e["exists"] = f.exists;
+        e["loaded"] = f.loaded;
+        derived.append(std::move(e));
+    }
+    j["derived"] = std::move(derived);
+    j["derived_rule"] = kIndexDerivedDataRule;
     // the table the paths are derived by (scripts/traversal/index_manifest.py mirrors it, and
     // an integration test compares the two)
     Json::Value kinds(Json::arrayValue);
@@ -3100,6 +3131,19 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
         if (!files.emplace(path, std::make_pair(f["size"].asUInt64(), digest)).second)
             throw bad("the file " + path + " is listed twice");
     }
+    // The graph's derived data is not part of the identity (the owner's decision #17 of
+    // 2026-10-08): a manifest that lists a mask or a Bloom filter — any entry named *.edgemask
+    // or *.bloom, whichever graph it belongs to — is refused rather than its entry skipped,
+    // since skipping it would change the index_fp the manifest states without a word
+    for (const auto &[p, entry] : files) {
+        if (index_derived_role(p)) {
+            const size_t slash = p.find_last_of('/');
+            throw bad("it lists " + p + ": " + kIndexDerivedDataRule + " (write it again "
+                      "without " + (slash == std::string::npos ? p : p.substr(slash + 1))
+                      + ": scripts/traversal/index_manifest.py leaves them out; the new "
+                        "manifest's index_fp differs from this one's)");
+        }
+    }
     // A manifest of another bundle must not lend its identity: every loaded file that
     // exists as named is listed (by base name) with its size. Hashing it is what the
     // manifest saves the server from (hundreds of GB at start-up).
@@ -3123,19 +3167,19 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
         }
     }
     // The optional files of this pair's inventory that it does not load (missing beside the
-    // listed spelling, the graph's mask not read, --no-coord-mapping) must not be listed
-    // either: index_fp would describe a file set that is not the loaded one, while an index
-    // that does load the file states the same index_fp (review of the pass-5 fixes). Files
-    // outside the inventory (--extra: a column annotation's .coords, the .weights, anchors
-    // beside another annotation type) stay allowed
+    // listed spelling, --no-coord-mapping) must not be listed either: index_fp would describe
+    // a file set that is not the loaded one, while an index that does load the file states the
+    // same index_fp (review of the pass-5 fixes). Files outside the inventory (--extra: a
+    // column annotation's .coords, the .weights, anchors beside another annotation type) stay
+    // allowed
     for (const std::string &path : not_loaded) {
         auto it = by_name.find(base_name(path));
         if (it != by_name.end()) {
             throw bad("it lists " + it->second + ", which the server does not load for this "
-                      "index (" + path + ": missing beside the listed file, its graph mask not "
-                      "read, or --no-coord-mapping): a manifest lists exactly the optional "
-                      "files of the loader inventory that are loaded (traverse "
-                      "--index-inventory), so that index_fp identifies the loaded files");
+                      "index (" + path + ": missing beside the listed file, or "
+                      "--no-coord-mapping): a manifest lists exactly the optional files of the "
+                      "loader inventory that are loaded (traverse --index-inventory), so that "
+                      "index_fp identifies the loaded files");
         }
     }
     for (const std::string &path : loaded) {
@@ -3149,8 +3193,9 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
             listed |= base_name(p) == base_name(path) && entry.first == size;
         }
         if (!named) {
-            // a sidecar the loader reads (a .bloom, a .seqs) that the manifest does not cover
-            // could change answers under an unchanged fingerprint (review of pass 5, finding 3)
+            // an identity sidecar the loader reads (a .seqs, the row-diff anchors) that the
+            // manifest does not cover could change answers under an unchanged fingerprint
+            // (review of pass 5, finding 3)
             throw bad("it does not cover the file " + path + " (" + std::to_string(size)
                       + " bytes), which the server loads for this index: the manifest must "
                         "list every file of the loader inventory (traverse --index-inventory; "

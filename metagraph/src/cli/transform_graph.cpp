@@ -26,8 +26,10 @@ namespace {
  * dummy-edge mask `build --mask-dummy` would have written, as the file <graph>.edgemask that
  * DBGSuccinct::load reads beside it. Only that file is written: the mask prunes nothing, so
  * node ids and the annotation stay valid, and a graph of hundreds of GB is not rewritten for a
- * file a small fraction of its size. Without a mask every dummy edge passes for a k-mer, and
- * the pattern search cannot count (mask_required).
+ * file a small fraction of its size. Without a mask the pattern search cannot tell a source
+ * dummy from a k-mer: it counts upper bounds with an estimate (counting upper_bound, owner
+ * decision #16 of 2026-10-08); with it, exact counts. The mask is derived data of the graph,
+ * not part of the index identity index_fp (owner decision #17).
  */
 int write_dummy_mask(const std::string &graph_path, const Config &config) {
     using graph::DBGSuccinct;
@@ -108,9 +110,10 @@ int write_dummy_mask(const std::string &graph_path, const Config &config) {
 
     // what the new file changes for the graph's other readers, which load it from now on
     logger->info("Every loader of {} reads the mask from now on: the graph states its k-mers "
-                 "as nodes ({} instead of {} edges), and an index manifest "
-                 "(--index-manifest) must list the new file", graph_path, counts.kmers,
-                 counts.edges);
+                 "as nodes ({} instead of {} edges), and the pattern search counts exactly. The "
+                 "mask is derived data of the graph, not part of index_fp: an index manifest "
+                 "(--index-manifest) stays valid and must not list it", graph_path,
+                 counts.kmers, counts.edges);
     const std::string bloom_path = prefix + DBGSuccinct::kBloomFilterExtension;
     if (std::filesystem::exists(bloom_path)) {
         // DBGSuccinct::load reads the Bloom filter only together with the mask

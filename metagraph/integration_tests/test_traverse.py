@@ -1,4 +1,5 @@
 import copy
+import filecmp
 import hashlib
 import json
 import os
@@ -110,11 +111,14 @@ class TestTraverseBase(TestingBase):
     def _write_manifest(directory, path):
         """Every file of the bundle (graph, annotation and their sidecars) with its size
         and sha256, as scripts/traversal/build_mini_refseq.sh writes it; -> index_fp, the
-        sha256 over the lines "path\tsize\tsha256\n" in byte order of path."""
+        sha256 over the lines "path\tsize\tsha256\n" in byte order of path. Never the
+        graph's derived data (a mask, a Bloom filter): not part of index_fp, and refused in a
+        manifest (the owner's decision #17 of 2026-10-08)."""
         files = []
         for name in sorted(os.listdir(directory)):
             full = os.path.join(directory, name)
-            if os.path.isfile(full) and name.startswith(('graph', 'annotation')):
+            if (os.path.isfile(full) and name.startswith(('graph', 'annotation'))
+                    and not name.endswith(('.edgemask', '.bloom'))):
                 with open(full, 'rb') as f:
                     data = f.read()
                 files.append({'path': name, 'size': len(data),
@@ -3335,7 +3339,11 @@ class TestTraverseMultiGraph(TestTraverseBase):
         graph with a Bloom filter, an unmasked one, row_diff (anchors and fork successors
         beside the graph), coordinate annotations with and without their .seqs, a column
         annotation with its .coords (not loaded), --no-coord-mapping, a symlinked spelling —
-        both list the same files in the same roles, and their annotation tables are equal."""
+        both list the same files in the same roles, and their annotation tables are equal.
+        The graph's derived data (the owner's decision #17 of 2026-10-08: its mask and Bloom
+        filter, not part of index_fp) is in neither's identity files; both list it apart
+        (index_derived_files, derived_files) with whether the loader reads it, and state the
+        same rule; `index_manifest.py --inventory` prints what the binary prints."""
         sys.path.insert(0, os.path.join(REPO, 'scripts', 'traversal'))
         import index_manifest as im
         d = os.path.join(self.tempdir.name, 'inventory')
@@ -3360,20 +3368,28 @@ class TestTraverseMultiGraph(TestTraverseBase):
         os.makedirs(f'{d}/link', exist_ok=True)
         os.symlink(f'{d}/plain.dbg', f'{d}/link/plain.dbg')
         os.symlink(f'{d}/coord.column_coord.annodbg', f'{d}/link/coord.column_coord.annodbg')
+        # an unmasked graph with a Bloom filter beside it (not read: only after the mask)
+        os.makedirs(f'{d}/bloomonly', exist_ok=True)
+        shutil.copyfile(f'{d}/plain.dbg', f'{d}/bloomonly/plain.dbg')
+        shutil.copyfile(f'{d}/masked.bloom', f'{d}/bloomonly/plain.bloom')
+        # (the identity roles, the derived (exists, loaded) of the mask and the Bloom filter)
+        masked, unmasked = [(True, True), (True, True)], [(False, False), (False, False)]
         cases = [
-            ('masked.dbg', 'col.column.annodbg', (), ['graph', 'graph_mask', 'graph_bloom',
-                                                      'annotation']),
+            ('masked.dbg', 'col.column.annodbg', (), ['graph', 'annotation'], masked),
             ('masked.dbg', 'coord.column_coord.annodbg', (),
-             ['graph', 'graph_mask', 'graph_bloom', 'annotation', 'coord_to_header']),
+             ['graph', 'annotation', 'coord_to_header'], masked),
             ('plain.dbg', 'coord.column_coord.annodbg', ('--no-coord-mapping',),
-             ['graph', 'annotation']),
-            ('plain.dbg', 'nohead.column_coord.annodbg', (), ['graph', 'annotation']),
+             ['graph', 'annotation'], unmasked),
+            ('plain.dbg', 'nohead.column_coord.annodbg', (), ['graph', 'annotation'], unmasked),
             ('plain.dbg', 'rd.row_diff.annodbg', (),
-             ['graph', 'annotation', 'row_diff_anchors', 'row_diff_fork_succ']),
+             ['graph', 'annotation', 'row_diff_anchors', 'row_diff_fork_succ'], unmasked),
             # beside the symlinks there is no .seqs (nor an anchors file): none is listed
-            ('link/plain.dbg', 'link/coord.column_coord.annodbg', (), ['graph', 'annotation']),
+            ('link/plain.dbg', 'link/coord.column_coord.annodbg', (), ['graph', 'annotation'],
+             unmasked),
+            ('bloomonly/plain.dbg', 'col.column.annodbg', (), ['graph', 'annotation'],
+             [(False, False), (True, False)]),
         ]
-        for graph, anno, flags, roles in cases:
+        for graph, anno, flags, roles, derived in cases:
             cli = self._cli_inventory(f'{d}/{graph}', f'{d}/{anno}', *flags)
             py = im.load_inventory(f'{d}/{graph}', f'{d}/{anno}',
                                    coord_mapping='--no-coord-mapping' not in flags)
@@ -3381,6 +3397,22 @@ class TestTraverseMultiGraph(TestTraverseBase):
                              py, (graph, anno))
             self.assertEqual(roles, [e['role'] for e in cli['files']], (graph, anno))
             self.assertTrue(all(e['exists'] for e in cli['files']), (graph, anno))
+            prefix = f'{d}/{graph}'[:-len('.dbg')]
+            self.assertEqual([(prefix + '.edgemask', 'graph_mask') + derived[0],
+                              (prefix + '.bloom', 'graph_bloom') + derived[1]],
+                             [(e['path'], e['role'], e['exists'], e['loaded'])
+                              for e in cli['derived']], (graph, anno))
+            self.assertEqual([(e['path'], e['role'], e['exists'], e['loaded'])
+                              for e in cli['derived']], im.derived_files(f'{d}/{graph}'))
+            self.assertEqual(im.DERIVED_RULE, cli['derived_rule'])
+            # the script's own --inventory: what the binary prints, key for key
+            res = subprocess.run([sys.executable, os.path.join(REPO, 'scripts', 'traversal',
+                                                               'index_manifest.py'),
+                                  '--inventory', '-i', f'{d}/{graph}', '-a', f'{d}/{anno}',
+                                  *flags], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(0, res.returncode, res.stderr.decode())
+            self.assertEqual({k: cli[k] for k in ('files', 'derived', 'derived_rule')},
+                             json.loads(res.stdout), (graph, anno))
         self.assertEqual([(k['extension'], k['row_diff_anchors'], k['coordinates'])
                           for k in cli['annotation_kinds']], im.ANNOTATION_KINDS)
 
@@ -3545,23 +3577,86 @@ class TestTraverseMultiGraph(TestTraverseBase):
                 self.assertEqual(1, code, (side, flags, log[-2000:]))
                 self.assertIn('annotation.seqs, which the server does not load', log)
 
-    def test_a_loaded_bloom_filter_is_part_of_the_identity(self):
-        """Review of pass 5, finding 3 (the reviewer's /tmp/metagraph-pass5-identity/bloom): a
-        masked basic graph's Bloom filter is loaded and can change answers (another valid k=11
-        filter turned graph_runs [[0, 36]] into []), but no manifest listed it. A manifest
-        without it is refused at start-up, naming it; index_manifest.py lists it, and the
-        server starts with that manifest (a same-size replacement is not detected: the server
-        checks sizes, index_manifest.py --verify re-hashes)."""
+    def test_derived_data_is_not_part_of_the_identity(self):
+        """The owner's decision #17 of 2026-10-08 (until then: review of pass 5, finding 3, a
+        loaded Bloom filter was part of the identity): the graph's dummy-edge mask and Bloom
+        filter are derived data, not part of index_fp. A manifest written before they exist is
+        valid after `transform --mask-dummy` and `--initialize-bloom`, its index_fp unchanged,
+        on a multi-graph server and on the CLI; index_manifest.py writes the same manifest
+        with or without them (it never lists them) and refuses them with --extra. A manifest
+        that lists one (the reviewer's graph, mask and annotation) is refused, by the server
+        and the CLI naming the rule, and flagged by --verify. And the server names the derived
+        data it loads beside a manifest (operators see what is loaded)."""
         d = os.path.join(self.tempdir.name, 'bloom')
         os.makedirs(d, exist_ok=True)
         seq = 'ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG'
         with open(f'{d}/seq.fa', 'w') as f:
             f.write('>A\n' + seq + '\n')
-        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 --mask-dummy '
+        self._run_ok(f'{METAGRAPH} build -p 1 --mode basic --graph succinct -k 11 '
                      '--in-ram -o graph seq.fa', d)
-        self._run_ok(f'{METAGRAPH} transform --initialize-bloom -o graph graph.dbg', d)
         self._annotate_graph(f'{d}/seq.fa', f'{d}/graph.dbg', f'{d}/annotation', 'column')
-        # the reviewer's manifest: graph, mask and annotation
+        script = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
+
+        def manifest(name, *extra):
+            res = subprocess.run([sys.executable, script, '-i', f'{d}/graph.dbg', '-a',
+                                  f'{d}/annotation.column.annodbg', '-o', f'{d}/{name}',
+                                  *extra], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return res.returncode, res.stdout.decode() + res.stderr.decode()
+
+        # before the mask: the graph and the annotation
+        self.assertEqual(0, manifest('before.manifest.json')[0])
+        with open(f'{d}/before.manifest.json') as f:
+            before = json.load(f)
+        self.assertEqual(['annotation.column.annodbg', 'graph.dbg'],
+                         [e['path'] for e in before['files']])
+        # the derived data added beside the deployed graph
+        self._run_ok(f'{METAGRAPH} transform --mask-dummy -p 1 graph.dbg', d)
+        self._run_ok(f'{METAGRAPH} transform --initialize-bloom -o graph graph.dbg', d)
+        for name in ('graph.edgemask', 'graph.bloom'):
+            self.assertTrue(os.path.exists(f'{d}/{name}'), name)
+        self.assertEqual([('graph_mask', True), ('graph_bloom', True)],
+                         [(e['role'], e['loaded']) for e in self._cli_inventory(
+                             f'{d}/graph.dbg', f'{d}/annotation.column.annodbg')['derived']])
+        # index_manifest.py writes the same manifest now (it never lists them) ...
+        self.assertEqual(0, manifest('after.manifest.json')[0])
+        with open(f'{d}/after.manifest.json') as f:
+            after = json.load(f)
+        self.assertEqual(before['files'], after['files'])
+        self.assertEqual(before['index_fp'], after['index_fp'])
+        # ... and refuses them as extra files
+        for extra in ('graph.edgemask', 'graph.bloom'):
+            code, text = manifest('extra.manifest.json', '--extra', f'{d}/{extra}')
+            self.assertNotEqual(0, code)
+            self.assertIn('derived data of the graph, not part of index_fp', text)
+            self.assertFalse(os.path.exists(f'{d}/extra.manifest.json'))
+        # the manifest written before the mask: the server starts, states its index_fp, and
+        # names the derived data it loaded; /resolve answers as on the reviewer's index
+        csv = f'{d}/before.csv'
+        with open(csv, 'w') as f:
+            f.write(f'A,{d}/graph.dbg,{d}/annotation.column.annodbg,{d}/before.manifest.json\n')
+        server = self._Server(self, csv)
+        try:
+            self.assertTrue(server.ready, server.text()[-2000:])
+            out = requests.post(server.url + '/resolve', data=json.dumps(
+                {'graph': 'A', 'sequence': seq, 'labels': ['A']})).json()
+            self.assertEqual([[0, 36]], out['graph_runs'])
+            self.assertEqual(before['index_fp'], out['capabilities']['index_fp'])
+            self.assertIn(f'Derived data of {d}/graph.dbg loaded beside it, not part of '
+                          f'index_fp: {d}/graph.edgemask, {d}/graph.bloom', server.text())
+        finally:
+            server.close()
+        request = f'{d}/request.json'
+        with open(request, 'w') as f:
+            json.dump({'seeds': [{'sequence': seq}],
+                       'strategy': {'direction': 'right',
+                                    'output': {'detail': 'summary', 'timing': False}}}, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + [
+            'traverse', '-i', f'{d}/graph.dbg', '-a', f'{d}/annotation.column.annodbg',
+            '--index-manifest', f'{d}/before.manifest.json', request],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+        self.assertEqual(before['index_fp'], json.loads(res.stdout)['capabilities']['index_fp'])
+        # the reviewer's manifest: graph, mask and annotation — refused, naming the rule
         files = []
         for name in ('annotation.column.annodbg', 'graph.dbg', 'graph.edgemask'):
             with open(f'{d}/{name}', 'rb') as f:
@@ -3575,33 +3670,23 @@ class TestTraverseMultiGraph(TestTraverseBase):
             f.write(f'A,{d}/graph.dbg,{d}/annotation.column.annodbg,{d}/old.manifest.json\n')
         code, log = self._start_refused(csv)
         self.assertEqual(1, code, log[-2000:])
-        self.assertIn(f'does not cover the file {d}/graph.bloom', log)
+        rule = ('it lists graph.edgemask: the dummy-edge mask (.edgemask) and the Bloom filter '
+                '(.bloom) are derived data of the graph, not part of index_fp')
+        self.assertIn(rule, log)
+        self.assertIn('write it again without graph.edgemask', log)
         res = subprocess.run(shlex.split(METAGRAPH) + [
             'traverse', '-i', f'{d}/graph.dbg', '-a', f'{d}/annotation.column.annodbg',
-            '--index-manifest', f'{d}/old.manifest.json', f'{d}/seq.fa'],
+            '--index-manifest', f'{d}/old.manifest.json', request],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertNotEqual(0, res.returncode)
-        self.assertIn('graph.bloom', res.stderr.decode())
-        script = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
-        res = subprocess.run([sys.executable, script, '-i', f'{d}/graph.dbg', '-a',
-                              f'{d}/annotation.column.annodbg', '-o', f'{d}/new.manifest.json'],
+        self.assertIn(rule, res.stderr.decode() + res.stdout.decode())
+        res = subprocess.run([sys.executable, script, '--verify', f'{d}/old.manifest.json'],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(0, res.returncode, res.stderr.decode())
-        with open(f'{d}/new.manifest.json') as f:
-            self.assertEqual(['annotation.column.annodbg', 'graph.bloom', 'graph.dbg',
-                              'graph.edgemask'],
-                             [e['path'] for e in json.load(f)['files']])
-        csv = f'{d}/new.csv'
-        with open(csv, 'w') as f:
-            f.write(f'A,{d}/graph.dbg,{d}/annotation.column.annodbg,{d}/new.manifest.json\n')
-        server = self._Server(self, csv)
-        try:
-            self.assertTrue(server.ready, server.text()[-2000:])
-            out = requests.post(server.url + '/resolve', data=json.dumps(
-                {'graph': 'A', 'sequence': seq, 'labels': ['A']})).json()
-            self.assertEqual([[0, 36]], out['graph_runs'])
-        finally:
-            server.close()
+        self.assertNotEqual(0, res.returncode)
+        self.assertIn('derived data listed: graph.edgemask', res.stdout.decode())
+        res = subprocess.run([sys.executable, script, '--verify', f'{d}/before.manifest.json'],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stdout.decode())
 
     def test_multi_three_column_list_states_nulls(self):
         """A list of three columns is read as it always was: null name and fingerprint."""
@@ -3619,6 +3704,270 @@ class TestTraverseMultiGraph(TestTraverseBase):
             self.assertEqual(16, len(caps['index_meta_fp']))
         finally:
             server.close()
+
+
+# the mini index (scripts/traversal/build_mini_refseq.sh; not in CI), as test_pattern.py finds it
+MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
+MINI_FILES = ('graph_k31.dbg', 'graph_k31.dbg.anchors', 'graph_k31.dbg.rd_succ',
+              'annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg',
+              'annotation.relaxed.relabeled.seqs')
+# $METAGRAPH_REQUIRE_GUARDS=1: a missing mini index fails the class instead of skipping it
+_MINI_PRESENT = all(os.path.isfile(os.path.join(MINI_DIR, f)) for f in MINI_FILES)
+_MINI_GUARD = (_MINI_PRESENT or os.environ.get('METAGRAPH_REQUIRE_GUARDS', '') == '1')
+
+
+@unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
+@unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
+@unittest.skipUnless(_MINI_GUARD, "the mini index is not built (scripts/traversal/"
+                                  "build_mini_refseq.sh; not in CI)")
+class TestTraverseDerivedDataMini(TestingBase):
+    """The owner's decision #17 of 2026-10-08 on a copy of build/mini_refseq (unmasked, as
+    built, like refseq33m): the dummy-edge mask is derived data of the graph, not part of
+    index_fp. A manifest made for the graph without a mask (index_manifest.py, the same
+    index_fp as the build's own manifest) serves a single-index server_query --index-manifest;
+    the mask is added beside the graph with `transform --mask-dummy` (the staging step) and
+    the server restarted with the SAME manifest: it starts, states the same index_fp (and
+    index_meta_fp), and stored /traverse retrievals and /resolve answers replay identically
+    (apart from timing): the graphlets stored before compare as the same index, equal. GET
+    /stats graph.nodes changes (the k-mers instead of the edges), as documented. A manifest
+    that lists the mask is refused. build/mini_refseq itself is never written to."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        assert _MINI_PRESENT, f'the mini index is not in {MINI_DIR}'
+        cls.mini_files = sorted(os.listdir(MINI_DIR))
+        d = cls.dir = os.path.join(cls.tempdir.name, 'mini')
+        os.makedirs(d)
+        for name in MINI_FILES:
+            shutil.copyfile(os.path.join(MINI_DIR, name), os.path.join(d, name))
+        cls.graph = os.path.join(d, MINI_FILES[0])
+        cls.anno = os.path.join(d, MINI_FILES[3])
+        # seeds from the records the index was built from (first record of the first files)
+        cls.seqs = []
+        for fasta in sorted(os.listdir(os.path.join(MINI_DIR, 'fasta')))[:3]:
+            with open(os.path.join(MINI_DIR, 'fasta', fasta)) as f:
+                lines = f.read().split('>')[1].split('\n')
+            seq = ''.join(lines[1:]).upper()
+            start = next(i for i in range(0, len(seq) - 700, 37)
+                         if set(seq[i:i + 700]) <= set('ACGT'))
+            cls.seqs.append(seq[start:start + 700])
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tempdir.cleanup()
+
+    def _server(self, manifest, wait=True):
+        port = _free_port()
+        log_path = f'{self.dir}/server-{port}.log'
+        log = open(log_path, 'w')
+        process = subprocess.Popen(
+            shlex.split(METAGRAPH) + ['server_query', '-i', self.graph, '-a', self.anno,
+                                      '--port', str(port), '--address', '127.0.0.1', '-p', '2',
+                                      '--index-name', 'mini', '--index-manifest', manifest],
+            stdout=log, stderr=subprocess.STDOUT)
+        url = f'http://127.0.0.1:{port}'
+        for _ in range(1200 if wait else 0):
+            if process.poll() is not None:
+                break
+            try:
+                if requests.get(url + '/traverse/capabilities', timeout=2).ok:
+                    break
+            except requests.exceptions.RequestException:
+                pass
+            time.sleep(0.1)
+
+        def stop():
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+            log.close()
+            with open(log_path) as f:
+                return f.read()
+        return url, process, stop
+
+    def _requests(self):
+        traverse = [{'seeds': [{'sequence': s[300:340]}],
+                     'strategy': {'direction': 'both', 'bounds': {'max_extension_bp': 250},
+                                  'output': {'detail': 'graphlet', 'timing': False}}}
+                    for s in self.seqs]
+        traverse.append({'seeds': [{'sequence': self.seqs[0][100:140]}],
+                         'strategy': {'direction': 'right', 'bounds': {'max_extension_bp': 120},
+                                      'output': {'detail': 'full', 'timing': False}}})
+        resolve = [{'sequence': s, 'discover': {'kind': 'header', 'max_labels': 10}}
+                   for s in self.seqs]
+        resolve.append({'sequence': self.seqs[1], 'discover': {'max_labels': 10},
+                        'support': 'trace'})
+        return traverse, resolve
+
+    @staticmethod
+    def _untimed(value):
+        """|value| without its timing: 'timing' members dropped, every elapsed_ms 0."""
+        if isinstance(value, dict):
+            return {k: (0 if k == 'elapsed_ms' else TestTraverseDerivedDataMini._untimed(v))
+                    for k, v in value.items() if k != 'timing'}
+        if isinstance(value, list):
+            return [TestTraverseDerivedDataMini._untimed(v) for v in value]
+        return value
+
+    def _answers(self, url):
+        """(identity, the stored answers: untimed results of every request, the graphlets)"""
+        caps = requests.get(url + '/traverse/capabilities').json()
+        identity = (caps['index_ns'], caps['index_fp'], caps['index_meta_fp'])
+        traverse, resolve = self._requests()
+        answers, graphlets = [], []
+        for request in traverse:
+            ret = requests.post(url + '/traverse', data=json.dumps(request))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            out = ret.json()
+            self.assertEqual(identity, tuple(out['capabilities'][k] for k in
+                                             ('index_ns', 'index_fp', 'index_meta_fp')))
+            answers.append(('traverse', self._untimed(out['results'])))
+            for r in out['results']:
+                if 'graphlet' in r:
+                    # the H record states the identity the graphlet is stored under
+                    self.assertEqual(list(identity), r['graphlet'].split('\n')[0].split(' ')[-3:])
+                    graphlets.append(graphlet_lib.from_response(r, out))
+        for request in resolve:
+            ret = requests.post(url + '/resolve', data=json.dumps(request))
+            self.assertEqual(200, ret.status_code, ret.text[:2000])
+            out = ret.json()
+            self.assertEqual(identity, tuple(out['capabilities'][k] for k in
+                                             ('index_ns', 'index_fp', 'index_meta_fp')))
+            answers.append(('resolve', self._untimed({k: v for k, v in out.items()
+                                                      if k != 'capabilities'})))
+        stats = requests.get(url + '/stats').json()
+        return identity, answers, graphlets, stats
+
+    def test_adding_a_mask_keeps_the_index_fp(self):
+        d = self.dir
+        script = os.path.join(REPO, 'scripts', 'traversal', 'index_manifest.py')
+        manifest = f'{d}/index.manifest.json'
+        res = subprocess.run([sys.executable, script, '-i', self.graph, '-a', self.anno,
+                              '-o', manifest, '--name', 'mini'],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        with open(manifest) as f:
+            fp = json.load(f)['index_fp']
+        # what a row_diff_brwt_coord pair loads: the graph, the annotation, the headers
+        with open(manifest) as f:
+            self.assertEqual(sorted([MINI_FILES[0], MINI_FILES[3], MINI_FILES[4]],
+                                    key=str.encode),
+                             [e['path'] for e in json.load(f)['files']])
+        # the build's own manifest (build_mini_refseq.sh: it lists the row-diff anchors and
+        # fork successors too, files outside the inventory, so its index_fp is its own)
+        built = os.path.join(MINI_DIR, 'annotation.relaxed.relabeled.manifest.json')
+        manifests = [(manifest, fp)]
+        if os.path.isfile(built):
+            shutil.copyfile(built, f'{d}/built.manifest.json')
+            with open(built) as f:
+                manifests.append((f'{d}/built.manifest.json', json.load(f)['index_fp']))
+        self.assertFalse(os.path.exists(f'{d}/graph_k31.edgemask'))
+
+        def identities():
+            """the index_fp each manifest makes the server state (the first's answers too)"""
+            out = []
+            for path, stated in manifests:
+                url, process, stop = self._server(path)
+                try:
+                    self.assertIsNone(process.poll(), 'the server did not start')
+                    if not out:
+                        answers = self._answers(url)
+                    caps = requests.get(url + '/traverse/capabilities').json()
+                    out.append(caps['index_fp'])
+                finally:
+                    log = stop()
+                self.assertEqual(stated, out[-1], log[-2000:])
+            return out, answers, log
+
+        fps, before, log = identities()
+        self.assertEqual(('mini', fp), before[0][:2], log[-2000:])
+        self.assertNotIn('Derived data of', log)
+        self.assertGreaterEqual(len(before[2]), 3)
+
+        # the staging step: the mask beside the deployed graph, nothing else written
+        res = self._run_command(f'{METAGRAPH} transform --mask-dummy -p 2 {self.graph}',
+                                'Mask the copy of the mini graph')
+        transform_log = (res.stdout + res.stderr).decode()
+        self.assertEqual(sorted(MINI_FILES + ('graph_k31.edgemask',)),
+                         sorted(n for n in os.listdir(d) if not n.startswith('server-')
+                                and not n.endswith('.manifest.json')))
+        for name in MINI_FILES:
+            self.assertTrue(filecmp.cmp(f'{d}/{name}', os.path.join(MINI_DIR, name),
+                                        shallow=False), name)
+        inventory = subprocess.run(shlex.split(METAGRAPH) + [
+            'traverse', '--index-inventory', '--json', '-i', self.graph, '-a', self.anno],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, inventory.returncode, inventory.stderr.decode())
+        inventory = json.loads(inventory.stdout)
+        self.assertEqual([f'{d}/{n}' for n in (MINI_FILES[0], MINI_FILES[3], MINI_FILES[4])],
+                         [e['path'] for e in inventory['files']])
+        self.assertEqual([(f'{d}/graph_k31.edgemask', 'graph_mask', True, True),
+                          (f'{d}/graph_k31.bloom', 'graph_bloom', False, False)],
+                         [(e['path'], e['role'], e['exists'], e['loaded'])
+                          for e in inventory['derived']])
+
+        # the restart, with the manifests made before the mask: each states its index_fp
+        fps_after, after, log = identities()
+        self.assertEqual(fps, fps_after)
+        self.assertIn(f'Derived data of {self.graph} loaded beside it, not part of index_fp: '
+                      f'{d}/graph_k31.edgemask', log)
+        # the same identity, the same answers: stored retrievals stay valid
+        self.assertEqual(before[0], after[0])
+        self.assertEqual(len(before[1]), len(after[1]))
+        for (route, a), (_, b) in zip(before[1], after[1]):
+            self.assertEqual(a, b, route)
+        self.assertEqual(len(before[2]), len(after[2]))
+        for stored, fresh in zip(before[2], after[2]):
+            # comparable as one index (a new index_fp would make them 'different indexes');
+            # 'qualified' only where a side's label lists were cut (then equality is not
+            # claimed by the library, and the byte comparison above stands for it)
+            c = stored.compare(fresh)
+            self.assertIn(c.comparable, (True, 'qualified'), c.reason)
+            self.assertNotIn('different indexes', c.reason)
+            if c.comparable is True:
+                self.assertIs(True, c.equal, c.reason)
+        # ... and what does change, as documented: /stats states the k-mers as the nodes
+        m = re.search(r'(\d+) edges, (\d+) source dummies \(the main dummy edge included\), '
+                      r'(\d+) sink dummies, (\d+) k-mers', transform_log)
+        self.assertIsNotNone(m, transform_log)
+        edges, source, sink, kmers = (int(x) for x in m.groups())
+        self.assertEqual(edges, source + sink + kmers)
+        self.assertEqual(edges, before[3]['graph']['nodes'])
+        self.assertEqual(kmers, after[3]['graph']['nodes'])
+
+        # the CLI states the same identity with the mask beside the graph
+        request = f'{d}/request.json'
+        with open(request, 'w') as f:
+            json.dump(self._requests()[0][0], f)
+        res = subprocess.run(shlex.split(METAGRAPH) + [
+            'traverse', '-i', self.graph, '-a', self.anno, '--index-name', 'mini',
+            '--index-manifest', manifest, request],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
+        self.assertEqual(fp, json.loads(res.stdout)['capabilities']['index_fp'])
+
+        # a manifest that lists the mask is refused, naming the rule
+        with open(manifest) as f:
+            listing = json.load(f)
+        with open(f'{d}/graph_k31.edgemask', 'rb') as f:
+            data = f.read()
+        listing['files'].append({'path': 'graph_k31.edgemask', 'size': len(data),
+                                 'sha256': hashlib.sha256(data).hexdigest()})
+        listing.pop('index_fp')
+        with open(f'{d}/masked.manifest.json', 'w') as f:
+            json.dump(listing, f)
+        url, process, stop = self._server(f'{d}/masked.manifest.json', wait=False)
+        try:
+            code = process.wait(timeout=120)
+        finally:
+            log = stop()
+        self.assertEqual(1, code, log[-2000:])
+        self.assertIn('it lists graph_k31.edgemask: the dummy-edge mask (.edgemask) and the '
+                      'Bloom filter (.bloom) are derived data of the graph, not part of index_fp',
+                      log)
+        # build/mini_refseq is unchanged
+        self.assertEqual(self.mini_files, sorted(os.listdir(MINI_DIR)))
 
 
 @unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")

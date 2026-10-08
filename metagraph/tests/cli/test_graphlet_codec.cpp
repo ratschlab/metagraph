@@ -1,5 +1,6 @@
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +12,7 @@
 #include <set>
 #include <sstream>
 #include <thread>
+#include <tuple>
 #include <unistd.h>
 
 #include <json/json.h>
@@ -1688,67 +1690,127 @@ TEST(Graphlet, IndexIdentity) {
     const std::string rd_anno = write("r.row_diff.annodbg", "row diff annotation");
     const std::string anchors = (dir / "g.dbg.anchors").string(),
                       fork_succ = (dir / "g.dbg.rd_succ").string();
-    EXPECT_EQ((std::vector<std::string> { graph, mask, bloom, anno }),
-              index_bundle_files(graph, anno));
-    EXPECT_EQ((std::vector<std::string> { graph, mask, bloom, coord_anno, seqs }),
+    // The owner's decision #17 of 2026-10-08: the dummy-edge mask and the Bloom filter are
+    // derived data of the graph, not part of the identity. They are loaded (index_derived_files
+    // says so) but never in the inventory a manifest is checked against
+    EXPECT_EQ((std::vector<std::string> { graph, anno }), index_bundle_files(graph, anno));
+    EXPECT_EQ((std::vector<std::string> { graph, coord_anno, seqs }),
               index_bundle_files(graph, coord_anno));
     // --no-coord-mapping: the headers are not loaded
-    EXPECT_EQ((std::vector<std::string> { graph, mask, bloom, coord_anno }),
+    EXPECT_EQ((std::vector<std::string> { graph, coord_anno }),
               index_bundle_files(graph, coord_anno, false));
     // row_diff (column): the anchors and fork successors beside the graph, required (listed
     // whether they exist or not: the loader fails without them)
-    EXPECT_EQ((std::vector<std::string> { graph, mask, bloom, rd_anno, anchors, fork_succ }),
+    EXPECT_EQ((std::vector<std::string> { graph, rd_anno, anchors, fork_succ }),
               index_bundle_files(graph, rd_anno));
+    auto derived = [](const std::string &g) {
+        std::vector<std::tuple<std::string, std::string, bool, bool>> out;
+        for (const IndexDerivedFile &f : index_derived_files(g)) {
+            out.emplace_back(f.path, f.role, f.exists, f.loaded);
+        }
+        return out;
+    };
+    using Derived = std::vector<std::tuple<std::string, std::string, bool, bool>>;
+    EXPECT_EQ((Derived { { mask, "graph_mask", true, true }, { bloom, "graph_bloom", true, true } }),
+              derived(graph));
+    // none for a graph that is not a DBGSuccinct (no loader reads a mask beside it)
+    EXPECT_TRUE(index_derived_files((dir / "g.orhashdbg").string()).empty());
+    // the inventory's JSON: the identity files, and the derived ones apart, with the rule
+    const Json::Value inventory = index_inventory_json(graph, anno);
+    ASSERT_EQ(2u, inventory["files"].size());
+    EXPECT_EQ("graph", inventory["files"][0]["role"].asString());
+    EXPECT_EQ("annotation", inventory["files"][1]["role"].asString());
+    ASSERT_EQ(2u, inventory["derived"].size());
+    EXPECT_EQ(mask, inventory["derived"][0]["path"].asString());
+    EXPECT_EQ("graph_mask", inventory["derived"][0]["role"].asString());
+    EXPECT_TRUE(inventory["derived"][0]["loaded"].asBool());
+    EXPECT_EQ(bloom, inventory["derived"][1]["path"].asString());
+    EXPECT_EQ("graph_bloom", inventory["derived"][1]["role"].asString());
+    EXPECT_TRUE(inventory["derived"][1]["exists"].asBool());
+    EXPECT_TRUE(inventory["derived"][1]["loaded"].asBool());
+    EXPECT_EQ(kIndexDerivedDataRule, inventory["derived_rule"].asString());
+    // a manifest of the graph and the annotation alone is valid beside its mask and Bloom
+    // filter, and states the index_fp it states without them: adding a mask (and then a Bloom
+    // filter) beside a deployed graph leaves its identity unchanged
+    EXPECT_EQ(fp, index_manifest_fingerprint((dir / "m1.json").string(),
+                                             index_bundle_files(graph, anno), nullptr,
+                                             index_unloaded_optional_files(graph, anno)));
     // the Bloom filter is read only with the mask
     std::filesystem::remove(dir / "g.edgemask");
+    EXPECT_EQ((Derived { { mask, "graph_mask", false, false },
+                         { bloom, "graph_bloom", true, false } }), derived(graph));
     EXPECT_EQ((std::vector<std::string> { graph, anno }), index_bundle_files(graph, anno));
+    EXPECT_EQ(fp, index_manifest_fingerprint((dir / "m1.json").string(),
+                                             index_bundle_files(graph, anno), nullptr,
+                                             index_unloaded_optional_files(graph, anno)));
+    std::filesystem::remove(dir / "g.bloom");
+    EXPECT_EQ((Derived { { mask, "graph_mask", false, false },
+                         { bloom, "graph_bloom", false, false } }), derived(graph));
+    EXPECT_EQ(fp, index_manifest_fingerprint((dir / "m1.json").string(),
+                                             index_bundle_files(graph, anno), nullptr,
+                                             index_unloaded_optional_files(graph, anno)));
     write("g.edgemask", "mask");
-    // a manifest that covers neither the mask nor the Bloom filter: refused, naming the file
-    try {
-        index_manifest_fingerprint((dir / "m1.json").string(), index_bundle_files(graph, anno));
-        ADD_FAILURE() << "a manifest without the mask was accepted";
-    } catch (const std::runtime_error &e) {
-        EXPECT_NE(std::string::npos, std::string(e.what()).find("does not cover the file "
-                                                                + mask)) << e.what();
+    write("g.bloom", "bloom filter");
+    // a manifest that lists derived data — this graph's mask or Bloom filter, or any file named
+    // so — is refused with the rule, whether the file is loaded or not: listed, it would make
+    // index_fp depend on it (an old manifest listing the mask is written again without it)
+    auto with = [&](const std::string &name, const std::vector<std::string> &entries) {
+        Json::Value m = parse_json(slurp(dir / "m1.json"));
+        for (const std::string &path : entries) {
+            const std::string content = slurp(dir / path);
+            Json::Value e;
+            e["path"] = path;
+            e["size"] = Json::UInt64(content.size());
+            e["sha256"] = sha256_hex(content);
+            m["files"].append(e);
+        }
+        return write(name, compact(m));
+    };
+    write("other.bloom", "another graph's Bloom filter");
+    for (bool mask_present : { true, false }) {
+        if (!mask_present)
+            std::filesystem::remove(dir / "g.edgemask");
+        for (const auto &entries : std::vector<std::vector<std::string>> {
+                 { "g.edgemask" }, { "g.bloom" }, { "g.edgemask", "g.bloom" }, { "other.bloom" } }) {
+            if (!mask_present && entries[0] == "g.edgemask")
+                continue;   // (its digest is taken from the file)
+            // the first derived entry in the manifest's order (ascending path) is named
+            const std::string named = *std::min_element(entries.begin(), entries.end());
+            try {
+                index_manifest_fingerprint(with("m11.json", entries),
+                                           index_bundle_files(graph, anno), nullptr,
+                                           index_unloaded_optional_files(graph, anno));
+                ADD_FAILURE() << "a manifest listing " << entries[0] << " was accepted";
+            } catch (const std::runtime_error &e) {
+                const std::string what = e.what();
+                EXPECT_NE(std::string::npos, what.find("it lists " + named + ": "
+                                                       + kIndexDerivedDataRule)) << what;
+                EXPECT_NE(std::string::npos, what.find("derived data of the graph, not part of "
+                                                       "index_fp")) << what;
+                EXPECT_NE(std::string::npos, what.find("write it again without " + named))
+                        << what;
+            }
+        }
     }
-    Json::Value full = parse_json(slurp(dir / "m1.json"));
-    for (const auto &[name, content] : std::vector<std::pair<std::string, std::string>> {
-             { "g.edgemask", "mask" } }) {
-        Json::Value e;
-        e["path"] = name;
-        e["size"] = Json::UInt64(content.size());
-        e["sha256"] = sha256_hex(content);
-        full["files"].append(e);
-    }
-    const std::string no_bloom = write("m11.json", compact(full));
-    try {
-        index_manifest_fingerprint(no_bloom, index_bundle_files(graph, anno));
-        ADD_FAILURE() << "a manifest without the Bloom filter was accepted";
-    } catch (const std::runtime_error &e) {
-        EXPECT_NE(std::string::npos, std::string(e.what()).find("does not cover the file "
-                                                                + bloom)) << e.what();
-    }
-    Json::Value bloom_entry;
-    bloom_entry["path"] = "g.bloom";
-    bloom_entry["size"] = Json::UInt64(12);
-    bloom_entry["sha256"] = sha256_hex("bloom filter");
-    full["files"].append(bloom_entry);
-    const std::string complete = write("m12.json", compact(full));
-    EXPECT_NO_THROW(index_manifest_fingerprint(complete, index_bundle_files(graph, anno)));
+    write("g.edgemask", "mask");
+    EXPECT_STREQ("graph_mask", index_derived_role("dir/g.edgemask"));
+    EXPECT_STREQ("graph_bloom", index_derived_role("g.bloom"));
+    EXPECT_EQ(nullptr, index_derived_role("g.dbg"));
+    EXPECT_EQ(nullptr, index_derived_role("g.edgemask/README"));
+    EXPECT_EQ(nullptr, index_derived_role("g.bloom.txt"));
+    // A stated limitation, pinned: the derived data is not checked by the identity, so a Bloom
+    // filter of another build beside the graph is not noticed by index_fp (the loader checks
+    // its k and mode only; a wrong one can hide k-mers, review of pass 5, finding 3)
     write("g.bloom", "a Bloom filter of another build");
-    try {
-        index_manifest_fingerprint(complete, index_bundle_files(graph, anno));
-        ADD_FAILURE() << "another build's Bloom filter was accepted";
-    } catch (const std::runtime_error &e) {
-        EXPECT_NE(std::string::npos, std::string(e.what()).find("is not listed with that size"))
-                << e.what();
-    }
+    EXPECT_EQ(fp, index_manifest_fingerprint((dir / "m1.json").string(),
+                                             index_bundle_files(graph, anno), nullptr,
+                                             index_unloaded_optional_files(graph, anno)));
     write("g.bloom", "bloom filter");
 
     // Review of the pass-5 fixes: a manifest written for a directory of bundles that share
     // base names (a/x.seqs, b/x.seqs) matched every one of them, and two indexes stated one
     // index_fp; the base names of a manifest's entries must be distinct
-    Json::Value shared = parse_json(slurp(dir / "m12.json"));
+    Json::Value shared = parse_json(slurp(dir / "m1.json"));
     for (const char *path : { "a/x.seqs", "b/x.seqs" }) {
         Json::Value e;
         e["path"] = path;
@@ -1774,10 +1836,9 @@ TEST(Graphlet, IndexIdentity) {
     }
 
     // ... and a manifest lists exactly the optional inventory files the pair loads: one that
-    // lists a .seqs, a mask or a Bloom filter the server does not load (missing beside the
-    // listed spelling, the mask unread, --no-coord-mapping) would state the identity of an
-    // index that does load it
-    Json::Value with_seqs = parse_json(slurp(dir / "m12.json"));
+    // lists a .seqs the server does not load (missing beside the listed spelling,
+    // --no-coord-mapping) would state the identity of an index that does load it
+    Json::Value with_seqs = parse_json(slurp(dir / "m1.json"));
     with_seqs["files"][1]["path"] = "x.row_diff_brwt_coord.annodbg";
     with_seqs["files"][1]["size"] = Json::UInt64(21);
     with_seqs["files"][1]["sha256"] = sha256_hex("coordinate annotation");
@@ -1801,13 +1862,11 @@ TEST(Graphlet, IndexIdentity) {
         EXPECT_NE(std::string::npos, std::string(e.what()).find("which the server does not load"))
                 << e.what();
     }
-    // the mask unread: neither it nor the Bloom filter is loaded, and listing either is refused
+    // the mask unread or read: no derived file is ever an "unloaded optional" one (a manifest
+    // lists them never, by the rule above)
+    EXPECT_TRUE(index_unloaded_optional_files(graph, anno).empty());
     std::filesystem::remove(dir / "g.edgemask");
-    EXPECT_EQ((std::vector<std::string> { mask, bloom }),
-              index_unloaded_optional_files(graph, anno));
-    EXPECT_THROW(index_manifest_fingerprint(complete, index_bundle_files(graph, anno), nullptr,
-                                            index_unloaded_optional_files(graph, anno)),
-                 std::runtime_error);
+    EXPECT_TRUE(index_unloaded_optional_files(graph, anno).empty());
     std::filesystem::remove_all(dir);
 }
 
