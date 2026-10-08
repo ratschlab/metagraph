@@ -36,7 +36,8 @@ async_load_critical_dbg(const Config &config);
  * the time, and record |graph| as one whose mask was built at load. A graph that has its mask
  * (read from its .edgemask) keeps it, and one that is not succinct has none to build (the
  * pattern search refuses it for that). Exits the process when the mask cannot be built: the
- * operator asked for it, and a server without it would answer mask_required throughout.
+ * operator asked for it (exact counts), and a server without it would answer upper bounds
+ * throughout.
  * |stdout_reserved|: the caller's stdout carries its answers (`metagraph pattern`), where the
  * logger writes its info lines, so the progress is logged at trace level (stderr, with -v).
  */

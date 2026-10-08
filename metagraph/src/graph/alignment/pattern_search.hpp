@@ -42,6 +42,10 @@
  *    length() (3m bases: every offset, scope decision, information bit and instance is in
  *    bases), residues (m) and genetic_code. The capabilities list the kind, the residues, the
  *    genetic codes (GeneticCode::ids()) and the default 1.
+ *  - graphs without the dummy-edge mask (owner decision #16 of 2026-10-08): served, see
+ *    "Graphs without the dummy-edge mask" at PatternSearch. Their counts that the engine could
+ *    not resolve are BOUNDS [lower, U] (Count), the route adding the estimate U x f with f
+ *    from sample_real_fraction(); the lists stay exact.
  *
  * The owner's guarantee rule holds for every type here: nothing is weakened silently, every
  * count carries its unit and its relation, and a count is never promoted by assumption.
@@ -93,7 +97,11 @@ enum class Unit { GRAPH_CONTEXTS, ANCHORS, PATHS, PLACED_OCCURRENCES, LABELS };
  *            was explored. An undiscovered IUPAC branch, offset or strand has no upper bound,
  *            so this is the relation of every interrupted discovery.
  *  BOUNDS    every range of every branch, offset and orientation was discovered and only the
- *            deferred scans were interrupted: lower <= true <= upper.
+ *            deferred scans were interrupted: lower <= true <= upper. On a graph without the
+ *            dummy-edge mask also (and mostly) a completed discovery whose candidates were not
+ *            all checked for source dummies: upper = U, the candidate entries (source dummies
+ *            included), lower = the part known exactly (PatternSearch, "Graphs without the
+ *            dummy-edge mask").
  *  UNKNOWN   the phase never ran: a stop came before it started, or not in this increment.
  * A search whose discovery was entered is AT_LEAST even when the stop refused its very first
  * step (AT_LEAST 0): it was interrupted, not skipped (SPEC §7.4). After any discovery stop
@@ -400,6 +408,14 @@ struct Request {
     // PRIMARY graph, by the palindromic k-mers both base searches may find (subtracted as
     // the candidates of the ranges where a palindrome is possible): there the stop can fire
     // late or not at all, and the answer is then the EXACT count with no stop.
+    // On a graph without the dummy-edge mask the running count compared is the running UPPER
+    // bound U (owner decision #16: conservative, the stop can fire while the true count is
+    // within the threshold; the note kNoteThresholdUpperBound says when the lower bound did
+    // not cross it), and so are ALL_OR_COUNT's retention and the extension's admission. On an
+    // even-k wrapped PRIMARY graph the running U leaves out the ranges whose palindrome scan
+    // is pending (the scan can only lower their share), so that it never exceeds the final U:
+    // there the stop can fire late or not at all, the admission after discovery then
+    // comparing the final U.
     bool stop_at_threshold = false;
     /**
      * Per pattern, all offsets and orientations (§5.3): the stop_at_threshold threshold for
@@ -639,12 +655,19 @@ struct GraphSupport {
     // when not (also the 400 code of the route): "representation_unsupported" (not a
     // DBGSuccinct, nor a CanonicalDBG over a PRIMARY one), "primary_unwrapped" (a PRIMARY
     // DBGSuccinct not wrapped in CanonicalDBG), "alphabet_unsupported" (the BOSS alphabet is
-    // not "$ACGT" or "$ACGTN"), "mask_required" (no valid-edge mask: without it every edge,
-    // dummies included, would count as a k-mer, §4). The route narrows it further
-    // (cli::route_support): "alphabet_untested" ($ACGTN, not served until a DNA5 build passes
-    // the pattern tests) and "mask_invalid" (a mask marking a W = $ edge valid)
+    // not "$ACGT" or "$ACGTN"). The route narrows it further (cli::route_support):
+    // "alphabet_untested" ($ACGTN, not served until a DNA5 build passes the pattern tests)
+    // and "mask_invalid" (a mask marking a W = $ edge valid). "mask_required", the refusal of
+    // a graph without its mask, is retired (owner decision #16 of 2026-10-08)
     std::string reason;
     GraphMode mode = GraphMode::BASIC;
+    /**
+     * The graph has its dummy-edge (valid-edge) mask: every count of a completed discovery
+     * is EXACT. Without it (owner decision #16) the graph is served all the same, its
+     * unresolved counts BOUNDS [lower, U] (PatternSearch, "Graphs without the dummy-edge
+     * mask"); the mask is derived data of the graph, never a different number for the same
+     * count (decision #17): it only changes which counts are exact.
+     */
     bool mask_present = false;
     size_t k = 0;
     // the BOSS alphabet, sentinel first: "$ACGT" (DNA4) or "$ACGTN" (DNA5)
@@ -654,6 +677,68 @@ struct GraphSupport {
     // the requestable scopes: SUFFIX and ANY_OFFSET, or ANY_OFFSET only (PRIMARY)
     std::vector<Scope> scopes;
 };
+
+/**
+ * f, the fraction of real k-mers among the entries of a succinct graph that a pattern can
+ * count (owner decision #16 of 2026-10-08): the BOSS edges whose W is not $ (a sink dummy,
+ * W = $, never carries a pattern base), each a k-mer or a source dummy (a k-mer starting
+ * with '$', BOSS::node_has_sentinel). On a graph without its dummy-edge mask a count is the
+ * bounds [lower, U] and the route states the additive estimate U x f beside it: what the count
+ * would be if the source dummies among its U entries were as frequent as in the whole graph
+ * (not a bound, never EXACT).
+ * Over the whole graph f = real edges / (edges with W != $), where `stats --count-dummy`'s
+ * real edges = edges - source dummies - sink dummies (its source dummies include the main
+ * dummy edge 1, whose W is $, its sinks do not) and the edges with W != $ number edges - sink
+ * dummies - 1. build/mini_refseq: 8,335,760 edges, 375 source and 12 sink dummies, f =
+ * 8,335,373 / 8,335,747 = 0.99995513.
+ */
+struct RealFraction {
+    // real / samples; 1 when the graph has no edge with W != $ (nothing can be counted)
+    double value = 1;
+    // Wilson's score interval at 95% (z = 1.959963984540054) around |value|, clamped to
+    // [0, 1] (and holding |value| despite rounding); [0, 1] without samples; lower == upper ==
+    // value for exact_real_fraction
+    double lower = 0;
+    double upper = 1;
+    // the entries drawn (W != $; every non-sink entry for exact_real_fraction) and the real
+    // k-mers among them
+    uint64_t samples = 0;
+    uint64_t real = 0;
+    // the edges with W = $ (plain or marked: the sink dummies and the main dummy edge 1),
+    // counted exactly by ranks of W, and all edges (BOSS::num_edges)
+    uint64_t sentinel_edges = 0;
+    uint64_t edges = 0;
+    // the seed of the draws: the graph's number of edges
+    uint64_t seed = 0;
+    // false: sampled (sample_real_fraction); true: every entry tested (exact_real_fraction)
+    bool exact = false;
+};
+
+// the entries drawn for f (owner decision #16): 10,000
+constexpr uint64_t kRealFractionSamples = 10'000;
+
+/**
+ * Samples f (RealFraction) from |samples| entries drawn uniformly, with replacement, among
+ * the edges whose W is not $: std::mt19937_64 seeded with the graph's number of edges (the
+ * generator the standard specifies, so that the same graph gives the same f in every process
+ * and on every platform), the edge 1 + rng() % edges (the modulo's bias is below edges / 2^64),
+ * a draw with W = $ drawn again; a drawn edge is real iff its source node holds no '$'
+ * (BOSS::node_has_sentinel: at most k - 1 symbols read). Reads the BOSS only, never the
+ * mask. Cost: |samples| walks of at most k - 1 bwd steps (less with an index of suffix
+ * ranges), plus a redraw per W = $ entry drawn: a few tens of milliseconds at k = 31 (see
+ * test_pattern_unmasked.cpp, RealFractionCost). Pure: the same graph and |samples| give the
+ * same result. The route samples it once per loaded graph.
+ */
+RealFraction sample_real_fraction(const DBGSuccinct &graph,
+                                  uint64_t samples = kRealFractionSamples);
+
+/**
+ * f over every entry with W != $: RealFraction::exact, lower == upper == value, the source
+ * dummies found by BOSS's own traversal of the dummy tree (BOSS::mark_source_dummy_edges, as
+ * `stats --count-dummy`), not by the test sample_real_fraction draws with. O(edges) bits; for
+ * tests and offline checks, never on a request's path.
+ */
+RealFraction exact_real_fraction(const DBGSuccinct &graph);
 
 
 // ---------------------------------------------------------------- results
@@ -693,6 +778,12 @@ struct ContextCounts {
  *                 completely is never extended; paths UNKNOWN (§3: every phase after a stop).
  *  NOT_ADMITTED   the anchors are EXACT and above max_anchors: the extension's admission
  *                 failed (§4.2); paths UNKNOWN; enumerate() withholds ANCHORS_ABOVE_THRESHOLD.
+ *                 On a graph without the dummy-edge mask also: the anchors are BOUNDS (no
+ *                 stop) and their upper bound U is above max_anchors (owner decision #16: the
+ *                 admission compares U; kNoteThresholdUpperBound when the lower bound is not).
+ *                 With U <= max_anchors the anchors are listed first, which drops the source
+ *                 dummies and makes their count EXACT (NO_ANCHORS when none is left), and then
+ *                 extended.
  *  STOPPED        the extension started and stopped (Result::stop, phase EXTENSION: max_steps,
  *                 the deadline, or max_paths with stop_at_threshold): paths AT_LEAST, the
  *                 paths completed before the stop.
@@ -748,7 +839,9 @@ struct Work {
     // edges, zero on BASIC, CANONICAL and odd-k graphs unless masked edges sit among the
     // candidates; on an even-k wrapped PRIMARY graph also the palindrome check of every range
     // at an offset where a palindromic k-mer can hold the pattern (one get_node_sequence, k - 1
-    // BOSS steps, per context, one step each): there about one per such range
+    // BOSS steps, per context, one step each): there about one per such range. On a graph
+    // without the dummy-edge mask only these palindrome checks exist (each also tells a source
+    // dummy from a k-mer)
     uint64_t mask_scans = 0;
     // L > k with extend_paths: the outgoing edges the extension examined, one step each
     // (allowed or not); 0 otherwise
@@ -772,7 +865,10 @@ struct Refusal {
 // Why enumerate() publishes nothing (JSON withheld.reason, §5.2)
 enum class Withheld {
     // ALL_OR_COUNT: discovery (and for L > k the extension) completed, EXACT total >
-    // max_contexts (L <= k), or EXACT paths > max_paths (L > k with extend_paths)
+    // max_contexts (L <= k), or EXACT paths > max_paths (L > k with extend_paths). On a
+    // graph without the dummy-edge mask also a BOUNDS total whose upper bound U is above
+    // max_contexts (owner decision #16: the admission compares U, conservative;
+    // kNoteThresholdUpperBound when the lower bound is not above it)
     COUNT_ABOVE_THRESHOLD,
     // ALL_OR_COUNT: stop_at_threshold stopped discovery or the extension (stop reason
     // MAX_CONTEXTS, MAX_ANCHORS or MAX_PATHS)
@@ -860,9 +956,16 @@ struct Context {
 //  strand_unknown_canonical  graph mode CANONICAL or PRIMARY: orientations, not strands
 //  paths_later_increment     L > k without Request::extend_paths: anchors counted, paths
 //                            neither extended nor extracted (never set with extend_paths)
+//  threshold_upper_bound     a graph without the dummy-edge mask (owner decision #16): a
+//                            threshold decision went against the request on the count's
+//                            upper bound U while its lower bound did not cross the threshold
+//                            (ALL_OR_COUNT withheld COUNT_ABOVE_THRESHOLD, stop_at_threshold
+//                            stopped, the extension NOT_ADMITTED): the true count may be
+//                            within the threshold (PARTIAL lists the contexts regardless)
 constexpr const char kNoteLowComplexity[] = "low_complexity_pattern";
 constexpr const char kNoteStrandUnknown[] = "strand_unknown_canonical";
 constexpr const char kNotePathsLater[] = "paths_later_increment";
+constexpr const char kNoteThresholdUpperBound[] = "threshold_upper_bound";
 
 /**
  * The answer for one pattern. With |refusal| set nothing was searched and only the pattern
@@ -940,7 +1043,9 @@ struct Result {
  *    position L. Every complete path is a context; the search never scores and stops at the
  *    first disallowed base, so it is complete within its budget. Outgoing edges come from
  *    the valid-edge mask's graph (DBGSuccinct::call_outgoing_kmers skips dummy and pruned
- *    k-mers), so a path exists only where all its k-mers were retained.
+ *    k-mers), so a path exists only where all its k-mers were retained; without the mask the
+ *    only dummy an outgoing edge of a k-mer can reach is a sink (base '$'), which no pattern
+ *    position allows.
  * No dummy edge is relied on and nothing is scored.
  *
  * Cost: a searched window (the oriented pattern, or a long pattern's anchor window) is
@@ -964,6 +1069,30 @@ struct Result {
  * same automaton. On a wrapped PRIMARY graph the reverse complement of a long peptide's anchor
  * window, rc(Q[0, k)) = rc(Q)[L - k, L), may start inside a codon: its first codon is matched
  * on the bases inside the window only (the codon's earlier bases are free).
+ *
+ * Graphs without the dummy-edge mask (owner decisions #16 and #17 of 2026-10-08). The mask
+ * only says which BOSS edges are dummies; without it the same ranges are discovered with the
+ * same steps, and every place that read the mask counts the candidates instead:
+ *  - a flank range counts its non-sink edges (W != $, DBGSuccinct::count_non_sink_edges_in_
+ *    range) instead of its valid ones, a W-rule leaf its candidates (W in {c, c + alph_size})
+ *    instead of the valid ones among them: no INVALID scan exists, a sink never counts;
+ *  - a range whose nodes the search spelled wholly (depth k - 1: every node symbol a pattern
+ *    base or a flank symbol, so no room for '$') holds no source dummy: its count is exact.
+ *    Any other range's candidates may include source dummies (k-mers starting with '$'):
+ *    they are UNCHECKED, counted into the upper bound U and not into the lower bound;
+ *  - the palindrome scans of an even-k wrapped PRIMARY graph spell every candidate anyway,
+ *    which checks it too (a k-mer holding '$' is a dummy, and never a palindrome).
+ * A count is then EXACT when nothing of it is unchecked (an empty block, U = 0, included:
+ * absence holds), else BOUNDS {lower, U}; stops as on a masked graph (AT_LEAST, UNKNOWN). The
+ * admission decisions compare U (Request::stop_at_threshold, ALL_OR_COUNT's threshold, the
+ * extension's admission): conservative, stated with kNoteThresholdUpperBound when the lower
+ * bound did not cross. The lists stay exact: the release tests every unchecked candidate with
+ * BOSS::node_has_sentinel (at most k - 1 symbols read, about the cost of the spelling the
+ * route does per context anyway) and never releases a source dummy, and a release that
+ * enumerated every candidate makes the counts EXACT (enumerate()). Memory: PARTIAL's
+ * retention bound counts only the contexts it is sure of, which an unchecked range is not:
+ * on such a graph PARTIAL keeps every discovered range whose nodes are not wholly spelled (24
+ * bytes each, at most one per step charged) rather than about max_contexts of them.
  *
  * Answer order (§5.5): contexts by (node, offset, orientation); paths by (anchor node,
  * orientation), then the DFS in symbol order A < C < G < T at every position, i.e. the
@@ -1059,6 +1188,17 @@ class PatternSearch {
      *                extension was not admitted (withheld ANCHORS_ABOVE_THRESHOLD).
      *                The release reads the clock once before the first callback.
      *  An EXACT 0 of anchors or of paths is a complete, empty release.
+     * On a graph without the dummy-edge mask (see the class): ALL_OR_COUNT releases iff
+     * discovery completed and the count is EXACT, or BOUNDS with U <= the threshold; the
+     * release then enumerates every candidate, drops the source dummies, and the counts
+     * (total, suffix, by_offset, by_orientation; anchors with release_anchors) become EXACT,
+     * the number of contexts released (a number outside [lower, U] is std::logic_error).
+     * PARTIAL: a release that enumerated every candidate of a completed discovery (nothing
+     * pruned) makes the counts EXACT likewise; one cut by its cap or after a stop raises each
+     * count's lower bound to the contexts it released at that orientation and offset. With
+     * extend_paths, anchors BOUNDS and U <= max_anchors, the anchors are listed (dummies
+     * dropped, their counts EXACT) and extended. count() never enumerates: its counts stay
+     * BOUNDS, and the steps charged are the same in both.
      * Release runs only while the deadline's work time has not passed, reading the clock
      * before it starts, every kClockStride descriptors it prepares, every kClockStride edges
      * it examines and every kReleaseClockStride contexts it passes on (the caller's work per

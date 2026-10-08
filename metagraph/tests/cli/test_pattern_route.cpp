@@ -15,11 +15,13 @@
 #include "gtest/gtest.h"
 
 #include "../annotation/test_annotated_dbg_helpers.hpp"
+#include "../test_helpers.hpp"
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "cli/pattern.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
@@ -812,20 +814,20 @@ TEST(PatternRoute, DeliveryCheck) {
     EXPECT_THROW(delivery.check(), PatternRefusal);
 }
 
-TEST(PatternRoute, MaskRequired) {
-    auto graph = std::make_shared<DBGSuccinct>(kK);
+// SPEC §5: the body not JSON (3), then the graph (4), then the body not an object (5)
+// (review of 2026-10-07, R2-03), on a graph the engine does not serve (a graph without its
+// mask, which mask_required refused before, is served since owner decision #16)
+TEST(PatternRoute, TheGraphIsCheckedBetweenTheJsonAndTheObject) {
+    auto hash = std::make_shared<DBGHashFast>(kK);
     for (const std::string &r : kRecords) {
-        graph->add_sequence(r);
+        hash->add_sequence(r);
     }
-    ASSERT_EQ(nullptr, graph->get_mask());
-    AnnotatedDBG anno_graph(graph,
-                            std::make_unique<annot::ColumnCompressed<>>(graph->max_index()));
-    EXPECT_EQ(std::make_pair(400, std::string("mask_required")),
+    AnnotatedDBG anno_graph(hash, std::make_unique<annot::ColumnCompressed<>>(hash->max_index()));
+    const std::string code = "representation_unsupported";
+    EXPECT_EQ(std::make_pair(400, code),
               refusal(anno_graph, "{\"patterns\": [{\"dna\": \"AACG\"}]}"));
-    // SPEC §5: the body not JSON (3), then the graph (4), then the body not an object (5)
-    // (review of 2026-10-07, R2-03)
-    EXPECT_EQ(std::make_pair(400, std::string("mask_required")), refusal(anno_graph, "[1]"));
-    EXPECT_EQ(std::make_pair(400, std::string("mask_required")),
+    EXPECT_EQ(std::make_pair(400, code), refusal(anno_graph, "[1]"));
+    EXPECT_EQ(std::make_pair(400, code),
               refusal(anno_graph, "{\"patterns\": 1, \"predicate\": 1}"));
     EXPECT_EQ(std::make_pair(400, std::string("invalid_request")),
               refusal(anno_graph, "{\"patterns\": ["));
@@ -833,10 +835,6 @@ TEST(PatternRoute, MaskRequired) {
               refusal(anno_graph, "{\"patterns\": [{\"dna\": \"AACG\"}]} GARBAGE"));
     EXPECT_EQ(std::make_pair(400, std::string("invalid_request")),
               refusal(anno_graph, repeat("[", 1001) + repeat("]", 1001)));
-    Json::Value caps = pattern_capabilities_json(&anno_graph, limits(), false);
-    EXPECT_FALSE(caps["available"].asBool());
-    EXPECT_EQ("mask_required", caps["unavailable_reason"].asString());
-    EXPECT_EQ("absent", caps["mask"].asString());
 }
 
 // C2-01, C1-05 (review of 2026-10-07): the two graph reasons of a graph the engine does not
@@ -867,8 +865,9 @@ TEST(PatternRoute, GraphsTheEngineDoesNotServe) {
         EXPECT_FALSE(caps["available"].asBool()) << code;
         EXPECT_EQ(code, caps["unavailable_reason"].asString());
         EXPECT_EQ(kK, caps["k"].asUInt64()) << code;
-        for (const char *f : { "graph_mode", "alphabet", "strand_stated", "mask", "scopes",
-                                "placement", "support", "annotation" }) {
+        for (const char *f : { "graph_mode", "alphabet", "strand_stated", "mask", "counting",
+                                "dummy_fraction", "scopes", "placement", "support",
+                                "annotation" }) {
             EXPECT_TRUE(caps[f].isNull()) << code << " " << f;
         }
     }
@@ -990,17 +989,429 @@ TEST(PatternRoute, Capabilities) {
                                  24, 25, 26, 27, 28, 29, 30, 31, 32, 33 }), codes);
     EXPECT_EQ(1, caps["default_genetic_code"].asInt());
     EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("stop_unsupported"));
+    // owner decision #16: a graph with its mask counts exactly, and has no dummy fraction
+    EXPECT_EQ("exact", caps["counting"].asString());
+    EXPECT_TRUE(caps.isMember("dummy_fraction"));
+    EXPECT_TRUE(caps["dummy_fraction"].isNull());
+    // no prose of its own: the document a service's MCP tool returns has a 32 KiB ceiling
+    EXPECT_FALSE(caps.isMember("counting_rule"));
 
     // loading: nothing about the graph is known yet
     caps = pattern_capabilities_json(nullptr, limits(), false);
     EXPECT_TRUE(caps["available"].isNull());
     EXPECT_TRUE(caps["graph_mode"].isNull());
     EXPECT_TRUE(caps["k"].isNull());
+    EXPECT_TRUE(caps.isMember("counting"));
+    EXPECT_TRUE(caps["counting"].isNull());
+    EXPECT_TRUE(caps["dummy_fraction"].isNull());
 
     caps = pattern_capabilities_json(g.get(), limits(), true);
     EXPECT_EQ(3u, caps.size());
     EXPECT_FALSE(caps["available"].asBool());
     EXPECT_EQ("multi_graph_later_increment", caps["unavailable_reason"].asString());
+}
+
+
+// ---------------------------------------------------------------- without the mask (#16)
+
+// |masked|'s graph without its dummy-edge mask (owner decision #16): the same BOSS written
+// and loaded again without the mask, so the same node ids and rows; a PRIMARY graph wrapped in
+// CanonicalDBG again (the wrapper reads at construction whether its graph has a mask); an
+// annotation of as many rows, without labels (these tests read none)
+std::unique_ptr<AnnotatedDBG> unmasked(const AnnotatedDBG &masked, const std::string &name) {
+    const DeBruijnGraph &graph = masked.get_graph();
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+    const auto *dbg = dynamic_cast<const DBGSuccinct*>(canonical ? &canonical->get_graph()
+                                                                 : &graph);
+    EXPECT_TRUE(dbg);
+    const std::string base = test_dump_dir() + "/pattern_route_unmasked_" + name;
+    dbg->serialize(base);
+    auto loaded = std::make_shared<DBGSuccinct>(2);
+    EXPECT_TRUE(loaded->load_without_mask(base + ".dbg"));
+    EXPECT_EQ(nullptr, loaded->get_mask());
+    std::shared_ptr<DeBruijnGraph> served = loaded;
+    if (canonical)
+        served = std::make_shared<CanonicalDBG>(served);
+    return std::make_unique<AnnotatedDBG>(
+            served, std::make_unique<annot::ColumnCompressed<>>(loaded->max_index()));
+}
+
+bool iupac_matches(char code, char base) {
+    static const std::map<char, std::string> sets = {
+        { 'A', "A" }, { 'C', "C" }, { 'G', "G" }, { 'T', "T" }, { 'R', "AG" }, { 'Y', "CT" },
+        { 'S', "CG" }, { 'W', "AT" }, { 'K', "GT" }, { 'M', "AC" }, { 'B', "CGT" },
+        { 'D', "AGT" }, { 'H', "ACT" }, { 'V', "ACG" }, { 'N', "ACGT" },
+    };
+    return sets.at(code).find(base) != std::string::npos;
+}
+
+std::string iupac_rc(const std::string &p) {
+    static const std::map<char, char> c = {
+        { 'A', 'T' }, { 'C', 'G' }, { 'G', 'C' }, { 'T', 'A' }, { 'R', 'Y' }, { 'Y', 'R' },
+        { 'S', 'S' }, { 'W', 'W' }, { 'K', 'M' }, { 'M', 'K' }, { 'B', 'V' }, { 'V', 'B' },
+        { 'D', 'H' }, { 'H', 'D' }, { 'N', 'N' },
+    };
+    std::string r(p.rbegin(), p.rend());
+    for (char &x : r) {
+        x = c.at(x);
+    }
+    return r;
+}
+
+/**
+ * The graph-walk oracle of a succinct graph (BASIC or native CANONICAL), never the engine:
+ * every edge of its BOSS spelled (its node's symbols and W), the edges with W = $ (sink
+ * dummies, the main dummy edge) left out as no pattern base matches there; for every
+ * orientation of |p| searched (P and rc(P), or P once when palindromic) and every offset of the
+ * scope, the contexts (orientation key, edge, offset) whose k-mer holds the oriented pattern
+ * there, each marked real or a source dummy ($ in its node).
+ */
+struct EdgeContext {
+    std::string orientation;
+    uint64_t edge;
+    uint64_t offset;
+    bool dummy;
+    std::string kmer;
+};
+
+std::vector<EdgeContext> edge_oracle(const DBGSuccinct &graph, const std::string &p,
+                                     bool strand_stated, bool suffix_only) {
+    const auto &boss = graph.get_boss();
+    const size_t k = graph.get_k();
+    std::vector<std::pair<std::string, std::string>> oriented;
+    if (iupac_rc(p) == p) {
+        oriented.emplace_back(strand_stated ? "both" : "palindromic", p);
+    } else {
+        oriented.emplace_back(strand_stated ? "+" : "forward", p);
+        oriented.emplace_back(strand_stated ? "-" : "reverse", iupac_rc(p));
+    }
+    std::vector<EdgeContext> out;
+    for (uint64_t e = 1; e <= boss.num_edges(); ++e) {
+        const auto w = boss.get_W(e) % boss.alph_size;
+        if (!w)
+            continue;
+        const std::string kmer = boss.get_node_str(e) + boss.decode(w);
+        const bool dummy = kmer.find('$') != std::string::npos;
+        for (const auto &[key, q] : oriented) {
+            for (size_t o = suffix_only ? k - q.size() : 0; o + q.size() <= k; ++o) {
+                bool ok = true;
+                for (size_t i = 0; i < q.size() && ok; ++i) {
+                    ok = kmer[o + i] != '$' && iupac_matches(q[i], kmer[o + i]);
+                }
+                if (ok)
+                    out.push_back({ key, e, o, dummy, kmer });
+            }
+        }
+    }
+    return out;
+}
+
+/**
+ * A count of a graph without its mask against the oracle's |real| contexts and |all| (real and
+ * source dummies): exact only as the real count (and exact 0 whenever nothing is a candidate:
+ * an empty block), else bounds with the real count inside, upper the candidates, and the
+ * estimate upper x f rounded into the bounds; nothing else
+ */
+void expect_unmasked_count(const Json::Value &c, uint64_t real, uint64_t all,
+                           const DummyFraction &f, const std::string &where) {
+    SCOPED_TRACE(where);
+    ASSERT_TRUE(c.isObject()) << c;
+    if (!all) {
+        EXPECT_EQ("exact", c["relation"].asString()) << c;
+        EXPECT_EQ(0u, c["value"].asUInt64());
+    }
+    if (c["relation"].asString() == "exact") {
+        EXPECT_EQ(real, c["value"].asUInt64()) << c;
+        EXPECT_FALSE(c.isMember("estimate")) << c;
+        EXPECT_FALSE(c.isMember("upper")) << c;
+        return;
+    }
+    ASSERT_EQ("bounds", c["relation"].asString()) << c;
+    const uint64_t lower = c["lower"].asUInt64(), upper = c["upper"].asUInt64();
+    EXPECT_EQ(lower, c["value"].asUInt64());
+    EXPECT_LE(lower, real) << c;
+    EXPECT_EQ(all, upper) << c;
+    ASSERT_TRUE(c.isMember("estimate")) << c;
+    const uint64_t e = std::max<uint64_t>(lower, std::min<uint64_t>(
+            upper, std::llround(static_cast<double>(upper) * f.value)));
+    EXPECT_EQ(e, c["estimate"].asUInt64()) << c;
+    // the count's own fields (a total also carries suffix, by_offset and by_strand)
+    std::vector<std::string> own;
+    for (const std::string &name : c.getMemberNames()) {
+        if (name != "suffix" && name != "by_offset" && name != "by_strand"
+                && name != "by_orientation") {
+            own.push_back(name);
+        }
+    }
+    EXPECT_EQ((std::vector<std::string>{ "estimate", "lower", "relation", "unit", "upper",
+                                         "value" }), own);
+}
+
+const DBGSuccinct& succinct(const AnnotatedDBG &anno_graph) {
+    const DeBruijnGraph &graph = anno_graph.get_graph();
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
+        return dynamic_cast<const DBGSuccinct&>(canonical->get_graph());
+    return dynamic_cast<const DBGSuccinct&>(graph);
+}
+
+// patterns of the tiny records: ACGT and TTGG begin a record (their source dummies hold them:
+// $ACGTTG, $$ACGTT, $$$ACGT), the others inside one, IUPAC ones, and absent ones
+const std::vector<std::string> kUnmaskedPatterns = {
+    "ACGT", "TTGG", "AACG", "CGTA", "GCTT", "RCGT", "TTNG", "GGGGG", "CCCCC", "ACGTTGC",
+};
+
+// Owner decision #16: a graph without its dummy-edge mask is served. Its counts against the
+// graph-walk oracle over the BOSS's edges: upper the candidates, source dummies included (never
+// a sink: W = $ matches no base), lower <= the real count, exact only as the real count, exact 0
+// where nothing is a candidate; the estimate upper x f; the answer and the capabilities say so
+TEST(PatternRoute, UnmaskedCountsAgainstTheEdgeOracle) {
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
+        const bool stated = mode == DeBruijnGraph::BASIC;
+        SCOPED_TRACE(stated ? "basic" : "canonical");
+        auto masked = tiny(mode);
+        auto g = unmasked(*masked, stated ? "basic" : "canonical");
+        const DBGSuccinct &dbg = succinct(*g);
+        const std::optional<DummyFraction> f = dummy_fraction(*g);
+        ASSERT_TRUE(f);
+        EXPECT_FALSE(dummy_fraction(*masked));
+        EXPECT_EQ(pattern::kRealFractionSamples, f->samples);
+        EXPECT_LT(f->value, 1.0);
+
+        // the capabilities: served, the mask absent, counting upper_bound, its fraction
+        const Json::Value caps = pattern_capabilities_json(g.get(), limits(), false);
+        EXPECT_TRUE(caps["available"].asBool());
+        EXPECT_TRUE(caps["unavailable_reason"].isNull());
+        EXPECT_EQ("absent", caps["mask"].asString());
+        EXPECT_EQ("upper_bound", caps["counting"].asString());
+        EXPECT_EQ(dummy_fraction_json(*f), caps["dummy_fraction"]);
+        EXPECT_EQ("sampled", caps["dummy_fraction"]["source"].asString());
+        // the rest of the block is the masked graph's
+        Json::Value a = caps, b = pattern_capabilities_json(masked.get(), limits(), false);
+        for (Json::Value *x : { &a, &b }) {
+            x->removeMember("mask");
+            x->removeMember("counting");
+            x->removeMember("dummy_fraction");
+        }
+        EXPECT_EQ(b, a);
+
+        for (const char *scope : { "any_offset", "suffix" }) {
+            const bool suffix = std::string(scope) == "suffix";
+            std::string body = "{\"patterns\": [";
+            for (size_t i = 0; i < kUnmaskedPatterns.size(); ++i) {
+                body += std::string(i ? ", " : "") + "{\"iupac\": \"" + kUnmaskedPatterns[i]
+                        + "\"}";
+            }
+            body += "], \"mode\": \"count\", \"scope\": \"" + std::string(scope) + "\"}";
+            const Json::Value out = run(*g, body);
+            const Json::Value exact = run(*masked, body);
+            // the answer's index states the counting and the fraction; the masked one does not
+            EXPECT_EQ("upper_bound", out["index"]["counting"].asString());
+            EXPECT_EQ(dummy_fraction_json(*f), out["index"]["dummy_fraction"]);
+            EXPECT_FALSE(exact["index"].isMember("counting"));
+            EXPECT_FALSE(exact["index"].isMember("dummy_fraction"));
+            bool some_dummy = false;
+            for (size_t i = 0; i < kUnmaskedPatterns.size(); ++i) {
+                const std::string &p = kUnmaskedPatterns[i];
+                SCOPED_TRACE(p + " " + scope);
+                const Json::Value &e = out["patterns"][Json::ArrayIndex(i)];
+                const Json::Value &m = exact["patterns"][Json::ArrayIndex(i)];
+                ASSERT_FALSE(e.isMember("error")) << e;
+                const auto oracle = edge_oracle(dbg, p, stated, suffix);
+                auto tally = [&](const std::string &orientation, int64_t offset) {
+                    uint64_t real = 0, all = 0;
+                    for (const EdgeContext &x : oracle) {
+                        if ((orientation.empty() || x.orientation == orientation)
+                                && (offset < 0 || x.offset == static_cast<uint64_t>(offset))) {
+                            ++all;
+                            real += !x.dummy;
+                        }
+                    }
+                    return std::make_pair(real, all);
+                };
+                const auto [real, all] = tally("", -1);
+                some_dummy |= real < all;
+                // the masked graph's exact count is the oracle's real one
+                EXPECT_EQ("exact", m["counts"]["contexts"]["relation"].asString());
+                EXPECT_EQ(real, m["counts"]["contexts"]["value"].asUInt64());
+
+                const Json::Value &c = e["counts"]["contexts"];
+                expect_unmasked_count(c, real, all, *f, "total");
+                const auto [sreal, sall] = tally("", kK - p.size());
+                expect_unmasked_count(c["suffix"], sreal, sall, *f, "suffix");
+                for (const std::string &o : c["by_offset"].getMemberNames()) {
+                    const auto [r, a] = tally("", std::stoll(o));
+                    expect_unmasked_count(c["by_offset"][o], r, a, *f, "offset " + o);
+                }
+                EXPECT_EQ(m["counts"]["contexts"]["by_offset"].getMemberNames(),
+                          c["by_offset"].getMemberNames());
+                const Json::Value &by = c[stated ? "by_strand" : "by_orientation"];
+                EXPECT_EQ(m["counts"]["contexts"][stated ? "by_strand" : "by_orientation"]
+                                  .getMemberNames(), by.getMemberNames());
+                for (const std::string &o : by.getMemberNames()) {
+                    const auto [r, a] = tally(o, -1);
+                    expect_unmasked_count(by[o], r, a, *f, "orientation " + o);
+                }
+                // the note says what an estimate rests on, exactly when one is stated
+                bool estimated = false;
+                std::function<void(const Json::Value&)> find = [&](const Json::Value &v) {
+                    if (v.isObject()) {
+                        estimated |= v.isMember("estimate");
+                        for (const auto &name : v.getMemberNames()) {
+                            find(v[name]);
+                        }
+                    }
+                };
+                find(e["counts"]);
+                const auto &notes = e["notes"];
+                const bool noted = std::any_of(notes.begin(), notes.end(), [](const auto &n) {
+                    return n.asString() == "estimate_sampled_dummy_fraction";
+                });
+                EXPECT_EQ(estimated, noted) << e;
+                // the masked answer is written as before: no estimate, no note
+                Json::Value mc = m["counts"];
+                estimated = false;
+                find(mc);
+                EXPECT_FALSE(estimated) << m;
+                for (const auto &n : m["notes"]) {
+                    EXPECT_NE("estimate_sampled_dummy_fraction", n.asString());
+                }
+                // everything but the counts, the work and the notes is the masked answer's
+                Json::Value x = e, y = m;
+                for (Json::Value *v : { &x, &y }) {
+                    for (const char *field : { "counts", "work", "notes", "timing" }) {
+                        v->removeMember(field);
+                    }
+                }
+                EXPECT_EQ(y, x);
+                // labels and occurrences are not read in mode count: unknown as before
+                EXPECT_EQ(m["counts"]["labels"], e["counts"]["labels"]);
+                EXPECT_EQ(m["counts"]["occurrences"], e["counts"]["occurrences"]);
+            }
+            // the records' starts put patterns in source dummies: the test sees some
+            EXPECT_TRUE(some_dummy);
+        }
+    }
+}
+
+// Owner decision #16, the retrieval modes without the mask: the lists are exact (every
+// released context a real k-mer: a dummy is dropped), equal to the masked graph's lists; a
+// complete release makes the counts exact; all_or_count admits on the upper bound, stated
+TEST(PatternRoute, UnmaskedRetrievalListsAreExact) {
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        const std::string name = mode == DeBruijnGraph::BASIC ? "basic"
+                               : mode == DeBruijnGraph::CANONICAL ? "canonical" : "primary";
+        SCOPED_TRACE(name);
+        auto masked = tiny(mode);
+        auto g = unmasked(*masked, "retrieval_" + name);
+        std::string patterns;
+        for (size_t i = 0; i < kUnmaskedPatterns.size(); ++i) {
+            patterns += std::string(i ? ", " : "") + "{\"iupac\": \"" + kUnmaskedPatterns[i]
+                        + "\"}";
+        }
+        for (const char *m : { "all_or_count", "partial" }) {
+            SCOPED_TRACE(m);
+            const std::string body = "{\"patterns\": [" + patterns + "], \"mode\": \""
+                                     + std::string(m) + "\"}";
+            const Json::Value out = run(*g, body);
+            const Json::Value exact = run(*masked, body);
+            for (size_t i = 0; i < kUnmaskedPatterns.size(); ++i) {
+                SCOPED_TRACE(kUnmaskedPatterns[i]);
+                const Json::Value &e = out["patterns"][Json::ArrayIndex(i)];
+                const Json::Value &x = exact["patterns"][Json::ArrayIndex(i)];
+                // every context released: the masked graph's list, node and row ids alike, and
+                // the counts exact, the masked graph's
+                EXPECT_EQ(x["results"], e["results"]);
+                EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+                EXPECT_EQ(x["counts"], e["counts"]);
+                EXPECT_EQ(x["withheld"], e["withheld"]);
+                EXPECT_EQ(x["cut"], e["cut"]);
+                for (const Json::Value &r : e["results"]) {
+                    EXPECT_EQ(std::string::npos, r["kmer"].asString().find('$')) << r;
+                }
+            }
+        }
+        // partial, cut: the first contexts of the masked graph's list
+        const Json::Value cut = run(*g, "{\"patterns\": [" + patterns + "], \"mode\": "
+                                        "\"partial\", \"max_contexts\": 2}");
+        const Json::Value cut_exact = run(*masked, "{\"patterns\": [" + patterns + "], "
+                                                   "\"mode\": \"partial\", \"max_contexts\": 2}");
+        for (size_t i = 0; i < kUnmaskedPatterns.size(); ++i) {
+            SCOPED_TRACE(kUnmaskedPatterns[i]);
+            const Json::Value &e = cut["patterns"][Json::ArrayIndex(i)];
+            const Json::Value &x = cut_exact["patterns"][Json::ArrayIndex(i)];
+            EXPECT_EQ(x["results"], e["results"]);
+            EXPECT_EQ(x["returned"], e["returned"]);
+            if (x["cut"].isNull()) {
+                EXPECT_TRUE(e["cut"].isNull()) << e;
+            } else {
+                EXPECT_EQ(x["cut"], e["cut"]);
+                EXPECT_FALSE(e["retrieval_complete"].asBool());
+                // a count of a list cut: a true bound, at least what was returned
+                const Json::Value &c = e["counts"]["contexts"];
+                EXPECT_GE(c["value"].asUInt64(), e["returned"].asUInt64()) << c;
+                EXPECT_LE(c["value"].asUInt64(), x["counts"]["contexts"]["value"].asUInt64());
+                if (c["relation"].asString() == "bounds") {
+                    EXPECT_GE(c["upper"].asUInt64(),
+                              x["counts"]["contexts"]["value"].asUInt64());
+                }
+            }
+        }
+    }
+
+    // all_or_count admits on the upper bound (conservative): ACGT's real contexts fit
+    // max_contexts, its candidates (3 source dummies among them) do not. The masked graph
+    // releases them; without the mask they are withheld, the count still a true bound, and the
+    // engine says why (threshold_upper_bound)
+    auto masked = tiny();
+    auto g = unmasked(*masked, "admission");
+    const uint64_t real = oracle("ACGT").size();
+    const std::string body = "{\"patterns\": [{\"dna\": \"ACGT\"}], \"max_contexts\": "
+                             + std::to_string(real) + "}";
+    const Json::Value x = run(*masked, body)["patterns"][0];
+    EXPECT_TRUE(x["retrieval_complete"].asBool());
+    EXPECT_EQ(real, x["returned"].asUInt64());
+    const Json::Value e = run(*g, body)["patterns"][0];
+    EXPECT_FALSE(e["retrieval_complete"].asBool());
+    EXPECT_EQ("count_above_threshold", e["withheld"]["reason"].asString()) << e;
+    EXPECT_EQ(0u, e["returned"].asUInt64());
+    const Json::Value &c = e["counts"]["contexts"];
+    EXPECT_EQ("bounds", c["relation"].asString()) << c;
+    EXPECT_EQ(real + 3, c["upper"].asUInt64()) << c;
+    EXPECT_LE(c["lower"].asUInt64(), real);
+    bool noted = false;
+    for (const auto &n : e["notes"]) {
+        noted |= n.asString() == "threshold_upper_bound";
+    }
+    EXPECT_TRUE(noted) << e;
+    // with room for the candidates: released, every one real, the count exact
+    const Json::Value ok = run(*g, "{\"patterns\": [{\"dna\": \"ACGT\"}], \"max_contexts\": "
+                                   + std::to_string(real + 3) + "}")["patterns"][0];
+    EXPECT_TRUE(ok["retrieval_complete"].asBool());
+    EXPECT_EQ(real, ok["returned"].asUInt64());
+    EXPECT_EQ("exact", ok["counts"]["contexts"]["relation"].asString());
+    EXPECT_EQ(real, ok["counts"]["contexts"]["value"].asUInt64());
+}
+
+// Owner decision #16: the dummy fraction is sampled once per graph and kept (the loader samples
+// it in its thread; a graph not loaded that way at its first use), the same for every request
+// and every reader; a graph with its mask has none
+TEST(PatternRoute, UnmaskedDummyFractionIsKeptPerGraph) {
+    auto masked = tiny();
+    auto g = unmasked(*masked, "kept");
+    const auto a = dummy_fraction(*g);
+    const auto b = dummy_fraction(*g);
+    ASSERT_TRUE(a && b);
+    EXPECT_EQ(a->real, b->real);
+    EXPECT_EQ(a->value, b->value);
+    const DummyFraction direct = pattern::sample_real_fraction(succinct(*g));
+    EXPECT_EQ(direct.real, a->real);
+    EXPECT_EQ(direct.samples, a->samples);
+    EXPECT_EQ(direct.lower, a->lower);
+    EXPECT_EQ(direct.upper, a->upper);
+    // the same graph loaded again: the same draws
+    auto again = unmasked(*masked, "kept_again");
+    EXPECT_EQ(a->real, dummy_fraction(*again)->real);
+    EXPECT_FALSE(dummy_fraction(*masked));
 }
 
 } // namespace

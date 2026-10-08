@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <queue>
+#include <random>
 #include <sstream>
 #include <tuple>
 
@@ -432,11 +433,16 @@ struct Item {
     Scan scan = Scan::NONE;
     bool count_palindromes = false;
     bool scan_done = false;
+    // a graph without the dummy-edge mask, a range whose nodes were not wholly spelled: its
+    // candidates may include source dummies (k-mers starting with '$'), which nothing has
+    // checked (owner decision #16). Never set on a masked graph
+    bool unchecked = false;
     uint64_t examined = 0;
     // INVALID: the examined invalid edges whose W is not the sentinel (s)
     uint64_t examined_ns = 0;
     // INVALID: the examined invalid edges with W in {c, c + alph_size} (t);
-    // CANDIDATES on a W rule: the valid candidates found
+    // CANDIDATES on a W rule: the valid candidates found; on a graph without the mask, the
+    // candidates found real (any range: the scan spells each)
     uint64_t hits = 0;
     uint64_t palindromes = 0;
 
@@ -448,9 +454,12 @@ struct Item {
      * The bounds of the range's valid contexts. §4.1: an interrupted scan of the invalid
      * edges leaves lower = max(0, R - t - (I - s)) and upper = R - t; I and s are counted
      * here over non-sentinel invalid edges (J), since an edge with W = $ never carries c:
-     * the design's bound, tightened, never loosened.
+     * the design's bound, tightened, never loosened. Unchecked candidates (no mask): the
+     * real ones a scan found below, every candidate not found a dummy above.
      */
     uint64_t lower() const {
+        if (unchecked)
+            return scan == Scan::CANDIDATES ? hits : 0;
         if (flank() || scan == Scan::NONE)
             return candidates;
 
@@ -472,6 +481,8 @@ struct Item {
     }
 
     uint64_t upper() const {
+        if (unchecked)
+            return scan == Scan::CANDIDATES ? hits + (candidates - examined) : candidates;
         if (flank() || scan == Scan::NONE)
             return candidates;
         if (scan == Scan::INVALID)
@@ -480,8 +491,12 @@ struct Item {
     }
 
     // the count is known exactly: by ranks, or by a completed scan (never by bounds that
-    // happen to meet)
-    bool count_exact() const { return flank() || scan == Scan::NONE || scan_done; }
+    // happen to meet); unchecked candidates only by a completed scan
+    bool count_exact() const {
+        if (unchecked)
+            return scan == Scan::CANDIDATES && scan_done;
+        return flank() || scan == Scan::NONE || scan_done;
+    }
 
     uint64_t palindromes_upper() const {
         return count_palindromes ? palindromes + (candidates - examined) : 0;
@@ -501,6 +516,8 @@ struct Span {
     uint16_t offset;
     // the W-rule symbol; 0 for a flank range
     TAlphabet c;
+    // Item::unchecked: the release tests each candidate for a source dummy
+    bool unchecked;
 
     bool flank() const { return !c; }
 };
@@ -619,12 +636,18 @@ struct BaseSearch {
 
     // per offset: the contexts known exactly when their range was discovered
     std::vector<uint64_t> exact;
+    // per offset, a graph without the mask: the unchecked candidates of the ranges no scan
+    // reads (Item::unchecked), counted into the upper bound only
+    std::vector<uint64_t> unchecked;
     // the ranges that need a scan, in discovery order
     std::vector<Item> pending;
     // enumerate(): the ranges with candidates the release may need, in discovery order
     std::vector<Span> release;
     // the lower bound of everything counted so far (stop_at_threshold, retention)
     uint64_t running_lower = 0;
+    // the upper bound of everything counted so far: what the thresholds compare on a graph
+    // without the mask (owner decision #16)
+    uint64_t running_upper = 0;
     // the candidates of the items whose palindromes are counted (count_palindromes): at least
     // the palindromic contexts among them, which a wrapped PRIMARY union finds twice (E2-02)
     uint64_t running_palindrome_candidates = 0;
@@ -648,7 +671,8 @@ struct BaseSearch {
 
         const bool discovered = !halted;
         for (uint32_t p = 0; p < exact.size(); ++p) {
-            contexts[p] = { true, discovered, discovered, exact[p], exact[p] };
+            contexts[p] = { true, discovered, discovered && !unchecked[p], exact[p],
+                            exact[p] + unchecked[p] };
             palindromes[p] = { true, discovered, discovered, 0, 0 };
         }
         for (const Item &item : pending) {
@@ -754,7 +778,8 @@ class PatternRun {
             cap_(long_ ? request.max_anchors : request.max_contexts),
             // PARTIAL releases at most cap_ contexts: keep only the ranges that can hold one
             // of the first cap_ in answer order (E4-01)
-            prune_(retain && !extending_ && request.mode == Mode::PARTIAL) {
+            prune_(retain && !extending_ && request.mode == Mode::PARTIAL),
+            masked_(support.mask_present) {
         for (char base : { 'A', 'C', 'G', 'T' }) {
             codes_.push_back(boss_.encode(base));
         }
@@ -774,6 +799,18 @@ class PatternRun {
     const std::vector<OrientationPlan>& plans() const { return plans_; }
     const std::optional<Stop>& stop() const { return stop_; }
     bool time_limited() const { return time_limited_; }
+
+    // kNoteThresholdUpperBound: a threshold decision went against the request on an upper
+    // bound (no mask) that the lower bound did not cross
+    bool upper_bound_decision() const { return upper_bound_decision_; }
+    void note_upper_bound_decision() { upper_bound_decision_ = true; }
+
+    // every discovered range with candidates is retained for the release (none dropped by
+    // ALL_OR_COUNT's threshold, the extension's admission, or PARTIAL's retention bound): a
+    // release that drains them enumerates every candidate
+    bool retained_all() const {
+        return retain_ && prune_bound_ == std::numeric_limits<node_index>::max();
+    }
     Work work() const {
         Work work = work_;
         work.spans_retained_peak = retained_peak_;
@@ -884,10 +921,13 @@ class PatternRun {
      * (|callers_emit|: a spelling and a result object per context, not a buffer's
      * push_back), every kReleaseClockStride contexts it emits. Returns false when the
      * deadline stopped it ({|phase|, TIME} recorded: EXTRACTION for a release, EXTENSION for
-     * the listing of the anchors to extend).
+     * the listing of the anchors to extend). |exhausted|, when given and true is returned:
+     * every retained range was drained (no context left in them; a cut at |limit| with
+     * contexts left says false).
      */
     bool release(uint64_t limit, const std::function<void(const Context&)> &emit,
-                 bool callers_emit, StopPhase phase = StopPhase::EXTRACTION);
+                 bool callers_emit, StopPhase phase = StopPhase::EXTRACTION,
+                 bool *exhausted = nullptr);
 
     /**
      * ALL_OR_COUNT's delivery of its buffered release to |callback|, whose work per context
@@ -919,6 +959,16 @@ class PatternRun {
      * anchor was extended to L; false when a stop ended it (recorded, phase EXTENSION).
      */
     bool extend(bool keep, uint64_t anchors);
+
+    /**
+     * The two halves of extend(): the listing of the anchors in answer order (the anchor
+     * ranges then discarded; false when the deadline stopped it, {EXTENSION, TIME} recorded),
+     * and the extension of a listed set (false when a stop ended it). Without the mask (owner
+     * decision #16) the listing drops the source dummies, so that the caller learns the exact
+     * anchor count from it before extending.
+     */
+    bool list_anchors(std::vector<Context> *anchors);
+    bool extend_listed(bool keep, const std::vector<Context> &anchors);
 
     // the anchors' ranges are no longer needed: the extension's admission failed (§5.2)
     void drop_anchors() {
@@ -991,6 +1041,13 @@ class PatternRun {
     const uint64_t cap_;
     // PARTIAL: the retained ranges are bounded by what the release can use
     const bool prune_;
+    // the graph has its dummy-edge mask; without it (owner decision #16) the candidates of a
+    // range not wholly spelled are unchecked, the thresholds compare upper bounds, and the
+    // release tests every unchecked candidate for a source dummy
+    const bool masked_;
+    // a threshold decision went against the request on an upper bound its lower bound did
+    // not cross (kNoteThresholdUpperBound)
+    bool upper_bound_decision_ = false;
     // the ranges retained now, and the most at once (Work::spans_retained_peak)
     uint64_t retained_ = 0;
     uint64_t retained_peak_ = 0;
@@ -1072,6 +1129,7 @@ class PatternRun {
             }
         }
         search.exact.assign(search.max_offset(k_) + 1, 0);
+        search.unchecked.assign(search.max_offset(k_) + 1, 0);
         searches_.push_back(std::move(search));
         return searches_.size() - 1;
     }
@@ -1168,18 +1226,36 @@ class PatternRun {
         return total;
     }
 
+    // the running upper bound of the whole pattern, as the thresholds compare it without the
+    // mask: every candidate counted so far, of both parts of a wrapped PRIMARY union, but for
+    // the ranges whose palindrome scan is pending (add_item): at most the final U, which it
+    // equals on BASIC, CANONICAL and odd-k graphs
+    uint64_t running_upper() const {
+        uint64_t total = 0;
+        for (const OrientationPlan &o : plans_) {
+            total += searches_[o.direct].running_upper;
+            if (o.mapped)
+                total += searches_[*o.mapped].running_upper;
+        }
+        return total;
+    }
+
     // after every count: the release's retention (ALL_OR_COUNT releases nothing once the
-    // count exceeds max_contexts, §5.2) and the threshold stop of stop_at_threshold
+    // count exceeds max_contexts, §5.2) and the threshold stop of stop_at_threshold. The
+    // count compared is the running lower bound with the mask, and the running upper bound
+    // without it (owner decision #16: conservative, as the admissions after discovery)
     bool threshold_crossed() {
-        uint64_t lower = running_lower();
+        const uint64_t threshold = long_ ? request_.max_anchors : request_.max_contexts;
+        uint64_t lower = masked_ ? running_lower() : running_upper();
         // ALL_OR_COUNT releases nothing above its threshold, and the extension is not
         // admitted above max_anchors in any mode (§5.2: anchors kept through the admission)
         if (retain_ && (request_.mode == Mode::ALL_OR_COUNT || extending_)
-                && lower > (long_ ? request_.max_anchors : request_.max_contexts)) {
+                && lower > threshold) {
             drop_anchors();
         }
-        if (request_.stop_at_threshold
-                && lower > (long_ ? request_.max_anchors : request_.max_contexts)) {
+        if (request_.stop_at_threshold && lower > threshold) {
+            if (!masked_ && running_lower() <= threshold)
+                upper_bound_decision_ = true;
             record_stop(StopPhase::DISCOVERY,
                         long_ ? StopReason::MAX_ANCHORS : StopReason::MAX_CONTEXTS);
             return true;
@@ -1221,7 +1297,7 @@ class PatternRun {
                     item.first, item.last,
                     static_cast<uint32_t>(std::min<uint64_t>(
                             lower, std::numeric_limits<uint32_t>::max())),
-                    static_cast<uint16_t>(item.offset), item.c
+                    static_cast<uint16_t>(item.offset), item.c, item.unchecked
                 });
                 retained_peak_ = std::max(retained_peak_, ++retained_);
                 if (prune_ && retained_ > next_compaction_)
@@ -1230,10 +1306,19 @@ class PatternRun {
         }
         if (item.pending()) {
             search.pending.push_back(item);
+        } else if (item.unchecked) {
+            search.unchecked[item.offset] += item.candidates;
         } else {
             search.exact[item.offset] += item.candidates;
         }
         search.running_lower += item.lower();
+        // a range whose scan is pending (the palindromes of an even-k wrapped PRIMARY graph)
+        // can only lose candidates to it, and its palindromes come off the union: counted
+        // when scanned, so that the running count never exceeds the final U and a retention
+        // dropped or a stop taken on it agrees with the admission after discovery. Without
+        // a pending scan (every range on BASIC and CANONICAL graphs) it is the final U
+        if (!item.pending())
+            search.running_upper += item.upper();
         if (item.count_palindromes)
             search.running_palindrome_candidates += item.candidates;
     }
@@ -1349,7 +1434,14 @@ class PatternRun {
         item.first = first;
         item.last = last;
         item.offset = static_cast<uint32_t>(k_ - 1 - depth - search.lead);
-        item.candidates = dbg_succ_.count_valid_edges_in_range(first, last);
+        if (masked_) {
+            item.candidates = dbg_succ_.count_valid_edges_in_range(first, last);
+        } else {
+            // no mask (owner decision #16): every edge that can carry a base, the source
+            // dummies among them unless the nodes are wholly spelled (depth k - 1)
+            item.candidates = dbg_succ_.count_non_sink_edges_in_range(first, last);
+            item.unchecked = depth < boss_.get_k();
+        }
         if (!item.candidates)
             return;
         if (search.count_palindromes && may_be_palindromic(search.q, item.offset, k_)) {
@@ -1363,6 +1455,25 @@ class PatternRun {
     // are the valid edges with W in {c, c + alph_size} (§4.1, "Counting")
     void count_w_rule(BaseSearch &search, const Range &range, TAlphabet c) {
         const auto &[first, last, depth] = range;
+        if (!masked_) {
+            // no mask (owner decision #16): the candidates, unchecked unless the nodes are
+            // wholly spelled (depth k - 1: no room for '$'); no INVALID scan exists
+            Item item;
+            item.first = first;
+            item.last = last;
+            item.offset = search.max_offset(k_);
+            item.c = c;
+            item.candidates = dbg_succ_.count_edges_with_symbol(first, last, c);
+            if (!item.candidates)
+                return;
+            item.unchecked = depth < boss_.get_k();
+            if (search.count_palindromes && may_be_palindromic(search.q, item.offset, k_)) {
+                item.scan = Item::Scan::CANDIDATES;
+                item.count_palindromes = true;
+            }
+            add_item(search, item);
+            return;
+        }
         auto edges = dbg_succ_.count_edges_with_last_symbol(first, last, c);
         if (!edges.candidates)
             return;
@@ -1696,11 +1807,14 @@ class PatternRun {
 
     // ---------------------------------------------------------------- scans
 
-    bool is_palindrome(edge_index edge) const {
-        std::string kmer = dbg_succ_.get_node_sequence(edge);
+    static bool is_palindrome(const std::string &kmer) {
         std::string rc = kmer;
         ::reverse_complement(rc.begin(), rc.end());
         return kmer == rc;
+    }
+
+    bool is_palindrome(edge_index edge) const {
+        return is_palindrome(dbg_succ_.get_node_sequence(edge));
     }
 
     // one examined edge of a scan: one step
@@ -1715,6 +1829,34 @@ class PatternRun {
     // false when the budget stopped it
     bool scan(Item &item) {
         ++work_.mask_scans;
+        if (!masked_) {
+            // no mask (owner decision #16): only the palindrome scans of an even-k wrapped
+            // PRIMARY graph exist (CANDIDATES). Each candidate is spelled for its palindrome
+            // test, which shows a source dummy too (its k-mer starts with '$'; never a
+            // palindrome, its last base being one): |hits| counts the real ones
+            assert(item.scan == Item::Scan::CANDIDATES && item.count_palindromes);
+            // the candidates: a flank's non-sink edges, a W rule's edges with W in
+            // {c, c + alph_size}
+            auto next = [&](edge_index from) {
+                return item.flank()
+                    ? dbg_succ_.next_non_sink_edge(from, item.last)
+                    : dbg_succ_.next_edge_with_last_symbol(from, item.last, item.c);
+            };
+            for (edge_index e = next(item.first); e; e = next(e + 1)) {
+                if (!charge_scan())
+                    return false;
+                ++item.examined;
+                const std::string kmer = dbg_succ_.get_node_sequence(e);
+                // the sentinel '$' (BOSS::kSentinel), which only a source dummy starts with
+                if (kmer.front() == '$')
+                    continue;
+                ++item.hits;
+                if (is_palindrome(kmer))
+                    ++item.palindromes;
+            }
+            item.scan_done = true;
+            return true;
+        }
         if (item.scan == Item::Scan::INVALID) {
             for (edge_index e = dbg_succ_.next_invalid_edge(item.first, item.last); e;
                     e = dbg_succ_.next_invalid_edge(e + 1, item.last)) {
@@ -1787,7 +1929,8 @@ class PatternRun {
         const Span &item = *cursor.item;
         while (cursor.next && cursor.next <= item.last) {
             edge_index e = item.flank()
-                ? dbg_succ_.next_valid_edge(cursor.next, item.last)
+                ? (masked_ ? dbg_succ_.next_valid_edge(cursor.next, item.last)
+                           : dbg_succ_.next_non_sink_edge(cursor.next, item.last))
                 : dbg_succ_.next_edge_with_last_symbol(cursor.next, item.last, item.c);
             if (!e)
                 break;
@@ -1797,6 +1940,9 @@ class PatternRun {
                 return false;
             }
             if (!item.flank() && !dbg_succ_.in_graph(e))
+                continue;
+            // no mask (owner decision #16): a source dummy is never released
+            if (item.unchecked && boss_.node_has_sentinel(e))
                 continue;
             switch (cursor.use) {
                 case Use::DIRECT:
@@ -1826,8 +1972,10 @@ class PatternRun {
 };
 
 bool PatternRun::release(uint64_t limit, const std::function<void(const Context&)> &emit,
-                         bool callers_emit, StopPhase phase) {
+                         bool callers_emit, StopPhase phase, bool *exhausted) {
     release_phase_ = phase;
+    if (exhausted)
+        *exhausted = false;
     if (!budget_.check_time()) {
         record_stop(phase, StopReason::TIME);
         return false;
@@ -1907,45 +2055,59 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
         if (stopped)
             return false;
     }
+    if (exhausted)
+        *exhausted = heap.empty() && joined == cursors.size();
     return true;
+}
+
+bool PatternRun::list_anchors(std::vector<Context> *anchors) {
+    assert(extending_);
+    // the anchors in answer order (§5.5); their ranges are discarded once they are listed:
+    // the anchors are kept through the extension, not beyond (§5.2)
+    listed_ = release(kNoLimit, [&](const Context &c) { anchors->push_back(c); }, false,
+                      StopPhase::EXTENSION);
+    drop_anchors();
+    work_.steps = budget_.steps_used() - steps_before_;
+    return listed_;
+}
+
+bool PatternRun::extend_listed(bool keep, const std::vector<Context> &anchors) {
+    assert(extending_ && listed_);
+    keep_paths_ = keep;
+
+    bool done = true;
+    for (const Context &anchor : anchors) {
+        ++anchors_left_[anchor.orientation];
+    }
+    const Pattern rc = pattern_.reverse_complement();
+    for (const Context &anchor : anchors) {
+        // each oriented pattern is extended in its own reading direction from its own
+        // first k-mer (§4.1, "Orientation")
+        if (!extend_anchor(anchor, anchor.orientation == Orientation::REVERSE ? rc
+                                                                              : pattern_)) {
+            done = false;
+            break;
+        }
+        --anchors_left_[anchor.orientation];
+    }
+
+    work_.steps = budget_.steps_used() - steps_before_;
+    return done;
 }
 
 bool PatternRun::extend(bool keep, uint64_t num_anchors) {
     assert(extending_);
     keep_paths_ = keep;
 
-    // the anchors in answer order (§5.5); their ranges are discarded once they are listed:
-    // the anchors are kept through the extension, not beyond (§5.2)
     std::vector<Context> anchors;
-    listed_ = release(kNoLimit, [&](const Context &c) { anchors.push_back(c); }, false,
-                      StopPhase::EXTENSION);
-    drop_anchors();
-    if (listed_ && anchors.size() != num_anchors) {
+    if (!list_anchors(&anchors))
+        return false;
+    if (anchors.size() != num_anchors) {
         throw std::logic_error("pattern: " + std::to_string(anchors.size())
                                + " anchors listed for the extension of "
                                + std::to_string(num_anchors) + " counted");
     }
-
-    bool done = listed_;
-    if (listed_) {
-        for (const Context &anchor : anchors) {
-            ++anchors_left_[anchor.orientation];
-        }
-        const Pattern rc = pattern_.reverse_complement();
-        for (const Context &anchor : anchors) {
-            // each oriented pattern is extended in its own reading direction from its own
-            // first k-mer (§4.1, "Orientation")
-            if (!extend_anchor(anchor, anchor.orientation == Orientation::REVERSE ? rc
-                                                                                  : pattern_)) {
-                done = false;
-                break;
-            }
-            --anchors_left_[anchor.orientation];
-        }
-    }
-
-    work_.steps = budget_.steps_used() - steps_before_;
-    return done;
+    return extend_listed(keep, anchors);
 }
 
 // why ALL_OR_COUNT withholds the results of a pattern its stop touched (§5.2)
@@ -2056,6 +2218,88 @@ Extraction extract_paths(const AnchorCounts &anchors, const Request &request,
 } // namespace
 
 
+namespace {
+
+// Wilson's score interval at 95% around real / samples, clamped to [0, 1]; it holds the
+// point estimate (min and max only undo a rounding at 0 and 1)
+void set_wilson_interval(RealFraction *f) {
+    if (!f->samples)
+        return;
+    const double n = static_cast<double>(f->samples);
+    const double p = static_cast<double>(f->real) / n;
+    const double z = 1.959963984540054;
+    const double denominator = 1 + z * z / n;
+    const double centre = (p + z * z / (2 * n)) / denominator;
+    const double half = z / denominator * std::sqrt(p * (1 - p) / n + z * z / (4 * n * n));
+    f->value = p;
+    // (the interval holds p; min and max only undo the rounding at p = 0 or 1)
+    f->lower = std::min(p, std::max(0.0, centre - half));
+    f->upper = std::max(p, std::min(1.0, centre + half));
+}
+
+// the entries no pattern base matches: W = $, plain or marked (the sinks and edge 1)
+uint64_t sentinel_edges(const BOSS &boss) {
+    const auto sentinel = static_cast<TAlphabet>(BOSS::kSentinelCode);
+    return boss.rank_W(boss.num_edges(), sentinel)
+         + boss.rank_W(boss.num_edges(), sentinel + boss.alph_size);
+}
+
+} // namespace
+
+RealFraction sample_real_fraction(const DBGSuccinct &graph, uint64_t samples) {
+    const BOSS &boss = graph.get_boss();
+    RealFraction f;
+    f.edges = boss.num_edges();
+    f.sentinel_edges = sentinel_edges(boss);
+    f.seed = f.edges;
+    if (f.sentinel_edges >= f.edges || !samples)
+        return f;
+
+    // the generator the standard specifies (not a distribution of the library, whose draws
+    // differ between implementations): the same draws on every platform
+    std::mt19937_64 rng(f.seed);
+    while (f.samples < samples) {
+        // uniform over [1, edges]; an entry with W = $ (W modulo alph_size 0, plain or
+        // marked) is drawn again, so that the draws are uniform over the entries a pattern
+        // can count
+        const uint64_t edge = 1 + rng() % f.edges;
+        if (!(boss.get_W(edge) % boss.alph_size))
+            continue;
+        ++f.samples;
+        f.real += !boss.node_has_sentinel(edge);
+    }
+    set_wilson_interval(&f);
+    return f;
+}
+
+RealFraction exact_real_fraction(const DBGSuccinct &graph) {
+    const BOSS &boss = graph.get_boss();
+    RealFraction f;
+    f.edges = boss.num_edges();
+    f.sentinel_edges = sentinel_edges(boss);
+    f.seed = f.edges;
+    f.exact = true;
+    f.samples = f.edges - f.sentinel_edges;
+    // the source dummies by BOSS's own traversal of the dummy tree (`stats --count-dummy`),
+    // not by the walk sample_real_fraction tests with: those with W != $ are the dummies
+    // among the entries
+    sdsl::bit_vector source_dummies(boss.get_W().size(), false);
+    boss.mark_source_dummy_edges(&source_dummies, 1);
+    uint64_t dummies = 0;
+    for (uint64_t e = 1; e < source_dummies.size(); ++e) {
+        // (W modulo alph_size is 0 for $, plain or marked: BOSS::kSentinelCode)
+        if (source_dummies[e] && boss.get_W(e) % boss.alph_size)
+            ++dummies;
+    }
+    assert(dummies <= f.samples);
+    f.real = f.samples - dummies;
+    if (f.samples) {
+        f.value = static_cast<double>(f.real) / static_cast<double>(f.samples);
+        f.lower = f.upper = f.value;
+    }
+    return f;
+}
+
 GraphSupport PatternSearch::support(const DeBruijnGraph &graph) {
     GraphSupport result;
     result.k = graph.get_k();
@@ -2105,10 +2349,9 @@ GraphSupport PatternSearch::support(const DeBruijnGraph &graph) {
         result.reason = "representation_unsupported";
         return result;
     }
-    if (!result.mask_present) {
-        result.reason = "mask_required";
-        return result;
-    }
+    // without the mask the graph is served all the same (owner decision #16 of 2026-10-08):
+    // its unresolved counts are upper bounds (PatternSearch, "Graphs without the dummy-edge
+    // mask"); mask_required, which refused it before, is retired
 
     result.supported = true;
     return result;
@@ -2238,37 +2481,125 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
 
     result.searched = engine.searched();
 
-    // counts by orientation and offset, summed with the weakest relation (§3)
+    // the count of every (orientation, offset) of the served graph, in plan order: what the
+    // totals sum (§3)
     const Unit unit = is_long ? Unit::ANCHORS : Unit::GRAPH_CONTEXTS;
+    struct Cell {
+        Orientation orientation;
+        uint32_t offset;
+        Count count;
+    };
+    std::vector<Cell> cells;
+    for (const OrientationPlan &o : engine.plans()) {
+        for (uint32_t p : engine.offsets()) {
+            cells.push_back(Cell { o.orientation, p, engine.count(o, p, unit) });
+        }
+    }
+
+    // counts by orientation and offset, summed with the weakest relation (§3)
     std::map<uint32_t, Count> by_offset;
     std::map<Orientation, Count> by_orientation;
     std::optional<Count> total;
-    for (const OrientationPlan &o : engine.plans()) {
-        std::optional<Count> orientation_total;
-        for (uint32_t p : engine.offsets()) {
-            Count c = engine.count(o, p, unit);
-            auto [it, inserted] = by_offset.emplace(p, c);
-            if (!inserted)
-                it->second += c;
-            if (orientation_total) {
-                *orientation_total += c;
+    auto aggregate = [&]() {
+        by_offset.clear();
+        by_orientation.clear();
+        total.reset();
+        // one plan's cells are consecutive, one plan per orientation
+        for (size_t i = 0; i < cells.size(); ) {
+            const Orientation o = cells[i].orientation;
+            std::optional<Count> orientation_total;
+            for (; i < cells.size() && cells[i].orientation == o; ++i) {
+                const Count &c = cells[i].count;
+                auto [it, inserted] = by_offset.emplace(cells[i].offset, c);
+                if (!inserted)
+                    it->second += c;
+                if (orientation_total) {
+                    *orientation_total += c;
+                } else {
+                    orientation_total = c;
+                }
+            }
+            by_orientation.emplace(o, *orientation_total);
+            if (total) {
+                *total += *orientation_total;
             } else {
-                orientation_total = c;
+                total = orientation_total;
             }
         }
-        by_orientation.emplace(o.orientation, *orientation_total);
-        if (total) {
-            *total += *orientation_total;
-        } else {
-            total = orientation_total;
-        }
-    }
-    assert(total);
+        assert(total);
+    };
+    aggregate();
 
+    /**
+     * A graph without the dummy-edge mask (owner decision #16): the contexts (or anchors) a
+     * release enumerated, per orientation and offset. A release that enumerated every
+     * candidate of a completed discovery makes each count the number it released
+     * (exactify); one cut short raises each count's lower bound to it (raise_lower). Real
+     * contexts only (the release drops the source dummies), so a number outside a count's
+     * bounds is a broken invariant, never published.
+     */
+    typedef std::map<std::pair<Orientation, uint32_t>, uint64_t> Released;
+    auto released_at = [](const Released &released, const Cell &cell) -> uint64_t {
+        auto it = released.find({ cell.orientation, cell.offset });
+        return it == released.end() ? 0 : it->second;
+    };
+    auto broken = [](const Cell &cell, uint64_t n) {
+        const Count &c = cell.count;
+        return std::logic_error(
+            "pattern: " + std::to_string(n) + " released at offset "
+            + std::to_string(cell.offset) + " " + orientation_key(cell.orientation)
+            + " of a count " + to_string(c.relation) + " " + std::to_string(c.value) + ".."
+            + std::to_string(c.relation == Relation::BOUNDS ? c.upper : c.value));
+    };
+    auto exactify = [&](const Released &released) {
+        for (Cell &cell : cells) {
+            const uint64_t n = released_at(released, cell);
+            const Count &c = cell.count;
+            const bool within = c.relation == Relation::EXACT
+                ? n == c.value
+                : c.relation == Relation::BOUNDS && c.lower <= n && n <= c.upper;
+            if (!within)
+                throw broken(cell, n);
+            cell.count = Count::exact(unit, n);
+        }
+        aggregate();
+    };
+    auto raise_lower = [&](const Released &released) {
+        for (Cell &cell : cells) {
+            const uint64_t n = released_at(released, cell);
+            Count &c = cell.count;
+            switch (c.relation) {
+                case Relation::EXACT:
+                    if (n > c.value)
+                        throw broken(cell, n);
+                    break;
+                case Relation::BOUNDS:
+                    if (n > c.upper)
+                        throw broken(cell, n);
+                    if (n > c.lower)
+                        c = Count::bounds(unit, n, c.upper);
+                    break;
+                case Relation::AT_LEAST:
+                    if (n > c.value)
+                        c = Count::at_least(unit, n);
+                    break;
+                case Relation::UNKNOWN:
+                    if (n)
+                        c = Count::at_least(unit, n);
+                    break;
+            }
+        }
+        aggregate();
+    };
+    // a graph without the mask, discovery completed: a count BOUNDS for its unchecked
+    // candidates only, which a release resolves
+    auto unresolved = [&]() {
+        return !support_.mask_present && !engine.stop()
+                && total->relation == Relation::BOUNDS;
+    };
+
+    AnchorCounts anchors;
     if (is_long) {
-        AnchorCounts anchors;
-        anchors.total = *total;
-        anchors.by_orientation = std::move(by_orientation);
         // no path starts without an anchor (a derivation, not a promotion); otherwise the
         // paths need the extension (§4.2)
         const bool no_anchor = total->relation == Relation::EXACT && total->value == 0;
@@ -2279,6 +2610,46 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             bool ran = false;
             if (no_anchor) {
                 anchors.extension = Extension::NO_ANCHORS;
+            } else if (unresolved()) {
+                // no mask (owner decision #16): the admission compares the upper bound
+                if (total->upper > request.max_anchors) {
+                    anchors.extension = Extension::NOT_ADMITTED;
+                    engine.drop_anchors();
+                    if (total->lower <= request.max_anchors)
+                        engine.note_upper_bound_decision();
+                } else {
+                    // the listing drops the source dummies: the anchors it lists are the
+                    // exact set, extended as on a masked graph (the running count the
+                    // retention compares never exceeds the final U: nothing was dropped)
+                    if (!engine.retained_all())
+                        throw std::logic_error("pattern: anchors dropped for an admitted "
+                                               "extension");
+                    auto extension_start = std::chrono::steady_clock::now();
+                    std::vector<Context> listed;
+                    if (!engine.list_anchors(&listed)) {
+                        anchors.extension = Extension::STOPPED;
+                        ran = true;
+                    } else {
+                        Released counted;
+                        for (const Context &c : listed) {
+                            ++counted[{ c.orientation, c.offset }];
+                        }
+                        exactify(counted);
+                        if (listed.empty()) {
+                            anchors.extension = Extension::NO_ANCHORS;
+                            anchors.paths = Count::exact(Unit::PATHS, 0);
+                        } else {
+                            const bool keep = callback != nullptr;
+                            anchors.extension = engine.extend_listed(keep, listed)
+                                    ? Extension::COMPLETED
+                                    : Extension::STOPPED;
+                            ran = true;
+                        }
+                    }
+                    result.extension_ms = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - extension_start).count();
+                    anchors.candidates_examined = engine.candidates_examined();
+                }
             } else if (total->relation != Relation::EXACT || engine.stop()) {
                 // an anchor set not known completely is never extended (§3)
                 anchors.extension = Extension::NOT_STARTED;
@@ -2301,7 +2672,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             // extended, AT_LEAST when the extension stopped before; UNKNOWN when it did not run
             std::optional<Count> sum;
             for (Orientation o : engine.searched()) {
-                const Count &a = anchors.by_orientation.at(o);
+                const Count &a = by_orientation.at(o);
                 Count paths = Count::unknown(Unit::PATHS);
                 if (a.relation == Relation::EXACT && a.value == 0) {
                     paths = Count::exact(Unit::PATHS, 0);
@@ -2324,26 +2695,22 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                             == (anchors.extension == Extension::COMPLETED));
             }
         }
-        result.anchors = std::move(anchors);
-    } else {
-        ContextCounts contexts;
-        contexts.total = *total;
-        contexts.suffix = by_offset.at(static_cast<uint32_t>(k - L));
-        contexts.by_offset = std::move(by_offset);
-        contexts.by_orientation = std::move(by_orientation);
-        result.contexts = std::move(contexts);
+        anchors.total = *total;
+        anchors.by_orientation = by_orientation;
     }
 
     // the label-free release (§4.3, §5.2 "Projection none")
     if (callback) {
         Extraction extraction;
         const bool exact = total->relation == Relation::EXACT && !engine.stop();
+        // no mask: discovery complete, the count BOUNDS for its unchecked candidates only
+        const bool resolvable = unresolved();
         std::optional<StopReason> reason;
         if (engine.stop())
             reason = engine.stop()->reason;
 
         if (extending) {
-            extraction = extract_paths(*result.anchors, request, engine, *callback);
+            extraction = extract_paths(anchors, request, engine, *callback);
 
         } else if (!releasing) {
             // the results of a long pattern are its paths, not extended without
@@ -2355,7 +2722,14 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             }
 
         } else if (request.mode == Mode::ALL_OR_COUNT) {
-            if (exact && total->value <= max_released) {
+            // without the mask the threshold is compared with the upper bound (owner
+            // decision #16: conservative), and the release resolves the count
+            if (resolvable && total->upper <= max_released && !engine.retained_all()) {
+                // the running count the retention compares never exceeds the final U
+                throw std::logic_error("pattern: ranges dropped for an admitted release");
+            }
+            if ((exact && total->value <= max_released)
+                    || (resolvable && total->upper <= max_released)) {
                 // buffered, so that a deadline in the release withholds everything (§5.2),
                 // then delivered under the clock: the caller's work per context (a spelling,
                 // a result object) is work too, and a deadline during it withholds everything
@@ -2364,11 +2738,20 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                 if (engine.release(kNoLimit, [&](const Context &c) { buffer.push_back(c); },
                                    false)) {
                     // the absence licence rests on this: checked in every build (T1-02)
-                    if (buffer.size() != total->value) {
+                    if (exact && buffer.size() != total->value) {
                         throw std::logic_error("pattern: " + std::to_string(buffer.size())
                                                + " contexts released of "
                                                + std::to_string(total->value)
                                                + " counted exactly");
+                    }
+                    if (resolvable) {
+                        // every candidate enumerated, the source dummies dropped: the
+                        // counts are what was released
+                        Released released;
+                        for (const Context &c : buffer) {
+                            ++released[{ c.orientation, c.offset }];
+                        }
+                        exactify(released);
                     }
                     if (engine.deliver(buffer, *callback)) {
                         extraction.returned = buffer.size();
@@ -2379,8 +2762,10 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                 } else {
                     extraction.withheld = Withheld::DEADLINE;
                 }
-            } else if (exact) {
+            } else if (exact || resolvable) {
                 extraction.withheld = Withheld::COUNT_ABOVE_THRESHOLD;
+                if (resolvable && total->lower <= max_released)
+                    engine.note_upper_bound_decision();
             } else if (reason == StopReason::MAX_CONTEXTS || reason == StopReason::MAX_ANCHORS) {
                 extraction.withheld = Withheld::THRESHOLD_CROSSED;
             } else if (reason == StopReason::TIME) {
@@ -2394,36 +2779,70 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             // stated; nothing after a time stop, whose membership depends on the machine
             if (reason == StopReason::TIME) {
                 extraction.cut = StopReason::TIME;
-            } else if (engine.release(max_released, [&](const Context &c) {
-                           (*callback)(c);
-                           ++extraction.returned;
-                       }, true)) {
-                // an exact count and a release run to its end must agree, as in all_or_count
-                // (owner decision #9 of 2026-10-07, I09): min(count, cap) contexts, else the
-                // list would be stated complete short of the count, or cut by a cap it did
-                // not reach
-                if (exact && (extraction.returned > total->value
-                                || (extraction.returned < total->value
-                                        && extraction.returned < max_released))) {
-                    throw std::logic_error("pattern: " + std::to_string(extraction.returned)
-                                           + " contexts released of "
-                                           + std::to_string(total->value)
-                                           + " counted exactly (cap "
-                                           + std::to_string(max_released) + ")");
-                }
-                if (exact && extraction.returned == total->value) {
-                    extraction.complete = true;
-                } else {
-                    // the cap that cut the list: max_anchors when anchors are released
-                    extraction.cut = reason ? *reason
-                                            : is_long ? StopReason::MAX_ANCHORS
-                                                      : StopReason::MAX_CONTEXTS;
-                }
             } else {
-                extraction.cut = StopReason::TIME;
+                const bool masked = support_.mask_present;
+                Released released;
+                bool exhausted = false;
+                const bool finished = engine.release(max_released, [&](const Context &c) {
+                    (*callback)(c);
+                    ++extraction.returned;
+                    if (!masked)
+                        ++released[{ c.orientation, c.offset }];
+                }, true, StopPhase::EXTRACTION, &exhausted);
+                bool now_exact = exact;
+                if (!masked && !exact) {
+                    // no mask: a release that drained every retained range of a completed
+                    // discovery, none dropped, enumerated every candidate
+                    if (finished && resolvable && exhausted && engine.retained_all()) {
+                        exactify(released);
+                        now_exact = true;
+                    } else {
+                        raise_lower(released);
+                    }
+                }
+                if (finished) {
+                    // an exact count and a release run to its end must agree, as in
+                    // all_or_count (owner decision #9 of 2026-10-07, I09): min(count, cap)
+                    // contexts, else the list would be stated complete short of the count, or
+                    // cut by a cap it did not reach
+                    if (now_exact && (extraction.returned > total->value
+                                        || (extraction.returned < total->value
+                                                && extraction.returned < max_released))) {
+                        throw std::logic_error("pattern: "
+                                               + std::to_string(extraction.returned)
+                                               + " contexts released of "
+                                               + std::to_string(total->value)
+                                               + " counted exactly (cap "
+                                               + std::to_string(max_released) + ")");
+                    }
+                    if (now_exact && extraction.returned == total->value) {
+                        extraction.complete = true;
+                    } else {
+                        // the cap that cut the list: max_anchors when anchors are released
+                        extraction.cut = reason ? *reason
+                                                : is_long ? StopReason::MAX_ANCHORS
+                                                          : StopReason::MAX_CONTEXTS;
+                    }
+                } else {
+                    extraction.cut = StopReason::TIME;
+                }
             }
         }
         result.extraction = extraction;
+    }
+
+    if (is_long) {
+        // (the counts as the release left them: EXACT once it enumerated every candidate)
+        anchors.total = *total;
+        anchors.by_orientation = std::move(by_orientation);
+        result.anchors = std::move(anchors);
+    } else {
+        ContextCounts contexts;
+        contexts.total = *total;
+        contexts.suffix = by_offset.at(static_cast<uint32_t>(k - L));
+        contexts.by_offset = std::move(by_offset);
+        contexts.by_orientation = std::move(by_orientation);
+        result.contexts = std::move(contexts);
     }
 
     result.work = engine.work();
@@ -2440,6 +2859,8 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         result.notes.push_back(kNoteStrandUnknown);
     if (is_long && !extending)
         result.notes.push_back(kNotePathsLater);
+    if (engine.upper_bound_decision())
+        result.notes.push_back(kNoteThresholdUpperBound);
 
     return finish();
 }

@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string_view>
@@ -14,6 +15,8 @@
 
 #include "common/logger.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/traversal/label_oracle.hpp"
 #include "config/config.hpp"
 #include "load/load_annotated_graph.hpp"
@@ -26,6 +29,8 @@ namespace cli {
 using mtg::common::logger;
 using namespace mtg::graph::pattern;
 using graph::AnnotatedDBG;
+using graph::CanonicalDBG;
+using graph::DBGSuccinct;
 using graph::DeBruijnGraph;
 
 namespace {
@@ -63,6 +68,18 @@ constexpr const char kSupportVerified[] = "record_verified";
 // amino acids and the ambiguity codes X, B, Z, J, as the engine's Pattern::parse reads them
 // (the stop '*' is answered stop_unsupported in its slot); listed in the capabilities
 constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ";
+
+// The note of an entry answered on a graph without its dummy-edge mask (counting
+// "upper_bound", owner decision #16) where a count carries an estimate: each such count is the
+// bounds [lower, upper], upper the BOSS entries of its ranges (source dummies included), and
+// its estimate is upper x the graph's sampled dummy fraction (index.dummy_fraction), not a
+// bound
+constexpr const char kNoteEstimate[] = "estimate_sampled_dummy_fraction";
+
+// counting (capabilities and, on a graph without its mask, the answer's index): "exact" with
+// the dummy-edge mask, "upper_bound" without it (owner decision #16)
+constexpr const char kCountingExact[] = "exact";
+constexpr const char kCountingUpperBound[] = "upper_bound";
 
 // The note of an entry whose request named the labels (output.labels "all", or an
 // annotation field) but whose answer reads none: mode count reads no annotation (§5.2), and
@@ -473,15 +490,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
 }
 
 std::string support_message(const GraphSupport &support) {
-    if (support.reason == "mask_required") {
-        return "pattern: the graph was loaded without its dummy-edge mask (.edgemask): without "
-               "it every dummy edge would count as a k-mer and no count would be right; give "
-               "the graph its mask once with `metagraph transform --mask-dummy <graph>.dbg` "
-               "(writes the .edgemask beside the graph; node ids and annotation unchanged), or "
-               "pass --pattern-build-mask to server_query or pattern (builds it in memory at "
-               "load); the mask is read when the graph is loaded: restart the server once the "
-               ".edgemask exists";
-    }
+    // (mask_required, the refusal of a graph without its mask, is retired: such a graph is
+    // served with upper bounds since owner decision #16 of 2026-10-08)
     if (support.reason == "representation_unsupported") {
         return "pattern: the graph is not a succinct graph (a DBGSuccinct, or a PRIMARY one "
                "wrapped in CanonicalDBG): the pattern lookup narrows BOSS ranges";
@@ -509,7 +519,28 @@ std::string support_message(const GraphSupport &support) {
     return "pattern: the graph is not supported (" + support.reason + ")";
 }
 
-Json::Value count_json(const Count &c) {
+/**
+ * The estimate of a count of a graph served without its dummy-edge mask (owner decision #16):
+ * its upper bound times the graph's dummy fraction, rounded, and kept inside the bounds
+ * (lower, a true lower bound, can exceed the product). Not a bound: what the count would be if
+ * the source dummies among the upper bound's entries were as frequent as among the graph's.
+ */
+uint64_t estimate(const Count &c, const DummyFraction &fraction) {
+    assert(c.relation == Relation::BOUNDS);
+    const double x = std::round(static_cast<double>(c.upper) * fraction.value);
+    const uint64_t e = x <= 0 ? 0 : x >= static_cast<double>(c.upper) ? c.upper
+                                                                    : static_cast<uint64_t>(x);
+    return std::max(c.lower, e);
+}
+
+/**
+ * The JSON of one count (§7.4). |fraction|: the graph's dummy fraction when it is served
+ * without its dummy-edge mask (counting "upper_bound"), null with the mask: a count with
+ * relation bounds then also carries `estimate` (owner decision #16), and |estimated| is set.
+ * With the mask nothing is added: every count is written as before.
+ */
+Json::Value count_json(const Count &c, const DummyFraction *fraction = nullptr,
+                       bool *estimated = nullptr) {
     Json::Value v;
     // the conservative number: the count, or the lower bound; null when nothing is known
     v["value"] = c.relation == Relation::UNKNOWN ? Json::Value() : uint_json(c.value);
@@ -518,6 +549,11 @@ Json::Value count_json(const Count &c) {
     if (c.relation == Relation::BOUNDS) {
         v["lower"] = uint_json(c.lower);
         v["upper"] = uint_json(c.upper);
+        if (fraction) {
+            v["estimate"] = uint_json(estimate(c, *fraction));
+            if (estimated)
+                *estimated = true;
+        }
     }
     return v;
 }
@@ -525,10 +561,12 @@ Json::Value count_json(const Count &c) {
 // by_strand (keys +, -, both) on a BASIC graph, by_orientation (forward, reverse,
 // palindromic) on the others, where no strand is known (§3, "Strand")
 void put_orientations(Json::Value *count, const std::map<Orientation, Count> &by,
-                      bool strand_stated) {
+                      bool strand_stated, const DummyFraction *fraction = nullptr,
+                      bool *estimated = nullptr) {
     Json::Value o(Json::objectValue);
     for (const auto &[orientation, c] : by) {
-        o[strand_stated ? strand_key(orientation) : orientation_key(orientation)] = count_json(c);
+        o[strand_stated ? strand_key(orientation) : orientation_key(orientation)]
+                = count_json(c, fraction, estimated);
     }
     (*count)[strand_stated ? "by_strand" : "by_orientation"] = std::move(o);
 }
@@ -564,7 +602,7 @@ Json::Value error_json(const std::string &code, const std::string &message) {
  */
 Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
                        bool strand_stated, Json::Value results, uint64_t released,
-                       bool long_paths) {
+                       bool long_paths, const DummyFraction *fraction) {
     Json::Value e;
     e["id"] = spec.id;
     e["kind"] = to_string(spec.kind);
@@ -602,28 +640,34 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     e["strands"] = std::move(searched);
     e["palindromic"] = result->palindromic;
 
+    // a graph without its mask (owner decision #16): every count with relation bounds carries
+    // its estimate, and the entry then says what the estimate rests on (kNoteEstimate)
+    bool estimated = false;
     Json::Value counts;
     if (result->contexts) {
-        Json::Value c = count_json(result->contexts->total);
-        c["suffix"] = count_json(result->contexts->suffix);
+        Json::Value c = count_json(result->contexts->total, fraction, &estimated);
+        c["suffix"] = count_json(result->contexts->suffix, fraction, &estimated);
         Json::Value by_offset(Json::objectValue);
         for (const auto &[offset, count] : result->contexts->by_offset) {
-            by_offset[std::to_string(offset)] = count_json(count);
+            by_offset[std::to_string(offset)] = count_json(count, fraction, &estimated);
         }
         c["by_offset"] = std::move(by_offset);
-        put_orientations(&c, result->contexts->by_orientation, strand_stated);
+        put_orientations(&c, result->contexts->by_orientation, strand_stated, fraction,
+                         &estimated);
         counts["contexts"] = std::move(c);
     } else if (result->anchors) {
-        Json::Value a = count_json(result->anchors->total);
-        put_orientations(&a, result->anchors->by_orientation, strand_stated);
+        Json::Value a = count_json(result->anchors->total, fraction, &estimated);
+        put_orientations(&a, result->anchors->by_orientation, strand_stated, fraction,
+                         &estimated);
         counts["anchors"] = std::move(a);
-        Json::Value paths = count_json(result->anchors->paths);
+        Json::Value paths = count_json(result->anchors->paths, fraction, &estimated);
         if (long_paths) {
             // increment 4 (long_search "paths", §4.2): the paths counted by the extension,
             // per orientation, beside the branches it entered (work, not a count of the
             // pattern) and what it did (no_anchors, not_started, not_admitted, stopped,
             // completed)
-            put_orientations(&paths, result->anchors->paths_by_orientation, strand_stated);
+            put_orientations(&paths, result->anchors->paths_by_orientation, strand_stated,
+                             fraction, &estimated);
             paths["candidates_examined"] = uint_json(result->anchors->candidates_examined);
             paths["extension"] = to_string(result->anchors->extension);
         }
@@ -678,6 +722,9 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     for (const std::string &note : result->notes) {
         notes.append(note);
     }
+    // (the engine's notes first; then the route's note of the estimates, decision #16)
+    if (estimated)
+        notes.append(kNoteEstimate);
     e["notes"] = std::move(notes);
     Json::Value timing;
     timing["elapsed_ms"] = result->elapsed_ms;
@@ -702,9 +749,8 @@ std::string alphabet_refusal(const std::string &alphabet) {
 
 GraphSupport route_support(const DeBruijnGraph &graph) {
     GraphSupport support = PatternSearch::support(graph);
-    // the alphabet before the mask, as the engine orders alphabet_unsupported before
-    // mask_required: no mask makes a DNA5 graph served
-    if (support.supported || support.reason == "mask_required") {
+    // (a graph without its mask is served, counting upper bounds: owner decision #16)
+    if (support.supported) {
         const std::string refusal = alphabet_refusal(support.alphabet);
         if (!refusal.empty()) {
             support.supported = false;
@@ -713,12 +759,94 @@ GraphSupport route_support(const DeBruijnGraph &graph) {
         }
     }
     // a mask that marks a W = $ edge valid (review of 2026-10-07, I17; owner decision #6),
-    // found once at load (check_mask_at_load)
-    if (support.supported && mask_invalid_at_load(graph)) {
+    // found once at load (check_mask_at_load): a loaded mask is trusted only once checked; a
+    // graph without a mask counts upper bounds and needs no such check
+    if (support.supported && support.mask_present && mask_invalid_at_load(graph)) {
         support.supported = false;
         support.reason = "mask_invalid";
     }
     return support;
+}
+
+namespace {
+
+// The dummy fractions sampled so far, one per succinct graph served without its mask (weak
+// references: a graph freed and another allocated at its address must not pass for it, as in
+// load_annotated_graph.cpp's mask registries)
+std::mutex dummy_fractions_mutex;
+std::vector<std::pair<std::weak_ptr<const DBGSuccinct>, DummyFraction>> dummy_fractions;
+
+// the succinct graph |graph| is, or the PRIMARY one its CanonicalDBG wraps; null otherwise
+std::shared_ptr<const DBGSuccinct> succinct_of(std::shared_ptr<const DeBruijnGraph> graph) {
+    if (auto canonical = std::dynamic_pointer_cast<const CanonicalDBG>(graph))
+        graph = canonical->get_graph_ptr();
+    return std::dynamic_pointer_cast<const DBGSuccinct>(graph);
+}
+
+// the kept fraction of |dbg_succ|, sampled now when there is none; the caller holds
+// dummy_fractions_mutex
+const DummyFraction& fraction_of(const std::shared_ptr<const DBGSuccinct> &dbg_succ,
+                                 bool *sampled = nullptr) {
+    for (auto it = dummy_fractions.begin(); it != dummy_fractions.end(); ) {
+        if (auto held = it->first.lock()) {
+            if (held == dbg_succ)
+                return it->second;
+            ++it;
+        } else {
+            it = dummy_fractions.erase(it);
+        }
+    }
+    if (sampled)
+        *sampled = true;
+    dummy_fractions.emplace_back(dbg_succ, sample_real_fraction(*dbg_succ));
+    return dummy_fractions.back().second;
+}
+
+} // namespace
+
+std::optional<DummyFraction> dummy_fraction(const AnnotatedDBG &anno_graph) {
+    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
+    auto dbg_succ = graph ? succinct_of(graph) : nullptr;
+    if (!dbg_succ || dbg_succ->get_mask())
+        return std::nullopt;
+    std::lock_guard<std::mutex> lock(dummy_fractions_mutex);
+    return fraction_of(dbg_succ);
+}
+
+void sample_dummy_fraction_at_load(const std::shared_ptr<DeBruijnGraph> &graph,
+                                   bool stdout_reserved) {
+    auto dbg_succ = succinct_of(graph);
+    if (!dbg_succ || dbg_succ->get_mask())
+        return;
+    bool sampled = false;
+    DummyFraction f;
+    const auto start = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(dummy_fractions_mutex);
+        f = fraction_of(dbg_succ, &sampled);
+    }
+    if (!sampled)
+        return;
+    logger->log(stdout_reserved ? spdlog::level::trace : spdlog::level::info,
+                "Dummy fraction sampled for the pattern search in {:.3f} s (the graph has no "
+                "dummy-edge mask: counts are upper bounds with estimates): {} real k-mers "
+                "among {} entries with W != $ drawn of {} edges ({} with W = $), f = {:.6f}, "
+                "95% interval [{:.6f}, {:.6f}], seed {}",
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
+                f.real, f.samples, f.edges, f.sentinel_edges, f.value, f.lower, f.upper,
+                f.seed);
+}
+
+Json::Value dummy_fraction_json(const DummyFraction &f) {
+    Json::Value v;
+    v["value"] = f.value;
+    Json::Value interval(Json::arrayValue);
+    interval.append(f.lower);
+    interval.append(f.upper);
+    v["interval"] = std::move(interval);
+    v["samples"] = uint_json(f.samples);
+    v["source"] = f.exact ? "counted" : "sampled";
+    return v;
 }
 
 Json::Value PatternRefusal::body() const {
@@ -871,6 +999,12 @@ Json::Value process_pattern_request(
     const size_t k = graph.get_k();
     const bool strand_stated = support.strand_stated;
     const uint64_t num_rows = anno_graph.get_annotator().num_objects();
+    // without the dummy-edge mask (owner decision #16): the counts are upper bounds, each
+    // with its estimate from the graph's dummy fraction (sampled once per graph)
+    const std::optional<DummyFraction> fraction = support.mask_present
+            ? std::nullopt : dummy_fraction(anno_graph);
+    if (!support.mask_present && !fraction)
+        throw std::logic_error("pattern: no dummy fraction for a graph without its mask");
 
     // output.labels "all" in a retrieval mode reads the annotation (increment 3, §4.3): on
     // the budget-aware path, or unbudgeted by the request's explicit opt-in
@@ -1119,7 +1253,7 @@ Json::Value process_pattern_request(
         }
         Json::Value entry = entry_json(req.patterns[i], a.result ? &*a.result : nullptr, mode,
                                        strand_stated, std::move(a.results), a.released,
-                                       req.long_paths);
+                                       req.long_paths, fraction ? &*fraction : nullptr);
         if (a.labels) {
             apply_labels(&entry, std::move(*a.labels), mode);
         } else if (req.annotation_named && !read_labels && entry.isMember("notes")) {
@@ -1152,6 +1286,13 @@ Json::Value process_pattern_request(
     index["graph_mode"] = to_string(support.mode);
     index["alphabet"] = support.alphabet;
     index["strand_stated"] = support.strand_stated;
+    if (fraction) {
+        // owner decision #16, in the answers on a graph without its mask only (an answer on a
+        // masked graph is written as before: its counting is exact): what the counts are and
+        // the dummy fraction the estimates rest on
+        index["counting"] = kCountingUpperBound;
+        index["dummy_fraction"] = dummy_fraction_json(*fraction);
+    }
     out["index"] = std::move(index);
 
     Json::Value l;
@@ -1227,17 +1368,18 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     }
     p["genetic_codes"] = std::move(codes);
     p["default_genetic_code"] = GeneticCode::kStandard;
+    // (compact: the capabilities document a service's MCP tool returns in one piece has a
+    // ceiling of 32 KiB, api/python/metagraph/traverse/mcp_tools.py CAPABILITIES_MAX_BYTES,
+    // which the mini index's document nearly fills)
     p["protein_rule"] = "A protein pattern (patterns[i].protein) is a peptide over "
-        "protein_residues (any case): the 20 amino acids and the ambiguity codes X (any "
-        "residue: every codon of the genetic code that is not a stop), B (D or N), Z (E or Q) "
-        "and J (I or L). It is searched as its codon automaton in the request's genetic_code "
-        "(an NCBI translation table id of genetic_codes, default_genetic_code when omitted): "
-        "its instances are exactly the codon strings that translate to it, no stop codon "
-        "anywhere, on both strands as for dna. Its length is in bases (3 per residue; residues "
-        "states the residues), so a peptide of more than k / 3 residues is a pattern longer "
-        "than k (long_search). A stop '*' is answered in its slot with stop_unsupported; any "
-        "other character with bad_alphabet. Tables 27, 28 and 31 code some codons both as a "
-        "residue and as a stop in context: they match as their residue";
+        "protein_residues (any case): the 20 amino acids, X (any residue, never a stop), B (D "
+        "or N), Z (E or Q) and J (I or L). It is searched as its codon automaton in "
+        "genetic_code (an id of genetic_codes, default_genetic_code when omitted): its "
+        "instances are exactly the codon strings that translate to it, no stop codon "
+        "anywhere, on both strands. Its length is in bases (3 per residue), so more than k / 3 "
+        "residues make a pattern longer than k (long_search). A stop '*': stop_unsupported in "
+        "its slot; any other character: bad_alphabet. Tables 27, 28 and 31 code some codons "
+        "as a residue and as a stop in context: they match as their residue";
     p["default_scope"] = to_string(Scope::ANY_OFFSET);
     Json::Value by_mode;
     by_mode["basic"] = strings_json({ "suffix", "any_offset" });
@@ -1297,7 +1439,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
         "long_search changes nothing for a pattern of at most k bases";
 
     const char *graph_fields[] = { "graph_mode", "k", "alphabet", "strand_stated", "mask",
-                                   "scopes", "placement", "support", "annotation" };
+                                   "counting", "dummy_fraction", "scopes", "placement",
+                                   "support", "annotation" };
     for (const char *field : graph_fields) {
         p[field] = Json::Value();
     }
@@ -1313,10 +1456,9 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["available"] = support.supported;
     p["unavailable_reason"] = support.supported ? Json::Value() : Json::Value(support.reason);
     p["k"] = uint_json(graph.get_k());
-    // the engine recognised the representation (only its mask or alphabet is missing, or
-    // not served: alphabet_untested, mask_invalid)
-    const bool recognised = support.supported || support.reason == "mask_required"
-                                || support.reason == "alphabet_unsupported"
+    // the engine recognised the representation (only its alphabet is not served, or its
+    // mask: alphabet_unsupported, alphabet_untested, mask_invalid)
+    const bool recognised = support.supported || support.reason == "alphabet_unsupported"
                                 || support.reason == "alphabet_untested"
                                 || support.reason == "mask_invalid";
     if (!recognised)
@@ -1328,6 +1470,16 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // built in memory at load (--pattern-build-mask) when there was no file
     p["mask"] = !support.mask_present ? "absent"
               : mask_built_at_load(graph) ? "built_at_load" : "file";
+    if (support.supported) {
+        // owner decision #16: exact with the mask, upper bounds and estimates without it (the
+        // rule is SPEC's; no prose here: see protein_rule's note on the document's ceiling);
+        // the dummy fraction the estimates rest on, null with the mask
+        p["counting"] = support.mask_present ? kCountingExact : kCountingUpperBound;
+        if (!support.mask_present) {
+            if (auto fraction = dummy_fraction(*anno_graph))
+                p["dummy_fraction"] = dummy_fraction_json(*fraction);
+        }
+    }
     Json::Value scopes(Json::arrayValue);
     for (Scope s : support.scopes) {
         scopes.append(to_string(s));

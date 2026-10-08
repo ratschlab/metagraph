@@ -18,6 +18,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "cli/config/config.hpp"
+#include "cli/pattern.hpp"
 #include "load_graph.hpp"
 #include "load_annotation.hpp"
 
@@ -155,20 +156,27 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const
                 logger->log(cli ? spdlog::level::warn : spdlog::level::info,
                             "The dummy-edge mask {} exists but could not be opened "
                             "(permissions?): the graph was loaded without it, and the pattern "
-                            "search answers mask_required. Remedies: make it readable and "
-                            "restart, or `metagraph transform --mask-dummy --force {}`, or "
+                            "search counts upper bounds with estimates (counting: "
+                            "upper_bound). For exact counts: make it readable and restart, or "
+                            "`metagraph transform --mask-dummy --force {}`, or "
                             "--pattern-build-mask (builds it in memory at every start)",
                             mask_path, path);
             } else if (dbg_succ && !dbg_succ->get_mask()) {
-                // the operator learns at start-up, not from the first refused request (in the
-                // server's log; on the CLI's stderr, as a warning)
+                // the operator learns at start-up, not from the first answer (in the server's
+                // log; on the CLI's stderr, as a warning)
                 logger->log(cli ? spdlog::level::warn : spdlog::level::info,
                             "The graph has no dummy-edge mask (.edgemask): the pattern search "
-                            "answers mask_required. Remedies: `metagraph transform "
-                            "--mask-dummy {}` once (writes the .edgemask beside the graph), "
-                            "or --pattern-build-mask (builds it in memory at every start)",
+                            "counts upper bounds with estimates (counting: upper_bound). For "
+                            "exact counts: `metagraph transform --mask-dummy {}` once (writes "
+                            "the .edgemask beside the graph), or --pattern-build-mask (builds "
+                            "it in memory at every start)",
                             path);
             }
+        }
+        if (serves_pattern) {
+            // without a mask (none, or not built): the dummy fraction of the estimates (owner
+            // decision #16), sampled once here rather than in the first request
+            sample_dummy_fraction_at_load(graph, cli);
         }
         return graph;
     }).share();

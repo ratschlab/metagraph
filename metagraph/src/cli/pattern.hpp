@@ -18,13 +18,19 @@
  *    fields sequence, anchor_kmer, nodes and rows (never kmer), and with output.labels "all"
  *    each path's labels, each with its support (label_intersection, record_verified) and
  *    require_support "record_verified" listing the verified ones only;
- *  - single-graph servers only; no predicate.
+ *  - single-graph servers only; no predicate;
+ *  - graphs with their dummy-edge mask (counting "exact") and, since owner decision #16 of
+ *    2026-10-08, without it (counting "upper_bound"): a count is then the bounds [lower, U],
+ *    U the BOSS entries of its ranges (source dummies among them), with the additive estimate
+ *    U x f (f the graph's sampled dummy fraction, DummyFraction), while every list stays exact
+ *    (the engine drops the dummies it releases).
  * Everything a later increment adds is refused (400 "later_increment"), never ignored: the
  * owner's guarantee rule, nothing weakened silently.
  */
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <ostream>
 #include <stdexcept>
@@ -49,11 +55,10 @@ struct IndexIdentity;
 
 /**
  * A refusal of a whole /pattern request: the HTTP status and the body {"error", "code"}
- * (400 invalid_request, later_increment, resident_only, mask_required and the other graph
- * support reasons of route_support, alphabet_untested and mask_invalid among them; 503
- * deadline). The server answers it as is (HttpError); the CLI writes the
- * same body and exits 1. A refusal of one pattern is not this: it is the `error` of that
- * pattern's slot in a 200 answer.
+ * (400 invalid_request, later_increment, resident_only and the graph support reasons of
+ * route_support, alphabet_untested and mask_invalid among them; 503 deadline). The server
+ * answers it as is (HttpError); the CLI writes the same body and exits 1. A refusal of one
+ * pattern is not this: it is the `error` of that pattern's slot in a 200 answer.
  */
 class PatternRefusal : public std::runtime_error {
   public:
@@ -126,13 +131,48 @@ std::string alphabet_refusal(const std::string &alphabet);
 
 /**
  * Whether /pattern and `metagraph pattern` serve |graph|: the engine's PatternSearch::support,
- * narrowed by the route's own reasons, "alphabet_untested" (alphabet_refusal; it takes
- * precedence over mask_required, as alphabet_unsupported does) and "mask_invalid" (a mask
- * that marks an edge with W = $ valid, found once at load: check_mask_at_load; review of
- * 2026-10-07, I17, owner decision #6). Its reason is the 400 refusal's code and the
- * capabilities' unavailable_reason. The engine itself keeps serving $ACGTN (its tests).
+ * narrowed by the route's own reasons, "alphabet_untested" (alphabet_refusal) and
+ * "mask_invalid" (a loaded mask that marks an edge with W = $ valid, found once at load:
+ * check_mask_at_load; review of 2026-10-07, I17, owner decision #6). Its reason is the 400
+ * refusal's code and the
+ * capabilities' unavailable_reason. The engine itself keeps serving $ACGTN (its tests). A graph
+ * without a mask is served (owner decision #16 of 2026-10-08: counting "upper_bound"):
+ * mask_required, which refused it before, is retired (no configuration answers it).
  */
 graph::pattern::GraphSupport route_support(const graph::DeBruijnGraph &graph);
+
+/**
+ * f, the fraction of real k-mers among the entries of a succinct graph that a pattern can
+ * count (owner decision #16 of 2026-10-08): on a graph served without its dummy-edge mask a
+ * count is an upper bound U (the BOSS entries of its ranges, the source dummies among them),
+ * stated with the additive estimate U x f. Sampled by the engine
+ * (graph::pattern::sample_real_fraction: 10,000 entries with W != $ drawn with a seed fixed by
+ * the graph's number of edges, the same value in every process; Wilson's 95% interval), once
+ * per graph by the route (dummy_fraction).
+ */
+using DummyFraction = graph::pattern::RealFraction;
+
+/**
+ * The dummy fraction of the graph |anno_graph| serves when the pattern search counts on it
+ * without a dummy-edge mask (counting "upper_bound"); nullopt when it has its mask (counting
+ * "exact"), or is not a succinct graph. Sampled once per graph and kept: in the loading thread
+ * (sample_dummy_fraction_at_load), or at the first call for a graph not loaded that way.
+ * Thread-safe.
+ */
+std::optional<DummyFraction> dummy_fraction(const graph::AnnotatedDBG &anno_graph);
+
+/**
+ * In the loading thread of a graph the pattern search serves (async_load_critical_dbg): when
+ * |graph| is a succinct graph without its dummy-edge mask, samples its dummy fraction and keeps
+ * it for dummy_fraction(), logging f, its interval and the time; nothing otherwise.
+ * |stdout_reserved| as for build_mask_at_load (the CLI logs at trace level).
+ */
+void sample_dummy_fraction_at_load(const std::shared_ptr<graph::DeBruijnGraph> &graph,
+                                   bool stdout_reserved = false);
+
+// The JSON of a dummy fraction: {value, interval: [lower, upper], samples, source: "sampled"}
+// ("counted" for an exact one, which the route never states)
+Json::Value dummy_fraction_json(const DummyFraction &fraction);
 
 /**
  * What the transport of one /pattern answer needs from its processing: the request's
@@ -203,8 +243,9 @@ Json::Value process_pattern_request(const Json::Value &json,
  * The `pattern` block of GET /capabilities (§7.3): the contract version, whether this server
  * can answer /pattern (available: true | false | null while the single index loads, with the
  * reason when false), the modes, projections, kinds, scopes and strands, the caps and the
- * finalisation reserve, and what the graph is (mode, k, alphabet, mask) and what its
- * annotation gives the labelled retrieval (placement, support, annotation: budgeted or
+ * finalisation reserve, and what the graph is (mode, k, alphabet, mask, counting: exact with
+ * the mask, upper_bound without it, and then its dummy_fraction; owner decision #16) and what
+ * its annotation gives the labelled retrieval (placement, support, annotation: budgeted or
  * unbudgeted). |anno_graph| is null while the index loads; |multi_graph| servers answer only
  * that they are not served yet.
  */

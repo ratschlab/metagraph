@@ -268,6 +268,18 @@ class BOSS {
     std::string get_node_str(edge_index i) const;
 
     /**
+     * Whether the source node of edge |i| holds the sentinel: edge |i| is a source dummy
+     * edge (its k-mer starts with '$'; the main dummy edge 1 included). A '$' can only lead a
+     * node, so the node's symbols are read from its last one (get_node_seq's walk, at most
+     * k - 1 of them) and the first '$' ends the walk; with an index of suffix ranges the
+     * node's first get_indexed_suffix_length() symbols are judged by one select instead (a
+     * suffix holding '$' is in no indexed range). The pattern search on a graph without its
+     * dummy-edge mask (docs/DESIGN-pattern-search.md §4.4; owner decision #16 of 2026-10-08):
+     * a sink dummy (W = $) is told apart by W alone and not by this.
+     */
+    bool node_has_sentinel(edge_index i) const;
+
+    /**
      * Given an edge index i, this function returns the k-mer sequence of its
      * source node.
      */

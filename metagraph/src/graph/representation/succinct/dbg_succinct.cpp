@@ -462,6 +462,44 @@ uint64_t DBGSuccinct::count_valid_sentinel_edges() const {
     return valid;
 }
 
+uint64_t DBGSuccinct::count_non_sink_edges_in_range(node_index first, node_index last) const {
+    assert(first >= 1 && first <= last && last <= max_index());
+
+    const BOSS &boss = *boss_graph_;
+    const auto sentinel = static_cast<BOSS::TAlphabet>(BOSS::kSentinelCode);
+    const uint64_t sinks = boss.rank_W(last, sentinel) - boss.rank_W(first - 1, sentinel)
+                         + boss.rank_W(last, sentinel + boss.alph_size)
+                         - boss.rank_W(first - 1, sentinel + boss.alph_size);
+    assert(sinks <= last - first + 1);
+    return (last - first + 1) - sinks;
+}
+
+uint64_t DBGSuccinct::count_edges_with_symbol(node_index first, node_index last,
+                                              BOSS::TAlphabet c) const {
+    assert(first >= 1 && first <= last && last <= max_index());
+
+    const BOSS &boss = *boss_graph_;
+    assert(c >= 1 && c < boss.alph_size);
+    return boss.rank_W(last, c) - boss.rank_W(first - 1, c)
+         + boss.rank_W(last, c + boss.alph_size) - boss.rank_W(first - 1, c + boss.alph_size);
+}
+
+node_index DBGSuccinct::next_non_sink_edge(node_index from, node_index last) const {
+    assert(last <= max_index());
+    if (!from)
+        return npos;
+
+    const BOSS &boss = *boss_graph_;
+    // a sink dummy is the only edge of its node, so a run of them is short in a range of
+    // node groups: read W edge by edge
+    for (node_index e = from; e <= last; ++e) {
+        // W modulo alph_size is BOSS::kSentinelCode (0) for $, plain or marked
+        if (boss.get_W(e) % boss.alph_size)
+            return e;
+    }
+    return npos;
+}
+
 node_index DBGSuccinct::next_edge_with_last_symbol(node_index from, node_index last,
                                                    BOSS::TAlphabet c) const {
     assert(last <= max_index());

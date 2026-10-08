@@ -1770,7 +1770,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
             fprintf(stderr, "\t   --pattern-max-labels [INT] \tdefault and maximum of max_labels: labels listed per pattern in mode partial [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
-            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask, with -p threads (small graphs; else transform --mask-dummy once) [off]\n");
+            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask, with -p threads, for exact counts (without a mask: upper bounds with estimates; small graphs; else transform --mask-dummy once) [off]\n");
             fprintf(stderr, "\t   --json \t\t\tprint compact JSON (one line per request) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for loading [1]\n");
             fprintf(stderr, "\n");
@@ -1833,7 +1833,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-memory-mb [INT] \tdefault and maximum of max_memory_mb: the memory account of a request reading labels [256]\n");
             fprintf(stderr, "\t   --pattern-max-labels [INT] \tdefault and maximum of max_labels: labels listed per pattern in mode partial [1000]\n");
             fprintf(stderr, "\t   --pattern-max-occurrences [INT] \tdefault and maximum of max_occurrences_per_label in mode partial [16]\n");
-            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask, with --threads-each threads (small graphs; else transform --mask-dummy once; a mask written later is read only after a restart) [off]\n");
+            fprintf(stderr, "\t   --pattern-build-mask \tbuild the dummy-edge mask in memory at load when the graph has no .edgemask, with --threads-each threads, for exact counts (without a mask: upper bounds with estimates; small graphs; else transform --mask-dummy once; a mask written later is read only after a restart) [off]\n");
         } break;
     }
 

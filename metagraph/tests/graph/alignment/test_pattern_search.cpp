@@ -1087,16 +1087,17 @@ TEST(PatternSearch, GraphSupport) {
     EXPECT_EQ("representation_unsupported", s.reason);
 }
 
-TEST(PatternSearch, GraphWithoutMaskRefused) {
-    // without the mask every dummy edge would count as a k-mer (§4): refused, never guessed
+TEST(PatternSearch, GraphWithoutMaskServed) {
+    // (until 4596bb3b: refused, mask_required.) Owner decision #16 of 2026-10-08: served,
+    // its unresolved counts upper bounds (test_pattern_unmasked.cpp tests the answers)
     auto graph = build(4, { "ACGTT", "TTGCA" }, DeBruijnGraph::BASIC);
     auto &dbg_succ = const_cast<DBGSuccinct&>(base_dbg(*graph));
     dbg_succ.reset_mask();
     GraphSupport s = PatternSearch::support(*graph);
-    EXPECT_FALSE(s.supported);
+    EXPECT_TRUE(s.supported);
     EXPECT_FALSE(s.mask_present);
-    EXPECT_EQ("mask_required", s.reason);
-    EXPECT_THROW(PatternSearch engine(*graph), std::invalid_argument);
+    EXPECT_TRUE(s.reason.empty());
+    EXPECT_NO_THROW(PatternSearch engine(*graph));
 }
 
 TEST(PatternSearch, MainDummySourceIsInvalid) {

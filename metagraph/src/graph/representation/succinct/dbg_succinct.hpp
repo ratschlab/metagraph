@@ -158,6 +158,27 @@ class DBGSuccinct : public DeBruijnGraph {
      */
     uint64_t count_valid_sentinel_edges() const;
 
+    /**
+     * The same primitives for a graph without the valid-edge mask (owner decision #16 of
+     * 2026-10-08: the pattern search counts upper bounds there). They read W only, never the
+     * mask, and count every edge that can carry a pattern base: a k-mer, or a source dummy
+     * (a k-mer starting with '$', which only the range's unspelled node symbols can hold;
+     * BOSS::node_has_sentinel tells one). A sink dummy (W = $) never carries a base and is
+     * never counted. Same range conventions as above.
+     */
+
+    // The edges of the range whose W is not $ (plain or marked): the k-mers leaving its
+    // nodes and the source dummies among them (four ranks).
+    uint64_t count_non_sink_edges_in_range(node_index first, node_index last) const;
+
+    // The edges of the range with W in {c, c + alph_size}: LastSymbolEdges::candidates,
+    // without the mask's invalid counts (two ranks per form). 1 <= c < alph_size.
+    uint64_t count_edges_with_symbol(node_index first, node_index last,
+                                     boss::BOSS::TAlphabet c) const;
+
+    // The first edge in [from, last] whose W is not $; npos if there is none.
+    node_index next_non_sink_edge(node_index from, node_index last) const;
+
     // Given a starting node, traverse the graph forward following the edge
     // sequence delimited by begin and end. Terminate the traversal if terminate()
     // returns true, or if the sequence is exhausted.

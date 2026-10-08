@@ -38,13 +38,16 @@ overlapping regex) and adds every k-mer that contains it, at each offset.
 Fixtures:
   - TestPatternMini: the mini index (build/mini_refseq, scripts/traversal/build_mini_refseq.sh;
     or $METAGRAPH_MINI_REFSEQ), a BASIC succinct graph at k = 31 with a row_diff_brwt_coord
-    annotation and its .seqs. It was built without the dummy-edge mask the route requires (§4),
-    so a COPY of its graph in a temporary directory is given the mask by `metagraph transform
-    --mask-dummy` (the one-time step for staging) and served with the original annotation, which
-    the mask leaves valid; build/mini_refseq itself is never written to. The masks made the other
-    ways are checked against it: a rebuild with --mask-dummy (the same .edgemask, the same
+    annotation and its .seqs. It was built without the dummy-edge mask, so a COPY of its graph
+    in a temporary directory is given the mask by `metagraph transform --mask-dummy` (the
+    one-time step for staging) and served with the original annotation, which the mask leaves
+    valid, for exact counts; build/mini_refseq itself is never written to. The masks made the
+    other ways are checked against it: a rebuild with --mask-dummy (the same .edgemask, the same
     answers) and a server started with --pattern-build-mask on the unmasked graph (the same
-    answers, mask: built_at_load). Skipped when the mini index is not built.
+    answers, mask: built_at_load). The graph as built is served too (owner decision #16 of
+    2026-10-08): counts upper bounds with estimates, checked against the masked copy's exact
+    counts and an oracle of the source dummies, lists exact. Skipped when the mini index is not
+    built.
   - TestPatternSynthetic: random records, BASIC, CANONICAL and PRIMARY graphs at k = 15 (and a
     multi-graph server), always run.
   - TestPatternFixtureBodies: the frozen fixture bodies (api/python/tests/data/traverse/pattern)
@@ -301,6 +304,37 @@ class Records:
                     extend(x)
         return out
 
+    def source_dummies(self, k, canonical=False):
+        """The source dummy k-mers of the BOSS graph of these records (owner decision #16:
+        what a graph without its dummy-edge mask counts besides its k-mers): '$' * j + x[:k - j]
+        for 1 <= j < k and every node x (a (k - 1)-mer) that starts a k-mer and that no k-mer
+        enters, i.e. the first k - 1 bases of a sequence (island, or its reverse complement on
+        a graph holding both orientations) holding a k-mer, found at no later position of any
+        sequence. The main dummy edge ($ * k: its W is $) and the sink dummies (W = $) are not
+        among them: no pattern base matches $."""
+        key = ('dummies', k, canonical)
+        if key not in self._cache:
+            seqs = [s for s in self.sequences(canonical)]
+            starts = {s[:k - 1] for s in seqs if len(s) >= k}
+            entered = {x for x in starts if any(s.find(x, 1) != -1 for s in seqs)}
+            self._cache[key] = {'$' * j + x[:k - j] for x in starts - entered
+                                for j in range(1, k)}
+        return self._cache[key]
+
+    def dummy_contexts(self, pattern, k, scope='any_offset', strands='both', canonical=False):
+        """{(strand or orientation, dummy k-mer, offset)}: the contexts a graph without its mask
+        counts in source dummies (the oriented pattern on bases only, never on a $)."""
+        L = len(pattern)
+        out = set()
+        for strand, q in self.oriented(pattern, strands, not canonical):
+            rx = pattern_regex(q)
+            for d in self.source_dummies(k, canonical):
+                for m in rx.finditer(d):
+                    if scope == 'suffix' and m.start() != k - L:
+                        continue
+                    out.add((strand, d, m.start()))
+        return out
+
     def names_with_kmer(self, kmer):
         return {name for _, name, island in self.islands if kmer in island}
 
@@ -308,7 +342,6 @@ class Records:
         return {source for source, _, island in self.islands if kmer in island}
 
 
-# the refusal of a graph without its dummy-edge mask (§4): both remedies named
 # a 10-mer whose suffix-scope count on the mini needs a mask scan (it starts a record's first
 # k-mer): discovery takes 20 range steps, the scan one more, so max_steps 20 stops in the scan
 # with bounds (review of 2026-10-07, X-TESTS-03)
@@ -318,13 +351,11 @@ SCAN_STEPS = 20
 # discovery a work deadline of a second stops
 HEAVY31 = 'GG' + 'N' * 19 + 'TTGGCGATCT'
 
-MASK_REQUIRED_MESSAGE = (
-    'pattern: the graph was loaded without its dummy-edge mask (.edgemask): without it every '
-    'dummy edge would count as a k-mer and no count would be right; give the graph its mask '
-    'once with `metagraph transform --mask-dummy <graph>.dbg` (writes the .edgemask beside the '
-    'graph; node ids and annotation unchanged), or pass --pattern-build-mask to server_query '
-    'or pattern (builds it in memory at load); the mask is read when the graph is loaded: '
-    'restart the server once the .edgemask exists')
+# owner decision #16: the note of an entry whose counts carry an estimate (a graph without its
+# dummy-edge mask), and the engine's of a threshold decided on an upper bound against a request
+# whose lower bound fits
+NOTE_ESTIMATE = 'estimate_sampled_dummy_fraction'
+NOTE_THRESHOLD_UPPER = 'threshold_upper_bound'
 
 
 def guard(condition, reason):
@@ -538,11 +569,17 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         cls.server = Server(METAGRAPH, ['-i', cls.graph, '-a', cls.anno],
                             os.path.join(d, 'server.log'))
         cls.stats = cls.server.get('stats').json()
+        # the mini graph as built, without its mask (owner decision #16): served, its counts
+        # upper bounds with estimates, its lists exact
+        cls.unmasked_server = Server(METAGRAPH, ['-i', cls.unmasked_graph,
+                                                 '-a', cls.unmasked_anno],
+                                     os.path.join(d, 'server_unmasked.log'))
         cls._choose_patterns()
 
     @classmethod
     def tearDownClass(cls):
         cls.server.stop()
+        cls.unmasked_server.stop()
         cls.tempdir.cleanup()
 
     @classmethod
@@ -593,6 +630,13 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                 return s
         cls.absent16 = absent(16)
         cls.absent40 = absent(40)
+        # patterns at the start of an island no k-mer enters: its source dummies hold them
+        # ($^j x[:k - j]), which a graph without its mask counts in its upper bounds
+        dummies = cls.records.source_dummies(cls.k)
+        starts = sorted(d[1:] for d in dummies if len(d.lstrip('$')) == cls.k - 1)
+        cls.start16 = starts[0][:16]
+        cls.start14 = starts[1][:14]
+        cls.start40 = next(island[:40] for island in islands if island[:cls.k - 1] == starts[0])
 
     def contexts(self, pattern, **kw):
         return self.records.contexts(pattern, self.k, **kw)
@@ -867,6 +911,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'long_search': ['anchors', 'paths'], 'default_long_search': 'anchors',
             'strands': ['both', 'forward', 'reverse'], 'graph_mode': 'basic', 'k': self.k,
             'alphabet': '$ACGT', 'strand_stated': True, 'mask': 'file',
+            # owner decision #16: the masked graph counts exactly, no dummy fraction
+            'counting': 'exact', 'dummy_fraction': None,
             'graph_cleaned': 'unknown', 'records_shorter_than_k': 'not_indexed',
             'resident_only': True, 'caps': DEFAULT_CAPS,
             'default_time_budget_ms': DEFAULT_TIME_MS,
@@ -1932,22 +1978,30 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertContextCounts(json.loads(lines[2])['patterns'][0], self.contexts(self.p16),
                                  self.k, 16, 'any_offset')
 
-    def test_cli_mask_required(self):
-        """The mini index as built (no .edgemask): refused, since every dummy edge would count;
-        with --pattern-build-mask the CLI answers as the server on the transformed copy."""
-        request = {'patterns': [{'dna': self.p16}, {'iupac': self.iupac16}], 'mode': 'count'}
+    def test_cli_unmasked(self):
+        """The mini index as built (no .edgemask) is served by the CLI too (owner decision #16):
+        its answer states the counting and the dummy fraction, as the server's on the same
+        graph (the fraction sampled in another process: the same draws); the start-up note
+        names the remedies for exact counts; with --pattern-build-mask the CLI answers as the
+        server on the transformed copy."""
+        request = {'patterns': [{'dna': self.p16}, {'iupac': self.iupac16},
+                                {'dna': self.start16}], 'mode': 'count'}
         path = os.path.join(self.tempdir.name, 'request_mask.json')
         with open(path, 'w') as f:
             json.dump(request, f)
         cli = shlex.split(METAGRAPH) + ['pattern']
         args = ['--json', '-i', self.unmasked_graph, '-a', self.unmasked_anno, path]
         res = subprocess.run(cli + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(1, res.returncode, res.stderr.decode())
-        self.assertEqual({'error': MASK_REQUIRED_MESSAGE, 'code': 'mask_required'},
-                         json.loads(res.stdout))
-        # the start-up note names the remedies before any request is refused
-        self.assertIn('the pattern search answers mask_required. Remedies: `metagraph transform '
-                      f'--mask-dummy {self.unmasked_graph}` once', res.stderr.decode())
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        out = json.loads(res.stdout)
+        self.assertEqual('upper_bound', out['index']['counting'])
+        caps = self.unmasked_server.get('capabilities').json()['pattern']
+        self.assertEqual(caps['dummy_fraction'], out['index']['dummy_fraction'])
+        self.assertEqual(untimed(self.pattern(self.unmasked_server, request)), untimed(out))
+        # the start-up note names the remedies for exact counts
+        self.assertIn('the pattern search counts upper bounds with estimates (counting: '
+                      'upper_bound). For exact counts: `metagraph transform --mask-dummy '
+                      f'{self.unmasked_graph}` once', res.stderr.decode())
 
         res = subprocess.run(cli + ['--pattern-build-mask'] + args,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1980,8 +2034,11 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                                            path],
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             err = res.stderr.decode()
-            self.assertEqual(1, res.returncode, err)
-            self.assertEqual('mask_required', json.loads(res.stdout)['code'])
+            # served without it (owner decision #16): upper bounds, as on the unmasked graph
+            self.assertEqual(0, res.returncode, err)
+            out = json.loads(res.stdout)
+            self.assertEqual('upper_bound', out['index']['counting'])
+            self.assertEqual(untimed(self.pattern(self.unmasked_server, request)), untimed(out))
             # the loader's warning and the start-up note both name the file and the cause
             self.assertIn(f'The dummy-edge mask {mask} exists but could not be opened', err)
             self.assertIn('--mask-dummy --force', err)
@@ -2090,22 +2147,240 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                          sorted(os.listdir(os.path.dirname(self.unmasked_graph))))
         self.assertFalse(os.path.exists(self.unmasked_graph[:-len('.dbg')] + '.edgemask'))
 
-    def test_mask_required(self):
-        """Without the mask: absent in the capabilities, 400 mask_required naming both remedies."""
-        server = Server(METAGRAPH, ['-i', self.unmasked_graph, '-a', self.unmasked_anno],
-                        os.path.join(self.tempdir.name, 'server_unmasked.log'))
-        try:
-            for route in ('capabilities', 'traverse/capabilities'):
-                p = server.get(route).json()['pattern']
-                self.assertEqual(('absent', False, 'mask_required'),
-                                 (p['mask'], p['available'], p['unavailable_reason']))
-            ret = server.post('pattern', {'patterns': [{'dna': self.p16}], 'mode': 'count'})
-            self.assertEqual(400, ret.status_code)
-            self.assertEqual({'error': MASK_REQUIRED_MESSAGE, 'code': 'mask_required'},
-                             ret.json())
-        finally:
-            server.stop()
+    # ------------------------------------------------------------ without the mask (#16)
 
+    def exact_dummy_fraction(self):
+        """The mini graph's exact fraction of real k-mers among its edges with W != $, from
+        `metagraph stats --count-dummy` (the main dummy edge, W = $, among the source
+        dummies)."""
+        res = TestingBase._run_command(f'{METAGRAPH} stats --count-dummy {self.unmasked_graph}',
+                                       'Count the dummies of the mini graph')
+        text = res.stdout.decode()
+        edges = int(re.search(r'edges \( k \): (\d+)', text).group(1))
+        source = int(re.search(r'dummy source edges: (\d+)', text).group(1))
+        sink = int(re.search(r'dummy sink edges: (\d+)', text).group(1))
+        real = int(re.search(r'real edges: (\d+)', text).group(1))
+        self.assertEqual(edges, source + sink + real)
+        # the source dummies: the oracle's, and the main dummy edge
+        self.assertEqual(source - 1, len(self.records.source_dummies(self.k)))
+        return real / (edges - sink - 1)
+
+    def test_unmasked_capabilities(self):
+        """Without the mask (owner decision #16): served, mask absent, counting upper_bound, and
+        the dummy fraction sampled from 10,000 entries, its 95% interval holding the exact
+        fraction (stats --count-dummy); the rest of the block as on the masked graph, which
+        counts exactly and has no fraction."""
+        f = self.exact_dummy_fraction()
+        for route in ('capabilities', 'traverse/capabilities'):
+            p = self.unmasked_server.get(route).json()['pattern']
+            self.assertEqual(('absent', True, None, 'upper_bound'),
+                             (p['mask'], p['available'], p['unavailable_reason'], p['counting']))
+            frac = p['dummy_fraction']
+            self.assertEqual({'value', 'interval', 'samples', 'source'}, set(frac))
+            self.assertEqual((10000, 'sampled'), (frac['samples'], frac['source']))
+            lo, hi = frac['interval']
+            self.assertLessEqual(lo, f)
+            self.assertLessEqual(f, hi)
+            self.assertLessEqual(lo, frac['value'])
+            self.assertLessEqual(frac['value'], hi)
+            q = self.server.get(route).json()['pattern']
+            self.assertEqual(('file', 'exact', None), (q['mask'], q['counting'],
+                                                       q['dummy_fraction']))
+            self.assertEqual(dict(q, mask='absent', counting='upper_bound', dummy_fraction=frac),
+                             p)
+        # the probe's document stays within the ceiling of the MCP tool that returns it in one
+        # piece (traverse_capabilities, CAPABILITIES_MAX_BYTES of the Python API), which the
+        # mini index's document nearly fills: the pattern block's additions are small
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'api',
+                                        'python'))
+        from metagraph.traverse.mcp_tools import CAPABILITIES_MAX_BYTES
+        for server in (self.server, self.unmasked_server):
+            text = server.get('traverse/capabilities').text
+            self.assertLess(len(text.encode()) + 64, CAPABILITIES_MAX_BYTES)
+        # the log names it once, at start-up
+        with open(os.path.join(self.tempdir.name, 'server_unmasked.log')) as log:
+            text = log.read()
+        self.assertRegex(text, r'Dummy fraction sampled for the pattern search in [\d.]+ s')
+        self.assertIn('The graph has no dummy-edge mask (.edgemask): the pattern search counts '
+                      'upper bounds with estimates', text)
+
+    def assertUnmaskedCount(self, count, exact, upper, fraction, where=''):
+        """A count of the unmasked graph against the masked graph's exact count and the oracle's
+        upper bound (the exact contexts and those of the source dummies): exact only as the
+        exact count, exact 0 where nothing is a candidate, else bounds holding it, the upper
+        bound the oracle's, the estimate upper x f rounded into the bounds."""
+        msg = f'{where}: {count}'
+        # the count's own fields (a total also carries suffix, by_offset, by_strand)
+        own = {k for k in count if k in ('value', 'relation', 'unit', 'lower', 'upper',
+                                         'estimate')}
+        if upper == 0:
+            self.assertEqual({'value': 0, 'relation': 'exact', 'unit': count['unit']},
+                             {k: count[k] for k in own}, msg)
+            return
+        if count['relation'] == 'exact':
+            self.assertEqual(exact, count['value'], msg)
+            self.assertEqual({'value', 'relation', 'unit'}, own, msg)
+            return
+        self.assertEqual('bounds', count['relation'], msg)
+        self.assertEqual({'value', 'relation', 'unit', 'lower', 'upper', 'estimate'}, own, msg)
+        self.assertEqual(count['lower'], count['value'], msg)
+        self.assertLessEqual(count['lower'], exact, msg)
+        self.assertEqual(upper, count['upper'], msg)
+        e = min(upper, max(count['lower'], round(upper * fraction)))
+        self.assertEqual(e, count['estimate'], msg)
+
+    def test_unmasked_counts_against_the_masked(self):
+        """Owner decision #16: every count of the unmasked graph against the masked graph's exact
+        one and the source-dummy oracle, in both scopes, per offset and per strand: the upper
+        bound counts exactly the contexts of the k-mers and of the source dummies, the lower
+        bound never passes the exact count, an absent pattern is exact 0, the estimate of an
+        ordinary pattern (no dummy holds it) is the exact count; a pattern at an island's start
+        (its source dummies hold it) has an upper bound above the exact count. Anchors of a
+        pattern longer than k: a dummy never holds an anchor window (its first symbol is $)."""
+        fraction = self.unmasked_server.get('capabilities').json()['pattern'][
+            'dummy_fraction']['value']
+        long_ = [self.p40, self.absent40, self.start40]
+        for scope in ('any_offset', 'suffix'):
+            # (SCAN_10, 20 bits, is below the floor but in suffix scope, as an exact pattern)
+            short = [self.p16, self.p14, self.iupac16, self.pal12, self.absent16, self.start16,
+                     self.start14] + ([SCAN_10] if scope == 'suffix' else [])
+            request = {'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
+                                    for p in short + long_], 'mode': 'count', 'scope': scope}
+            out = self.pattern(self.unmasked_server, request)
+            masked = self.pattern(self.server, request)
+            self.assertEqual('upper_bound', out['index']['counting'])
+            self.assertNotIn('counting', masked['index'])
+            for p, e, m in zip(short + long_, out['patterns'], masked['patterns']):
+                with self.subTest(pattern=p, scope=scope):
+                    estimated = NOTE_ESTIMATE in e['notes']
+                    self.assertNotIn(NOTE_ESTIMATE, m['notes'])
+                    if len(p) > self.k:
+                        a, b = e['counts']['anchors'], m['counts']['anchors']
+                        self.assertEqual('exact', b['relation'])
+                        self.assertUnmaskedCount(a, b['value'], b['value'], fraction, 'anchors')
+                        self.assertEqual(m['counts']['paths'], e['counts']['paths'])
+                        self.assertFalse(estimated)
+                        continue
+                    exact = self.contexts(p, scope=scope)
+                    dummies = self.records.dummy_contexts(p, self.k, scope=scope)
+                    c, x = e['counts']['contexts'], m['counts']['contexts']
+                    self.assertEqual(len(exact), x['value'])
+                    self.assertUnmaskedCount(c, len(exact), len(exact) + len(dummies), fraction,
+                                             'total')
+                    L = len(p)
+                    for o in c['by_offset']:
+                        self.assertUnmaskedCount(
+                            c['by_offset'][o], sum(1 for *_, q in exact if q == int(o)),
+                            sum(1 for *_, q in exact | dummies if q == int(o)), fraction, o)
+                    self.assertUnmaskedCount(
+                        c['suffix'], sum(1 for *_, q in exact if q == self.k - L),
+                        sum(1 for *_, q in exact | dummies if q == self.k - L), fraction,
+                        'suffix')
+                    for strand, count in c['by_strand'].items():
+                        t = '=' if strand == 'both' else strand
+                        self.assertUnmaskedCount(
+                            count, sum(1 for u, *_ in exact if u == t),
+                            sum(1 for u, *_ in exact | dummies if u == t), fraction, strand)
+                    self.assertEqual(set(x['by_offset']), set(c['by_offset']))
+                    self.assertEqual(set(x['by_strand']), set(c['by_strand']))
+                    if p in (self.start16, self.start14, SCAN_10):
+                        self.assertGreater(len(dummies), 0)
+                        self.assertEqual('bounds', c['relation'])
+                        self.assertTrue(estimated)
+                    elif not dummies:
+                        # an ordinary pattern: the estimate (or the exact count) is the count
+                        self.assertEqual(len(exact), c.get('estimate', c['value']))
+                    self.assertEqual(estimated, any('estimate' in v for v in [c, c['suffix']]
+                                                    + list(c['by_offset'].values())
+                                                    + list(c['by_strand'].values())))
+                    # the rest of the entry is the masked graph's
+                    self.assertEqual({k: v for k, v in m.items()
+                                      if k not in ('counts', 'work', 'notes', 'timing')},
+                                     {k: v for k, v in e.items()
+                                      if k not in ('counts', 'work', 'notes', 'timing')})
+
+    def test_unmasked_retrieval_against_the_masked(self):
+        """Owner decision #16: the lists of the unmasked graph are exact, the masked graph's,
+        labels and placed occurrences included, and a complete release makes the counts exact
+        (the masked graph's); partial's cut lists are the masked graph's first ones; all_or_count
+        admits on the upper bound (stated: threshold_upper_bound) and withholds a pattern whose
+        real contexts fit but whose candidates do not."""
+        panel = []
+        for scope in ('any_offset', 'suffix'):
+            # (SCAN_10, 20 bits, is below the floor but in suffix scope, as an exact pattern)
+            patterns = [{'dna': self.p16}, {'iupac': self.iupac16}, {'dna': self.pal12},
+                        {'dna': self.absent16}, {'dna': self.start16}, {'dna': self.start14}] \
+                + ([{'dna': SCAN_10}] if scope == 'suffix' else [])
+            panel.append({'patterns': patterns, 'scope': scope})
+            panel.append({'patterns': patterns, 'scope': scope, 'mode': 'partial',
+                          'max_contexts': 5})
+            panel.append({'patterns': patterns, 'scope': scope, 'output': {'labels': 'all'}})
+        panel.append({'patterns': [{'dna': self.p40}, {'dna': self.start40},
+                                   {'dna': self.absent40}], 'long_search': 'paths',
+                      'output': {'labels': 'all'}})
+        for request in panel:
+            out = self.pattern(self.unmasked_server, request)
+            masked = self.pattern(self.server, request)
+            for e, m in zip(out['patterns'], masked['patterns']):
+                with self.subTest(pattern=m['pattern'], request=request):
+                    for field in ('results', 'returned', 'withheld', 'cut', 'by_label',
+                                  'retrieval_complete'):
+                        self.assertEqual(m.get(field), e.get(field), field)
+                    for r in e['results']:
+                        self.assertNotIn('$', r.get('kmer', r.get('sequence')))
+                    if m['retrieval_complete']:
+                        # every candidate enumerated: the counts are the exact ones
+                        self.assertEqual(m['counts'], e['counts'])
+                    elif request.get('mode') == 'partial':
+                        c, x = e['counts']['contexts'], m['counts']['contexts']
+                        self.assertGreaterEqual(c['value'], e['returned'])
+                        self.assertLessEqual(c['value'], x['value'])
+                        if c['relation'] == 'bounds':
+                            self.assertGreaterEqual(c['upper'], x['value'])
+        # all_or_count's admission compares the upper bound: start16's real contexts fit
+        # max_contexts, its candidates (the source dummies among them) do not
+        exact = len(self.contexts(self.start16))
+        upper = exact + len(self.records.dummy_contexts(self.start16, self.k))
+        self.assertGreater(upper, exact)
+        request = {'patterns': [{'dna': self.start16}], 'max_contexts': exact}
+        m = self.pattern(self.server, request)['patterns'][0]
+        self.assertCompleteRetrieval(m)
+        e = self.pattern(self.unmasked_server, request)['patterns'][0]
+        self.assertEqual({'reason': 'count_above_threshold'}, e['withheld'])
+        self.assertFalse(e['retrieval_complete'])
+        self.assertEqual(('bounds', upper), (e['counts']['contexts']['relation'],
+                                             e['counts']['contexts']['upper']))
+        self.assertIn(NOTE_THRESHOLD_UPPER, e['notes'])
+        self.assertIn(NOTE_ESTIMATE, e['notes'])
+        # room for every candidate: released, the masked graph's list, the count exact
+        e = self.pattern(self.unmasked_server, dict(request, max_contexts=upper))['patterns'][0]
+        self.assertCompleteRetrieval(e)
+        self.assertEqual(m['results'], e['results'])
+        self.assertEqual(m['counts'], e['counts'])
+
+    def test_unmasked_stop_at_threshold_is_conservative(self):
+        """stop_at_threshold on the unmasked graph compares the running upper bound: it stops
+        no later than on the masked graph, every count it leaves a true lower bound."""
+        request = {'patterns': [{'dna': self.p16}, {'dna': self.start16}, {'iupac': self.iupac16}],
+                   'max_contexts': 3, 'stop_at_threshold': True}
+        out = self.pattern(self.unmasked_server, request)
+        masked = self.pattern(self.server, request)
+        for e, m in zip(out['patterns'], masked['patterns']):
+            with self.subTest(pattern=m['pattern']):
+                exact = len(self.contexts(m['pattern']))
+                c = e['counts']['contexts']
+                self.assertLessEqual(c['value'], exact)
+                self.assertIn(c['relation'], ('at_least', 'bounds', 'exact'))
+                if c['relation'] == 'exact':
+                    self.assertEqual(exact, c['value'])
+                # all or nothing: the masked graph's list, or none (the upper bound crossed the
+                # threshold first: start16 has fewer real contexts than its candidates)
+                if e['withheld'] is None:
+                    self.assertEqual(m['results'], e['results'])
+                else:
+                    self.assertEqual([], e['results'])
+                    if m['withheld'] is None:
+                        self.assertIn(NOTE_THRESHOLD_UPPER, e['notes'])
 
 @unittest.skipIf(PROTEIN_MODE, "pattern search is DNA only")
 @unittest.skipUnless(_supports_pattern(), "`metagraph pattern` is not available in this build")
@@ -2141,6 +2416,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
         cls.records = Records.from_fasta([cls.fasta])
 
         cls.servers = {}
+        cls.unmasked_servers = {}
         for mode in ('basic', 'canonical', 'primary'):
             graph = os.path.join(d, f'graph_{mode}.dbg')
             cls._build_graph(cls.fasta, graph, cls.K, 'succinct', mode=mode,
@@ -2151,12 +2427,21 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                                                    '--pattern-min-information-bits',
                                                    str(cls.FLOOR)],
                                        os.path.join(d, f'server_{mode}.log'))
+            # the same graph without its mask (owner decision #16): the .dbg alone in a
+            # directory of its own (the loader reads a mask beside the path it is given)
+            u = os.path.join(d, f'unmasked_{mode}')
+            os.makedirs(u)
+            os.symlink(graph, os.path.join(u, os.path.basename(graph)))
+            cls.unmasked_servers[mode] = Server(
+                METAGRAPH, ['-i', os.path.join(u, os.path.basename(graph)), '-a', anno,
+                            '--pattern-min-information-bits', str(cls.FLOOR)],
+                os.path.join(d, f'server_unmasked_{mode}.log'))
         cls.graph_basic = os.path.join(d, 'graph_basic.dbg')
         cls.anno_basic = os.path.join(d, 'anno_basic.column.annodbg')
 
     @classmethod
     def tearDownClass(cls):
-        for server in cls.servers.values():
+        for server in list(cls.servers.values()) + list(cls.unmasked_servers.values()):
             server.stop()
         super().tearDownClass()
 
@@ -2241,6 +2526,70 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                         self.assertEqual(carriers, {x['column'] for x in r['labels']}, s)
                         for label in r['labels']:
                             self.assertEqual('label_intersection', label['support'])
+
+    def test_unmasked_in_every_graph_mode(self):
+        """Owner decision #16 on BASIC, CANONICAL and PRIMARY graphs without their mask: the
+        counts of short motifs (many of them in source dummies at k = 15) against the record
+        oracle and, on BASIC and CANONICAL, the source-dummy oracle (the upper bound exactly the
+        contexts of the k-mers and of the dummies); on PRIMARY, whose wrapper searches the
+        stored graph twice, an upper bound at least the exact count; every list the masked
+        graph's, every complete release exact; the paths of long patterns the masked graph's."""
+        for mode in ('basic', 'canonical', 'primary'):
+            stated = mode == 'basic'
+            caps = self.unmasked_servers[mode].get('capabilities').json()['pattern']
+            self.assertEqual(('absent', 'upper_bound', True),
+                             (caps['mask'], caps['counting'], caps['available']))
+            fraction = caps['dummy_fraction']['value']
+            for scope in ('any_offset', 'suffix'):
+                if mode == 'primary' and scope == 'suffix':
+                    continue
+                request = {'patterns': [{'iupac': p} for p in self.PATTERNS], 'scope': scope,
+                           'mode': 'count'}
+                out = self.pattern(self.unmasked_servers[mode], request)
+                for entry, p in zip(out['patterns'], self.PATTERNS):
+                    with self.subTest(mode=mode, scope=scope, pattern=p):
+                        exact = self.records.contexts(p, self.K, scope=scope,
+                                                      canonical=not stated)
+                        c = entry['counts']['contexts']
+                        if c['relation'] == 'exact':
+                            self.assertEqual(len(exact), c['value'])
+                            continue
+                        self.assertEqual('bounds', c['relation'])
+                        self.assertLessEqual(c['lower'], len(exact))
+                        self.assertIn(NOTE_ESTIMATE, entry['notes'])
+                        self.assertEqual(min(c['upper'], max(c['lower'],
+                                                             round(c['upper'] * fraction))),
+                                         c['estimate'])
+                        if mode == 'primary':
+                            self.assertGreaterEqual(c['upper'], len(exact))
+                            continue
+                        dummies = self.records.dummy_contexts(p, self.K, scope=scope,
+                                                              canonical=not stated)
+                        self.assertEqual(len(exact) + len(dummies), c['upper'])
+                # the lists, and their counts once complete
+                for m in ('all_or_count', 'partial'):
+                    request = {'patterns': [{'iupac': p} for p in self.PATTERNS],
+                               'scope': scope, 'mode': m, 'max_contexts': 30}
+                    out = self.pattern(self.unmasked_servers[mode], request)
+                    masked = self.pattern(self.servers[mode], request)
+                    for e, x in zip(out['patterns'], masked['patterns']):
+                        with self.subTest(mode=mode, scope=scope, request=m,
+                                          pattern=x['pattern']):
+                            if m == 'partial' or x['withheld'] is None:
+                                self.assertEqual(x['results'], e['results'])
+                            if e['retrieval_complete']:
+                                self.assertEqual(x['counts'], e['counts'])
+                                self.assertEqual(x['results'], e['results'])
+            # the paths of long patterns: the masked graph's
+            island = max((i for _, _, i in self.records.islands), key=len)
+            request = {'patterns': [{'dna': island[100:125]}, {'dna': island[:24]}],
+                       'long_search': 'paths', 'output': {'labels': 'none'}}
+            out = self.pattern(self.unmasked_servers[mode], request)
+            masked = self.pattern(self.servers[mode], request)
+            for e, x in zip(out['patterns'], masked['patterns']):
+                with self.subTest(mode=mode, paths=x['pattern']):
+                    self.assertEqual(x['results'], e['results'])
+                    self.assertEqual(x['counts']['paths'], e['counts']['paths'])
 
     def test_rows(self):
         """The row is the annotation row of the context's k-mer: node - 1 on BASIC; on the

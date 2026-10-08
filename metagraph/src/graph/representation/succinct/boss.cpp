@@ -973,6 +973,35 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
     return ret;
 }
 
+bool BOSS::node_has_sentinel(edge_index x) const {
+    CHECK_INDEX(x);
+
+    // the symbols of the node from its last, as get_node_seq reads them: '$' only ever leads
+    // a node, so the first one met is the answer (and bwd is never asked from a node ending
+    // with '$', which only the main dummy node $...$ does)
+    size_t i = k_;
+    if (indexed_suffix_length_) {
+        while (i > indexed_suffix_length_) {
+            if (get_node_last_value(x) == kSentinelCode)
+                return true;
+            x = bwd(x);
+            --i;
+        }
+        // the node's first indexed_suffix_length_ symbols are the last ones of x's node: in
+        // an indexed range iff they hold no '$' (get_node_seq's test)
+        uint64_t index = indexed_suffix_ranges_slct0_(x + 1) - x;
+        return !(index % 2);
+    }
+
+    for (;;) {
+        if (get_node_last_value(x) == kSentinelCode)
+            return true;
+        if (!--i)
+            return false;
+        x = bwd(x);
+    }
+}
+
 /**
  * Given a node index k_node, this function returns the k-mer sequence of the
  * node as a string.
