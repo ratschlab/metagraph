@@ -426,12 +426,31 @@ class LabelOracle {
  * annotation.batch_kmers. |dependency_units|: the work of its row-diff dependency rows (8 per
  * row and 1 per entry and coordinate they store). |demand|: an upper bound of what reading
  * it ALONE holds at its peak — the decode, what building its result holds beside the raw row,
- * and the result — which every key a budgeted fetch returns is admitted against.
+ * and the result — which every key a budgeted fetch returns is admitted against. |entries|:
+ * the size of the row the read decoded, before anything was taken from it — its columns, and
+ * for a tuple row its columns plus their coordinates —, so that a caller can charge a read
+ * of a restricted LabelQuery as the whole row it decoded (on the row-diff family asking for
+ * fewer labels does not make a row cheaper), not as the hits it returned. Nothing in this
+ * file charges |entries|.
+ *
+ * Its size is part of the memory model (the costs vectors and LabelRecorder's demand charge
+ * sizeof(KeyCost) per key; the cache entries kCostEntryBytes), so |entries| takes no room:
+ * both unit counts are 32 bits, saturated at 2^32 - 1 (saturate_units()). A read reaches it
+ * only holding gigabytes at once: its demand counts the stored rows of its path (a row's
+ * slot, and every entry and coordinate they store, at least 4 bytes) and the decoded row
+ * (8 bytes per column or coordinate).
  */
 struct KeyCost {
-    uint64_t dependency_units = 0;
+    uint32_t dependency_units = 0;
+    uint32_t entries = 0;
     uint64_t demand = 0;
 };
+static_assert(sizeof(KeyCost) == 16, "the memory model charges sizeof(KeyCost) per key");
+
+// |units| as KeyCost stores them: at most 2^32 - 1
+inline uint32_t saturate_units(uint64_t units) {
+    return static_cast<uint32_t>(std::min<uint64_t>(units, std::numeric_limits<uint32_t>::max()));
+}
 
 // The longest run of keys one budget-aware read decodes together: a run that does not fit
 // is retried in halves, so this bounds the wasted decoding near the budget
@@ -509,7 +528,9 @@ class LabelQuery {
     using NodeHits = std::vector<Hit>;
 
     // Throws std::invalid_argument if the requested access path is not available
-    // for this annotation (no silent fallback).
+    // for this annotation (no silent fallback). AUTO picks DIRECT for at most 16 columns
+    // when the annotation has direct access, which the budget-aware fetch and warm do not
+    // read (they decode whole rows): their callers ask for ROWS explicitly.
     LabelQuery(const LabelOracle &oracle,
                std::vector<LabelRef> labels,
                bool with_coords,

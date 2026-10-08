@@ -5,6 +5,8 @@
 
 #include <chrono>
 #include <future>
+#include <limits>
+#include <map>
 #include <memory>
 #include <random>
 #include <set>
@@ -177,6 +179,201 @@ TEST(LabelOracleBudgetedQuery, SameHitsAsTheUnbudgetedFetch) {
             EXPECT_GT(from_cache, 10u);
         }
     }
+}
+
+// The rows of the fixture counted from its sequences alone (an oracle independent of the
+// annotation and its decoders): per k-mer as spelled (BASIC), the columns it occurs in and
+// its occurrences in them (one coordinate each)
+struct RowCounts {
+    uint64_t columns = 0;
+    uint64_t coordinates = 0;
+};
+
+std::map<std::string, RowCounts> rows_by_kmer(const Fixture &fx) {
+    std::map<std::string, std::map<std::string, uint64_t>> occurrences;
+    for (size_t i = 0; i < fx.seqs.size(); ++i) {
+        for (size_t p = 0; p + kK <= fx.seqs[i].size(); ++p) {
+            occurrences[fx.seqs[i].substr(p, kK)][fx.labels[i]]++;
+        }
+    }
+    std::map<std::string, RowCounts> out;
+    for (const auto &[kmer, per_label] : occurrences) {
+        RowCounts &r = out[kmer];
+        r.columns = per_label.size();
+        for (const auto &entry : per_label) {
+            r.coordinates += entry.second;
+        }
+    }
+    return out;
+}
+
+// 5b-2 (honest units, DECISIONS P17): KeyCost::entries is the whole row the read decoded —
+// its columns, and for a tuple row its columns plus their coordinates — whatever the query
+// keeps of it (one label, or the recorder's cap), and the same whether the key was decoded by
+// the fetch, found in the cache or decoded by the lookahead
+TEST(LabelOracleBudgetedQuery, EntriesAreTheDecodedRow) {
+    for (bool coordinates : { false, true }) {
+        Fixture fx(coordinates);
+        const auto expected = rows_by_kmer(fx);
+        std::vector<std::pair<std::vector<std::string>, bool>> restricted {
+            { { "L3" }, false },
+        };
+        if (coordinates) {
+            restricted.push_back({ { "L3" }, true });
+            restricted.push_back({ { "acc1" }, false });
+        }
+        for (const auto &[names, with_coords] : restricted) {
+            LabelOracle oracle(*fx.anno, fx.cth.get());
+            ASSERT_TRUE(oracle.decode_charged());
+            for (int variant = 0; variant < 3; ++variant) {
+                // 0: decoded by the fetch, 1: the second of two fetches (cached),
+                // 2: decoded by a warm before the fetch (cached)
+                LabelQuery query(oracle, refs(oracle, names), with_coords);
+                query.set_max_cache_bytes(variant ? 1 << 22 : 0);
+                const bool tuples = std::string(query.access_path()) == "tuples";
+                EXPECT_EQ(coordinates && (with_coords || names[0] == "acc1"), tuples);
+                uint64_t checked = 0, entries = 0, hit_units = 0;
+                for (const std::string &seq : fx.seqs) {
+                    const std::vector<node_index> keys = oracle.keys_of_sequence(seq);
+                    std::vector<LabelQuery::NodeHits> hits;
+                    std::vector<KeyCost> costs;
+                    hits.reserve(keys.size());
+                    costs.reserve(keys.size());
+                    size_t refused = 0;
+                    if (variant == 1) {
+                        DecodeBudget first;
+                        ASSERT_TRUE(query.fetch(keys.data(), keys.size(), first, &hits, &costs,
+                                                &refused));
+                        hits.clear();
+                        costs.clear();
+                    } else if (variant == 2) {
+                        DecodeBudget warm;
+                        query.warm(keys, warm);
+                    }
+                    const uint64_t cache_hits = oracle.counters().cache_hits;
+                    DecodeBudget budget;
+                    ASSERT_TRUE(query.fetch(keys.data(), keys.size(), budget, &hits, &costs,
+                                            &refused));
+                    if (variant) {
+                        EXPECT_EQ(cache_hits + keys.size(), oracle.counters().cache_hits);
+                    }
+                    ASSERT_EQ(keys.size(), costs.size());
+                    for (size_t p = 0; p < keys.size(); ++p) {
+                        ASSERT_NE(npos, keys[p]);
+                        const RowCounts &row = expected.at(seq.substr(p, kK));
+                        EXPECT_EQ(tuples ? row.columns + row.coordinates : row.columns,
+                                  costs[p].entries)
+                                << names[0] << " " << with_coords << " variant " << variant;
+                        checked++;
+                        entries += costs[p].entries;
+                        hit_units += hits[p].size();
+                        for (const auto &hit : hits[p]) {
+                            hit_units += hit.coords.size();
+                        }
+                    }
+                }
+                EXPECT_GT(checked, 400u);
+                // the rows are wider than what the restricted query keeps of them
+                EXPECT_GT(entries, 2 * hit_units) << names[0];
+            }
+        }
+    }
+}
+
+TEST(LabelOracleBudgetedRecorder, EntriesAreTheDecodedRow) {
+    Fixture fx(true);
+    const auto expected = rows_by_kmer(fx);
+    auto name_bytes = [](std::string_view n) { return 100 + n.size(); };
+    for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
+        for (size_t cap : { size_t(1), size_t(64) }) {
+            for (int variant = 0; variant < 3; ++variant) {
+                LabelOracle oracle(*fx.anno, fx.cth.get());
+                LabelRecorder recorder(oracle, kind, cap);
+                recorder.set_max_cache_bytes(variant ? 1 << 22 : 0);
+                ASSERT_STREQ(kind == LabelKind::HEADER ? "tuples" : "rows", recorder.access_path());
+                for (const std::string &seq : fx.seqs) {
+                    const std::vector<node_index> keys = oracle.keys_of_sequence(seq);
+                    std::vector<LabelRecorder::NodeLabels> lists;
+                    std::vector<KeyCost> costs;
+                    lists.reserve(keys.size());
+                    costs.reserve(keys.size());
+                    size_t refused = 0;
+                    if (variant == 1) {
+                        DecodeBudget first;
+                        ASSERT_TRUE(recorder.fetch(keys.data(), keys.size(), first, &lists,
+                                                   &costs, &refused, name_bytes));
+                        lists.clear();
+                        costs.clear();
+                    } else if (variant == 2) {
+                        DecodeBudget warm;
+                        recorder.warm(keys, warm);
+                    }
+                    DecodeBudget budget;
+                    ASSERT_TRUE(recorder.fetch(keys.data(), keys.size(), budget, &lists, &costs,
+                                               &refused, name_bytes));
+                    ASSERT_EQ(keys.size(), costs.size());
+                    for (size_t p = 0; p < keys.size(); ++p) {
+                        const RowCounts &row = expected.at(seq.substr(p, kK));
+                        EXPECT_EQ(kind == LabelKind::HEADER ? row.columns + row.coordinates
+                                                            : row.columns,
+                                  costs[p].entries)
+                                << (kind == LabelKind::HEADER) << " cap " << cap
+                                << " variant " << variant;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The 32-bit unit counts of KeyCost saturate instead of wrapping
+TEST(LabelOracleBudgeted, KeyCostUnitsSaturate) {
+    EXPECT_EQ(0u, saturate_units(0));
+    EXPECT_EQ(4'294'967'294u, saturate_units(4'294'967'294ull));
+    EXPECT_EQ(4'294'967'295u, saturate_units(4'294'967'295ull));
+    EXPECT_EQ(4'294'967'295u, saturate_units(4'294'967'296ull));
+    EXPECT_EQ(4'294'967'295u, saturate_units(std::numeric_limits<uint64_t>::max()));
+}
+
+// The trap of Access::AUTO (plan of 5b, finding 10), pinned as it is: AUTO picks DIRECT for at
+// most 16 distinct columns wherever the annotation has direct access, and ROWS above (TUPLES
+// with coordinates or header labels) — while the budget-aware fetch reads whole rows only,
+// so a budgeted caller must ask for ROWS. None of the annotations the budget-aware reads
+// serve (decode_charged()) has direct access, so there AUTO is ROWS.
+TEST(LabelOracleAccess, AutoPicksDirectForAtMost16Columns) {
+    auto seqs = sequences(17, 40, 23);
+    std::vector<std::string> names;
+    for (size_t i = 0; i < seqs.size(); ++i) {
+        names.push_back("c" + std::to_string(i));
+    }
+    auto prefix = [&](size_t n) { return std::vector<std::string>(names.begin(), names.begin() + n); };
+    auto column = test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(kK, seqs, names, DeBruijnGraph::BASIC);
+    auto row_flat = test::build_anno_graph<DBGSuccinct, annot::RowFlatAnnotator>(kK, seqs, names, DeBruijnGraph::BASIC);
+    for (const auto *anno : { column.get(), row_flat.get() }) {
+        LabelOracle oracle(*anno);
+        ASSERT_TRUE(oracle.supports_direct());
+        EXPECT_FALSE(oracle.decode_charged());
+        EXPECT_STREQ("direct", LabelQuery(oracle, refs(oracle, prefix(1)), false).access_path());
+        EXPECT_STREQ("direct", LabelQuery(oracle, refs(oracle, prefix(16)), false).access_path());
+        EXPECT_STREQ("rows", LabelQuery(oracle, refs(oracle, prefix(17)), false).access_path());
+        EXPECT_STREQ("rows", LabelQuery(oracle, refs(oracle, prefix(1)), false,
+                                        LabelOracle::Access::ROWS).access_path());
+    }
+    auto row_diff = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(kK, seqs, names, DeBruijnGraph::BASIC);
+    auto row_diff_coord = test::build_anno_graph<DBGSuccinct, annot::RowDiffColumnAnnotator>(kK, seqs, names, DeBruijnGraph::BASIC, true);
+    auto row_disk = test::build_anno_graph<DBGSuccinct, annot::RowDiffDiskAnnotator>(kK, seqs, names, DeBruijnGraph::BASIC);
+    for (const auto *anno : { row_diff.get(), row_diff_coord.get(), row_disk.get() }) {
+        LabelOracle oracle(*anno);
+        EXPECT_FALSE(oracle.supports_direct());
+        for (size_t n : { size_t(1), size_t(16), size_t(17) }) {
+            EXPECT_STREQ("rows", LabelQuery(oracle, refs(oracle, prefix(n)), false).access_path());
+        }
+        if (oracle.has_coordinates()) {
+            EXPECT_TRUE(oracle.decode_charged());
+            EXPECT_STREQ("tuples", LabelQuery(oracle, refs(oracle, prefix(1)), true).access_path());
+        }
+    }
+    EXPECT_TRUE(LabelOracle(*row_diff).decode_charged());
 }
 
 // The efficiency pass, the row-diff path cache (LabelOracle::path_cache): the reads of an

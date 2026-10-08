@@ -42,6 +42,14 @@ constexpr uint64_t kCostEntryBytes = 128;
 static uint64_t dependency_units(const RowCost &cost) {
     return 8 * cost.dependency_rows + cost.dependency_entries;
 }
+// the entries of a decoded tuple row (KeyCost::entries): its columns and their coordinates
+static uint64_t row_entries(const MultiIntMatrix::RowTuples &row) {
+    uint64_t entries = row.size();
+    for (const auto &entry : row) {
+        entries += entry.second.size();
+    }
+    return entries;
+}
 
 
 LabelOracle::LabelOracle(const AnnotatedDBG &anno_graph,
@@ -513,7 +521,13 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
             path_ = Path::ROWS;
             break;
         case LabelOracle::Access::AUTO:
-            // a few single-cell reads beat reconstructing the whole row
+            // a few single-cell reads beat reconstructing the whole row. A trap for the
+            // budget-aware fetch, which reads whole rows only (decode_run asserts the path is
+            // not DIRECT): AUTO picks DIRECT for <= 16 columns wherever the annotation has
+            // direct access, so a budgeted caller asks for ROWS explicitly. Unreachable today:
+            // no annotation the budget-aware reads serve (LabelOracle::decode_charged(), the
+            // row-diff family) has direct access, so AUTO is ROWS there (the test
+            // LabelOracleAccess.AutoPicksDirectForAtMost16Columns pins both)
             path_ = oracle_.supports_direct() && direct_columns_.size() <= 16 ? Path::DIRECT
                                                                               : Path::ROWS;
             break;
@@ -1028,6 +1042,7 @@ DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudg
     std::vector<BinaryMatrix::SetBitPositions> plain;
     std::vector<MultiIntMatrix::RowTuples> tuples;
     const bool tuple_path = path_ == Path::TUPLES;
+    // whole rows only: a budgeted caller asks for Access::ROWS, not AUTO (see the constructor)
     assert(path_ != Path::DIRECT);
     const DecodeStatus status = tuple_path
         ? oracle_.get_row_tuples(rows, budget, &tuples, &row_costs, &held)
@@ -1055,8 +1070,10 @@ DecodeStatus LabelQuery::decode_run(const node_index *keys, size_t n, DecodeBudg
             result = DecodeStatus::REFUSED;
             break;
         }
-        (*costs)[at + i] = KeyCost{ dependency_units(row_costs[i]),
-                                    row_costs[i].demand + one + peak };
+        KeyCost &cost = (*costs)[at + i];
+        cost.dependency_units = saturate_units(dependency_units(row_costs[i]));
+        cost.entries = saturate_units(tuple_path ? row_entries(tuples[i]) : plain[i].size());
+        cost.demand = row_costs[i].demand + one + peak;
         budget.release(held[i]);
         if (tuple_path) {
             MultiIntMatrix::RowTuples().swap(tuples[i]);
@@ -1798,10 +1815,11 @@ DecodeStatus LabelRecorder::decode_run(const node_index *keys, size_t n, DecodeB
         }
         // a key's demand: decoding it alone, the row vector of one key, building its raw
         // row, and the label list it is returned as
-        (*costs)[at + i] = KeyCost{ dependency_units(row_costs[i]),
-                                    row_costs[i].demand + one + peak
-                                        + buffer_bytes((*rows_out)[at + i].kept.size(),
-                                                       sizeof(LabelId)) };
+        KeyCost &cost = (*costs)[at + i];
+        cost.dependency_units = saturate_units(dependency_units(row_costs[i]));
+        cost.entries = saturate_units(tuple_path ? row_entries(tuples[i]) : plain[i].size());
+        cost.demand = row_costs[i].demand + one + peak
+                        + buffer_bytes((*rows_out)[at + i].kept.size(), sizeof(LabelId));
         (*rows_held)[at + i] = raw_bytes((*rows_out)[at + i]);
         budget.release(held[i]);
         if (tuple_path) {
