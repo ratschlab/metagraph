@@ -257,6 +257,35 @@ def free_port():
         return s.getsockname()[1]
 
 
+def half_closed_request(port, route, body, timeout=60):
+    """The bytes a server sends for a complete POST /route (body: a dict, sent as JSON, or the
+    raw text) whose client then half-closed its connection: shutdown(SHUT_WR) right after the
+    request, as in the reviewer's repro (review GPT-2 of 2026-10-08, finding 4). The client
+    still reads until the server closes. The request is held back until the FIN goes with it
+    where the platform can do so (TCP_CORK on Linux, TCP_NOPUSH on macOS), so that the server
+    sees the FIN as soon as it has read the request, not after a race."""
+    payload = (body if isinstance(body, str) else json.dumps(body)).encode()
+    head = (f'POST /{route} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n'
+            f'Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n').encode()
+    with socket.create_connection(('127.0.0.1', port), timeout=timeout) as s:
+        hold = getattr(socket, 'TCP_CORK', None)
+        if hold is None and sys.platform == 'darwin':
+            hold = 4    # TCP_NOPUSH of <netinet/tcp.h>, which Python does not export
+        if hold is not None:
+            try:
+                s.setsockopt(socket.IPPROTO_TCP, hold, 1)
+            except OSError:
+                pass
+        s.sendall(head + payload)
+        s.shutdown(socket.SHUT_WR)
+        received = b''
+        while True:
+            part = s.recv(65536)
+            if not part:
+                return received
+            received += part
+
+
 class Server:
     """A server_query process on a free port, ready once GET /stats answers 200."""
 
@@ -1617,6 +1646,36 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                     self.assertEqual(labels, {b['column']: b['contexts']['value']
                                               for b in entry['by_label']})
 
+    def test_a_client_that_left_is_not_answered(self):
+        """SPEC §3: a request whose client has left is not answered, a half-close counted as
+        gone -- its errors no more than its answer (review GPT-2 of 2026-10-08, finding 4:
+        after a complete request and shutdown(SHUT_WR), a valid count request got 0 bytes, but
+        `{` got 194 (400) and {"patterns":[]} 177 (400): the error path wrote without asking).
+        The same requests from a client that is still there are answered as before."""
+        server = self.servers['basic']
+        cases = [
+            ('a count', {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'}, 200, None),
+            ('a retrieval', {'patterns': [{'dna': 'ACGAC'}]}, 200, None),
+            ('not JSON', '{', 400, 'invalid_request'),
+            ('no patterns', {'patterns': []}, 400, 'invalid_request'),
+            ('a later increment', {'patterns': [{'dna': 'ACGAC'}],
+                                   'output': {'labels': 'predicate_only'}}, 400,
+             'later_increment'),
+            # refused once the request is parsed (the column annotation has no budgeted reads)
+            ('unbudgeted labels', {'patterns': [{'dna': 'ACGAC'}], 'output': {'labels': 'all'}},
+             400, 'annotation_unbudgeted'),
+        ]
+        for name, body, status, code in cases:
+            with self.subTest(case=name):
+                ret = server.post('pattern', body, raw=isinstance(body, str))
+                self.assertEqual(status, ret.status_code, ret.text)
+                if code:
+                    self.assertEqual(code, ret.json()['code'])
+                for _ in range(3):
+                    self.assertEqual(b'', half_closed_request(server.port, 'pattern', body))
+        # the server serves on
+        self.pattern(server, {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'})
+
     def test_multi_graph_server(self):
         d = self.tempdir.name
         csv = os.path.join(d, 'graphs.csv')
@@ -1628,6 +1687,9 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(400, ret.status_code)
             self.assertEqual({'error': 'pattern: multi-graph servers in a later increment',
                               'code': 'later_increment'}, ret.json())
+            # nor is this refusal written to a client that left (review GPT-2, finding 4)
+            self.assertEqual(b'', half_closed_request(
+                server.port, 'pattern', {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'}))
             caps = server.get('capabilities').json()
             self.assertNotIn('pattern', caps['features'])
             self.assertNotIn('pattern', caps['routes'])
@@ -1846,6 +1908,24 @@ class TestPatternRegression(TestingBase):
         for route in ('column_labels', 'stats'):
             a, b = self.base.get(route), self.new.get(route)
             self.assertEqual((a.status_code, a.content), (b.status_code, b.content), route)
+
+    def test_a_half_closed_client_is_answered_as_before(self):
+        """Only /pattern withholds its answers from a client that half-closed (review GPT-2 of
+        2026-10-08, finding 4): /search and /align answer such a client byte for byte as
+        before, their errors included."""
+        panel = [
+            ('search', {'FASTA': f'>query\n{self.SEQ}', 'top_labels': 5,
+                        'min_exact_match': 0.1}),
+            ('search', '{"FASTA": ">query\\nAATAAAGG", "discovery_fraction": 0.1,'),
+            ('search', {'discovery_fraction': 0.1}),
+            ('align', {'FASTA': '>query0\nTCGATCGA', 'min_exact_match': 0}),
+            ('align', '{'),
+        ]
+        for route, payload in panel:
+            a = half_closed_request(self.base.port, route, payload)
+            b = half_closed_request(self.new.port, route, payload)
+            self.assertTrue(a.startswith(b'HTTP/1.1 '), (route, payload, a))
+            self.assertEqual(a, b, (route, payload))
 
     def test_capabilities_only_gain(self):
         def without_instance(value):

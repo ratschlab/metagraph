@@ -46,11 +46,19 @@ namespace {
 // a released context: its result object (k-mer, instance, offset, strand, node, row) and its
 // descriptor, beside its k-mer twice (the result's strings); charged before the object is built
 uint64_t context_bytes(size_t k) { return 512 + 2 * k; }
-// a dictionary label: its LabelRef and name in the recorder, its counters here, its name in
-// by_label and in every label object (the latter priced with the label object)
-uint64_t label_name_bytes(std::string_view name) { return 192 + 3 * name.size(); }
-// a label object of a result (column, support, the occurrences count, the list)
-constexpr uint64_t kLabelEntryBytes = 256;
+// Every copy of a label's name the request holds is priced where it is made, at its length
+// (review GPT-2, finding 3: a result's label was priced 256 whatever its name, and one label
+// of 512 KiB in 64 contexts built a 34 MB answer under max_memory_mb 2):
+// a dictionary label: its LabelRef and name in the recorder, its counters here, and the copy
+// of its name in each pattern's placement (the LabelQuery of step 2 copies the dictionary;
+// one at a time); charged inside the read that names it
+uint64_t label_name_bytes(std::string_view name) { return 192 + 2 * name.size(); }
+// a label object of a result (column, support, the occurrences count, the list) and its copy
+// of the label's name
+uint64_t label_entry_bytes(std::string_view name) { return 256 + name.size(); }
+// a by_label entry of a pattern (graph, column, contexts, contexts_suffix, occurrences) and its
+// copy of the label's name
+uint64_t by_label_bytes(std::string_view name) { return 512 + name.size(); }
 // a placed occurrence object (seq_id, record, strand, nt_coords, nt_length), its record name
 // beside it
 uint64_t occurrence_bytes(std::string_view record) { return 256 + record.size(); }
@@ -62,8 +70,6 @@ constexpr uint64_t kDedupBytes = 64;
 // available_bytes) or an anchors_truncated entry (k-mer, row, cap, total); reserved before
 // the read that can produce it, so that it always fits, and held with the answer
 uint64_t statement_bytes(size_t k) { return 384 + k; }
-// the most keys one read takes (the reads' own runs are cut at kMaxDecodeRun as well)
-constexpr size_t kMaxChunk = graph::traversal::kMaxDecodeRun;
 
 /**
  * The compact JSON text of the labels built for the answer, from above (AnswerVolume, review
@@ -398,14 +404,17 @@ struct PatternRetrieval::Impl {
         return true;
     }
 
-    // keys per read: grown from one, and near the work budget no more than it has left at
-    // the widest row read so far (so a read overshoots it by one row at most)
-    size_t chunk(size_t grown, uint64_t widest) const {
-        const uint64_t left = limits.max_annotation_work - units;
-        return static_cast<size_t>(std::min<uint64_t>(
-                { static_cast<uint64_t>(grown), static_cast<uint64_t>(kMaxChunk),
-                  std::max<uint64_t>(1, left / (8 + widest)) }));
+    // the work of a read, charged to the request and to the pattern
+    void charge_work(uint64_t u, uint64_t *pattern_units) {
+        units += u;
+        *pattern_units += u;
     }
+
+    // What a refused read is charged (review GPT-2, finding 1): the units of what it decoded
+    // (FetchRefusal::units: the row was read, and refused for its demand or its names), or 8
+    // when its read itself did not fit (its units are not known): a refused row is work like
+    // a row read, so that refusals cannot go on past the work budget
+    static uint64_t refused_units(const FetchRefusal &r) { return r.units ? r.units : 8; }
 
     Json::Value refusal_json(const RowState &row, const std::vector<RetrievalContext> &contexts,
                              const char *phase, const FetchRefusal *r) const {
@@ -436,145 +445,106 @@ struct PatternRetrieval::Impl {
                     uint64_t *held_hits, Json::Value *refused);
 };
 
+// Both steps read one row at a time (review GPT-2, finding 2): the time and the work are
+// checked before every row, and every row whose read began is charged its units (also when it
+// is refused or interrupted), so that a read passes the work budget by its one row at most —
+// a batch sized by the rows read before it overshot by every wider row in it (7 rows of one
+// label, then 8 of 100: 927 units under a budget of 150). The units of a row do not depend on
+// how the rows are cut into reads (KeyCost: its whole row-diff path), so where the reads stop
+// depends only on the index and the request.
 void PatternRetrieval::Impl::discover(std::vector<RowState> &rows,
                                       const std::vector<RetrievalContext> &contexts,
                                       Mode mode, uint64_t *rows_read, uint64_t *pattern_units,
                                       uint64_t *held_lists, Json::Value *refused) {
-    std::vector<uint64_t> keys(rows.size());
-    for (size_t i = 0; i < rows.size(); ++i) {
-        keys[i] = rows[i].key;
-    }
     auto name_bytes = [](std::string_view name) { return label_name_bytes(name); };
-    size_t pos = 0, grown = 1, retry = 0;
-    uint64_t widest = 0;
-    while (pos < rows.size()) {
+    for (RowState &row : rows) {
         if (!may_read("label_discovery"))
             break;
-        size_t n = chunk(grown, widest);
-        if (retry)
-            n = std::min(n, retry);
-        // room for one statement per row of the read (refused or truncated), reserved
-        n = std::min<uint64_t>(n, account.left() / statement());
-        if (!n) {
+        // room for the row's statement (refused or truncated), reserved before its read
+        if (account.left() < statement()) {
             set_stop("label_discovery", "max_memory");
             break;
         }
-        const size_t end = std::min(rows.size(), pos + n);
-        n = end - pos;
         ReadPacing pace = pacing();
         if (budgeted) {
-            DecodeBudget decode = decode_budget(n * statement());
+            DecodeBudget decode = decode_budget(statement());
             std::vector<LabelRecorder::NodeLabels> out;
             std::vector<KeyCost> costs;
-            out.reserve(n);
-            costs.reserve(n);
+            out.reserve(1);
+            costs.reserve(1);
             size_t refused_at = 0;
-            if (!recorder->fetch(keys.data() + pos, n, decode, &out, &costs, &refused_at,
-                                 name_bytes, &pace)) {
+            if (!recorder->fetch(&row.key, 1, decode, &out, &costs, &refused_at, name_bytes,
+                                 &pace)) {
                 if (pace.interrupted) {
-                    // decoded work, though nothing was returned
-                    units += pace.units;
-                    *pattern_units += pace.units;
+                    // decoded work, though nothing was returned (none: the deadline came
+                    // before the row's read)
+                    charge_work(pace.units, pattern_units);
                     budget.check_time();
                     set_stop("label_discovery", "time");
                     time_stop = true;
                     break;
                 }
-                if (refused_at) {
-                    // the keys before it were admitted: read them alone
-                    retry = refused_at;
-                    continue;
-                }
                 // the row does not fit what the account has left: refused, stated (the
-                // statement in its reserve)
-                rows[pos].status = RowStatus::REFUSED;
+                // statement in its reserve), and its read charged as work
+                charge_work(refused_units(recorder->refusal()), pattern_units);
+                row.status = RowStatus::REFUSED;
                 const bool stated = account.charge(statement());
                 assert(stated);
                 (void)stated;
-                refused->append(refusal_json(rows[pos], contexts, "label_discovery",
+                refused->append(refusal_json(row, contexts, "label_discovery",
                                              &recorder->refusal()));
-                retry = 0;
-                ++pos;
                 if (mode == Mode::ALL_OR_COUNT)
                     break;      // the results cannot be published: no further reads
                 continue;
             }
-            retry = 0;
-            // the lists and the names the call gave, held within what was left
+            // the list and the names the call gave, held within what was left
             const bool held = account.charge(decode.held());
             assert(held);
             (void)held;
-            // the names stay with the dictionary (the request's); the lists and the
+            // the names stay with the dictionary (the request's); the list and the
             // provisional naming charges are this pattern's
             *held_lists += decode.held() - recorder->last_names_bytes();
-            for (size_t i = 0; i < n; ++i) {
-                RowState &row = rows[pos + i];
-                row.labels = std::move(out[i]);
-                row.status = row.labels.truncated() ? RowStatus::TRUNCATED : RowStatus::COMPLETE;
-                if (row.status == RowStatus::TRUNCATED) {
-                    // its anchors_truncated entry, in the read's reserve
-                    const bool stated = account.charge(statement());
-                    assert(stated);
-                    (void)stated;
-                }
-                const uint64_t u = 8 + row.labels.total + costs[i].dependency_units;
-                units += u;
-                *pattern_units += u;
-                widest = std::max<uint64_t>(widest, u - 8);
+            row.labels = std::move(out[0]);
+            row.status = row.labels.truncated() ? RowStatus::TRUNCATED : RowStatus::COMPLETE;
+            if (row.status == RowStatus::TRUNCATED) {
+                // its anchors_truncated entry, in the read's reserve
+                const bool stated = account.charge(statement());
+                assert(stated);
+                (void)stated;
             }
+            charge_work(8 + row.labels.total + costs[0].dependency_units, pattern_units);
         } else {
             const size_t named = recorder->labels().size();
-            std::vector<uint64_t> part(keys.begin() + pos, keys.begin() + end);
-            std::vector<LabelRecorder::NodeLabels> out = recorder->fetch(part, &pace);
+            std::vector<LabelRecorder::NodeLabels> out = recorder->fetch({ row.key }, &pace);
             if (pace.interrupted) {
-                units += pace.units;
-                *pattern_units += pace.units;
+                charge_work(pace.units, pattern_units);
                 budget.check_time();
                 set_stop("label_discovery", "time");
                 time_stop = true;
                 break;
             }
             // read without a budget: what it returned is held (charged after the fact), the
-            // statements of its truncated rows with it; the names stay with the dictionary
-            // whether or not the rest fits (forced: the account may go past its maximum by
-            // them, and then nothing more fits and the reads stop)
-            uint64_t lists = 0, names = 0;
-            for (const auto &nl : out) {
-                lists += LabelRecorder::held_bytes(nl);
-                if (nl.truncated())
-                    lists += statement();
-            }
+            // statement of a truncated row with it; the names stay with the dictionary whether
+            // or not the rest fits (forced: the account may go past its maximum by them, and
+            // then nothing more fits and the reads stop)
+            uint64_t list = LabelRecorder::held_bytes(out[0]), names = 0;
+            if (out[0].truncated())
+                list += statement();
             for (size_t id = named; id < recorder->labels().size(); ++id) {
                 names += label_name_bytes(recorder->labels()[id].name);
             }
             account.force(names);
-            const bool fits = account.charge(lists);
-            for (size_t i = 0; i < n; ++i) {
-                RowState &row = rows[pos + i];
-                const uint64_t u = 8 + out[i].total;
-                units += u;
-                *pattern_units += u;
-                widest = std::max<uint64_t>(widest, u - 8);
-                if (fits) {
-                    row.labels = std::move(out[i]);
-                    row.status = row.labels.truncated() ? RowStatus::TRUNCATED
-                                                        : RowStatus::COMPLETE;
-                }
-            }
-            if (!fits) {
+            charge_work(8 + out[0].total, pattern_units);
+            if (!account.charge(list)) {
                 set_stop("label_discovery", "max_memory");
                 break;
             }
-            for (size_t i = 0; i < n; ++i) {
-                // the statements stay with the answer; the lists are the pattern's
-                if (rows[pos + i].status == RowStatus::TRUNCATED)
-                    lists -= statement();
-            }
-            *held_lists += lists;
+            row.labels = std::move(out[0]);
+            row.status = row.labels.truncated() ? RowStatus::TRUNCATED : RowStatus::COMPLETE;
+            // the statement stays with the answer; the list is the pattern's
+            *held_lists += list - (row.status == RowStatus::TRUNCATED ? statement() : 0);
         }
-        *rows_read += n;
-        grown = std::min(2 * grown, kMaxChunk);
-        pos = end;
+        ++*rows_read;
     }
     for (RowState &row : rows) {
         if (row.status == RowStatus::PENDING)
@@ -600,110 +570,75 @@ void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
     // dictionary's, so that a hit names its label by the recorder's id)
     LabelQuery query(oracle, recorder->labels(), true);
     query.set_max_cache_bytes(0);
-    std::vector<uint64_t> keys(todo.size());
-    for (size_t i = 0; i < todo.size(); ++i) {
-        keys[i] = rows[todo[i]].key;
-    }
-    size_t pos = 0, grown = 1, retry = 0;
-    uint64_t widest = 0;
-    while (pos < todo.size()) {
+    // the units of a row's hits: 8, 1 per label and 1 per coordinate, and its dependency rows'
+    auto hits_units = [](const LabelQuery::NodeHits &hits, const KeyCost &cost) {
+        uint64_t u = 8 + hits.size() + cost.dependency_units;
+        for (const auto &hit : hits) {
+            u += hit.coords.size();
+        }
+        return u;
+    };
+    for (size_t t : todo) {
+        RowState &row = rows[t];
         if (!may_read("placement"))
             break;
-        size_t n = chunk(grown, widest);
-        if (retry)
-            n = std::min(n, retry);
-        // room for one statement per row of the read (refused), reserved
-        n = std::min<uint64_t>(n, account.left() / statement());
-        if (!n) {
+        // room for the row's statement (refused), reserved
+        if (account.left() < statement()) {
             set_stop("placement", "max_memory");
             break;
         }
-        const size_t end = std::min(todo.size(), pos + n);
-        n = end - pos;
         ReadPacing pace = pacing();
         std::vector<LabelQuery::NodeHits> out;
         std::vector<KeyCost> costs;
         if (budgeted) {
-            DecodeBudget decode = decode_budget(n * statement());
-            out.reserve(n);
-            costs.reserve(n);
+            DecodeBudget decode = decode_budget(statement());
+            out.reserve(1);
+            costs.reserve(1);
             size_t refused_at = 0;
-            if (!query.fetch(keys.data() + pos, n, decode, &out, &costs, &refused_at, &pace)) {
+            if (!query.fetch(&row.key, 1, decode, &out, &costs, &refused_at, &pace)) {
                 if (pace.interrupted) {
-                    units += pace.units;
-                    *pattern_units += pace.units;
+                    charge_work(pace.units, pattern_units);
                     budget.check_time();
                     set_stop("placement", "time");
                     time_stop = true;
                     break;
                 }
-                if (refused_at) {
-                    retry = refused_at;
-                    continue;
-                }
-                RowState &row = rows[todo[pos]];
+                charge_work(refused_units(query.refusal()), pattern_units);
                 row.place_refused = true;
                 const bool stated = account.charge(statement());
                 assert(stated);
                 (void)stated;
                 refused->append(refusal_json(row, contexts, "placement", &query.refusal()));
-                retry = 0;
-                ++pos;
                 if (mode == Mode::ALL_OR_COUNT)
                     break;
                 continue;
             }
-            retry = 0;
             const bool held = account.charge(decode.held());
             assert(held);
             (void)held;
             *held_hits += decode.held();
         } else {
-            std::vector<uint64_t> part(keys.begin() + pos, keys.begin() + end);
-            out = query.fetch(part, &pace);
+            out = query.fetch({ row.key }, &pace);
             if (pace.interrupted) {
-                units += pace.units;
-                *pattern_units += pace.units;
+                charge_work(pace.units, pattern_units);
                 budget.check_time();
                 set_stop("placement", "time");
                 time_stop = true;
                 break;
             }
-            uint64_t bytes = 0;
-            for (const auto &h : out) {
-                bytes += LabelQuery::held_bytes(h);
-            }
+            costs.resize(1);
+            const uint64_t bytes = LabelQuery::held_bytes(out[0]);
             if (!account.charge(bytes)) {
-                uint64_t u = 0;
-                for (size_t i = 0; i < n; ++i) {
-                    u += 8 + out[i].size();
-                    for (const auto &hit : out[i]) {
-                        u += hit.coords.size();
-                    }
-                }
-                units += u;
-                *pattern_units += u;
+                charge_work(hits_units(out[0], costs[0]), pattern_units);
                 set_stop("placement", "max_memory");
                 break;
             }
             *held_hits += bytes;
-            costs.resize(n);
         }
-        for (size_t i = 0; i < n; ++i) {
-            RowState &row = rows[todo[pos + i]];
-            uint64_t u = 8 + out[i].size() + costs[i].dependency_units;
-            for (const auto &hit : out[i]) {
-                u += hit.coords.size();
-            }
-            units += u;
-            *pattern_units += u;
-            widest = std::max<uint64_t>(widest, u - 8);
-            row.hits = std::move(out[i]);
-            row.placed = true;
-        }
-        *rows_read += n;
-        grown = std::min(2 * grown, kMaxChunk);
-        pos = end;
+        charge_work(hits_units(out[0], costs[0]), pattern_units);
+        row.hits = std::move(out[0]);
+        row.placed = true;
+        ++*rows_read;
     }
 }
 
@@ -934,23 +869,38 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
             name_text[id] = string_text_bytes(dict[id].name);
         return name_text[id];
     };
+    uint64_t summary_text = 0;
     {
-        uint64_t fixed = keep * kResultLabelsText;
         const uint64_t graph_text = compact_json_bytes(graph_name);
         for (size_t r = 0; r < kept_labels; ++r) {
-            fixed += kByLabelText + label_text(order[r]) + graph_text;
+            summary_text += kByLabelText + label_text(order[r]) + graph_text;
         }
-        pend(fixed);
+        pend(keep * kResultLabelsText + summary_text);
     }
+
+    // by_label (its entries with their copies of the names) is charged before any context's
+    // labels: the answer holds it whatever is cut after it. When it does not fit, no label of
+    // the pattern is built: stop {output, max_memory} (unless an earlier stop is stated),
+    // all_or_count withholds (output_budget), partial returns the contexts read with
+    // labels_status output_budget and by_label null
+    uint64_t summary = 0;
+    for (size_t r = 0; r < kept_labels; ++r) {
+        summary += by_label_bytes(dict[order[r]].name);
+    }
+    const bool summary_held = m.account.charge(summary);
+    if (!summary_held)
+        unpend(summary_text);
 
     // the contexts' label lists with their occurrences; each label's deduplicated union
     // (§5.4: (column, seq_id, start, strand); the label is the column)
     std::vector<std::vector<ContextLabel>> lists(keep);
     std::vector<std::set<Occurrence>> unions(dict.size());
-    std::vector<bool> output_cut(keep, false);
+    std::vector<bool> output_cut(keep, !summary_held);
     uint64_t output = 0, dedup = 0;
     bool placement_complete = true;
-    bool output_stopped = false;
+    bool output_stopped = !summary_held;
+    if (!summary_held)
+        m.set_stop("output", "max_memory");
     for (size_t i = 0; i < keep && !output_stopped; ++i) {
         const RowState &row = rows[row_of[i]];
         if (row.status != RowStatus::COMPLETE && row.status != RowStatus::TRUNCATED)
@@ -966,7 +916,7 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
             ContextLabel cl;
             cl.label = id;
             if (listed) {
-                bytes += kLabelEntryBytes;
+                bytes += label_entry_bytes(dict[id].name);
                 text += kLabelText + label_text(id);
             }
             if (m.place) {
@@ -1150,7 +1100,7 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
                    : output_stopped || m.stop ? "output_budget"
                    : truncated ? "anchor_labels_truncated"
                                : "annotation_budget";
-        m.account.release(output + descriptors);
+        m.account.release(output + descriptors + (summary_held ? summary : 0));
         // no label of this pattern is built for the answer
         unpend(pending);
         finish_work();
@@ -1162,9 +1112,10 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
     a.occurrences_count = count_json(empty_complete && m.records ? Relation::EXACT : occ_relation,
                                      occurrences_total, Unit::PLACED_OCCURRENCES);
 
-    // by_label: the per-label summary over the returned contexts (§7.2), in label order
+    // by_label: the per-label summary over the returned contexts (§7.2), in label order (null
+    // when the account could not hold it, above)
     Json::Value by_label(Json::arrayValue);
-    for (size_t r = 0; r < kept_labels; ++r) {
+    for (size_t r = 0; r < kept_labels && summary_held; ++r) {
         const LabelId id = order[r];
         Json::Value b;
         b["graph"] = graph_name;
@@ -1178,7 +1129,8 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
                                       unions[id].size(), Unit::PLACED_OCCURRENCES);
         by_label.append(std::move(b));
     }
-    a.fields["by_label"] = std::move(by_label);
+    if (summary_held)
+        a.fields["by_label"] = std::move(by_label);
 
     // the results' labels
     a.result_fields.reserve(keep);

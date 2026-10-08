@@ -2108,6 +2108,138 @@ TEST(GraphletServer, CompressionTakesTheTextInPieces) {
     EXPECT_EQ(3u, calls);
 }
 
+// What process_request writes (answer_request, without the HTTP library) for every outcome of
+// a request: as before for a route that does not ask whether its client left (every route but
+// /pattern: no control, or a control without |gone|); and, for a route that asks
+// (ResponseControl::gone, /pattern; SPEC-pattern-search.md §3), nothing at all once its
+// client is gone or the server stops, its errors included — review GPT-2 of 2026-10-08,
+// finding 4: `{` and {"patterns":[]} from a half-closed client were answered 400, the success
+// path alone asked. The deadline is not that question: its 503 reaches a client that is there
+TEST(ServerRequest, ARouteThatAsksAnswersNobodyWhoLeft) {
+    using Process = std::function<Json::Value(const std::string &)>;
+    using Header = std::vector<std::pair<std::string, std::string>>;
+    auto error_text = [](const std::string &message) {
+        Json::Value v;
+        v["error"] = message;
+        return Json::writeString(Json::StreamWriterBuilder(), v);
+    };
+    Json::Value ok;
+    ok["patterns"].append("x");
+    Json::Value refusal;
+    refusal["error"] = "request: not JSON";
+    refusal["code"] = "invalid_request";
+    Json::Value deadline;
+    deadline["error"] = "pattern: the answer could not be written within time_budget_ms";
+    deadline["code"] = "deadline";
+    struct Outcome {
+        const char *name;
+        Process process;
+        int status;
+        std::string body;
+        Header header;
+    };
+    const std::vector<Outcome> outcomes = {
+        { "an answer", [&](const std::string &) { return ok; }, 200, json_text(ok, true), {} },
+        { "a refusal", [&](const std::string &) -> Json::Value { throw HttpError(400, refusal); },
+          400, json_text(refusal, true), {} },
+        { "a 503 of the route", [&](const std::string &) -> Json::Value {
+              throw HttpError(503, deadline);
+          }, 503, json_text(deadline, true), {} },
+        { "the index loading", [](const std::string &) -> Json::Value {
+              throw CurrentlyInitializingError();
+          }, 503, error_text("Server is currently initializing, please come back later."),
+          { { "Retry-After", "60" } } },
+        { "an exception", [](const std::string &) -> Json::Value {
+              throw std::invalid_argument("Bad json received: x");
+          }, 400, error_text("Bad json received: x"), {} },
+        { "anything else", [](const std::string &) -> Json::Value { throw 7; },
+          500, error_text("Internal server error"), {} },
+    };
+    for (const Outcome &o : outcomes) {
+        SCOPED_TRACE(o.name);
+        auto expect_written = [&](const RequestAnswer &a) {
+            EXPECT_EQ(o.status, a.status);
+            EXPECT_EQ(o.body, a.body);
+            EXPECT_EQ(o.header, a.header);
+        };
+        // no control (/search, /align, ...) and a control without |gone| (/resolve,
+        // /traverse): every outcome written, as before
+        expect_written(answer_request("{}", "", 1, o.process, true));
+        ResponseControl plain;
+        size_t checks = 0;
+        plain.check = [&checks]() { ++checks; };
+        expect_written(answer_request("{}", "", 1, o.process, true, &plain));
+        EXPECT_EQ(o.status == 200 ? 1u : 0u, checks);
+
+        // a route that asks: written while its client is there, asked once after the answer
+        // was built; nothing once the client left — an error as much as an answer
+        bool gone = false;
+        size_t asked = 0;
+        ResponseControl control;
+        control.check = []() {};
+        control.gone = [&]() {
+            ++asked;
+            return gone;
+        };
+        expect_written(answer_request("{}", "", 1, o.process, true, &control));
+        EXPECT_EQ(1u, asked);
+        gone = true;
+        const RequestAnswer withheld = answer_request("{}", "", 1, o.process, true, &control);
+        EXPECT_EQ(0, withheld.status);
+        EXPECT_EQ("", withheld.body);
+        EXPECT_TRUE(withheld.header.empty());
+        EXPECT_EQ(2u, asked);
+    }
+
+    // the deadline is the check's (HttpError 503), the client's presence |gone|'s: a 503 at
+    // the deadline — here after the compression, which drops its fields — reaches a client
+    // that is there, and nobody who left
+    for (bool gone : { false, true }) {
+        bool compressed = false;
+        ResponseControl control;
+        control.on_compressed = [&](size_t, double) { compressed = true; };
+        control.check = [&]() {
+            if (compressed)
+                throw HttpError(503, deadline);
+        };
+        control.gone = [&gone]() { return gone; };
+        const RequestAnswer a = answer_request("{}", "gzip", 1,
+                                               [&](const std::string &) { return ok; }, true,
+                                               &control);
+        EXPECT_TRUE(compressed);
+        EXPECT_EQ(gone ? 0 : 503, a.status) << gone;
+        EXPECT_EQ(gone ? "" : json_text(deadline, true), a.body) << gone;
+        EXPECT_TRUE(a.header.empty()) << gone;
+    }
+    // compressed, the fields follow the Content-Type in the order the server always wrote them
+    {
+        ResponseControl control;
+        control.gone = []() { return false; };
+        const RequestAnswer a = answer_request("{}", "deflate", 1,
+                                               [&](const std::string &) { return ok; }, true,
+                                               &control);
+        EXPECT_EQ(200, a.status);
+        EXPECT_EQ(compress_string(json_text(ok, true), 9, false), a.body);
+        EXPECT_EQ(Header({ { "Content-Encoding", "deflate" },
+                           { "Content-Length", std::to_string(a.body.size()) } }), a.header);
+    }
+    // a client gone at a check (ClientGone): nothing written, |gone| not asked after it
+    {
+        size_t asked = 0;
+        ResponseControl control;
+        control.check = []() { throw ClientGone("the client is gone"); };
+        control.gone = [&asked]() {
+            ++asked;
+            return false;
+        };
+        const RequestAnswer a = answer_request("{}", "", 1,
+                                               [&](const std::string &) { return ok; }, true,
+                                               &control);
+        EXPECT_EQ(0, a.status);
+        EXPECT_EQ(0u, asked);
+    }
+}
+
 // The multi-graph list (pass 5, W2): three columns read as they always were, two optional
 // ones (manifest_path, index_ns), empty meaning none; more than five columns, fewer than
 // three, or an index_ns that is no token refuse the line

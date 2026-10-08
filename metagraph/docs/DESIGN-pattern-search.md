@@ -885,7 +885,8 @@ a **job** (submit → status → results), as it wraps `/search` and the travers
 `kContentTimeoutS` 900 s, `server.cpp:52`). The route's own deadline (default 60 s, cap `--pattern-max-time-ms`
 600 s, at most 899 s on `server_query`; finalisation reserve inside it, §5.3) stays under that wall with room for
 serialisation and compression. As `/resolve` and `/traverse`, it stops a request whose client has left, or that
-runs at shutdown, at its next clock reading and writes nothing (a half-close counts as gone).
+runs at shutdown, at its next clock reading and writes nothing, not even an error (a half-close counts as gone;
+`ResponseControl::gone`, which only `/pattern` sets: `/resolve` and `/traverse` still write their errors).
 
 **No Python client yet** (the owner, 2026-10-07: "write it lazily, when we need it"; unused code is weight to
 maintain). Nothing calls one: the search service has its own HTTP client, agents reach the route through the

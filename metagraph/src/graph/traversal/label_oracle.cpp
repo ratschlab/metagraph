@@ -1139,7 +1139,23 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
     uint64_t committed = 0;
     size_t requested = 0, hits_from_cache = 0;
     auto left = [&]() { return budget.max_bytes() - at_entry - committed; };
-    auto refuse = [&](size_t pos, FetchRefusal::Cause cause, uint64_t demand, uint64_t need) {
+    // the work units of the keys at [0, end) this call decoded and built (FetchRefusal::units;
+    // those the cache does not hold: it does not change during the call)
+    auto decoded_units = [&](size_t end) {
+        uint64_t units = 0;
+        for (size_t i = 0; i < end; ++i) {
+            if (keys[i] == npos || cache_.count(keys[i]))
+                continue;
+            const NodeHits &h = (*out)[base + i];
+            units += 8 + h.size() + (*costs)[base + i].dependency_units;
+            for (const Hit &hit : h) {
+                units += hit.coords.size();
+            }
+        }
+        return units;
+    };
+    auto refuse = [&](size_t pos, FetchRefusal::Cause cause, uint64_t demand, uint64_t need,
+                      size_t decoded_end) {
         refusal_ = FetchRefusal();
         refusal_.cause = cause;
         refusal_.position = pos;
@@ -1147,6 +1163,7 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
         refusal_.held = committed;
         refusal_.demand = demand;
         refusal_.need = need;
+        refusal_.units = decoded_units(decoded_end);
         out->resize(base);
         costs->resize(base);
         budget.restore(at_entry);
@@ -1168,17 +1185,8 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
     double previous_ms = 0;
     auto interrupt = [&](size_t pos) {
         pacing->interrupted = true;
-        pacing->units = 0;
-        for (size_t i = 0; i < pos; ++i) {
-            if (keys[i] == npos || cache_.count(keys[i]))
-                continue;
-            const NodeHits &h = (*out)[base + i];
-            pacing->units += 8 + h.size() + (*costs)[base + i].dependency_units;
-            for (const Hit &hit : h) {
-                pacing->units += hit.coords.size();
-            }
-        }
-        refuse(pos, FetchRefusal::INTERRUPTED, 0, 0);
+        pacing->units = decoded_units(pos);
+        refuse(pos, FetchRefusal::INTERRUPTED, 0, 0, pos);
         return false;
     };
     size_t run_limit = kMaxDecodeRun;
@@ -1195,11 +1203,11 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
             // admitted against its demand, as if decoded now (its costs are the key's)
             const KeyCost &cost = costs_.at(key);
             if (cost.demand > left())
-                return refuse(pos, FetchRefusal::DEMAND, cost.demand, 0);
+                return refuse(pos, FetchRefusal::DEMAND, cost.demand, 0, pos);
             // the demand covers the copy, so only the test hook can refuse it
             const uint64_t bytes = held_bytes(it->second);
             if (!budget.charge(bytes))
-                return refuse(pos, FetchRefusal::DECODE, 0, seen_need());
+                return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), pos);
             committed += bytes;
             out->push_back(it->second);
             costs->push_back(cost);
@@ -1239,7 +1247,7 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
         for (size_t j = 0; j < built; ++j) {
             const uint64_t demand = (*costs)[base + pos + j].demand;
             if (demand > left())
-                return refuse(pos + j, FetchRefusal::DEMAND, demand, 0);
+                return refuse(pos + j, FetchRefusal::DEMAND, demand, 0, pos + built);
             committed += held_bytes((*out)[base + pos + j]);
         }
         assert(at_entry + committed == budget.held());
@@ -1252,7 +1260,7 @@ bool LabelQuery::fetch(const node_index *keys, size_t n, DecodeBudget &budget,
         // the run did not fit as one: a single key that does not fit alone is the stop;
         // otherwise go on from the first key not built, in smaller runs
         if (!built && len == 1)
-            return refuse(pos, FetchRefusal::DECODE, 0, seen_need());
+            return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), pos);
         pos += built;
         out->resize(base + pos);
         costs->resize(base + pos);
@@ -1870,8 +1878,19 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
     // what the keys admitted so far hold: their lists, the names they gave and their naming
     uint64_t committed = 0, names_given = 0, naming = 0;
     auto left = [&]() { return budget.max_bytes() - at_entry - committed; };
+    // the work units of the keys admitted so far that this call decoded (FetchRefusal::units;
+    // those the cache does not hold: it does not change during the call)
+    auto decoded_units = [&]() {
+        uint64_t units = 0;
+        for (size_t i = 0; i < out->size() - base; ++i) {
+            if (keys[i] != npos && !cache_.count(keys[i]))
+                units += 8 + (*out)[base + i].total + (*costs)[base + i].dependency_units;
+        }
+        return units;
+    };
+    // |run_units|: those of the keys of the current run built but not admitted
     auto refuse = [&](size_t pos, FetchRefusal::Cause cause, uint64_t demand, uint64_t need,
-                      uint64_t labels, uint64_t names) {
+                      uint64_t labels, uint64_t names, uint64_t run_units) {
         refusal_ = FetchRefusal();
         refusal_.cause = cause;
         refusal_.position = pos;
@@ -1881,6 +1900,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         refusal_.need = need;
         refusal_.labels = labels;
         refusal_.names_bytes = names;
+        refusal_.units = decoded_units() + run_units;
         out->resize(base);
         costs->resize(base);
         budget.restore(at_entry);
@@ -1893,13 +1913,16 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
     };
     // a key read (cached or decoded now) is admitted against its demand and its names, and a
     // refusal says which of them did not fit
-    auto admit = [&](size_t pos, uint64_t demand, uint64_t labels, uint64_t names) {
+    // (|run_units|(): those of the keys of its run built from it on, asked on a refusal only)
+    auto admit = [&](size_t pos, uint64_t demand, uint64_t labels, uint64_t names,
+                     const auto &run_units) {
         if (demand > left())
-            return refuse(pos, FetchRefusal::DEMAND, demand, 0, labels, names);
+            return refuse(pos, FetchRefusal::DEMAND, demand, 0, labels, names, run_units());
         if (demand + names > left())
-            return refuse(pos, FetchRefusal::NAMES, demand, 0, labels, names);
+            return refuse(pos, FetchRefusal::NAMES, demand, 0, labels, names, run_units());
         return true;
     };
+    auto none = []() { return uint64_t(0); };
     // as LabelQuery's: a paced fetch's deadline before a run is restored as a refusal (and
     // names nothing), with the work of the keys its runs decoded for the caller to charge
     DecodePacer &pacer = oracle_.pacer();
@@ -1907,13 +1930,10 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
     size_t previous = 0;
     double previous_ms = 0;
     auto interrupt = [&](size_t pos) {
+        assert(out->size() == base + pos);
         pacing->interrupted = true;
-        pacing->units = 0;
-        for (size_t i = 0; i < pos; ++i) {
-            if (keys[i] != npos && !cache_.count(keys[i]))
-                pacing->units += 8 + (*out)[base + i].total + (*costs)[base + i].dependency_units;
-        }
-        return refuse(pos, FetchRefusal::INTERRUPTED, 0, 0, 0, 0);
+        pacing->units = decoded_units();
+        return refuse(pos, FetchRefusal::INTERRUPTED, 0, 0, 0, 0, 0);
     };
     size_t requested = 0, hits_from_cache = 0;
     size_t run_limit = kMaxDecodeRun;
@@ -1930,13 +1950,13 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
             const KeyCost &cost = costs_.at(key);
             uint64_t labels = 0;
             const uint64_t names = names_of(it->second, &labels);
-            if (!admit(pos, cost.demand, labels, names))
+            if (!admit(pos, cost.demand, labels, names, none))
                 return false;
             NodeLabels nl;
             // the demand covers the list, so only the test hook can refuse it
             const uint64_t list = buffer_bytes(it->second.kept.size(), sizeof(LabelId));
             if (!budget.charge(list + names))
-                return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), 0, 0);
+                return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), 0, 0, 0);
             committed += list + names;
             naming += labels * kNamingBytes;
             names_given += names - labels * kNamingBytes;
@@ -1967,7 +1987,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         const uint64_t work = run_bytes_of(len, sizeof(RawRow));
         if (!budget.charge(work)) {
             if (len == 1)
-                return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), 0, 0);
+                return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), 0, 0, 0);
             run_limit = std::max<size_t>(1, len / 2);
             continue;
         }
@@ -1986,16 +2006,24 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         if (!built && len == 1) {
             assert(status == DecodeStatus::REFUSED);
             // seen before the run's own buffers are freed: they are part of the read
-            return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), 0, 0);
+            return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), 0, 0, 0);
         }
         size_t listed = 0;
+        // the work units of the run's keys built from |listed| on (FetchRefusal::units)
+        auto unlisted_units = [&]() {
+            uint64_t units = 0;
+            for (size_t j = listed; j < built; ++j) {
+                units += 8 + raws[j].total + run_costs[j].dependency_units;
+            }
+            return units;
+        };
         for (; listed < built; ++listed) {
             const RawRow &raw = raws[listed];
             uint64_t labels = 0;
             const uint64_t names = names_of(raw, &labels);
             // admitted against what was left at its position, as a cached key is: the run's
             // buffers are held beside it (charged), which its demand counts for one key
-            if (!admit(pos + listed, run_costs[listed].demand, labels, names))
+            if (!admit(pos + listed, run_costs[listed].demand, labels, names, unlisted_units))
                 return false;
             const uint64_t list = buffer_bytes(raw.kept.size(), sizeof(LabelId));
             if (!budget.charge(list + names)) {
@@ -2017,6 +2045,8 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
         for (size_t j = listed; j < built; ++j) {
             budget.release(raws_held[j]);
         }
+        // a single key built but not listed was decoded all the same
+        const uint64_t dropped_units = !listed && len == 1 ? unlisted_units() : 0;
         raws = std::vector<RawRow>();
         raws_held = std::vector<uint64_t>();
         run_costs = std::vector<KeyCost>();
@@ -2026,7 +2056,7 @@ bool LabelRecorder::fetch(const node_index *keys, size_t n, DecodeBudget &budget
             continue;
         }
         if (!listed && len == 1)
-            return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), 0, 0);
+            return refuse(pos, FetchRefusal::DECODE, 0, seen_need(), 0, 0, dropped_units);
         pos += listed;
         run_limit = std::max<size_t>(1, len / 2);
     }

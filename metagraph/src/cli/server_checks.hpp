@@ -3,6 +3,8 @@
 
 #include <functional>
 #include <map>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,6 +17,89 @@ namespace cli {
 
 // The parts of the server's request handling that need no HTTP library (server_utils.cpp),
 // declared apart so that they are tested on their own
+
+// Answers a request with |status| and the JSON |body| (an error that states more than its
+// message: the usage of a ledger-managed /traverse, the state of a conflicting attempt)
+class HttpError : public std::runtime_error {
+  public:
+    HttpError(int status, Json::Value body)
+          : std::runtime_error(body.get("error", "").asString()), status_(status),
+            body_(std::move(body)) {}
+    int status() const { return status_; }
+    const Json::Value& body() const { return body_; }
+
+  private:
+    int status_;
+    Json::Value body_;
+};
+
+// The client of the request is gone: nothing is written, and the connection is closed
+class ClientGone : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+};
+
+class CurrentlyInitializingError : public std::runtime_error {
+  public:
+    CurrentlyInitializingError()
+        : std::runtime_error("Server is currently initializing") {}
+};
+
+// What process_request does besides writing the result (null: nothing, as before)
+struct ResponseControl {
+    // called while the body is written (every 64 KiB of JSON text) and compressed (every
+    // block): throws to stop — ClientGone (nothing is written) or HttpError (that answer)
+    std::function<void()> check;
+    // after the handler is done: the status written and the body's size in bytes, or 0 and
+    // nullopt when nothing was written (the client is gone)
+    std::function<void(int status, std::optional<size_t> bytes)> on_written;
+    // the zlib level of a compressed body (1-9; 9, the best compression, for every route
+    // that does not choose: the traversal routes choose a faster one, see
+    // Config::traverse_compression_level)
+    int compression_level = 9;
+    // after a body of |text_bytes| was compressed in |seconds| (a delivery rate measured)
+    std::function<void(size_t text_bytes, double seconds)> on_compressed;
+    // writes the result as text instead of json_text(result, compact, check) — a route that
+    // wrote parts of it already (the /traverse results, each written once built) assembles
+    // them here; must give the same bytes json_text would
+    std::function<std::string(const Json::Value &result, const std::function<void()> &check)> write;
+    // A route that answers nobody who left (/pattern, SPEC-pattern-search.md §3: a client
+    // that is gone — a half-close counts — or a server that stops gets nothing written):
+    // asked once every answer is built, an error's included (a refusal, a 400 of a malformed
+    // body, a 503 while the index loads or at the deadline, an unexpected failure), and
+    // before a byte of it is written; true: nothing is written and the connection is closed,
+    // as for ClientGone. Not the deadline, which |check| reads: a 503 at the deadline is
+    // still written to a client that is there. Unset (every other route): every error is
+    // written, as before — a check reaches only the success path (review GPT-2 of
+    // 2026-10-08, finding 4: a half-closed client was sent its 400 by /pattern)
+    std::function<bool()> gone;
+};
+
+// The response of one request as process_request writes it: |status| (0: nothing is
+// written, the connection is closed — a ClientGone, or ResponseControl::gone), the header
+// fields after the Content-Type ("application/json", every response's first) in the order
+// they are added, and the body
+struct RequestAnswer {
+    int status = 0;
+    std::vector<std::pair<std::string, std::string>> header;
+    std::string body;
+};
+
+/**
+ * What process_request answers, without the HTTP library (server_utils.hpp): runs |process|
+ * on |content| and writes its JSON result (|control|->write, else json_text(result, |compact|)
+ * under |control|->check), compressed when |encoding| is "gzip" or "deflate" (the request's
+ * requested_encoding; "" none), then asks the check once more. Its failures are answered:
+ * ClientGone with nothing (status 0); HttpError with its status and body (uncompressed, as
+ * every error); CurrentlyInitializingError with 503 and Retry-After; any other exception with
+ * 400 {"error": its message}, anything else with 500. Last, |control|->gone, when set: true
+ * answers nothing (status 0) whatever was built. |request_id| names the request in the log.
+ */
+RequestAnswer answer_request(const std::string &content, const std::string &encoding,
+                             size_t request_id,
+                             const std::function<Json::Value(const std::string &)> &process,
+                             bool compact = false,
+                             const ResponseControl *control = nullptr);
 
 // Whether the peer of the connected TCP socket |fd| is gone: a non-blocking peek (consuming
 // nothing) finds the connection closed — an orderly close or a half-close (the peer will send

@@ -918,10 +918,17 @@ int run_server(Config *config) {
         // a client that is gone, or a shutdown, is not answered: the work ends at its next
         // clock reading, the writing at its next check, and nothing is written (review of
         // 2026-10-07, X-CONCURRENCY-01, R2-02; as /resolve's and /traverse's)
-        delivery.set_abort([&request, &shutdown]() {
+        auto gone = [&request, &shutdown]() {
             return shutdown.stopping() || client_gone(*request);
-        });
+        };
+        delivery.set_abort(gone);
         ResponseControl control;
+        // nor with an error: a refusal, a 400 of a malformed body, a 503 (the index loading,
+        // the deadline) or an unexpected failure is not written to a client that left — a
+        // half-close counts — or during a shutdown (SPEC §3; review GPT-2 of 2026-10-08,
+        // finding 4: `{` and {"patterns":[]} from a half-closed client were answered 400).
+        // Asked apart from the deadline: a 503 at the deadline reaches a client still there
+        control.gone = gone;
         control.check = [&]() {
             try {
                 delivery.check();

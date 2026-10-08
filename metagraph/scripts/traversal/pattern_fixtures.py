@@ -1023,8 +1023,10 @@ def readme(fixtures):
         'compared as they are).',
         'Paths under the generator\'s work directory read `{work}/...`. Two fixtures are',
         'HAND-MADE (no server produces them on demand); their text is the code\'s. No fixture',
-        'holds `primary_unwrapped` (server_query and the CLI always wrap a PRIMARY graph) or',
-        '`alphabet_unsupported` (a graph of another alphabet does not load in this build).',
+        'holds `primary_unwrapped` (server_query and the CLI always wrap a PRIMARY graph),',
+        '`alphabet_unsupported` (a graph of another alphabet does not load in this build),',
+        '`mask_invalid` (a graph extended after masking by an older build, or a stale mask) or',
+        '`alphabet_untested` (a DNA5 build); test_pattern_fixtures.py names them in NO_FIXTURE.',
         '',
     ]
     for f in fixtures:

@@ -322,22 +322,22 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.128583,
-    "label_discovery_ms": 0.166166,
-    "placement_ms": 0.06325
+    "elapsed_ms": 0.02675,
+    "label_discovery_ms": 0.029084,
+    "placement_ms": 0.018625
    },
    "withheld": null,
    "work": {
     "annotation_rows": 6,
     "annotation_units": 2285,
     "mask_scans": 0,
-    "memory_bytes": 16681,
+    "memory_bytes": 17721,
     "ranges_visited": 122,
     "steps": 122
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.43425
+  "elapsed_ms": 0.097959
  }
 }

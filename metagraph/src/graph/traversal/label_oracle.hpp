@@ -466,6 +466,14 @@ struct FetchRefusal {
     uint64_t need = 0;          // DECODE: the least its read was seen to need (> |left|)
     uint64_t labels = 0;        // NAMES: the new labels
     uint64_t names_bytes = 0;
+    // The work units (8 per key, 1 per entry and coordinate, and the key's dependency units,
+    // as a returned key's) of the keys the refused call decoded and built — those before the
+    // refused key, the refused key itself when it was built (DEMAND, NAMES), and the keys of
+    // its run built after it — but not of the keys the cache held: decoding done though
+    // nothing was returned, which a caller with a work budget still charges (review GPT-2,
+    // finding 1). A key whose own read or build did not fit (DECODE) adds nothing: its units
+    // are not known. INTERRUPTED: ReadPacing::units.
+    uint64_t units = 0;
 };
 
 /**

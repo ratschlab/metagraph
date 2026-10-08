@@ -627,32 +627,24 @@ std::string json_str_with_error_msg(const std::string &msg) {
     return Json::writeString(Json::StreamWriterBuilder(), root);
 }
 
-void process_request(std::shared_ptr<HttpServer::Response> &response,
-                     const std::shared_ptr<HttpServer::Request> &request,
-                     size_t request_id,
-                     const std::function<Json::Value(const std::string &)> &process,
-                     bool compact,
-                     const ResponseControl *control) {
-    logger->info("[Server] {} request {} from {}", request->path, request_id,
-                 request->remote_endpoint().address().to_string());
-    Timer timer;
-    // Retrieve string:
-    std::string content = request->content.string();
-    SimpleWeb::CaseInsensitiveMultimap header({ { "Content-Type", "application/json" } });
-    SimpleWeb::StatusCode status;
-    std::string ret;
+RequestAnswer answer_request(const std::string &content, const std::string &encoding,
+                             size_t request_id,
+                             const std::function<Json::Value(const std::string &)> &process,
+                             bool compact,
+                             const ResponseControl *control) {
+    RequestAnswer answer;
+    std::string &ret = answer.body;
     static const std::function<void()> kNoCheck;
     const std::function<void()> &check = control ? control->check : kNoCheck;
 
     try {
         // Return JSON string
-        status = SimpleWeb::StatusCode::success_ok;
+        answer.status = 200;
         if (control && control->write) {
             ret = control->write(process(content), check);
         } else {
             ret = json_text(process(content), compact, check);
         }
-        const std::string encoding = requested_encoding(request);
         if (!encoding.empty()) {
             Timer compressing;
             const size_t text_bytes = ret.size();
@@ -660,8 +652,8 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
                                   encoding == "gzip", check);
             if (control && control->on_compressed)
                 control->on_compressed(text_bytes, compressing.elapsed());
-            header.insert(std::make_pair("Content-Encoding", encoding));
-            header.insert(std::make_pair("Content-Length", std::to_string(ret.size())));
+            answer.header.emplace_back("Content-Encoding", encoding);
+            answer.header.emplace_back("Content-Length", std::to_string(ret.size()));
         }
         // once more before the response is handed to the transport: a body shorter than the
         // check's interval is otherwise never checked after it was built
@@ -671,30 +663,66 @@ void process_request(std::shared_ptr<HttpServer::Response> &response,
         // nobody to answer: nothing is written, and the connection is closed rather than
         // kept for a next request
         logger->info("[Server] Request {}: {}; no response written", request_id, e.what());
-        response->close_connection_after_response = true;
-        if (control && control->on_written)
-            control->on_written(0, std::nullopt);
-        return;
+        return RequestAnswer();
     } catch (const HttpError &e) {
         logger->warn("[Server] Error on request {} ({}): {}", request_id, e.status(), e.what());
-        status = static_cast<SimpleWeb::StatusCode>(e.status());
-        header = SimpleWeb::CaseInsensitiveMultimap({ { "Content-Type", "application/json" } });
+        answer.status = e.status();
+        answer.header.clear();
         // the body as the route wrote it, uncompressed like every error
         ret = json_text(e.body(), compact);
     } catch (const CurrentlyInitializingError& e) {
         logger->info("[Server] Got a request during initialization. Asked to come back later");
-        status = SimpleWeb::StatusCode::server_error_service_unavailable;
-        header.insert(std::make_pair("Retry-After", "60")); // ask to come back in 60 seconds
+        answer.status = 503;
+        answer.header.emplace_back("Retry-After", "60"); // ask to come back in 60 seconds
         ret = json_str_with_error_msg("Server is currently initializing, please come back later.");
     } catch (const std::exception& e) {
         logger->warn("[Server] Error on request {}: {}", request_id, e.what());
-        status = SimpleWeb::StatusCode::client_error_bad_request;
+        answer.status = 400;
         ret = json_str_with_error_msg(e.what());
     } catch (...) {
         logger->warn("[Server] Error on request {}", request_id);
-        status = SimpleWeb::StatusCode::server_error_internal_server_error;
+        answer.status = 500;
         ret = json_str_with_error_msg("Internal server error");
     }
+    // a route that answers nobody who left asks once more, whatever was built: its errors
+    // too (the success path's check asked already; an error never passed one). Apart from
+    // the deadline, so that a 503 at the deadline still reaches a client that is there
+    if (control && control->gone && control->gone()) {
+        logger->info("[Server] Request {}: the client is gone or the server stops; the {} "
+                     "answer is not written", request_id, answer.status);
+        return RequestAnswer();
+    }
+    return answer;
+}
+
+void process_request(std::shared_ptr<HttpServer::Response> &response,
+                     const std::shared_ptr<HttpServer::Request> &request,
+                     size_t request_id,
+                     const std::function<Json::Value(const std::string &)> &process,
+                     bool compact,
+                     const ResponseControl *control) {
+    logger->info("[Server] {} request {} from {}", request->path, request_id,
+                 request->remote_endpoint().address().to_string());
+    Timer timer;
+    const RequestAnswer answer = answer_request(request->content.string(),
+                                                requested_encoding(request), request_id,
+                                                process, compact, control);
+    if (!answer.status) {
+        // nothing is written, and the connection is closed rather than kept for a next
+        // request
+        response->close_connection_after_response = true;
+        if (control && control->on_written)
+            control->on_written(0, std::nullopt);
+        return;
+    }
+    const auto status = static_cast<SimpleWeb::StatusCode>(answer.status);
+    // the Content-Type first, then the fields in the order added (the multimap built as it
+    // always was, so that its fields are written in the same order)
+    SimpleWeb::CaseInsensitiveMultimap header({ { "Content-Type", "application/json" } });
+    for (const auto &field : answer.header) {
+        header.insert(field);
+    }
+    const std::string &ret = answer.body;
     double processing_time = timer.elapsed();
     // after the last check: the transport's copy is made into a buffer of its final size
     reserve_transport(*response, ret.size() + response_head_bytes(header));

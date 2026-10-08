@@ -187,7 +187,7 @@ larger value is lowered and listed in `limits.clamped`), and it does not grow wi
 600 s budget it, not the deadline, usually stops a long discovery (`stop: max_steps`, `withheld:
 discovery_budget`). The cost of a long call is the request-pool slot it holds, counted by the shared
 per-database cap of item 4; the server stops a `/pattern` request whose client has closed (or half-closed) its
-connection at its next clock reading and writes nothing, so a task the service cancels frees the backend's slot
+connection at its next clock reading and writes neither an answer nor an error, so a task the service cancels frees the backend's slot
 once its HTTP connection is closed. `time_budget_ms` is not the task's latency: the wait for a backend thread
 comes before it, the work stops `finalize_reserve_ms` plus the estimated writing time before it (seconds, for
 an answer with many results), and a finalisation that overruns it is still a 503 `deadline` (SPEC §7.6); the
@@ -195,10 +195,10 @@ task's HTTP timeout and the job's lifetime are separate, larger clocks.
 
 ## 4. Constraints
 
-- Never claim absence from a `count` or `labels: none` answer; show `absence_scope` and `retrieval_complete`.
-  Precisely (SPEC §9): an `exact` 0 count establishes absence of its unit in its scope (`exact` 0 contexts: no
-  k-mer of the index holds the pattern there); a count-mode or label-free answer establishes no absence of a
-  label, a sample or a record, whatever its counts; an incomplete list is not an inexact count (a `max_contexts`
+- Absence claims follow SPEC §9; show `absence_scope` and `retrieval_complete` with every answer. A count-mode or
+  label-free answer establishes no absence of a label, a sample or a record, whatever its counts; an `exact` 0
+  count establishes absence of its unit in its scope (`exact` 0 contexts: no k-mer of the index holds the
+  pattern there); an incomplete list is not an inexact count (a `max_contexts`
   cut after a completed discovery, `labels_cut` and `occurrences_cut` keep `exact` counts), but an item missing
   from an incomplete list is not absent: one item's absence needs `retrieval_complete: true` or an `exact` 0.
 - A `determinism: time_limited` answer is not reproducible; say so where the service caches answers.

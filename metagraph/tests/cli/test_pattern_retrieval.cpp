@@ -980,8 +980,8 @@ void expect_incomplete_stated(const Json::Value &e) {
 
 const uint64_t kDescriptor = 512 + 2 * kK;
 const uint64_t kStatement = 384 + kK;
-// a label name of the dictionary: 192 + 3 x its length ("c1")
-const uint64_t kName = 192 + 3 * 2;
+// a label name of the dictionary: 192 + 2 x its length ("c1")
+const uint64_t kName = 192 + 2 * 2;
 
 // Review finding (unsigned wrap): an unbudgeted read's label names are held whether or not
 // they fit; once they took the account past its maximum, `max - held` wrapped and every later
@@ -990,11 +990,11 @@ const uint64_t kName = 192 + 3 * 2;
 // while it is past the maximum, and the reads stop, stated.
 TEST(PatternRetrieval, UnbudgetedNamesPastTheMaximumStopTheReads) {
     Index idx = build<annot::ColumnCompressed<>>(kK, kRecords, true);
-    // GACGACT: one context, its row carries c1 and c4 (two names, 2 x 198 bytes). The account
-    // holds its descriptor and leaves 393 bytes: enough to reserve one statement (391) for the
-    // read, not for the two names the read returns, which take it 3 bytes past its maximum.
+    // GACGACT: one context, its row carries c1 and c4 (two names, 2 x 196 bytes). The account
+    // holds its descriptor and leaves 391 bytes: enough to reserve one statement (391) for the
+    // read, not for the two names the read returns, which take it 1 byte past its maximum.
     RetrievalHooks hooks;
-    hooks.max_memory_bytes = kDescriptor + kStatement + 2;
+    hooks.max_memory_bytes = kDescriptor + kStatement;
     ASSERT_LT(hooks.max_memory_bytes - kDescriptor, 2 * kName);
     Json::Value out = run(idx, body("{\"dna\": \"GACGACT\"}, {\"dna\": \"AC\"}",
                                     "\"allow_unbudgeted_annotation\": true"), hooks);
@@ -1106,6 +1106,392 @@ TEST(PatternRetrieval, RefusedRowStatementsAreCharged) {
     const Json::Value &w = out["patterns"][0];
     ASSERT_EQ(1u, w["rows_refused"].size());
     EXPECT_EQ(contexts * kDescriptor + kStatement, w["work"]["memory_bytes"].asUInt64());
+}
+
+// The distinct rows of an answer in reading order (the answer order of their first context),
+// with their labels_total
+std::vector<std::pair<uint64_t, uint64_t>> rows_in_order(const Json::Value &e) {
+    std::vector<std::pair<uint64_t, uint64_t>> rows;
+    std::set<uint64_t> seen;
+    for (const Json::Value &r : e["results"]) {
+        if (seen.insert(r["row"].asUInt64()).second)
+            rows.emplace_back(r["row"].asUInt64(), r["labels_total"].asUInt64());
+    }
+    return rows;
+}
+
+// Review GPT-2, finding 1: a row decoded and then refused (its label names did not fit the
+// account) was charged no work, and a refused read was repeated for the rows before it
+// uncharged: under max_annotation_work 1 and max_memory_mb 1 the review's request refused
+// all 64 rows at annotation_units 0, with no stop. Now every read is charged what it decoded,
+// whatever its outcome: a refused row costs what reading it costs (its row and its row-diff
+// dependencies), 8 when its read itself did not fit (nothing decoded); and the work is checked
+// before every row.
+TEST(PatternRetrieval, RefusedReadsChargeTheirWork) {
+    // one label with a long name in the five k-mers of GGACGACTTTG, all of which contain AC
+    const std::string name = "c" + std::string(20000, 'x');
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, { { name, "r0", "GGACGACTTTG" } },
+                                                     false);
+    const std::string occ = ", \"output\": {\"labels\": \"all\", \"occurrences\": false}";
+    auto request = [&](const std::string &rest) {
+        return "{\"patterns\": [{\"dna\": \"AC\"}]" + occ + ", \"mode\": \"partial\"" + rest + "}";
+    };
+    // a complete read: the units of the five rows
+    Json::Value full = run(idx, request(""), {}, false);
+    const Json::Value &f = full["patterns"][0];
+    ASSERT_TRUE(f["retrieval_complete"].asBool()) << f;
+    ASSERT_EQ(5u, f["work"]["annotation_rows"].asUInt64());
+    const uint64_t units = f["work"]["annotation_units"].asUInt64();
+
+    // an account that holds the eight contexts' descriptors (partial: at most half of it) and
+    // a row's read, but not the name (192 + 2 x 20,001 + 640 provisional naming): every row is
+    // decoded and then refused for its names
+    RetrievalHooks hooks;
+    hooks.max_memory_bytes = 2 * 8 * kDescriptor + 20000;
+    Json::Value out = run(idx, request(""), hooks, false);
+    const Json::Value &e = out["patterns"][0];
+    ASSERT_EQ(5u, e["rows_refused"].size()) << e;
+    for (const Json::Value &x : e["rows_refused"]) {
+        EXPECT_GT(x["needed_bytes"].asUInt64(), x["available_bytes"].asUInt64());
+    }
+    EXPECT_EQ(0u, e["work"]["annotation_rows"].asUInt64());
+    // each refused row charged as its read: the same units as the complete read (before the
+    // fix: 0)
+    EXPECT_EQ(units, e["work"]["annotation_units"].asUInt64());
+    EXPECT_TRUE(e["stop"].isNull());
+    expect_incomplete_stated(e);
+
+    // max_annotation_work 1: the first refused read reaches it, no other row is read (before
+    // the fix: five refusals, no stop)
+    out = run(idx, request(", \"max_annotation_work\": 1"), hooks, false);
+    const Json::Value &w = out["patterns"][0];
+    EXPECT_EQ(1u, w["rows_refused"].size()) << w;
+    EXPECT_EQ("label_discovery", w["stop"]["phase"].asString());
+    EXPECT_EQ("max_annotation_work", w["stop"]["reason"].asString());
+    EXPECT_GE(w["work"]["annotation_units"].asUInt64(), 8u);
+    // the contexts of the refused row say refused, every other context not_read
+    std::set<uint64_t> refused_rows;
+    size_t refused = 0, not_read = 0;
+    for (const Json::Value &r : w["results"]) {
+        if (r["labels_status"].asString() == "refused") {
+            refused++;
+            refused_rows.insert(r["row"].asUInt64());
+        }
+        not_read += r["labels_status"].asString() == "not_read";
+    }
+    EXPECT_EQ(1u, refused_rows.size());
+    EXPECT_EQ(w["rows_refused"][0]["row"].asUInt64(), *refused_rows.begin());
+    EXPECT_EQ(w["results"].size(), refused + not_read);
+    EXPECT_GT(not_read, 0u);
+
+    // a read that did not fit at all (every charge denied): 8 per refused row
+    hooks = RetrievalHooks();
+    hooks.deny_decode = [](uint64_t) { return true; };
+    out = run(idx, request(""), hooks, false);
+    EXPECT_EQ(5u, out["patterns"][0]["rows_refused"].size());
+    EXPECT_EQ(5u * 8, out["patterns"][0]["work"]["annotation_units"].asUInt64());
+    out = run(idx, request(", \"max_annotation_work\": 9"), hooks, false);
+    EXPECT_EQ(2u, out["patterns"][0]["rows_refused"].size());
+    EXPECT_EQ(16u, out["patterns"][0]["work"]["annotation_units"].asUInt64());
+    EXPECT_EQ("max_annotation_work", out["patterns"][0]["stop"]["reason"].asString());
+}
+
+// Finding 1 in step 2: every placement read refused (the reads of discovery admitted), each
+// charged 8; under a budget the discovery leaves one unit of, one placement read is refused
+// and the work stops the placement
+TEST(PatternRetrieval, RefusedPlacementReadsChargeTheirWork) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    Json::Value plain = run(idx, "{\"patterns\": [{\"dna\": \"AC\"}], \"mode\": \"partial\", "
+                                 "\"output\": {\"labels\": \"all\", \"occurrences\": false}}");
+    const uint64_t rows = plain["patterns"][0]["work"]["annotation_rows"].asUInt64();
+    const uint64_t discovery = plain["patterns"][0]["work"]["annotation_units"].asUInt64();
+    ASSERT_GT(rows, 1u);
+    // the first charge of every read has the ordinal 0 (a DecodeBudget per read): the reads
+    // after the discovery's are refused
+    auto reads = std::make_shared<uint64_t>(0);
+    RetrievalHooks hooks;
+    hooks.deny_decode = [reads, rows](uint64_t ordinal) {
+        if (!ordinal)
+            ++*reads;
+        return *reads > rows;
+    };
+    Json::Value out = run(idx, body("{\"dna\": \"AC\"}", "\"mode\": \"partial\""), hooks);
+    const Json::Value &e = out["patterns"][0];
+    ASSERT_EQ(rows, e["rows_refused"].size()) << e;
+    for (const Json::Value &x : e["rows_refused"]) {
+        EXPECT_EQ("placement", x["phase"].asString());
+    }
+    EXPECT_EQ(rows, e["work"]["annotation_rows"].asUInt64());
+    EXPECT_EQ(discovery + 8 * rows, e["work"]["annotation_units"].asUInt64());
+
+    *reads = 0;
+    out = run(idx, body("{\"dna\": \"AC\"}", "\"mode\": \"partial\", \"max_annotation_work\": "
+                                              + std::to_string(discovery + 1)), hooks);
+    const Json::Value &w = out["patterns"][0];
+    EXPECT_EQ(1u, w["rows_refused"].size()) << w;
+    EXPECT_EQ("placement", w["stop"]["phase"].asString());
+    EXPECT_EQ("max_annotation_work", w["stop"]["reason"].asString());
+    EXPECT_EQ(discovery + 8, w["work"]["annotation_units"].asUInt64());
+}
+
+// Review GPT-2, finding 2: a read took as many rows as the work budget had left for rows as
+// wide as the widest read before it, so a read of wider rows passed the budget by many rows (7
+// rows of one label, then 8 of 100: 927 units under 150). Now the rows are read one at a time,
+// the work checked before each: for every budget the reads stop at the first row that reaches
+// it, which passes it by its own units at most. On an unbudgeted backend without coordinates a
+// row costs exactly 8 + its labels, so the expectation is computed from the complete answer.
+TEST(PatternRetrieval, TheWorkBudgetIsPassedByOneRowAtMost) {
+    // narrow rows (one label) and wide ones (24 labels) carrying AC, in an order of the graph
+    std::vector<Record> records;
+    for (size_t c = 0; c < 24; ++c) {
+        records.push_back({ "w" + std::to_string(100 + c), "w_r0", "GGGACGGGTTACCC" });
+    }
+    for (const char *seq : { "CCACCCC", "TTTTACC", "ACAAAAA", "CTACAAT", "AACATTT",
+                             "TCCACTT", "CTTTCAC", "GGCCACG" }) {
+        records.push_back({ std::string("n") + seq, "n_r0", seq });
+    }
+    const std::string occ = "\"output\": {\"labels\": \"all\", \"occurrences\": false}, "
+                            "\"mode\": \"partial\", \"strands\": \"forward\", "
+                            "\"allow_unbudgeted_annotation\": true";
+    auto request = [&](uint64_t budget) {
+        return "{\"patterns\": [{\"dna\": \"AC\"}], " + occ
+                + (budget ? ", \"max_annotation_work\": " + std::to_string(budget) : "") + "}";
+    };
+    Index idx = build<annot::ColumnCompressed<>>(kK, records, false);
+    Json::Value full = run(idx, request(0), {}, false);
+    const Json::Value &f = full["patterns"][0];
+    ASSERT_TRUE(f["retrieval_complete"].asBool()) << f;
+    const auto rows = rows_in_order(f);
+    ASSERT_GT(rows.size(), 8u);
+    std::vector<uint64_t> cumulative;
+    uint64_t total = 0, narrow_before_wide = 0, narrow = 0;
+    for (const auto &[row, labels] : rows) {
+        total += 8 + labels;
+        cumulative.push_back(total);
+        narrow += labels == 1;
+        if (labels > 1)
+            narrow_before_wide = std::max(narrow_before_wide, narrow);
+    }
+    ASSERT_EQ(total, f["work"]["annotation_units"].asUInt64());
+    // the order has narrow rows before wide ones (what the batched reads overshot on)
+    ASSERT_GT(narrow_before_wide, 1u);
+
+    for (uint64_t budget = 1; budget <= total; ++budget) {
+        SCOPED_TRACE("max_annotation_work " + std::to_string(budget));
+        Json::Value out = run(idx, request(budget), {}, false);
+        const Json::Value &e = out["patterns"][0];
+        // the rows read: the shortest prefix whose units reach the budget
+        const size_t read = std::lower_bound(cumulative.begin(), cumulative.end(), budget)
+                                - cumulative.begin() + 1;
+        ASSERT_EQ(read, e["work"]["annotation_rows"].asUInt64()) << e["work"];
+        ASSERT_EQ(cumulative[read - 1], e["work"]["annotation_units"].asUInt64());
+        // past the budget by the last row's units at most
+        ASSERT_LT(e["work"]["annotation_units"].asUInt64() - budget,
+                  8 + rows[read - 1].second);
+        if (read < rows.size()) {
+            EXPECT_EQ("label_discovery", e["stop"]["phase"].asString());
+            EXPECT_EQ("max_annotation_work", e["stop"]["reason"].asString());
+        } else {
+            // the last row reached it: nothing left to stop
+            EXPECT_TRUE(e["stop"].isNull()) << e["stop"];
+        }
+        std::set<uint64_t> read_rows;
+        for (size_t i = 0; i < read; ++i) {
+            read_rows.insert(rows[i].first);
+        }
+        for (const Json::Value &r : e["results"]) {
+            EXPECT_EQ(read_rows.count(r["row"].asUInt64()) ? "complete" : "not_read",
+                      r["labels_status"].asString());
+        }
+    }
+
+    // a budgeted backend (row-diff dependency units, unknown here): the rows read under each
+    // budget are those of the first budget that read them, and the units grow row by row
+    Index rd = build<annot::RowDiffColumnAnnotator>(kK, records, false);
+    std::vector<uint64_t> steps;    // the units after each row
+    for (uint64_t budget = 1; ; ) {
+        Json::Value out = run(rd, request(budget), {}, false);
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_EQ(steps.size() + 1, e["work"]["annotation_rows"].asUInt64()) << budget;
+        steps.push_back(e["work"]["annotation_units"].asUInt64());
+        if (e["stop"].isNull())
+            break;
+        ASSERT_GE(steps.back(), budget);
+        budget = steps.back() + 1;
+    }
+    ASSERT_EQ(rows.size(), steps.size());
+    for (uint64_t budget = 1; budget <= steps.back(); budget += 7) {
+        Json::Value out = run(rd, request(budget), {}, false);
+        const Json::Value &e = out["patterns"][0];
+        const size_t read = std::lower_bound(steps.begin(), steps.end(), budget) - steps.begin()
+                                + 1;
+        ASSERT_EQ(read, e["work"]["annotation_rows"].asUInt64()) << budget;
+        ASSERT_EQ(steps[read - 1], e["work"]["annotation_units"].asUInt64()) << budget;
+    }
+}
+
+// Review GPT-2, finding 3: a result's label was priced 256 bytes whatever its name, though it
+// holds a copy of it, and by_label's copies were not priced at all: one label of 512 KiB in
+// 64 contexts built a 34 MB answer under max_memory_mb 2. Now every copy of a name the answer
+// holds is in the account before it is built: over a sweep of maxima, the names an answer
+// holds never pass its memory_bytes, which never passes the maximum, and every incomplete
+// entry says why.
+TEST(PatternRetrieval, EveryCopyOfALabelNameIsPriced) {
+    const std::string name = "c" + std::string(3000, 'x');
+    const std::vector<Record> records = { { name, "r0", "GGACGACTTTG" },
+                                          { "c2", "r0", "TTTTACTTTTG" } };
+    Index budgeted = build<annot::RowDiffColumnAnnotator>(kK, records, false);
+    Index column = build<annot::ColumnCompressed<>>(kK, records, false);
+    auto held_names = [](const Json::Value &e) {
+        uint64_t bytes = 0;
+        for (const Json::Value &r : e["results"]) {
+            for (const Json::Value &l : r["labels"]) {
+                bytes += l["column"].asString().size();
+            }
+        }
+        for (const Json::Value &b : e["by_label"]) {
+            bytes += b["column"].asString().size();
+        }
+        return bytes;
+    };
+    for (const Index *idx : { &budgeted, &column }) {
+        for (const char *mode : { "all_or_count", "partial" }) {
+            SCOPED_TRACE(std::string(mode) + (idx == &column ? " unbudgeted" : " budgeted"));
+            const std::string b = body("{\"dna\": \"AC\"}, {\"dna\": \"GACG\"}",
+                                       "\"allow_unbudgeted_annotation\": true, \"mode\": \""
+                                       + std::string(mode) + "\"");
+            Json::Value full = run(*idx, b, {}, false);
+            ASSERT_TRUE(full["patterns"][0]["retrieval_complete"].asBool());
+            // the long name in five contexts and in by_label of both patterns
+            ASSERT_GE(held_names(full["patterns"][0]), 6 * name.size());
+            uint64_t complete = 0, cut = 0;
+            for (uint64_t max = 8000; max < 90000; max += 211) {
+                RetrievalHooks hooks;
+                hooks.max_memory_bytes = max;
+                Json::Value out = run(*idx, b, hooks, false);
+                uint64_t names = 0;
+                for (const Json::Value &e : out["patterns"]) {
+                    expect_incomplete_stated(e);
+                    names += held_names(e);
+                    complete += e["retrieval_complete"].asBool();
+                    if (!e["retrieval_complete"].asBool() && e["stop"]["phase"] == "output") {
+                        cut++;
+                        EXPECT_EQ("max_memory", e["stop"]["reason"].asString());
+                    }
+                    // partial: by_label is null only when the account could not hold it
+                    // (stop {output, max_memory}, or an earlier stop), and then no context's
+                    // labels are built
+                    if (e["by_label"].isNull() && e["withheld"].isNull()) {
+                        EXPECT_FALSE(e["retrieval_complete"].asBool());
+                        EXPECT_EQ("max_memory", e["stop"]["reason"].asString()) << e;
+                        for (const Json::Value &r : e["results"]) {
+                            EXPECT_TRUE(r["labels"].isNull());
+                            EXPECT_NE("complete", r["labels_status"].asString());
+                        }
+                    }
+                }
+                const uint64_t memory = out["patterns"][1]["work"]["memory_bytes"].asUInt64();
+                // every name the answer holds is priced (before the fix: 6 x 3,001 bytes of
+                // names in an account of about 15,000)
+                ASSERT_LE(names, memory) << "max " << max << "\n" << out;
+                ASSERT_LE(memory, max + (idx == &column ? 2 * (192 + 2 * name.size()) : 0))
+                        << "max " << max;
+            }
+            EXPECT_GT(complete, 0u);
+            EXPECT_GT(cut, 0u);
+        }
+    }
+}
+
+// SPEC §11 (review GPT-2, finding 7): an earlier stop of the pattern followed by a time stop of
+// the output of its labels, on a virtual clock. The work budget stops the discovery after two
+// rows; the clock passes the work time when the second context read is to get its labels: the
+// first stop stays (label_discovery, max_annotation_work), the contexts read after the time
+// stop say output_budget, the determinism time_limited, and the next pattern answers as after
+// any time stop
+TEST(PatternRetrieval, AWorkStopThenATimeStopOfTheOutput) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
+    const std::string patterns = "{\"dna\": \"AC\"}, {\"dna\": \"GACG\"}";
+    // the units of the first row: a budget of 1 reads it alone; one more unit reads a second
+    Json::Value one = run(idx, body(patterns, "\"mode\": \"partial\", \"max_annotation_work\": 1"));
+    ASSERT_EQ(1u, one["patterns"][0]["work"]["annotation_rows"].asUInt64());
+    const std::string budget = "\"max_annotation_work\": "
+            + std::to_string(one["patterns"][0]["work"]["annotation_units"].asUInt64() + 1);
+
+    const Clock::time_point start = Clock::now();
+    auto virtual_ms = std::make_shared<double>(0);
+    auto clock = [start, virtual_ms]() {
+        return start + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double, std::milli>(*virtual_ms));
+    };
+    auto calls = std::make_shared<size_t>(0);
+    RetrievalHooks hooks;
+    // called before each read context's labels are built: past the work time at the second
+    hooks.output_hook = [virtual_ms, calls](size_t) {
+        if (++*calls == 2)
+            *virtual_ms = 1e9;
+    };
+    Json::Value out = run(idx, body(patterns, "\"mode\": \"partial\", " + budget), hooks, true,
+                          clock);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ(2u, e["work"]["annotation_rows"].asUInt64());
+    ASSERT_GE(*calls, 2u);
+    // the first stop is preserved
+    EXPECT_EQ("label_discovery", e["stop"]["phase"].asString()) << e["stop"];
+    EXPECT_EQ("max_annotation_work", e["stop"]["reason"].asString());
+    EXPECT_EQ("time_limited", e["determinism"].asString());
+    EXPECT_FALSE(e["retrieval_complete"].asBool());
+    EXPECT_TRUE(e["withheld"].isNull());
+    EXPECT_EQ("exact", e["counts"]["contexts"]["relation"].asString());
+    size_t complete = 0, output_budget = 0, not_read = 0;
+    bool after_complete = false;
+    for (const Json::Value &r : e["results"]) {
+        const std::string status = r["labels_status"].asString();
+        if (status == "complete") {
+            // the first read context, built before the clock moved
+            EXPECT_FALSE(after_complete);
+            EXPECT_TRUE(r["labels"].isArray());
+            complete++;
+        } else if (status == "output_budget") {
+            after_complete = true;
+            EXPECT_TRUE(r["labels"].isNull());
+            EXPECT_FALSE(r["labels_total"].isNull());
+            output_budget++;
+        } else {
+            EXPECT_EQ("not_read", status);
+            EXPECT_TRUE(r["labels"].isNull());
+            EXPECT_TRUE(r["labels_total"].isNull());
+            not_read++;
+        }
+    }
+    EXPECT_EQ(1u, complete);
+    EXPECT_GE(output_budget, 1u);
+    EXPECT_GT(not_read, 0u);
+    // the next pattern: after a time stop, as after any (its discovery stops at once)
+    const Json::Value &next = out["patterns"][1];
+    EXPECT_EQ("discovery", next["stop"]["phase"].asString());
+    EXPECT_EQ("time", next["stop"]["reason"].asString());
+    EXPECT_EQ("unknown", next["counts"]["contexts"]["relation"].asString());
+    EXPECT_EQ(0u, next["work"]["annotation_rows"].asUInt64());
+
+    // all_or_count: withheld (deadline: the time stop names the reason), the first stop stays
+    *virtual_ms = 0;
+    *calls = 0;
+    out = run(idx, body(patterns, budget), hooks, true, clock);
+    const Json::Value &w = out["patterns"][0];
+    EXPECT_EQ("deadline", w["withheld"]["reason"].asString()) << w;
+    EXPECT_EQ("label_discovery", w["stop"]["phase"].asString());
+    EXPECT_EQ("max_annotation_work", w["stop"]["reason"].asString());
+    EXPECT_EQ("time_limited", w["determinism"].asString());
+    EXPECT_EQ(0u, w["results"].size());
+    EXPECT_FALSE(w["retrieval_complete"].asBool());
+    EXPECT_EQ("time", out["patterns"][1]["stop"]["reason"].asString());
+
+    // without the clock moving: the work stop alone, deterministic
+    *virtual_ms = 0;
+    out = run(idx, body(patterns, "\"mode\": \"partial\", " + budget), {}, true, clock);
+    EXPECT_EQ("max_annotation_work", out["patterns"][0]["stop"]["reason"].asString());
+    EXPECT_EQ("full", out["patterns"][0]["determinism"].asString());
 }
 
 } // namespace

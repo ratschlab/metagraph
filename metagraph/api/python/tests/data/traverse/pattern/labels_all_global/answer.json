@@ -4318,22 +4318,22 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.301875,
-    "label_discovery_ms": 0.352833,
-    "placement_ms": 0.187166
+    "elapsed_ms": 0.1955,
+    "label_discovery_ms": 0.348375,
+    "placement_ms": 0.189042
    },
    "withheld": null,
    "work": {
     "annotation_rows": 48,
     "annotation_units": 24440,
     "mask_scans": 0,
-    "memory_bytes": 209916,
+    "memory_bytes": 215316,
     "ranges_visited": 122,
     "steps": 122
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 1.401292
+  "elapsed_ms": 0.999
  }
 }

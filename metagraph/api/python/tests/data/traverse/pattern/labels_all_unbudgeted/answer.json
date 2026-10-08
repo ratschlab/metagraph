@@ -706,8 +706,8 @@
     "reverse"
    ],
    "timing": {
-    "elapsed_ms": 0.192291,
-    "label_discovery_ms": 0.02475,
+    "elapsed_ms": 0.078375,
+    "label_discovery_ms": 0.015792,
     "placement_ms": 0.0
    },
    "withheld": null,
@@ -715,13 +715,13 @@
     "annotation_rows": 12,
     "annotation_units": 120,
     "mask_scans": 0,
-    "memory_bytes": 26676,
+    "memory_bytes": 27988,
     "ranges_visited": 73,
     "steps": 73
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.314
+  "elapsed_ms": 0.137375
  }
 }

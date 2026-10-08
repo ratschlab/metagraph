@@ -1189,22 +1189,22 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.1045,
-    "label_discovery_ms": 0.146666,
-    "placement_ms": 0.0885
+    "elapsed_ms": 0.05675,
+    "label_discovery_ms": 0.193958,
+    "placement_ms": 0.1695
    },
    "withheld": null,
    "work": {
     "annotation_rows": 48,
     "annotation_units": 24440,
     "mask_scans": 0,
-    "memory_bytes": 63048,
+    "memory_bytes": 64361,
     "ranges_visited": 122,
     "steps": 122
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.435167
+  "elapsed_ms": 0.500167
  }
 }

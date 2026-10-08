@@ -107,8 +107,11 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 - **A request whose client has left is not answered.** A client that closed, reset or half-closed its
   connection (one that half-closes after sending its request is treated as gone, as on `/traverse`), or a
   request running when the server shuts down: the work ends at the engine's next clock reading (§7.6), the
-  writing at its next check, and nothing is written. A request abandoned while it waited for a thread is dropped
-  at its first such reading or check.
+  writing at its next check, and nothing is written. Nor is an error: a refusal (400), a 503 (the index loading,
+  or `deadline`) or any other failure is not written to a client that left or during a shutdown — the server
+  asks once more after the answer or the error is built (outside review GPT-2, finding 4). A 503 `deadline`
+  still reaches a client that is there. A request abandoned while it waited for a thread is dropped at its first
+  such reading or check.
 - Single-graph servers only (`server_query -i GRAPH -a ANNOTATION`). A multi-graph server (`server_query
   GRAPHS.csv`) answers every `/pattern` request with 400 `later_increment` (§6).
 - `metagraph pattern -i GRAPH -a ANNOTATION [--json] REQUEST.json ...` answers each request file as the server
@@ -669,7 +672,7 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 | `timing` | object (§8.4) | answered | |
 | `placement` | string | answered, `labels: "all"` | increment 3: what this answer places: `record`, `global`, `none`, `none_canonical` (§14.3), or `not_requested` (`output.occurrences: false`) |
 | `annotation` | `"budgeted"` \| `"unbudgeted"` | answered, `labels: "all"` | the reads' access (§14.4) |
-| `by_label` | list \| null | answered, `labels: "all"` | the per-label summary over the returned contexts (§14.5); `null` when the results are withheld |
+| `by_label` | list \| null | answered, `labels: "all"` | the per-label summary over the returned contexts (§14.5); `null` when the results are withheld or, in `partial`, when the memory account could not hold it (§14.4) |
 | `rows_refused` | list | answered, `labels: "all"` | the rows the memory account refused, each once (§14.4) |
 | `anchors_truncated` | list | answered, `labels: "all"` | the rows cut at `max_labels_per_anchor`, each once (§14.2) |
 | `labels_cut` | object \| null | answered, `labels: "all"` | `partial`: `{reason: "max_labels", returned}` when `by_label` and the results list fewer labels than were found |
@@ -722,7 +725,7 @@ An anchors count is a count with `by_strand` or `by_orientation` besides (unit `
 | `mask_scans` | integer | ranges whose deferred scan began (§7.6): a range's masked edges — 0 on BASIC, CANONICAL and odd-k PRIMARY graphs unless masked edges lie among the candidates — and, on an even-k wrapped PRIMARY graph, the palindrome check of each range at a palindrome-capable offset (about one per such range) |
 | `steps` | integer | every step this pattern charged |
 | `annotation_rows` | integer | increment 3, `labels: "all"`: the rows this pattern's reads returned (both steps) |
-| `annotation_units` | integer | likewise: the work units they cost (§14.4) |
+| `annotation_units` | integer | likewise: the work units of this pattern's reads, refused ones included (§14.4) |
 | `memory_bytes` | integer | likewise: the request's memory account at its peak so far (the model of §14.4) |
 
 <!-- schema: stop -->
@@ -805,8 +808,9 @@ It costs no step.
   each placed where `placement` is `record` or `global` — so a column absent from `by_label` carries no
   occurrence of the pattern in the index's retained k-mers in that scope, and on a `record` index every placed
   occurrence of the listed columns is in the results (`counts.occurrences` exact). Without it (withheld, cut,
-  truncated, refused, stopped) the labels and occurrences listed are true but not all: their counts are
-  `at_least` or `unknown`, and nothing licenses an absence.
+  truncated, refused, stopped) the labels and occurrences listed are true but not all: an omission from the lists
+  establishes no absence, and each count keeps its own stated relation (it stays `exact` after an output-only cut
+  such as `labels_cut` or `occurrences_cut`, and is `at_least` or `unknown` where the reads themselves stopped).
 
 ## 10. Capabilities
 
@@ -856,7 +860,7 @@ It costs no step.
 | `k` | integer \| null | | |
 | `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN`: `available: false`, `alphabet_untested`, §8.2) |
 | `strand_stated` | boolean \| null | | `true` on BASIC |
-| `mask` | string \| null | | `file`: the `.edgemask` loaded beside the graph (below; one that marks a W = `$` edge valid: `available: false`, `mask_invalid`); `built_at_load`: built in memory at start-up (`--pattern-build-mask`, milestone 1b); `absent`: the route answers `mask_required` |
+| `mask` | string \| null | | `file`: the `.edgemask` loaded beside the graph (below; one that marks a W = `$` edge valid: `available: false`, `mask_invalid`); `built_at_load`: built in memory at start-up (`--pattern-build-mask`, milestone 1b); `absent`: the route answers `mask_required` on a `$ACGT` graph (a `$ACGTN` graph says `alphabet_untested` first, §6) |
 | `placement` | string \| null | | the placement `output.labels: "all"` gives on this index (`record`, `global`, `none`, `none_canonical`, §14.3; before increment 3: what a later increment could give) |
 | `support` | string \| null | | the best per-label support of a path (`record_verified`, `label_intersection`; milestone 4); a context of L ≤ k has `kmer` |
 | `annotation` | string \| null | | `budgeted` (row-diff with budgeted decode) or `unbudgeted`: the reads of `output.labels: "all"` (§14.4; `unbudgeted` needs `allow_unbudgeted_annotation`); `count` and `none` never read it |
@@ -925,7 +929,8 @@ pattern longer than k, the three error slots, the clamps, the relation `bounds` 
 (`max_steps_then_time`: `stop` keeps the first stop, the time shows as `cut: time` and `time_limited`, §7.6), a
 graph the engine does not recognise
 (`*_representation_unsupported` on both capabilities routes, `representation_unsupported`), and every
-whole-request refusal a server of this build gives (two 503 bodies are hand-made: no server produces them on
+whole-request refusal a server of this build gives but `mask_invalid` and `alphabet_untested` (below; the
+fixture validator names them in `NO_FIXTURE` and checks its code lists against the codes the sources write) (two 503 bodies are hand-made: no server produces them on
 demand; their `request.json` is illustrative, and a live server answers it 200). Two codes have no fixture: `primary_unwrapped` (`server_query` and the CLI always wrap a PRIMARY
 graph; only an embedding can reach it) and `alphabet_unsupported` (no graph of another alphabet loads in this
 build). Increment 3 adds `labels_all` (record placement within the threshold: 9 columns, 42 placed occurrences
@@ -948,7 +953,9 @@ Situations without a stored body: a row refused by the memory account (`rows_ref
 account, 1 MB); `cut: max_memory` in `partial`; an earlier stop followed by a time stop of the output of the labels
 (it depends on the machine's speed); the refusals `mask_invalid` (it needs a graph extended after masking with an
 older build; the unit test `PatternMask.MaskWithAValidSentinelIsRefused` shows it) and `alphabet_untested` (a DNA5
-build). The first three are exercised by the unit tests of `tests/cli/test_pattern_retrieval.cpp` on small graphs.
+build). The first three are exercised by the unit tests of `tests/cli/test_pattern_retrieval.cpp` on small graphs
+(the third by `PatternRetrieval.AWorkStopThenATimeStopOfTheOutput`, on a virtual clock: a work stop in discovery
+kept as the first stop, then the output's time stop).
 How a client merges answers is in `PROMPT-search-service-pattern.md` §3.1 item 2, not in a fixture.
 
 - `pattern_fixtures.py --check` regenerates them and compares: bodies byte for byte, except
@@ -1104,7 +1111,7 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
 - **Access.** `annotation: "budgeted"` when the annotation has the budget-aware decode
   (`LabelOracle::decode_charged()`: the row-diff family, e.g. `row_diff_brwt_coord` of refseq33m and the mini
   index): every read takes a `DecodeBudget` of what the memory account has left and admits each row against its
-  demand, all or nothing per read (a read refused at a row is repeated for the rows before it). A row that does not
+  demand, one row per read (outside review GPT-2, findings 1-2). A row that does not
   fit alone is **refused**: listed once in `rows_refused`, `labels_status: "refused"`; `partial` reads on,
   `all_or_count` stops reading and withholds (`annotation_budget`). `annotation: "unbudgeted"` (column, BRWT, row
   and disk annotations): refused (400 `annotation_unbudgeted`) unless `allow_unbudgeted_annotation: true`; then
@@ -1115,10 +1122,12 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
   is past its maximum nothing more fits: the reads stop and the later patterns' contexts are not admitted.
 - **The memory account** (`max_memory_mb`, one per request, over all its patterns) is a deterministic model in
   bytes, never a measurement, so that where a request stops does not depend on the allocator: a released
-  context 512 + 2k (its descriptor and its result object), a dictionary label 192 + 3 × its name's length
-  (charged inside the read that names it), the rows' label lists and coordinates as the `DecodeBudget` charges
+  context 512 + 2k (its descriptor and its result object), a dictionary label 192 + 2 × its name's length
+  (its name in the dictionary and in the placement's copy of it; charged inside the read that names it), the rows' label lists and coordinates as the `DecodeBudget` charges
   them (held until the pattern's labels are built), a statement of a row (a `rows_refused` or
-  `anchors_truncated` entry) 384 + k, a label of a result 256, a placed occurrence 256 + its record name's length
+  `anchors_truncated` entry) 384 + k, a label of a result 256 + its name's length (its copy of the name), a
+  `by_label` entry 512 + its name's length (per pattern; GPT-2 finding 3: every retained copy of a name is
+  charged before it is built), a placed occurrence 256 + its record name's length
   (`global`: 192), an occurrence in a label's deduplication set 64. What the reads and the deduplication sets
   hold is freed after each pattern; the dictionary, the descriptors, the statements and the labels built stay
   (the buffered answer). The label caches of the reused classes get no allotment (nothing is cached). The order:
@@ -1131,6 +1140,9 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
     truncation can always be stated); when the account cannot reserve one, the reads stop: `stop
     {label_discovery | placement, max_memory}`, the rows not read `labels_status: "not_read"`, `all_or_count`
     withheld (`annotation_budget`);
+  - then `by_label`, all its entries, before any context's labels: when it does not fit, `stop {output,
+    max_memory}` (unless an earlier stop is stated), `all_or_count` withholds (`output_budget`), `partial` returns
+    every context read with `labels_status: "output_budget"` and `by_label: null`;
   - then the labels of each context, in answer order — when a context's do not fit, `stop {output,
     max_memory}`: `all_or_count` withholds (`output_budget`), `partial` returns it and the later ones with
     `labels_status: "output_budget"`.
@@ -1140,9 +1152,12 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
 - **Work** (`max_annotation_work`, the oracle's units, one budget per request): a row read costs 8, plus 1 per
   label of the row (its true total, also when truncated) in step 1, plus 1 per label and 1 per coordinate in
   step 2, plus the units of its row-diff dependency rows (8 per row and 1 per entry they store); a row read in
-  both steps costs both. The reads take 1, 2, 4, … up to 512 rows, and near the budget no more than it has left
-  at the widest row read so far; the budget is checked before each read, so the last one can pass it by about a
-  row. The stop: `stop {label_discovery | placement, max_annotation_work}`, the rows not read `labels_status:
+  both steps costs both. The reads take one row at a time and the budget is checked before each row: a row is
+  read only while the units are below `max_annotation_work`, so the reads pass it by their last row's units at
+  most (`annotation_units` < `max_annotation_work` + that row's units; GPT-2 finding 2: batches of growing size
+  could pass it by many rows). A refused row costs what its read decoded: a read row's units when it was read and
+  then refused for its demand or its names, 8 when its read itself did not fit; it counts in `annotation_units`,
+  not in `annotation_rows` (GPT-2 finding 1: refused reads were not charged). The stop: `stop {label_discovery | placement, max_annotation_work}`, the rows not read `labels_status:
   "not_read"`, `all_or_count` withheld (`annotation_budget`); the request's later patterns read nothing.
 - **The deadline.** The reads and the output of the labels are work (§7.6): the work time is checked before each
   read and, within a read, between its chunks (paced at `--traverse-chunk-target-ms`, as `/traverse`'s reads; an
@@ -1182,8 +1197,8 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
   first `max_occurrences_per_label` occurrences of its deduplicated union, in (`seq_id`, start, strand) order —
   every context lists those of them it holds, possibly none (`occurrences_cut`); the label's counts stay whole.
   `all_or_count` cuts nothing: all or nothing.
-- **`by_label`**: one entry per label over the returned contexts; `null` when the results are withheld, `[]` when
-  none was found.
+- **`by_label`**: one entry per label over the returned contexts; `null` when the results are withheld or, in
+  `partial`, when the memory account could not hold it (§14.4), `[]` when none was found.
 
 <!-- schema: label -->
 | field | type | meaning |
@@ -1260,7 +1275,7 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
     "occurrences": {"value": 2, "relation": "exact", "unit": "placed_occurrences"}},
    "... 8 more"],
  "work": {"ranges_visited": 122, "mask_scans": 0, "steps": 122, "annotation_rows": 48,
-          "annotation_units": 24440, "memory_bytes": 220428},
+          "annotation_units": 24440, "memory_bytes": 225828},
  "timing": {"elapsed_ms": "...", "label_discovery_ms": "...", "placement_ms": "..."}}
 ```
 
@@ -1394,6 +1409,8 @@ and `/stats` (byte for byte apart from `timing`), the alignment, and every answe
   refused (`mask_invalid`, above).
 - **A client that left, or a shutdown** (R2-02, X-CONCURRENCY-01, the owner's decision): nothing is written
   (§3); before, the request ran to its stop and wrote into the closed connection. A half-close counts as gone.
+  Nor is an error written (outside review GPT-2, finding 4): `{` and `{"patterns":[]}` from a half-closed client
+  were answered 400; now nothing. The other routes are unchanged.
 - **Request parsing** (R1-02, R1-03, R2-01): bodies the server answered 200 — with a comment, a trailing comma,
   content after the value, or a duplicated member name (whose last value won silently: `max_steps` 1 then 100000
   gave 100000, unlisted) — and bodies nested deeper than 1,000 (a 400 without a code) are now 400
@@ -1408,7 +1425,10 @@ and `/stats` (byte for byte apart from `timing`), the alignment, and every answe
   --force` and the restart).
 - **Capabilities** (both routes): `caps_rule` rewritten (R2-04, X-EFFICIENCY-04): it names the nine clamped
   caps, says that `max_patterns` and `min_information_bits` are not request fields' maxima, and states the rule
-  of §7.6 with the delivery rates in force. No field is added or removed.
+  of §7.6 with the delivery rates in force. The `/resolve` block's `rule` (on both capabilities routes) is
+  rewritten too: on the row paths the explicit labels' hits are taken from each priming batch before the
+  deadline is read, so a deadline stop keeps every row read (f8919958, T3-01/V1-01), and it says which invalid
+  selections are still a 400 after a deadline stop (V1-02). No field is added or removed.
 - **Server flags**: `--pattern-delivery-build-mbps` (10) and `--pattern-delivery-compress-mbps` (50) are new;
   `--pattern-finalize-ms` is now the floor of the time kept back (§4.5).
 - **Fixtures** (§11): new `capabilities_representation_unsupported`,
@@ -1417,9 +1437,24 @@ and `/stats` (byte for byte apart from `timing`), the alignment, and every answe
   time shown as `cut: time` and `time_limited`, and the sticky stop after it); every pattern entry gains
   `min_anchor_information_bits`; changed: the capabilities bodies (`caps_rule`), `mask_required` (the message),
   `deadline` and `deadline_partial` (the heavy pattern is now `GG` + N^19 + `TTGGCGATCT`, the old one having
-  become cheap; at L = 31 its `by_offset` has one key), `README.md`, `index.json`; `--check` now compares every
+  become cheap; at L = 31 its `by_offset` has one key), `README.md`, `index.json`; after the outside review
+  (85614d30, GPT #11) new `labels_all_output_budget`, `labels_all_partial_exact_cut` and `labels_all_mixed_slots`
+  (§11); `--check` now compares every
   `time_limited` entry after an answer's first, and blanks the `returned` and `results` of that first entry when
   the clock cut its release (`max_steps_then_time`).
+- **After the outside review GPT-2** (labels "all" only; count mode, labels "none" and every label-free answer
+  unchanged):
+  - reads take one row at a time with the work budget checked before each row, and a refused row costs what its
+    read decoded (findings 1-2): under a work budget fewer rows can be read when later rows are wider, refused
+    rows add to `annotation_units`, and rows that used to be refused can be `not_read` behind a work stop; near
+    the memory limit which row is refused first, and its `needed_bytes`, can differ;
+  - every retained copy of a label name is charged, `by_label` first (finding 3): `work.memory_bytes` grows in
+    every labelled answer (the ten labelled fixtures: e.g. `labels_all` 220,428 to 225,828), contexts can become
+    `output_budget` earlier, `all_or_count` can withhold `output_budget` where it completed, and `partial` can
+    answer `by_label: null`;
+  - nothing is written to a client that left, errors included (finding 4, §3);
+  - the fixture validator knows `mask_invalid` and `alphabet_untested` and checks its code lists against the
+    sources (finding 6).
 - **No answer changes** (stated for completeness): the deleted per-offset completion rule was never in effect
   (T1-04: no offset was `exact` after a discovery stop before either); the dummy-edge mask is built faster with
   the same bytes (D1-02, M1-02); an `.edgemask` that exists but cannot be opened is now named in the log, by

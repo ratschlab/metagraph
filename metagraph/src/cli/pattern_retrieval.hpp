@@ -18,6 +18,9 @@
  * Both steps read through LabelOracle::decode_charged() annotations with a DecodeBudget (the
  * account's remainder) and ReadPacing (the request's deadline); an unbudgeted backend is
  * read only when the request allows it (allow_unbudgeted_annotation), and the answer says so.
+ * They read one row at a time, the time and the work checked before each row, every row whose
+ * read began charged its units (refused and interrupted reads too), so that the reads pass the
+ * work budget by one row at most (review GPT-2, findings 1 and 2).
  * One memory account per request, over all its patterns, holds what the reads return, the
  * label dictionary, the contexts' descriptors (charged as the engine releases them, before
  * their result objects are built), the statements of refused and truncated rows (reserved
@@ -26,7 +29,8 @@
  * may take it past its maximum by the label names it returned, after which nothing more fits
  * and the reads stop, stated); the work
  * account counts the oracle's units (8 per row, 1 per entry and coordinate, and the rows'
- * row-diff dependencies). Every refusal, truncation, cut and stop is stated (the owner's
+ * row-diff dependencies; a refused row what its read decoded, at least 8). Every refusal,
+ * truncation, cut and stop is stated (the owner's
  * guarantee rule); a count is exact only when everything behind it was read.
  */
 
@@ -122,7 +126,7 @@ struct RetrievalLimits {
     // the labels kept per row (LabelRecorder's cap); a row with more is truncated and stated
     uint64_t max_labels_per_anchor = 64;
     // the oracle's work units over all reads of the request (8 per row, 1 per entry and
-    // coordinate, plus the rows' row-diff dependency units)
+    // coordinate, plus the rows' row-diff dependency units; checked before every row)
     uint64_t max_annotation_work = 100'000'000;
     // the request's memory account (bytes)
     uint64_t max_memory_bytes = uint64_t(256) << 20;

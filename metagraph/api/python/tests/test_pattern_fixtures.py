@@ -19,7 +19,9 @@ scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, cont
   - the fixture set: it covers every mode, scope, strand setting, relation (bounds included),
     stop, withheld and cut reason, slot error, refusal code and unavailable reason a service
     has to handle -- but for the ones UNPRODUCIBLE names, which no server of this build can
-    give -- and the README names each fixture.
+    give, and the ones NO_FIXTURE names, which need an index the fixture servers are not --
+    and the README names each fixture; the refusal codes and unavailable reasons are the ones
+    the server's sources write.
 
 No metagraph import and no server: the service copies these bodies into its own tests, and
 this check is what makes them a contract rather than a sample.
@@ -65,17 +67,36 @@ CUT = ('max_contexts', 'max_steps', 'time', 'max_anchors', 'max_memory')
 NOTES = ('low_complexity_pattern', 'strand_unknown_canonical', 'paths_later_increment',
          'annotation_unbudgeted', 'record_bounds_unknown', 'annotation_not_read')
 SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported')
+# mask_invalid and alphabet_untested: the route's own reasons not to serve a graph (85614d30,
+# owner decisions #6 and #4 of 2026-10-07; pattern.cpp route_support), a 400 refusal's code and
+# the capabilities' unavailable_reason alike (review GPT-2 of 2026-10-08, finding 6: missing
+# here, valid answers carrying them were rejected)
 REFUSALS = ('invalid_request', 'later_increment', 'resident_only', 'mask_required',
             'representation_unsupported', 'primary_unwrapped', 'alphabet_unsupported', 'deadline',
-            'annotation_unbudgeted')
+            'annotation_unbudgeted', 'mask_invalid', 'alphabet_untested')
 UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped',
-               'alphabet_unsupported', 'multi_graph_later_increment')
+               'alphabet_unsupported', 'multi_graph_later_increment', 'mask_invalid',
+               'alphabet_untested')
 # The refusals and unavailable reasons no server of this build gives, so that no fixture holds
 # them (review of 2026-10-07, C2-01, D1-07, C1-05): primary_unwrapped (server_query and the CLI
 # always wrap a PRIMARY graph in CanonicalDBG; only an embedding reaches it) and
 # alphabet_unsupported (the BOSS alphabet is the build's: a graph of another alphabet does not
-# load). Every other code has a fixture.
+# load).
 UNPRODUCIBLE = ('primary_unwrapped', 'alphabet_unsupported')
+# The ones a server of this build gives but no stored fixture holds, each with the index it
+# needs (review GPT-2 of 2026-10-08, finding 6): named here rather than left out of the
+# expected sets, so that the coverage tests list every code without a fixture. Every other code
+# has a fixture.
+NO_FIXTURE = {
+    'mask_invalid': 'a graph whose .edgemask marks an edge with W = $ valid: one extended after '
+                    'masking by a build older than 85614d30 (metagraph extend on a masked '
+                    'graph), or a stale mask',
+    'alphabet_untested': 'a DNA5 build of metagraph and a $ACGTN graph (a DNA4 build does not '
+                         'load one)',
+}
+# The alphabet the route serves (pattern.cpp alphabet_refusal): on any other the alphabet's
+# reason comes first, mask or none
+SERVED_ALPHABET = '$ACGT'
 MASKS = ('file', 'built_at_load', 'absent')
 PLACEMENTS = ('record', 'global', 'none', 'none_canonical')
 # an entry's placement (increment 3): the index's, or not_requested (output.occurrences false)
@@ -895,8 +916,23 @@ class Checker:
         self.ok(b['scopes'] == b['scopes_by_graph_mode'][b['graph_mode']], path + '.scopes')
         self.ok(b['strand_stated'] is (b['graph_mode'] == 'basic'), path + '.strand_stated')
         self.one_of(b['mask'], MASKS, path + '.mask')
-        self.ok((b['mask'] == 'absent') is (b['unavailable_reason'] == 'mask_required'),
-                path + '.mask', 'mask absent exactly when mask_required')
+        self.ok(isinstance(b['alphabet'], str) and b['alphabet'], path + '.alphabet')
+        # the alphabet before the mask (pattern.cpp route_support, as the engine orders
+        # alphabet_unsupported before mask_required): on the served alphabet the mask is absent
+        # exactly when mask_required; on another the alphabet's reason is given, mask or none --
+        # a DNA5 graph without a mask is alphabet_untested (review GPT-2 of 2026-10-08,
+        # finding 6: this rule held on every alphabet and refused that block)
+        if b['alphabet'] == SERVED_ALPHABET:
+            self.ok((b['mask'] == 'absent') is (b['unavailable_reason'] == 'mask_required'),
+                    path + '.mask', f'on {SERVED_ALPHABET}, mask absent exactly when mask_required')
+            self.ok(b['unavailable_reason'] not in ('alphabet_untested', 'alphabet_unsupported'),
+                    path + '.unavailable_reason', f'{SERVED_ALPHABET} is served')
+        else:
+            self.ok(b['available'] is False, path + '.available',
+                    f'only {SERVED_ALPHABET} is served')
+            self.one_of(b['unavailable_reason'],
+                        ('alphabet_untested' if b['alphabet'] == '$ACGTN'
+                         else 'alphabet_unsupported',), path + '.unavailable_reason')
         for f, values in (('placement', PLACEMENTS), ('support', SUPPORTS),
                           ('annotation', ANNOTATIONS)):
             self.ok(b[f] is None or b[f] in values, f'{path}.{f}')
@@ -1083,9 +1119,16 @@ class TestPatternFixtures(unittest.TestCase):
                               ('discovery', 'max_contexts'), ('mask_scan', 'max_steps')},
                              seen['stop'])
         # every refusal code but the unproducible ones (review of 2026-10-07, C2-01: the set was
-        # pinned to the covered ones, so a code without a fixture went unseen)
-        self.assertEqual((set(REFUSALS) | {'initializing'}) - set(UNPRODUCIBLE),
-                         seen['refusal'])
+        # pinned to the covered ones, so a code without a fixture went unseen) and the ones no
+        # stored fixture holds, listed by name with the index each needs (review GPT-2 of
+        # 2026-10-08, finding 6: derived from REFUSALS alone, the expectation could not notice
+        # REFUSALS missing two codes; test_the_codes_are_the_sources compares it with the code)
+        without_fixture = {'mask_invalid', 'alphabet_untested'}
+        self.assertEqual(without_fixture, set(NO_FIXTURE))
+        self.assertEqual((set(REFUSALS) | {'initializing'}) - set(UNPRODUCIBLE)
+                         - without_fixture, seen['refusal'])
+        self.assertEqual(without_fixture | set(UNPRODUCIBLE),
+                         set(REFUSALS) - seen['refusal'], 'the refusal codes without a fixture')
         self.assertLessEqual({('label_discovery', 'max_annotation_work')}, seen['stop'])
         # SPEC §7.6 (the owner's decision of 2026-10-07): stop keeps the first stop; the time
         # that then cut the release shows only as cut time and time_limited, in the pattern
@@ -1133,7 +1176,8 @@ class TestPatternFixtures(unittest.TestCase):
             check(a)
 
     def test_every_unavailable_reason_has_a_capabilities_fixture(self):
-        """Every unavailable reason but the unproducible ones, on both capabilities routes."""
+        """Every unavailable reason but the unproducible ones and the ones named as without a
+        fixture (NO_FIXTURE), on both capabilities routes."""
         seen = {}
         for name, f in self.fixtures.items():
             if f['method'] != 'GET':
@@ -1142,9 +1186,87 @@ class TestPatternFixtures(unittest.TestCase):
             if b['available'] is False:
                 route = 'probe' if f['path'].startswith('/traverse/') else 'capabilities'
                 seen.setdefault(b['unavailable_reason'], set()).add(route)
-        self.assertEqual(set(UNAVAILABLE) - set(UNPRODUCIBLE), set(seen))
+        without_fixture = {'mask_invalid', 'alphabet_untested'}
+        self.assertEqual(without_fixture, set(NO_FIXTURE))
+        self.assertEqual(set(UNAVAILABLE) - set(UNPRODUCIBLE) - without_fixture, set(seen))
+        self.assertEqual(without_fixture | set(UNPRODUCIBLE), set(UNAVAILABLE) - set(seen),
+                         'the unavailable reasons without a fixture')
         for reason, routes in seen.items():
             self.assertEqual({'probe', 'capabilities'}, routes, reason)
+
+    def test_the_codes_are_the_sources(self):
+        """REFUSALS and UNAVAILABLE are the codes the server's sources write (review GPT-2 of
+        2026-10-08, finding 6: mask_invalid and alphabet_untested, added to pattern.cpp, were
+        missing here, and the coverage tests, derived from these lists, could not notice):
+        every PatternRefusal's literal code, and every reason support_message words (the
+        graph-support reasons a refusal and the capabilities' unavailable_reason carry), with
+        the multi-graph server's own unavailable reason."""
+        if not os.path.isfile(PATTERN_CPP):
+            self.skipTest('the server sources are not in this checkout')
+        cli = os.path.dirname(PATTERN_CPP)
+        sources = {}
+        for name in sorted(os.listdir(cli)):
+            if name.endswith('.cpp'):
+                with open(os.path.join(cli, name), encoding='utf-8') as f:
+                    sources[name] = f.read()
+        literal = set()
+        for text in sources.values():
+            literal |= set(re.findall(r'PatternRefusal\(\s*\d+\s*,\s*"(\w+)"', text))
+        support = set(re.findall(r'support\.reason == "(\w+)"', sources['pattern.cpp']))
+        self.assertIn('PatternRefusal(400, support.reason, support_message(support))',
+                      sources['pattern.cpp'], 'a graph-support refusal is its reason')
+        unavailable = set(re.findall(r'p\["unavailable_reason"\] = "(\w+)"',
+                                     sources['pattern.cpp']))
+        self.assertLessEqual({'mask_required', 'mask_invalid', 'alphabet_untested'}, support,
+                             'support_message\'s branches not found in pattern.cpp')
+        self.assertEqual(set(REFUSALS), literal | support)
+        self.assertEqual(set(UNAVAILABLE), support | unavailable)
+
+    def test_the_new_codes_are_valid_answers(self):
+        """Hand-made bodies of v1 with mask_invalid and alphabet_untested -- a 400 refusal, and
+        the capabilities block of such a server (a DNA5 graph without a mask included) -- are
+        accepted (review GPT-2 of 2026-10-08, finding 6: none is stored, see NO_FIXTURE),
+        and the rules they rest on still refuse what v1 never answers."""
+        class Stub:
+            def fail(self, message):
+                raise AssertionError(message)
+
+        def refusal(code, status=400):
+            check = Checker(Stub(), f'hand-made {code}')
+            self.refusal(check, {'status': status, 'headers': {}},
+                         {'error': f'pattern: the graph is not served ({code})', 'code': code})
+
+        def block(**fields):
+            b = copy.deepcopy(self.capabilities_of('masked'))
+            self.assertIsNotNone(b)
+            self.assertIs(True, b['available'])
+            b.update(fields)
+            Checker(Stub(), 'hand-made capabilities').block(b, 'pattern', False)
+
+        for code in ('mask_invalid', 'alphabet_untested'):
+            refusal(code)
+            with self.assertRaisesRegex(AssertionError, '503 is the deadline'):
+                refusal(code, 503)
+        # a mask that marks a W = $ edge valid: the graph described, its mask stated
+        block(available=False, unavailable_reason='mask_invalid', mask='file')
+        # a DNA5 graph, with its mask or without (the alphabet's reason comes first)
+        for mask in MASKS:
+            block(available=False, unavailable_reason='alphabet_untested', alphabet='$ACGTN',
+                  mask=mask)
+        # what v1 never answers
+        with self.assertRaisesRegex(AssertionError, 'mask absent exactly when mask_required'):
+            block(available=False, unavailable_reason='mask_invalid', mask='absent')
+        with self.assertRaisesRegex(AssertionError, 'mask absent exactly when mask_required'):
+            block(available=False, unavailable_reason='alphabet_untested', mask='absent')
+        with self.assertRaisesRegex(AssertionError, 'is served'):
+            block(available=False, unavailable_reason='alphabet_untested')
+        with self.assertRaisesRegex(AssertionError, 'only \\$ACGT is served'):
+            block(alphabet='$ACGTN')
+        with self.assertRaisesRegex(AssertionError, 'unavailable_reason'):
+            block(available=False, unavailable_reason='mask_required', alphabet='$ACGTN',
+                  mask='absent')
+        with self.assertRaisesRegex(AssertionError, 'unavailable_reason'):
+            block(available=False, unavailable_reason='alphabet_untested', alphabet='$ACGU')
 
     def test_hand_made_bodies_are_the_codes(self):
         """The two hand-made 503 bodies are written by the code as stored here."""
