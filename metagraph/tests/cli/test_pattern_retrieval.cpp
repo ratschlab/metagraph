@@ -1494,4 +1494,155 @@ TEST(PatternRetrieval, AWorkStopThenATimeStopOfTheOutput) {
     EXPECT_EQ("full", out["patterns"][0]["determinism"].asString());
 }
 
+// GPT review 3, finding 4: every occurrence of a context was built for the answer, charged and
+// estimated in the answer's volume, and max_occurrences_per_label applied after (refunding the
+// memory, not the estimate): ten AAA on a 30,000-base homopolymer, cap 1, stopped in the first
+// output after 4 ms of work. Now each occurrence is counted in its label's union, but a list
+// holds (and the account and the volume are charged for) only the first max_occurrences_per_
+// label of its context's, cut to the union's first once it is complete. The record-scan oracle:
+// each label lists exactly the first of its union, its counts exact over all of them
+TEST(PatternRetrieval, TheCapListsTheFirstOfEachUnion) {
+    std::vector<Record> records = kRecords;
+    records.push_back({ "h", "h0", std::string(30, 'A') });
+    records.push_back({ "h", "h1", "CC" + std::string(12, 'A') + "CC" });
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, records, true);
+    for (const uint64_t cap : { 0, 1, 2, 5 }) {
+        for (const std::string p : { "AAA", "AC", "GAC" }) {
+            SCOPED_TRACE(p + " cap " + std::to_string(cap));
+            Json::Value out = run(idx, body("{\"dna\": \"" + p + "\"}",
+                                            "\"mode\": \"partial\", \"max_occurrences_per_label\": "
+                                            + std::to_string(cap)));
+            const Json::Value &e = out["patterns"][0];
+            ASSERT_TRUE(e["stop"].isNull()) << e["stop"];
+            // the oracle's occurrences per column, in the union's order (seq_id, start, strand:
+            // + before - before =)
+            std::map<std::string, std::set<std::tuple<uint64_t, uint64_t, std::string>>> oracle;
+            for (const auto &[column, seq_id, start, strand] : placed_oracle(idx, p)) {
+                oracle[column].emplace(seq_id, start, strand);
+            }
+            std::map<std::string, std::set<std::tuple<uint64_t, uint64_t, std::string>>> listed;
+            for (const Json::Value &r : e["results"]) {
+                const std::string kmer = r["kmer"].asString();
+                for (const Json::Value &l : r["labels"]) {
+                    const std::string column = l["column"].asString();
+                    // the context's own occurrences: its k-mer in the column's records
+                    uint64_t own = 0;
+                    for (const Record &rec : idx.records) {
+                        for (size_t i = 0; rec.column == column && i + kK <= rec.seq.size(); ++i) {
+                            own += rec.seq.compare(i, kK, kmer) == 0;
+                        }
+                    }
+                    EXPECT_EQ(own, l["occurrences"]["value"].asUInt64()) << column << " " << r;
+                    EXPECT_LE(l["occurrence_list"].size(), cap);
+                    for (const Json::Value &o : l["occurrence_list"]) {
+                        listed[column].emplace(o["seq_id"].asUInt64(),
+                                               nt_coords(o["nt_coords"].asString()).first,
+                                               o["strand"].asString());
+                    }
+                }
+            }
+            uint64_t cut = 0, total = 0;
+            for (const auto &[column, u] : oracle) {
+                std::set<std::tuple<uint64_t, uint64_t, std::string>> first;
+                for (auto it = u.begin(); it != u.end() && first.size() < cap; ++it) {
+                    first.insert(*it);
+                }
+                EXPECT_EQ(first, listed[column]) << column;
+                cut += u.size() > cap;
+                total += u.size();
+            }
+            for (const Json::Value &b : e["by_label"]) {
+                EXPECT_EQ(oracle[b["column"].asString()].size(),
+                          b["occurrences"]["value"].asUInt64());
+                EXPECT_EQ("exact", b["occurrences"]["relation"].asString());
+            }
+            EXPECT_EQ(total, e["counts"]["occurrences"]["value"].asUInt64());
+            EXPECT_EQ("exact", e["counts"]["occurrences"]["relation"].asString());
+            if (cut) {
+                EXPECT_EQ(cut, e["occurrences_cut"]["labels"].asUInt64());
+            } else {
+                EXPECT_TRUE(e["occurrences_cut"].isNull());
+            }
+        }
+    }
+}
+
+// The answer's volume counts what is listed, not what is counted (GPT review 3, finding 4): a
+// clock that never moves and a build rate of 10 bytes per ms, under which the text of the 1,994
+// occurrences of one context (some 300 KB, 74 s to build and write) stops the output and the
+// cap's one (a few KB with the rest of the answer) does not. Before: stop {output, time}, the
+// labels output_budget, the occurrences at least 0. (Column-compressed, read unbudgeted, as
+// below)
+TEST(PatternRetrieval, TheCapEstimatesOnlyWhatIsListed) {
+    Index idx = build<annot::ColumnCompressed<>>(kK, { { "h", "h0", std::string(2000, 'A') } },
+                                                 true);
+    const Clock::time_point start = Clock::now();
+    auto clock = [start]() { return start; };
+    PatternLimits slow = limits();
+    slow.delivery_build_mbps = 0.01;
+    // (the server's cap, the maximum of the request's: room for the uncapped list below)
+    slow.max_occurrences_per_label = 5000;
+    const std::string rest = "\"mode\": \"partial\", \"allow_unbudgeted_annotation\": true, "
+                             "\"time_budget_ms\": 10000, \"max_occurrences_per_label\": ";
+    Json::Value out = run(idx, body("{\"dna\": \"AAA\"}", rest + "1"), {}, true, clock, slow);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_TRUE(e["stop"].isNull()) << e["stop"];
+    EXPECT_EQ("full", e["determinism"].asString());
+    // the starts 1 .. 1,998, each once, from the five contexts AAAAAAA (offsets 0 .. 4)
+    EXPECT_EQ(1998u, e["counts"]["occurrences"]["value"].asUInt64());
+    EXPECT_EQ("exact", e["counts"]["occurrences"]["relation"].asString());
+    EXPECT_EQ(1u, e["occurrences_cut"]["labels"].asUInt64());
+    ASSERT_EQ(5u, e["results"].size());
+    uint64_t listed = 0;
+    for (const Json::Value &r : e["results"]) {
+        EXPECT_EQ("complete", r["labels_status"].asString());
+        ASSERT_EQ(1u, r["labels"].size());
+        EXPECT_EQ(1994u, r["labels"][0]["occurrences"]["value"].asUInt64());
+        for (const Json::Value &o : r["labels"][0]["occurrence_list"]) {
+            EXPECT_EQ("1-3", o["nt_coords"].asString());
+            listed++;
+        }
+    }
+    EXPECT_EQ(1u, listed);
+    // the uncapped list does not fit: stopped by the estimate, stated
+    out = run(idx, body("{\"dna\": \"AAA\"}", rest + "2000"), {}, true, clock, slow);
+    EXPECT_EQ("output", out["patterns"][0]["stop"]["phase"].asString());
+    EXPECT_EQ("time", out["patterns"][0]["stop"]["reason"].asString());
+}
+
+// The occurrences of a context are made under the clock (GPT review 3): one context of 19,994
+// coordinates, the clock moved past the work time before they are made: the counting stops
+// within a stride of them, before the context's deduplication (64 bytes an occurrence) is
+// charged — which, made whole and refused after, would have left its 1.3 MB in the peak. (A
+// column-compressed index, read unbudgeted: the row-diff conversion of a row of 20,000
+// coordinates takes the test half a minute)
+static_assert(pattern::Budget::kClockStride < 19994 / 2, "two strides in the context");
+TEST(PatternRetrieval, TheOccurrencesReadTheClock) {
+    Index idx = build<annot::ColumnCompressed<>>(kK, { { "h", "h0", std::string(20000, 'A') } },
+                                                 true);
+    const Clock::time_point start = Clock::now();
+    auto virtual_ms = std::make_shared<double>(0);
+    auto clock = [start, virtual_ms]() {
+        return start + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double, std::milli>(*virtual_ms));
+    };
+    RetrievalHooks hooks;
+    hooks.occurrences_hook = [virtual_ms](size_t) { *virtual_ms = 1e9; };
+    const std::string p = std::string(kK, 'A');
+    const std::string rest = "\"mode\": \"partial\", \"allow_unbudgeted_annotation\": true";
+    Json::Value out = run(idx, body("{\"dna\": \"" + p + "\"}", rest), hooks, true, clock);
+    const Json::Value &e = out["patterns"][0];
+    EXPECT_EQ("output", e["stop"]["phase"].asString());
+    EXPECT_EQ("time", e["stop"]["reason"].asString());
+    ASSERT_EQ(1u, e["results"].size());
+    EXPECT_EQ("output_budget", e["results"][0]["labels_status"].asString());
+    EXPECT_LT(e["work"]["memory_bytes"].asUInt64(), 19994u * 64);
+    // the clock left alone: every occurrence counted
+    *virtual_ms = 0;
+    out = run(idx, body("{\"dna\": \"" + p + "\"}", rest), {}, true, clock);
+    EXPECT_EQ(19994u, out["patterns"][0]["counts"]["occurrences"]["value"].asUInt64());
+    EXPECT_GT(out["patterns"][0]["work"]["memory_bytes"].asUInt64(), 19994u * 64);
+}
+
+
 } // namespace

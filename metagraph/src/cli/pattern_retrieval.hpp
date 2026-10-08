@@ -26,12 +26,18 @@
  * One memory account per request, over all its patterns, holds what the reads return, the
  * label dictionary, the contexts' descriptors (charged as the engine releases them, before
  * their result objects are built), the statements of refused and truncated rows (reserved
- * before the read that can produce them), the deduplication state and the labels built for
- * the answer (a deterministic model, as the walker's, never a measurement; an unbudgeted read
- * may take it past its maximum by the label names it returned, after which nothing more fits
- * and the reads stop, stated); the work
+ * before the read that can produce them), the deduplication state, the runs of occurrences a
+ * path's verification keeps for its output and the labels built for the answer (a
+ * deterministic model, as the walker's, never a measurement; an unbudgeted read may take it
+ * past its maximum by the label names it returned, after which nothing more fits and the
+ * reads stop, stated); the work
  * account counts the oracle's units (8 per row, 1 per entry and coordinate, and the rows'
- * row-diff dependencies; a refused row what its read decoded, at least 8). Every refusal,
+ * row-diff dependencies; a refused row what its read decoded, at least 8). The work between
+ * the reads (the occurrences, the paths' label lists and their verification) reads the clock
+ * at least every Budget::kClockStride units, before the work (review GPT-3). Each placed
+ * occurrence is counted in its label's union, but a label's list holds, and the answer's volume
+ * and account are charged for, only what it can list (partial: max_occurrences_per_label of
+ * the context's or path's first), cut to the union's first once it is complete. Every refusal,
  * truncation, cut and stop is stated (the owner's
  * guarantee rule); a count is exact only when everything behind it was read.
  */
@@ -201,9 +207,11 @@ uint64_t path_descriptor_bytes(size_t k, size_t length);
 // instead of the request's MiB (0: the request's); a hook asked at every charge of a read's
 // DecodeBudget, refusing it when true (DecodeBudget::deny); a hook called before the work time
 // is read for the labels of each context built for the answer, with the context's index (to
-// move a virtual clock past the work time in the middle of the output); and a hook called
-// once the route's work is done, before the answer is assembled (to move it into the
-// finalisation reserve or past the deadline)
+// move a virtual clock past the work time in the middle of the output); a hook called once
+// the route's work is done, before the answer is assembled (to move it into the finalisation
+// reserve or past the deadline); and a hook called before the occurrences of each context read
+// are made, and before each path's labels are verified (once the clock was read there), with
+// its index (to move the clock past the work time inside that work, which reads it itself)
 struct RetrievalHooks {
     const annot::CoordToHeader *coord_to_header = nullptr;
     std::function<void(size_t rows)> read_hook;
@@ -211,6 +219,38 @@ struct RetrievalHooks {
     std::function<bool(uint64_t ordinal)> deny_decode;
     std::function<void(size_t context)> output_hook;
     std::function<void()> work_done_hook;
+    std::function<void(size_t item)> occurrences_hook;
+};
+
+/**
+ * Counters of the labelled retrieval (review GPT-3), additive: one pattern's in its
+ * LabelsAnswer, the request's so far in PatternRetrieval::counters(). Not in the answer
+ * unless the route states them.
+ */
+struct RetrievalCounters {
+    // the distinct annotation rows whose labels were read (LabelRecorder, complete or
+    // truncated): each row once per pattern, however many of its contexts or of its paths'
+    // k-mers share it; the placement's second read of a row is not counted again (the
+    // request's sum counts a row once per pattern that read it)
+    uint64_t rows_distinct = 0;
+    // paths: the time spent intersecting the label lists of each path's rows (ms)
+    double label_intersection_ms = 0;
+    // paths: the time spent verifying the labels carrying the paths, the chains of every
+    // (path, label) in its rows' coordinates with their record placement (ms)
+    double verification_ms = 0;
+    // paths: the verification's units of work, one per k-mer row looked up for a label
+    // carrying a path, per list ordered, per galloping seek, per run of chains extended in a
+    // list and per record a run crosses — a homopolymer's run of chains is a few units per
+    // k-mer of the path, not one per coordinate
+    uint64_t verification_steps = 0;
+
+    RetrievalCounters& operator+=(const RetrievalCounters &other) {
+        rows_distinct += other.rows_distinct;
+        label_intersection_ms += other.label_intersection_ms;
+        verification_ms += other.verification_ms;
+        verification_steps += other.verification_steps;
+        return *this;
+    }
 };
 
 /**
@@ -241,6 +281,8 @@ struct LabelsAnswer {
     bool complete = false;
     // added after the engine's notes
     std::vector<std::string> notes;
+    // this pattern's (not merged by apply_labels: the route states them)
+    RetrievalCounters counters;
 };
 
 /**
@@ -309,7 +351,10 @@ class PatternRetrieval {
      *     k-mers (a chain crossing into the next record of the column is not one). Each such
      *     occurrence is placed: (seq_id, 1-based local + 1, the path's strand), nt_coords over
      *     the L bases. Placement global: the chains (kmer_coord, offset 0), record bounds
-     *     unknown, nothing verified. Elsewhere label_intersection only.
+     *     unknown, nothing verified. Elsewhere label_intersection only. The chains are the
+     *     intersection of the k-mers' coordinate lists shifted by -i (a leapfrog join from the
+     *     smallest, consecutive chains kept as runs), made once per (path, label) and kept for
+     *     the output as runs of occurrences (review GPT-3, finding 1).
      * |require_verified| (require_support "record_verified"; placement record, checked by the
      * route): only the verified labels are listed, the others counted per path and per entry
      * (labels_excluded_unverified). Mode ALL_OR_COUNT or PARTIAL.
@@ -322,6 +367,8 @@ class PatternRetrieval {
     // the memory account's peak so far (bytes of the model) and what it holds now
     uint64_t memory_peak() const;
     uint64_t memory_held() const;
+    // the request's counters so far (the sum of its patterns')
+    const RetrievalCounters& counters() const;
 
   private:
     struct Impl;

@@ -257,6 +257,206 @@ struct ContextLabel {
     bool verified = false;
 };
 
+// What the verification of a path keeps for its output (review GPT-3, finding 1: the chains
+// of every (path, label) were made again for the output): its occurrences as runs, |count|
+// consecutive starts in one record from |first| on (global placement: consecutive chains, the
+// coordinate |first|.a on) — a homopolymer's are one run. Charged before they are held: the
+// entry of a label with occurrences (PathRuns) and each run, both below the deduplication
+// state the output then charges for the occurrences (kDedupBytes each, a run holding one at
+// least), so that keeping them does not raise the peak of the account
+struct OccurrenceRun {
+    Occurrence first;
+    uint64_t count = 0;
+};
+struct PathRuns {
+    LabelId label = 0;
+    uint64_t total = 0;
+    std::vector<OccurrenceRun> runs;
+};
+constexpr uint64_t kRunsBytes = 32;
+constexpr uint64_t kRunBytes = 32;
+
+/**
+ * |o| into |set|, the deduplicated union of a label (§5.4), the occurrences coming in sorted
+ * order: hinted at the position after the previous one's (|hint|, advanced), which makes a
+ * sorted stream O(1) an occurrence where the union already holds its neighbours (a
+ * homopolymer's contexts: every context's occurrences but its last are in the union). The
+ * iterator of the new element, or set.end() when the union held it.
+ */
+std::set<Occurrence>::iterator insert_sorted(std::set<Occurrence> &set,
+                                             std::set<Occurrence>::iterator *hint,
+                                             const Occurrence &o) {
+    const size_t before = set.size();
+    auto it = set.insert(*hint, o);
+    *hint = std::next(it);
+    return set.size() > before ? it : set.end();
+}
+
+/**
+ * One k-mer's coordinates of a label for the chains of a path (§4.3): the column coordinates
+ * of the j-th k-mer (sorted, distinct), shifted by -j, and where the join stands in them.
+ */
+struct ShiftedList {
+    const Coord *coords = nullptr;
+    size_t size = 0;
+    Coord shift = 0;
+    size_t pos = 0;
+};
+
+// the first position at or after l.pos whose coordinate is at least |target|: galloping from
+// l.pos (the join's targets only grow), then a binary search in the last stride
+size_t seek(const ShiftedList &l, Coord target) {
+    size_t lo = l.pos;
+    if (lo >= l.size || l.coords[lo] >= target)
+        return lo;
+    size_t step = 1;
+    while (lo + step < l.size && l.coords[lo + step] < target) {
+        lo += step;
+        step *= 2;
+    }
+    const size_t hi = std::min(lo + step, l.size);
+    return std::lower_bound(l.coords + lo + 1, l.coords + hi, target) - l.coords;
+}
+
+// the largest d <= |limit| with coords[pos + d] == coords[pos] + d: how far the coordinates
+// from l.pos on are consecutive (sorted and distinct, coords[pos + d] - coords[pos] >= d, equal
+// exactly as long as they are: a binary search). Distinct: each is the position of one k-mer
+// in its column (a repeated one would make the test unsound, a missing chain hidden by it)
+uint64_t consecutive(const ShiftedList &l, uint64_t limit) {
+    const Coord *c = l.coords + l.pos;
+    uint64_t hi = std::min<uint64_t>(limit, l.size - 1 - l.pos);
+    if (!hi || c[1] != c[0] + 1)
+        return 0;
+    if (c[hi] - c[0] == hi)
+        return hi;
+    // c[lo] consecutive, c[hi] not
+    uint64_t lo = 1;
+    while (hi - lo > 1) {
+        const uint64_t mid = lo + (hi - lo) / 2;
+        (c[mid] - c[0] == mid ? lo : hi) = mid;
+    }
+    return lo;
+}
+
+/**
+ * The chains of a path in one label (§4.3; review GPT-3, finding 1): the column coordinates c
+ * with c + j a coordinate of the j-th k-mer of the path for every j, the intersection of
+ * |lists| shifted. Each coordinate of the first list was binary-searched in every other one
+ * before, and again for the output (a 30,000-base homopolymer and a 1,500-base path: 44
+ * million searches, twice, without a clock reading). A leapfrog join instead, driven by the
+ * smallest list: its next coordinate is the candidate, the other lists (smallest first) seek
+ * it from where they stood (galloping), the first holding a larger coordinate moves the
+ * candidate there, and a candidate every list holds is extended into the run of consecutive
+ * chains as far as every list is consecutive from it (a homopolymer's chains: one run, one
+ * check per list). emit(first, last) takes the runs in order and may end the join (false).
+ * |work|(units) is asked before every seek and every extension, and false ends the join
+ * (returned: false).
+ */
+template <class Emit, class Work>
+bool join_chains(std::vector<ShiftedList> &lists, const Emit &emit, const Work &work) {
+    if (lists.empty())
+        return true;
+    if (!work(lists.size()))
+        return false;
+    std::sort(lists.begin(), lists.end(), [](const ShiftedList &x, const ShiftedList &y) {
+        return x.size < y.size;
+    });
+    ShiftedList &driver = lists[0];
+    // a chain is not negative: the driver's coordinates from its shift on
+    driver.pos = std::lower_bound(driver.coords, driver.coords + driver.size, driver.shift)
+                    - driver.coords;
+    while (driver.pos < driver.size) {
+        const Coord c = driver.coords[driver.pos] - driver.shift;
+        bool held = true;
+        for (size_t t = 1; t < lists.size(); ++t) {
+            ShiftedList &l = lists[t];
+            if (!work(1))
+                return false;
+            l.pos = seek(l, c + l.shift);
+            if (l.pos == l.size)
+                return true;
+            if (l.coords[l.pos] != c + l.shift) {
+                // the next candidate: no chain before this list's next coordinate
+                if (!work(1))
+                    return false;
+                driver.pos = seek(driver, l.coords[l.pos] - l.shift + driver.shift);
+                held = false;
+                break;
+            }
+        }
+        if (!held)
+            continue;
+        uint64_t run = consecutive(driver, std::numeric_limits<uint64_t>::max());
+        for (size_t t = 1; t < lists.size() && run; ++t) {
+            if (!work(1))
+                return false;
+            run = consecutive(lists[t], run);
+        }
+        if (!emit(c, c + run))
+            return true;
+        // past the run (and a coordinate repeated in it)
+        driver.pos = seek(driver, c + run + 1 + driver.shift);
+    }
+    return true;
+}
+
+/**
+ * Partial (§5.4): each label lists the first |cap| occurrences of its union, those up to its
+ * cap-th. |lists| (each context's or path's listed labels, each with at most its first |cap|
+ * occurrences) are cut to them, and what the cut takes is given back by refund(bytes of the
+ * memory model, bytes of answer text), for the labels whose union holds more than |cap| among
+ * the first |kept_labels| of |order| (the labels listed), which |cut| states. Not clocked: it
+ * runs after the work, over occurrences the account admitted (kGlobalOccurrenceBytes or more
+ * each) and whose text the answer's volume still holds pending, so the finalisation reserve
+ * already counts the time to write them, more than dropping them takes.
+ */
+template <class Refund>
+void trim_to_unions(const std::vector<std::set<Occurrence>> &unions,
+                    const std::vector<LabelId> &order, size_t kept_labels, uint64_t cap,
+                    bool records, const LabelOracle &oracle,
+                    const std::vector<LabelRef> &dict,
+                    std::vector<std::vector<ContextLabel>> *lists, Json::Value *cut,
+                    const Refund &refund) {
+    // the last occurrence each label lists (null: all of them)
+    std::vector<const Occurrence*> bound(dict.size(), nullptr);
+    uint64_t cut_labels = 0;
+    for (size_t r = 0; r < kept_labels; ++r) {
+        const std::set<Occurrence> &u = unions[order[r]];
+        if (u.size() <= cap)
+            continue;
+        cut_labels++;
+        // (a cap of 0: the lists hold none)
+        if (cap)
+            bound[order[r]] = &*std::next(u.begin(), cap - 1);
+    }
+    if (!cut_labels)
+        return;
+    uint64_t bytes = 0, text = 0;
+    for (auto &list : *lists) {
+        for (ContextLabel &cl : list) {
+            if (!bound[cl.label])
+                continue;
+            auto end = std::upper_bound(cl.occurrences.begin(), cl.occurrences.end(),
+                                        *bound[cl.label]);
+            for (auto it = end; it != cl.occurrences.end(); ++it) {
+                if (records) {
+                    const std::string_view record = oracle.header_name(dict[cl.label].column,
+                                                                       it->a);
+                    bytes += occurrence_bytes(record);
+                    text += kOccurrenceText + string_text_bytes(record);
+                } else {
+                    bytes += kGlobalOccurrenceBytes;
+                    text += kGlobalOccurrenceText;
+                }
+            }
+            cl.occurrences.erase(end, cl.occurrences.end());
+        }
+    }
+    refund(bytes, text);
+    *cut = reason_json("max_occurrences_per_label");
+    (*cut)["labels"] = uint_json(cut_labels);
+}
+
 // What the verification made of a label carrying a path (every k-mer of it annotated)
 enum class PathSupport : uint8_t {
     // not verified: no record placement, or a row of the path not placed (refused, not
@@ -364,6 +564,7 @@ struct PatternRetrieval::Impl {
         if (hooks) {
             deny_decode = hooks->deny_decode;
             output_hook = hooks->output_hook;
+            occurrences_hook = hooks->occurrences_hook;
         }
         // the reads under the deadline are decoded in paced chunks (as /traverse's)
         oracle.pacer().target_ms = limits.chunk_target_ms;
@@ -392,6 +593,10 @@ struct PatternRetrieval::Impl {
     // read for a context's labels
     AnswerVolume *volume = nullptr;
     std::function<void(size_t)> output_hook;
+    // tests: called before each context's occurrences are made and each path's verified
+    std::function<void(size_t)> occurrences_hook;
+    // the request's counters (RetrievalCounters)
+    RetrievalCounters counters;
     // the pattern being released (admit_context): its descriptors' bytes, held, and what they
     // may hold (all_or_count: what the account had left; partial: half of it); false once a
     // descriptor did not fit
@@ -449,6 +654,25 @@ struct PatternRetrieval::Impl {
     void charge_work(uint64_t u, uint64_t *pattern_units) {
         units += u;
         *pattern_units += u;
+    }
+
+    /**
+     * The clock of the retrieval's own work between the reads (review GPT-3, findings 1 and
+     * 4): the occurrences made for the counts and the output, the paths' label lists and their
+     * verification. Asked before |u| more units are done: the clock is read when they would
+     * take the units since its last reading past Budget::kClockStride, as the engine's steps
+     * read it; false when the work time passed (the caller states the stop and does not do the
+     * work).
+     */
+    uint64_t unclocked = 0;
+    bool may_work(uint64_t u) {
+        if (unclocked + u > Budget::kClockStride) {
+            unclocked = 0;
+            if (!budget.check_time())
+                return false;
+        }
+        unclocked += u;
+        return true;
     }
 
     // What a refused read is charged (review GPT-2, finding 1): the units of what it decoded
@@ -740,6 +964,7 @@ bool PatternRetrieval::admit_path(size_t length) {
 
 uint64_t PatternRetrieval::memory_peak() const { return impl_->account.peak(); }
 uint64_t PatternRetrieval::memory_held() const { return impl_->account.held(); }
+const RetrievalCounters& PatternRetrieval::counters() const { return impl_->counters; }
 
 LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &contexts,
                                         uint64_t released, size_t length, Mode mode,
@@ -785,6 +1010,7 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
             m.volume->add(compact_json_bytes(a.fields["rows_refused"])
                           + compact_json_bytes(a.fields["anchors_truncated"]));
         }
+        m.counters += a.counters;
     };
 
     if (x.withheld) {
@@ -843,6 +1069,8 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
     bool truncated = false;
     bool rows_complete = true;
     for (const RowState &row : rows) {
+        a.counters.rows_distinct += row.status == RowStatus::COMPLETE
+                                    || row.status == RowStatus::TRUNCATED;
         if (row.status == RowStatus::TRUNCATED) {
             truncated = true;
             Json::Value t;
@@ -944,7 +1172,13 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
         unpend(summary_text);
 
     // the contexts' label lists with their occurrences; each label's deduplicated union
-    // (§5.4: (column, seq_id, start, strand); the label is the column)
+    // (§5.4: (column, seq_id, start, strand); the label is the column). Every occurrence is
+    // counted in its label's union, but a listed label's list holds only the first
+    // max_occurrences_per_label of its context's occurrences in partial (review GPT-3, finding
+    // 4: every one was built, charged and estimated in the answer's volume, the cap applied
+    // after): the label lists the first that many of its union, and those of one context are a
+    // prefix of its sorted occurrences. Once the unions are complete, the lists are cut to
+    // them, and what they no longer hold refunded to the account and the volume
     std::vector<std::vector<ContextLabel>> lists(keep);
     std::vector<std::set<Occurrence>> unions(dict.size());
     std::vector<bool> output_cut(keep, !summary_held);
@@ -953,14 +1187,20 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
     bool output_stopped = !summary_held;
     if (!summary_held)
         m.set_stop("output", "max_memory");
+    const uint64_t cap = partial ? m.limits.max_occurrences_per_label
+                                 : std::numeric_limits<uint64_t>::max();
     for (size_t i = 0; i < keep && !output_stopped; ++i) {
         const RowState &row = rows[row_of[i]];
         if (row.status != RowStatus::COMPLETE && row.status != RowStatus::TRUNCATED)
             continue;
         const RetrievalContext &c = contexts[i];
+        const uint8_t strand = strand_rank(c.orientation);
+        if (m.occurrences_hook)
+            m.occurrences_hook(i);
         std::vector<ContextLabel> list;
         uint64_t bytes = 0, new_dedup = 0, text = 0;
-        std::vector<std::pair<LabelId, Occurrence>> inserted;
+        std::vector<std::pair<LabelId, std::set<Occurrence>::iterator>> inserted;
+        bool late = false, refused = false;
         for (LabelId id : row.labels.labels) {
             // a label partial's max_labels cut is not listed, but its occurrences are
             // counted all the same (counts.occurrences is over every label)
@@ -979,44 +1219,86 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
                 if (row.placed && hit != row.hits.end() && hit->label == id) {
                     cl.placed = true;
                     const Column column = dict[id].column;
-                    const uint8_t strand = strand_rank(c.orientation);
-                    if (m.records) {
-                        // the record first, the offset after (§4.3)
-                        m.oracle.map_coords(column, hit->coords.data(), hit->coords.size(),
-                                            [&](Coord, uint64_t seq_id, Coord local) {
-                            const uint64_t nt_length
-                                    = m.oracle.num_kmers_in_sequence(column, seq_id) + k - 1;
-                            if (local + c.offset + length > nt_length) {
-                                throw std::runtime_error(
-                                        "pattern: a coordinate of " + c.kmer + " maps past the "
-                                        "end of its record: the record mapping does not "
-                                        "describe this annotation");
+                    // one occurrence per coordinate (distinct), in their order: the record
+                    // mapping keeps the order of a column's coordinates and the offset is the
+                    // context's (without a mapping the coordinate is the occurrence)
+                    const auto &coords = hit->coords;
+                    cl.total = coords.size();
+                    const uint64_t first = listed ? std::min<uint64_t>(cap, cl.total) : 0;
+                    cl.occurrences.reserve(first);
+                    auto hint = unions[id].begin();
+                    Occurrence previous;
+                    bool any = false;
+                    // false: what the context holds no longer fits what the account has left
+                    // (the context's charge below would be refused: it stops here, before the
+                    // union grows past the account)
+                    auto add = [&](const Occurrence &o) {
+                        // (the list keeps the first: their order is checked; a coordinate
+                        // repeated is one occurrence)
+                        if (any && !(previous < o)) {
+                            if (o == previous) {
+                                cl.total--;
+                                return true;
                             }
-                            cl.occurrences.push_back(
-                                    Occurrence { seq_id, local + c.offset + 1, strand });
-                        });
-                    } else {
-                        for (Coord coord : hit->coords) {
-                            cl.occurrences.push_back(Occurrence { coord, c.offset, strand });
+                            throw std::runtime_error("pattern: the coordinates of " + c.kmer
+                                                     + " are not in their record order: the "
+                                                     "record mapping does not describe this "
+                                                     "annotation");
                         }
-                    }
-                    std::sort(cl.occurrences.begin(), cl.occurrences.end());
-                    cl.occurrences.erase(std::unique(cl.occurrences.begin(),
-                                                     cl.occurrences.end()),
-                                         cl.occurrences.end());
-                    cl.total = cl.occurrences.size();
-                    for (const Occurrence &o : cl.occurrences) {
-                        if (listed && m.records) {
-                            const std::string_view record = m.oracle.header_name(column, o.a);
-                            bytes += occurrence_bytes(record);
-                            text += kOccurrenceText + string_text_bytes(record);
-                        } else if (listed) {
-                            bytes += kGlobalOccurrenceBytes;
-                            text += kGlobalOccurrenceText;
+                        previous = o;
+                        any = true;
+                        if (cl.occurrences.size() < first) {
+                            cl.occurrences.push_back(o);
+                            if (m.records) {
+                                const std::string_view record = m.oracle.header_name(column,
+                                                                                      o.a);
+                                bytes += occurrence_bytes(record);
+                                text += kOccurrenceText + string_text_bytes(record);
+                            } else {
+                                bytes += kGlobalOccurrenceBytes;
+                                text += kGlobalOccurrenceText;
+                            }
                         }
-                        if (unions[id].insert(o).second) {
-                            inserted.emplace_back(id, o);
+                        auto it = insert_sorted(unions[id], &hint, o);
+                        if (it != unions[id].end()) {
+                            inserted.emplace_back(id, it);
                             new_dedup += kDedupBytes;
+                        }
+                        return bytes + new_dedup <= m.account.left();
+                    };
+                    // in pieces between the clock's readings
+                    uint64_t last_seq = std::numeric_limits<uint64_t>::max(), nt_length = 0;
+                    for (size_t b = 0; b < coords.size() && !refused; b += Budget::kClockStride) {
+                        const size_t e = std::min<size_t>(b + Budget::kClockStride,
+                                                          coords.size());
+                        if (!m.may_work(e - b)) {
+                            late = true;
+                            break;
+                        }
+                        if (m.records) {
+                            // the record first, the offset after (§4.3)
+                            m.oracle.map_coords(column, coords.data() + b, e - b,
+                                                [&](Coord, uint64_t seq_id, Coord local) {
+                                if (refused)
+                                    return;
+                                if (seq_id != last_seq) {
+                                    nt_length = m.oracle.num_kmers_in_sequence(column, seq_id)
+                                                    + k - 1;
+                                    last_seq = seq_id;
+                                }
+                                if (local + c.offset + length > nt_length) {
+                                    throw std::runtime_error(
+                                            "pattern: a coordinate of " + c.kmer + " maps past "
+                                            "the end of its record: the record mapping does "
+                                            "not describe this annotation");
+                                }
+                                refused = !add(Occurrence { seq_id, local + c.offset + 1,
+                                                            strand });
+                            });
+                        } else {
+                            for (size_t t = b; t < e && !refused; ++t) {
+                                refused = !add(Occurrence { coords[t], c.offset, strand });
+                            }
                         }
                     }
                 } else {
@@ -1025,13 +1307,14 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
                     placement_complete = false;
                 }
             }
+            if (late || refused)
+                break;
             if (listed)
                 list.push_back(std::move(cl));
         }
         // the memory first (where it stops does not depend on the machine), then the time:
         // the work time, read with this context's labels counted in the answer's volume
-        const bool held = m.account.charge(bytes + new_dedup);
-        bool late = false;
+        const bool held = !late && !refused && m.account.charge(bytes + new_dedup);
         if (held) {
             if (m.output_hook)
                 m.output_hook(i);
@@ -1043,8 +1326,8 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
             }
         }
         if (!held || late) {
-            for (const auto &[id, o] : inserted) {
-                unions[id].erase(o);
+            for (const auto &[id, it] : inserted) {
+                unions[id].erase(it);
             }
             output_stopped = true;
             for (size_t j = i; j < keep; ++j) {
@@ -1070,41 +1353,12 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
         occurrences_total += unions[id].size();
     }
     if (partial && m.place) {
-        uint64_t cut_labels = 0;
-        for (size_t r = 0; r < kept_labels; ++r) {
-            const LabelId id = order[r];
-            if (unions[id].size() <= m.limits.max_occurrences_per_label)
-                continue;
-            cut_labels++;
-            auto last = unions[id].begin();
-            std::advance(last, m.limits.max_occurrences_per_label);
-            const std::set<Occurrence> kept(unions[id].begin(), last);
-            for (auto &list : lists) {
-                for (ContextLabel &cl : list) {
-                    if (cl.label != id)
-                        continue;
-                    uint64_t dropped = 0;
-                    const Column column = dict[id].column;
-                    cl.occurrences.erase(std::remove_if(cl.occurrences.begin(),
-                                                        cl.occurrences.end(),
-                                                        [&](const Occurrence &o) {
-                        if (kept.count(o))
-                            return false;
-                        dropped += m.records
-                                ? occurrence_bytes(m.oracle.header_name(column, o.a))
-                                : kGlobalOccurrenceBytes;
-                        return true;
-                    }), cl.occurrences.end());
-                    m.account.release(dropped);
-                    output -= std::min(output, dropped);
-                }
-            }
-        }
-        if (cut_labels) {
-            Json::Value cut = reason_json("max_occurrences_per_label");
-            cut["labels"] = uint_json(cut_labels);
-            a.fields["occurrences_cut"] = std::move(cut);
-        }
+        trim_to_unions(unions, order, kept_labels, cap, m.records, m.oracle, dict, &lists,
+                       &a.fields["occurrences_cut"], [&](uint64_t bytes, uint64_t text) {
+            m.account.release(bytes);
+            output -= std::min(output, bytes);
+            unpend(text);
+        });
     }
 
     // what the pattern's reads held is freed; the dictionary, the descriptors and the labels
@@ -1325,6 +1579,7 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
             m.volume->add(compact_json_bytes(a.fields["rows_refused"])
                           + compact_json_bytes(a.fields["anchors_truncated"]));
         }
+        m.counters += a.counters;
     };
 
     if (x.withheld) {
@@ -1397,7 +1652,13 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
 
     bool truncated = false;
     bool rows_complete = true;
-    for (const RowState &row : rows) {
+    for (RowState &row : rows) {
+        const bool read = row.status == RowStatus::COMPLETE || row.status == RowStatus::TRUNCATED;
+        a.counters.rows_distinct += read;
+        // the paths intersect the rows' label lists: sorted once per row (LabelRecorder gives
+        // them in ascending ids), not copied and sorted for every path through the row
+        if (read && !std::is_sorted(row.labels.labels.begin(), row.labels.labels.end()))
+            std::sort(row.labels.labels.begin(), row.labels.labels.end());
         if (row.status == RowStatus::TRUNCATED) {
             truncated = true;
             Json::Value t;
@@ -1435,10 +1696,13 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
     auto is_read = [](RowStatus s) {
         return s == RowStatus::COMPLETE || s == RowStatus::TRUNCATED;
     };
+    const auto t_lists = std::chrono::steady_clock::now();
+    std::vector<LabelId> common;
     for (size_t i = 0; i < keep; ++i) {
-        // the clock before each path's list (O(n) row lists to intersect): a time stop ends
-        // the lists there, as the output of the labels (stop {output, time})
-        if (!m.budget.check_time()) {
+        // the clock before each path's list (O(n) row lists to intersect, read again as they
+        // are): a time stop ends the lists there, as the output of the labels (stop {output,
+        // time})
+        if (!m.budget.check_time() || !m.may_work(n)) {
             m.set_stop("output", "time");
             m.time_stop = true;
             lists_end = i;
@@ -1452,15 +1716,43 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         path_status[i] = status == RowStatus::PENDING ? RowStatus::NOT_READ : status;
         if (!is_read(path_status[i]))
             continue;
-        std::vector<LabelId> common(rows[path_rows[i][0]].labels.labels);
-        std::sort(common.begin(), common.end());
-        for (size_t j = 1; j < n && !common.empty(); ++j) {
-            std::vector<LabelId> next(rows[path_rows[i][j]].labels.labels);
-            std::sort(next.begin(), next.end());
-            std::vector<LabelId> both;
-            std::set_intersection(common.begin(), common.end(), next.begin(), next.end(),
-                                  std::back_inserter(both));
-            common.swap(both);
+        // from the smallest list, filtered in place by each other row's (sorted once per row,
+        // after the reads; a row repeated at consecutive k-mers taken once)
+        size_t smallest = path_rows[i][0];
+        for (size_t r : path_rows[i]) {
+            if (rows[r].labels.labels.size() < rows[smallest].labels.labels.size())
+                smallest = r;
+        }
+        common.assign(rows[smallest].labels.labels.begin(), rows[smallest].labels.labels.end());
+        size_t previous = smallest;
+        bool late = false;
+        for (size_t r : path_rows[i]) {
+            if (common.empty())
+                break;
+            if (r == previous)
+                continue;
+            previous = r;
+            const std::vector<LabelId> &next = rows[r].labels.labels;
+            if (!m.may_work(common.size())) {
+                late = true;
+                break;
+            }
+            size_t w = 0;
+            auto it = next.begin();
+            for (size_t t = 0; t < common.size(); ++t) {
+                it = std::lower_bound(it, next.end(), common[t]);
+                if (it == next.end())
+                    break;
+                if (*it == common[t])
+                    common[w++] = common[t];
+            }
+            common.resize(w);
+        }
+        if (late) {
+            m.set_stop("output", "time");
+            m.time_stop = true;
+            lists_end = i;
+            break;
         }
         const uint64_t bytes = kPathLabelsBytes + kPathLabelBytes * common.size();
         if (!m.account.charge(bytes)) {
@@ -1479,9 +1771,11 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         }
     }
     const bool lists_complete = lists_end == keep;
+    a.counters.label_intersection_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t_lists).count();
 
-    // ---- step 2, the verification: the coordinates of the rows of the paths that carry a
-    // label (all_or_count: only when every row was read completely, as for contexts)
+    // ---- step 2, the placement: the coordinates of the rows of the paths that carry a label
+    // (all_or_count: only when every row was read completely, as for contexts)
     if (m.place && !m.read_stop && lists_complete && (partial || (rows_complete && !m.stop))) {
         const auto t2 = std::chrono::steady_clock::now();
         m.place_rows(rows, namer, mode, &rows_read, &pattern_units, &held_hits, &refused,
@@ -1491,101 +1785,159 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
     }
 
     const std::vector<LabelRef> &dict = m.recorder->labels();
-    // the column coordinates c of a label's chains along path |i|: c a coordinate of the first
-    // k-mer with c + j one of the j-th k-mer's, for every j (consecutive coordinates of one
-    // column, §4.3). False when a row of the path was not placed, or holds no coordinates of
-    // the label (not verified). The chain list is at most the first row's coordinates of the
-    // label, which its hits hold (charged with them)
-    std::vector<const LabelQuery::Hit*> chain_hits;
-    auto chains = [&](size_t i, LabelId id, std::vector<Coord> *out) {
-        out->clear();
-        if (!m.place)
-            return false;
-        chain_hits.assign(n, nullptr);
+
+    // ---- step 3, the verification of every label carrying a path, once per (path, label)
+    // (review GPT-3, finding 1: the chains were made again for the output, and nothing read
+    // the clock in either). The chains of a path in a label: join_chains over the coordinates
+    // of its k-mers (NOT_PLACED when a row of the path was not placed or holds no coordinates
+    // of the label). Their occurrences, as runs (OccurrenceRun): with record placement the
+    // chains whose whole path lies in one record, (seq_id, local + 1), the record mapping
+    // first (§4.3; a chain whose first k-mer is in one record and whose last is past that
+    // record's k-mers crosses into the next record of the column: not an occurrence), and the
+    // label is verified when there is one; global, every chain (kmer_coord, offset 0), nothing
+    // verified. The runs are kept for the output (PathRuns, charged before they are held):
+    // when the account cannot hold a path's, its labels and the later paths' are verified all
+    // the same (a label's first occurrence is enough), and their labels are not output (stop
+    // {output, max_memory}: holding no more than the runs, the account could not hold their
+    // occurrences' deduplication). The work is clocked inside (stop {placement, time}: the
+    // path and the later ones not verified)
+    const uint64_t cap = partial ? m.limits.max_occurrences_per_label
+                                 : std::numeric_limits<uint64_t>::max();
+    bool late = false;
+    auto work = [&](uint64_t u) {
+        a.counters.verification_steps += u;
+        if (m.may_work(u))
+            return true;
+        late = true;
+        return false;
+    };
+    enum class Chains { NOT_PLACED, DONE, LATE };
+    std::vector<ShiftedList> shifted;
+    // the occurrences of path |i| in label |id|, run by run in order, to on_run(run) (false
+    // ends them)
+    auto chains_of = [&](size_t i, LabelId id, const auto &on_run) {
+        if (!work(n))
+            return Chains::LATE;
+        shifted.clear();
         for (size_t j = 0; j < n; ++j) {
             const RowState &row = rows[path_rows[i][j]];
-            if (!row.placed)
-                return false;
             auto hit = std::lower_bound(row.hits.begin(), row.hits.end(), id,
                                         [](const LabelQuery::Hit &h, LabelId l) {
                                             return h.label < l;
                                         });
-            if (hit == row.hits.end() || hit->label != id)
-                return false;
-            chain_hits[j] = &*hit;
+            if (!row.placed || hit == row.hits.end() || hit->label != id)
+                return Chains::NOT_PLACED;
+            shifted.push_back(ShiftedList { hit->coords.data(), hit->coords.size(), j });
         }
-        out->assign(chain_hits[0]->coords.begin(), chain_hits[0]->coords.end());
-        for (size_t j = 1; j < n && !out->empty(); ++j) {
-            const auto &next = chain_hits[j]->coords;
-            out->erase(std::remove_if(out->begin(), out->end(), [&](Coord c) {
-                return !std::binary_search(next.begin(), next.end(), c + j);
-            }), out->end());
-        }
-        return true;
-    };
-    // the occurrences of a chain list: record placement, the chains whose whole path lies in
-    // one record — (seq_id, local + 1), the record mapping first (§4.3; a chain whose first
-    // k-mer is in one record and whose last is past that record's k-mers crosses into the next
-    // record of the column: not an occurrence); global, every chain (kmer_coord, offset 0)
-    auto occurrences_of = [&](size_t i, LabelId id, const std::vector<Coord> &chain,
-                              std::vector<Occurrence> *occ) {
-        occ->clear();
         const Column column = dict[id].column;
         const uint8_t strand = strand_rank(paths[i].orientation);
-        if (m.records) {
-            m.oracle.map_coords(column, chain.data(), chain.size(),
-                                [&](Coord, uint64_t seq_id, Coord local) {
+        auto emit = [&](Coord first, Coord last) {
+            if (!m.records)
+                return on_run(OccurrenceRun { Occurrence { first, 0, strand }, last - first + 1 });
+            // record by record: the run's chains in one record are consecutive locals
+            for (Coord c = first; ; ) {
+                if (!work(1))
+                    return false;
+                const auto [seq_id, local] = m.oracle.map_coord(column, c);
                 const uint64_t kmers = m.oracle.num_kmers_in_sequence(column, seq_id);
                 if (local >= kmers) {
                     throw std::runtime_error("pattern: a coordinate of " + paths[i].sequence
                                              + " maps past the end of its record: the record "
                                              "mapping does not describe this annotation");
                 }
-                if (local + n - 1 < kmers)
-                    occ->push_back(Occurrence { seq_id, local + 1, strand });
-            });
-        } else {
-            for (Coord c : chain) {
-                occ->push_back(Occurrence { c, 0, strand });
+                const Coord record_last = c - local + kmers - 1;
+                const Coord end = std::min(last, record_last);
+                if (local + n - 1 < kmers) {
+                    const Coord whole = std::min(end, record_last - (n - 1));
+                    if (!on_run(OccurrenceRun { Occurrence { seq_id, local + 1, strand },
+                                                whole - c + 1 }))
+                        return false;
+                }
+                if (end == last)
+                    return true;
+                c = end + 1;
             }
-        }
-        std::sort(occ->begin(), occ->end());
-        occ->erase(std::unique(occ->begin(), occ->end()), occ->end());
+        };
+        join_chains(shifted, emit, work);
+        return late ? Chains::LATE : Chains::DONE;
     };
 
-    // the verification of every carried label (no list is kept: the occurrences are made
-    // again for the labels built for the answer, and charged there)
+    std::vector<std::vector<PathRuns>> found(keep);
+    std::vector<uint64_t> kept_bytes(keep, 0);
+    // the paths whose runs were kept (found: every label of theirs with occurrences)
+    size_t kept_end = keep;
     bool placement_complete = true;
     bool any_placed = false;
-    {
-        std::vector<Coord> chain;
-        std::vector<Occurrence> occ;
-        for (size_t i = 0; i < lists_end; ++i) {
-            // the clock before each path's verification (O(n) coordinate lists per label): a
-            // time stop leaves the later paths' labels not verified (stop {placement, time})
-            if (m.place && !carried[i].empty() && !m.budget.check_time()) {
+    const auto t_verify = std::chrono::steady_clock::now();
+    for (size_t i = 0; i < lists_end; ++i) {
+        // the clock before each path's verification: a time stop leaves the later paths'
+        // labels not verified (stop {placement, time})
+        if (m.place && !carried[i].empty()) {
+            if (!m.budget.check_time()) {
                 m.set_stop("placement", "time");
                 m.time_stop = true;
                 placement_complete = false;
                 break;
             }
-            for (PathLabel &pl : carried[i]) {
-                if (!chains(i, pl.label, &chain)) {
-                    pl.support = PathSupport::NOT_PLACED;
-                    if (m.place)
-                        placement_complete = false;
-                    continue;
+            if (m.occurrences_hook)
+                m.occurrences_hook(i);
+        }
+        uint64_t kept = 0;
+        for (PathLabel &pl : carried[i]) {
+            if (!m.place)
+                continue;
+            PathRuns pr;
+            pr.label = pl.label;
+            uint64_t bytes = 0;
+            const Chains r = chains_of(i, pl.label, [&](const OccurrenceRun &run) {
+                pr.total += run.count;
+                // not kept: the first occurrence verifies the label
+                if (i >= kept_end)
+                    return false;
+                const uint64_t more = (pr.runs.empty() ? kRunsBytes : 0) + kRunBytes;
+                if (!m.account.charge(more)) {
+                    // nothing of this path kept: its labels and the later ones' not output
+                    m.account.release(bytes + kept);
+                    bytes = kept = 0;
+                    found[i].clear();
+                    kept_end = i;
+                    m.set_stop("output", "max_memory");
+                    return false;
                 }
-                any_placed = true;
-                if (m.records) {
-                    occurrences_of(i, pl.label, chain, &occ);
-                    pl.support = occ.empty() ? PathSupport::PLACED : PathSupport::VERIFIED;
-                } else {
-                    pl.support = PathSupport::PLACED;
-                }
+                bytes += more;
+                pr.runs.push_back(run);
+                return true;
+            });
+            if (r == Chains::LATE) {
+                m.account.release(bytes);
+                break;
+            }
+            if (r == Chains::NOT_PLACED) {
+                placement_complete = false;
+                continue;
+            }
+            any_placed = true;
+            pl.support = m.records && pr.total ? PathSupport::VERIFIED : PathSupport::PLACED;
+            if (i < kept_end && pr.total) {
+                kept += bytes;
+                found[i].push_back(std::move(pr));
             }
         }
+        if (late) {
+            m.account.release(kept);
+            found[i].clear();
+            for (PathLabel &pl : carried[i]) {
+                pl.support = PathSupport::NOT_PLACED;
+            }
+            m.set_stop("placement", "time");
+            m.time_stop = true;
+            placement_complete = false;
+            break;
+        }
+        kept_bytes[i] = kept;
     }
+    a.counters.verification_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t_verify).count();
     // what a path lists: every label carrying it, or (require_support "record_verified") the
     // verified ones only
     auto listed_label = [&](const PathLabel &pl) {
@@ -1667,7 +2019,9 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
     if (!summary_held)
         unpend(summary_text);
 
-    // the paths' label lists with their occurrences; each label's deduplicated union (§5.4)
+    // the paths' label lists with their occurrences; each label's deduplicated union (§5.4),
+    // and, as for contexts, each listed label's list with its first max_occurrences_per_label
+    // occurrences only in partial, cut to the unions once they are complete
     std::vector<std::vector<ContextLabel>> lists(keep);
     std::vector<std::set<Occurrence>> unions(dict.size());
     std::vector<bool> output_cut(keep, !summary_held);
@@ -1676,86 +2030,130 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
     }
     uint64_t output = 0, dedup = 0;
     bool output_stopped = !summary_held || !lists_complete;
-    if (output_stopped)
+    if (output_stopped) {
         m.set_stop("output", "max_memory");
-    {
-        std::vector<Coord> chain;
-        std::vector<Occurrence> occ;
-        for (size_t i = 0; i < keep && !output_stopped; ++i) {
-            if (!is_read(path_status[i]))
+        // no path's labels are built: every path read is returned without them
+        // (output_budget), not with an empty list
+        output_cut.assign(keep, true);
+    }
+    for (size_t i = 0; i < keep && !output_stopped; ++i) {
+        if (!is_read(path_status[i]))
+            continue;
+        if (i >= kept_end) {
+            // the account could not hold this path's runs (stop {output, max_memory}, above)
+            for (size_t j = i; j < keep; ++j) {
+                output_cut[j] = true;
+            }
+            output_stopped = true;
+            break;
+        }
+        std::vector<ContextLabel> list;
+        uint64_t bytes = 0, new_dedup = 0, text = 0;
+        std::vector<std::pair<LabelId, std::set<Occurrence>::iterator>> inserted;
+        late = false;
+        bool refused = false;
+        size_t f = 0;
+        for (const PathLabel &pl : carried[i]) {
+            // its runs from the verification (found[i] is in carried[i]'s order)
+            const PathRuns *pr = f < found[i].size() && found[i][f].label == pl.label
+                    ? &found[i][f++] : nullptr;
+            if (!listed_label(pl))
                 continue;
-            std::vector<ContextLabel> list;
-            uint64_t bytes = 0, new_dedup = 0, text = 0;
-            std::vector<std::pair<LabelId, Occurrence>> inserted;
-            for (const PathLabel &pl : carried[i]) {
-                if (!listed_label(pl))
-                    continue;
-                // a label partial's max_labels cut does not list: its occurrences are counted
-                const bool listed = rank[pl.label] != std::numeric_limits<uint64_t>::max();
-                ContextLabel cl;
-                cl.label = pl.label;
-                cl.verified = pl.support == PathSupport::VERIFIED;
-                if (listed) {
-                    bytes += label_entry_bytes(dict[pl.label].name);
-                    text += kPathLabelText + label_text(pl.label);
-                }
-                if (pl.support != PathSupport::NOT_PLACED) {
-                    cl.placed = true;
-                    chains(i, pl.label, &chain);
-                    occurrences_of(i, pl.label, chain, &occ);
-                    cl.occurrences = occ;
-                    cl.total = cl.occurrences.size();
-                    const Column column = dict[pl.label].column;
-                    for (const Occurrence &o : cl.occurrences) {
-                        if (listed && m.records) {
-                            const std::string_view record = m.oracle.header_name(column, o.a);
-                            bytes += occurrence_bytes(record);
-                            text += kOccurrenceText + string_text_bytes(record);
-                        } else if (listed) {
-                            bytes += kGlobalOccurrenceBytes;
-                            text += kGlobalOccurrenceText;
+            // a label partial's max_labels cut does not list: its occurrences are counted
+            const bool listed = rank[pl.label] != std::numeric_limits<uint64_t>::max();
+            ContextLabel cl;
+            cl.label = pl.label;
+            cl.verified = pl.support == PathSupport::VERIFIED;
+            if (listed) {
+                bytes += label_entry_bytes(dict[pl.label].name);
+                text += kPathLabelText + label_text(pl.label);
+            }
+            if (pl.support != PathSupport::NOT_PLACED) {
+                cl.placed = true;
+                const Column column = dict[pl.label].column;
+                const uint64_t first = listed ? cap : 0;
+                auto hint = unions[pl.label].begin();
+                // a run's occurrences in pieces between the clock's readings
+                auto add_run = [&](const OccurrenceRun &run) {
+                    for (uint64_t t = 0; t < run.count; ) {
+                        const uint64_t piece = std::min<uint64_t>(run.count - t,
+                                                                  Budget::kClockStride);
+                        if (!m.may_work(piece)) {
+                            late = true;
+                            return false;
                         }
-                        if (unions[pl.label].insert(o).second) {
-                            inserted.emplace_back(pl.label, o);
-                            new_dedup += kDedupBytes;
+                        for (const uint64_t e = t + piece; t < e; ++t) {
+                            Occurrence o = run.first;
+                            (m.records ? o.b : o.a) += t;
+                            cl.total++;
+                            if (cl.occurrences.size() < first) {
+                                cl.occurrences.push_back(o);
+                                if (m.records) {
+                                    const std::string_view record
+                                            = m.oracle.header_name(column, o.a);
+                                    bytes += occurrence_bytes(record);
+                                    text += kOccurrenceText + string_text_bytes(record);
+                                } else {
+                                    bytes += kGlobalOccurrenceBytes;
+                                    text += kGlobalOccurrenceText;
+                                }
+                            }
+                            auto it = insert_sorted(unions[pl.label], &hint, o);
+                            if (it != unions[pl.label].end()) {
+                                inserted.emplace_back(pl.label, it);
+                                new_dedup += kDedupBytes;
+                            }
+                            // (the path's charge below, the runs it holds released first,
+                            // would be refused: stopped before the union grows past it)
+                            if (bytes + new_dedup > m.account.left() + kept_bytes[i]) {
+                                refused = true;
+                                return false;
+                            }
                         }
                     }
-                }
-                if (listed)
-                    list.push_back(std::move(cl));
+                    return true;
+                };
+                // (none kept: no occurrence)
+                for (size_t r = 0; pr && r < pr->runs.size() && add_run(pr->runs[r]); ++r) {}
             }
-            // the memory first, then the time (as for contexts)
-            const bool held = m.account.charge(bytes + new_dedup);
-            bool late = false;
-            if (held) {
-                if (m.output_hook)
-                    m.output_hook(i);
-                pend(text);
-                late = !m.budget.check_time();
-                if (late) {
-                    unpend(text);
-                    m.account.release(bytes + new_dedup);
-                }
-            }
-            if (!held || late) {
-                for (const auto &[id, o] : inserted) {
-                    unions[id].erase(o);
-                }
-                output_stopped = true;
-                for (size_t j = i; j < keep; ++j) {
-                    output_cut[j] = true;
-                }
-                m.set_stop("output", late ? "time" : "max_memory");
-                m.time_stop |= late;
+            if (late || refused)
                 break;
-            }
-            output += bytes;
-            dedup += new_dedup;
-            std::sort(list.begin(), list.end(), [&](const ContextLabel &x, const ContextLabel &y) {
-                return rank[x.label] < rank[y.label];
-            });
-            lists[i] = std::move(list);
+            if (listed)
+                list.push_back(std::move(cl));
         }
+        // the runs kept for this path are no longer needed
+        m.account.release(kept_bytes[i]);
+        kept_bytes[i] = 0;
+        // the memory first, then the time (as for contexts)
+        const bool held = !late && !refused && m.account.charge(bytes + new_dedup);
+        if (held) {
+            if (m.output_hook)
+                m.output_hook(i);
+            pend(text);
+            late = !m.budget.check_time();
+            if (late) {
+                unpend(text);
+                m.account.release(bytes + new_dedup);
+            }
+        }
+        if (!held || late) {
+            for (const auto &[id, it] : inserted) {
+                unions[id].erase(it);
+            }
+            output_stopped = true;
+            for (size_t j = i; j < keep; ++j) {
+                output_cut[j] = true;
+            }
+            m.set_stop("output", late ? "time" : "max_memory");
+            m.time_stop |= late;
+            break;
+        }
+        output += bytes;
+        dedup += new_dedup;
+        std::sort(list.begin(), list.end(), [&](const ContextLabel &x, const ContextLabel &y) {
+            return rank[x.label] < rank[y.label];
+        });
+        lists[i] = std::move(list);
     }
 
     // partial: each label lists the first max_occurrences_per_label occurrences of its union
@@ -1764,46 +2162,21 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
         occurrences_total += unions[id].size();
     }
     if (partial && m.place) {
-        uint64_t cut_labels = 0;
-        for (size_t r = 0; r < kept_labels; ++r) {
-            const LabelId id = order[r];
-            if (unions[id].size() <= m.limits.max_occurrences_per_label)
-                continue;
-            cut_labels++;
-            auto last = unions[id].begin();
-            std::advance(last, m.limits.max_occurrences_per_label);
-            const std::set<Occurrence> kept(unions[id].begin(), last);
-            for (auto &list : lists) {
-                for (ContextLabel &cl : list) {
-                    if (cl.label != id)
-                        continue;
-                    uint64_t dropped = 0;
-                    const Column column = dict[id].column;
-                    cl.occurrences.erase(std::remove_if(cl.occurrences.begin(),
-                                                        cl.occurrences.end(),
-                                                        [&](const Occurrence &o) {
-                        if (kept.count(o))
-                            return false;
-                        dropped += m.records
-                                ? occurrence_bytes(m.oracle.header_name(column, o.a))
-                                : kGlobalOccurrenceBytes;
-                        return true;
-                    }), cl.occurrences.end());
-                    m.account.release(dropped);
-                    output -= std::min(output, dropped);
-                }
-            }
-        }
-        if (cut_labels) {
-            Json::Value cut = reason_json("max_occurrences_per_label");
-            cut["labels"] = uint_json(cut_labels);
-            a.fields["occurrences_cut"] = std::move(cut);
-        }
+        trim_to_unions(unions, order, kept_labels, cap, m.records, m.oracle, dict, &lists,
+                       &a.fields["occurrences_cut"], [&](uint64_t bytes, uint64_t text) {
+            m.account.release(bytes);
+            output -= std::min(output, bytes);
+            unpend(text);
+        });
     }
 
-    // what the pattern's reads and its paths' label lists held is freed; the dictionary, the
-    // descriptors and the labels built for the answer stay
-    m.account.release(held_lists + held_hits + dedup + carried_bytes);
+    // what the pattern's reads, its paths' label lists and the runs kept for paths not output
+    // held is freed; the dictionary, the descriptors and the labels built for the answer stay
+    uint64_t kept_left = 0;
+    for (uint64_t bytes : kept_bytes) {
+        kept_left += bytes;
+    }
+    m.account.release(held_lists + held_hits + dedup + carried_bytes + kept_left);
 
     // ---- the statements
     const bool all_returned = x.complete && keep == released;

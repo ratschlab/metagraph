@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <random>
@@ -1550,6 +1551,394 @@ TEST(PatternPaths, CountMode) {
     Json::Value server = run(idx, body("{\"dna\": \"ACGTACC\"}"));
     // (as text: a parsed number is a signed JSON value, the route's unsigned)
     EXPECT_EQ(Json::writeString(builder, untimed(server)), Json::writeString(builder, untimed(cli)));
+}
+
+
+// ------------------------------------------------------------------ repeats (review GPT-3)
+//
+// GPT review 3, finding 1: the verification of a path binary-searched every coordinate of its
+// first k-mer in every other k-mer's list, made it all again for the output, and read no clock
+// (a 30,000-base homopolymer and a 1,500-base path: 1.5 s past a budget of 500 ms, 503). The
+// chains of a path are now the intersection of its k-mers' coordinate lists shifted (a leapfrog
+// join, consecutive chains kept as runs), made once, under the clock. Records of repeats, where
+// a path's chains form long runs: a homopolymer in two records of one column (its chains run
+// on across the two records' coordinates, which the record bounds must cut), a dinucleotide
+// repeat (no two chains consecutive), and runs of A broken by single C's.
+
+std::string repeated(const std::string &unit, size_t times) {
+    std::string s;
+    for (size_t i = 0; i < times; ++i) {
+        s += unit;
+    }
+    return s;
+}
+
+const std::vector<Record> kRepeats = {
+    { "h", "h0", std::string(300, 'A') },
+    { "h", "h1", std::string(120, 'A') },
+    { "d", "d0", repeated("AC", 150) },
+    { "m", "m0", std::string(40, 'A') + "C" + std::string(25, 'A') + "C" + std::string(60, 'A') },
+};
+
+TEST(PatternPaths, RepeatsAgainstTheOracles) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRepeats, true);
+    const std::vector<std::string> patterns = {
+        std::string(50, 'A'), std::string(25, 'A'), repeated("AC", 20), repeated("CA", 12),
+        "C" + std::string(25, 'A') + "C", std::string(10, 'A') + "W" + std::string(9, 'A'),
+        "N" + std::string(18, 'A') + "N",
+    };
+    for (const std::string &p : patterns) {
+        const bool iupac = p.find_first_not_of("ACGT") != std::string::npos;
+        const std::string spec = "{\"" + std::string(iupac ? "iupac" : "dna") + "\": \"" + p
+                                 + "\"}";
+        for (bool require : { false, true }) {
+            SCOPED_TRACE(p + (require ? " record_verified" : ""));
+            Json::Value out = run(idx, body(spec, require ? "\"require_support\": "
+                                                            "\"record_verified\"" : ""));
+            check_labelled_paths(idx, out["patterns"][0], p, require);
+        }
+    }
+    // A^50: 251 starts in h0 and 71 in h1, none across the two (their chains are one run of
+    // consecutive column coordinates); 11 in m0's run of 60
+    Json::Value out = run(idx, body("{\"dna\": \"" + std::string(50, 'A') + "\"}"));
+    const Json::Value &e = out["patterns"][0];
+    ASSERT_EQ(1u, e["results"].size());
+    std::map<std::string, uint64_t> occurrences;
+    for (const Json::Value &l : e["results"][0]["labels"]) {
+        occurrences[l["column"].asString()] = l["occurrences"]["value"].asUInt64();
+    }
+    EXPECT_EQ((std::map<std::string, uint64_t> { { "h", 251 + 71 }, { "m", 11 } }), occurrences);
+}
+
+// partial: each label lists the first max_occurrences_per_label occurrences of its union (over
+// the paths returned), its counts exact over all of them (the record scan), and the cut stated
+TEST(PatternPaths, TheCapListsTheFirstOccurrencesOfEachUnion) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRepeats, true);
+    Scan scan(idx);
+    const uint64_t cap = 3;
+    for (const std::string &p : { std::string(25, 'A'), "N" + std::string(18, 'A') + "N",
+                                 repeated("AC", 20) }) {
+        SCOPED_TRACE(p);
+        const bool iupac = p.find_first_not_of("ACGT") != std::string::npos;
+        Json::Value out = run(idx, body("{\"" + std::string(iupac ? "iupac" : "dna") + "\": \""
+                                        + p + "\"}", "\"mode\": \"partial\", "
+                                        "\"max_occurrences_per_label\": " + std::to_string(cap)));
+        const Json::Value &e = out["patterns"][0];
+        ASSERT_TRUE(e["stop"].isNull()) << e["stop"];
+        // per column: every occurrence of every path returned (the scan), in the union's order
+        std::map<std::string, std::set<std::tuple<uint64_t, uint64_t, uint8_t>>> unions;
+        std::map<std::string, std::set<std::tuple<uint64_t, uint64_t, uint8_t>>> listed;
+        for (const Json::Value &r : e["results"]) {
+            const std::string s = r["sequence"].asString();
+            const uint8_t strand = orientation_rank(r["strand"].asString());
+            for (const Json::Value &l : r["labels"]) {
+                const std::string column = l["column"].asString();
+                const auto occ = scan.occurrences(column, s);
+                for (const auto &[seq_id, start] : occ) {
+                    unions[column].emplace(seq_id, start, strand);
+                }
+                // the path's own count, exact, whatever is listed
+                EXPECT_EQ(occ.size(), l["occurrences"]["value"].asUInt64()) << column;
+                EXPECT_EQ("exact", l["occurrences"]["relation"].asString());
+                for (const Json::Value &o : l["occurrence_list"]) {
+                    const std::string coords = o["nt_coords"].asString();
+                    const uint64_t start = std::stoull(coords.substr(0, coords.find('-')));
+                    EXPECT_TRUE(occ.count({ o["seq_id"].asUInt64(), start })) << o;
+                    listed[column].emplace(o["seq_id"].asUInt64(), start, strand);
+                }
+            }
+        }
+        ASSERT_FALSE(unions.empty());
+        uint64_t cut = 0, total = 0;
+        for (const auto &[column, u] : unions) {
+            std::set<std::tuple<uint64_t, uint64_t, uint8_t>> first;
+            for (auto it = u.begin(); it != u.end() && first.size() < cap; ++it) {
+                first.insert(*it);
+            }
+            EXPECT_EQ(first, listed[column]) << column;
+            cut += u.size() > cap;
+            total += u.size();
+        }
+        for (const Json::Value &b : e["by_label"]) {
+            EXPECT_EQ(unions[b["column"].asString()].size(), b["occurrences"]["value"].asUInt64());
+            EXPECT_EQ("exact", b["occurrences"]["relation"].asString());
+        }
+        EXPECT_EQ(total, e["counts"]["occurrences"]["value"].asUInt64());
+        EXPECT_EQ("exact", e["counts"]["occurrences"]["relation"].asString());
+        if (cut) {
+            EXPECT_EQ("max_occurrences_per_label", e["occurrences_cut"]["reason"].asString());
+            EXPECT_EQ(cut, e["occurrences_cut"]["labels"].asUInt64());
+        } else {
+            EXPECT_TRUE(e["occurrences_cut"].isNull());
+        }
+    }
+}
+
+// The work of the verification, seen through the clock's readings (deterministic: every
+// reading after kClockStride units of work): a 1,000-base path through a 3,000-base
+// homopolymer has 2,001 chains, one run, found with a few units per k-mer — not a search per
+// chain and k-mer (two million units, some 500 readings). The readings between the path's
+// verification and the output of its labels: those of a few thousand units at most. (A
+// column-compressed index, read unbudgeted: a row-diff conversion of the homopolymer's row
+// takes seconds)
+TEST(PatternPaths, AHomopolymersChainsAreOneRun) {
+    Index idx = build<annot::ColumnCompressed<>>(kK, { { "h", "h0", std::string(3000, 'A') } },
+                                                 true);
+    const Clock::time_point start = Clock::now();
+    auto armed = std::make_shared<bool>(false);
+    auto readings = std::make_shared<uint64_t>(0);
+    auto clock = [start, armed, readings]() {
+        *readings += *armed;
+        return start;
+    };
+    RetrievalHooks hooks;
+    hooks.occurrences_hook = [armed](size_t) { *armed = true; };
+    hooks.output_hook = [armed](size_t) { *armed = false; };
+    Json::Value out = run_clocked(idx, body("{\"dna\": \"" + std::string(1000, 'A') + "\"}",
+                                            "\"mode\": \"partial\", \"max_occurrences_per_label\": "
+                                            "2, \"allow_unbudgeted_annotation\": true"), hooks,
+                                  clock);
+    const Json::Value &e = out["patterns"][0];
+    ASSERT_EQ(1u, e["results"].size());
+    const Json::Value &l = e["results"][0]["labels"][0];
+    EXPECT_EQ("record_verified", l["support"].asString());
+    EXPECT_EQ(2001u, l["occurrences"]["value"].asUInt64());
+    ASSERT_EQ(2u, l["occurrence_list"].size());
+    EXPECT_EQ("1-1000", l["occurrence_list"][0]["nt_coords"].asString());
+    EXPECT_EQ("2-1001", l["occurrence_list"][1]["nt_coords"].asString());
+    EXPECT_LE(*readings, 3u);
+}
+
+// The verification reads the clock inside a path (review GPT-3, finding 1): a dinucleotide
+// repeat, whose 1,901 chains of a 200-base path are no run, each sought in 195 lists; the clock
+// passes the work time once the verification began (after the path's own reading): stop
+// {placement, time}, its labels neither verified nor refuted, stated — not finished first and
+// stopped in the output after it (or 503 after the budget)
+TEST(PatternPaths, TheVerificationReadsTheClock) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, { { "d", "d0", repeated("AC", 2000) } },
+                                                     true);
+    const std::string p = repeated("AC", 100);
+    const Clock::time_point start = Clock::now();
+    auto virtual_ms = std::make_shared<double>(0);
+    auto clock = [start, virtual_ms]() {
+        return start + std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double, std::milli>(*virtual_ms));
+    };
+    RetrievalHooks hooks;
+    hooks.occurrences_hook = [virtual_ms](size_t) { *virtual_ms = 1e9; };
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        *virtual_ms = 0;
+        Json::Value out = run_clocked(idx, body("{\"dna\": \"" + p + "\"}",
+                                                "\"mode\": \"" + mode + "\""), hooks, clock);
+        const Json::Value &e = out["patterns"][0];
+        EXPECT_EQ("placement", e["stop"]["phase"].asString()) << mode << " " << e["stop"];
+        EXPECT_EQ("time", e["stop"]["reason"].asString());
+        EXPECT_EQ("time_limited", e["determinism"].asString());
+        EXPECT_FALSE(e["retrieval_complete"].asBool());
+        EXPECT_EQ("exact", e["counts"]["paths"]["relation"].asString());
+        if (mode == "partial") {
+            ASSERT_EQ(1u, e["results"].size());
+            EXPECT_TRUE(e["results"][0]["labels"].isNull());
+            EXPECT_EQ("unknown", e["counts"]["occurrences"]["relation"].asString());
+        } else {
+            EXPECT_EQ("deadline", e["withheld"]["reason"].asString());
+        }
+    }
+    // the clock left alone: every chain verified (the record scan's 1,901)
+    *virtual_ms = 0;
+    Json::Value out = run_clocked(idx, body("{\"dna\": \"" + p + "\"}"), {}, clock);
+    check_labelled_paths(idx, out["patterns"][0], p, false);
+    EXPECT_EQ(1901u, out["patterns"][0]["counts"]["occurrences"]["value"].asUInt64());
+}
+
+// Over a sweep of memory maxima on the repeats (the verification's runs, the occurrences'
+// deduplication and the labels built all in the account), both modes: the account never passes
+// its maximum, an incomplete entry says why, a path whose labels are listed lists them all
+// (labels_total of them, unless max_labels cut them) with its true occurrences (the record
+// scan's), and one whose labels were not built says so (output_budget, labels null) — not an
+// empty list beside labels_total
+TEST(PatternPaths, MemorySweepOverRepeats) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRepeats, true);
+    Scan scan(idx);
+    const std::string spec = "{\"iupac\": \"N" + std::string(18, 'A') + "N\"}, {\"dna\": \""
+                             + repeated("AC", 20) + "\"}";
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        Json::Value full = run(idx, body(spec, "\"mode\": \"" + mode + "\""));
+        ASSERT_TRUE(full["patterns"][0]["retrieval_complete"].asBool() || mode == "partial");
+        ASSERT_GT(full["patterns"][0]["results"].size(), 2u);
+        const uint64_t peak = full["patterns"][1]["work"]["memory_bytes"].asUInt64();
+        uint64_t stated = 0;
+        for (uint64_t max = 2000; max <= peak; max += std::max<uint64_t>(1, (peak - 2000) / 400)) {
+            SCOPED_TRACE(mode + " max " + std::to_string(max));
+            RetrievalHooks hooks;
+            hooks.max_memory_bytes = max;
+            Json::Value out = run(idx, body(spec, "\"mode\": \"" + mode + "\""), hooks);
+            for (const Json::Value &e : out["patterns"]) {
+                ASSERT_LE(e["work"]["memory_bytes"].asUInt64(), max);
+                if (!e["retrieval_complete"].asBool() && e["occurrences_cut"].isNull()) {
+                    stated++;
+                    EXPECT_TRUE(!e["withheld"].isNull() || !e["cut"].isNull()
+                                || !e["stop"].isNull() || e["rows_refused"].size()) << e;
+                }
+                for (const Json::Value &r : e["results"]) {
+                    const std::string status = r["labels_status"].asString();
+                    if (status != "complete") {
+                        if (status == "output_budget") {
+                            EXPECT_TRUE(r["labels"].isNull()) << r;
+                        }
+                        continue;
+                    }
+                    ASSERT_TRUE(r["labels"].isArray()) << r;
+                    if (e["labels_cut"].isNull()) {
+                        EXPECT_EQ(r["labels_total"].asUInt64(), r["labels"].size()) << r;
+                    }
+                    const std::string s = r["sequence"].asString();
+                    for (const Json::Value &l : r["labels"]) {
+                        if (l["occurrences"]["relation"].asString() != "exact")
+                            continue;
+                        const auto occ = scan.occurrences(l["column"].asString(), s);
+                        EXPECT_EQ(occ.size(), l["occurrences"]["value"].asUInt64()) << l;
+                        EXPECT_LE(l["occurrence_list"].size(), occ.size());
+                    }
+                }
+            }
+        }
+        EXPECT_GT(stated, 0u);
+    }
+}
+
+
+// As MemorySweepOverRepeats over the clock: the clock passes the work time at its R-th reading,
+// for every R of the request (the readings are a deterministic function of the request: every
+// stride of work, every path, every row read), so that every time stop the request can meet —
+// in the extension, the reads, the paths' label lists, their verification, the output — is
+// met once. Each answer states it, a path returned with labels_status complete lists all its
+// labels (not an empty list after a stop of the lists), and none is refused
+TEST(PatternPaths, TimeSweepOverRepeats) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRepeats, true);
+    Scan scan(idx);
+    const std::string spec = "{\"iupac\": \"N" + std::string(18, 'A') + "N\"}";
+    const Clock::time_point start = Clock::now();
+    auto readings = std::make_shared<uint64_t>(0);
+    auto jump = std::make_shared<uint64_t>(0);
+    auto clock = [start, readings, jump]() {
+        return ++*readings > *jump ? start + std::chrono::hours(1) : start;
+    };
+    for (const std::string mode : { "partial", "all_or_count" }) {
+        const std::string b = body(spec, "\"mode\": \"" + mode + "\"");
+        *readings = 0;
+        *jump = std::numeric_limits<uint64_t>::max();
+        Json::Value full = run_clocked(idx, b, {}, clock);
+        ASSERT_GT(full["patterns"][0]["results"].size(), 2u);
+        const uint64_t total = *readings;
+        std::set<std::string> stops;
+        for (uint64_t r = 0; r <= total; ++r) {
+            SCOPED_TRACE(mode + " reading " + std::to_string(r));
+            *readings = 0;
+            *jump = r;
+            Json::Value out = run_clocked(idx, b, {}, clock);
+            const Json::Value &e = out["patterns"][0];
+            if (!e["stop"].isNull())
+                stops.insert(e["stop"]["phase"].asString() + "/" + e["stop"]["reason"].asString());
+            if (!e["retrieval_complete"].asBool() && e["occurrences_cut"].isNull()) {
+                EXPECT_TRUE(!e["withheld"].isNull() || !e["cut"].isNull() || !e["stop"].isNull())
+                        << e;
+            }
+            for (const Json::Value &res : e["results"]) {
+                const std::string status = res["labels_status"].asString();
+                if (status == "output_budget") {
+                    EXPECT_TRUE(res["labels"].isNull()) << res;
+                }
+                if (status != "complete")
+                    continue;
+                ASSERT_TRUE(res["labels"].isArray()) << res;
+                EXPECT_EQ(res["labels_total"].asUInt64(), res["labels"].size()) << res;
+                for (const Json::Value &l : res["labels"]) {
+                    if (l["occurrences"]["relation"].asString() == "exact") {
+                        EXPECT_EQ(scan.occurrences(l["column"].asString(),
+                                                   res["sequence"].asString()).size(),
+                                  l["occurrences"]["value"].asUInt64()) << l;
+                    }
+                }
+            }
+        }
+        // the stops met on the way include the output's and the placement's
+        EXPECT_TRUE(stops.count("output/time")) << mode;
+    }
+}
+
+
+// The retrieval's counters (review GPT-3, for the route to state), read from PatternRetrieval
+// itself on paths built by hand: the distinct rows read (one for a homopolymer's path, however
+// long), the verification's work (a few units per k-mer for its one run of chains, not one per
+// chain and k-mer), and the request's sums over its patterns
+TEST(PatternPaths, TheRetrievalCounters) {
+    Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRepeats, true);
+    const DeBruijnGraph &graph = idx.anno->get_graph();
+    // a path of |s| as the route collects it: the annotation key (row + 1) of every k-mer
+    auto path_of = [&](const std::string &s) {
+        RetrievalPath p;
+        p.sequence = s;
+        for (size_t j = 0; j + kK <= s.size(); ++j) {
+            DeBruijnGraph::node_index node = DeBruijnGraph::npos;
+            graph.map_to_nodes(s.substr(j, kK), [&](DeBruijnGraph::node_index x) { node = x; });
+            EXPECT_NE(DeBruijnGraph::npos, node) << s.substr(j, kK);
+            p.keys.push_back(AnnotatedDBG::anno_to_graph_index(
+                    AnnotatedDBG::graph_to_anno_index(node)));
+        }
+        return p;
+    };
+    RetrievalLimits limits;
+    pattern::Budget budget(1'000'000, pattern::Deadline::unbounded());
+    RetrievalHooks hooks;
+    hooks.coord_to_header = idx.cth.get();
+    PatternRetrieval retrieval(*idx.anno, pattern::GraphMode::BASIC, limits, budget, &hooks);
+    pattern::Extraction x;
+    x.complete = true;
+    auto labels = [&](const std::string &s) {
+        const std::vector<RetrievalPath> paths = { path_of(s) };
+        retrieval.begin_release(pattern::Mode::PARTIAL);
+        EXPECT_TRUE(retrieval.admit_path(s.size()));
+        x.returned = 1;
+        return retrieval.retrieve_paths(paths, 1, s.size(), pattern::Mode::PARTIAL, x,
+                                        Json::Value(), false);
+    };
+    const std::string a50(50, 'A');
+    LabelsAnswer h = labels(a50);
+    ASSERT_EQ(1u, h.result_fields.size());
+    EXPECT_TRUE(h.complete || !h.fields["occurrences_cut"].isNull()) << h.fields;
+    EXPECT_EQ(1u, h.counters.rows_distinct);
+    // 46 k-mers, two labels: h's 412 coordinates are one run (its rows looked up, the lists
+    // ordered, sought and extended once each, a unit per record), m's three runs broken by C's
+    // a few candidates each; a search per coordinate and k-mer would be 412 x 45 for h alone
+    const uint64_t n = 50 - kK + 1;
+    EXPECT_GT(h.counters.verification_steps, 4 * n);
+    EXPECT_LT(h.counters.verification_steps, 412 * (n - 1) / 10) << h.counters.verification_steps;
+    EXPECT_GE(h.counters.label_intersection_ms, 0);
+    EXPECT_GE(h.counters.verification_ms, 0);
+
+    // m0's C A^25 C: the rows CAAAA, AAAAA and AAAAC
+    LabelsAnswer c = labels("C" + std::string(25, 'A') + "C");
+    EXPECT_EQ(3u, c.counters.rows_distinct);
+    const RetrievalCounters &total = retrieval.counters();
+    EXPECT_EQ(4u, total.rows_distinct);
+    EXPECT_EQ(h.counters.verification_steps + c.counters.verification_steps,
+              total.verification_steps);
+
+    // a work budget that one row passes: the others not read, not counted
+    limits.max_annotation_work = 1;
+    pattern::Budget small(1'000'000, pattern::Deadline::unbounded());
+    PatternRetrieval one(*idx.anno, pattern::GraphMode::BASIC, limits, small, &hooks);
+    const std::string s = "C" + std::string(25, 'A') + "C";
+    const std::vector<RetrievalPath> paths = { path_of(s) };
+    one.begin_release(pattern::Mode::PARTIAL);
+    ASSERT_TRUE(one.admit_path(s.size()));
+    LabelsAnswer w = one.retrieve_paths(paths, 1, s.size(), pattern::Mode::PARTIAL, x,
+                                        Json::Value(), false);
+    ASSERT_TRUE(w.stop);
+    EXPECT_EQ("max_annotation_work", w.stop->second);
+    EXPECT_EQ(1u, w.work["annotation_rows"].asUInt64());
+    EXPECT_EQ(1u, w.counters.rows_distinct);
 }
 
 
