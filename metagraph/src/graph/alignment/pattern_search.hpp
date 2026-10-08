@@ -3,8 +3,9 @@
 
 /**
  * Pattern search: count, and extract without reading any annotation, every graph context of
- * a short motif or an IUPAC pattern (peptides later) on the succinct graph, and for a pattern
- * longer than k every graph path spelling it (phase 2, the extension).
+ * a short motif, an IUPAC pattern or a peptide (its codon automaton, §6) on the succinct
+ * graph, and for a pattern longer than k every graph path spelling it (phase 2, the
+ * extension).
  *
  * The design is docs/DESIGN-pattern-search.md (v6 + §22); section numbers below refer to it.
  * This header is the contract between the engine (pattern_search.cpp) and the route
@@ -19,37 +20,28 @@
  * counted, paths UNKNOWN, nothing released, note paths_later_increment), so the route's
  * answers do not change until it opts in.
  *
- * Wiring the route for `long` (a follow-up; the route is not edited by increment 4's engine
- * work). The paths are OPT-IN per request (owner decision #13 of 2026-10-07; SPEC §12), an
- * addition under contract version 1: a request without the option keeps today's anchor-only
- * answer. In src/cli/pattern.cpp:
- *  1. parse_request: accept the request field "long_search" (reserved: refused by name as
- *     later_increment today, whatever its value): "anchors" (the default) leaves
- *     extend_paths false; "paths" sets req.request.extend_paths = true and admits
- *     "max_paths" (refused by name today; capped like max_anchors, by a new
- *     --pattern-max-paths) into req.request.max_paths;
- *  2. entry_json, the `anchors` branch, with long_search "paths": counts.paths =
- *     count_json(anchors->paths) as today, plus paths["candidates_examined"] =
- *     anchors->candidates_examined, the per-strand split put_orientations(&paths,
- *     anchors->paths_by_orientation, strand_stated), and paths["extension"] =
- *     to_string(anchors->extension); work["extension_edges"] = result->work.extension_edges;
- *     timing["extension_ms"] = result->extension_ms;
- *  3. context_json: a released path (!c.path.empty()) is written with NEW fields, never
- *     `kmer`, which keeps its meaning (the k-mer of a graph context): sequence = c.sequence
- *     (the L spelled bases, §7.2), anchor_kmer = graph.get_node_sequence(c.node) (the k-base
- *     anchor), instance = c.sequence, offset 0, and with output.paths the node ids c.path
- *     (rows: AnnotatedDBG::graph_to_anno_index(search.base_node(n)) per node); the check
- *     `c.offset + length > k` applies to L <= k contexts only;
- *  4. capabilities: advertise the option (long_search values "anchors", "paths"; max_paths
- *     among the caps); long_patterns keeps describing the default answer. For a request
- *     with long_search "paths", L > k, count mode included: counts.paths becomes known, the
- *     note and the withheld reason paths_later_increment do not appear (never produced with
- *     extend_paths), and anchors_above_threshold, stop phase "extension" and reason
- *     "max_paths" can appear. A request without it keeps counts.paths unknown and
- *     paths_later_increment, as today.
- * Everything else (the withheld reasons, the cut, retrieval_complete, the stop and its phase)
- * flows through the existing Extraction and Stop fields with the values added below
- * (Withheld::ANCHORS_ABOVE_THRESHOLD, StopReason::MAX_PATHS, StopPhase::EXTENSION).
+ * How the route serves them (src/cli/pattern.cpp; SPEC §12, §17):
+ *  - `long` (increment 4): OPT-IN per request (owner decision #13 of 2026-10-07), an addition
+ *    under contract version 1: the request field long_search "paths" sets
+ *    Request::extend_paths and admits max_paths (--pattern-max-paths); a request without it
+ *    keeps the anchor-only answer (counts.paths unknown, note and withheld reason
+ *    paths_later_increment). With it, counts.paths states the extension's count, its
+ *    per-orientation split, candidates_examined and the Extension; a released path is written
+ *    with the fields sequence (the L bases), anchor_kmer, nodes and rows, never `kmer`, which
+ *    keeps its meaning (a context's k-mer); the withheld reason anchors_above_threshold, stop
+ *    phase "extension" and reason "max_paths" can appear. Labels of paths are read by
+ *    PatternRetrieval::retrieve_paths (support label_intersection or record_verified, owner
+ *    decision #14).
+ *  - `protein` (increment 5, §6; owner decision #15 of 2026-10-08): patterns[i].protein is the
+ *    third kind; the request field genetic_code (an integer, default GeneticCode::kStandard)
+ *    is looked up with GeneticCode::find (an unknown id: 400 genetic_code_unknown), and
+ *    Pattern::parse(PatternKind::PROTEIN, text, code)'s PatternError (bad_alphabet,
+ *    stop_unsupported) is the slot's error as for dna and iupac. A peptide is a Pattern like
+ *    any other: counts, contexts, anchors, the extension and its paths need no route code of
+ *    their own; its entry states kind "protein", pattern = text() (the residues), length =
+ *    length() (3m bases: every offset, scope decision, information bit and instance is in
+ *    bases), residues (m) and genetic_code. The capabilities list the kind, the residues, the
+ *    genetic codes (GeneticCode::ids()) and the default 1.
  *
  * The owner's guarantee rule holds for every type here: nothing is weakened silently, every
  * count carries its unit and its relation, and a count is never promoted by assumption.
@@ -67,6 +59,7 @@
 #include <utility>
 #include <vector>
 
+#include "graph/alignment/genetic_code.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
@@ -172,8 +165,12 @@ struct Count {
 
 // ---------------------------------------------------------------- patterns
 
-// The kinds of this increment; `protein` (the codon automaton, §6) is a later increment
-enum class PatternKind { DNA, IUPAC };
+/**
+ * The pattern kinds (§3): DNA over A, C, G, T; IUPAC over the 15 codes; PROTEIN a peptide,
+ * searched as its codon automaton (§6, increment 5): 3 positions per residue, the bases
+ * allowed at a position depending on the bases already spelled in its codon.
+ */
+enum class PatternKind { DNA, IUPAC, PROTEIN };
 
 /**
  * The bases allowed at one pattern position: bit 0 A, bit 1 C, bit 2 G, bit 3 T (the IUPAC
@@ -205,13 +202,15 @@ class PatternError : public std::invalid_argument {
 };
 
 /**
- * One oriented pattern: L positions, each a BaseSet (§3).
+ * One oriented pattern: L positions, each a BaseSet (§3); for a peptide, L = 3m positions
+ * whose allowed bases follow its codon automaton (§6).
  */
 class Pattern {
   public:
     /**
      * Parses |text| (case-insensitive) as |kind|: DNA over A, C, G, T; IUPAC over the 15
-     * codes A C G T R Y S W K M B D H V N. Throws PatternError with code "bad_alphabet" on
+     * codes A C G T R Y S W K M B D H V N; PROTEIN as parse(PROTEIN, text,
+     * GeneticCode::standard()) below. Throws PatternError with code "bad_alphabet" on
      * an empty text or on any other character (U, '-', '.', whitespace included), naming
      * the first offending 0-based position. No length cap: a pattern longer than k is
      * charged steps for its anchor windows only (§4.1); parsing it, its information bits,
@@ -220,41 +219,105 @@ class Pattern {
      */
     static Pattern parse(PatternKind kind, std::string_view text);
 
+    /**
+     * As above; for PROTEIN (§6, owner decision #15 of 2026-10-08) |code| is the genetic
+     * code (the route passes GeneticCode::get(request genetic_code), 1 by default), for DNA
+     * and IUPAC it is not read. A peptide is a string over the 20 residues A C D E F G H I
+     * K L M N P Q R S T V W Y and the ambiguity codes X (any residue: every codon of |code|
+     * that is not a stop), B (D or N), Z (E or Q) and J (I or L), case-insensitive; it is the
+     * pattern of L = 3m positions whose instances are exactly the codon strings c_1 .. c_m
+     * with c_i a codon of residue i in |code| (§6: no superset, no stop codon anywhere).
+     * Refused with "bad_alphabet": U (selenocysteine), O (pyrrolysine), '-', digits,
+     * whitespace and every other character outside these 24 letters and '*', naming the
+     * first such 0-based residue position (wherever a '*' is), and an empty text. A text
+     * whose every other character is a residue but which holds the stop '*' is refused with
+     * "stop_unsupported" (SPEC §8.9: not served in this version, no branch through a stop),
+     * naming the first '*'.
+     */
+    static Pattern parse(PatternKind kind, std::string_view text, const GeneticCode &code);
+
     PatternKind kind() const { return kind_; }
-    // the pattern in upper case; for a reverse complement, the IUPAC complement reversed
+    /**
+     * The pattern in upper case; for a DNA or IUPAC reverse complement, the IUPAC complement
+     * reversed. A peptide's is its residues (the route's `pattern`); a peptide's reverse
+     * complement, an automaton with no residue letters of its own, has its residues in
+     * reverse order (a diagnostic only, never parsed back).
+     */
     const std::string& text() const { return text_; }
+    // L, in bases: 3m for a peptide of m residues
     size_t length() const { return positions_.size(); }
+    /**
+     * Per position the bases it admits. For DNA and IUPAC exactly the pattern; for a peptide
+     * the union over the residue's codons at that codon position, a superset of what the
+     * automaton admits after a given prefix (allowed() is the exact primitive; the engine
+     * uses these sets only where a superset is safe: its cost estimate and the test whether
+     * a palindromic k-mer can hold the pattern, §4.1).
+     */
     const std::vector<BaseSet>& positions() const { return positions_; }
+
+    // PROTEIN: the genetic code's NCBI id; 0 for DNA and IUPAC
+    int genetic_code() const { return genetic_code_; }
+    /**
+     * PROTEIN: per residue of this oriented pattern, in reading order, the codons it admits
+     * (residue i covers positions [3i, 3i + 3)); for the reverse complement, the original's
+     * codon sets in reverse order, each codon reverse-complemented (§6: GCN becomes NGC).
+     * Empty for DNA and IUPAC.
+     */
+    const std::vector<CodonSet>& codon_sets() const { return codons_; }
 
     /**
      * The engine's one primitive (§3): the bases allowed at |position| after the bases
      * |spelled| at positions [0, position) of this oriented pattern. For DNA and IUPAC it is
-     * positions()[position] whatever was spelled; a peptide's codon automaton (§6, a later
-     * increment) depends on |spelled|, which is why the range DFS asks through this call.
+     * positions()[position] whatever was spelled. For a peptide it is the codon automaton
+     * (§6): with residue i = position / 3 and j = position % 3, exactly the bases b such
+     * that some codon of residue i agrees with the last j bases of |spelled| (that codon's
+     * first j) and has b at its position j; 0 when none does (a prefix off the automaton,
+     * an N included). Only the last j <= 2 bases of |spelled| are read; when |spelled| holds
+     * fewer than j, the missing ones are taken as unknown (any base).
      * The extension (§4.2) asks it at every position >= k with |spelled| the whole instance
      * so far: the anchor's k spelled bases (read from the graph) followed by the bases the
      * DFS appended, so that an automaton recomputes its state at the k boundary from the
-     * anchor's sequence (§4.1, last bullet) and needs no state carried by the engine.
+     * anchor's sequence (§4.1, last bullet) and needs no state carried by the engine. The
+     * range DFS of phase 1 asks the same automaton with the bases its range's nodes end with
+     * (pattern_search.cpp, CodonWindow).
      */
     BaseSet allowed(size_t position, std::string_view spelled) const;
 
-    // sum of log2(4 / |set_i|) over the positions [begin, end) (§3)
+    /**
+     * The information of the positions [begin, end) (§3): DNA and IUPAC, the sum of
+     * log2(4 / |set_i|); PROTEIN, 2 (end - begin) - log2(the number of distinct strings the
+     * automaton admits over those positions), computed per residue as the strings its codons
+     * spell over the positions of [begin, end) it covers (exact also for a window that cuts
+     * a codon: the anchor window [0, k), its reverse P[L - k, L)), never a per-position sum
+     * (which overstates a residue whose codons share no position-wise structure). For a
+     * whole peptide: the sum of log2(64 / |codons_i|) = 6m - log2(the number of codon
+     * strings it admits).
+     */
     double information_bits(size_t begin, size_t end) const;
     double information_bits() const { return information_bits(0, length()); }
 
     // every position is a single base, whatever the kind (the floor is waived for such a
-    // pattern in `suffix` scope, §5.3: one range, a few ranks)
+    // pattern in `suffix` scope, §5.3: one range, a few ranks); a peptide is exact when
+    // every residue has one codon in its code (M and W in the standard code)
     bool is_exact() const;
 
     /**
      * rc(P): positions reversed, each set complemented (A<->T, C<->G, R<->Y, K<->M, B<->V,
      * D<->H; S, W, N to themselves, COMPL_TAB of reverse_complement.hpp); the kind is kept.
-     * Searched completely on its own and never converted to P's ids (§4.1, "Orientation").
+     * A peptide's is its reverse-complemented automaton (§6): residues in reverse order,
+     * each codon reverse-complemented. Searched completely on its own and never converted to
+     * P's ids (§4.1, "Orientation").
      */
     Pattern reverse_complement() const;
 
-    // P == rc(P) position by position (ACGT, RY, NN): searched once, its contexts counted
-    // once in every total, strand "=" per context and key "both" in by_strand (§3, "Strand")
+    /**
+     * P == rc(P) (ACGT, RY, NN): searched once, its contexts counted once in every total,
+     * strand "=" per context and key "both" in by_strand (§3, "Strand"). DNA and IUPAC
+     * position by position; a peptide residue by residue (its instances are a product of
+     * codon sets, equal to rc's iff every residue's codons are the reverse complements of
+     * those of its mirror residue): only X runs in the tables without a stop codon (27, 28,
+     * 31) are palindromic peptides.
+     */
     bool is_palindromic() const;
 
   private:
@@ -264,6 +327,9 @@ class Pattern {
     PatternKind kind_;
     std::string text_;
     std::vector<BaseSet> positions_;
+    // PROTEIN only
+    std::vector<CodonSet> codons_;
+    int genetic_code_ = 0;
 };
 
 
@@ -356,9 +422,9 @@ struct Request {
      * Context::sequence) instead of withholding PATHS_LATER_INCREMENT, and the note
      * paths_later_increment is not set. False (the default): increments 1-2, unchanged —
      * anchors counted, paths UNKNOWN (EXACT 0 without anchors), nothing extended or
-     * released for L > k, no extension step charged. Not a JSON field: the route will set it
-     * for a request with long_search "paths" (opt-in, owner decision #13; see "Wiring the
-     * route" at the top of this file); every other request keeps it false.
+     * released for L > k, no extension step charged. Not a JSON field: the route sets it for
+     * a request with long_search "paths" (opt-in, owner decision #13; see "How the route
+     * serves them" at the top of this file); every other request keeps it false.
      */
     bool extend_paths = false;
     /**
@@ -887,7 +953,17 @@ struct Result {
  * N run inside a window still costs about min(4^run, edges / 4^a) ranges per level, a being
  * the specified bases before it in that orientation: the information bits do not bound it.
  * The base searches run cheapest first by that estimate, so that a budget stop leaves the
- * orientation whose run comes late complete.
+ * orientation whose run comes late complete. A peptide's leading X residues are searched as
+ * given on every graph (an X codon is not every 3-mer: its stops are excluded), at the cost of
+ * a codon's worth of ranges each, as an IUPAC N^3 inside a window.
+ *
+ * Peptides (§6): a window of a peptide is searched with its codon automaton: at every depth of
+ * the range DFS the bases tried are Pattern::allowed()'s after the codon bases the range's
+ * nodes already end with, read from the BOSS (the last by its F array, the one before through
+ * bwd), so no prefix state travels outside the range; the W rule and the extension ask the
+ * same automaton. On a wrapped PRIMARY graph the reverse complement of a long peptide's anchor
+ * window, rc(Q[0, k)) = rc(Q)[L - k, L), may start inside a codon: its first codon is matched
+ * on the bases inside the window only (the codon's earlier bases are free).
  *
  * Answer order (§5.5): contexts by (node, offset, orientation); paths by (anchor node,
  * orientation), then the DFS in symbol order A < C < G < T at every position, i.e. the
@@ -1045,10 +1121,12 @@ inline const char* to_string(Relation relation) {
     return "unknown";
 }
 
+// the answer's `kind` and the request's pattern key
 inline const char* to_string(PatternKind kind) {
     switch (kind) {
         case PatternKind::DNA: return "dna";
         case PatternKind::IUPAC: return "iupac";
+        case PatternKind::PROTEIN: return "protein";
     }
     return "unknown";
 }

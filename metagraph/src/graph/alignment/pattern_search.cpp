@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -73,9 +74,32 @@ uint32_t set_size(BaseSet set) {
     return __builtin_popcount(set);
 }
 
+// the bases a codon set admits at codon position |j| (0, 1, 2), whatever the others
+BaseSet codon_position_set(CodonSet set, size_t j) {
+    return next_bases(set, j);
+}
+
+// a peptide's residue (upper case) as a codon set of |code|: the 20 residues, X (every codon
+// that is not a stop), B (D or N), Z (E or Q), J (I or L); 0 for anything else
+CodonSet residue_codons(char residue, const GeneticCode &code) {
+    switch (residue) {
+        case 'X': return kAllCodons & ~code.stops();
+        case 'B': return code.codons('D') | code.codons('N');
+        case 'Z': return code.codons('E') | code.codons('Q');
+        case 'J': return code.codons('I') | code.codons('L');
+        default:
+            return residue && std::strchr("ACDEFGHIKLMNPQRSTVWY", residue)
+                ? code.codons(residue)
+                : 0;
+    }
+}
+
 } // namespace
 
 Pattern Pattern::parse(PatternKind kind, std::string_view text) {
+    if (kind == PatternKind::PROTEIN)
+        return parse(kind, text, GeneticCode::standard());
+
     if (text.empty())
         throw PatternError("bad_alphabet", "pattern: empty");
 
@@ -102,13 +126,92 @@ Pattern Pattern::parse(PatternKind kind, std::string_view text) {
     return Pattern(kind, std::move(upper), std::move(positions));
 }
 
-BaseSet Pattern::allowed(size_t position, std::string_view) const {
+Pattern Pattern::parse(PatternKind kind, std::string_view text, const GeneticCode &code) {
+    if (kind != PatternKind::PROTEIN)
+        return parse(kind, text);
+
+    if (text.empty())
+        throw PatternError("bad_alphabet", "pattern: empty");
+
+    std::string upper;
+    upper.reserve(text.size());
+    std::vector<CodonSet> codons;
+    codons.reserve(text.size());
+    std::vector<BaseSet> positions;
+    positions.reserve(3 * text.size());
+
+    // the first stop '*', refused with its own code once every other character is a residue
+    // (a character outside the alphabet is named first, wherever it is)
+    size_t stop = std::string_view::npos;
+    for (size_t i = 0; i < text.size(); ++i) {
+        const char residue = std::toupper(static_cast<unsigned char>(text[i]));
+        if (residue == '*') {
+            stop = std::min(stop, i);
+            continue;
+        }
+        const CodonSet set = residue_codons(residue, code);
+        if (!set) {
+            std::ostringstream msg;
+            msg << "pattern: character '" << text[i] << "' at position " << i
+                << " is not in the protein alphabet (A C D E F G H I K L M N P Q R S T V W Y, "
+                   "and X B Z J)";
+            throw PatternError("bad_alphabet", msg.str());
+        }
+        upper.push_back(residue);
+        codons.push_back(set);
+        for (size_t j = 0; j < 3; ++j) {
+            positions.push_back(codon_position_set(set, j));
+        }
+    }
+    if (stop != std::string_view::npos) {
+        // owner decision #15 of 2026-10-08: stop codons are refused for now (no branch
+        // through a stop): its own slot code, so that a client can tell a peptide that is
+        // valid apart from its stops from a malformed one
+        std::ostringstream msg;
+        msg << "pattern: character '*' at position " << stop << " is a stop, not served in "
+               "this version (no branch through a stop codon)";
+        throw PatternError("stop_unsupported", msg.str());
+    }
+
+    Pattern pattern(kind, std::move(upper), std::move(positions));
+    pattern.codons_ = std::move(codons);
+    pattern.genetic_code_ = code.id();
+    return pattern;
+}
+
+BaseSet Pattern::allowed(size_t position, std::string_view spelled) const {
     assert(position < positions_.size());
-    return positions_[position];
+    if (kind_ != PatternKind::PROTEIN)
+        return positions_[position];
+
+    // the codon automaton (§6): the residue's codons agreeing with the bases spelled so far
+    // in this codon
+    const size_t j = position % 3;
+    int known[2] = { -1, -1 };
+    for (size_t i = 0; i < j && i < spelled.size(); ++i) {
+        const int b = base_index(spelled[spelled.size() - 1 - i]);
+        if (b < 0)
+            return 0;
+        known[j - 1 - i] = b;
+    }
+    return next_bases(codons_[position / 3], j, known[0], known[1]);
 }
 
 double Pattern::information_bits(size_t begin, size_t end) const {
     assert(begin <= end && end <= positions_.size());
+    if (kind_ == PatternKind::PROTEIN) {
+        // per residue covered: the positions of [begin, end) inside its codon, and the
+        // number of distinct strings its codons spell there
+        double bits = 0;
+        for (size_t i = begin / 3; 3 * i < end; ++i) {
+            const size_t first = std::max(begin, 3 * i) - 3 * i;
+            const size_t last = std::min(end, 3 * i + 3) - 3 * i;
+            bits += 2.0 * (last - first)
+                    - std::log2(static_cast<double>(
+                            distinct_projections(codons_[i], first, last)));
+        }
+        return bits;
+    }
     // log2(4 / |set|) per set size, each computed once by the very expression the sum used
     // per position before, so that the sums are the same doubles bit for bit (one table read
     // per base instead of a log2: the O(L) pass of a long pattern, C1-01)
@@ -129,6 +232,21 @@ bool Pattern::is_exact() const {
 
 Pattern Pattern::reverse_complement() const {
     std::vector<BaseSet> positions(positions_.rbegin(), positions_.rend());
+    if (kind_ == PatternKind::PROTEIN) {
+        // the reverse-complemented automaton (§6): residues reversed, each codon set
+        // reverse-complemented; its per-position unions are those of P complemented and
+        // reversed
+        for (BaseSet &set : positions) {
+            set = complement_set(set);
+        }
+        Pattern rc(kind_, std::string(text_.rbegin(), text_.rend()), std::move(positions));
+        rc.codons_.reserve(codons_.size());
+        for (auto it = codons_.rbegin(); it != codons_.rend(); ++it) {
+            rc.codons_.push_back(reverse_complement_codons(*it));
+        }
+        rc.genetic_code_ = genetic_code_;
+        return rc;
+    }
     std::string text;
     text.reserve(positions.size());
     for (BaseSet &set : positions) {
@@ -139,6 +257,15 @@ Pattern Pattern::reverse_complement() const {
 }
 
 bool Pattern::is_palindromic() const {
+    if (kind_ == PatternKind::PROTEIN) {
+        // the instances are the product of the residues' codon sets: equal to rc's product
+        // iff residue by residue (fixed-length factors)
+        for (size_t i = 0, j = codons_.size(); i < codons_.size(); ++i) {
+            if (codons_[i] != reverse_complement_codons(codons_[--j]))
+                return false;
+        }
+        return true;
+    }
     for (size_t i = 0, j = positions_.size(); i < positions_.size(); ++i) {
         if (positions_[i] != complement_set(positions_[--j]))
             return false;
@@ -404,11 +531,64 @@ Count to_count(const Estimate &e, Unit unit) {
 }
 
 /**
+ * A window [begin, end) of an oriented peptide's codon automaton (§6), the language one
+ * BaseSearch matches: the codon sets of the residues it overlaps, the first and the last cut
+ * to the codon positions inside the window as cylinders (the positions outside free), so that
+ * two windows admitting the same strings compare equal. |phase| is the place of the window's
+ * first position in its codon: 0 for a window starting an oriented pattern (position 0 is a
+ * codon start), (L - k) % 3 for the reverse complement of a long peptide's anchor window
+ * searched on a wrapped PRIMARY graph (rc(Q[0, k)) = rc(Q)[L - k, L), §4.1).
+ */
+struct CodonWindow {
+    std::vector<CodonSet> sets;
+    size_t phase = 0;
+
+    bool operator==(const CodonWindow &other) const {
+        return phase == other.phase && sets == other.sets;
+    }
+
+    // how many bases of window position j's codon before it lie inside the window: the ones
+    // the automaton reads (the earlier ones are free in the cylinder)
+    size_t known(size_t j) const { return std::min((phase + j) % 3, j); }
+
+    // the bases allowed at window position |j| after the codon's bases b0 and b1 at codon
+    // positions 0 and 1 (-1: not known, before the window)
+    BaseSet allowed(size_t j, int b0, int b1) const {
+        const size_t at = phase + j;
+        return next_bases(sets[at / 3], at % 3, b0, b1);
+    }
+
+    /**
+     * The window [begin, end) of the oriented peptide whose residue i has the codons
+     * codons[i] (|reversed| false: P itself) or rc(codons[m - 1 - i]) (|reversed| true: rc(P)),
+     * m = codons.size(). Builds only the residues the window overlaps (O(k)).
+     */
+    static CodonWindow of(const std::vector<CodonSet> &codons, bool reversed,
+                          size_t begin, size_t end) {
+        assert(begin < end && end <= 3 * codons.size());
+        CodonWindow w;
+        w.phase = begin % 3;
+        for (size_t i = begin / 3; 3 * i < end; ++i) {
+            const CodonSet set = reversed
+                ? reverse_complement_codons(codons[codons.size() - 1 - i])
+                : codons[i];
+            const size_t first = std::max(begin, 3 * i) - 3 * i;
+            const size_t last = std::min(end, 3 * i + 3) - 3 * i;
+            w.sets.push_back(cylinder(set, first, last));
+        }
+        return w;
+    }
+};
+
+/**
  * One search of one oriented pattern string q (|q| <= k) on the base BOSS, over the offsets
  * [0, k - |q|] (any_offset) or k - |q| only (suffix, and a long pattern's anchor window,
  * where |q| = k). §4.1: positions 0 .. |q|-2 on node ranges, the last on W, then the flank.
- * (q is a list of base sets: a peptide's spelled-prefix dependence, a later increment, would
- * travel with the range.)
+ * q is a list of base sets; for a peptide window (|automaton|) these are the per-position
+ * unions, a superset used only for the cost estimate and the palindrome test, and the bases
+ * tried at each depth are the automaton's after the bases the range's nodes end with
+ * (PatternRun::symbols_at): a range of depth d is the set of nodes ending with the window's
+ * first d spelled bases, so the spelled prefix travels with the range itself.
  *
  * A leading run of pattern N on a $ACGT graph is not searched (|lead|): every base of a
  * valid k-mer there is one of A, C, G, T, so q at offset p is exactly its core q[lead, |q|)
@@ -418,7 +598,10 @@ Count to_count(const Estimate &e, Unit unit) {
  */
 struct BaseSearch {
     std::vector<BaseSet> q;
-    // the leading positions of q not searched (a pattern-N run, $ACGT graphs only)
+    // a peptide window: its codon automaton (§6); unset for DNA and IUPAC
+    std::optional<CodonWindow> automaton;
+    // the leading positions of q not searched (a pattern-N run, $ACGT graphs only; never in
+    // a peptide window, whose first codon constrains the positions after the run)
     size_t lead = 0;
     // the BOSS codes of each core position's bases (q[lead + i]), in A, C, G, T order
     std::vector<std::vector<TAlphabet>> codes;
@@ -525,6 +708,16 @@ BaseSet base_of_char(char c) {
     }
 }
 
+// the bases of an exact pattern (every position one base)
+std::string exact_bases(const Pattern &pattern) {
+    std::string bases;
+    bases.reserve(pattern.length());
+    for (BaseSet set : pattern.positions()) {
+        bases.push_back(iupac_letter(set));
+    }
+    return bases;
+}
+
 std::string format_bits(double bits) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(1) << bits;
@@ -564,6 +757,12 @@ class PatternRun {
             prune_(retain && !extending_ && request.mode == Mode::PARTIAL) {
         for (char base : { 'A', 'C', 'G', 'T' }) {
             codes_.push_back(boss_.encode(base));
+        }
+        for (BaseSet set = 0; set <= kAllBases; ++set) {
+            for (size_t b = 0; b < 4; ++b) {
+                if (set & (1 << b))
+                    codes_of_set_[set].push_back(codes_[b]);
+            }
         }
         plan();
         // nothing to release: nothing to keep
@@ -803,6 +1002,9 @@ class PatternRun {
     static constexpr uint64_t kMinCompaction = 4096;
 
     std::vector<TAlphabet> codes_;
+    // the BOSS codes of every BaseSet's bases, in A, C, G, T order (a peptide window's
+    // symbols at a range, symbols_at)
+    std::array<std::vector<TAlphabet>, kAllBases + 1> codes_of_set_;
     std::vector<BaseSearch> searches_;
     std::vector<OrientationPlan> plans_;
     std::vector<Orientation> searched_;
@@ -840,21 +1042,24 @@ class PatternRun {
             : node;
     }
 
-    size_t add_search(const std::vector<BaseSet> &q, bool count_palindromes) {
+    size_t add_search(const std::vector<BaseSet> &q, bool count_palindromes,
+                      const std::optional<CodonWindow> &automaton = std::nullopt) {
         for (size_t i = 0; i < searches_.size(); ++i) {
-            if (searches_[i].q == q) {
+            if (searches_[i].q == q && searches_[i].automaton == automaton) {
                 searches_[i].count_palindromes |= count_palindromes;
                 return i;
             }
         }
         BaseSearch search;
         search.q = q;
+        search.automaton = automaton;
         search.any_offset = !long_ && request_.scope == Scope::ANY_OFFSET;
         search.count_palindromes = count_palindromes;
         // a leading pattern-N run is not searched where the graph has no N symbol: every
         // base of a valid k-mer is then one of A, C, G, T, which N admits (at least one
-        // position is kept: an all-N window is searched as its last N)
-        if (support_.alphabet == "$ACGT") {
+        // position is kept: an all-N window is searched as its last N). Never for a peptide
+        // window: an X codon's first bases admit every base, but not every codon
+        if (support_.alphabet == "$ACGT" && !automaton) {
             while (search.lead + 1 < q.size() && q[search.lead] == kAllBases) {
                 ++search.lead;
             }
@@ -879,7 +1084,9 @@ class PatternRun {
      * anchor window Q[0, k) and rc(Q[0, k)) (not rc(Q)[0, k), which is Q's last k-mer).
      * Identical base searches are run once (P and rc(P) serve both orientations).
      * Only the windows are built (O(k)), never rc of the whole pattern: REVERSE's window
-     * rc(P)[0, k) is rc(P[L - k, L)).
+     * rc(P)[0, k) is rc(P[L - k, L)). A peptide's windows carry their codon automaton (§6):
+     * Q[0, m) of the oriented pattern, and on a wrapped PRIMARY graph rc(Q[0, m)), the window
+     * [L - m, L) of the other orientation's automaton.
      */
     void plan() {
         searched_ = searched_orientations(pattern_, request_.strands);
@@ -887,34 +1094,45 @@ class PatternRun {
         const bool primary = support_.mode == GraphMode::PRIMARY;
         const bool even_primary = primary && !(k_ % 2);
         const auto &positions = pattern_.positions();
-        const size_t m = std::min(positions.size(), k_);
+        const size_t L = positions.size();
+        const size_t m = std::min(L, k_);
+        const bool protein = pattern_.kind() == PatternKind::PROTEIN;
 
         for (Orientation orientation : searched_) {
             std::vector<BaseSet> window = orientation == Orientation::REVERSE
                 ? reverse_complement_sets(std::vector<BaseSet>(positions.end() - m,
                                                                positions.end()))
                 : std::vector<BaseSet>(positions.begin(), positions.begin() + m);
+            const bool reverse = orientation == Orientation::REVERSE;
+            std::optional<CodonWindow> automaton;
+            if (protein)
+                automaton = CodonWindow::of(pattern_.codon_sets(), reverse, 0, m);
 
             OrientationPlan o { orientation, 0, std::nullopt, std::nullopt, false };
             if (!primary) {
-                o.direct = add_search(window, false);
+                o.direct = add_search(window, false, automaton);
                 searches_[o.direct].read_directly = true;
                 plans_.push_back(o);
                 continue;
             }
 
             std::vector<BaseSet> window_rc = reverse_complement_sets(window);
+            // rc(Q[0, m)): the positions [L - m, L) of the other orientation's automaton
+            std::optional<CodonWindow> automaton_rc;
+            if (protein)
+                automaton_rc = CodonWindow::of(pattern_.codon_sets(), !reverse, L - m, L);
             // the palindromic k-mers at offset p of the window's search are those at the
             // mirrored offset of its reverse complement's: count them on one of the two
             bool mirrored = false;
             if (even_primary) {
                 for (const BaseSearch &search : searches_) {
-                    mirrored |= search.q == window_rc && search.count_palindromes;
+                    mirrored |= search.q == window_rc && search.automaton == automaton_rc
+                                    && search.count_palindromes;
                 }
             }
-            o.direct = add_search(window, even_primary && !mirrored);
+            o.direct = add_search(window, even_primary && !mirrored, automaton);
             searches_[o.direct].read_directly = true;
-            o.mapped = add_search(window_rc, false);
+            o.mapped = add_search(window_rc, false, automaton_rc);
             if (even_primary) {
                 o.palindromes = mirrored ? *o.mapped : o.direct;
                 o.palindromes_mirrored = mirrored;
@@ -1197,7 +1415,8 @@ class PatternRun {
             return;
 
         if (d + 1 == L) {
-            for (TAlphabet c : search.codes[L - 1]) {
+            const std::vector<TAlphabet> &symbols = symbols_at(search, range, L - 1);
+            for (TAlphabet c : symbols) {
                 if (!charge_range()) {
                     halt(search);
                     return;
@@ -1209,10 +1428,10 @@ class PatternRun {
                 }
             }
             if (search.any_offset && d < max_depth)
-                children(search, range, search.codes[L - 1], push);
+                children(search, range, symbols, push);
 
         } else if (d + 1 < L) {
-            children(search, range, search.codes[d], push);
+            children(search, range, symbols_at(search, range, d), push);
 
         } else if (d < max_depth) {
             // the flank admits every symbol of the graph's alphabet but $, N on a DNA5 build
@@ -1222,6 +1441,38 @@ class PatternRun {
                                         [&](TAlphabet s) { symbols.push_back(s); });
             children(search, range, symbols, push);
         }
+    }
+
+    /**
+     * The BOSS codes of the bases |search|'s window allows at its core position |x| for the
+     * nodes of |range|, whose depth is x (they end with the window's first x bases): for DNA
+     * and IUPAC the position's own (search.codes[x], whatever the range); for a peptide
+     * window the automaton's after the codon's bases already spelled (§6), read from the
+     * range's nodes — the last one by get_node_last_value, the one before through bwd (both
+     * O(1) BOSS reads per range evaluated, which is charged its step) — in A, C, G, T order.
+     */
+    const std::vector<TAlphabet>& symbols_at(const BaseSearch &search, const Range &range,
+                                             size_t x) const {
+        if (!search.automaton)
+            return search.codes[x];
+
+        const CodonWindow &window = *search.automaton;
+        assert(!search.lead && std::get<2>(range) == x);
+        const size_t j = (window.phase + x) % 3;
+        int known[2] = { -1, -1 };
+        edge_index e = std::get<0>(range);
+        for (size_t i = 0; i < window.known(x); ++i) {
+            if (i)
+                e = boss_.bwd(e);
+            const TAlphabet s = boss_.get_node_last_value(e);
+            const auto it = std::find(codes_.begin(), codes_.end(), s);
+            // the window admits A, C, G, T only, so its spelled bases are among them
+            assert(it != codes_.end());
+            if (it == codes_.end())
+                return codes_of_set_[0];
+            known[j - 1 - i] = static_cast<int>(it - codes_.begin());
+        }
+        return codes_of_set_[window.allowed(x, known[0], known[1])];
     }
 
     void children(BaseSearch &search, const Range &range,
@@ -2179,7 +2430,11 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     result.stop = engine.stop();
     result.time_limited = engine.time_limited();
 
-    if (pattern.is_exact() && is_low_complexity(pattern.text()))
+    // the bases of an exact pattern: its text, or for a peptide (every residue one codon)
+    // the codons it spells
+    if (pattern.is_exact() && is_low_complexity(pattern.kind() == PatternKind::PROTEIN
+                                                    ? exact_bases(pattern)
+                                                    : pattern.text()))
         result.notes.push_back(kNoteLowComplexity);
     if (support_.mode != GraphMode::BASIC)
         result.notes.push_back(kNoteStrandUnknown);
