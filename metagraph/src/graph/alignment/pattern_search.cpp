@@ -12,6 +12,7 @@
 #include <random>
 #include <sstream>
 #include <tuple>
+#include <type_traits>
 
 #include <sdust.h>
 
@@ -188,6 +189,70 @@ BaseSet Pattern::allowed(size_t position, std::string_view spelled) const {
         known[j - 1 - i] = b;
     }
     return next_bases(codons_[position / 3], j, known[0], known[1]);
+}
+
+namespace {
+
+// a peptide's Model state (Pattern::start, next): the bases spelled so far in the current codon,
+// codon position i in bits [3i, 3i + 3) as its base index + 1 (0: not known, as allowed() takes
+// a base before the spelled ones), and a flag for a base other than A, C, G, T among them, after
+// which allowed() admits nothing
+constexpr Model::State kCodonDead = Model::State(1) << 6;
+
+int codon_prefix_base(Model::State s, size_t i) {
+    return static_cast<int>((s >> (3 * i)) & 7) - 1;
+}
+
+} // namespace
+
+Model::State Pattern::start(std::string_view anchor_kmer) const {
+    if (kind_ != PatternKind::PROTEIN)
+        return 0;
+
+    // the last j bases of the anchor, as allowed(|anchor_kmer|.size(), anchor_kmer) reads them
+    const size_t j = anchor_kmer.size() % 3;
+    State s = 0;
+    for (size_t i = 0; i < j && i < anchor_kmer.size(); ++i) {
+        const int b = base_index(anchor_kmer[anchor_kmer.size() - 1 - i]);
+        if (b < 0)
+            return kCodonDead;
+        s |= State(b + 1) << (3 * (j - 1 - i));
+    }
+    return s;
+}
+
+BaseSet Pattern::bases(State s, uint32_t position) const {
+    assert(position < positions_.size());
+    if (kind_ != PatternKind::PROTEIN)
+        return positions_[position];
+    if (s & kCodonDead)
+        return 0;
+
+    return next_bases(codons_[position / 3], position % 3, codon_prefix_base(s, 0),
+                      codon_prefix_base(s, 1));
+}
+
+Model::State Pattern::next(State s, uint32_t position, char base) const {
+    assert(position < positions_.size());
+    // |base| is one the state admits (the precondition of Model::next)
+    assert(bases(s, position) & iupac_set(base));
+    if (kind_ != PatternKind::PROTEIN)
+        return 0;
+
+    const size_t j = position % 3;
+    // the codon's last base: the next codon starts with nothing spelled
+    if (j == 2)
+        return 0;
+    // base_index()'s codes, inline (once per child the extension enters); |base| is A, C, G or T
+    State b = 0;
+    switch (base) {
+        case 'A': b = 0; break;
+        case 'C': b = 1; break;
+        case 'G': b = 2; break;
+        case 'T': b = 3; break;
+        default: return kCodonDead;
+    }
+    return (s & ~(State(7) << (3 * j))) | (b + 1) << (3 * j);
 }
 
 double Pattern::information_bits(size_t begin, size_t end) const {
@@ -1042,6 +1107,21 @@ class PatternRun {
 
     uint64_t candidates_examined() const { return candidates_; }
 
+    // with a support tracker (Request::support): the supported paths of anchors of
+    // |orientation|, the tracker's DEAD verdicts, and whether one came before L (in
+    // |orientation|, or in any)
+    uint64_t supported_found(Orientation orientation) const {
+        auto it = supported_.find(orientation);
+        return it == supported_.end() ? 0 : it->second;
+    }
+    uint64_t branches_pruned() const { return pruned_; }
+    // the complete walks, supported or not (AnchorCounts::walks)
+    uint64_t walks() const { return found_total_; }
+    bool pruned_before_completion(Orientation orientation) const {
+        return pruned_early_.count(orientation) > 0;
+    }
+    bool pruned_before_completion() const { return !pruned_early_.empty(); }
+
     /**
      * The retained paths, in answer order (the DFS's own), each passed to |emit|. Reads the
      * clock before the first and before every kReleaseClockStride-th (the caller's work per
@@ -1142,6 +1222,12 @@ class PatternRun {
     uint64_t expanded_ = 0;
     bool keep_paths_ = false;
     std::vector<Context> paths_;
+    // with a support tracker (increment 5s): the supported paths per orientation and in all,
+    // the DEAD verdicts, and the orientations with one before L
+    std::map<Orientation, uint64_t> supported_;
+    uint64_t supported_total_ = 0;
+    uint64_t pruned_ = 0;
+    std::map<Orientation, bool> pruned_early_;
 
     // the first stop is the pattern's; a later one only adds whether time touched it
     void record_stop(StopPhase phase, StopReason reason) {
@@ -1773,19 +1859,61 @@ class PatternRun {
         }
     }
 
+    // a STOPPED verdict of the support tracker or a false accept() of the path sink: TIME when
+    // they found the work time passed through the request's Budget (check_time, which then
+    // holds TIME: nothing else stops it while the extension runs), else EXTERNAL, whose reason
+    // the route reads from them
+    void external_stop() {
+        record_stop(StopPhase::EXTENSION, budget_.stopped().value_or(StopReason::EXTERNAL));
+    }
+
+    // a DEAD verdict of the support tracker: the branch of |orientation| is pruned; before
+    // L, the walks below it are not counted
+    void prune(Orientation orientation, bool before_completion) {
+        ++pruned_;
+        if (before_completion)
+            pruned_early_[orientation] = true;
+    }
+
     /**
-     * A complete path of |anchor|: counted, kept under the retention rule of
-     * Request::max_paths (§5.2), and checked against max_paths for stop_at_threshold.
-     * False when that threshold stopped the extension.
+     * A complete walk of |anchor| (the Model accepting at L): counted; with a support tracker
+     * (Request::support) supported or not by its complete() (a DEAD answer prunes it, a
+     * complete walk all the same); then a path: handed to the sink (Request::sink) or kept
+     * under the retention rule of Request::max_paths (§5.2), and checked against max_paths
+     * for stop_at_threshold — under a tracker both count the supported paths. False when a
+     * stop ended the extension (the threshold, the tracker's or the sink's).
      */
     bool complete_path(const Context &anchor, const std::vector<node_index> &path,
                        const std::string &spelled) {
         ++found_[anchor.orientation];
         ++found_total_;
-        if (keep_paths_) {
+        SupportTracker *const tracker = request_.support;
+        const PathView view { anchor, path, spelled };
+        if (tracker) {
+            switch (tracker->complete(view)) {
+                case SupportTracker::Verdict::ALIVE:
+                    break;
+                case SupportTracker::Verdict::DEAD:
+                    prune(anchor.orientation, false);
+                    return true;
+                case SupportTracker::Verdict::STOPPED:
+                    external_stop();
+                    return false;
+            }
+            ++supported_[anchor.orientation];
+            ++supported_total_;
+        }
+        // the paths the rules of max_paths read: the supported ones under a tracker
+        const uint64_t released = tracker ? supported_total_ : found_total_;
+        if (request_.sink) {
+            if (!request_.sink->accept(view, tracker)) {
+                external_stop();
+                return false;
+            }
+        } else if (keep_paths_) {
             const bool keep = request_.mode == Mode::PARTIAL
                 ? paths_.size() < request_.max_paths
-                : found_total_ <= request_.max_paths;
+                : released <= request_.max_paths;
             if (keep) {
                 paths_.push_back(Context { anchor.orientation, 0, anchor.node, anchor.base_node,
                                            path, spelled });
@@ -1795,7 +1923,7 @@ class PatternRun {
                 std::vector<Context>().swap(paths_);
             }
         }
-        if (request_.stop_at_threshold && found_total_ > request_.max_paths) {
+        if (request_.stop_at_threshold && released > request_.max_paths) {
             record_stop(StopPhase::EXTENSION, StopReason::MAX_PATHS);
             return false;
         }
@@ -1803,34 +1931,71 @@ class PatternRun {
     }
 
     /**
-     * The depth-first search of one anchor (§4.2): from the anchor's k spelled bases, at
-     * every position the outgoing k-mers of the path's last node whose base is allowed at
-     * that position after the bases spelled so far (Pattern::allowed, so that an automaton
-     * reads its state from the spelled prefix), in symbol order (A, C, G, T), to position
-     * L of the oriented pattern |q|. One step per outgoing edge examined, allowed or not;
-     * the clock before every kReleaseClockStride-th node expanded, counted over the whole
-     * extension. False when a stop ended it.
+     * The depth-first search of one anchor (§4.2) over search states (SearchState: the node,
+     * the position, the Model's state, the tracker's frame): from the anchor's k spelled
+     * bases, at every position the outgoing k-mers of the path's last node whose base the
+     * |model| allows in its state there (Model::bases; the state after each base entered,
+     * Model::next), in symbol order (A, C, G, T), to position L = model.length() of the
+     * oriented pattern. One step per outgoing edge examined, allowed or not; the clock before
+     * every kReleaseClockStride-th node expanded, counted over the whole extension. With a
+     * support tracker (Request::support) one frame per level: opened at the anchor, pushed
+     * when a child is entered (before it is expanded or completed), popped when the DFS leaves
+     * it; a DEAD verdict prunes the branch (not expanded), a STOPPED one ends the extension.
+     * Without one, exactly increment 4's DFS. False when a stop ended it.
+     * A template on the Model's type: with a Pattern (final, its Model methods defined in this
+     * file) every call is resolved and inlined, so that the DFS of increment 4 costs what it
+     * cost (5s-2's timing: per extension edge within the noise of an A/A run); another Model
+     * instantiates it as itself, or as Model through the virtual calls.
      */
-    bool extend_anchor(const Context &anchor, const Pattern &q) {
-        const size_t L = q.length();
+    template <class M>
+    bool extend_anchor(const Context &anchor, const M &model) {
+        static_assert(std::is_base_of_v<Model, M>, "the extension's automaton is a Model");
+        const size_t L = model.length();
         assert(L > k_);
 
         std::string spelled = graph_.get_node_sequence(anchor.node);
         assert(spelled.size() == k_);
         std::vector<node_index> path { anchor.node };
 
-        // the allowed outgoing k-mers of one node of the path, in symbol order, and the next
-        // one to enter. At most four: a node has one outgoing k-mer per last base, and a
-        // pattern position allows only A, C, G, T (never N or $)
+        // the allowed outgoing k-mers of one node of the path, in symbol order, the next one
+        // to enter, and the Model's state at that node (after its bases). At most four: a node
+        // has one outgoing k-mer per last base, and a pattern position allows only A, C, G, T
+        // (never N or $)
         struct Level {
             std::array<std::pair<char, node_index>, 4> children;
+            Model::State state = 0;
             uint8_t size = 0;
             uint8_t next = 0;
         };
         std::vector<Level> levels;
         levels.reserve(L - k_);
 
-        auto expand = [&]() {
+        // the support tracker's frames open, popped on every way out (SupportTracker's
+        // protocol: each ALIVE open() and push() popped exactly once)
+        SupportTracker *const tracker = request_.support;
+        struct Frames {
+            SupportTracker *tracker;
+            uint32_t open = 0;
+            void pop() {
+                assert(open);
+                tracker->pop();
+                --open;
+            }
+            ~Frames() {
+                while (open) {
+                    pop();
+                }
+            }
+        } frames { tracker };
+        // the search state of the node just entered (built only for a tracker)
+        auto state_of = [&](node_index node, char base, Model::State s) {
+            const node_index stored = base_of(node);
+            return SearchState { node, stored, stored != node, anchor.orientation, Side::RIGHT,
+                                 base, static_cast<uint32_t>(spelled.size()), s,
+                                 static_cast<uint32_t>(path.size() - 1), spelled };
+        };
+
+        auto expand = [&](Model::State state) {
             // the clock before every kReleaseClockStride-th node expanded: a node's outgoing
             // k-mers cost a few BOSS steps each (more on the wrapper of a PRIMARY graph) and
             // one step is charged per edge, so that a stride of steps can take long on a cold
@@ -1839,8 +2004,9 @@ class PatternRun {
                 record_stop(StopPhase::EXTENSION, StopReason::TIME);
                 return false;
             }
-            const BaseSet allowed = q.allowed(spelled.size(), spelled);
+            const BaseSet allowed = model.bases(state, static_cast<uint32_t>(spelled.size()));
             Level level;
+            level.state = state;
             bool charged = true;
             call_outgoing(path.back(), spelled, [&](node_index next, char c) {
                 if (!charged || !(charged = charge_edge()))
@@ -1867,34 +2033,87 @@ class PatternRun {
             return true;
         };
 
-        if (!expand())
+        const Model::State start = model.start(spelled);
+        if (tracker) {
+            // frame 0: the anchor's support, before its first expansion
+            switch (tracker->open(state_of(anchor.node, '\0', start))) {
+                case SupportTracker::Verdict::ALIVE:
+                    ++frames.open;
+                    break;
+                case SupportTracker::Verdict::DEAD:
+                    // nothing supports the anchor: none of its walks is followed
+                    prune(anchor.orientation, true);
+                    return true;
+                case SupportTracker::Verdict::STOPPED:
+                    external_stop();
+                    return false;
+            }
+        }
+
+        if (!expand(start))
             return false;
 
         while (levels.size()) {
             Level &top = levels.back();
             if (top.next == top.size) {
                 levels.pop_back();
-                // the anchor itself is never popped
+                // the anchor itself is never popped (its frame 0 after the loop)
                 if (levels.size()) {
                     path.pop_back();
                     spelled.pop_back();
+                    if (tracker)
+                        frames.pop();
                 }
                 continue;
             }
             const auto [c, next] = top.children[top.next++];
+            const Model::State state = model.next(top.state, static_cast<uint32_t>(spelled.size()),
+                                                  c);
             path.push_back(next);
             spelled.push_back(c);
             ++candidates_;
-            if (spelled.size() < L) {
-                if (!expand())
+            const bool at_end = spelled.size() == L;
+            // a fixed-length Model accepts every walk that reaches L (a Pattern always): a
+            // walk it does not accept is no instance, neither counted nor supported
+            if (at_end && !model.accepting(state, static_cast<uint32_t>(L))) {
+                path.pop_back();
+                spelled.pop_back();
+                continue;
+            }
+            if (tracker) {
+                switch (tracker->push(state_of(next, c, state))) {
+                    case SupportTracker::Verdict::ALIVE:
+                        ++frames.open;
+                        break;
+                    case SupportTracker::Verdict::DEAD:
+                        // pruned: not expanded; at L a complete walk all the same (P25)
+                        if (at_end) {
+                            ++found_[anchor.orientation];
+                            ++found_total_;
+                        }
+                        prune(anchor.orientation, !at_end);
+                        path.pop_back();
+                        spelled.pop_back();
+                        continue;
+                    case SupportTracker::Verdict::STOPPED:
+                        external_stop();
+                        return false;
+                }
+            }
+            if (!at_end) {
+                if (!expand(state))
                     return false;
                 continue;
             }
             if (!complete_path(anchor, path, spelled))
                 return false;
+            if (tracker)
+                frames.pop();
             path.pop_back();
             spelled.pop_back();
         }
+        if (tracker)
+            frames.pop();
         return true;
     }
 
@@ -2287,16 +2506,20 @@ Withheld withheld_for(StopReason reason) {
             return Withheld::DEADLINE;
         case StopReason::MAX_STEPS:
             return Withheld::DISCOVERY_BUDGET;
+        case StopReason::EXTERNAL:
+            return Withheld::EXTERNAL;
     }
     return Withheld::DISCOVERY_BUDGET;
 }
 
 /**
  * The release of a long pattern's paths (Request::extend_paths), from what the extension
- * counted and kept: see PatternSearch::enumerate for the rules per mode.
+ * counted and kept: see PatternSearch::enumerate for the rules per mode. |released| is the count
+ * of the paths the rules read: AnchorCounts::paths, or with a support tracker
+ * AnchorCounts::supported (EXACT when the extension COMPLETED, whatever it pruned).
  */
-Extraction extract_paths(const AnchorCounts &anchors, const Request &request,
-                         PatternRun &engine,
+Extraction extract_paths(const AnchorCounts &anchors, const Count &released,
+                         const Request &request, PatternRun &engine,
                          const std::function<void(const Context&)> &callback) {
     Extraction extraction;
     const bool all_or_count = request.mode == Mode::ALL_OR_COUNT;
@@ -2351,8 +2574,8 @@ Extraction extract_paths(const AnchorCounts &anchors, const Request &request,
         }
 
         case Extension::COMPLETED: {
-            assert(anchors.paths.relation == Relation::EXACT);
-            const uint64_t paths = anchors.paths.value;
+            assert(released.relation == Relation::EXACT);
+            const uint64_t paths = released.value;
             if (all_or_count) {
                 if (paths > request.max_paths) {
                     extraction.withheld = Withheld::COUNT_ABOVE_THRESHOLD;
@@ -2553,6 +2776,10 @@ Result PatternSearch::enumerate(const Pattern &pattern, const Request &request,
     if (request.extend_paths && request.release_anchors) {
         throw std::invalid_argument("pattern: release_anchors and extend_paths exclude each "
                                     "other (the results of a long pattern are its paths)");
+    }
+    if (request.sink && request.extend_paths && pattern.length() > support_.k) {
+        throw std::invalid_argument("pattern: the paths of the extension go to the path sink, "
+                                    "which is their release: use count()");
     }
 
     return run(pattern, request, budget, &callback);
@@ -2845,17 +3072,28 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             }
 
             // per orientation: EXACT 0 without anchors; EXACT when every anchor of it was
-            // extended, AT_LEAST when the extension stopped before; UNKNOWN when it did not run
+            // extended, AT_LEAST when the extension stopped before; UNKNOWN when it did not run.
+            // With a support tracker (increment 5s) the walks are a plain count, AT_LEAST also
+            // when a branch was pruned before L (P25), and the supported paths follow the rule
+            // of the extension alone
+            const bool tracked = request.support != nullptr;
             std::optional<Count> sum;
+            std::optional<Count> supported_sum;
             for (Orientation o : engine.searched()) {
                 const Count &a = by_orientation.at(o);
                 Count paths = Count::unknown(Unit::PATHS);
+                Count supported = Count::unknown(Unit::PATHS);
                 if (a.relation == Relation::EXACT && a.value == 0) {
                     paths = Count::exact(Unit::PATHS, 0);
+                    supported = Count::exact(Unit::PATHS, 0);
                 } else if (ran) {
-                    paths = engine.orientation_extended(o)
+                    const bool extended = engine.orientation_extended(o);
+                    paths = extended && !engine.pruned_before_completion(o)
                         ? Count::exact(Unit::PATHS, engine.paths_found(o))
                         : Count::at_least(Unit::PATHS, engine.paths_found(o));
+                    supported = extended
+                        ? Count::exact(Unit::PATHS, engine.supported_found(o))
+                        : Count::at_least(Unit::PATHS, engine.supported_found(o));
                 }
                 anchors.paths_by_orientation.emplace(o, paths);
                 if (sum) {
@@ -2863,12 +3101,32 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                 } else {
                     sum = paths;
                 }
+                if (!tracked)
+                    continue;
+                anchors.supported_by_orientation.emplace(o, supported);
+                if (supported_sum) {
+                    *supported_sum += supported;
+                } else {
+                    supported_sum = supported;
+                }
             }
             if (ran) {
                 assert(sum);
                 anchors.paths = *sum;
+                anchors.walks = engine.walks();
                 assert((anchors.paths.relation == Relation::EXACT)
-                            == (anchors.extension == Extension::COMPLETED));
+                            == (anchors.extension == Extension::COMPLETED
+                                    && !engine.pruned_before_completion()));
+            }
+            if (tracked) {
+                assert(supported_sum);
+                if (ran) {
+                    anchors.supported = *supported_sum;
+                } else if (anchors.extension == Extension::NO_ANCHORS) {
+                    anchors.supported = Count::exact(Unit::PATHS, 0);
+                }
+                anchors.branches_pruned = engine.branches_pruned();
+                anchors.pruned_before_completion = engine.pruned_before_completion();
             }
         }
         anchors.total = *total;
@@ -2886,7 +3144,9 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             reason = engine.stop()->reason;
 
         if (extending) {
-            extraction = extract_paths(anchors, request, engine, *callback);
+            extraction = extract_paths(anchors, request.support ? anchors.supported
+                                                                : anchors.paths,
+                                       request, engine, *callback);
 
         } else if (!releasing) {
             // the results of a long pattern are its paths, not extended without

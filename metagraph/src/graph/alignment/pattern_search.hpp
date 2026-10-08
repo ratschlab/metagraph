@@ -46,6 +46,11 @@
  *    owner decision #19 of 2026-10-08 (a stop codon of the table; see Pattern::parse): a
  *    peptide holding it in a table without an unconditional stop codon has no instance and is
  *    answered with the note kNoteNoStopCodon (EXACT 0 contexts without a search for L <= k).
+ *  - `supported_paths` (increment 5s, DECISIONS P23-P29; not wired yet, 5s-4): the extension is
+ *    a DFS over search states (SearchState) with Pattern as its Model; the route passes a
+ *    SupportTracker (5s-3, src/cli/pattern_support) and a PathSink through Request::support and
+ *    Request::sink, and reads AnchorCounts::walks, supported, branches_pruned and
+ *    pruned_before_completion. A request without them is answered exactly as in increment 4.
  *  - graphs without the dummy-edge mask (owner decision #16 of 2026-10-08): served, see
  *    "Graphs without the dummy-edge mask" at PatternSearch. Their counts that the engine could
  *    not resolve are BOUNDS [lower, U] (Count), the route adding the estimate U x f with f
@@ -202,6 +207,77 @@ constexpr BaseSet kBaseT = 8;
 constexpr BaseSet kAllBases = kBaseA | kBaseC | kBaseG | kBaseT;
 
 /**
+ * What may come next along an instance (increment 5s, DECISIONS P29 of 2026-10-08): the
+ * automaton the extension (§4.2) asks at every position beyond the anchor window. Pattern is the
+ * one Model of this increment (DNA and IUPAC: a set per position; a peptide: its codon automaton,
+ * §6). A Model is deterministic and of fixed length: from a state, a base leads to at most one
+ * state, and an instance is a walk of exactly length() bases.
+ *
+ * The extension's search state (SearchState) is the oriented node, the position (the bases
+ * spelled), the model's state and the support tracker's frame: the DFS of PatternSearch asks
+ * start() once per anchor, bases() once per node it expands and next() once per child it
+ * enters, so that no model reads the spelled bases again (Pattern::allowed, which does, stays
+ * the primitive of the range DFS of phase 1).
+ *
+ * Open, not designed (the coordinator's point 2 of 2026-10-08; nothing below is built):
+ *  - bounded mismatches (docs/NOTE-mismatch-search.md): a Model whose State packs (the pattern's
+ *    own state, the mismatches used) and whose bases() admits every base while mismatches are
+ *    left (next() adds one where the pattern does not admit the base). Deterministic, fixed
+ *    length: it plugs in as is, and the trackers and sinks do not change. Its anchor phase (the
+ *    BOSS ranges of phase 1) would take the same Model, the range DFS carrying a State per range
+ *    in place of the CodonWindow's bases read back from the BOSS.
+ *  - a profile model (docs/NOTE-biological-discovery-feature-priorities.md, "Gene family
+ *    bundles": profile position, match / insertion / deletion state, coding phase): needs what
+ *    this interface leaves out — several next states per base (match and insertion: next()
+ *    would append to a short list, and the DFS's Level would hold one child per (base, node,
+ *    state) instead of one per base), transitions that consume no base (a deletion: a next()
+ *    without a base, the DFS staying on its node), accepting states at several depths (a
+ *    variable-length instance: accepting() asked at every depth, the DFS completing there and
+ *    going on), and a bound on the score a branch can still reach (a bound(state) the DFS
+ *    prunes on). The DFS would then key its work by (node, state); the trackers and sinks keep
+ *    their interfaces (a walk is still a walk).
+ *  - the selective anchor (5t, DECISIONS P30): a Model that also steps left (prev(), the codon
+ *    automaton read backwards), with SearchState::side LEFT along incoming edges. It also needs
+ *    start(window, offset) for a window at offset w (Pattern::start derives a peptide's codon
+ *    phase from the window's length alone), and a left arm's SearchState: spelled growing at
+ *    the left, position = w - depth, base the node's first base (support_step's Arm::LEFT).
+ *  - the entry point (the review of 5s-2): today only extend_anchor<Pattern> is instantiated,
+ *    from PatternRun::extend_listed with the oriented Pattern, and the anchor phase does not
+ *    ask the Model. Another Model needs a per-orientation `const Model*` (a Request field or a
+ *    PatternRun argument) with extend_anchor<Model> instantiated through the virtual calls,
+ *    and the range DFS of phase 1 taking Model::bases() per range (from Model::start of the
+ *    window) in place of CodonWindow::allowed.
+ */
+class Model {
+  public:
+    // opaque to the engine: the automaton's state after the bases spelled so far
+    using State = uint64_t;
+
+    virtual ~Model() = default;
+
+    // the instance's length in bases (L; 3m for a peptide of m residues)
+    virtual size_t length() const = 0;
+    // the state after the anchor window: the first |anchor_kmer|.size() bases of a walk, as
+    // spelled (the anchor's k-mer, read from the graph)
+    virtual State start(std::string_view anchor_kmer) const = 0;
+    // the bases allowed at |position| (0-based, < length()) in state |s| (after |position|
+    // bases); 0: none
+    virtual BaseSet bases(State s, uint32_t position) const = 0;
+    // the state after |base| (one of bases(s, position)) at |position|
+    virtual State next(State s, uint32_t position, char base) const = 0;
+    // a walk of |position| bases ending in state |s| is an instance; asked at length() only
+    virtual bool accepting(State s, uint32_t position) const {
+        (void)s;
+        return position == length();
+    }
+
+  protected:
+    Model() = default;
+    Model(const Model&) = default;
+    Model& operator=(const Model&) = default;
+};
+
+/**
  * A refusal of one pattern: written as the `error` of that pattern's slot, the other patterns
  * of the request are still answered (§7.2). |code| is the JSON error code of the slot.
  */
@@ -217,9 +293,13 @@ class PatternError : public std::invalid_argument {
 
 /**
  * One oriented pattern: L positions, each a BaseSet (§3); for a peptide, L = 3m positions
- * whose allowed bases follow its codon automaton (§6).
+ * whose allowed bases follow its codon automaton (§6). The Model of the extension (§4.2): its
+ * State is 0 for DNA and IUPAC (a position's set does not depend on what was spelled) and for
+ * a peptide the bases already spelled in the current codon (the prefix allowed() reads back
+ * from |spelled|), so that bases(s, position) == allowed(position, spelled) for the state s that
+ * start() and next() reach along |spelled|.
  */
-class Pattern {
+class Pattern final : public Model {
   public:
     /**
      * Parses |text| (case-insensitive) as |kind|: DNA over A, C, G, T; IUPAC over the 15
@@ -265,7 +345,7 @@ class Pattern {
      */
     const std::string& text() const { return text_; }
     // L, in bases: 3m for a peptide of m residues
-    size_t length() const { return positions_.size(); }
+    size_t length() const override { return positions_.size(); }
     /**
      * Per position the bases it admits. For DNA and IUPAC exactly the pattern; for a peptide
      * the union over the residue's codons at that codon position, a superset of what the
@@ -302,6 +382,19 @@ class Pattern {
      * (pattern_search.cpp, CodonWindow).
      */
     BaseSet allowed(size_t position, std::string_view spelled) const;
+
+    /**
+     * The Model (increment 5s): allowed() with its state carried instead of read back. start()
+     * reads the anchor's last (k mod 3) bases for a peptide (its codon prefix at position k; a
+     * base other than A, C, G, T there admits nothing after it, as allowed() answers 0), nothing
+     * otherwise; next() appends a base to the codon prefix, emptied at a codon's end. O(1) but
+     * bases(), which is allowed()'s codon test for a peptide.
+     */
+    State start(std::string_view anchor_kmer) const override;
+    BaseSet bases(State s, uint32_t position) const override;
+    State next(State s, uint32_t position, char base) const override;
+    // every walk of L bases the automaton admitted is an instance
+    bool accepting(State, uint32_t position) const override { return position == length(); }
 
     /**
      * The information of the positions [begin, end) (§3): DNA and IUPAC, the sum of
@@ -408,6 +501,10 @@ enum class Scope { SUFFIX, ANY_OFFSET, LONG };
  * + strand and REVERSE the - strand; elsewhere they name orientations of the pattern only.
  */
 enum class Strands { BOTH, FORWARD, REVERSE };
+
+// the extension's support tracker and path sink (increment 5s), declared with the results below
+class SupportTracker;
+class PathSink;
 
 /**
  * The per-pattern semantics of a request. The route fills it from the request JSON with the
@@ -524,6 +621,25 @@ struct Request {
      * not a request field.
      */
     uint64_t max_checked_entries = 0;
+    /**
+     * L > k with extend_paths: the supported-path search (increment 5s; SPEC-DRAFT §20, DECISIONS
+     * P29), read by the extension only. Not JSON fields: the route sets them per pattern for a
+     * request with long_search "supported_paths" (5s-4). Both null (the default): the extension
+     * runs exactly as in increment 4 — the same steps, clock readings, counts and paths.
+     *  support  carries each branch's support beside the DFS (SupportTracker: a frame per level,
+     *           pushed when a child is entered and popped with its level) and prunes a branch it
+     *           declares DEAD; the paths are then the SUPPORTED complete walks (AnchorCounts::
+     *           supported), every rule of max_paths (retention, ALL_OR_COUNT's threshold,
+     *           PARTIAL's cap, stop_at_threshold) applies to them, and AnchorCounts::paths becomes
+     *           a plain count of the complete walks (P25: AT_LEAST once a branch was pruned before
+     *           reaching L). Must outlive the call.
+     *  sink     receives every path as it completes (with a tracker the supported ones), in
+     *           answer order, instead of the engine's own list: the sink is the release, so
+     *           count() serves it and enumerate() refuses an extending pattern with a sink
+     *           (std::invalid_argument). Must outlive the call.
+     */
+    SupportTracker *support = nullptr;
+    PathSink *sink = nullptr;
 };
 
 // the server's default of Request::max_checked_entries (--pattern-max-checked-entries; owner
@@ -574,8 +690,11 @@ class Deadline {
 
 // Why a pattern's work stopped, or why PARTIAL's list was cut (JSON stop.reason, cut.reason):
 // the knob an agent can turn. MAX_PATHS: the stop_at_threshold threshold of the extension,
-// and PARTIAL's cap on the paths returned
-enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS, MAX_PATHS };
+// and PARTIAL's cap on the paths returned. EXTERNAL (increment 5s, internal): the extension's
+// support tracker or path sink (Request::support, Request::sink) answered STOPPED; the route,
+// which owns them, writes their own reason (SupportTracker::stop_reason, PathSink::stop_reason:
+// max_annotation_work, max_memory), never "external". Never set without a tracker or a sink
+enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS, MAX_PATHS, EXTERNAL };
 
 /**
  * Where it stopped (JSON stop.phase):
@@ -591,7 +710,9 @@ enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS, MAX_PATHS };
  *              relation: extraction counts nothing);
  *  EXTENSION   L > k with Request::extend_paths: the listing of the admitted anchors and the
  *              DFS beyond k (§4.2), stopped by max_steps, the deadline, or max_paths with
- *              stop_at_threshold. The anchors stay EXACT, the paths become AT_LEAST.
+ *              stop_at_threshold, and with a support tracker or a path sink by them (EXTERNAL,
+ *              or TIME when they found the work time passed through the request's Budget). The
+ *              anchors stay EXACT, the paths become AT_LEAST.
  */
 enum class StopPhase { DISCOVERY, MASK_SCAN, EXTRACTION, EXTENSION };
 
@@ -866,6 +987,10 @@ struct AnchorCounts {
      * NO_ANCHORS, or without extend_paths when the anchors are EXACT 0), AT_LEAST when
      * STOPPED, UNKNOWN otherwise. Never derived from the anchors (an anchor may have no
      * path: AAAC with AAA present).
+     * With a support tracker (Request::support, increment 5s) a plain count of the complete
+     * walks, supported or not (DECISIONS P25): EXACT only when COMPLETED and no branch was
+     * pruned before it reached L (pruned_before_completion false), AT_LEAST (the walks
+     * completed) otherwise; a branch pruned at its last k-mer is a complete walk and counted.
      */
     Count paths = Count::unknown(Unit::PATHS);
     /**
@@ -873,9 +998,28 @@ struct AnchorCounts {
      * every anchor of that orientation was extended (EXACT 0 when its anchors are EXACT 0),
      * AT_LEAST when the extension stopped before, UNKNOWN when it did not run. |paths| is
      * their sum with the weakest relation, except that a total whose extension did not run
-     * is UNKNOWN (EXACT 0 with NO_ANCHORS) rather than AT_LEAST over its known zeros.
+     * is UNKNOWN (EXACT 0 with NO_ANCHORS) rather than AT_LEAST over its known zeros. With a
+     * support tracker, AT_LEAST also when a branch of that orientation was pruned before L.
      */
     std::map<Orientation, Count> paths_by_orientation;
+    /**
+     * Increment 5s (Request::support). |walks|: the complete walks the extension counted, a
+     * plain number (paths.value once the extension ran, with or without a tracker; 0 when it
+     * did not). |supported|: the complete walks the tracker supported (unit PATHS), with
+     * |paths|'s relation rule for the extension but without the pruning (a pruned branch holds
+     * no supported path): EXACT when COMPLETED, AT_LEAST when STOPPED, EXACT 0 without
+     * anchors, UNKNOWN when the extension did not run and always without a tracker; per
+     * orientation in |supported_by_orientation| (empty without a tracker), summed as |paths|.
+     * |branches_pruned|: the tracker's DEAD verdicts — anchors and branches whose support ran
+     * out before L, and complete walks without support (work, exact as such). |pruned_before_
+     * completion|: some anchor or branch was pruned before L, so that the walks below it were not
+     * counted (|paths| AT_LEAST).
+     */
+    uint64_t walks = 0;
+    Count supported = Count::unknown(Unit::PATHS);
+    std::map<Orientation, Count> supported_by_orientation;
+    uint64_t branches_pruned = 0;
+    bool pruned_before_completion = false;
     /**
      * The branches the DFS entered (§4.2: candidates_examined beside the paths): every
      * partial path of k + 1 .. L bases the extension formed by appending an allowed
@@ -948,6 +1092,10 @@ enum class Withheld {
     // either mode, L > k with extend_paths: the anchors are EXACT and above max_anchors, so
     // the extension was not admitted (§4.2); counts.anchors is exact, the paths UNKNOWN
     ANCHORS_ABOVE_THRESHOLD,
+    // ALL_OR_COUNT, L > k with a support tracker (increment 5s): the tracker stopped the
+    // extension (StopReason::EXTERNAL); the route writes the tracker's reason (SPEC-DRAFT §20.5,
+    // annotation_budget), never "external"
+    EXTERNAL,
 };
 
 /**
@@ -972,7 +1120,8 @@ struct Extraction {
     // PARTIAL, neither complete nor withheld: why the list is shorter than the pattern's
     // contexts — the reason of the stop that touched the pattern when there is one, else
     // MAX_CONTEXTS (the first max_contexts in answer order were returned; MAX_ANCHORS for
-    // the anchors of Request::release_anchors; MAX_PATHS for paths)
+    // the anchors of Request::release_anchors; MAX_PATHS for paths; EXTERNAL for the supported
+    // paths completed before a support tracker stopped the extension)
     std::optional<StopReason> cut;
 };
 
@@ -1012,6 +1161,139 @@ struct Context {
     std::vector<DeBruijnGraph::node_index> path = {};
     // a path only: the L bases it spells (its first k are the anchor's k-mer)
     std::string sequence = {};
+};
+
+
+// ---------------------------------------------------------------- the search state (5s)
+
+/**
+ * The arm a step of the extension takes: RIGHT along outgoing edges (every extension of this
+ * increment: each oriented pattern is read from its first k-window on), LEFT along incoming
+ * edges (the selective anchor of 5t, DECISIONS P30: not built).
+ */
+enum class Side : uint8_t { RIGHT, LEFT };
+
+/**
+ * One state of the extension's DFS (increment 5s, DECISIONS P29), as a SupportTracker sees it:
+ * the oriented node entered, the position in the oriented pattern, the Model's state and the
+ * tracker's frame. Built only when a tracker is given (Request::support).
+ */
+struct SearchState {
+    // the k-mer entered (the anchor, or the child a step chose), as the served graph names it
+    DeBruijnGraph::node_index node;
+    // the stored k-mer that carries its annotation row (PatternSearch::base_node)
+    DeBruijnGraph::node_index base_node;
+    // the stored k-mer is the reverse complement of the node's k-mer (review of 5s-2, for 5s-3:
+    // a tracker passes support_step the row's k-mer as rc of the k-mer spelled, without the
+    // wrapper's id arithmetic): true on the wrapper of a PRIMARY graph for a node that is not
+    // stored as spelled (base_node != node), false on BASIC and CANONICAL graphs. A palindromic
+    // k-mer is its own reverse complement: either value names the same row
+    bool stored_reverse_complement;
+    // the oriented pattern extended: FORWARD and PALINDROMIC read P, REVERSE rc(P)
+    Orientation orientation;
+    Side side;
+    // the base the step spelled (the node's last base on the right arm); '\0' for an anchor
+    char base;
+    // the bases of the oriented pattern spelled, this step's included: k at an anchor
+    uint32_t position;
+    // the Model's state after them
+    Model::State model;
+    // the tracker's frame: 0 at the anchor, one more per step (the level of the DFS)
+    uint32_t depth;
+    // the bases spelled, in reading order (the anchor's k-mer, then one per step): the node's
+    // k-mer is its last k bases. A view into the DFS's own string, valid during the call only
+    std::string_view spelled;
+};
+
+/**
+ * A complete walk as the extension hands it to a tracker and a sink (valid during the call
+ * only): nothing is copied before a sink admits it (SPEC-DRAFT §20.7; GPT review 3, the
+ * efficiency note on the copies of increment 4). copy() is the Context enumerate() releases.
+ */
+struct PathView {
+    // the walk's anchor (offset 0, node == path.front())
+    const Context &anchor;
+    // its n = L - k + 1 k-mers in reading order
+    const std::vector<DeBruijnGraph::node_index> &path;
+    // the L bases it spells
+    std::string_view sequence;
+
+    Context copy() const {
+        return Context { anchor.orientation, 0, anchor.node, anchor.base_node, path,
+                         std::string(sequence) };
+    }
+};
+
+/**
+ * The support of each branch of the extension (increment 5s; SPEC-DRAFT §20.3; DECISIONS P28,
+ * P29): one frame per level of the DFS. Implemented outside the engine (src/cli/pattern_support,
+ * 5s-3: the label and trace trackers over the annotation, on graph/traversal/support_step); the
+ * engine only asks it and counts its verdicts. With Request::support null the extension asks
+ * nothing and runs as in increment 4.
+ *
+ * The protocol, per anchor of an admitted extension, in answer order:
+ *  - open(anchor): frame 0 from the anchor (depth 0, position k), before its first expansion;
+ *  - push(child): frame d + 1 from frame d and the child entered (depth d + 1), right after
+ *    the DFS chose it (its edge already examined and charged as a step) and before it is
+ *    expanded or, at L, completed;
+ *  - complete(walk): the walk of the frames open reached L (the Model accepting); the walk is
+ *    a supported path iff it answers ALIVE (then the sink, or the engine's list, receives it);
+ *  - pop(): drops the top frame — when the DFS leaves a child it pushed (after its subtree, or
+ *    after its completion), and frame 0 when the anchor is done. Every open() and push() that
+ *    answered ALIVE is popped exactly once, also when the extension stops (the frames unwind
+ *    before extend returns); a DEAD or STOPPED verdict leaves no frame to pop.
+ * Verdicts: ALIVE (some support survives: go on), DEAD (no support: the branch is pruned —
+ * not expanded, not completed, counted in AnchorCounts::branches_pruned), STOPPED (the
+ * tracker's own budget, memory or the deadline: the extension ends with stop {EXTENSION,
+ * EXTERNAL}, or {EXTENSION, TIME} when the tracker found the work time passed through the
+ * request's Budget::check_time, which then holds TIME; the route writes stop_reason()).
+ * The extension's own work is unchanged: every outgoing edge of an expanded node is a step,
+ * the clock is read as without a tracker; a pruned branch is not expanded, so its edges are
+ * never examined. The tracker charges its own work (rows, merges) to its own budgets and
+ * reads the deadline before its own reads (never Budget::charge). pop() must not throw.
+ */
+class SupportTracker {
+  public:
+    enum class Verdict : uint8_t { ALIVE, DEAD, STOPPED };
+
+    virtual ~SupportTracker() = default;
+
+    virtual Verdict open(const SearchState &anchor) = 0;
+    virtual Verdict push(const SearchState &child) = 0;
+    virtual void pop() = 0;
+    virtual Verdict complete(const PathView &walk) = 0;
+    // after a STOPPED verdict: the reason the route writes (max_annotation_work, max_memory,
+    // time); nullptr before
+    virtual const char* stop_reason() const = 0;
+};
+
+/**
+ * What a complete walk becomes (increment 5s; DECISIONS P27, P29): the route's list of
+ * supported paths (5s-4), later the alignment projection (5s-A) or a ranked list. Given
+ * (Request::sink), it receives every path the extension completes — with a tracker the
+ * supported ones, the tracker's frames still open so that it can read their support — in
+ * answer order, through count(): the engine then keeps no path of its own, and enumerate()
+ * refuses an extending pattern with a sink. Null: the engine's own list (enumerate() only),
+ * with the retention rule of Request::max_paths. The engine applies stop_at_threshold
+ * (more than max_paths paths complete: stop {EXTENSION, MAX_PATHS}) after the sink's call
+ * either way; the retention of a given sink is its own (it admits a path's memory before it
+ * copies it: PathView::copy).
+ * The engine's threshold counts the paths it handed over (with a tracker the supported ones),
+ * not what the sink kept. A sink that selects among them (a predicate over supported paths,
+ * 5b-5; PLAN §6: the threshold is on the selected paths) owns max_paths itself (the review of
+ * 5s-2, decided by the integrator of round 5b-A): the route then leaves Request::
+ * stop_at_threshold off, and the sink answers false once more than max_paths paths are
+ * selected, with stop_reason() "max_paths" (the route writes stop {extension, max_paths}).
+ */
+class PathSink {
+  public:
+    virtual ~PathSink() = default;
+
+    // false: the sink stopped the extension (stop {EXTENSION, EXTERNAL}, or TIME as for a
+    // tracker), after which it is asked nothing more
+    virtual bool accept(const PathView &path, const SupportTracker *support) = 0;
+    // after a false accept(): the reason the route writes; nullptr before
+    virtual const char* stop_reason() const = 0;
 };
 
 // JSON notes of a pattern (§7.2), the ones this increment can state:
@@ -1241,6 +1523,9 @@ class PatternSearch {
      * admitted, extended to count the paths (AnchorCounts::paths, Extension); no path is
      * retained. The extension's memory is the anchor list (<= max_anchors) and the DFS
      * stack, O(n * alphabet) for n = L - k + 1.
+     * With Request::support and Request::sink (increment 5s) the extension asks the tracker
+     * per level and hands every (supported) complete walk to the sink as it completes; the
+     * counts are those of AnchorCounts (walks, supported, branches_pruned).
      */
     Result count(const Pattern &pattern, const Request &request, Budget &budget) const;
 
@@ -1287,6 +1572,12 @@ class PatternSearch {
      *                extension was not admitted (withheld ANCHORS_ABOVE_THRESHOLD).
      *                The release reads the clock once before the first callback.
      *  An EXACT 0 of anchors or of paths is a complete, empty release.
+     *  With a support tracker (Request::support, increment 5s) the paths are the supported
+     *  ones and every rule above reads their count (AnchorCounts::supported, EXACT when the
+     *  extension COMPLETED whatever it pruned); a tracker's stop is withheld EXTERNAL
+     *  (ALL_OR_COUNT) or cut EXTERNAL after the prefix completed before it (PARTIAL). With a
+     *  path sink (Request::sink) the sink is the release: an extending pattern is refused
+     *  (std::invalid_argument; count() serves it).
      * On a graph without the dummy-edge mask (see the class): ALL_OR_COUNT releases iff
      * discovery completed and the count is EXACT, or BOUNDS with U <= the threshold; the
      * release then enumerates every candidate, drops the source dummies, and the counts
@@ -1465,6 +1756,8 @@ inline const char* to_string(StopReason reason) {
         case StopReason::MAX_CONTEXTS: return "max_contexts";
         case StopReason::MAX_ANCHORS: return "max_anchors";
         case StopReason::MAX_PATHS: return "max_paths";
+        // never written by the route, which names the tracker's or the sink's reason
+        case StopReason::EXTERNAL: return "external";
     }
     return "unknown";
 }
@@ -1487,6 +1780,8 @@ inline const char* to_string(Withheld withheld) {
         case Withheld::DEADLINE: return "deadline";
         case Withheld::PATHS_LATER_INCREMENT: return "paths_later_increment";
         case Withheld::ANCHORS_ABOVE_THRESHOLD: return "anchors_above_threshold";
+        // never written by the route (see Withheld::EXTERNAL)
+        case Withheld::EXTERNAL: return "external";
     }
     return "unknown";
 }
