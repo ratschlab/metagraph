@@ -43,10 +43,10 @@ constexpr const char *kDefaultProjection = "none";
 // Request fields of later increments (§7.1): refused by name, any value (null included),
 // rather than reported as unknown, so that the answer says what to wait for. (long_search,
 // max_paths and require_support, reserved until increment 4, are served now: the paths of a
-// pattern longer than k, opt-in by long_search "paths", owner decisions #13 and #14)
+// pattern longer than k, opt-in by long_search "paths", owner decisions #13 and #14; and
+// genetic_code with the peptides of increment 5, owner decision #15)
 const char *const kLaterIncrementFields[] = {
-    "predicate", "max_predicate_contexts", "max_predicate_work", "graphs", "genetic_code",
-    "budget_split",
+    "predicate", "max_predicate_contexts", "max_predicate_work", "graphs", "budget_split",
 };
 
 // long_search (owner decision #13 of 2026-10-07): "anchors", the default, answers a pattern
@@ -58,6 +58,11 @@ constexpr const char kLongSearchPaths[] = "paths";
 // support ("label_intersection", the default), or only the record-verified ones
 constexpr const char kSupportIntersection[] = "label_intersection";
 constexpr const char kSupportVerified[] = "record_verified";
+
+// The residues a protein pattern may hold (increment 5, owner decision #15; DESIGN §6): the 20
+// amino acids and the ambiguity codes X, B, Z, J, as the engine's Pattern::parse reads them
+// (the stop '*' is answered stop_unsupported in its slot); listed in the capabilities
+constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ";
 
 // The note of an entry whose request named the labels (output.labels "all", or an
 // annotation field) but whose answer reads none: mode count reads no annotation (§5.2), and
@@ -142,10 +147,13 @@ class Fields {
     std::set<std::string> seen_;
 };
 
-// One pattern of the request: parsed, or refused in its slot with bad_alphabet
+// One pattern of the request: parsed, or refused in its slot (bad_alphabet; a peptide's stop
+// stop_unsupported)
 struct PatternSpec {
     Json::Value id;                      // the string given, or null
     PatternKind kind = PatternKind::DNA;
+    // a peptide's text (increment 5), parsed once the request's genetic code is known
+    std::string protein;
     std::optional<Pattern> pattern;
     std::optional<std::pair<std::string, std::string>> error;  // code, message
 };
@@ -169,6 +177,8 @@ struct ParsedRequest {
     // require_support "record_verified" (increment 4): the labels of paths that one record
     // verifies only
     bool require_verified = false;
+    // the genetic code of the request's peptides (increment 5): genetic_code, default 1
+    const GeneticCode *genetic_code = &GeneticCode::standard();
 };
 
 void note_clamped(Json::Value *clamped, const char *field, Json::Value requested,
@@ -209,10 +219,12 @@ std::string string_field(Fields &f, const char *key, const std::string &def) {
 }
 
 /**
- * The request as this increment serves it (§7.1): the first error wins, in
+ * The request as this increment serves it (§7.1; SPEC §5): the first error wins, in
  * this order — a later-increment or resident-only field (named, whatever its value), the
- * patterns, mode, output, scope, strands, stop_at_threshold, the caps, the time budget — and
- * a field nothing read is refused last, as /traverse's Strict refuses it.
+ * patterns, mode, output, scope, strands, stop_at_threshold, the caps, the time budget, the
+ * annotation caps, increment 4's long_search, max_paths, require_support, increment 5's
+ * genetic_code (then the peptides are read in it: a slot error, never a refusal) — and a
+ * field nothing read is refused last, as /traverse's Strict refuses it.
  */
 ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits) {
     if (!json.isObject())
@@ -250,27 +262,36 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         const std::string path = "request.patterns[" + std::to_string(i) + "]";
         Fields p(patterns[i], path);
         PatternSpec spec;
-        if (p.has("protein"))
-            throw later(p.path("protein") + ": protein patterns in a later increment");
         if (p.has("id")) {
             if (!p.raw("id").isString())
                 throw invalid(p.path("id") + ": expected a string");
             spec.id = p.raw("id").asString();
         }
+        // the kinds (§4.2): dna, iupac and, since increment 5, protein (a peptide)
         const bool dna = p.has("dna");
         const bool iupac = p.has("iupac");
-        if (dna == iupac)
-            throw invalid(path + ": expected exactly one of 'dna', 'iupac'");
-        const char *key = dna ? "dna" : "iupac";
+        const bool protein = p.has("protein");
+        if (dna + iupac + protein != 1) {
+            // (without a peptide named, the message of increments 1-4: a request without the
+            // new kind is answered as before, byte for byte)
+            throw invalid(path + (protein ? ": expected exactly one of 'dna', 'iupac', 'protein'"
+                                          : ": expected exactly one of 'dna', 'iupac'"));
+        }
+        const char *key = dna ? "dna" : iupac ? "iupac" : "protein";
         if (!p.raw(key).isString())
             throw invalid(p.path(key) + ": expected a string");
         p.finish();
-        spec.kind = dna ? PatternKind::DNA : PatternKind::IUPAC;
-        try {
-            spec.pattern = Pattern::parse(spec.kind, p.raw(key).asString());
-        } catch (const PatternError &e) {
-            // the pattern's own error (§7.2): the other patterns are still answered
-            spec.error = std::make_pair(e.code(), std::string(e.what()));
+        spec.kind = dna ? PatternKind::DNA : iupac ? PatternKind::IUPAC : PatternKind::PROTEIN;
+        if (protein) {
+            // parsed with the request's genetic code, once that is read (below)
+            spec.protein = p.raw(key).asString();
+        } else {
+            try {
+                spec.pattern = Pattern::parse(spec.kind, p.raw(key).asString());
+            } catch (const PatternError &e) {
+                // the pattern's own error (§7.2): the other patterns are still answered
+                spec.error = std::make_pair(e.code(), std::string(e.what()));
+            }
         }
         req.patterns.push_back(std::move(spec));
     }
@@ -416,6 +437,37 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                       "coordinates, which output.occurrences false does not read");
     }
 
+    // increment 5 (owner decision #15): the genetic code of the request's peptides, an NCBI
+    // translation table id; accepted with any request, it acts on protein patterns only
+    if (f.has("genetic_code")) {
+        const Json::Value &v = f.raw("genetic_code");
+        if (!v.isIntegral()) {
+            throw invalid(f.path("genetic_code") + ": expected an integer (an NCBI translation "
+                          "table id: " + GeneticCode::ids_text() + ")");
+        }
+        const GeneticCode *code = v.isInt() ? GeneticCode::find(v.asInt()) : nullptr;
+        if (!code) {
+            const std::string given = v.isInt64() ? std::to_string(v.asInt64())
+                                                  : std::to_string(v.asUInt64());
+            throw PatternRefusal(400, "genetic_code_unknown",
+                                 f.path("genetic_code") + ": " + given + " is not an NCBI "
+                                 "translation table id; the tables served are "
+                                 + GeneticCode::ids_text() + " (capabilities genetic_codes), "
+                                 "1, the standard code, the default");
+        }
+        req.genetic_code = code;
+    }
+    for (PatternSpec &spec : req.patterns) {
+        if (spec.kind != PatternKind::PROTEIN)
+            continue;
+        try {
+            spec.pattern = Pattern::parse(PatternKind::PROTEIN, spec.protein, *req.genetic_code);
+        } catch (const PatternError &e) {
+            // bad_alphabet, or stop_unsupported for a stop '*': the slot's error (§8.9)
+            spec.error = std::make_pair(e.code(), std::string(e.what()));
+        }
+    }
+
     f.finish();
     return req;
 }
@@ -522,7 +574,13 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     }
     assert(spec.pattern && result);
     e["pattern"] = spec.pattern->text();
+    // L, in bases, whatever the kind (a peptide's 3m)
     e["length"] = uint_json(spec.pattern->length());
+    if (spec.kind == PatternKind::PROTEIN) {
+        // increment 5: the peptide's residues (m) and the genetic code it was read in
+        e["residues"] = uint_json(spec.pattern->text().size());
+        e["genetic_code"] = spec.pattern->genetic_code();
+    }
     e["information_bits"] = result->information_bits;
     e["anchor_information_bits"] = result->anchor_information_bits
             ? Json::Value(*result->anchor_information_bits) : Json::Value();
@@ -1154,8 +1212,32 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["projections_later_increment"] = strings_json({ "predicate_only" });
     // output.occurrences with output.labels "all": placed where the index can place
     p["default_occurrences"] = true;
-    p["kinds"] = strings_json({ "dna", "iupac" });
-    p["kinds_later_increment"] = strings_json({ "protein" });
+    p["kinds"] = strings_json({ "dna", "iupac", "protein" });
+    p["kinds_later_increment"] = Json::Value(Json::arrayValue);
+    // increment 5 (owner decision #15): the residues a protein pattern may hold, the genetic
+    // codes (NCBI translation table ids) and the default
+    Json::Value residues(Json::arrayValue);
+    for (char c : std::string(kProteinResidues)) {
+        residues.append(std::string(1, c));
+    }
+    p["protein_residues"] = std::move(residues);
+    Json::Value codes(Json::arrayValue);
+    for (int id : GeneticCode::ids()) {
+        codes.append(id);
+    }
+    p["genetic_codes"] = std::move(codes);
+    p["default_genetic_code"] = GeneticCode::kStandard;
+    p["protein_rule"] = "A protein pattern (patterns[i].protein) is a peptide over "
+        "protein_residues (any case): the 20 amino acids and the ambiguity codes X (any "
+        "residue: every codon of the genetic code that is not a stop), B (D or N), Z (E or Q) "
+        "and J (I or L). It is searched as its codon automaton in the request's genetic_code "
+        "(an NCBI translation table id of genetic_codes, default_genetic_code when omitted): "
+        "its instances are exactly the codon strings that translate to it, no stop codon "
+        "anywhere, on both strands as for dna. Its length is in bases (3 per residue; residues "
+        "states the residues), so a peptide of more than k / 3 residues is a pattern longer "
+        "than k (long_search). A stop '*' is answered in its slot with stop_unsupported; any "
+        "other character with bad_alphabet. Tables 27, 28 and 31 code some codons both as a "
+        "residue and as a stop in context: they match as their residue";
     p["default_scope"] = to_string(Scope::ANY_OFFSET);
     Json::Value by_mode;
     by_mode["basic"] = strings_json({ "suffix", "any_offset" });

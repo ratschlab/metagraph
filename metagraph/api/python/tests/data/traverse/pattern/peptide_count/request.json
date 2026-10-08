@@ -1,0 +1,9 @@
+{
+ "patterns": [
+  {
+   "protein": "MELPNIMHPV"
+  }
+ ],
+ "mode": "count",
+ "genetic_code": 11
+}

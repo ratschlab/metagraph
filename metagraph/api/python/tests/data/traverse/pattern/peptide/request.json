@@ -1,0 +1,19 @@
+{
+ "patterns": [
+  {
+   "protein": "MELPNIMHPV",
+   "id": "NDM-1 1-10"
+  },
+  {
+   "protein": "MELPNJMHPV",
+   "id": "J"
+  },
+  {
+   "protein": "MELPNIMHPVAKLS",
+   "id": "NDM-1 1-14"
+  }
+ ],
+ "output": {
+  "labels": "all"
+ }
+}

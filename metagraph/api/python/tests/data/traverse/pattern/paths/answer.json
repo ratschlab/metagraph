@@ -1,0 +1,263 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "long_search": "paths",
+  "max_anchors": 1000,
+  "max_contexts": 10000,
+  "max_paths": 1000,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "none"
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "long",
+   "anchor_information_bits": 62.0,
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 2
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "paths": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      }
+     },
+     "candidates_examined": 18,
+     "extension": "completed",
+     "relation": "exact",
+     "unit": "paths",
+     "value": 2
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "NDM-40",
+   "information_bits": 80.0,
+   "kind": "dna",
+   "length": 40,
+   "min_anchor_information_bits": 62.0,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "results": [
+    {
+     "anchor_kmer": "ATGGAATTGCCCAATATTATGCACCCGGTCG",
+     "instance": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+     "nodes": [
+      3980269,
+      5488838,
+      3141987,
+      5170940,
+      1033811,
+      207491,
+      4230264,
+      2684316,
+      7357061,
+      6491280
+     ],
+     "offset": 0,
+     "rows": [
+      3980268,
+      5488837,
+      3141986,
+      5170939,
+      1033810,
+      207490,
+      4230263,
+      2684315,
+      7357060,
+      6491279
+     ],
+     "sequence": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+     "strand": "+"
+    },
+    {
+     "anchor_kmer": "TCAGCTTCGCGACCGGGTGCATAATATTGGG",
+     "instance": "TCAGCTTCGCGACCGGGTGCATAATATTGGGCAATTCCAT",
+     "nodes": [
+      6263842,
+      6106883,
+      3407326,
+      701993,
+      131953,
+      6831792,
+      8022757,
+      4039112,
+      2627650,
+      555291
+     ],
+     "offset": 0,
+     "rows": [
+      6263841,
+      6106882,
+      3407325,
+      701992,
+      131952,
+      6831791,
+      8022756,
+      4039111,
+      2627649,
+      555290
+     ],
+     "sequence": "TCAGCTTCGCGACCGGGTGCATAATATTGGGCAATTCCAT",
+     "strand": "-"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 2,
+   "scope": "long",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.153,
+    "extension_ms": 0.048833
+   },
+   "withheld": null,
+   "work": {
+    "extension_edges": 18,
+    "mask_scans": 0,
+    "ranges_visited": 62,
+    "steps": 80
+   }
+  },
+  {
+   "absence_scope": "long",
+   "anchor_information_bits": 62.0,
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 0
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 0
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 0
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "paths": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 0
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 0
+      }
+     },
+     "candidates_examined": 0,
+     "extension": "no_anchors",
+     "relation": "exact",
+     "unit": "paths",
+     "value": 0
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "absent",
+   "information_bits": 80.0,
+   "kind": "dna",
+   "length": 40,
+   "min_anchor_information_bits": 62.0,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "GATAGAGAACTCGAGAGAGGTTCCACCTTCATATTGAATT",
+   "results": [],
+   "retrieval_complete": true,
+   "returned": 0,
+   "scope": "long",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.016083,
+    "extension_ms": 0.0
+   },
+   "withheld": null,
+   "work": {
+    "extension_edges": 0,
+    "mask_scans": 0,
+    "ranges_visited": 23,
+    "steps": 23
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 0.230459
+ }
+}

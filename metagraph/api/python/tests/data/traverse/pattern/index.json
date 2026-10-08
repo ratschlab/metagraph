@@ -489,6 +489,159 @@
    "headers": {},
    "shows": "the same with allow_unbudgeted_annotation: labels read without a memory bound on the reads (annotation unbudgeted, note annotation_unbudgeted); a PRIMARY index places nothing (placement none_canonical)"
   },
+  "paths": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "long_search \"paths\" (increment 4, opt-in): a pattern longer than k extended into paths: counts.paths exact with its per-strand split, candidates_examined and extension completed, work.extension_edges, timing.extension_ms; each path result has sequence (the L bases), anchor_kmer, instance, offset 0, strand, nodes and rows (never kmer); limits echo long_search and max_paths; no anchor: no path, the empty answer complete"
+  },
+  "paths_count": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "mode count with long_search \"paths\": the paths counted (exact, by strand), nothing released"
+  },
+  "paths_labels": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the labels of paths (owner decision #14): each label with its support -- record_verified where one record holds the whole path (blaNDM-1's first 40 bases: 9 columns, their placed occurrences of the whole path), label_intersection where every k-mer of the path carries the label but no record holds it whole (a 51-mer joining two copies of a repeated 31-mer of the E. coli records: occurrences exact 0); by_label with paths and paths_record_verified, counts.labels.by_support"
+  },
+  "paths_require_support": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "require_support \"record_verified\": only the labels one record verifies are listed; each path and the entry count the others in labels_excluded_unverified (the chimera's two columns), limits.require_support echoed"
+  },
+  "paths_max_paths_partial": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "partial, more paths (2) than max_paths (1): the first path in answer order, cut.reason max_paths, the count exact"
+  },
+  "paths_count_above_threshold": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "all_or_count, the exact path count (2) above max_paths (1): withheld count_above_threshold"
+  },
+  "paths_stop_at_max_paths": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "stop_at_threshold with max_paths 1: the extension stops once more than max_paths paths are complete: stop {extension, max_paths}, paths at_least, extension stopped, withheld threshold_crossed"
+  },
+  "paths_anchors_above_threshold": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the exact anchor count (2) above max_anchors (1): the extension is not admitted, paths unknown (extension not_admitted), withheld anchors_above_threshold"
+  },
+  "paths_max_steps": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "max_steps reached in the extension (discovery took 62 steps): stop {extension, max_steps}, paths at_least, the paths completed before the stop released (a prefix of the answer order), cut max_steps; the next pattern answers the sticky stop"
+  },
+  "paths_global": {
+   "server": "masked_no_map",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "paths with coordinates but no record mapping (placement global): nothing can be verified, every label label_intersection, its occurrence_list the chains (kmer_coord of the first k-mer, offset 0, strand), note record_bounds_unknown"
+  },
+  "paths_primary": {
+   "server": "primary",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "paths on a PRIMARY index: orientation instead of strand, wrapper node ids; no coordinates read (placement none_canonical): every label label_intersection, note label_intersection_only"
+  },
+  "support_unavailable": {
+   "server": "masked_no_map",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 support_unavailable: require_support \"record_verified\" on an index that cannot verify (no record mapping: its best support is label_intersection)"
+  },
+  "peptide": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "protein patterns (increment 5) in the default genetic code (1): kind protein, length in bases (3 per residue), residues, genetic_code; the first 10 residues of NDM-1 (30 bases, one k-mer) in their codons: the contexts, labels and placed occurrences of blaNDM-1 (9 columns, 42); J (I or L) admits the same; 14 residues (42 bases, longer than k) without long_search: anchors only, withheld paths_later_increment"
+  },
+  "peptide_count": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a peptide counted in the bacterial genetic code (genetic_code 11, stated in the entry)"
+  },
+  "peptide_paths": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a peptide longer than k with long_search \"paths\": its anchors extended through the codon automaton into paths of 42 bases (one per strand), each with its labels, record_verified"
+  },
+  "peptide_bad_residue": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "error slots of protein patterns: bad_alphabet (U, selenocysteine, is not served), stop_unsupported (the stop * is not served in this version: no branch through a stop codon); the last pattern is answered"
+  },
+  "genetic_code_unknown": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 genetic_code_unknown: genetic_code is not an NCBI translation table id (7 was merged into 4; capabilities genetic_codes lists the ids)"
+  },
   "unknown_field": {
    "server": "masked",
    "method": "POST",

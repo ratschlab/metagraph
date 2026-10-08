@@ -1,0 +1,17 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "id": "NDM-40"
+  },
+  {
+   "dna": "CGGCCTCCAGAGCACTTTGTCGTTTTTGGACGGAAAATCCCTAGAACCCCT",
+   "id": "chimera"
+  }
+ ],
+ "long_search": "paths",
+ "require_support": "record_verified",
+ "output": {
+  "labels": "all"
+ }
+}

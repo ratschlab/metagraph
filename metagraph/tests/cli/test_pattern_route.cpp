@@ -206,9 +206,30 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"require_support\": \"label_intersection\", \"long_search\": "
           "\"paths\", \"output\": {\"labels\": \"all\"}, \"allow_unbudgeted_annotation\": "
           "true}", 200, "" },
-        // increment 5's protein and genetic_code are still refused by name
-        { "{\"patterns\": [{\"protein\": \"MK\"}]}", 400, "later_increment" },
-        { "{" + p + ", \"genetic_code\": 1}", 400, "later_increment" },
+        // increment 5 (owner decision #15): protein is the third kind, genetic_code an NCBI
+        // translation table id (default 1); an unknown id has its own code
+        { "{\"patterns\": [{\"protein\": \"MK\"}]}", 200, "" },
+        { "{\"patterns\": [{\"protein\": \"MK\"}], \"genetic_code\": 2}", 200, "" },
+        { "{\"patterns\": [{\"protein\": \"MK\"}], \"genetic_code\": 33.0}", 200, "" },
+        { "{" + p + ", \"genetic_code\": 11}", 200, "" },
+        { "{\"patterns\": [{\"protein\": 5}]}", 400, "invalid_request" },
+        { "{\"patterns\": [{\"protein\": \"MK\", \"dna\": \"ACG\"}]}", 400,
+          "invalid_request" },
+        { "{\"patterns\": [{\"protein\": \"MK\", \"iupac\": \"ACG\"}]}", 400,
+          "invalid_request" },
+        { "{\"patterns\": [{\"protein\": null}]}", 400, "invalid_request" },
+        { "{\"patterns\": [{\"protein\": \"MK\"}], \"genetic_code\": 7}", 400,
+          "genetic_code_unknown" },
+        { "{" + p + ", \"genetic_code\": 0}", 400, "genetic_code_unknown" },
+        { "{" + p + ", \"genetic_code\": -1}", 400, "genetic_code_unknown" },
+        { "{" + p + ", \"genetic_code\": 34}", 400, "genetic_code_unknown" },
+        { "{" + p + ", \"genetic_code\": 17}", 400, "genetic_code_unknown" },
+        { "{" + p + ", \"genetic_code\": 18446744073709551615}", 400, "genetic_code_unknown" },
+        { "{" + p + ", \"genetic_code\": 4294967297}", 400, "genetic_code_unknown" },
+        { "{" + p + ", \"genetic_code\": \"1\"}", 400, "invalid_request" },
+        { "{" + p + ", \"genetic_code\": 1.5}", 400, "invalid_request" },
+        { "{" + p + ", \"genetic_code\": null}", 400, "invalid_request" },
+        { "{" + p + ", \"genetic_code\": true}", 400, "invalid_request" },
         { "{" + p + ", \"in_ram\": true}", 400, "resident_only" },
         { "{" + p + ", \"output\": {\"labels\": \"none\", \"paths\": false}}", 200, "" },
         // increment 4: output.paths is accepted with either value and changes nothing (a path
@@ -271,11 +292,16 @@ TEST(PatternRoute, RefusalOrder) {
           "request.patterns" },
         // 7 before 8
         { "{\"patterns\": [], \"mode\": \"x\"}", "invalid_request", "request.patterns" },
-        // within 7: protein, id, exactly one of dna / iupac, its type, an unknown field
-        { "{\"patterns\": [{\"protein\": \"MK\", \"id\": 1}]}", "later_increment",
-          "request.patterns[0].protein" },
+        // within 7: id, exactly one of dna / iupac / protein, its type, an unknown field
+        { "{\"patterns\": [{\"protein\": \"MK\", \"id\": 1}]}", "invalid_request",
+          "request.patterns[0].id" },
         { "{\"patterns\": [{\"id\": 1, \"dna\": \"A\", \"iupac\": \"A\"}]}",
           "invalid_request", "request.patterns[0].id" },
+        { "{\"patterns\": [{\"protein\": \"M\", \"dna\": 1}], \"mode\": \"x\"}",
+          "invalid_request", "request.patterns[0]: expected exactly one of 'dna', 'iupac', "
+          "'protein'" },
+        { "{\"patterns\": [{\"protein\": 1, \"x\": 1}]}", "invalid_request",
+          "request.patterns[0].protein" },
         { "{\"patterns\": [{\"dna\": 1, \"x\": 1}]}", "invalid_request",
           "request.patterns[0].dna" },
         { "{\"patterns\": [{\"dna\": \"A\", \"x\": 1}], \"mode\": \"x\"}",
@@ -320,8 +346,16 @@ TEST(PatternRoute, RefusalOrder) {
         { "{" + p + ", \"require_support\": \"x\", \"bogus\": 1}", "invalid_request",
           "request.require_support" },
         { "{" + p + ", \"require_support\": \"record_verified\", \"output\": {\"labels\": "
-          "\"all\", \"occurrences\": false}, \"bogus\": 1}", "invalid_request",
+          "\"all\", \"occurrences\": false}, \"genetic_code\": 7}", "invalid_request",
           "request.require_support" },
+        // then increment 5's genetic_code (its type, then the table)
+        { "{" + p + ", \"genetic_code\": \"x\", \"bogus\": 1}", "invalid_request",
+          "request.genetic_code: expected an integer" },
+        { "{" + p + ", \"genetic_code\": 7, \"bogus\": 1}", "genetic_code_unknown",
+          "request.genetic_code: 7 is not an NCBI translation table id" },
+        // a peptide's slot error is no refusal: the genetic code's comes first
+        { "{\"patterns\": [{\"protein\": \"M*U\"}], \"genetic_code\": 8}",
+          "genetic_code_unknown", "request.genetic_code" },
         // 8 before 9
         { "{" + p + ", \"max_steps\": 0, \"bogus\": 1}", "invalid_request", "request.max_steps" },
         // 9 before 10: on this column annotation labels "all" would be annotation_unbudgeted
@@ -923,6 +957,39 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("label_intersection", caps["support"].asString());
     // a column annotation: no budget-aware decode
     EXPECT_EQ("unbudgeted", caps["annotation"].asString());
+    // increment 5 (owner decision #15): the kind protein, its residues, the genetic codes
+    // (every NCBI translation table) and the default, the standard code
+    ASSERT_EQ(3u, caps["kinds"].size());
+    EXPECT_EQ("protein", caps["kinds"][2].asString());
+    EXPECT_TRUE(caps["kinds_later_increment"].isArray());
+    EXPECT_EQ(0u, caps["kinds_later_increment"].size());
+    std::string residues;
+    for (const Json::Value &r : caps["protein_residues"]) {
+        ASSERT_EQ(1u, r.asString().size());
+        residues += r.asString();
+    }
+    EXPECT_EQ("ACDEFGHIKLMNPQRSTVWYXBZJ", residues);
+    // the list is what the engine parses: each residue alone is a peptide, every other
+    // character of the alphabet, the stop '*' included, is not
+    for (char c = 'A'; c <= 'Z'; ++c) {
+        const bool listed = residues.find(c) != std::string::npos;
+        bool parsed = true;
+        try {
+            pattern::Pattern::parse(pattern::PatternKind::PROTEIN, std::string(1, c));
+        } catch (const pattern::PatternError &e) {
+            parsed = false;
+            EXPECT_EQ("bad_alphabet", e.code()) << c;
+        }
+        EXPECT_EQ(listed, parsed) << c;
+    }
+    std::vector<int> codes;
+    for (const Json::Value &id : caps["genetic_codes"]) {
+        codes.push_back(id.asInt());
+    }
+    EXPECT_EQ(std::vector<int>({ 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23,
+                                 24, 25, 26, 27, 28, 29, 30, 31, 32, 33 }), codes);
+    EXPECT_EQ(1, caps["default_genetic_code"].asInt());
+    EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("stop_unsupported"));
 
     // loading: nothing about the graph is known yet
     caps = pattern_capabilities_json(nullptr, limits(), false);

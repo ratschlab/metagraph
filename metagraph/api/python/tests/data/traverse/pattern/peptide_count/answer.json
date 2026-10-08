@@ -1,0 +1,107 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_contexts": 10000,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "count",
+ "output": null,
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "unit": "graph_contexts",
+     "value": 4
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "determinism": "full",
+   "genetic_code": 11,
+   "id": null,
+   "information_bits": 46.83007499855769,
+   "kind": "protein",
+   "length": 30,
+   "min_anchor_information_bits": null,
+   "mode": "count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "MELPNIMHPV",
+   "residues": 10,
+   "retrieval_complete": false,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.165792
+   },
+   "work": {
+    "mask_scans": 0,
+    "ranges_visited": 432,
+    "steps": 432
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 0.180666
+ }
+}

@@ -1,6 +1,7 @@
 """The POST /pattern fixture bodies (data/traverse/pattern/, written by
 scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, contract version 1
-(milestone 1, and increment 3's output.labels "all", SPEC §14):
+(milestone 1, increment 3's output.labels "all", SPEC §14, and increments 4 and 5, SPEC §12.1,
+§12.2, §17: the paths of long_search "paths" with their labels' support, and protein patterns):
 
   - the field lists: every table of the SPEC marked `<!-- schema: NAME -->` names exactly the
     fields SCHEMA[NAME] below knows, so that the SPEC and this check cannot drift apart;
@@ -24,7 +25,9 @@ scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, cont
     the server's sources write.
 
 No metagraph import and no server: the service copies these bodies into its own tests, and
-this check is what makes them a contract rather than a sample.
+this check is what makes them a contract rather than a sample. A peptide's bits and instances
+are checked against the validator's own copy of NCBI's genetic codes (GENETIC_CODES), never
+against the server's tables.
 """
 
 import copy
@@ -55,25 +58,72 @@ UNITS = ('graph_contexts', 'anchors', 'paths', 'placed_occurrences', 'labels')
 GRAPH_MODES = ('basic', 'canonical', 'primary')
 STRAND_SYMBOLS = {'forward': '+', 'reverse': '-', 'palindromic': '='}
 STRAND_KEYS = {'+': '+', '-': '-', '=': 'both'}
-# increment 3 (output.labels "all", SPEC §14) adds the annotation phases and reasons
+# increment 3 (output.labels "all", SPEC §14) adds the annotation phases and reasons;
+# increment 4 (long_search "paths", SPEC §17) the phase extension and the reason max_paths
 ANNOTATION_PHASES = ('label_discovery', 'placement', 'output')
-STOP_PHASES = ('discovery', 'mask_scan', 'extraction') + ANNOTATION_PHASES
+STOP_PHASES = ('discovery', 'mask_scan', 'extraction') + ANNOTATION_PHASES + ('extension',)
 STOP_REASONS = ('max_steps', 'time', 'max_contexts', 'max_anchors', 'max_annotation_work',
-                'max_memory')
+                'max_memory', 'max_paths')
 WITHHELD = ('count_above_threshold', 'threshold_crossed', 'discovery_budget', 'deadline',
             'paths_later_increment', 'annotation_budget', 'anchor_labels_truncated',
-            'output_budget')
-CUT = ('max_contexts', 'max_steps', 'time', 'max_anchors', 'max_memory')
+            'output_budget', 'anchors_above_threshold')
+CUT = ('max_contexts', 'max_steps', 'time', 'max_anchors', 'max_memory', 'max_paths')
 NOTES = ('low_complexity_pattern', 'strand_unknown_canonical', 'paths_later_increment',
-         'annotation_unbudgeted', 'record_bounds_unknown', 'annotation_not_read')
-SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported')
+         'annotation_unbudgeted', 'record_bounds_unknown', 'annotation_not_read',
+         'label_intersection_only')
+# stop_unsupported: a peptide valid apart from its stop '*' (increment 5, owner decision #15)
+SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported',
+               'stop_unsupported')
+KINDS = ('dna', 'iupac', 'protein')
+# increment 4: what the extension of a pattern longer than k did (counts.paths.extension)
+EXTENSIONS = ('no_anchors', 'not_started', 'not_admitted', 'stopped', 'completed')
+LONG_SEARCH = ('anchors', 'paths')
+# a path result's support: its listed labels' (null when it lists none)
+PATH_SUPPORTS = ('record_verified', 'label_intersection', 'mixed')
+# increment 5: the residues of a protein pattern (any case) and NCBI's genetic codes (gc.prt
+# version 4.6, https://ftp.ncbi.nih.gov/entrez/misc/data/gc.prt): each table's ncbieaa string,
+# the residue of each codon in TCAG order (TTT TTC TTA TTG TCT ... GGG), '*' a stop
+PROTEIN_RESIDUES = 'ACDEFGHIKLMNPQRSTVWYXBZJ'
+GENETIC_CODES = {
+    1: 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    2: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNKKSS**VVVVAAAADDEEGGGG',
+    3: 'FFLLSSSSYY**CCWWTTTTPPPPHHQQRRRRIIMMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    4: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    5: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNKKSSSSVVVVAAAADDEEGGGG',
+    6: 'FFLLSSSSYYQQCC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    9: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIIMTTTTNNNKSSSSVVVVAAAADDEEGGGG',
+    10: 'FFLLSSSSYY**CCCWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    11: 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    12: 'FFLLSSSSYY**CC*WLLLSPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    13: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNKKSSGGVVVVAAAADDEEGGGG',
+    14: 'FFLLSSSSYYY*CCWWLLLLPPPPHHQQRRRRIIIMTTTTNNNKSSSSVVVVAAAADDEEGGGG',
+    15: 'FFLLSSSSYY*QCC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    16: 'FFLLSSSSYY*LCC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    21: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNNKSSSSVVVVAAAADDEEGGGG',
+    22: 'FFLLSS*SYY*LCC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    23: 'FF*LSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    24: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSSKVVVVAAAADDEEGGGG',
+    25: 'FFLLSSSSYY**CCGWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    26: 'FFLLSSSSYY**CC*WLLLAPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    27: 'FFLLSSSSYYQQCCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    28: 'FFLLSSSSYYQQCCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    29: 'FFLLSSSSYYYYCC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    30: 'FFLLSSSSYYEECC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    31: 'FFLLSSSSYYEECCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    32: 'FFLLSSSSYY*WCC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    33: 'FFLLSSSSYYY*CCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSSKVVVVAAAADDEEGGGG',
+}
+CODONS_TCAG = [a + b + c for a in 'TCAG' for b in 'TCAG' for c in 'TCAG']
 # mask_invalid and alphabet_untested: the route's own reasons not to serve a graph (85614d30,
 # owner decisions #6 and #4 of 2026-10-07; pattern.cpp route_support), a 400 refusal's code and
 # the capabilities' unavailable_reason alike (review GPT-2 of 2026-10-08, finding 6: missing
 # here, valid answers carrying them were rejected)
 REFUSALS = ('invalid_request', 'later_increment', 'resident_only', 'mask_required',
             'representation_unsupported', 'primary_unwrapped', 'alphabet_unsupported', 'deadline',
-            'annotation_unbudgeted', 'mask_invalid', 'alphabet_untested')
+            'annotation_unbudgeted', 'mask_invalid', 'alphabet_untested',
+            # increment 4 (require_support "record_verified" on an index that cannot verify) and
+            # increment 5 (genetic_code no NCBI table)
+            'support_unavailable', 'genetic_code_unknown')
 UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped',
                'alphabet_unsupported', 'multi_graph_later_increment', 'mask_invalid',
                'alphabet_untested')
@@ -112,8 +162,9 @@ SCHEMA = {
     'request': ['patterns', 'mode', 'scope', 'strands', 'stop_at_threshold', 'max_contexts',
                 'max_anchors', 'max_steps', 'time_budget_ms', 'output',
                 'max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb', 'max_labels',
-                'max_occurrences_per_label', 'allow_unbudgeted_annotation'],
-    'request_pattern': ['id', 'dna', 'iupac'],
+                'max_occurrences_per_label', 'allow_unbudgeted_annotation',
+                'long_search', 'max_paths', 'require_support', 'genetic_code'],
+    'request_pattern': ['id', 'dna', 'iupac', 'protein'],
     'request_output': ['labels', 'occurrences', 'paths'],
     'refusal': ['error', 'code'],
     'answer': ['pattern_contract_version', 'mode', 'output', 'index', 'limits', 'timing',
@@ -124,24 +175,35 @@ SCHEMA = {
                'finalize_reserve_ms', 'min_information_bits', 'max_patterns',
                'stop_at_threshold', 'max_labels_per_anchor', 'max_annotation_work',
                'max_memory_mb', 'max_labels', 'max_occurrences_per_label',
-               'allow_unbudgeted_annotation', 'clamped'],
+               'allow_unbudgeted_annotation', 'long_search', 'max_paths', 'require_support',
+               'clamped'],
     'clamped': ['field', 'requested', 'effective'],
-    'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms'],
-    'entry': ['id', 'kind', 'pattern', 'length', 'information_bits', 'anchor_information_bits',
-              'min_anchor_information_bits', 'error', 'mode', 'scope', 'strands', 'palindromic', 'counts', 'work', 'stop',
+    'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms', 'extension_ms'],
+    'entry': ['id', 'kind', 'pattern', 'length', 'residues', 'genetic_code', 'information_bits',
+              'anchor_information_bits', 'min_anchor_information_bits', 'error', 'mode', 'scope',
+              'strands', 'palindromic', 'counts', 'work', 'stop',
               'retrieval_complete', 'withheld', 'returned', 'cut', 'results', 'absence_scope',
               'determinism', 'notes', 'timing', 'placement', 'annotation', 'by_label',
-              'rows_refused', 'anchors_truncated', 'labels_cut', 'occurrences_cut'],
+              'rows_refused', 'anchors_truncated', 'labels_cut', 'occurrences_cut',
+              'labels_excluded_unverified'],
     'counts': ['contexts', 'anchors', 'paths', 'labels', 'occurrences'],
     'count': ['value', 'relation', 'unit', 'lower', 'upper'],
     'contexts_count': ['suffix', 'by_offset', 'by_strand', 'by_orientation'],
     'anchors_count': ['by_strand', 'by_orientation'],
+    # increment 4 (long_search "paths", SPEC §17)
+    'paths_count': ['by_strand', 'by_orientation', 'candidates_examined', 'extension'],
+    'labels_count': ['by_support'],
+    'by_support': ['record_verified', 'label_intersection'],
     'work': ['ranges_visited', 'mask_scans', 'steps', 'annotation_rows', 'annotation_units',
-             'memory_bytes'],
+             'memory_bytes', 'extension_edges'],
     'stop': ['phase', 'reason'],
     'reason': ['reason'],
     'result': ['kmer', 'instance', 'offset', 'strand', 'orientation', 'node', 'row', 'support',
                'labels_status', 'labels_total', 'labels'],
+    # increment 4: a path (a result of a pattern longer than k under long_search "paths")
+    'path_result': ['sequence', 'anchor_kmer', 'instance', 'offset', 'strand', 'orientation',
+                    'nodes', 'rows', 'support', 'labels_status', 'labels_total', 'labels',
+                    'labels_excluded_unverified'],
     'error': ['code', 'message'],
     'capabilities': ['pattern_contract_version', 'available', 'unavailable_reason', 'modes',
                      'default_mode', 'projections', 'default_projection',
@@ -150,7 +212,10 @@ SCHEMA = {
                      'strands', 'default_strands', 'graph_cleaned', 'records_shorter_than_k',
                      'resident_only', 'caps', 'default_time_budget_ms', 'finalize_reserve_ms',
                      'caps_rule', 'graph_mode', 'k', 'alphabet', 'strand_stated', 'mask',
-                     'placement', 'support', 'annotation', 'default_occurrences'],
+                     'placement', 'support', 'annotation', 'default_occurrences',
+                     # increments 4 and 5
+                     'long_search', 'default_long_search', 'protein_residues', 'genetic_codes',
+                     'default_genetic_code', 'protein_rule'],
     'capabilities_multi': ['pattern_contract_version', 'available', 'unavailable_reason'],
     # increment 3 (SPEC §14)
     'anchor_truncated': ['kmer', 'row', 'cap', 'total'],
@@ -159,6 +224,7 @@ SCHEMA = {
     'row_refused': ['kmer', 'row', 'phase', 'reason', 'needed_bytes', 'available_bytes'],
     'label': ['column', 'support', 'occurrences', 'occurrence_list'],
     'by_label': ['graph', 'column', 'contexts', 'contexts_suffix', 'occurrences'],
+    'by_label_paths': ['graph', 'column', 'paths', 'paths_record_verified', 'occurrences'],
     'labels_cut': ['reason', 'returned'],
     'occurrences_cut': ['reason', 'labels'],
 }
@@ -174,7 +240,7 @@ ENTRY_LABELS = ['placement', 'annotation', 'by_label', 'rows_refused', 'anchors_
 LIMITS_LABELS = ['max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb', 'max_labels',
                  'max_occurrences_per_label']
 CAPS = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms', 'min_information_bits',
-        'max_patterns'] + LIMITS_LABELS
+        'max_patterns'] + LIMITS_LABELS + ['max_paths']
 
 
 def load(*path):
@@ -224,6 +290,80 @@ def matches(pattern, text):
 
 def revcomp(s):
     return s.translate(COMPLEMENT)[::-1]
+
+
+def codons_of(residue, table):
+    """The codons of a peptide's residue in an NCBI table (X: every codon that is not a stop,
+    B: D or N, Z: E or Q, J: I or L; no stop codon ever)."""
+    admits = {'X': lambda a: True, 'B': lambda a: a in 'DN', 'Z': lambda a: a in 'EQ',
+              'J': lambda a: a in 'IL'}.get(residue, lambda a: a == residue)
+    return {c for c, a in zip(CODONS_TCAG, GENETIC_CODES[table]) if a != '*' and admits(a)}
+
+
+class Kind:
+    """A request pattern as the validator reads it: dna or iupac position by position, a
+    protein (a peptide) as its codon sets in the request's genetic code (SPEC §12.2)."""
+
+    def __init__(self, asked, request):
+        self.kind = next(k for k in KINDS if k in asked)
+        self.text = asked[self.kind].upper()
+        self.table = request.get('genetic_code', 1)
+        self.protein = self.kind == 'protein'
+        if self.protein and self.parsed():
+            self.codons = [codons_of(r, self.table) for r in self.text]
+
+    def parsed(self):
+        """Within the kind's alphabet (no slot error of the alphabet)."""
+        if not self.text:
+            return False
+        alphabet = {'dna': 'ACGT', 'iupac': ''.join(IUPAC), 'protein': PROTEIN_RESIDUES}
+        return all(c in alphabet[self.kind] for c in self.text)
+
+    def length(self):
+        return 3 * len(self.text) if self.protein else len(self.text)
+
+    def bits(self, begin=0, end=None):
+        """The information of the bases [begin, end): DNA and IUPAC per position; a peptide per
+        residue, 2 per base less log2 of the distinct strings its codons spell over the bases
+        of the window it covers (exact also for a window that cuts a codon, SPEC §12.2)."""
+        end = self.length() if end is None else end
+        if not self.protein:
+            return information_bits(self.text[begin:end])
+        out = 0.0
+        for i, codons in enumerate(self.codons):
+            lo, hi = max(begin, 3 * i) - 3 * i, min(end, 3 * i + 3) - 3 * i
+            if lo < hi:
+                out += 2 * (hi - lo) - math.log2(len({c[lo:hi] for c in codons}))
+        return out
+
+    def instance(self, s, reverse):
+        """|s| is an instance of the oriented pattern: P, or rc(P) when |reverse|."""
+        if not self.protein:
+            return matches(revcomp(self.text) if reverse else self.text, s)
+        m = len(self.text)
+        if len(s) != 3 * m:
+            return False
+        for i in range(m):
+            codon = s[3 * i:3 * i + 3]
+            if reverse:
+                if revcomp(codon) not in self.codons[m - 1 - i]:
+                    return False
+            elif codon not in self.codons[i]:
+                return False
+        return True
+
+    def palindromic(self):
+        if not self.protein:
+            return revcomp(self.text) == self.text
+        m = len(self.codons)
+        return all(self.codons[i] == {revcomp(c) for c in self.codons[m - 1 - i]}
+                   for i in range(m))
+
+    def exact(self):
+        """Every position one base (a peptide: every residue one codon)."""
+        if self.protein:
+            return all(len(c) == 1 for c in self.codons)
+        return all(c in 'ACGT' for c in self.text)
 
 
 class Checker:
@@ -332,9 +472,14 @@ class Checker:
                 'index.strand_stated', 'true exactly on basic graphs')
 
         limits = a['limits']
-        # the annotation limits only in the answers that read annotation (increment 3)
+        # the annotation limits only in the answers that read annotation (increment 3); the
+        # path limits only in the answers to long_search "paths" (increment 4, SPEC §12.1),
+        # require_support among them only when labels are read
+        paths = request.get('long_search', 'anchors') == 'paths'
         self.keys(limits, [f for f in SCHEMA['limits']
-                           if labelled or f not in LIMITS_LABELS + ['allow_unbudgeted_annotation']],
+                           if (labelled or f not in LIMITS_LABELS + ['allow_unbudgeted_annotation'])
+                           and (paths or f not in ('long_search', 'max_paths'))
+                           and (paths and labelled or f != 'require_support')],
                   'limits')
         if labelled:
             for f in LIMITS_LABELS:
@@ -342,6 +487,13 @@ class Checker:
             self.ok(limits['allow_unbudgeted_annotation']
                     is request.get('allow_unbudgeted_annotation', False),
                     'limits.allow_unbudgeted_annotation')
+        if paths:
+            self.ok(limits['long_search'] == 'paths', 'limits.long_search')
+            self.ok(is_int(limits['max_paths']) and limits['max_paths'] >= 0, 'limits.max_paths')
+            if labelled:
+                self.ok(limits['require_support']
+                        == request.get('require_support', 'label_intersection'),
+                        'limits.require_support', 'as requested')
         for f in ('max_contexts', 'max_anchors', 'max_steps', 'max_patterns'):
             self.ok(is_int(limits[f]) and limits[f] >= 0, 'limits.' + f)
         self.ok(limits['max_steps'] >= 1, 'limits.max_steps')
@@ -352,7 +504,8 @@ class Checker:
         self.ok(limits['stop_at_threshold'] is request.get('stop_at_threshold', False),
                 'limits.stop_at_threshold')
         self.ok(isinstance(limits['clamped'], list), 'limits.clamped')
-        order = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms'] + LIMITS_LABELS
+        order = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms'] + LIMITS_LABELS \
+            + ['max_paths']
         clamped = []
         for i, c in enumerate(limits['clamped']):
             path = f'limits.clamped[{i}]'
@@ -386,6 +539,9 @@ class Checker:
             self.ok(limits['min_information_bits'] == caps['min_information_bits'],
                     'limits.min_information_bits')
             self.ok(limits['max_patterns'] == caps['max_patterns'], 'limits.max_patterns')
+            if 'genetic_code' in request:
+                self.ok(request['genetic_code'] in capabilities['genetic_codes'],
+                        'request.genetic_code', 'a table of the capabilities')
 
         self.timing(a['timing'], 'timing')
         self.ok(len(a['patterns']) == len(request['patterns']), 'patterns',
@@ -415,8 +571,8 @@ class Checker:
             if sticky is not None:
                 self.ok(e['stop'] == {'phase': 'discovery', 'reason': sticky}, path + '.stop',
                         f'the {sticky} stop of an earlier pattern, in discovery')
-                self.ok({f: e['work'][f] for f in ('ranges_visited', 'mask_scans', 'steps')}
-                        == {'ranges_visited': 0, 'mask_scans': 0, 'steps': 0}, path + '.work',
+                engine = ('ranges_visited', 'mask_scans', 'steps', 'extension_edges')
+                self.ok(all(e['work'][f] == 0 for f in engine if f in e['work']), path + '.work',
                         'no work after a budget stop')
                 for name, c in self.counts_of(e):
                     self.ok(c['relation'] == 'unknown' and c['value'] is None,
@@ -429,7 +585,7 @@ class Checker:
         """Every graph count of an answered entry: (name, count), parts included."""
         c = e['counts']
         out = []
-        for unit in ('contexts', 'anchors'):
+        for unit in ('contexts', 'anchors', 'paths'):
             if unit not in c:
                 continue
             top = c[unit]
@@ -439,14 +595,58 @@ class Checker:
             for key in ('by_offset', 'by_strand', 'by_orientation'):
                 for k, v in top.get(key, {}).items():
                     out.append((f'{unit}.{key}.{k}', v))
-        if 'paths' in c:
-            out.append(('paths', c['paths']))
         return out
 
-    def timing(self, t, path, labelled=False):
-        self.keys(t, SCHEMA['timing'] if labelled else ['elapsed_ms'], path)
+    def timing(self, t, path, labelled=False, extension=False):
+        self.keys(t, ['elapsed_ms'] + (['label_discovery_ms', 'placement_ms'] if labelled else [])
+                  + (['extension_ms'] if extension else []), path)
         for k, v in t.items():
             self.ok(is_num(v) and v >= 0, f'{path}.{k}')
+
+    def paths_count(self, c, anchors, e, strand_stated, limits, path):
+        """counts.paths of a pattern longer than k under long_search "paths" (SPEC §12.1): the
+        count with its per-orientation split, candidates_examined and what the extension did,
+        each extension with its relation."""
+        key = 'by_strand' if strand_stated else 'by_orientation'
+        self.count(c, 'paths', path, extra=[key, 'candidates_examined', 'extension'])
+        self.by_orientation(c, e, strand_stated, 'paths', path)
+        self.ok(is_int(c['candidates_examined']) and c['candidates_examined'] >= 0,
+                path + '.candidates_examined')
+        self.one_of(c['extension'], EXTENSIONS, path + '.extension')
+        relation = {'completed': 'exact', 'no_anchors': 'exact', 'stopped': 'at_least',
+                    'not_started': 'unknown', 'not_admitted': 'unknown'}.get(c['extension'])
+        self.ok(c['relation'] == relation, path + '.relation',
+                f'{c["relation"]} for an extension {c["extension"]}')
+        no_anchor = (anchors['relation'], anchors['value']) == ('exact', 0)
+        self.ok((c['extension'] == 'no_anchors') is no_anchor, path + '.extension',
+                'no_anchors exactly when the anchors are exact 0')
+        if no_anchor:
+            self.ok(c['value'] == 0 and c['candidates_examined'] == 0, path,
+                    'no anchor, no path: exact 0')
+        if c['extension'] == 'completed':
+            self.ok(anchors['relation'] == 'exact', path + '.extension',
+                    'completed: every anchor discovered and extended')
+        if c['extension'] == 'not_admitted':
+            self.ok(anchors['relation'] == 'exact' and anchors['value'] > limits['max_anchors'],
+                    path + '.extension', 'not admitted: the exact anchors above max_anchors')
+        if c['relation'] in ('exact', 'at_least'):
+            # each path entered its last branch of its own
+            self.ok(c['value'] <= c['candidates_examined'], path + '.candidates_examined',
+                    'at least one branch per path')
+
+    def by_support(self, labels, path):
+        """counts.labels.by_support of the labels of paths: the labels verified on a returned
+        path, and the listed ones verified on none; the two sum to the labels when exact."""
+        b = labels['by_support']
+        self.keys(b, SCHEMA['by_support'], path + '.by_support')
+        for name, v in b.items():
+            self.count(v, 'labels', f'{path}.by_support.{name}')
+        if labels['relation'] == 'exact' and all(v['relation'] == 'exact' for v in b.values()):
+            self.ok(sum(v['value'] for v in b.values()) == labels['value'], path + '.by_support',
+                    'the supports sum to the labels')
+        if labels['relation'] == 'unknown':
+            self.ok(all(v['relation'] == 'unknown' for v in b.values()), path + '.by_support',
+                    'unknown labels, unknown supports')
 
     def entry(self, e, asked, request, a, path):
         k = a['index']['k']
@@ -455,52 +655,66 @@ class Checker:
         labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
         # the request named the labels (or an annotation field) and this answer reads none
         named = (request.get('output', {}).get('labels') == 'all'
-                 or any(f in request for f in LIMITS_LABELS + ['allow_unbudgeted_annotation']))
+                 or any(f in request for f in LIMITS_LABELS + ['allow_unbudgeted_annotation',
+                                                               'require_support']))
         self.ok(set(e) <= set(SCHEMA['entry']), path, f'fields outside the SPEC: '
                 f'{sorted(set(e) - set(SCHEMA["entry"]))}')
         self.ok(e['id'] == asked.get('id'), path + '.id', 'echoed')
-        kind = 'dna' if 'dna' in asked else 'iupac'
-        self.ok(e['kind'] == kind, path + '.kind')
-        text = asked[kind].upper()
+        pk = Kind(asked, request)
+        self.ok(e['kind'] == pk.kind, path + '.kind')
+        text = pk.text
+        # a peptide's entry states its residues and its genetic code (increment 5)
+        description = ENTRY_DESCRIPTION + (['residues', 'genetic_code'] if pk.protein else [])
 
         if 'error' in e:
             err = e['error']
             self.keys(err, SCHEMA['error'], path + '.error')
             self.one_of(err['code'], SLOT_ERRORS, path + '.error.code')
             self.ok(isinstance(err['message'], str) and err['message'], path + '.error.message')
-            if err['code'] == 'bad_alphabet':
+            # a peptide valid apart from its stops '*' (SPEC §8.9, §12.2)
+            stops_only = pk.protein and '*' in text \
+                and all(c in PROTEIN_RESIDUES + '*' for c in text)
+            if err['code'] in ('bad_alphabet', 'stop_unsupported'):
                 self.keys(e, ['id', 'kind', 'error'], path)
-                alphabet = 'ACGT' if kind == 'dna' else ''.join(IUPAC)
-                self.ok(not text or any(c not in alphabet for c in text), path,
-                        'bad_alphabet for a pattern inside the alphabet')
+                if err['code'] == 'stop_unsupported':
+                    self.ok(stops_only, path, 'stop_unsupported: a peptide valid but its stops')
+                else:
+                    self.ok(not pk.parsed() and not stops_only, path,
+                            'bad_alphabet for a pattern inside the alphabet')
                 return
-            self.keys(e, ENTRY_DESCRIPTION + ['error'], path)
-            self.description(e, text, k, path, request.get('strands', 'both'))
+            self.ok(pk.parsed(), path, 'an engine slot for a pattern outside the alphabet')
+            self.keys(e, description + ['error'], path)
+            self.description(e, pk, k, path, request)
             if err['code'] == 'information_below_floor':
                 bits = e['min_anchor_information_bits'] if e['length'] > k \
                     else e['information_bits']
                 self.ok(bits < a['limits']['min_information_bits'], path,
                         'refused above the floor')
                 # SPEC §7.8: an exact pattern in suffix scope is exempt from the floor
-                self.ok(not self.exempt(text, k, request), path,
+                self.ok(not self.exempt(pk, k, request), path,
                         'an exact pattern of L <= k in suffix scope is exempt from the floor')
             return
 
-        expected = ENTRY_ANSWERED + (ENTRY_RETRIEVAL if mode != 'count' else []) \
-            + (ENTRY_LABELS if labelled else [])
+        self.ok(pk.parsed(), path, 'answered outside the alphabet')
+        L = pk.length()
+        # long_search "paths" (increment 4): a pattern longer than k answered by its paths
+        paths = request.get('long_search', 'anchors') == 'paths' and L > k
+        verified_only = request.get('require_support') == 'record_verified'
+        expected = description + ENTRY_ANSWERED[len(ENTRY_DESCRIPTION):] \
+            + (ENTRY_RETRIEVAL if mode != 'count' else []) + (ENTRY_LABELS if labelled else []) \
+            + (['labels_excluded_unverified'] if labelled and paths and verified_only else [])
         self.keys(e, expected, path)
-        self.description(e, text, k, path, request.get('strands', 'both'))
+        self.description(e, pk, k, path, request)
         # SPEC §7.8: a pattern answered is exempt or at or above the floor (for L > k: every
         # searched anchor window, review of 2026-10-07, X-GUARANTEES-01)
-        bits = e['min_anchor_information_bits'] if e['length'] > k else e['information_bits']
-        self.ok(self.exempt(text, k, request) or bits >= a['limits']['min_information_bits'],
+        bits = e['min_anchor_information_bits'] if L > k else e['information_bits']
+        self.ok(self.exempt(pk, k, request) or bits >= a['limits']['min_information_bits'],
                 path, 'answered below the floor')
         self.ok(e['mode'] == mode, path + '.mode')
-        L = e['length']
         scope = 'long' if L > k else request.get('scope', 'any_offset')
         self.ok(e['scope'] == scope, path + '.scope', f'{e["scope"]!r}, expected {scope!r}')
         self.ok(e['absence_scope'] == ABSENCE_SCOPES[scope], path + '.absence_scope')
-        palindromic = revcomp(text) == text
+        palindromic = pk.palindromic()
         self.ok(e['palindromic'] is palindromic, path + '.palindromic')
         strands = request.get('strands', 'both')
         if palindromic:
@@ -521,13 +735,17 @@ class Checker:
             self.count(anchors, 'anchors', path + '.counts.anchors',
                        extra=['by_strand' if strand_stated else 'by_orientation'])
             self.by_orientation(anchors, e, strand_stated, 'anchors', path + '.counts.anchors')
-            self.count(counts['paths'], 'paths', path + '.counts.paths')
-            if (anchors['relation'], anchors['value']) == ('exact', 0):
-                self.ok(counts['paths'] == {'value': 0, 'relation': 'exact', 'unit': 'paths'},
-                        path + '.counts.paths', 'no anchor, no path: exact 0')
+            if paths:
+                self.paths_count(counts['paths'], anchors, e, strand_stated, a['limits'],
+                                 path + '.counts.paths')
             else:
-                self.ok(counts['paths']['relation'] == 'unknown', path + '.counts.paths',
-                        'paths are a later increment')
+                self.count(counts['paths'], 'paths', path + '.counts.paths')
+                if (anchors['relation'], anchors['value']) == ('exact', 0):
+                    self.ok(counts['paths'] == {'value': 0, 'relation': 'exact', 'unit': 'paths'},
+                            path + '.counts.paths', 'no anchor, no path: exact 0')
+                else:
+                    self.ok(counts['paths']['relation'] == 'unknown', path + '.counts.paths',
+                            'paths only with long_search "paths"')
             total = anchors
         else:
             self.keys(counts, ['contexts', 'labels', 'occurrences'], path + '.counts')
@@ -547,7 +765,11 @@ class Checker:
             self.by_orientation(c, e, strand_stated, 'graph_contexts', path + '.counts.contexts')
             total = c
         for f, unit in (('labels', 'labels'), ('occurrences', 'placed_occurrences')):
-            if labelled:
+            if labelled and f == 'labels' and paths:
+                # the labels of paths: split by their support (SPEC §12.1)
+                self.count(counts[f], unit, f'{path}.counts.{f}', extra=['by_support'])
+                self.by_support(counts[f], f'{path}.counts.{f}')
+            elif labelled:
                 self.count(counts[f], unit, f'{path}.counts.{f}')
             else:
                 self.ok(counts[f] == {'value': None, 'relation': 'unknown', 'unit': unit},
@@ -555,25 +777,39 @@ class Checker:
 
         # work, stop, determinism, notes
         w = e['work']
-        self.keys(w, SCHEMA['work'] if labelled else ['ranges_visited', 'mask_scans', 'steps'],
-                  path + '.work')
+        self.keys(w, ['ranges_visited', 'mask_scans', 'steps']
+                  + (['annotation_rows', 'annotation_units', 'memory_bytes'] if labelled else [])
+                  + (['extension_edges'] if paths else []), path + '.work')
         self.ok(all(is_int(v) and v >= 0 for v in w.values()), path + '.work')
-        self.ok(w['steps'] >= w['ranges_visited'], path + '.work', 'steps >= ranges_visited')
+        self.ok(w['steps'] >= w['ranges_visited'] + w.get('extension_edges', 0), path + '.work',
+                'steps >= ranges_visited (+ extension_edges, one step each)')
         stop = e['stop']
         if stop is not None:
             self.keys(stop, SCHEMA['stop'], path + '.stop')
             self.one_of(stop['phase'], STOP_PHASES, path + '.stop.phase')
             self.one_of(stop['reason'], STOP_REASONS, path + '.stop.reason')
             self.ok(total['relation'] != 'exact'
-                    or stop['phase'] in ('extraction',) + ANNOTATION_PHASES,
+                    or stop['phase'] in ('extraction', 'extension') + ANNOTATION_PHASES,
                     path + '.stop', 'a stop in discovery leaves no exact count')
             self.ok(stop['phase'] not in ANNOTATION_PHASES or labelled, path + '.stop.phase',
                     'an annotation phase without labels "all"')
+            self.ok(stop['phase'] != 'extension' or paths, path + '.stop.phase',
+                    'an extension without long_search "paths"')
+            self.ok((stop['reason'] == 'max_paths') <= (stop['phase'] == 'extension'),
+                    path + '.stop.reason', 'max_paths stops the extension only')
+            if stop['phase'] == 'extension':
+                self.ok(total['relation'] == 'exact'
+                        and counts['paths']['relation'] == 'at_least', path + '.stop',
+                        'a stop in the extension: the anchors exact, the paths at_least')
             if stop['reason'] == 'max_steps':
                 self.ok(w['steps'] <= a['limits']['max_steps'], path + '.work.steps')
         else:
             self.ok(total['relation'] == 'exact', path + '.counts',
                     'a count without a stop is exact')
+            if paths:
+                self.ok(counts['paths']['relation'] == 'exact'
+                        or counts['paths']['extension'] == 'not_admitted', path + '.counts.paths',
+                        'paths without a stop: exact, or not admitted')
         self.one_of(e['determinism'], ('full', 'time_limited'), path + '.determinism')
         # SPEC §7.6/§7.9: time_limited iff the clock touched the entry, in its stop or, in
         # partial, only in its cut (stop keeps the first stop: a pattern stopped by max_steps or
@@ -594,7 +830,8 @@ class Checker:
         self.ok(e['notes'] == [n for n in NOTES if n in e['notes']], path + '.notes', 'order')
         self.ok(('strand_unknown_canonical' in e['notes']) is (not strand_stated),
                 path + '.notes', 'strand_unknown_canonical exactly where no strand is known')
-        self.ok(('paths_later_increment' in e['notes']) is (L > k), path + '.notes')
+        self.ok(('paths_later_increment' in e['notes']) is (L > k and not paths),
+                path + '.notes', 'paths_later_increment exactly for L > k without paths')
         self.ok(('annotation_not_read' in e['notes']) is (named and not labelled),
                 path + '.notes', 'annotation_not_read exactly where labels were named, not read')
         if labelled:
@@ -602,36 +839,46 @@ class Checker:
                     is (e['annotation'] == 'unbudgeted'), path + '.notes')
             self.ok(('record_bounds_unknown' in e['notes']) is (e['placement'] == 'global'),
                     path + '.notes')
+            # increment 4: the labels of paths where no coordinate is read
+            self.ok(('label_intersection_only' in e['notes'])
+                    is (paths and e['placement'] in ('none', 'none_canonical', 'not_requested')),
+                    path + '.notes', 'label_intersection_only exactly for paths placed nowhere')
         else:
-            self.ok(not {'annotation_unbudgeted', 'record_bounds_unknown'} & set(e['notes']),
-                    path + '.notes')
-        self.timing(e['timing'], path + '.timing', labelled)
+            self.ok(not {'annotation_unbudgeted', 'record_bounds_unknown',
+                         'label_intersection_only'} & set(e['notes']), path + '.notes')
+        self.timing(e['timing'], path + '.timing', labelled, paths)
 
         if mode == 'count':
             self.ok(e['retrieval_complete'] is False, path + '.retrieval_complete',
                     'a count returns no context')
             return
-        self.retrieval(e, text, total, request, a, path)
+        self.retrieval(e, pk, total, request, a, path, paths)
 
-    def description(self, e, text, k, path, strands='both'):
+    def description(self, e, pk, k, path, request):
+        strands = request.get('strands', 'both')
+        text, L = pk.text, pk.length()
         self.ok(e['pattern'] == text, path + '.pattern', 'the pattern in upper case')
-        self.ok(e['length'] == len(text), path + '.length')
-        self.ok(is_num(e['information_bits'])
-                and abs(e['information_bits'] - information_bits(text)) < 1e-9,
-                path + '.information_bits')
-        if len(text) > k:
+        # L in bases whatever the kind: 3 per residue of a peptide (SPEC §12.2)
+        self.ok(e['length'] == L, path + '.length')
+        if pk.protein:
+            self.ok(e['residues'] == len(text), path + '.residues')
+            self.ok(e['genetic_code'] == pk.table, path + '.genetic_code', 'the request\'s')
+        self.ok(is_num(e['information_bits']) and abs(e['information_bits'] - pk.bits()) < 1e-9,
+                path + '.information_bits', f'{e["information_bits"]}, expected {pk.bits()}')
+        if L > k:
             # anchor_information_bits: the bits of P[0, k), whatever the strands (its meaning in
             # contract version 1); min_anchor_information_bits: the least informative anchor
             # window searched, P[0, k) forward, rc(P)[0, k) reverse, whose bits are
-            # P[L - k, L)'s (review of 2026-10-07, X-GUARANTEES-01, and the owner's decision)
+            # P[L - k, L)'s (review of 2026-10-07, X-GUARANTEES-01, and the owner's decision);
+            # a peptide's windows may cut a codon (exact bits, SPEC §12.2)
             self.ok(is_num(e['anchor_information_bits'])
-                    and abs(e['anchor_information_bits'] - information_bits(text[:k])) < 1e-9,
+                    and abs(e['anchor_information_bits'] - pk.bits(0, k)) < 1e-9,
                     path + '.anchor_information_bits', 'the bits of P[0, k)')
             windows = []
-            if strands in ('both', 'forward') or revcomp(text) == text:
-                windows.append(information_bits(text[:k]))
-            if strands in ('both', 'reverse') and revcomp(text) != text:
-                windows.append(information_bits(text[-k:]))
+            if strands in ('both', 'forward') or pk.palindromic():
+                windows.append(pk.bits(0, k))
+            if strands in ('both', 'reverse') and not pk.palindromic():
+                windows.append(pk.bits(L - k, L))
             self.ok(is_num(e['min_anchor_information_bits'])
                     and abs(e['min_anchor_information_bits'] - min(windows)) < 1e-9,
                     path + '.min_anchor_information_bits', 'the bits of the least anchor window')
@@ -640,18 +887,20 @@ class Checker:
                 self.ok(e[f] is None, path + '.' + f)
 
     @staticmethod
-    def exempt(text, k, request):
-        """SPEC §7.8: an exact pattern (ACGT only, whatever its kind) of L <= k in suffix scope
-        is exempt from the information floor."""
-        return all(c in 'ACGT' for c in text) and len(text) <= k \
+    def exempt(pk, k, request):
+        """SPEC §7.8: an exact pattern (every position one base, whatever its kind; a peptide:
+        every residue one codon) of L <= k in suffix scope is exempt from the information
+        floor."""
+        return pk.exact() and pk.length() <= k \
             and request.get('scope', 'any_offset') == 'suffix'
 
-    def retrieval(self, e, text, total, request, a, path):
+    def retrieval(self, e, pk, total, request, a, path, paths=False):
         k = a['index']['k']
         strand_stated = a['index']['strand_stated']
         mode = a['mode']
         labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
-        L = len(text)
+        L = pk.length()
+        limits = a['limits']
         results = e['results']
         self.ok(isinstance(results, list) and e['returned'] == len(results), path + '.returned',
                 'the length of results')
@@ -666,15 +915,24 @@ class Checker:
             self.one_of(e['cut']['reason'], CUT, path + '.cut.reason')
             self.ok(mode == 'partial' and not e['retrieval_complete'], path + '.cut',
                     'only partial cuts, and a cut list is not complete')
+            self.ok(e['cut']['reason'] != 'max_contexts' or L <= k, path + '.cut',
+                    'max_contexts cuts contexts')
+            self.ok(e['cut']['reason'] != 'max_paths'
+                    or (paths and e['returned'] == limits['max_paths']), path + '.cut',
+                    'max_paths: the first max_paths paths')
         if e['retrieval_complete']:
             self.ok(total['relation'] == 'exact' and e['stop'] is None
                     and e['withheld'] is None and e['cut'] is None, path,
                     'complete: exact, no stop, nothing withheld or cut')
-            self.ok(e['returned'] == (total['value'] if L <= k else 0), path,
-                    'complete: every context returned')
-            if L > k:
-                self.ok(total['value'] == 0, path, 'a long pattern is complete only without '
-                        'anchors')
+            if paths:
+                c = e['counts']['paths']
+                self.ok(c['relation'] == 'exact' and e['returned'] == c['value'], path,
+                        'complete: every path returned')
+            elif L <= k:
+                self.ok(e['returned'] == total['value'], path, 'complete: every context returned')
+            else:
+                self.ok(e['returned'] == 0 and total['value'] == 0, path,
+                        'a long pattern without paths is complete only without anchors')
         elif e['withheld'] is None and mode == 'partial':
             labels_stated = labelled and (
                 e['rows_refused'] or e['anchors_truncated'] or e['stop'] is not None
@@ -684,13 +942,100 @@ class Checker:
         if mode == 'all_or_count':
             self.ok(e['retrieval_complete'] or e['withheld'] is not None, path,
                     'all_or_count returns all, or withholds')
-        if L > k:
-            self.ok(results == [], path + '.results', 'no result for a long pattern in version 1')
+        if L > k and not paths:
+            self.ok(results == [], path + '.results', 'no result without long_search "paths"')
             if not e['retrieval_complete']:
                 self.ok(e['withheld'] == {'reason': 'paths_later_increment'}, path + '.withheld')
+        if paths:
+            self.ok(e['withheld'] != {'reason': 'paths_later_increment'}, path + '.withheld',
+                    'paths were asked for')
+            c = e['counts']['paths']
+            reason = (e['withheld'] or {}).get('reason')
+            if reason == 'anchors_above_threshold':
+                self.ok(total['relation'] == 'exact' and total['value'] > limits['max_anchors']
+                        and c['extension'] == 'not_admitted', path + '.withheld',
+                        'the exact anchors above max_anchors, the extension not admitted')
+            elif reason == 'count_above_threshold':
+                self.ok(c['relation'] == 'exact' and c['value'] > limits['max_paths'],
+                        path + '.withheld', 'the exact paths above max_paths')
+            elif reason == 'threshold_crossed':
+                self.ok(e['stop'] is not None
+                        and e['stop']['reason'] in ('max_anchors', 'max_paths'),
+                        path + '.withheld', 'a stop_at_threshold stop')
         if mode == 'partial':
-            self.ok(e['returned'] <= a['limits']['max_contexts'], path + '.returned', 'the cap')
+            self.ok(e['returned'] <= (limits['max_paths'] if paths else limits['max_contexts']),
+                    path + '.returned', 'the cap')
 
+        if paths:
+            self.path_results(e, pk, request, a, path)
+        else:
+            self.context_results(e, pk, a, path)
+        if labelled:
+            self.labels(e, total, L, a, path, paths, request)
+
+    def path_results(self, e, pk, request, a, path):
+        """The paths of long_search "paths" (SPEC §12.1): each with its L bases (sequence =
+        instance, an instance of the oriented pattern), its anchor's k bases, offset 0, its node
+        path (n = L - k + 1 node ids, the row of each k-mer); never kmer; in the answer order
+        (anchor node, orientation, sequence), each once; per strand within the counts."""
+        k = a['index']['k']
+        strand_stated = a['index']['strand_stated']
+        labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
+        verified_only = request.get('require_support') == 'record_verified'
+        L = pk.length()
+        n = L - k + 1
+        key = 'strand' if strand_stated else 'orientation'
+        allowed = set(e['strands'])
+        order = []
+        for i, r in enumerate(e['results']):
+            rp = f'{path}.results[{i}]'
+            self.keys(r, ['sequence', 'anchor_kmer', 'instance', 'offset', key, 'nodes', 'rows']
+                      + (['support', 'labels_status', 'labels_total', 'labels'] if labelled
+                         else [])
+                      + (['labels_excluded_unverified'] if labelled and verified_only else []),
+                      rp)
+            s = r['sequence']
+            self.ok(isinstance(s, str) and len(s) == L and set(s) <= set('ACGT'),
+                    rp + '.sequence')
+            self.ok(r['instance'] == s, rp + '.instance', 'the sequence')
+            self.ok(r['anchor_kmer'] == s[:k], rp + '.anchor_kmer', 'the first k bases')
+            self.ok(r['offset'] == 0, rp + '.offset')
+            self.ok(r[key] in allowed, rp + '.' + key, f'{r[key]!r} not searched')
+            self.ok(pk.instance(s, r[key] in ('-', 'reverse')), rp + '.sequence',
+                    f'{s} does not instantiate the oriented pattern')
+            nodes, rows = r['nodes'], r['rows']
+            self.ok(isinstance(nodes, list) and len(nodes) == n
+                    and all(is_int(x) and x >= 1 for x in nodes), rp + '.nodes')
+            self.ok(isinstance(rows, list) and len(rows) == n
+                    and all(x is None or (is_int(x) and x >= 0) for x in rows), rp + '.rows')
+            if a['index']['graph_mode'] == 'basic':
+                self.ok(all(x is None or x == y - 1 for x, y in zip(rows, nodes)), rp + '.rows',
+                        'node - 1 on a basic graph')
+            order.append((nodes[0], ORIENTATION_RANK[r[key]], s))
+        self.ok(order == sorted(order) and len(set(order)) == len(order), path + '.results',
+                'ordered by (anchor node, orientation, sequence), each path once')
+        c = e['counts']['paths']
+        by = c['by_strand' if strand_stated else 'by_orientation']
+        got = {}
+        for r in e['results']:
+            part = STRAND_KEYS[r[key]] if strand_stated else r[key]
+            got[part] = got.get(part, 0) + 1
+        for part, count in by.items():
+            m = got.get(part, 0)
+            if e['retrieval_complete']:
+                self.ok(count['relation'] == 'exact' and m == count['value'],
+                        f'{path}.counts.paths.{part}', f'{m} results, the count {count["value"]}')
+            elif count['relation'] == 'exact':
+                self.ok(m <= count['value'], f'{path}.counts.paths.{part}',
+                        f'{m} results above the exact count {count["value"]}')
+        self.ok(set(got) <= set(by), path + '.counts.paths', 'a result outside the parts counted')
+
+    def context_results(self, e, pk, a, path):
+        k = a['index']['k']
+        strand_stated = a['index']['strand_stated']
+        labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
+        L = pk.length()
+        results = e['results']
         key = 'strand' if strand_stated else 'orientation'
         allowed = set(e['strands'])
         order = []
@@ -706,9 +1051,8 @@ class Checker:
                 self.ok(r['offset'] == k - L, rp + '.offset', 'suffix scope: offset k - L')
             self.ok(r['instance'] == r['kmer'][r['offset']:r['offset'] + L], rp + '.instance')
             self.ok(r[key] in allowed, rp + '.' + key, f'{r[key]!r} not searched')
-            oriented = revcomp(text) if r[key] in ('-', 'reverse') else text
-            self.ok(matches(oriented, r['instance']), rp + '.instance',
-                    f'{r["instance"]} does not instantiate {oriented}')
+            self.ok(pk.instance(r['instance'], r[key] in ('-', 'reverse')), rp + '.instance',
+                    f'{r["instance"]} does not instantiate the oriented pattern')
             self.ok(is_int(r['node']) and r['node'] >= 1, rp + '.node')
             self.ok(r['row'] is None or (is_int(r['row']) and r['row'] >= 0), rp + '.row')
             if a['index']['graph_mode'] == 'basic' and r['row'] is not None:
@@ -751,13 +1095,10 @@ class Checker:
                                 f'{n} results above the exact count {count["value"]}')
                 self.ok(set(got) <= set(parts), f'{path}.counts.contexts.{name}',
                         'a result outside the parts counted')
-        if labelled:
-            self.labels(e, total, L, a, path)
 
-    def labels(self, e, total, L, a, path):
-        """output.labels "all" (SPEC §14): the label fields, their values and the rules that tie
-        them to retrieval_complete, withheld and the counts."""
-        k = a['index']['k']
+    def labels(self, e, total, L, a, path, paths=False, request=None):
+        """output.labels "all" (SPEC §14; for paths §12.1): the label fields, their values and the
+        rules that tie them to retrieval_complete, withheld and the counts."""
         mode = a['mode']
         self.one_of(e['placement'], ENTRY_PLACEMENTS, path + '.placement')
         if a['index']['graph_mode'] != 'basic':
@@ -780,12 +1121,18 @@ class Checker:
                 self.keys(e[f], SCHEMA[schema], f'{path}.{f}')
                 self.ok(mode == 'partial' and not e['retrieval_complete'], f'{path}.{f}',
                         'only partial cuts its lists, and a cut answer is not complete')
+        if 'labels_excluded_unverified' in e:
+            self.count(e['labels_excluded_unverified'], 'labels',
+                       path + '.labels_excluded_unverified')
         if e['withheld'] is not None:
             self.ok(e['by_label'] is None, path + '.by_label', 'null when withheld')
             for f in ('labels', 'occurrences'):
                 self.ok(e['counts'][f]['relation'] == 'unknown', f'{path}.counts.{f}',
                         'nothing published when withheld')
             return
+        # a path's labels_total is the size of its labels' intersection: unknown (null) when a
+        # row of it was truncated (SPEC §12.1)
+        unknown_total = ('refused', 'not_read', 'truncated') if paths else ('refused', 'not_read')
         if e['by_label'] is None:
             # partial whose memory account could not hold by_label (SPEC §14.4; outside review
             # GPT-2 recheck): no label of the pattern is built, every context read answers
@@ -803,8 +1150,14 @@ class Checker:
                 self.ok(r['labels_status'] not in ('complete', 'truncated'), rp + '.labels_status',
                         'nothing listed without by_label')
                 self.ok(r['labels'] is None, rp + '.labels', 'null without by_label')
-                self.ok((r['labels_total'] is None) is (r['labels_status'] in ('refused', 'not_read')),
-                        rp + '.labels_total')
+                if r['labels_status'] in unknown_total:
+                    self.ok(r['labels_total'] is None, rp + '.labels_total')
+                elif not paths:
+                    self.ok(r['labels_total'] is not None, rp + '.labels_total')
+                # a path's excluded count is known only with its labels_total (SPEC §12.1)
+                if paths and r.get('labels_excluded_unverified') is not None:
+                    self.ok(is_int(r['labels_total']), rp + '.labels_excluded_unverified',
+                            'an integer only with the path\'s labels_total')
             return
         self.ok(isinstance(e['by_label'], list), path + '.by_label')
         if e['retrieval_complete']:
@@ -820,6 +1173,9 @@ class Checker:
             self.ok(e['counts']['labels']['value'] == len(e['by_label'])
                     or e['labels_cut'] is not None, path + '.counts.labels',
                     'every label in by_label')
+        if paths:
+            self.path_labels(e, L, a, path, request, records, placed)
+            return
         keys = []
         for i, b in enumerate(e['by_label']):
             bp = f'{path}.by_label[{i}]'
@@ -871,6 +1227,139 @@ class Checker:
                         self.ok(o['offset'] == r['offset'], op + '.offset')
                     self.ok(o['strand'] == strand, op + '.strand', 'the context\'s')
 
+    def path_labels(self, e, L, a, path, request, records, placed):
+        """The labels of paths (SPEC §12.1, owner decision #14): by_label per label with its
+        paths, the paths one record verifies and its occurrences; each path's labels, each with
+        its support (record_verified: an occurrence of the whole path in one record, placed;
+        label_intersection: on every k-mer of the path, no record holding it whole), the path's
+        support theirs; with require_support "record_verified" only the verified ones listed,
+        the others counted in labels_excluded_unverified."""
+        verified_only = request.get('require_support') == 'record_verified'
+        key = 'strand' if a['index']['strand_stated'] else 'orientation'
+        keys, verified_labels = [], 0
+        for i, b in enumerate(e['by_label']):
+            bp = f'{path}.by_label[{i}]'
+            self.keys(b, SCHEMA['by_label_paths'], bp)
+            self.ok(b['graph'] == a['index']['index_ns'], bp + '.graph')
+            self.count(b['paths'], 'paths', bp + '.paths')
+            self.count(b['paths_record_verified'], 'paths', bp + '.paths_record_verified')
+            self.count(b['occurrences'], 'placed_occurrences', bp + '.occurrences')
+            self.ok(b['paths']['value'] >= 1, bp + '.paths', 'a label of a returned path')
+            v = b['paths_record_verified']
+            if not records:
+                self.ok(v['relation'] == 'unknown', bp + '.paths_record_verified',
+                        'nothing is verified without a record mapping')
+                self.ok(b['occurrences']['relation'] == 'unknown', bp + '.occurrences')
+            elif v['relation'] == 'exact' and b['paths']['relation'] == 'exact':
+                self.ok(v['value'] <= b['paths']['value'], bp + '.paths_record_verified')
+                if verified_only:
+                    self.ok(v['value'] == b['paths']['value'], bp + '.paths_record_verified',
+                            'require_support: every path listing it verifies it')
+            if v['relation'] == 'exact' and v['value'] >= 1:
+                verified_labels += 1
+            keys.append((-b['paths']['value'], b['column']))
+        self.ok(keys == sorted(keys), path + '.by_label', '(paths desc, column asc)')
+        support = e['counts']['labels']['by_support']
+        if support['record_verified']['relation'] == 'exact' and e['labels_cut'] is None:
+            self.ok(support['record_verified']['value'] == verified_labels,
+                    path + '.counts.labels.by_support.record_verified',
+                    'the labels verified on a returned path')
+        if not records:
+            self.ok(support['record_verified']['relation'] == 'unknown',
+                    path + '.counts.labels.by_support.record_verified')
+        rank = {b['column']: i for i, b in enumerate(e['by_label'])}
+        for i, r in enumerate(e['results']):
+            rp = f'{path}.results[{i}]'
+            status = r['labels_status']
+            self.one_of(status, LABELS_STATUS, rp + '.labels_status')
+            if status == 'complete':
+                self.ok(is_int(r['labels_total']), rp + '.labels_total')
+            elif status in ('refused', 'not_read', 'truncated'):
+                self.ok(r['labels_total'] is None, rp + '.labels_total',
+                        'the intersection is known only when every row was read completely')
+            if verified_only:
+                # the true number or null: an integer only when every row of the path was read
+                # completely (as labels_total) and every label carrying it verified or refuted;
+                # a path whose verification was not done leaves the entry's count unknown
+                excluded = r['labels_excluded_unverified']
+                self.ok(excluded is None or (is_int(excluded) and excluded >= 0),
+                        rp + '.labels_excluded_unverified')
+                if status in ('refused', 'not_read', 'truncated'):
+                    self.ok(excluded is None, rp + '.labels_excluded_unverified',
+                            'null unless every row of the path was read completely')
+                if excluded is not None:
+                    self.ok(is_int(r['labels_total']), rp + '.labels_excluded_unverified',
+                            'an integer only with the path\'s labels_total')
+                elif status == 'complete':
+                    self.ok(e['labels_excluded_unverified']['relation'] == 'unknown',
+                            rp + '.labels_excluded_unverified',
+                            'a path read completely is undecided only when the verification '
+                            'was not done, which leaves the entry\'s count unknown')
+            if r['labels'] is None:
+                self.ok(r['support'] is None, rp + '.support', 'null without labels')
+                self.ok(status not in ('complete',), rp + '.labels', 'a complete path lists')
+                continue
+            self.ok(isinstance(r['labels'], list), rp + '.labels')
+            listed = [label['column'] for label in r['labels']]
+            self.ok(all(c in rank for c in listed), rp + '.labels', 'labels of by_label')
+            self.ok(listed == sorted(listed, key=rank.get), rp + '.labels', 'label order')
+            if status == 'complete' and e['labels_cut'] is None:
+                if not verified_only:
+                    self.ok(len(listed) == r['labels_total'], rp + '.labels',
+                            'every label of the intersection')
+                elif r['labels_excluded_unverified'] is not None:
+                    self.ok(len(listed) + r['labels_excluded_unverified'] == r['labels_total'],
+                            rp + '.labels',
+                            'every label of the intersection (listed or excluded)')
+                else:
+                    self.ok(len(listed) <= r['labels_total'], rp + '.labels',
+                            'the verified labels of the intersection')
+            supports = set()
+            for j, label in enumerate(r['labels']):
+                lp = f'{rp}.labels[{j}]'
+                self.keys(label, ['column', 'support'] + (['occurrences'] if records else [])
+                          + (['occurrence_list'] if placed else []), lp)
+                self.one_of(label['support'], SUPPORTS, lp + '.support')
+                supports.add(label['support'])
+                if verified_only:
+                    self.ok(label['support'] == 'record_verified', lp + '.support',
+                            'require_support: the verified labels only')
+                if not records:
+                    self.ok(label['support'] == 'label_intersection', lp + '.support',
+                            'nothing is verified without a record mapping')
+                if records:
+                    occ = label['occurrences']
+                    self.count(occ, 'placed_occurrences', lp + '.occurrences')
+                    if occ['relation'] == 'exact':
+                        self.ok((occ['value'] >= 1) is (label['support'] == 'record_verified'),
+                                lp + '.support', 'record_verified exactly with an occurrence')
+                if not placed or label['occurrence_list'] is None:
+                    continue
+                self.ok(isinstance(label['occurrence_list'], list), lp + '.occurrence_list')
+                if records and label['occurrences']['relation'] == 'exact' \
+                        and e['occurrences_cut'] is None:
+                    self.ok(len(label['occurrence_list']) == label['occurrences']['value'],
+                            lp + '.occurrence_list', 'every occurrence listed')
+                for n, o in enumerate(label['occurrence_list']):
+                    op = f'{lp}.occurrence_list[{n}]'
+                    if records:
+                        self.keys(o, SCHEMA['occurrence'], op)
+                        m = re.fullmatch(r'(\d+)-(\d+)', o['nt_coords'])
+                        self.ok(m and int(m.group(2)) == int(m.group(1)) + L - 1
+                                and int(m.group(1)) >= 1
+                                and int(m.group(2)) <= o['nt_length'], op + '.nt_coords',
+                                'the whole path in the record')
+                    else:
+                        # a chain of consecutive column coordinates: kmer_coord of its first
+                        # k-mer, offset 0 (record bounds unknown: unverified)
+                        self.keys(o, SCHEMA['occurrence_global'], op)
+                        self.ok(o['offset'] == 0, op + '.offset')
+                    self.ok(o['strand'] == r[key], op + '.strand', 'the path\'s')
+            expected = None if not supports else supports.pop() if len(supports) == 1 \
+                else 'mixed'
+            self.ok(r['support'] == expected, rp + '.support',
+                    f'{r["support"]!r}, its labels\' {expected!r}')
+
     # ------------------------------------------------------------- capabilities
 
     def block(self, b, path, multi):
@@ -887,9 +1376,26 @@ class Checker:
         else:
             self.ok(b['unavailable_reason'] is None, path + '.unavailable_reason')
         for f, values in (('modes', MODES), ('projections', ('none', 'all', 'predicate_only')),
-                          ('kinds', ('dna', 'iupac', 'protein')),
-                          ('strands', ('both', 'forward', 'reverse'))):
+                          ('kinds', KINDS), ('strands', ('both', 'forward', 'reverse')),
+                          ('long_search', LONG_SEARCH)):
             self.ok(isinstance(b[f], list) and b[f] and set(b[f]) <= set(values), f'{path}.{f}')
+        # increment 4: the paths are opt-in (owner decision #13): an omitted long_search is
+        # "anchors", and long_patterns keeps describing that answer
+        self.ok(b['default_long_search'] == 'anchors' and 'anchors' in b['long_search'],
+                path + '.default_long_search', 'version 1: an omitted long_search is "anchors"')
+        self.ok(b['long_patterns'] == 'anchors_counted', path + '.long_patterns')
+        # increment 5: the residues, the genetic codes (NCBI ids) and the default
+        self.ok(isinstance(b['protein_residues'], list)
+                and all(isinstance(r, str) and len(r) == 1 and r in PROTEIN_RESIDUES
+                        for r in b['protein_residues']), path + '.protein_residues')
+        self.ok(isinstance(b['genetic_codes'], list) and b['genetic_codes']
+                and all(c in GENETIC_CODES for c in b['genetic_codes']), path + '.genetic_codes',
+                'NCBI translation table ids')
+        self.ok(b['default_genetic_code'] in b['genetic_codes'], path + '.default_genetic_code')
+        self.ok(isinstance(b['protein_rule'], str) and b['protein_rule'],
+                path + '.protein_rule')
+        self.ok(('protein' in b['kinds']) is bool(b['protein_residues']), path + '.kinds',
+                'protein served exactly with its residues')
         self.ok(b['modes'] == list(MODES), path + '.modes')
         self.ok('none' in b['projections'], path + '.projections', '"none" is served everywhere')
         self.ok(b['default_mode'] in b['modes'], path + '.default_mode')
@@ -1030,6 +1536,8 @@ class TestPatternFixtures(unittest.TestCase):
         check.ok(set(request) <= set(SCHEMA['request']), 'request', sorted(request))
         for i, p in enumerate(request['patterns']):
             check.ok(set(p) <= set(SCHEMA['request_pattern']), f'request.patterns[{i}]')
+            check.ok(len(set(p) & set(KINDS)) == 1, f'request.patterns[{i}]', 'one kind')
+        check.ok(request.get('long_search', 'anchors') in LONG_SEARCH, 'request.long_search')
         check.ok(set(request.get('output', {})) <= set(SCHEMA['request_output']),
                  'request.output')
 
@@ -1093,7 +1601,8 @@ class TestPatternFixtures(unittest.TestCase):
         """The fixtures show every situation a client of version 1 has to handle."""
         seen = {k: set() for k in ('mode', 'scope', 'strands', 'withheld', 'cut', 'stop',
                                    'slot', 'refusal', 'graph_mode', 'relation', 'note',
-                                   'stop_then_cut')}
+                                   'stop_then_cut', 'kind', 'extension', 'support',
+                                   'path_support')}
         for name, f in self.fixtures.items():
             request, answer = self.bodies[name]
             if f['method'] != 'POST':
@@ -1105,10 +1614,17 @@ class TestPatternFixtures(unittest.TestCase):
             seen['strands'].add(request.get('strands', 'both'))
             seen['graph_mode'].add(answer['index']['graph_mode'])
             for e in answer['patterns']:
+                seen['kind'].add(e['kind'])
                 if 'error' in e:
                     seen['slot'].add(e['error']['code'])
                     continue
                 seen['scope'].add(e['scope'])
+                if 'extension' in e['counts'].get('paths', {}):
+                    seen['extension'].add(e['counts']['paths']['extension'])
+                    for r in e.get('results', []):
+                        if 'support' in r:
+                            seen['path_support'].add(r['support'])
+                            seen['support'].update(x['support'] for x in r['labels'] or [])
                 seen['note'].update(e['notes'])
                 for f2 in ('withheld', 'cut'):
                     if e.get(f2):
@@ -1123,12 +1639,21 @@ class TestPatternFixtures(unittest.TestCase):
                 seen['relation'].add(total['relation'])
         self.assertEqual(set(MODES), seen['mode'])
         self.assertEqual(set(SCOPES), seen['scope'])
+        # increments 4 and 5: every kind; the paths' extension completed, stopped, not
+        # admitted and without anchors; both supports of a label of a path (none listed: null)
+        self.assertEqual(set(KINDS), seen['kind'])
+        self.assertLessEqual({'completed', 'stopped', 'not_admitted', 'no_anchors'},
+                             seen['extension'])
+        self.assertEqual(set(SUPPORTS), seen['support'])
+        self.assertLessEqual({'record_verified', 'label_intersection', None},
+                             seen['path_support'])
         self.assertEqual({'both', 'forward', 'reverse'}, seen['strands'])
         # output_budget from labels_all_output_budget (a GCG repeat whose 1,828 contexts fill
         # the smallest account, max_memory_mb 1); the cut max_memory from labels_all_rows_refused
         # (partial, four patterns sharing that account)
         self.assertEqual(set(WITHHELD), seen['withheld'])
-        self.assertEqual({'max_contexts', 'max_steps', 'time', 'max_memory'}, seen['cut'])
+        self.assertEqual({'max_contexts', 'max_steps', 'time', 'max_memory', 'max_paths'},
+                         seen['cut'])
         self.assertEqual(set(SLOT_ERRORS), seen['slot'])
         self.assertEqual({'basic', 'primary'}, seen['graph_mode'])
         self.assertEqual(set(NOTES), seen['note'])
@@ -1150,6 +1675,9 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(without_fixture | set(UNPRODUCIBLE),
                          set(REFUSALS) - seen['refusal'], 'the refusal codes without a fixture')
         self.assertLessEqual({('label_discovery', 'max_annotation_work')}, seen['stop'])
+        # increment 4: the extension's stops
+        self.assertLessEqual({('extension', 'max_paths'), ('extension', 'max_steps')},
+                             seen['stop'])
         # SPEC §7.6 (the owner's decision of 2026-10-07): stop keeps the first stop; the time
         # that then cut the release shows only as cut time and time_limited, in the pattern
         # stopped by max_steps and in the one after it (review of 2026-10-07, C1-03)
@@ -1241,6 +1769,17 @@ class TestPatternFixtures(unittest.TestCase):
                              'support_message\'s branches not found in pattern.cpp')
         self.assertEqual(set(REFUSALS), literal | support)
         self.assertEqual(set(UNAVAILABLE), support | unavailable)
+        # the slot codes: the engine's PatternError codes (bad_alphabet, stop_unsupported) and
+        # its refusals of a parsed pattern (information_below_floor, scope_unsupported)
+        engine = os.path.join(REPO, 'src', 'graph', 'alignment', 'pattern_search.cpp')
+        with open(engine, encoding='utf-8') as f:
+            engine_text = f.read()
+        slots = set(re.findall(r'PatternError\(\s*"(\w+)"', engine_text))
+        self.assertEqual({'bad_alphabet', 'stop_unsupported'}, slots)
+        for code in ('information_below_floor', 'scope_unsupported'):
+            self.assertIn(f'"{code}"', engine_text)
+        self.assertEqual(set(SLOT_ERRORS), slots | {'information_below_floor',
+                                                    'scope_unsupported'})
 
     def test_by_label_null_in_partial_is_valid(self):
         """SPEC §14.4: in partial, when the memory account cannot hold by_label, the answer has
@@ -1321,6 +1860,78 @@ class TestPatternFixtures(unittest.TestCase):
                   mask='absent')
         with self.assertRaisesRegex(AssertionError, 'unavailable_reason'):
             block(available=False, unavailable_reason='alphabet_untested', alphabet='$ACGU')
+
+    def test_paths_and_peptides_rules_refuse_what_v1_never_answers(self):
+        """Increments 4 and 5 (SPEC §12.1, §12.2): the stored path and peptide answers pass,
+        and each rule they rest on refuses an answer that breaks it (so that the rules are not
+        vacuous): a path with kmer, a path that does not instantiate the pattern, a label
+        stated record_verified without an occurrence, an unverified label listed under
+        require_support, a stopped extension stated exact, a peptide's bits, a peptide's
+        instance off its codons, a stop refused as bad_alphabet, a path's excluded count stated
+        over truncated rows or withheld over complete ones."""
+        class Stub:
+            def fail(self, message):
+                raise AssertionError(message)
+
+        def check(name, mutate=None):
+            request, answer = self.bodies[name]
+            answer = copy.deepcopy(answer)
+            if mutate:
+                mutate(answer)
+            Checker(Stub(), name).answer(answer, request,
+                                         self.capabilities_of(self.fixtures[name]['server']))
+
+        for name in ('paths', 'paths_labels', 'paths_require_support', 'paths_stop_at_max_paths',
+                     'peptide', 'peptide_paths', 'peptide_bad_residue', 'paths_global',
+                     'paths_primary'):
+            check(name)
+
+        def first_path(a):
+            return a['patterns'][0]['results'][0]
+
+        cases = [
+            ('paths', lambda a: first_path(a).update(kmer=first_path(a)['anchor_kmer']),
+             'fields'),
+            ('paths', lambda a: first_path(a).update(
+                sequence=first_path(a)['sequence'][:-1] + 'ACGT'.replace(
+                    first_path(a)['sequence'][-1], '')[0],
+                instance=first_path(a)['sequence'][:-1] + 'ACGT'.replace(
+                    first_path(a)['sequence'][-1], '')[0]), 'does not instantiate'),
+            ('paths_labels',
+             lambda a: a['patterns'][1]['results'][0]['labels'][0].update(
+                 support='record_verified'), 'record_verified exactly with an occurrence'),
+            ('paths_require_support',
+             lambda a: a['patterns'][0]['results'][0]['labels'][0].update(
+                 support='label_intersection'), 'the verified labels only'),
+            ('paths_stop_at_max_paths',
+             lambda a: a['patterns'][0]['counts']['paths'].update(relation='exact'),
+             'for an extension stopped|an exact total has exact parts'),
+            ('paths_stop_at_max_paths',
+             lambda a: a['patterns'][0]['counts']['paths'].update(extension='completed'),
+             'at_least for an extension completed'),
+            ('peptide', lambda a: a['patterns'][0].update(
+                information_bits=a['patterns'][0]['information_bits'] + 1), 'information_bits'),
+            # the first context's instance: its first codon ATG (M) read as ATA (I in table 1)
+            ('peptide', lambda a: a['patterns'][0]['results'][0].update(
+                instance='ATA' + a['patterns'][0]['results'][0]['instance'][3:]),
+             'instance'),
+            ('peptide_bad_residue',
+             lambda a: a['patterns'][1]['error'].update(code='bad_alphabet'),
+             'bad_alphabet for a pattern inside the alphabet'),
+            # a path's labels_excluded_unverified (review of increments 4 and 5, finding 1):
+            # an integer for a path whose rows were truncated, and null for a path read and
+            # verified completely in an answer whose count is exact
+            ('paths_require_support',
+             lambda a: first_path(a).update(labels_status='truncated', labels_total=None),
+             'null unless every row of the path was read completely'),
+            ('paths_require_support',
+             lambda a: a['patterns'][1]['results'][0].update(labels_excluded_unverified=None),
+             'undecided only when the verification was not done'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                with self.assertRaisesRegex(AssertionError, says):
+                    check(name, mutate)
 
     def test_hand_made_bodies_are_the_codes(self):
         """The two hand-made 503 bodies are written by the code as stored here."""

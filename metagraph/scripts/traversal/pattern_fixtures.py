@@ -121,6 +121,16 @@ SCAN_10 = 'ATGCCGGTGA'
 SCAN_STEPS = 20
 # the record the hash graph is built from (a graph the engine does not recognise)
 HASH_RECORD = '1296536.fa'
+# increment 4 (paths, long_search "paths"): a 51-mer of two copies of a repeated 31-mer of the
+# E. coli records (562): 10 bases before one copy, the 31-mer, 10 bases after another. Every
+# k-mer of it is in the index (each window lies in one copy), so it is a path of the graph, but
+# no record holds it whole: its labels are carried (label_intersection), none record_verified
+CHIMERA = 'CGGCCTCCAGAGCACTTTGTCGTTTTTGGACGGAAAATCCCTAGAACCCCT'
+# increment 5 (peptides): the first residues of the NDM-1 protein (blaNDM-1's first codons,
+# ATG GAA TTG CCC AAT ATT ATG CAC CCG GTC GCG AAG CTG AGC): 10 residues are 30 bases, within
+# one k-mer; 14 residues are 42 bases, a pattern longer than k
+NDM_PEP = 'MELPNIMHPV'
+NDM_PEP_LONG = 'MELPNIMHPVAKLS'
 
 # the server's defaults (--pattern-* flags, DESIGN-pattern-search.md §5.3), for the hand-made
 # 503 and the expectations
@@ -140,6 +150,30 @@ STEP_THEN_TIME_BUDGET_MS = FINALIZE_MS + 150
 def counts_of(entry):
     c = entry['counts']
     return c.get('contexts') or c['anchors']
+
+
+def paths_count(relation, value=None, extension=None):
+    """counts.paths (long_search "paths", increment 4) with |relation|, |value| and what the
+    extension did, when given."""
+    def run(entry):
+        c = entry['counts']['paths']
+        check(c['relation'] == relation and (value is None or c['value'] == value)
+              and (extension is None or c['extension'] == extension), c)
+    return run
+
+
+def label_supports(*supports):
+    """Every label of every path result has a support of |supports|, and each is shown."""
+    def run(entry):
+        seen = {label['support'] for r in entry['results'] for label in r['labels']}
+        check(seen == set(supports), seen)
+    return run
+
+
+def has_note(name):
+    def run(entry):
+        check(name in entry['notes'], entry['notes'])
+    return run
 
 
 def check(condition, what):
@@ -688,6 +722,154 @@ FIXTURES = [
          'nothing (placement none_canonical)',
          entries(expect_all(exact(24), complete, field('annotation', 'unbudgeted'),
                             field('placement', 'none_canonical')))),
+
+    # ---------------------------------------------------------------- paths (increment 4)
+    post('paths', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(ABSENT_40, ident='absent')],
+          'long_search': 'paths', 'output': {'labels': 'none'}}, 200,
+         'long_search "paths" (increment 4, opt-in): a pattern longer than k extended into '
+         'paths: counts.paths exact with its per-strand split, candidates_examined and extension '
+         'completed, work.extension_edges, timing.extension_ms; each path result has sequence '
+         '(the L bases), anchor_kmer, instance, offset 0, strand, nodes and rows (never kmer); '
+         'limits echo long_search and max_paths; no anchor: no path, the empty answer complete',
+         entries(expect_all(paths_count('exact', 2, 'completed'), complete, field('returned', 2)),
+                 expect_all(paths_count('exact', 0, 'no_anchors'), complete))),
+    post('paths_count', 'masked',
+         {'patterns': [p(NDM_40)], 'mode': 'count', 'long_search': 'paths'}, 200,
+         'mode count with long_search "paths": the paths counted (exact, by strand), nothing '
+         'released',
+         entries(paths_count('exact', 2, 'completed'))),
+    post('paths_labels', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(CHIMERA, ident='chimera')],
+          'long_search': 'paths', 'output': {'labels': 'all'}}, 200,
+         'the labels of paths (owner decision #14): each label with its support -- '
+         'record_verified where one record holds the whole path (blaNDM-1\'s first 40 bases: '
+         '9 columns, their placed occurrences of the whole path), label_intersection where '
+         'every k-mer of the path carries the label but no record holds it whole (a 51-mer '
+         'joining two copies of a repeated 31-mer of the E. coli records: occurrences exact '
+         '0); by_label with paths and paths_record_verified, counts.labels.by_support',
+         entries(expect_all(paths_count('exact', 2), complete, label_supports('record_verified'),
+                            counted('labels', 'exact', 9), counted('occurrences', 'exact', 42),
+                            field('placement', 'record')),
+                 expect_all(paths_count('exact', 2), complete,
+                            label_supports('label_intersection'),
+                            counted('occurrences', 'exact', 0)))),
+    post('paths_require_support', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(CHIMERA, ident='chimera')],
+          'long_search': 'paths', 'require_support': 'record_verified',
+          'output': {'labels': 'all'}}, 200,
+         'require_support "record_verified": only the labels one record verifies are listed; '
+         'each path and the entry count the others in labels_excluded_unverified (the '
+         'chimera\'s two columns), limits.require_support echoed',
+         entries(expect_all(paths_count('exact', 2), complete, label_supports('record_verified'),
+                            counted('labels', 'exact', 9)),
+                 expect_all(paths_count('exact', 2), complete,
+                            lambda e: check(all(r['labels'] == [] for r in e['results']), e),
+                            lambda e: check(e['labels_excluded_unverified']['value'] == 2,
+                                            e['labels_excluded_unverified'])))),
+    post('paths_max_paths_partial', 'masked',
+         {'patterns': [p(NDM_40)], 'mode': 'partial', 'long_search': 'paths', 'max_paths': 1,
+          'output': {'labels': 'none'}}, 200,
+         'partial, more paths (2) than max_paths (1): the first path in answer order, '
+         'cut.reason max_paths, the count exact',
+         entries(expect_all(paths_count('exact', 2), cut('max_paths'), field('returned', 1),
+                            field('stop', None)))),
+    post('paths_count_above_threshold', 'masked',
+         {'patterns': [p(NDM_40)], 'long_search': 'paths', 'max_paths': 1,
+          'output': {'labels': 'none'}}, 200,
+         'all_or_count, the exact path count (2) above max_paths (1): withheld '
+         'count_above_threshold',
+         entries(expect_all(paths_count('exact', 2), withheld('count_above_threshold')))),
+    post('paths_stop_at_max_paths', 'masked',
+         {'patterns': [p(NDM_40)], 'long_search': 'paths', 'max_paths': 1,
+          'stop_at_threshold': True, 'output': {'labels': 'none'}}, 200,
+         'stop_at_threshold with max_paths 1: the extension stops once more than max_paths '
+         'paths are complete: stop {extension, max_paths}, paths at_least, extension stopped, '
+         'withheld threshold_crossed',
+         entries(expect_all(paths_count('at_least', 2, 'stopped'), withheld('threshold_crossed'),
+                            field('stop', {'phase': 'extension', 'reason': 'max_paths'})))),
+    post('paths_anchors_above_threshold', 'masked',
+         {'patterns': [p(NDM_40)], 'long_search': 'paths', 'max_anchors': 1,
+          'output': {'labels': 'none'}}, 200,
+         'the exact anchor count (2) above max_anchors (1): the extension is not admitted, '
+         'paths unknown (extension not_admitted), withheld anchors_above_threshold',
+         entries(expect_all(exact(2), paths_count('unknown', None, 'not_admitted'),
+                            withheld('anchors_above_threshold')))),
+    post('paths_max_steps', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(NDM_F, ident='NDM-F')], 'mode': 'partial',
+          'long_search': 'paths', 'max_steps': 75, 'output': {'labels': 'none'}}, 200,
+         'max_steps reached in the extension (discovery took 62 steps): stop {extension, '
+         'max_steps}, paths at_least, the paths completed before the stop released (a prefix of '
+         'the answer order), cut max_steps; the next pattern answers the sticky stop',
+         entries(expect_all(paths_count('at_least', 1, 'stopped'), cut('max_steps'),
+                            field('returned', 1),
+                            field('stop', {'phase': 'extension', 'reason': 'max_steps'})),
+                 expect_all(cut('max_steps'), field('returned', 0), unknown_counts,
+                            field('stop', {'phase': 'discovery', 'reason': 'max_steps'})))),
+    post('paths_global', 'masked_no_map',
+         {'patterns': [p(NDM_40)], 'long_search': 'paths', 'output': {'labels': 'all'}}, 200,
+         'paths with coordinates but no record mapping (placement global): nothing can be '
+         'verified, every label label_intersection, its occurrence_list the chains '
+         '(kmer_coord of the first k-mer, offset 0, strand), note record_bounds_unknown',
+         entries(expect_all(paths_count('exact', 2), complete, label_supports('label_intersection'),
+                            field('placement', 'global'), has_note('record_bounds_unknown')))),
+    post('paths_primary', 'primary',
+         {'patterns': [p(NDM_40)], 'long_search': 'paths', 'output': {'labels': 'all'},
+          'allow_unbudgeted_annotation': True}, 200,
+         'paths on a PRIMARY index: orientation instead of strand, wrapper node ids; no '
+         'coordinates read (placement none_canonical): every label label_intersection, note '
+         'label_intersection_only',
+         entries(expect_all(paths_count('exact', 2), complete, label_supports('label_intersection'),
+                            field('placement', 'none_canonical'),
+                            has_note('label_intersection_only')))),
+    post('support_unavailable', 'masked_no_map',
+         {'patterns': [p(NDM_40)], 'long_search': 'paths', 'require_support': 'record_verified',
+          'output': {'labels': 'all'}}, 400,
+         '400 support_unavailable: require_support "record_verified" on an index that cannot '
+         'verify (no record mapping: its best support is label_intersection)',
+         refused('support_unavailable')),
+
+    # ---------------------------------------------------------------- peptides (increment 5)
+    post('peptide', 'masked',
+         {'patterns': [p(NDM_PEP, 'protein', 'NDM-1 1-10'), p('MELPNJMHPV', 'protein', 'J'),
+                       p(NDM_PEP_LONG, 'protein', 'NDM-1 1-14')],
+          'output': {'labels': 'all'}}, 200,
+         'protein patterns (increment 5) in the default genetic code (1): kind protein, length '
+         'in bases (3 per residue), residues, genetic_code; the first 10 residues of NDM-1 (30 '
+         'bases, one k-mer) in their codons: the contexts, labels and placed occurrences of '
+         'blaNDM-1 (9 columns, 42); J (I or L) admits the same; 14 residues (42 bases, longer '
+         'than k) without long_search: anchors only, withheld paths_later_increment',
+         entries(expect_all(exact(4), complete, labelled, counted('labels', 'exact', 9),
+                            counted('occurrences', 'exact', 42), field('residues', 10),
+                            field('length', 30)),
+                 expect_all(exact(4), complete, counted('occurrences', 'exact', 42)),
+                 expect_all(exact(2), withheld('paths_later_increment'),
+                            field('residues', 14)))),
+    post('peptide_count', 'masked',
+         {'patterns': [p(NDM_PEP, 'protein')], 'mode': 'count', 'genetic_code': 11}, 200,
+         'a peptide counted in the bacterial genetic code (genetic_code 11, stated in the entry)',
+         entries(expect_all(exact(4), field('genetic_code', 11)))),
+    post('peptide_paths', 'masked',
+         {'patterns': [p(NDM_PEP_LONG, 'protein', 'NDM-1 1-14')], 'long_search': 'paths',
+          'output': {'labels': 'all'}}, 200,
+         'a peptide longer than k with long_search "paths": its anchors extended through the '
+         'codon automaton into paths of 42 bases (one per strand), each with its labels, '
+         'record_verified',
+         entries(expect_all(paths_count('exact', 2, 'completed'), complete,
+                            label_supports('record_verified'), counted('labels', 'exact', 9),
+                            counted('occurrences', 'exact', 42)))),
+    post('peptide_bad_residue', 'masked',
+         {'patterns': [p('MELPUIMHPV', 'protein', 'U'), p('MELPNIMHPV*', 'protein', 'stop'),
+                       p(NDM_PEP, 'protein', 'ok')], 'mode': 'count'}, 200,
+         'error slots of protein patterns: bad_alphabet (U, selenocysteine, is not served), '
+         'stop_unsupported (the stop * is not served in this version: no branch through a stop '
+         'codon); the last pattern is answered',
+         entries(slot_error('bad_alphabet'), slot_error('stop_unsupported'), exact(4))),
+    post('genetic_code_unknown', 'masked',
+         {'patterns': [p(NDM_PEP, 'protein')], 'genetic_code': 7}, 400,
+         '400 genetic_code_unknown: genetic_code is not an NCBI translation table id (7 was '
+         'merged into 4; capabilities genetic_codes lists the ids)',
+         refused('genetic_code_unknown')),
 
     # ---------------------------------------------------------------- whole-request refusals
     post('unknown_field', 'masked',

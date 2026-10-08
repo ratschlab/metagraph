@@ -107,6 +107,67 @@ def pattern_regex(pattern):
     return re.compile('(?=(' + ''.join('[' + IUPAC[c] + ']' for c in pattern.upper()) + '))')
 
 
+# increment 5 (peptides): the test's own copy of NCBI's genetic codes used here (gc.prt 4.6,
+# ncbieaa: the residue of each codon in TCAG order), never the server's tables
+GENETIC_CODES = {
+    1: 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    2: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNKKSS**VVVVAAAADDEEGGGG',
+    11: 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+}
+CODONS_TCAG = [a + b + c for a in 'TCAG' for b in 'TCAG' for c in 'TCAG']
+
+
+def translate(seq, table):
+    """The residues of |seq| read from its first base (an incomplete last codon dropped);
+    '?' for a codon with a base other than A, C, G, T."""
+    code = dict(zip(CODONS_TCAG, GENETIC_CODES[table]))
+    return ''.join(code.get(seq[i:i + 3], '?') for i in range(0, len(seq) - 2, 3))
+
+
+def residue_admits(residue, aa):
+    """A peptide's residue (X, B, Z, J the ambiguity codes) admits the amino acid |aa|; no
+    residue admits a stop."""
+    if aa in '*?':
+        return False
+    return {'X': True, 'B': aa in 'DN', 'Z': aa in 'EQ', 'J': aa in 'IL'}.get(residue,
+                                                                         aa == residue)
+
+
+def peptide_codons(residue, table):
+    return {c for c, aa in zip(CODONS_TCAG, GENETIC_CODES[table]) if residue_admits(residue, aa)}
+
+
+def peptide_prefix(residues, table, s, reverse):
+    """|s| is the prefix of an instance of the oriented peptide: each complete codon one of its
+    residue's, a partial last codon the prefix of one (rc(P): codon i the reverse complement
+    of a codon of residue m - 1 - i)."""
+    m = len(residues)
+    if len(s) > 3 * m:
+        return False
+    for i in range(0, len(s), 3):
+        part = s[i:i + 3]
+        r = residues[m - 1 - i // 3] if reverse else residues[i // 3]
+        codons = peptide_codons(r, table)
+        if not any((revcomp(c) if reverse else c).startswith(part) for c in codons):
+            return False
+    return True
+
+
+def six_frames(seq, residues, table):
+    """{(0-based start, strand)}: every match of the peptide in the six frames of |seq| (its
+    three frames and the three of its reverse complement), the start on |seq|'s + strand."""
+    m, L = len(residues), 3 * len(residues)
+    out = set()
+    for strand, t in (('+', seq), ('-', revcomp(seq))):
+        for frame in range(3):
+            aa = translate(t[frame:], table)
+            for j in range(len(aa) - m + 1):
+                if all(residue_admits(residues[x], aa[j + x]) for x in range(m)):
+                    start = frame + 3 * j
+                    out.add((start if strand == '+' else len(t) - start - L, strand))
+    return out
+
+
 def _supports_pattern():
     res = subprocess.run(shlex.split(METAGRAPH) + ['pattern'], stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE)
@@ -689,7 +750,18 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             ({'patterns': p, 'allow_unbudgeted_annotation': 'yes'}, 'invalid_request',
              'allow_unbudgeted_annotation'),
             ({'patterns': p, 'graphs': ['x']}, 'later_increment', 'graphs'),
-            ({'patterns': [{'protein': 'MKV'}]}, 'later_increment', 'protein'),
+            # increment 5: protein is served; genetic_code is an NCBI table id
+            ({'patterns': [{'protein': 'MKV'}], 'genetic_code': 7}, 'genetic_code_unknown',
+             'genetic_code'),
+            ({'patterns': p, 'genetic_code': '11'}, 'invalid_request', 'genetic_code'),
+            # an integer that is no table, a negative one included, is genetic_code_unknown;
+            # a fraction is not an integer (SPEC §4.1; review of increments 4 and 5, finding 2)
+            ({'patterns': [{'protein': 'MELPNIMHPV'}], 'genetic_code': -1},
+             'genetic_code_unknown', 'genetic_code'),
+            ({'patterns': [{'protein': 'MELPNIMHPV'}], 'genetic_code': 1.5}, 'invalid_request',
+             'genetic_code'),
+            ({'patterns': [{'protein': 'MKV', 'dna': self.p16}]}, 'invalid_request',
+             'exactly one'),
             ({'patterns': p, 'in_ram': False}, 'resident_only', 'in_ram'),
         ]
         for payload, code, words in cases:
@@ -783,7 +855,13 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'modes': ['count', 'all_or_count', 'partial'], 'default_mode': 'all_or_count',
             'projections': ['none', 'all'], 'default_projection': 'none',
             'projections_later_increment': ['predicate_only'], 'default_occurrences': True,
-            'kinds': ['dna', 'iupac'], 'scopes': ['suffix', 'any_offset'],
+            'kinds': ['dna', 'iupac', 'protein'], 'kinds_later_increment': [],
+            # increment 5: the residues, the genetic codes and the default
+            'protein_residues': list('ACDEFGHIKLMNPQRSTVWYXBZJ'),
+            'genetic_codes': [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25,
+                              26, 27, 28, 29, 30, 31, 32, 33],
+            'default_genetic_code': 1,
+            'scopes': ['suffix', 'any_offset'],
             'default_scope': 'any_offset', 'long_patterns': 'anchors_counted',
             # increment 4: the paths of long patterns, opt-in
             'long_search': ['anchors', 'paths'], 'default_long_search': 'anchors',
@@ -1362,6 +1440,215 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                 # every whole occurrence in a record is a chain (a chain may also cross)
                 self.assertLessEqual({(i, a - 1) for i, a in verified.get(label['column'], ())},
                                      chains)
+
+    # ------------------------------------------------------------ peptides (increment 5)
+
+    def peptide_contexts(self, residues, table):
+        """{(strand, k-mer, offset)}: the graph contexts of a peptide of at most k bases from the
+        six-frame translation of every record (the mini's records hold no N: a record is an
+        island, its k-mers the graph's): every k-mer of a record that holds a match."""
+        k, L = self.k, 3 * len(residues)
+        out = set()
+        for recs in self.columns.values():
+            for _, seq in recs:
+                seq = seq.upper()
+                for i, strand in six_frames(seq, residues, table):
+                    for s in range(max(0, i + L - k), min(i, len(seq) - k) + 1):
+                        out.add((strand, seq[s:s + k], i - s))
+        return out
+
+    def peptide_placed(self, residues, table):
+        """{(column, seq_id, 1-based start, strand)}: the six-frame matches in every record."""
+        return {(column, seq_id, i + 1, strand)
+                for column, recs in self.columns.items()
+                for seq_id, (_, seq) in enumerate(recs)
+                for i, strand in six_frames(seq.upper(), residues, table)}
+
+    def peptide_paths(self, residues, table):
+        """{(strand, sequence)}: the graph paths of a peptide longer than k (the graph-walk
+        oracle): each anchor -- a k-mer of the records whose bases begin an instance of the
+        oriented peptide, found where the six-frame translation matches the residues its whole
+        codons cover -- extended one base at a time while the bases stay a prefix of an instance
+        and every k-window is a k-mer of the records (Records.has_kmer)."""
+        k, m = self.k, len(residues)
+        whole = k // 3
+        out = set()
+        for strand, reverse in (('+', False), ('-', True)):
+            # the residues the anchor's whole codons spell, in the record's reading direction
+            head = residues[m - whole:] if reverse else residues[:whole]
+            anchors = set()
+            for recs in self.columns.values():
+                for _, seq in recs:
+                    seq = seq.upper()
+                    for i, st in six_frames(seq, head, table):
+                        # forward: P's first codons match on '+' where the anchor starts;
+                        # reverse: rc(P)'s first bases are the reverse complement of P's last
+                        # codons, which match on '-' where the anchor starts too
+                        if st == ('-' if reverse else '+') and i + k <= len(seq):
+                            anchors.add(seq[i:i + k])
+            anchors = {x for x in anchors if peptide_prefix(residues, table, x, reverse)}
+
+            def extend(s):
+                if len(s) == 3 * m:
+                    out.add((strand, s))
+                    return
+                for b in 'ACGT':
+                    t = s + b
+                    if peptide_prefix(residues, table, t, reverse) \
+                            and self.records.has_kmer(t[len(t) - k:]):
+                        extend(t)
+            for x in sorted(anchors):
+                extend(x)
+        return out
+
+    def peptides(self):
+        """Peptides of the mini's records: NDM-1's first residues (blaNDM-1 on both strands of
+        several taxa) within one k-mer (10 residues, 30 bases) with an ambiguity code, and
+        windows of the records' translations in their bacterial code (11)."""
+        rng = random.Random(1508)
+        out = [('MELPNIMHPV', 11), ('MZLPBJMHPV', 1), ('MELPNXMHPV', 11)]
+        recs = [seq.upper() for r in self.columns.values() for _, seq in r]
+        while len(out) < 9:
+            seq = rng.choice(recs)
+            i = rng.randrange(len(seq) - 40)
+            residues = translate(seq[i:i + 3 * 9], 11)
+            if '*' in residues or '?' in residues:
+                continue
+            out.append((residues, 11))
+        return out
+
+    def assertPeptideEntry(self, entry, residues, table):
+        self.assertEqual(('protein', residues, 3 * len(residues), len(residues), table),
+                         (entry['kind'], entry['pattern'], entry['length'], entry['residues'],
+                          entry['genetic_code']))
+        bits = sum(math.log2(64 / len(peptide_codons(r, table))) for r in residues)
+        self.assertAlmostEqual(bits, entry['information_bits'], places=9)
+        self.assertFalse(entry['palindromic'])
+
+    def test_peptides_against_the_six_frames(self):
+        """Peptides within one k-mer (increment 5): their contexts the six-frame translation's
+        (every k-mer of a record holding a match), each with the columns whose records hold its
+        k-mer, and the placed occurrences every match of the translation; in count mode the
+        same counts."""
+        peptides = self.peptides()
+        for residues, table in peptides:
+            with self.subTest(peptide=residues, table=table):
+                request = {'patterns': [{'protein': residues}], 'genetic_code': table}
+                count = self.pattern(self.server, dict(request, mode='count'))['patterns'][0]
+                entry = self.pattern(self.server, dict(request, output={'labels': 'all'})
+                                     )['patterns'][0]
+                expected = self.peptide_contexts(residues, table)
+                self.assertGreater(len(expected), 0)
+                for e in (count, entry):
+                    self.assertPeptideEntry(e, residues, table)
+                    self.assertCount({x: e['counts']['contexts'][x]
+                                      for x in ('value', 'relation', 'unit')}, len(expected))
+                self.assertCompleteRetrieval(entry)
+                got = {(r['strand'], r['kmer'], r['offset']) for r in entry['results']}
+                self.assertEqual(expected, got)
+                placed = set()
+                for r in entry['results']:
+                    self.assertEqual(r['kmer'][r['offset']:r['offset'] + 3 * len(residues)],
+                                     r['instance'])
+                    columns = {c for c, recs in self.column_records.items()
+                               if recs.has_kmer(r['kmer'])}
+                    self.assertEqual(columns, {x['column'] for x in r['labels']}, r['kmer'])
+                    for label in r['labels']:
+                        for o in label['occurrence_list']:
+                            placed.add((label['column'], o['seq_id'],
+                                        int(o['nt_coords'].split('-')[0]), o['strand']))
+                self.assertEqual(self.peptide_placed(residues, table), placed)
+                self.assertCount(entry['counts']['occurrences'], len(placed),
+                                 unit='placed_occurrences')
+
+    def test_peptide_paths_against_the_six_frames(self):
+        """Peptides longer than k (14-16 residues) with long_search "paths": the paths the
+        graph-walk oracle's (anchored on the six-frame translation, extended through the codon
+        automaton over the records' k-mers), each label of a path record_verified exactly where
+        a record holds the whole path, and the placed occurrences the six-frame matches of the
+        whole peptide; without long_search the anchors only."""
+        rng = random.Random(77)
+        recs = [seq.upper() for r in self.columns.values() for _, seq in r]
+        peptides = [('MELPNIMHPVAKLS', 11)]
+        while len(peptides) < 4:
+            seq = rng.choice(recs)
+            i = rng.randrange(len(seq) - 60)
+            residues = translate(seq[i:i + 3 * 15], 11)
+            if '*' not in residues and '?' not in residues:
+                peptides.append((residues, 11))
+        for residues, table in peptides:
+            with self.subTest(peptide=residues):
+                request = {'patterns': [{'protein': residues}], 'genetic_code': table,
+                           'long_search': 'paths', 'output': {'labels': 'all'}}
+                entry = self.pattern(self.server, request)['patterns'][0]
+                self.assertPeptideEntry(entry, residues, table)
+                expected = self.peptide_paths(residues, table)
+                self.assertGreater(len(expected), 0)
+                c = entry['counts']['paths']
+                self.assertEqual(('exact', len(expected), 'completed'),
+                                 (c['relation'], c['value'], c['extension']))
+                self.assertCompleteRetrieval(entry)
+                got = {(r['strand'], r['sequence']) for r in entry['results']}
+                self.assertEqual(expected, got)
+                placed = set()
+                for r in entry['results']:
+                    s = r['sequence']
+                    self.assertEqual(s[:self.k], r['anchor_kmer'])
+                    carriers, verified = self.path_columns(s)
+                    self.assertEqual(carriers, {x['column'] for x in r['labels']})
+                    for label in r['labels']:
+                        occ = verified.get(label['column'], set())
+                        self.assertEqual('record_verified' if occ else 'label_intersection',
+                                         label['support'])
+                        for o in label['occurrence_list']:
+                            placed.add((label['column'], o['seq_id'],
+                                        int(o['nt_coords'].split('-')[0]), o['strand']))
+                self.assertEqual(self.peptide_placed(residues, table), placed)
+                # the option is opt-in: the anchors only without it
+                plain = self.pattern(self.server, {'patterns': [{'protein': residues}],
+                                                   'genetic_code': table})['patterns'][0]
+                self.assertEqual({'reason': 'paths_later_increment'}, plain['withheld'])
+                self.assertEqual('unknown', plain['counts']['paths']['relation'])
+
+    def test_peptide_slots_and_genetic_codes(self):
+        """The slot errors of a peptide (bad_alphabet, stop_unsupported), an unknown genetic
+        code refused, and the genetic code read: a peptide in the vertebrate mitochondrial code
+        (2) answered as the six-frame translation in that code finds it."""
+        out = self.pattern(self.server, {'patterns': [{'protein': 'MELPUIMHPV'},
+                                                      {'protein': 'MELPNIMHPV*'},
+                                                      {'protein': 'melpnimhpv'}],
+                                         'mode': 'count'})
+        self.assertEqual(['bad_alphabet', 'stop_unsupported'],
+                         [e['error']['code'] for e in out['patterns'][:2]])
+        for e in out['patterns'][:2]:
+            self.assertEqual({'id', 'kind', 'error'}, set(e))
+        self.assertPeptideEntry(out['patterns'][2], 'MELPNIMHPV', 1)
+        ret = self.server.post('pattern', {'patterns': [{'protein': 'MELPNIMHPV'}],
+                                           'genetic_code': 7})
+        self.assertEqual((400, 'genetic_code_unknown'), (ret.status_code, ret.json()['code']))
+        ret = self.server.post('pattern', {'patterns': [{'protein': 'MELPNIMHPV'}],
+                                           'genetic_code': '11'})
+        self.assertEqual((400, 'invalid_request'), (ret.status_code, ret.json()['code']))
+        for residues in ('MELPNIMHPV', 'AKLSTALAAA'):
+            entry = self.pattern(self.server, {'patterns': [{'protein': residues}],
+                                               'genetic_code': 2, 'mode': 'count'})['patterns'][0]
+            self.assertPeptideEntry(entry, residues, 2)
+            self.assertCount({x: entry['counts']['contexts'][x]
+                              for x in ('value', 'relation', 'unit')},
+                             len(self.peptide_contexts(residues, 2)))
+
+    def test_peptide_cli_answers_as_the_server(self):
+        request = {'patterns': [{'protein': 'MELPNIMHPV'}, {'protein': 'MELPNIMHPVAKLS'}],
+                   'genetic_code': 11, 'long_search': 'paths', 'output': {'labels': 'all'}}
+        server_out = self.pattern(self.server, request)
+        path = os.path.join(self.tempdir.name, 'request_peptides.json')
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
+                                                       '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
 
     # ------------------------------------------------------------ labels (increment 3)
 

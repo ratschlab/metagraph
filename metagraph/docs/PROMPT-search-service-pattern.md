@@ -39,7 +39,7 @@ proposed, §13 the increments.
 `/traverse`. Synchronous request/response, compact JSON, gzip when accepted; its own deadline (default 60 s, cap
 600 s, §3.2) with a finalisation reserve; the 900 s content timeout above the cap.
 
-**What a request says.** A list of patterns (`dna` | `iupac`, later `protein`), a `mode`
+**What a request says.** A list of patterns (`dna` | `iupac` | `protein`, the last since increment 5), a `mode`
 (`count` | `all_or_count` | `partial`), a `scope` (`suffix` | `any_offset`; `long` is implied for patterns longer
 than k), `strands`, caps (`max_contexts`, `max_steps`, `time_budget_ms`, …), and an `output.labels` projection:
 `none` (the label-free path), `all` (since milestone 3), later `predicate_only` (5b).
@@ -70,14 +70,33 @@ scopes per graph mode, the caps and floors, `placement` and `support` the index 
 changed meaning; within version 1 read fields by presence and pass unknown values of the extensible
 enumerations through, SPEC §1). A host without the block has no route.
 
+**Increments 4 and 5 (in the build since 2026-10-08; SPEC §12.1, §12.2, §17).** Two additions to contract
+version 1, both opt-in, each gated on the capabilities block, never on a milestone number:
+- **Paths of a pattern longer than k**: offer them only where `long_search` lists `"paths"`; the job then sends
+  `long_search: "paths"` (and `max_paths` within `caps.max_paths`). Without it a long pattern keeps the
+  anchor-only answer (`withheld: paths_later_increment`). A path result has `sequence` (the L bases),
+  `anchor_kmer`, `nodes` and `rows`, never `kmer`; `counts.paths` is known with its `extension`. With labels, each
+  label of a path states its `support`: `record_verified` (one record holds the whole path, with its placed
+  occurrences) or `label_intersection` (every k-mer of the path carries it, no record claim). Show the two apart;
+  a tool that reports "found in record X" uses `record_verified` labels only. `require_support:
+  "record_verified"` lists the verified labels only (each path counts the others in
+  `labels_excluded_unverified`, `null` when that number is not known: never read a `null` as 0) and is allowed
+  only where the block's `support` is `record_verified` (else 400 `support_unavailable`). New values to handle: `withheld` `anchors_above_threshold`,
+  `cut` `max_paths`, `stop.phase` `extension`, `stop.reason` `max_paths`, note `label_intersection_only`.
+- **Peptides**: offer them only where `kinds` lists `"protein"`: a `protein` pattern over `protein_residues` (the
+  20 amino acids and X, B, Z, J), in `genetic_code` (one of `genetic_codes`, default `default_genetic_code`, 1;
+  another integer is 400 `genetic_code_unknown`). A stop `*` is answered in its slot with `stop_unsupported`; the
+  entry states `residues` and `genetic_code`, and `length` stays in bases (3 per residue), so a peptide of more
+  than k / 3 residues is a long pattern (paths as above).
+
 ## 2. When
 
 | backend milestone | content | state |
 |---|---|---|
 | 1 | count (`mode: count`) and the label-free extraction (`all_or_count` / `partial` with `labels: none`): k-mers, offsets, strands, node and row ids; exact DNA and IUPAC; both strands; `suffix` and `any_offset`; single-graph servers; the capabilities block; `metagraph pattern` CLI | running now; contract freezes on its commit |
 | 3 | `labels: all`: label discovery and placement (record, 1-based position, strand) on BASIC indexes with record mapping | in the build (SPEC §14), with fixtures |
-| 4 | patterns longer than k (extension), per-label `support`, `require_support`; opt-in: only a request with `long_search: "paths"` gets paths (new fields `sequence`, `anchor_kmer`; `kmer` keeps its meaning), every other request keeps today's anchor-only answer (SPEC §12) | after 3 |
-| 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | after 4 |
+| 4 | patterns longer than k (extension), per-label `support`, `require_support`; opt-in: only a request with `long_search: "paths"` gets paths (new fields `sequence`, `anchor_kmer`; `kmer` keeps its meaning), every other request keeps today's anchor-only answer (SPEC §12.1) | in the build (2026-10-08, SPEC §17), with fixtures (`paths*`, `support_unavailable`) |
+| 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | 5 in the build (2026-10-08, SPEC §12.2), with fixtures (`peptide*`, `genetic_code_unknown`); 5b later |
 | 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
 | 7 | this service's job type (the backend's Python client methods are deferred until needed) | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
 | mask | refseq33m-experimental's graph has no `.edgemask` file, and the route needs one (DESIGN §4): before the route answers on staging the owner runs `metagraph transform --mask-dummy` once on mex, on the host rather than in the 128 GiB container (it holds a transient bit vector of edges + 1 bits, about 78 GB, beside the graph). Node ids, rows and the annotation stay; but `/stats` `graph.nodes` becomes the k-mer count, a `.bloom` beside the graph starts loading, and with `--index-manifest` the manifest is regenerated before `update.sh` restarts the server, after which `index_fp` changes: the service sees a new index identity. `--pattern-build-mask` (the mask built in memory at every start-up, with `--threads-each` threads, before any route answers) is for small indexes, not for refseq33m. Until then the host states `mask: absent` and the job answers `mask_required` | before the owner's `update.sh` that enables the route |

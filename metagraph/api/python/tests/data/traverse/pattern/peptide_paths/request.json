@@ -1,0 +1,12 @@
+{
+ "patterns": [
+  {
+   "protein": "MELPNIMHPVAKLS",
+   "id": "NDM-1 1-14"
+  }
+ ],
+ "long_search": "paths",
+ "output": {
+  "labels": "all"
+ }
+}

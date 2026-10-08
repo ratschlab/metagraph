@@ -1,0 +1,17 @@
+{
+ "patterns": [
+  {
+   "protein": "MELPUIMHPV",
+   "id": "U"
+  },
+  {
+   "protein": "MELPNIMHPV*",
+   "id": "stop"
+  },
+  {
+   "protein": "MELPNIMHPV",
+   "id": "ok"
+  }
+ ],
+ "mode": "count"
+}

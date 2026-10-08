@@ -1,0 +1,4 @@
+{
+ "code": "genetic_code_unknown",
+ "error": "request.genetic_code: 7 is not an NCBI translation table id; the tables served are 1-6, 9-16, 21-33 (capabilities genetic_codes), 1, the standard code, the default"
+}

@@ -85,7 +85,7 @@ never matches a record's N symbol (DNA5 builds, `alphabets.hpp:81`); the unconst
 |---|---|---|
 | `dna` | a string over A, C, G, T | one base each |
 | `iupac` | a string over the 15 IUPAC codes | the code's set (R = {A, G}, N = {A, C, G, T}, …) |
-| `protein` | a string over the 20 amino acids (no stop, no ambiguity codes in v1) | 3 per residue; the codon automaton of the residue (§6) |
+| `protein` | a string over the 20 amino acids and the ambiguity codes X (any residue), B (D/N), Z (E/Q), J (I/L) (the owner's decision #15 of 2026-10-08; no stop `*` in this version) | 3 per residue; the codon automaton of the residue (§6) |
 
 A pattern's **information** is Σ log2(4 / |set_i|) bits over its positions (for a peptide, log2(64 / codons) per
 residue). For a pattern longer than k the information of each searched orientation's **anchor window** (positions
@@ -708,7 +708,9 @@ A residue is a set of codons; the automaton's state is (residue index, position 
 and `allowed(position, prefix)` returns the bases that extend the prefix to one of the residue's codons. This
 admits exactly the residue's codons: no superset for Leu (TTA, TTG, CTN), Ser (TCN, AGY) or Arg (CGN, AGR), no
 translation filter, and no branch through a stop codon. The standard code (table 1) is built in; `genetic_code`
-is a request field for others.
+is a request field for others. As served (increment 5, the owner's decision #15 of 2026-10-08; SPEC §12.2): every
+NCBI translation table (1–6, 9–16, 21–33), the ambiguity codes X (every codon that is not a stop), B, Z and J, and
+a stop `*` refused in the pattern's slot (`stop_unsupported`) until stops are served.
 
 Both strands: the reverse-complemented automaton — residues in reverse order, each codon replaced by its
 reverse complement (GCN becomes NGC, AAR becomes YTT) — is searched as the oriented pattern rc(P); it is a
@@ -1072,9 +1074,14 @@ job-originated call holds no client connection, so a long budget costs only the 
    the owner's decision of 2026-10-07, SPEC §12). The extension DFS, anchor-window bits, the two thresholds, per-label `support` with record bounds and `require_support`, the
    anchor mapping on wrapped PRIMARY graphs, the peptide state across the k boundary; tests with patterns
    spanning two and three k-mers, the cross-record path the bounds check must reject, the anchor without a path,
-   and the reverse hit.
+   and the reverse hit. **Served (2026-10-08, built in parallel with 5; SPEC §12.1, §17)**: the labels of each
+   path returned with their support (`label_intersection`, `record_verified`) and `require_support:
+   "record_verified"` filtering to the verified ones (the owner's decision #14); an addition to contract version
+   1, every answer to a request without the option unchanged.
 5. **Peptides.** The codon automaton and genetic code; tests with Leu/Ser/Arg-rich peptides and a peptide whose
-   only graph instance crosses a stop codon.
+   only graph instance crosses a stop codon. **Served (2026-10-08; SPEC §12.2, §17)**: the 20 residues and X, B,
+   Z, J, every NCBI genetic code (1 the default), stops refused for now (`stop_unsupported`; the owner's decision
+   #15); peptides longer than k through the paths of increment 4.
 5b. **Predicates** (§5.6). The predicate parser and evaluator over `LabelQuery` reads restricted to the
    predicate's labels; `output.labels: predicate_only`; the compute admission on the unfiltered count and the
    retrieval threshold on the selected count; path-level evaluation for `long`; unknown labels per shard. Tests:

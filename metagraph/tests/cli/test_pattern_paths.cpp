@@ -1553,4 +1553,587 @@ TEST(PatternPaths, CountMode) {
 }
 
 
+// ------------------------------------------------------------------ peptides (increment 5)
+//
+// The route's protein kind (owner decision #15 of 2026-10-08, wired by the integration of
+// increments 4 and 5): patterns[i].protein read in the request's genetic_code, the entry's
+// kind, residues and genetic_code, its slot errors, and its contexts (3m <= k) and its paths
+// (3m > k, long_search "paths") with their labels, against oracles that never ask the engine
+// nor its tables:
+//  - the genetic codes are the test's own copy of NCBI's ncbieaa strings (gc.prt 4.6) for the
+//    tables used here (1, 2, 11);
+//  - a GRAPH-WALK oracle over the k-mers of the records (both orientations on CANONICAL and
+//    PRIMARY graphs): every k-mer window, and every walk of k-mers, whose bases translate to
+//    the peptide (forward), or whose reverse complement does (reverse);
+//  - a SIX-FRAME oracle over the records: each record translated in its three frames and the
+//    three of its reverse complement; every match of the peptide is a placed occurrence
+//    (column, seq_id, 1-based start on the record, strand).
+
+// NCBI's ncbieaa: the residue of each codon in TCAG order (TTT TTC TTA TTG TCT ... GGG)
+const std::map<int, std::string> kTables = {
+    { 1, "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG" },
+    { 2, "FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNKKSS**VVVVAAAADDEEGGGG" },
+    { 11, "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG" },
+};
+
+char translate(int table, const std::string &codon) {
+    const std::string order = "TCAG";
+    size_t i = 0;
+    for (char b : codon) {
+        i = 4 * i + order.find(b);
+    }
+    return kTables.at(table).at(i);
+}
+
+const std::vector<std::string>& all_codons() {
+    static const std::vector<std::string> codons = [] {
+        std::vector<std::string> out;
+        for (char a : std::string("ACGT")) {
+            for (char b : std::string("ACGT")) {
+                for (char c : std::string("ACGT")) {
+                    out.push_back({ a, b, c });
+                }
+            }
+        }
+        return out;
+    }();
+    return codons;
+}
+
+// a residue of a peptide (X, B, Z, J the ambiguity codes) admits the amino acid |aa|; a stop
+// is admitted by none
+bool residue_admits(char residue, char aa) {
+    if (aa == '*')
+        return false;
+    switch (residue) {
+        case 'X': return true;
+        case 'B': return aa == 'D' || aa == 'N';
+        case 'Z': return aa == 'E' || aa == 'Q';
+        case 'J': return aa == 'I' || aa == 'L';
+        default: return aa == residue;
+    }
+}
+
+struct Peptide {
+    std::string residues;
+    int table = 1;
+
+    size_t length() const { return 3 * residues.size(); }
+
+    /**
+     * |s| (at most length() bases) is the prefix of an instance of the oriented peptide: each
+     * complete codon translates to its residue and a partial last codon is the prefix of one
+     * that does. The reverse orientation is rc(P): its i-th codon is the reverse complement of
+     * a codon of residue m - 1 - i.
+     */
+    bool prefix(const std::string &s, bool reverse) const {
+        const size_t m = residues.size();
+        if (s.size() > 3 * m)
+            return false;
+        for (size_t i = 0; 3 * i < s.size(); ++i) {
+            const std::string part = s.substr(3 * i, 3);
+            const char residue = residues[reverse ? m - 1 - i : i];
+            bool any = false;
+            for (const std::string &codon : all_codons()) {
+                const std::string oriented = reverse ? rc(codon) : codon;
+                if (oriented.compare(0, part.size(), part) == 0
+                        && residue_admits(residue, translate(table, codon))) {
+                    any = true;
+                    break;
+                }
+            }
+            if (!any)
+                return false;
+        }
+        return true;
+    }
+
+    bool instance(const std::string &s, bool reverse) const {
+        return s.size() == length() && prefix(s, reverse);
+    }
+
+    // log2 of 64 / (the codons of the residue), summed: the bits of the whole peptide
+    double bits() const {
+        double out = 0;
+        for (char r : residues) {
+            size_t n = 0;
+            for (const std::string &codon : all_codons()) {
+                n += residue_admits(r, translate(table, codon));
+            }
+            out += std::log2(64.0 / n);
+        }
+        return out;
+    }
+
+    std::string json() const {
+        return "{\"protein\": \"" + residues + "\"}";
+    }
+};
+
+// the request of |p| with long_search "paths" (as body()) in its genetic code
+std::string peptide_body(const Peptide &p, const std::string &rest = "",
+                         const std::string &labels = "all") {
+    return body(p.json(), "\"genetic_code\": " + std::to_string(p.table)
+                          + (rest.empty() ? "" : ", " + rest), labels);
+}
+
+using ContextSet = std::set<std::tuple<std::string, std::string, uint64_t>>;
+
+// the graph-walk oracle's contexts of a peptide of at most k bases: (strand or orientation,
+// k-mer, offset)
+ContextSet peptide_contexts(const Walk &walk, const Peptide &p, bool strand_stated) {
+    ContextSet out;
+    const size_t L = p.length();
+    for (const std::string &kmer : walk.kmers) {
+        for (size_t o = 0; o + L <= walk.k; ++o) {
+            const std::string s = kmer.substr(o, L);
+            if (p.instance(s, false))
+                out.emplace(strand_stated ? "+" : "forward", kmer, o);
+            if (p.instance(s, true))
+                out.emplace(strand_stated ? "-" : "reverse", kmer, o);
+        }
+    }
+    return out;
+}
+
+// the graph-walk oracle's paths of a peptide longer than k in one orientation: every walk of
+// k-mers spelling an instance, extended base by base from each anchor; |entered| counts the
+// prefixes of k + 1 .. L bases so formed (the branches the engine's DFS enters, §4.2)
+std::vector<std::string> peptide_paths(const Walk &walk, const Peptide &p, bool reverse,
+                                       uint64_t *entered = nullptr,
+                                       uint64_t *anchors = nullptr) {
+    std::vector<std::string> out;
+    uint64_t branches = 0, starts = 0;
+    std::function<void(const std::string&)> dfs = [&](const std::string &s) {
+        if (s.size() == p.length()) {
+            out.push_back(s);
+            return;
+        }
+        for (char b : std::string("ACGT")) {
+            const std::string t = s + b;
+            if (!p.prefix(t, reverse) || !walk.kmers.count(t.substr(t.size() - walk.k)))
+                continue;
+            ++branches;
+            dfs(t);
+        }
+    };
+    for (const std::string &x : walk.kmers) {
+        if (p.prefix(x, reverse)) {
+            ++starts;
+            dfs(x);
+        }
+    }
+    if (entered)
+        *entered = branches;
+    if (anchors)
+        *anchors = starts;
+    return out;
+}
+
+using Placed = std::set<std::tuple<std::string, uint64_t, uint64_t, std::string>>;
+
+// the six-frame oracle: {(column, seq_id, 1-based start, strand)} of every match of |p| in
+// the translation of every record, three frames on each strand
+Placed six_frames(const Index &idx, const Peptide &p) {
+    Placed out;
+    std::map<std::string, uint64_t> seq_id;
+    const size_t m = p.residues.size(), L = p.length();
+    for (const Record &r : idx.records) {
+        const uint64_t id = seq_id[r.column]++;
+        for (const std::string strand : { "+", "-" }) {
+            const std::string t = strand == "+" ? r.seq : rc(r.seq);
+            for (size_t frame = 0; frame < 3; ++frame) {
+                std::string aa;
+                for (size_t i = frame; i + 3 <= t.size(); i += 3) {
+                    aa += translate(p.table, t.substr(i, 3));
+                }
+                for (size_t j = 0; j + m <= aa.size(); ++j) {
+                    bool match = true;
+                    for (size_t x = 0; x < m && match; ++x) {
+                        match = residue_admits(p.residues[x], aa[j + x]);
+                    }
+                    if (!match)
+                        continue;
+                    const size_t start = frame + 3 * j;
+                    out.emplace(r.column, id,
+                                strand == "+" ? start + 1 : t.size() - (start + L) + 1, strand);
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// the entry of a peptide: its kind, residues, genetic code and bits (the test's own count of
+// the codons of each residue)
+void check_peptide_entry(const Json::Value &e, const Peptide &p) {
+    EXPECT_EQ("protein", e["kind"].asString());
+    EXPECT_EQ(p.residues, e["pattern"].asString());
+    EXPECT_EQ(p.length(), e["length"].asUInt64());
+    EXPECT_EQ(p.residues.size(), e["residues"].asUInt64());
+    EXPECT_EQ(p.table, e["genetic_code"].asInt());
+    EXPECT_NEAR(p.bits(), e["information_bits"].asDouble(), 1e-9) << e;
+    EXPECT_FALSE(e.isMember("error")) << e;
+    EXPECT_FALSE(e["palindromic"].asBool());
+}
+
+/**
+ * A peptide of at most k bases on a BASIC index with record placement, labels "all": the
+ * contexts are the graph-walk oracle's, each with the columns whose records hold its k-mer,
+ * and the placed occurrences, over all contexts, the six-frame oracle's matches.
+ */
+void check_peptide_contexts(const Index &idx, const Json::Value &e, const Peptide &p) {
+    check_peptide_entry(e, p);
+    const Walk walk(idx);
+    const Scan scan(idx);
+    const ContextSet expected = peptide_contexts(walk, p, true);
+    ContextSet got;
+    Placed placed;
+    for (const Json::Value &r : e["results"]) {
+        const std::string kmer = r["kmer"].asString();
+        const uint64_t offset = r["offset"].asUInt64();
+        got.emplace(r["strand"].asString(), kmer, offset);
+        EXPECT_EQ(kmer.substr(offset, p.length()), r["instance"].asString());
+        std::set<std::string> columns;
+        for (const Json::Value &l : r["labels"]) {
+            columns.insert(l["column"].asString());
+            for (const Json::Value &o : l["occurrence_list"]) {
+                const std::string coords = o["nt_coords"].asString();
+                placed.emplace(l["column"].asString(), o["seq_id"].asUInt64(),
+                               std::stoull(coords.substr(0, coords.find('-'))),
+                               o["strand"].asString());
+            }
+        }
+        std::set<std::string> holding;
+        for (const auto &[column, recs] : scan.columns) {
+            if (scan.holds_kmer(column, kmer))
+                holding.insert(column);
+        }
+        EXPECT_EQ(holding, columns) << kmer;
+    }
+    EXPECT_EQ(expected, got);
+    EXPECT_EQ(expected.size(), e["counts"]["contexts"]["value"].asUInt64());
+    EXPECT_EQ("exact", e["counts"]["contexts"]["relation"].asString());
+    EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+    const Placed frames = six_frames(idx, p);
+    EXPECT_EQ(frames, placed);
+    EXPECT_EQ(frames.size(), e["counts"]["occurrences"]["value"].asUInt64());
+    EXPECT_EQ("exact", e["counts"]["occurrences"]["relation"].asString());
+}
+
+/**
+ * A peptide longer than k under long_search "paths" on a BASIC index with record placement,
+ * labels "all": the paths and their counts the graph-walk oracle's, each path's labels the
+ * columns carrying it (or, with |require_verified|, those holding it whole in a record), each
+ * label's support and occurrences the record scan's, and the placed occurrences over all paths
+ * the six-frame oracle's matches.
+ */
+void check_peptide_paths(const Index &idx, const Json::Value &e, const Peptide &p,
+                         bool require_verified) {
+    check_peptide_entry(e, p);
+    const Walk walk(idx);
+    const Scan scan(idx);
+    const size_t k = idx.k, L = p.length();
+    std::set<std::pair<std::string, std::string>> expected;
+    uint64_t candidates = 0, anchors = 0;
+    for (bool reverse : { false, true }) {
+        uint64_t entered = 0, starts = 0;
+        const std::string strand = reverse ? "-" : "+";
+        const auto paths = peptide_paths(walk, p, reverse, &entered, &starts);
+        for (const std::string &s : paths) {
+            expected.emplace(strand, s);
+        }
+        candidates += entered;
+        anchors += starts;
+        EXPECT_EQ(paths.size(), e["counts"]["paths"]["by_strand"][strand]["value"].asUInt64());
+        EXPECT_EQ(starts, e["counts"]["anchors"]["by_strand"][strand]["value"].asUInt64());
+    }
+    const Json::Value &c = e["counts"]["paths"];
+    EXPECT_EQ(expected.size(), c["value"].asUInt64()) << c;
+    EXPECT_EQ("exact", c["relation"].asString());
+    EXPECT_EQ(candidates, c["candidates_examined"].asUInt64()) << c;
+    EXPECT_EQ(anchors ? "completed" : "no_anchors", c["extension"].asString());
+    EXPECT_EQ(anchors, e["counts"]["anchors"]["value"].asUInt64());
+    EXPECT_EQ("long", e["scope"].asString());
+    EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+
+    std::set<std::pair<std::string, std::string>> got;
+    Placed placed;
+    for (const Json::Value &r : e["results"]) {
+        const std::string s = r["sequence"].asString();
+        const std::string strand = r["strand"].asString();
+        got.emplace(strand, s);
+        EXPECT_FALSE(r.isMember("kmer"));
+        EXPECT_EQ(s, r["instance"].asString());
+        EXPECT_EQ(s.substr(0, k), r["anchor_kmer"].asString());
+        EXPECT_EQ(L - k + 1, r["nodes"].size());
+        const std::set<std::string> carriers = scan.carriers(s);
+        std::set<std::string> verified;
+        for (const std::string &column : carriers) {
+            if (!scan.occurrences(column, s).empty())
+                verified.insert(column);
+        }
+        EXPECT_EQ(carriers.size(), r["labels_total"].asUInt64()) << r;
+        std::set<std::string> listed;
+        for (const Json::Value &l : r["labels"]) {
+            const std::string column = l["column"].asString();
+            listed.insert(column);
+            const auto occ = scan.occurrences(column, s);
+            EXPECT_EQ(occ.empty() ? "label_intersection" : "record_verified",
+                      l["support"].asString()) << s << " " << column;
+            EXPECT_EQ(occ.size(), l["occurrences"]["value"].asUInt64());
+            for (const Json::Value &o : l["occurrence_list"]) {
+                const std::string coords = o["nt_coords"].asString();
+                const uint64_t start = std::stoull(coords.substr(0, coords.find('-')));
+                EXPECT_TRUE(occ.count({ o["seq_id"].asUInt64(), start })) << coords;
+                placed.emplace(column, o["seq_id"].asUInt64(), start, o["strand"].asString());
+            }
+        }
+        EXPECT_EQ(require_verified ? verified : carriers, listed) << s;
+    }
+    EXPECT_EQ(expected, got);
+    // every placed occurrence is a whole path in one record: the six-frame matches
+    EXPECT_EQ(six_frames(idx, p), placed);
+    EXPECT_EQ(placed.size(), e["counts"]["occurrences"]["value"].asUInt64());
+}
+
+// random records of four columns with planted codings of one peptide, in synonymous codons,
+// on both strands and split across two adjacent records of one column
+struct PeptideRecords {
+    std::vector<Record> records;
+    std::string peptide;
+};
+
+PeptideRecords peptide_records(std::mt19937 &rng, size_t m, size_t k) {
+    auto random_seq = [&](size_t length) {
+        std::string s;
+        for (size_t i = 0; i < length; ++i) {
+            s += "ACGT"[rng() % 4];
+        }
+        return s;
+    };
+    // a peptide with single-, two-, four- and six-codon residues
+    const std::string pool = "MWKHLSRAGVEDNQ";
+    std::string peptide;
+    for (size_t i = 0; i < m; ++i) {
+        peptide += pool[rng() % pool.size()];
+    }
+    auto coding = [&]() {
+        std::string out;
+        for (char residue : peptide) {
+            std::vector<std::string> codons;
+            for (const std::string &codon : all_codons()) {
+                if (translate(1, codon) == residue)
+                    codons.push_back(codon);
+            }
+            out += codons[rng() % codons.size()];
+        }
+        return out;
+    };
+    PeptideRecords out;
+    out.peptide = peptide;
+    for (int i = 0; i < 10; ++i) {
+        std::string seq = random_seq(30 + rng() % 40);
+        if (i % 3 == 0) {
+            const std::string planted = i % 2 ? rc(coding()) : coding();
+            seq = seq.substr(0, 10) + planted + seq.substr(10);
+        }
+        if (i == 4) {
+            // the record's end and the next record's start in column c1 (seq_ids 1 and 2)
+            // spell one coding: the first record ends with its k-mers 0 .. h - 1, the next
+            // starts with its k-mers h .., so that their column coordinates are consecutive
+            // across the two records, and neither holds it whole
+            const std::string planted = coding();
+            const size_t h = (planted.size() - k + 1) / 2;
+            seq += planted.substr(0, h + k - 1);
+            out.records.push_back({ "c1", "r" + std::to_string(i), seq });
+            out.records.push_back({ "c1", "r" + std::to_string(i) + "b",
+                                    planted.substr(h) + random_seq(20) });
+            continue;
+        }
+        out.records.push_back({ std::string("c") + char('0' + i % 4), "r" + std::to_string(i),
+                                seq });
+    }
+    return out;
+}
+
+TEST(PatternRoutePeptide, ShortPeptidesAgainstTheOracles) {
+    std::mt19937 rng(815);
+    for (int trial = 0; trial < 6; ++trial) {
+        const PeptideRecords data = peptide_records(rng, 4, 13);
+        Index idx = build<annot::RowDiffColumnAnnotator>(13, data.records, true);
+        std::vector<Peptide> peptides = { { data.peptide, 1 }, { data.peptide, 11 },
+                                          { data.peptide.substr(1), 1 } };
+        // widened by an ambiguity code
+        Peptide x { data.peptide, 1 };
+        x.residues[2] = "XBZJ"[rng() % 4];
+        peptides.push_back(x);
+        // windows of the records' translations (whatever they code), in table 2 too
+        for (const Record &r : data.records) {
+            const size_t start = rng() % (r.seq.size() - 12);
+            std::string residues;
+            for (size_t i = 0; i < 4; ++i) {
+                residues += translate(trial % 2 ? 2 : 1, r.seq.substr(start + 3 * i, 3));
+            }
+            if (residues.find('*') == std::string::npos)
+                peptides.push_back({ residues, trial % 2 ? 2 : 1 });
+        }
+        for (const Peptide &p : peptides) {
+            SCOPED_TRACE(p.residues + " table " + std::to_string(p.table));
+            Json::Value out = run(idx, "{\"patterns\": [" + p.json() + "], \"genetic_code\": "
+                                       + std::to_string(p.table) + ", \"output\": {\"labels\": "
+                                       "\"all\"}}");
+            const Json::Value &e = out["patterns"][0];
+            check_peptide_contexts(idx, e, p);
+            // a peptide of at most k bases: long_search changes nothing
+            Json::Value again = run(idx, peptide_body(p));
+            EXPECT_EQ(untimed(out["patterns"]), untimed(again["patterns"]));
+        }
+        // the planted peptide is found on both strands
+        Json::Value out = run(idx, "{\"patterns\": [{\"protein\": \"" + data.peptide + "\"}], "
+                                   "\"mode\": \"count\"}");
+        const Json::Value &by = out["patterns"][0]["counts"]["contexts"]["by_strand"];
+        EXPECT_GT(by["+"]["value"].asUInt64(), 0u) << out;
+        EXPECT_GT(by["-"]["value"].asUInt64(), 0u) << out;
+    }
+}
+
+TEST(PatternRoutePeptide, LongPeptidesAsPathsAgainstTheOracles) {
+    std::mt19937 rng(4242);
+    size_t verified_seen = 0, intersection_seen = 0;
+    for (int trial = 0; trial < 6; ++trial) {
+        const PeptideRecords data = peptide_records(rng, 7, 11);
+        Index idx = build<annot::RowDiffColumnAnnotator>(11, data.records, true);
+        std::vector<Peptide> peptides = { { data.peptide, 1 }, { data.peptide.substr(1), 11 },
+                                          { data.peptide.substr(0, 5), 1 } };
+        Peptide x { data.peptide, 1 };
+        x.residues[4] = 'X';
+        peptides.push_back(x);
+        for (const Peptide &p : peptides) {
+            ASSERT_GT(p.length(), idx.k);
+            for (bool require : { false, true }) {
+                SCOPED_TRACE(p.residues + " table " + std::to_string(p.table)
+                             + (require ? " record_verified" : ""));
+                Json::Value out = run(idx, peptide_body(p, require ? "\"require_support\": "
+                                                                     "\"record_verified\"" : ""));
+                const Json::Value &e = out["patterns"][0];
+                check_peptide_paths(idx, e, p, require);
+                for (const Json::Value &r : e["results"]) {
+                    for (const Json::Value &l : r["labels"]) {
+                        verified_seen += l["support"].asString() == "record_verified";
+                        intersection_seen += l["support"].asString() == "label_intersection";
+                    }
+                }
+            }
+            // without long_search "paths": the anchors only, as any pattern longer than k
+            Json::Value plain = run(idx, "{\"patterns\": [" + p.json() + "], \"genetic_code\": "
+                                         + std::to_string(p.table) + "}");
+            const Json::Value &e = plain["patterns"][0];
+            ASSERT_GT(e["counts"]["anchors"]["value"].asUInt64(), 0u) << e;
+            EXPECT_EQ("unknown", e["counts"]["paths"]["relation"].asString());
+            EXPECT_EQ("paths_later_increment", e["withheld"]["reason"].asString());
+            EXPECT_EQ(0u, e["results"].size());
+            EXPECT_FALSE(plain["limits"].isMember("long_search"));
+        }
+    }
+    // both supports were seen: the planted coding held whole, and the one split across two
+    // records of c1
+    EXPECT_GT(verified_seen, 0u);
+    EXPECT_GT(intersection_seen, 0u);
+}
+
+TEST(PatternRoutePeptide, CanonicalAndPrimaryGraphs) {
+    std::mt19937 rng(97);
+    const PeptideRecords data = peptide_records(rng, 6, 11);
+    for (auto mode : { DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        Index idx = build<annot::ColumnCompressed<>>(11, data.records, false, mode);
+        const Walk walk(idx);
+        for (const Peptide &p : std::vector<Peptide> { { data.peptide.substr(0, 3), 1 },
+                                                       { data.peptide, 1 },
+                                                       { data.peptide.substr(1), 11 } }) {
+            SCOPED_TRACE(p.residues + (mode == DeBruijnGraph::PRIMARY ? " primary"
+                                                                       : " canonical"));
+            Json::Value out = run(idx, peptide_body(p, "", "none"), {}, false);
+            const Json::Value &e = out["patterns"][0];
+            check_peptide_entry(e, p);
+            EXPECT_TRUE(e["retrieval_complete"].asBool()) << e;
+            if (p.length() <= idx.k) {
+                ContextSet got;
+                for (const Json::Value &r : e["results"]) {
+                    got.emplace(r["orientation"].asString(), r["kmer"].asString(),
+                                r["offset"].asUInt64());
+                }
+                EXPECT_EQ(peptide_contexts(walk, p, false), got);
+                continue;
+            }
+            std::set<std::pair<std::string, std::string>> expected, got;
+            for (bool reverse : { false, true }) {
+                for (const std::string &s : peptide_paths(walk, p, reverse)) {
+                    expected.emplace(reverse ? "reverse" : "forward", s);
+                }
+            }
+            for (const Json::Value &r : e["results"]) {
+                got.emplace(r["orientation"].asString(), r["sequence"].asString());
+            }
+            EXPECT_GT(expected.size(), 0u);
+            EXPECT_EQ(expected, got);
+            EXPECT_EQ(expected.size(), e["counts"]["paths"]["value"].asUInt64());
+        }
+    }
+}
+
+TEST(PatternRoutePeptide, TheEntryItsSlotsAndTheGeneticCode) {
+    // ATG TGA AAA: M W K in table 2 (TGA a W), a stop in tables 1 and 11
+    const std::vector<Record> records = {
+        { "a", "a0", "CCCATGTGAAAAGGGTTTCCC" },
+        { "b", "b0", "GGGATGTGGAAATTTGGG" },
+    };
+    Index idx = build<annot::RowDiffColumnAnnotator>(13, records, true);
+    PatternLimits floor = limits();
+    floor.min_information_bits = 16;
+    Json::Value out = run(idx, "{\"patterns\": [{\"id\": \"mwk\", \"protein\": \"mwk\"}, "
+                               "{\"id\": \"stop\", \"protein\": \"M*K\"}, "
+                               "{\"id\": \"bad\", \"protein\": \"M*U\"}, {\"protein\": \"\"}, "
+                               "{\"id\": \"floor\", \"protein\": \"MK\"}], "
+                               "\"mode\": \"count\"}", {}, true, floor);
+    const Json::Value &mwk = out["patterns"][0];
+    check_peptide_entry(mwk, { "MWK", 1 });
+    EXPECT_EQ("mwk", mwk["id"].asString());
+    const Walk walk(idx);
+    // ATG TGG AAA in b0, in the 4 k-mers holding it (offsets 0 to 3)
+    EXPECT_EQ(4u, peptide_contexts(walk, { "MWK", 1 }, true).size());
+    EXPECT_EQ(4u, mwk["counts"]["contexts"]["value"].asUInt64()) << mwk;
+    for (int i : { 1, 2, 3 }) {
+        const Json::Value &slot = out["patterns"][i];
+        EXPECT_EQ(std::vector<std::string>({ "error", "id", "kind" }), slot.getMemberNames());
+        EXPECT_EQ("protein", slot["kind"].asString());
+        EXPECT_EQ(i == 1 ? "stop_unsupported" : "bad_alphabet",
+                  slot["error"]["code"].asString()) << slot;
+    }
+    EXPECT_NE(std::string::npos, out["patterns"][1]["error"]["message"].asString()
+                                         .find("position 1 is a stop"));
+    EXPECT_NE(std::string::npos, out["patterns"][2]["error"]["message"].asString()
+                                         .find("'U' at position 2"));
+    // below the floor (M 6 bits + K 5): the slot keeps the peptide's description
+    const Json::Value &low = out["patterns"][4];
+    EXPECT_EQ("information_below_floor", low["error"]["code"].asString());
+    EXPECT_EQ(2u, low["residues"].asUInt64());
+    EXPECT_EQ(6u, low["length"].asUInt64());
+    EXPECT_EQ(1, low["genetic_code"].asInt());
+    EXPECT_NEAR(11.0, low["information_bits"].asDouble(), 1e-9);
+
+    // the genetic code changes the hit: MWK in table 2 also reads ATG TGA AAA
+    for (int table : { 1, 2, 11 }) {
+        const Peptide p { "MWK", table };
+        Json::Value answer = run(idx, "{\"patterns\": [{\"protein\": \"MWK\"}], \"genetic_code\": "
+                                      + std::to_string(table) + ", \"output\": {\"labels\": "
+                                      "\"all\"}}");
+        check_peptide_contexts(idx, answer["patterns"][0], p);
+        EXPECT_EQ(table == 2 ? 2u : 1u, six_frames(idx, p).size()) << table;
+    }
+    // an unknown table refuses the request
+    EXPECT_EQ(std::make_pair(400, std::string("genetic_code_unknown")),
+              refusal(idx, "{\"patterns\": [{\"protein\": \"MWK\"}], \"genetic_code\": 19}"));
+}
+
 } // namespace

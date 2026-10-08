@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA"
+  }
+ ],
+ "long_search": "paths",
+ "max_paths": 1,
+ "stop_at_threshold": true,
+ "output": {
+  "labels": "none"
+ }
+}

@@ -9,7 +9,11 @@ fields and values are in the tables below and described in §14; when it was add
 that does not ask for it was checked byte for byte against the milestone-1b build's (§15). **The review of
 2026-10-07** (milestones 1 and 1b) corrected this document sentence by sentence and changed some answers;
 §16 lists every change (one new field, `min_anchor_information_bits`; two new refusal reasons, `mask_invalid`
-and `alphabet_untested`; one reserved request field, `long_search`; no field changes meaning). Version 1
+and `alphabet_untested`; one reserved request field, `long_search`; no field changes meaning). **Increments 4 and 5**
+(2026-10-08) add two opt-ins to contract version 1, additions only (§17): the paths of a pattern longer than k
+for a request that sets `long_search: "paths"`, with the labels of each path and their support (§12.1), and
+protein patterns, peptides searched as their codon automaton (§12.2); every answer to a request that uses
+neither was checked byte for byte against the build of `44583b51` (§17). Version 1
 promises the meaning of every field and count, not identical work from build to build (§1). Checked against
 the fixture bodies of §11, which this build answered.
 **Scope:** the server route `POST /pattern`, the `pattern` block of `GET /capabilities` and
@@ -60,12 +64,12 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 |---|---|
 | modes `count`, `all_or_count`, `partial` (§5.2) | all three |
 | projections `none`, `all`, `predicate_only` (§4.3, §5.6) | `none`; `all` (increment 3, §14); `predicate_only` is 400 `later_increment` |
-| kinds `dna`, `iupac`, `protein` (§3) | `dna`, `iupac`; `protein` is 400 `later_increment` |
-| scopes `suffix`, `any_offset`, `long` (§3) | all; `long` counts anchors only, extracts nothing (§7.7); paths will need the explicit `long_search: "paths"` (reserved, §4.4, §12) |
+| kinds `dna`, `iupac`, `protein` (§3) | all three; `protein` since increment 5 (§12.2): the 20 amino acids and X, B, Z, J, every NCBI genetic code; a stop `*` is refused in its slot (`stop_unsupported`) |
+| scopes `suffix`, `any_offset`, `long` (§3) | all; `long` counts anchors only and extracts nothing (§7.7), unless the request sets `long_search: "paths"`: then its paths are counted and released (increment 4, §12.1) |
 | graph modes BASIC, native CANONICAL, wrapped PRIMARY (§4.1) | all three; `suffix` refused per pattern on PRIMARY |
 | alphabets `$ACGT`, `$ACGTN` (§3) | `$ACGT`; a `$ACGTN` (DNA5) graph is refused, `alphabet_untested` (§6, §10.2), until a DNA5 build passes the pattern tests (the owner's decision of 2026-10-07; §8.2) |
 | labels, placement, occurrences (§4.3) | read only with `output.labels: "all"` in a retrieval mode (increment 3, §14): labels on every index, placement on BASIC indexes with coordinates; otherwise none read and their counts `unknown` |
-| per-label `support` for paths, `require_support` (§4.3) | later (milestone 4); a context of L ≤ k has `support: "kmer"` |
+| per-label `support` for paths, `require_support` (§4.3) | served with `long_search: "paths"` (increment 4, §12.1): `label_intersection` or `record_verified` per label; a context of L ≤ k has `support: "kmer"` |
 | multi-graph servers (§8) | 400 `later_increment`; the block says `multi_graph_later_increment` |
 | the deadline with a finalisation reserve, 503 `deadline` (§5.3) | as designed; the annotation reads are work and stop at the work time (§14.4) |
 
@@ -73,13 +77,14 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 
 | term | meaning |
 |---|---|
-| pattern | L positions, each a set of bases from {A, C, G, T}: one base (`dna`) or an IUPAC code's set (`iupac`). A pattern's N is {A, C, G, T}; it never matches a record's N symbol (design §3). |
+| pattern | L positions, each a set of bases from {A, C, G, T}: one base (`dna`) or an IUPAC code's set (`iupac`). A pattern's N is {A, C, G, T}; it never matches a record's N symbol (design §3). A peptide (`protein`, §12.2) of m residues is a pattern of L = 3m positions whose bases follow its codon automaton: the bases allowed at a position depend on the bases already spelled in its codon. |
 | oriented pattern | P as given (`forward`) or its reverse complement rc(P) (`reverse`); a palindrome (P = rc(P), position by position) is one oriented pattern (`palindromic`). |
 | k | the graph's k-mer length (`index.k`; 31 on refseq33m). |
 | graph context | (orientation, k-mer, offset): one distinct k-mer of the index that contains the oriented pattern at that 0-based offset (L ≤ k). §7.1. |
 | anchor | for L > k: a k-mer that instantiates positions [0, k) of an oriented pattern (design §4.2). Not a context. |
+| path | for L > k with `long_search: "paths"` (§12.1): a walk of n = L − k + 1 k-mers of the graph, each the next one's predecessor, that spells an instance of an oriented pattern; its first k-mer is an anchor. A path need not lie in one record. |
 | retained island | a maximal run of consecutive k-mer starts of a record whose k-mers the index kept (design §3, "Covered sequence"). Every completeness statement is over retained islands. |
-| information bits | Σ log2(4 / \|set_i\|) over the positions: 2 per exact base, 1 per two-base code, log2(4/3) ≈ 0.415 per three-base code, 0 per N. |
+| information bits | Σ log2(4 / \|set_i\|) over the positions: 2 per exact base, 1 per two-base code, log2(4/3) ≈ 0.415 per three-base code, 0 per N. A peptide's: 2 per base less log2 of the distinct strings its codons spell over the positions counted, residue by residue (§12.2): log2(64 / codons) per whole residue. |
 | node | the graph's id of a context's k-mer: the BOSS edge index on a DBGSuccinct, the `CanonicalDBG` wrapper id on a wrapped PRIMARY graph (§7.10). |
 | row | the annotation row of the context's k-mer, named without reading it (§7.10). |
 | step | one range evaluation of the discovery, or one item of a deferred scan: an edge examined among a range's masked edges or its candidates (design §4.1), or on an even-k wrapped PRIMARY graph the palindrome check of one context (§7.6); the unit of `max_steps`. |
@@ -143,9 +148,14 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `max_labels` | integer ≥ 0 | `caps.max_labels` (1,000) | increment 3, `partial` only: the labels listed per pattern (§14.5); lowered like `max_contexts` |
 | `max_occurrences_per_label` | integer ≥ 0 | `caps.max_occurrences_per_label` (16) | increment 3, `partial` only: the placed occurrences listed per label (§14.5); lowered like `max_contexts` |
 | `allow_unbudgeted_annotation` | boolean | `false` | increment 3: read an annotation without the budget-aware decode (§14.4) |
+| `long_search` | `"anchors"` \| `"paths"` | `"anchors"` | increment 4 (§12.1): `"paths"` extends every pattern longer than k into its paths; `"anchors"` answers byte for byte as the field's absence (§7.7). A pattern of at most k bases is answered alike under both. Any other value, `null` included, is 400 `invalid_request` |
+| `max_paths` | integer ≥ 0 | `caps.max_paths` (1,000) | increment 4: per pattern, the paths an `all_or_count` answer releases at most (and partial's cut, and `stop_at_threshold`'s threshold in the extension, §12.1); lowered like `max_contexts`. Accepted with any request; it acts only with `long_search: "paths"` |
+| `require_support` | `"label_intersection"` \| `"record_verified"` | `"label_intersection"` | increment 4: the labels of paths listed: every label carrying the path with its support, or only those one record verifies (§12.1). An annotation field (§4.1, last bullet). `"record_verified"` with `output.occurrences: false` is 400 `invalid_request`; on an index that cannot verify, 400 `support_unavailable` (§6) |
+| `genetic_code` | integer | `1` (`default_genetic_code`) | increment 5 (§12.2): the NCBI translation table the request's peptides are read in, one of the capabilities' `genetic_codes` (1–6, 9–16, 21–33); another integer is 400 `genetic_code_unknown`, a value that is not an integer 400 `invalid_request`. Accepted with any request; it acts on protein patterns only |
 
 - An integer is a JSON number with an integral value (`5.0` is 5). A negative or fractional value is 400
-  `invalid_request`.
+  `invalid_request`, except for `genetic_code`: a fractional value is 400 `invalid_request`, any integer (a
+  negative one included) that is not an NCBI translation table id is 400 `genetic_code_unknown` (§6).
 - A field this version does not know is 400 `invalid_request` ("unknown field"), never ignored. Fields of
   later increments are refused by name with 400 `later_increment`, whatever their value, `null` included
   (§4.4); `in_ram` with 400 `resident_only`.
@@ -154,6 +164,11 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   `output.labels: "all"` in a retrieval mode. An answer that reads no annotation (mode `count`, or
   `output.labels: "none"`) echoes none of them in `limits` (it is the milestone-1 answer) and, when the request
   named one of them or `output.labels: "all"`, carries the note `annotation_not_read` in each answered entry.
+  `require_support` (increment 4) is such an annotation field too.
+- The fields of increments 4 and 5 are opt-ins: a request that names none of them (nor a protein pattern) is
+  answered as before them, byte for byte apart from `timing` (§17). `long_search` and `max_paths` are echoed in
+  `limits` only in the answers to `long_search: "paths"`, `require_support` only in those that also read labels;
+  `genetic_code` is stated in each protein pattern's entry.
 
 ### 4.2 A pattern
 
@@ -161,17 +176,22 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | field | type | rule |
 |---|---|---|
 | `id` | string | optional; echoed in the pattern's entry (`null` when absent). Another type is 400 `invalid_request` |
-| `dna` | string over A, C, G, T (any case) | exactly one of `dna`, `iupac` |
-| `iupac` | string over the 15 IUPAC codes A C G T R Y S W K M B D H V N (any case) | exactly one of `dna`, `iupac` |
+| `dna` | string over A, C, G, T (any case) | exactly one of `dna`, `iupac`, `protein` |
+| `iupac` | string over the 15 IUPAC codes A C G T R Y S W K M B D H V N (any case) | exactly one of `dna`, `iupac`, `protein` |
+| `protein` | string over the 20 amino acids A C D E F G H I K L M N P Q R S T V W Y and the ambiguity codes X B Z J (any case; the capabilities' `protein_residues`) | increment 5 (§12.2): a peptide, read in the request's `genetic_code`; exactly one of `dna`, `iupac`, `protein` |
 
-- Neither or both of `dna` and `iupac`, or a value that is not a string, is 400 `invalid_request`.
-- A string with another character (U, `-`, `.`, whitespace; an IUPAC code in a `dna` pattern) or an empty
-  string is answered in the pattern's slot with `bad_alphabet` (§8.9); the other patterns are answered.
+- None or more than one of `dna`, `iupac`, `protein`, or a value that is not a string, is 400 `invalid_request`.
+- A string with another character (U, `-`, `.`, whitespace; an IUPAC code in a `dna` pattern; U, O or a digit
+  in a `protein` pattern) or an empty string is answered in the pattern's slot with `bad_alphabet` (§8.9); a
+  `protein` pattern whose other characters are residues but which holds the stop `*` is answered with
+  `stop_unsupported` (stops are not served in this version: no branch through a stop codon); the other patterns
+  are answered.
 - No length cap: a pattern longer than k is charged steps for its anchor windows only (§7.7); parsing it, its
   `information_bits`, its palindrome test and its `low_complexity_pattern` note cost O(L) time inside the
   deadline that no step charges and no clock reading interrupts (a few ns per base; many long patterns can
   therefore end in a 503 after `time_budget_ms`).
-- `protein` is 400 `later_increment` (design §6).
+- A peptide's length L is in bases (3 per residue): with k = 31, peptides of up to 10 residues are within one
+  k-mer; longer ones are patterns longer than k (§7.7, §12.1).
 
 ### 4.3 `output`
 
@@ -180,23 +200,23 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 |---|---|---|
 | `labels` | `"none"` \| `"all"` | `"none"`: the label-free projection (design §4.3), contexts without any annotation read. `"all"` (increment 3): every returned context with its labels, placed where the index can (§14); in mode `count` it reads nothing and is said so (note `annotation_not_read`). `"predicate_only"` is 400 `later_increment` in every mode, `count` included; any other string is 400 `invalid_request` |
 | `occurrences` | boolean | with `labels: "all"`: whether the labels are placed (default `true`, the capabilities' `default_occurrences`; `false` answers `placement: "not_requested"`). With `labels: "none"` (or omitted): `false` is accepted and changes nothing, `true` is 400 `invalid_request` (occurrences are placed per label) |
-| `paths` | boolean | `false` is accepted and changes nothing; `true` is 400 `later_increment` |
+| `paths` | boolean | accepted with either value and changes nothing (increment 4: a path result always carries its node path, `nodes` and `rows`, §12.1; `true` was 400 `later_increment` before); another type is 400 `invalid_request` |
 
 ### 4.4 Fields of later increments
 
-Refused by name (400 `later_increment`), whatever their value: `long_search`, `max_paths`, `require_support`,
-`predicate`, `max_predicate_contexts`, `max_predicate_work`, `graphs`, `genetic_code`, `budget_split`;
-`patterns[i].protein`; `output.labels: "predicate_only"`; `output.paths: true`. So that a request written for
+Refused by name (400 `later_increment`), whatever their value: `predicate`, `max_predicate_contexts`,
+`max_predicate_work`, `graphs`, `budget_split`; `output.labels: "predicate_only"`. So that a request written for
 a later increment is told what to wait for, not answered as if the field were absent.
 
-`long_search` (the owner's decision of 2026-10-07) is reserved for the increment that extends patterns longer
-than k into paths (§12): `"anchors"` (its default: what every answer of version 1 gives, §7.7) or `"paths"`
-(extend the anchors into paths). The paths are opt-in: a request that does not send `long_search: "paths"` keeps
-the anchor-only answer of §7.7 on every later host. Until the capabilities announce it (§12), every value is
-refused as above, `"anchors"` included. (Until increment 3 the
-list also held `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`,
-`max_occurrences_per_label`, `allow_unbudgeted_annotation`, `output.labels: "all"` and
-`output.occurrences: true`; they are served now, §4.1, §4.3.)
+`long_search` (the owner's decision of 2026-10-07) was reserved for the increment that extends patterns longer
+than k into paths: increment 4 serves it (§12.1), with `max_paths` and `require_support`, and `output.paths:
+true` is accepted. The paths are opt-in: a request that does not send `long_search: "paths"` keeps the
+anchor-only answer of §7.7 (`"anchors"`, the default, is that answer). Increment 5 serves `patterns[i].protein`
+and `genetic_code` (§12.2). (Until increment 3 the list also held `max_labels_per_anchor`,
+`max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`,
+`allow_unbudgeted_annotation`, `output.labels: "all"` and `output.occurrences: true`; until increments 4 and 5,
+`long_search`, `max_paths`, `require_support`, `genetic_code`, `patterns[i].protein` and `output.paths: true`.
+They are served now, §4.1–§4.3.)
 
 ### 4.5 Caps and defaults (server flags)
 
@@ -204,6 +224,7 @@ list also held `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, 
 |---|---|---|---|
 | `--pattern-max-contexts` | 10,000 | `max_contexts` (default = cap) | lowered, listed in `limits.clamped` |
 | `--pattern-max-anchors` | 1,000 | `max_anchors` (default = cap) | lowered, listed |
+| `--pattern-max-paths` | 1,000 | `max_paths` (default = cap; increment 4) | lowered, listed |
 | `--pattern-max-steps` | 100,000,000 | `max_steps` (default = cap) | lowered, listed |
 | `--pattern-default-time-ms` | 60,000 | `time_budget_ms` when omitted | — |
 | `--pattern-max-time-ms` | 600,000 | `time_budget_ms` | lowered to the cap (not to the default), listed; on `server_query` the flag is at most 899,000 (§3) |
@@ -239,15 +260,21 @@ A request is refused by the first check it fails, in this order:
    `alphabet_untested`, …, §6), whatever the body asks;
 5. the body is not an object: 400 `invalid_request`;
 6. a later-increment field (§4.4, top level) or `in_ram`, in the alphabetical order of the body's field names;
-7. `patterns` (presence, list, length), then each pattern in order (`protein`, `id`, exactly one of `dna` /
-   `iupac`, its type, an unknown field); a pattern's alphabet is not a refusal (§8.9);
+7. `patterns` (presence, list, length), then each pattern in order (`id`, exactly one of `dna` / `iupac` /
+   `protein`, its type, an unknown field); a pattern's alphabet is not a refusal (§8.9);
 8. `mode`, `output` (`labels`, `occurrences`, `paths`, an unknown field), `scope`, `strands`,
    `stop_at_threshold`, `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, then increment 3's
    `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`,
-   `allow_unbudgeted_annotation`;
+   `allow_unbudgeted_annotation`, then increment 4's `long_search`, `max_paths`, `require_support` (its value,
+   then `"record_verified"` with `output.occurrences: false`), then increment 5's `genetic_code` (not an
+   integer: 400 `invalid_request`; an integer that is no NCBI table: 400 `genetic_code_unknown`); the peptides are
+   read in the genetic code after it (their alphabet, again, is no refusal);
 9. an unknown top-level field;
 10. increment 3: `output.labels: "all"` in a retrieval mode on an annotation without the budget-aware decode,
-    without `allow_unbudgeted_annotation: true`: 400 `annotation_unbudgeted`.
+    without `allow_unbudgeted_annotation: true`: 400 `annotation_unbudgeted`;
+11. increment 4: `require_support: "record_verified"` with `long_search: "paths"` and `output.labels: "all"` in a
+    retrieval mode, on an index whose best support (capabilities `support`) is not `record_verified`: 400
+    `support_unavailable`, whatever the patterns' lengths.
 
 ## 6. Whole-request refusals
 
@@ -261,8 +288,10 @@ The body is `{"error": <message>, "code": <code>}`, except the 503 during loadin
 
 | status | `code` | when | what a client does |
 |---|---|---|---|
-| 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"` | fix the request |
+| 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein` | fix the request |
 | 400 | `later_increment` | a field or value of §4.4; a multi-graph server | wait for the increment the capabilities will announce |
+| 400 | `support_unavailable` | increment 4: `require_support: "record_verified"` with `long_search: "paths"` and `output.labels: "all"` in a retrieval mode, on an index that cannot verify a path in one record: not BASIC, no coordinates, or no record mapping (no `.seqs`, or `--no-coord-mapping`); capabilities `support` is then not `record_verified`. The message names the index's best support and placement | ask without `require_support`: each label of a path then states its support (`label_intersection` there) |
+| 400 | `genetic_code_unknown` | increment 5: `genetic_code` is an integer that is not an NCBI translation table id (1–6, 9–16, 21–33; 7 and 8 were merged into 4 and 1, 17–20 are unassigned); the message names the ids | send one of the capabilities' `genetic_codes`, or omit it (1, the standard code) |
 | 400 | `resident_only` | `in_ram`, any value: the route never loads an index inside a request (design §5.3) | drop `in_ram` |
 | 400 | `mask_required` | the graph was loaded without its dummy-edge mask (`.edgemask`); without it every dummy edge would count as a k-mer | the host's operator creates the mask (`metagraph transform --mask-dummy` once, then restarts the server: the mask is read when the graph is loaded; or `--pattern-build-mask` at start-up, for graphs with few edges; design §4); the capabilities say `mask: absent` meanwhile |
 | 400 | `mask_invalid` | the graph's `.edgemask` marks valid a dummy edge whose last symbol (W) is `$`, as `metagraph extend` of earlier builds wrote it on a masked graph, or a stale mask left beside a rebuilt graph; counts on such a graph could be overstated, `exact` included (the owner's decision of 2026-10-07). Checked once when the graph is loaded (the start-up log names the edges found); a mask built at load (`--pattern-build-mask`) is not checked | the host's operator masks the graph again (`metagraph transform --mask-dummy --force`), then restarts the server; the capabilities say `available: false`, `unavailable_reason: "mask_invalid"` meanwhile |
@@ -308,7 +337,7 @@ with a larger budget on its own (the caller decides, §7.5); it passes an unknow
 |---|---|---|---|
 | `any_offset` | default, L ≤ k | every k-mer containing the oriented pattern at any offset p ∈ [0, k − L]: every occurrence inside a retained k-mer | `any_offset` |
 | `suffix` | `scope: "suffix"`, L ≤ k | the k-mers whose last L symbols instantiate it (offset k − L only): every occurrence starting at island position ≥ k − L | `suffix_only` |
-| `long` | implied by L > k | anchors (§7.7) | `long` |
+| `long` | implied by L > k | anchors (§7.7); with `long_search: "paths"` also its paths (§12.1) | `long` |
 
 - `suffix` is the cheap, exactly countable scope; `any_offset` discovers the flank ranges, branching work even for
   an exact pattern, charged to `max_steps` (design §4.1).
@@ -385,11 +414,12 @@ labels alone — a row truncated or refused, a stop of the annotation reads or o
 
 | reason | when | the count | what to change |
 |---|---|---|---|
-| `count_above_threshold` | `all_or_count`: discovery completed, `exact` total > `max_contexts` | `exact` | narrow the pattern, scope or strand; or `partial` |
+| `count_above_threshold` | `all_or_count`: discovery completed, `exact` total > `max_contexts`; for a path search (§12.1), the paths `exact` and more than `max_paths` | `exact` | narrow the pattern, scope or strand; or `partial` |
 | `threshold_crossed` | `all_or_count`, `stop_at_threshold`, L ≤ k: discovery stopped once its running lower bound passed `max_contexts`. The bound lags the count by the masked edges not yet scanned and, on an even-k wrapped PRIMARY graph, by the palindromic k-mers both base searches may find; the deferred scans do not consult the threshold. So the stop can come late or not at all, and a pattern above its threshold can end `exact` with `count_above_threshold` (the owner's decision of 2026-10-07: the threshold is checked in discovery only) | `at_least` | as above |
 | `discovery_budget` | `all_or_count`, L ≤ k: `max_steps` reached in discovery or a deferred scan | `at_least` or `bounds` | shorten or split an N run inside the pattern, add specified bases before it, or restrict `strands` to the orientation in which more specified bases precede it: the cost is set by where N runs sit, not by the bits (§7.8); the scope hardly changes it; a filter does not help |
 | `deadline` | `all_or_count`, L ≤ k: the work time passed in discovery or a deferred scan, or in the release or while its contexts were handed to the route (all or nothing: a deadline during the hand-over withholds all of them, the counts kept) | as stopped | a larger `time_budget_ms`, or as for `discovery_budget` |
-| `paths_later_increment` | either retrieval mode, L > k, unless the anchors are `exact` 0 (§7.7); whatever stopped the anchors is in `stop` | the anchors' | nothing yet: paths arrive with milestone 4, for requests that ask for them (`long_search: "paths"`, §12); a request that does not keeps this answer |
+| `paths_later_increment` | either retrieval mode, L > k without `long_search: "paths"`, unless the anchors are `exact` 0 (§7.7); whatever stopped the anchors is in `stop` | the anchors' | ask with `long_search: "paths"` (increment 4, §12.1); a request that does not keeps this answer |
+| `anchors_above_threshold` | increment 4, `long_search: "paths"`, L > k, either retrieval mode (`partial` too): the anchors `exact` and more than `max_anchors`, so the extension was not admitted (§12.1) | the anchors' (`exact`); `counts.paths` `unknown`, `extension: "not_admitted"` | raise `max_anchors`, or narrow the pattern's anchor window (its first k bases, and its last k with `strands` `both` or `reverse`) |
 | `annotation_budget` | increment 3, `all_or_count`, `labels: "all"`: a row the memory account refused (`rows_refused`), or the reads stopped at `max_annotation_work` | `exact` | raise `max_memory_mb` or `max_annotation_work`, narrow the pattern, or `partial` |
 | `anchor_labels_truncated` | increment 3, `all_or_count`, `labels: "all"`: a row carried more labels than `max_labels_per_anchor` (`anchors_truncated` lists each, with its total) | `exact` | raise `max_labels_per_anchor` to the largest total, or `partial` |
 | `output_budget` | increment 3, `all_or_count`, `labels: "all"`: the memory account could not hold the answer (the contexts' descriptors or the labels and occurrences built for them) | `exact` | raise `max_memory_mb`, narrow the pattern, or `partial` |
@@ -408,9 +438,11 @@ server bug (§6).
 | `max_steps` | discovery or a deferred scan stopped at `max_steps`: the first `max_contexts` of those discovered |
 | `time` | the work time passed: in discovery nothing is released (its membership would depend on the machine, `returned: 0`); in the release, what was released before (the clock is read every 64 contexts handed to the route, §7.6). Also the cut of a pattern already stopped by `max_steps` or the threshold whose release met the work time (§7.6: `stop` keeps the first stop) |
 | `max_memory` | increment 3, `labels: "all"`: the memory account held the descriptors of only the first `returned` contexts (`partial`'s descriptors take at most half of the account, §14.4; the list's length; it replaces the engine's `max_contexts` cut when both cut) |
+| `max_paths` | increment 4, `long_search: "paths"`: more paths than `max_paths` (completed, or stopped at the threshold in the extension): the first `max_paths` in answer order (§12.1) |
 
 `max_anchors` is a value of `cut.reason` reserved for a later increment's release of anchors; version 1 never
-releases anchors.
+releases anchors (a path search cut before any extension, by `stop_at_threshold` on the anchors, says
+`max_anchors` with nothing returned, §12.1).
 
 ### 7.6 Budget, deadline and the finalisation reserve
 
@@ -460,6 +492,8 @@ releases anchors.
   palindrome check of every context at an offset where a palindromic k-mer can hold the pattern; the only phase
   whose stop can leave `bounds`) or `extraction` (the release, and `all_or_count`'s delivery of it to the
   route), and reason `max_steps`, `time`, `max_contexts` or `max_anchors` (the last two: `stop_at_threshold`).
+  Increment 4 (`long_search: "paths"`) adds the phase `extension` (the depth-first extension of the anchors,
+  §12.1) and the reason `max_paths` (`stop_at_threshold` in the extension).
   A later stop does not replace it: in `partial`, a pattern stopped by `max_steps` or by its threshold is still
   released, and a time stop in that release shows only as `cut: time` and `determinism: time_limited`, `stop`
   keeping the earlier reason (the owner's decision of 2026-10-07). Increment 3 (`labels: "all"`) adds the phases
@@ -471,8 +505,9 @@ releases anchors.
   stop of the output) or `not_read`, `cut: time`, `withheld`, while `stop` names an earlier phase. Any time stop,
   stated in `stop` or not, sets `determinism: "time_limited"` (§7.9).
 - `work` per pattern: `ranges_visited` (range evaluations), `mask_scans` (ranges whose deferred scan began),
-  `steps` (every step charged: `ranges_visited` plus the items the deferred scans examined). The `steps` of all
-  patterns sum to at most `max_steps`. On an even-k wrapped PRIMARY graph the deferred scans check every context
+  `steps` (every step charged: `ranges_visited` plus the items the deferred scans examined, plus, with
+  `long_search: "paths"`, the outgoing edges the extension examined, stated as `extension_edges`). The `steps` of
+  all patterns sum to at most `max_steps`. On an even-k wrapped PRIMARY graph the deferred scans check every context
   at a palindrome-capable offset, one k-mer spelling each, so an `any_offset` count there costs time and steps
   linear in those contexts (`index.graph_mode` and `index.k` tell a client so).
 - **Memory.** The label-free path (mode `count`, or `output.labels: "none"`) has no memory account in version
@@ -504,9 +539,12 @@ releases anchors.
 - Nothing is extracted: in a retrieval mode the results are withheld with `paths_later_increment`, unless the
   anchors are `exact` 0, in which case the empty answer is complete (`retrieval_complete: true`).
 - The note `paths_later_increment` is on every such entry. `max_anchors` is the `stop_at_threshold` threshold.
-- This is the answer of `long_search: "anchors"`, the default of the request field reserved for the increment
-  that extends anchors into paths (§4.4, §12). Paths are opt-in: on a later host too, a request without
-  `long_search: "paths"` is answered as here.
+- This is the answer of `long_search: "anchors"`, the default of the request field. Paths are opt-in: a request
+  without `long_search: "paths"` is answered as here; with it, the anchors are extended into paths, counted and
+  released as §12.1 states (increment 4).
+- A peptide longer than k (more than k / 3 residues) is such a pattern: anchored on the first k bases of its
+  codon automaton (a window that can cut a codon), extended through the automaton with `long_search: "paths"`
+  (§12.2).
 
 ### 7.8 The information floor
 
@@ -515,8 +553,11 @@ releases anchors.
   must reach the floor (§7.7; the least of them is `min_anchor_information_bits`): P + N^k is refused with
   `strands` `both` or `reverse` (the message names the reverse orientation's window), N^k + P is answered with
   `strands: "reverse"`.
-- Exempt: an exact pattern (every position one base, whatever its kind) in `suffix` scope, however short: one
-  range, a few ranks.
+- Exempt: an exact pattern (every position one base, whatever its kind; a peptide whose every residue has one
+  codon in its genetic code, M and W in the standard code) in `suffix` scope, however short: one range, a few
+  ranks.
+- A peptide's bits are exact (§2, §12.2), also for an anchor window that cuts a codon: the floor gates peptides
+  as it gates DNA.
 - The floor is a planning heuristic, not a cost bound. A searched window is matched from its first position on
   the widest ranges, so the cost is set by where its N runs sit, whatever the pattern's bits: a run of N costs
   about min(4^run, edges / 4^a) ranges per level, a being the specified bases before it in that orientation's
@@ -537,15 +578,19 @@ releases anchors.
 - `patterns`: request order, one entry per request pattern.
 - `results`: node ascending, then offset ascending, then orientation (`forward`/`+`, `reverse`/`-`,
   `palindromic`/`=`) (design §5.5, "BOSS edge order, then by offset"; the orientation separates the two
-  contexts an IUPAC pattern can have at one offset).
+  contexts an IUPAC pattern can have at one offset). Paths (§12.1): anchor node ascending, then orientation,
+  then the sequence (A < C < G < T).
 - `strands` (entry): the orientations searched, forward before reverse; `["="]` or `["palindromic"]` for a
   palindrome. This is the order of the plan, not of the work: the base searches run cheapest first (§7.8), so
   after a budget stop the reverse orientation can be `exact` and the forward one `at_least`.
 - `notes`: `low_complexity_pattern`, `strand_unknown_canonical`, `paths_later_increment`, then increment 3's
-  `annotation_unbudgeted`, `record_bounds_unknown` or `annotation_not_read`, in that order.
+  `annotation_unbudgeted`, `record_bounds_unknown` or `annotation_not_read`, then increment 4's
+  `label_intersection_only`, in that order.
 - `limits.clamped`: `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, then increment 3's
   `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`,
-  in that order.
+  then increment 4's `max_paths`, in that order.
+- Increment 4: the labels of paths in `by_label` and in each path by (paths desc, column asc); a label's
+  occurrences by (`seq_id`, start), or by `kmer_coord` without a record mapping.
 - Increment 3: labels in `by_label` and in each result by (contexts desc, column asc) (design §5.5); a label's
   occurrences by (`seq_id`, start, strand), or (`kmer_coord`, `offset`, strand) without a record mapping.
 - JSON objects (`by_offset`, `by_strand`, `by_orientation`, …) carry no order; the server writes keys sorted
@@ -621,12 +666,15 @@ releases anchors.
 | `max_labels` | integer | likewise |
 | `max_occurrences_per_label` | integer | likewise |
 | `allow_unbudgeted_annotation` | boolean | likewise, as requested |
+| `long_search` | `"paths"` | increment 4, answers to `long_search: "paths"` only: as requested |
+| `max_paths` | integer | likewise: effective (§4.1) |
+| `require_support` | string | likewise, and only when labels are read (`labels: "all"` in a retrieval mode): as requested, default applied |
 | `clamped` | list of objects | one per request value lowered to its cap, in the order of §7.9; `[]` when none |
 
 <!-- schema: clamped -->
 | field | type | meaning |
 |---|---|---|
-| `field` | string | `max_contexts`, `max_anchors`, `max_steps` or `time_budget_ms`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label` |
+| `field` | string | `max_contexts`, `max_anchors`, `max_steps` or `time_budget_ms`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths` |
 | `requested` | number | the value asked for |
 | `effective` | number | the cap applied |
 
@@ -638,6 +686,7 @@ releases anchors.
 | `elapsed_ms` | number | top level: from the deadline's start to the end of the search (the annotation reads included); in an entry: that pattern's search. Varies between runs |
 | `label_discovery_ms` | number | increment 3, entries with `labels: "all"`: the first read (§14.2). Varies between runs |
 | `placement_ms` | number | likewise, the second read (§14.3) |
+| `extension_ms` | number | increment 4, entries of a pattern longer than k with `long_search: "paths"`: the extension (§12.1). Varies between runs |
 
 ### 8.5 A pattern's entry
 
@@ -647,9 +696,11 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 | field | type | present | meaning |
 |---|---|---|---|
 | `id` | string \| null | always | the request's `id` |
-| `kind` | `"dna"` \| `"iupac"` | always | which key the pattern came in |
-| `pattern` | string | answered, engine refusal | the pattern in upper case |
-| `length` | integer | answered, engine refusal | L |
+| `kind` | `"dna"` \| `"iupac"` \| `"protein"` | always | which key the pattern came in (`protein` since increment 5) |
+| `pattern` | string | answered, engine refusal | the pattern in upper case (a peptide's residues) |
+| `length` | integer | answered, engine refusal | L, in bases whatever the kind (a peptide of m residues: 3m) |
+| `residues` | integer | `protein` only, answered, engine refusal | increment 5: m, the peptide's residues (§12.2) |
+| `genetic_code` | integer | `protein` only, answered, engine refusal | increment 5: the NCBI translation table it was read in (the request's `genetic_code`, default 1) |
 | `information_bits` | number | answered, engine refusal | §2 |
 | `anchor_information_bits` | number \| null | answered, engine refusal | L > k: the bits of the anchor window P[0, k), whatever the strands searched (§7.7); else `null` |
 | `min_anchor_information_bits` | number \| null | answered, engine refusal | L > k: the bits of the least informative searched anchor window, the information floor's operand (§7.7, §7.8: P[0, k) for `forward` or a palindrome, rc(P)[0, k) — the bits of P[L − k, L) — for `reverse`, the lower of the two for `both`); else `null`. Added by the review of 2026-10-07 (§16) |
@@ -665,18 +716,19 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 | `withheld` | object \| null | answered, retrieval modes | `{reason}` (§7.5) |
 | `returned` | integer | answered, retrieval modes | the length of `results` |
 | `cut` | object \| null | answered, retrieval modes | `{reason}` (§7.5); only in `partial` |
-| `results` | list of results (§8.8) | answered, retrieval modes | the released contexts, in the order of §7.9 |
+| `results` | list of results (§8.8) | answered, retrieval modes | the released contexts, in the order of §7.9; for a pattern longer than k with `long_search: "paths"`, the released paths (`path_result`, §12.1) |
 | `absence_scope` | `"suffix_only"` \| `"any_offset"` \| `"long"` | answered | §7.2 |
 | `determinism` | `"full"` \| `"time_limited"` | answered | §7.9 |
 | `notes` | list of strings | answered | §8.10 |
 | `timing` | object (§8.4) | answered | |
 | `placement` | string | answered, `labels: "all"` | increment 3: what this answer places: `record`, `global`, `none`, `none_canonical` (§14.3), or `not_requested` (`output.occurrences: false`) |
 | `annotation` | `"budgeted"` \| `"unbudgeted"` | answered, `labels: "all"` | the reads' access (§14.4) |
-| `by_label` | list \| null | answered, `labels: "all"` | the per-label summary over the returned contexts (§14.5); `null` when the results are withheld or, in `partial`, when the memory account could not hold it (§14.4) |
+| `by_label` | list \| null | answered, `labels: "all"` | the per-label summary over the returned contexts (§14.5), or over the returned paths (`by_label_paths`, §12.1); `null` when the results are withheld or, in `partial`, when the memory account could not hold it (§14.4) |
 | `rows_refused` | list | answered, `labels: "all"` | the rows the memory account refused, each once (§14.4) |
 | `anchors_truncated` | list | answered, `labels: "all"` | the rows cut at `max_labels_per_anchor`, each once (§14.2) |
 | `labels_cut` | object \| null | answered, `labels: "all"` | `partial`: `{reason: "max_labels", returned}` when `by_label` and the results list fewer labels than were found |
 | `occurrences_cut` | object \| null | answered, `labels: "all"` | `partial`: `{reason: "max_occurrences_per_label", labels}` when that many labels list fewer occurrences than they have |
+| `labels_excluded_unverified` | count | answered, `labels: "all"`, L > k, `long_search: "paths"` and `require_support: "record_verified"` | increment 4, unit `labels`: the labels carrying a returned path but verified on none, left out of `by_label` (§12.1) |
 
 ### 8.6 `counts`
 
@@ -685,8 +737,8 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 |---|---|---|---|
 | `contexts` | contexts count | L ≤ k | unit `graph_contexts` |
 | `anchors` | anchors count | L > k | unit `anchors` (§7.7) |
-| `paths` | count | L > k | unit `paths`; `unknown` (`exact` 0 without anchors) |
-| `labels` | count | always | unit `labels`; `unknown` unless `labels: "all"` read them (§14.6) |
+| `paths` | count | L > k | unit `paths`; `unknown` (`exact` 0 without anchors); with `long_search: "paths"` a paths count (`paths_count` below, §12.1) |
+| `labels` | count | always | unit `labels`; `unknown` unless `labels: "all"` read them (§14.6); for the paths of `long_search: "paths"` with `by_support` besides (`labels_count` below) |
 | `occurrences` | count | always | unit `placed_occurrences`; `unknown` unless `labels: "all"` placed them in records (§14.6) |
 
 <!-- schema: count -->
@@ -716,6 +768,30 @@ An anchors count is a count with `by_strand` or `by_orientation` besides (unit `
 | `by_strand` | object → count | BASIC graphs |
 | `by_orientation` | object → count | CANONICAL and PRIMARY graphs |
 
+Increment 4: with `long_search: "paths"`, the paths count of a pattern longer than k has these fields besides
+(§12.1):
+
+<!-- schema: paths_count -->
+| field | type | meaning |
+|---|---|---|
+| `by_strand` | object → count | BASIC graphs: the paths per orientation searched, unit `paths` |
+| `by_orientation` | object → count | CANONICAL and PRIMARY graphs |
+| `candidates_examined` | integer | the branches the extension entered (prefixes of k + 1 to L bases, complete paths included): work, not a count of the pattern |
+| `extension` | `"no_anchors"` \| `"not_started"` \| `"not_admitted"` \| `"stopped"` \| `"completed"` | what the extension did: `completed` (relation `exact`), `no_anchors` (`exact` 0: the anchors `exact` 0), `stopped` (`at_least`: a stop in the extension), `not_started` (`unknown`: a stop before it), `not_admitted` (`unknown`: the anchors `exact` above `max_anchors`) |
+
+and the labels count of the paths (with `labels: "all"`) has:
+
+<!-- schema: labels_count -->
+| field | type | meaning |
+|---|---|---|
+| `by_support` | object (`by_support` below) | the labels split by their support over the returned paths |
+
+<!-- schema: by_support -->
+| field | type | meaning |
+|---|---|---|
+| `record_verified` | count | unit `labels`: the labels one record verifies on at least one returned path; `unknown` without `record` placement |
+| `label_intersection` | count | unit `labels`: the listed labels verified on none (carried by every k-mer of a path, no record holding it whole); the two sum to `counts.labels` when all three are `exact` |
+
 ### 8.7 `work`, `stop`, `withheld`, `cut`
 
 <!-- schema: work -->
@@ -727,12 +803,13 @@ An anchors count is a count with `by_strand` or `by_orientation` besides (unit `
 | `annotation_rows` | integer | increment 3, `labels: "all"`: the rows this pattern's reads returned (both steps) |
 | `annotation_units` | integer | likewise: the work units of this pattern's reads, refused ones included (§14.4) |
 | `memory_bytes` | integer | likewise: the request's memory account at its peak so far (the model of §14.4) |
+| `extension_edges` | integer | increment 4, entries of a pattern longer than k with `long_search: "paths"`: the outgoing edges the extension examined, one step each (part of `steps`) |
 
 <!-- schema: stop -->
 | field | type | meaning |
 |---|---|---|
-| `phase` | `"discovery"` \| `"mask_scan"` \| `"extraction"`; increment 3: `"label_discovery"` \| `"placement"` \| `"output"` | §7.6 |
-| `reason` | `"max_steps"` \| `"time"` \| `"max_contexts"` \| `"max_anchors"`; increment 3: `"max_annotation_work"` \| `"max_memory"` | §7.6 |
+| `phase` | `"discovery"` \| `"mask_scan"` \| `"extraction"`; increment 3: `"label_discovery"` \| `"placement"` \| `"output"`; increment 4: `"extension"` | §7.6 |
+| `reason` | `"max_steps"` \| `"time"` \| `"max_contexts"` \| `"max_anchors"`; increment 3: `"max_annotation_work"` \| `"max_memory"`; increment 4: `"max_paths"` (phase `extension` only) | §7.6 |
 
 <!-- schema: reason -->
 | field | type | meaning |
@@ -756,7 +833,9 @@ An anchors count is a count with `by_strand` or `by_orientation` besides (unit `
 | `labels_total` | integer \| null | likewise: the labels the row carries (its true total, also when truncated); `null` when it was not read |
 | `labels` | list \| null | likewise: the context's labels (§14.5); `null` unless the row was read and held |
 
-With `output.labels: "none"` a result has the first seven fields only: nothing of the annotation is read.
+With `output.labels: "none"` a result has the first seven fields only: nothing of the annotation is read. A
+path (a result of a pattern longer than k under `long_search: "paths"`) has its own fields (`path_result`,
+§12.1): never `kmer`, `node` or `row`.
 
 ### 8.9 Per-pattern errors (the error slot)
 
@@ -771,8 +850,9 @@ It costs no step.
 
 | `code` | when | the slot carries |
 |---|---|---|
-| `bad_alphabet` | a character outside the kind's alphabet, or an empty pattern (the message names the first offending 0-based position) | `id`, `kind`, `error` |
-| `information_below_floor` | below the floor for its scope (§7.8) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `error` |
+| `bad_alphabet` | a character outside the kind's alphabet, or an empty pattern (the message names the first offending 0-based position); for `protein`, a character that is neither a residue of `protein_residues` nor the stop `*` (named first, wherever a `*` is) | `id`, `kind`, `error` |
+| `stop_unsupported` | increment 5: a `protein` pattern whose every other character is a residue but which holds the stop `*` (the message names the first `*`): stops are not served in this version, no path branches through a stop codon (§12.2) | `id`, `kind`, `error` |
+| `information_below_floor` | below the floor for its scope (§7.8) | `id`, `kind`, `pattern`, `length`, `information_bits`, `anchor_information_bits`, `min_anchor_information_bits`, `error`; a peptide also `residues`, `genetic_code` |
 | `scope_unsupported` | `scope: "suffix"` on a wrapped PRIMARY graph, L ≤ k (§7.2) | as above |
 
 ### 8.10 Notes
@@ -781,10 +861,11 @@ It costs no step.
 |---|---|
 | `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows |
 | `strand_unknown_canonical` | a CANONICAL or PRIMARY graph: orientations, not strands |
-| `paths_later_increment` | L > k: anchors counted, paths neither extended nor extracted |
+| `paths_later_increment` | L > k without `long_search: "paths"`: anchors counted, paths neither extended nor extracted (ask with `long_search: "paths"`, §12.1) |
 | `annotation_unbudgeted` | increment 3: the labels were read without the budget-aware decode (`allow_unbudgeted_annotation`): no memory bound on the reads themselves (what they returned is in the account), the deadline checked between chunks of keys |
 | `record_bounds_unknown` | increment 3: coordinates without a record mapping (`placement: "global"`): occurrences are (`kmer_coord`, `offset`), placed in no record, not deduplicated, not counted |
-| `annotation_not_read` | increment 3: the request asked for labels (`output.labels: "all"`) or named an annotation field, and this answer reads none (mode `count`, or `labels: "none"`): the fields had no effect |
+| `annotation_not_read` | increment 3: the request asked for labels (`output.labels: "all"`) or named an annotation field (`require_support` included), and this answer reads none (mode `count`, or `labels: "none"`): the fields had no effect |
+| `label_intersection_only` | increment 4: the labels of paths where no coordinate is read (placement `none`, `none_canonical`, `not_requested`): every label is `label_intersection`, none can be verified (§12.1) |
 
 ## 9. What an answer licenses
 
@@ -803,6 +884,15 @@ It costs no step.
 - `at_least`, `bounds` and `unknown` claim what they say and no more (§7.4).
 - A `count` answer, or any answer with `output.labels: "none"`, establishes no absence of a label, a sample or
   a record, whatever its counts (design §5.1).
+- Increment 4, `long_search: "paths"`, a pattern longer than k: `retrieval_complete: true` says that every path
+  of the graph spelling an instance of the pattern (in its strands) is in `results`; an `exact` 0 count of paths
+  says that no walk of the index's retained k-mers spells it. A label of a path is a claim about records only
+  when its support is `record_verified` (one record holds the whole path, at the placed coordinates);
+  `label_intersection` says only that every k-mer of the path carries the label (design §4.3), and its
+  `occurrences` `exact` 0 that no record of the label holds the whole path. With `require_support:
+  "record_verified"` a label left out (counted in `labels_excluded_unverified`) is not absent from the path's
+  k-mers. With labels, `retrieval_complete: true` also says that every label carrying a returned path is listed
+  with its support (§12.1).
 - Increment 3, `output.labels: "all"`, `retrieval_complete: true`: every graph context of the pattern in its scope
   and strands is in `results` with **all** the labels its row carries (`labels_status: "complete"` everywhere),
   each placed where `placement` is `record` or `global` — so a column absent from `by_label` carries no
@@ -841,28 +931,34 @@ It costs no step.
 | `default_projection` | string | `"none"` | an omitted `output.labels`; frozen for version 1 (§1) |
 | `projections_later_increment` | list | `["predicate_only"]` | refused with `later_increment` today (`["all", "predicate_only"]` before increment 3) |
 | `default_occurrences` | boolean | `true` | increment 3: an omitted `output.occurrences` with `labels: "all"` |
-| `kinds` | list | `["dna", "iupac"]` | pattern kinds served |
-| `kinds_later_increment` | list | `["protein"]` | |
+| `kinds` | list | `["dna", "iupac", "protein"]` | pattern kinds served (`protein` since increment 5; `["dna", "iupac"]` before) |
+| `kinds_later_increment` | list | `[]` | (`["protein"]` before increment 5) |
+| `protein_residues` | list of one-letter strings | the 20 amino acids then `X`, `B`, `Z`, `J` | increment 5: the residues a `protein` pattern may hold (§12.2); the stop `*` is not among them |
+| `genetic_codes` | list of integers | `[1, 2, 3, 4, 5, 6, 9, 10, …, 16, 21, …, 33]` | increment 5: the NCBI translation table ids `genetic_code` accepts (gc.prt version 4.6) |
+| `default_genetic_code` | integer | `1` | increment 5: an omitted `genetic_code` (the standard code) |
+| `protein_rule` | string | | increment 5: in prose, how a peptide is read (the ambiguity codes, the codon automaton, the length in bases, the slot errors, the context stops of tables 27, 28 and 31) |
 | `default_scope` | string | `"any_offset"` | |
 | `scopes_by_graph_mode` | object | `basic`, `canonical`: `["suffix", "any_offset"]`; `primary`: `["any_offset"]` | the rule |
 | `scopes` | list \| null | | this graph's requestable scopes |
-| `long_patterns` | string | `"anchors_counted"` | what L > k gets (§7.7); stays `"anchors_counted"` when paths are served, since they are opt-in (`long_search`, §12) |
+| `long_patterns` | string | `"anchors_counted"` | what L > k gets without the option (§7.7); stays `"anchors_counted"` now that paths are served, since they are opt-in (`long_search`, §12.1) |
+| `long_search` | list | `["anchors", "paths"]` | increment 4: the `long_search` values served; gate the paths on `"paths"` in it |
+| `default_long_search` | string | `"anchors"` | increment 4: an omitted `long_search`; the paths are never switched on by a default |
 | `strands` | list | `["both", "forward", "reverse"]` | |
 | `default_strands` | string | `"both"` | |
 | `graph_cleaned` | string | `"unknown"` | whether graph cleaning may have pruned k-mers (design §3); not known in version 1 |
 | `records_shorter_than_k` | string | `"not_indexed"` | such records have no k-mer |
 | `resident_only` | boolean | `true` | the route never loads an index (`in_ram` refused) |
-| `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label` |
+| `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths` |
 | `default_time_budget_ms` | number | 60,000 | the budget of a request that names none, below `caps.time_budget_ms` |
 | `finalize_reserve_ms` | number | 250 | §7.6 |
-| `caps_rule` | string | | in prose: the clamp rule (which caps are request fields' maxima, `max_patterns` and `min_information_bits`) and the rule of the time kept back for the answer with the delivery rates in force (§7.6) |
+| `caps_rule` | string | | in prose: the clamp rule (which caps are request fields' maxima, `max_patterns` and `min_information_bits`), the rule of the time kept back for the answer with the delivery rates in force (§7.6) and, since increment 4, the rule of `long_search` (the two admissions, `max_anchors` and `max_paths`) |
 | `graph_mode` | string \| null | | `basic`, `canonical`, `primary` |
 | `k` | integer \| null | | |
 | `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN`: `available: false`, `alphabet_untested`, §8.2) |
 | `strand_stated` | boolean \| null | | `true` on BASIC |
 | `mask` | string \| null | | `file`: the `.edgemask` loaded beside the graph (below; one that marks a W = `$` edge valid: `available: false`, `mask_invalid`); `built_at_load`: built in memory at start-up (`--pattern-build-mask`, milestone 1b); `absent`: the route answers `mask_required` on a `$ACGT` graph (a `$ACGTN` graph says `alphabet_untested` first, §6) |
 | `placement` | string \| null | | the placement `output.labels: "all"` gives on this index (`record`, `global`, `none`, `none_canonical`, §14.3; before increment 3: what a later increment could give) |
-| `support` | string \| null | | the best per-label support of a path (`record_verified`, `label_intersection`; milestone 4); a context of L ≤ k has `kmer` |
+| `support` | string \| null | | the best per-label support of a path on this index (`record_verified`, `label_intersection`; served since increment 4, §12.1: `require_support: "record_verified"` needs `record_verified` here); a context of L ≤ k has `kmer` |
 | `annotation` | string \| null | | `budgeted` (row-diff with budgeted decode) or `unbudgeted`: the reads of `output.labels: "all"` (§14.4; `unbudgeted` needs `allow_unbudgeted_annotation`); `count` and `none` never read it |
 
 The graph fields (`graph_mode` to `annotation`) are `null` while the index loads; when the graph is not
@@ -910,6 +1006,12 @@ recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; 
   `allow_unbudgeted_annotation: true` (else 400 `annotation_unbudgeted`), which a client sends only with its
   caller's explicit consent to reads without a memory bound (§14.4); `placement` says whether occurrences come
   in records (`record`), as coordinates (`global`) or not at all.
+- Paths (increment 4): send `long_search: "paths"` only where `long_search` lists `"paths"`; `max_paths` within
+  `caps.max_paths`; `require_support: "record_verified"` only where `support` is `record_verified` (else 400
+  `support_unavailable`). A host whose capabilities lack `long_search` refuses it (400 `later_increment`, a build
+before increment 4).
+- Peptides (increment 5): send `protein` patterns only where `kinds` lists `"protein"`, with residues of
+  `protein_residues`, and `genetic_code` only from `genetic_codes`.
 
 ## 11. Fixtures
 
@@ -950,6 +1052,24 @@ counts stay `exact`) and `labels_all_mixed_slots` (refused and answered slots si
 sharing one account of 1 MB in `partial`: the last one's rows are refused, `rows_refused` and `labels_status:
 "refused"`, `cut: max_memory`, its labels counted `at_least`).
 
+Increments 4 and 5 (§17) add the paths: `paths` (label-free, with an absent 40-mer: `no_anchors`, complete),
+`paths_count` (mode `count`), `paths_labels` (blaNDM-1's first 40 bases, every label `record_verified` with its
+whole-path occurrences, 9 columns and 42 occurrences as for the primer; and a 51-mer joining two copies of a
+repeated 31-mer of the E. coli records, a path of the graph that no record holds whole: its labels
+`label_intersection`, occurrences `exact` 0), `paths_require_support` (the same with `require_support:
+"record_verified"`: the chimera lists no label, `labels_excluded_unverified` 2), `paths_max_paths_partial` (`cut:
+max_paths`), `paths_count_above_threshold`, `paths_stop_at_max_paths` (`stop {extension, max_paths}`,
+`threshold_crossed`), `paths_anchors_above_threshold` (`not_admitted`), `paths_max_steps` (`stop {extension,
+max_steps}`, the paths completed before it released, `cut: max_steps`, the sticky stop after it), `paths_global`
+(no record mapping: chains, every label `label_intersection`), `paths_primary` (a PRIMARY index: orientations, note
+`label_intersection_only`) and `support_unavailable` (the 400 on the index without record mapping); and the
+peptides: `peptide` (NDM-1's first 10 residues within one k-mer: 4 contexts, the 9 columns and 42 placed
+occurrences of blaNDM-1; with J; and 14 residues without `long_search`: anchors only), `peptide_count`
+(`genetic_code: 11`), `peptide_paths` (14 residues, 42 bases, through `long_search: "paths"`: one path per strand,
+`record_verified`), `peptide_bad_residue` (`bad_alphabet` for U, `stop_unsupported` for `*`) and
+`genetic_code_unknown` (the 400 for table 7). The nine capabilities bodies of the single-graph servers gained the
+fields of §17; no other stored body changed.
+
 Situations without a stored body: `withheld: annotation_budget` for a refused row (in `all_or_count`); `by_label:
 null` in `partial` (the mini's label names are too short to exhaust the account there; a real answer of a tiny
 long-label index in `data/traverse/pattern_validator/by_label_null_partial` checks that the validator accepts it);
@@ -988,8 +1108,8 @@ a client may use it. (Milestone 1b, the edge mask, is in this build and its fixt
 | milestone (design §13) | request | answer | capabilities |
 |---|---|---|---|
 | 3: labels and placement — **served in this build (§14)** | `output.labels: "all"`; `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`, `allow_unbudgeted_annotation`; `output.occurrences` | `labels` on each result (column, support, placed occurrences `seq_id`, `record`, `strand`, `nt_coords`, `nt_length`; or `kmer_coord`, `offset`); `by_label`; `counts.labels` and `counts.occurrences` known; `rows_refused`, `anchors_truncated`, `labels_cut`, `occurrences_cut`; `withheld` reasons `annotation_budget`, `anchor_labels_truncated`, `output_budget`; notes `record_bounds_unknown`, `annotation_unbudgeted`, `annotation_not_read` (`label_intersection_only` arrives with paths, milestone 4) | `projections` gains `"all"`; `default_occurrences`; five caps; `default_projection` stays `"none"` (§1) |
-| 4: patterns longer than k, **opt-in** (the owner's decision of 2026-10-07) | `long_search: "paths"` (default `"anchors"`; reserved and refused today, §4.4), `max_paths`, `require_support`, `output.paths: true` | only for a request with `long_search: "paths"`: results for L > k are paths, each with the new fields `sequence` (the L spelled bases) and `anchor_kmer` (the anchor's k bases), and its node path with `output.paths` — never `kmer`, which keeps its meaning, the k-mer of a context; `counts.paths` known with `candidates_examined`; per-label `support`; `withheld` `anchors_above_threshold`. A request without it gets the answer of §7.7 as today: anchors counted, `counts.paths` `unknown` (`exact` 0 without anchors), `withheld: paths_later_increment` and its note | the served `long_search` values (with `"paths"`) and the default `"anchors"`; `max_paths` among the caps; `long_patterns` stays `"anchors_counted"` (what a request without the option gets) |
-| 5: peptides | `patterns[i].protein`, `genetic_code` | `kind: "protein"` (instances name the codons) | `kinds` gains `"protein"` |
+| 4: patterns longer than k, **opt-in** (the owner's decision of 2026-10-07) — **served in this build (§12.1)** | `long_search: "paths"` (default `"anchors"`), `max_paths`, `require_support`; `output.paths` accepted with either value | only for a request with `long_search: "paths"`: results for L > k are paths, with the new fields `sequence` (the L spelled bases), `anchor_kmer` (the anchor's k bases) and their node path (`nodes`, `rows`) — never `kmer`, which keeps its meaning, the k-mer of a context; `counts.paths` known with its split, `candidates_examined` and `extension`; the labels of each path with their `support` (`label_intersection`, `record_verified`) and `require_support`; `withheld` `anchors_above_threshold`, `cut` `max_paths`, stop phase `extension` and reason `max_paths`; 400 `support_unavailable`. A request without it gets the answer of §7.7 as before: anchors counted, `counts.paths` `unknown` (`exact` 0 without anchors), `withheld: paths_later_increment` and its note | `long_search` `["anchors", "paths"]`, `default_long_search` `"anchors"`; `caps.max_paths`; `long_patterns` stays `"anchors_counted"` (what a request without the option gets); `support` states the best support of a path |
+| 5: peptides — **served in this build (§12.2)** | `patterns[i].protein`, `genetic_code` | `kind: "protein"` with `residues` and `genetic_code` (instances name the codons); slot error `stop_unsupported`; 400 `genetic_code_unknown` | `kinds` gains `"protein"`; `protein_residues`, `genetic_codes`, `default_genetic_code`, `protein_rule` |
 | 5b: predicates | `predicate`, `max_predicate_contexts`, `max_predicate_work`, `output.labels: "predicate_only"` | `selection` (tested, selected, access, unknown labels); `withheld` `predicate_above_threshold`, `predicate_budget`; filtered answers state their narrower absence claim (design §5.1) | `projections` gains `"predicate_only"` |
 | 6: multi-graph | `graphs` (as `/search` names graphs and chunks), `budget_split` | each result carries `graph`, `index_fp`, `release`; counts `by_shard` with `per_shard`; `stop` and `withheld` gain the shard; the merged order of design §8 | the block on multi-graph servers becomes available, with the resident graphs |
 
@@ -999,6 +1119,213 @@ a client may use it. (Milestone 1b, the edge mask, is in this build and its fixt
   on by a default.
 - What a version-1 client sees on a later host: more fields and values, read by presence or passed through;
   other work counters and stopping points (§1).
+
+### 12.1 Increment 4, served: patterns longer than k as paths (`long_search: "paths"`)
+
+Served by this build (`src/cli/pattern.cpp`, `src/cli/pattern_retrieval.cpp`, the extension of
+`src/graph/alignment/pattern_search.cpp`; design §4.2, §4.3 "Label consistency for long", owner decisions #13 and
+#14), as additions to version 1. Opt-in: only a request with `long_search: "paths"` gets any of it; a request
+without it, or with `"anchors"`, is answered as §7.7 says, byte for byte as before (§17). A pattern of at most k
+bases is answered alike under both values (its entry is the same; only `limits` gains the echo).
+
+**Request.** `long_search: "paths"`; `max_paths` (integer ≥ 0, default and cap `caps.max_paths`, 1,000; lowered and
+listed in `limits.clamped` above the cap; accepted with any request, it acts only with `"paths"`);
+`require_support` (`"label_intersection"`, the default, or `"record_verified"`, §4.1). The checks are steps 8 and 11
+of §5.
+
+**What is searched.** Each searched orientation anchors on its own window (§7.7); the anchors are counted first
+(`counts.anchors`, as §7.7). The extension is admitted when the anchors are `exact` and at most `max_anchors`
+(the first admission); it then extends every anchor one base at a time along the graph's outgoing edges, keeping
+only the bases the pattern allows at the next position (for a peptide, its codon automaton, the codon's state
+recomputed at the k boundary from the anchor's bases, §12.2), by depth-first search to L bases. Every complete
+walk is a **path**: n = L − k + 1 k-mers of the graph spelling an instance of the oriented pattern. A path need not
+lie in one record. Each outgoing edge examined is one step (`work.extension_edges`, inside `steps`, under the
+request's one `max_steps`); the work time is read at every 4,096 steps as in discovery (§7.6). The paths are
+released when they are `exact` and at most `max_paths` in `all_or_count` (the second admission), the first
+`max_paths` in `partial`.
+
+**`counts.paths`** (a `paths_count`, §8.6): `{value, relation, unit: "paths"}` with `by_strand` (BASIC) or
+`by_orientation` (one count per orientation searched), `candidates_examined` (the branches the extension
+entered, prefixes of k + 1 to L bases, complete paths included: work, not a count of the pattern) and `extension`:
+
+| `extension` | when | relation of `counts.paths` |
+|---|---|---|
+| `completed` | every anchor was extended | `exact` |
+| `no_anchors` | the anchors are `exact` 0 | `exact` 0 |
+| `stopped` | a stop in the extension: `max_steps`, `time`, or `max_paths` with `stop_at_threshold` | `at_least` (the paths completed before the stop) |
+| `not_started` | a stop before the extension (in discovery or a deferred scan) | `unknown` |
+| `not_admitted` | the anchors `exact` and more than `max_anchors` | `unknown` |
+
+The note `paths_later_increment` is absent. `timing.extension_ms` states the extension's time.
+
+**Stops** (§7.6): the phase `extension` with reasons `max_steps`, `time` and `max_paths` (`stop_at_threshold`: the
+extension stops once more than `max_paths` paths are complete); `stop_at_threshold` on the anchors stops discovery
+with `max_anchors` as before. First stop wins; a stop is sticky for the later patterns as in §7.6.
+
+**`withheld` and `cut`.** `all_or_count` releases every path or none: `anchors_above_threshold` (not admitted),
+`count_above_threshold` (the paths `exact` and more than `max_paths`), `threshold_crossed` (a `stop_at_threshold`
+stop, on the anchors or on the paths), `discovery_budget` (`max_steps` in any phase, the extension included),
+`deadline` (the work time, anywhere), and with labels the reasons of §14.6. `partial` withholds only
+`anchors_above_threshold` (nothing was extended); its `cut.reason` is `max_paths` (more paths than `max_paths`: the
+first `max_paths` in answer order), `max_steps` (a stop in the extension: the paths completed before it, a prefix of
+the answer order; a stop in discovery: none), `max_anchors` (`stop_at_threshold` in discovery: nothing extended,
+`returned` 0), `time` or `max_memory`. `retrieval_complete` is `true` iff every path was released (the extension
+`completed`, the paths `exact` and all returned; an `exact` 0 included) and, with labels, everything below was.
+
+**A path result** (`path_result`; results in answer order: anchor node ascending, then orientation, then the
+sequence, A < C < G < T):
+
+<!-- schema: path_result -->
+| field | type | meaning |
+|---|---|---|
+| `sequence` | string | the L bases the path spells (an instance of P for `+`, `=`, `forward`, `palindromic`; of rc(P) for `-`, `reverse`) |
+| `anchor_kmer` | string | its first k bases, as the graph spells its anchor node |
+| `instance` | string | the matched bases: equal to `sequence` |
+| `offset` | integer | 0 |
+| `strand` | `"+"` \| `"-"` \| `"="` | BASIC graphs |
+| `orientation` | `"forward"` \| `"reverse"` \| `"palindromic"` | CANONICAL and PRIMARY graphs, instead of `strand` |
+| `nodes` | list of integers | the n = L − k + 1 node ids of its k-mers in order, `nodes[0]` the anchor (§7.10; wrapper ids on a wrapped PRIMARY graph) |
+| `rows` | list of integers \| null | the annotation row of each k-mer, as a context's `row` (§7.10); `null` for a k-mer without one |
+| `support` | `"record_verified"` \| `"label_intersection"` \| `"mixed"` \| null | `labels: "all"`: its listed labels' support: all `record_verified`, none, or both; `null` when it lists no label or its labels were not built |
+| `labels_status` | string | likewise: `complete`, `truncated`, `refused`, `not_read` (the worst of its rows': refused, then not_read, then truncated) or `output_budget` (read, not built) |
+| `labels_total` | integer \| null | likewise: the labels on every k-mer of the path (the intersection of its rows' labels), when every row was read completely; `null` otherwise (a truncated row leaves the intersection partly known). With `require_support` the unverified ones are counted too |
+| `labels` | list \| null | likewise: the labels on every k-mer of the path (with `require_support: "record_verified"` the verified ones only), in label order, each a `label` (§14.5) whose `support` is `record_verified` or `label_intersection`; `null` unless read and built |
+| `labels_excluded_unverified` | integer \| null | with `require_support: "record_verified"` only: the labels of the path left out for not being verified, their true number; an integer only when every row of the path was read completely (as `labels_total`) and every label carrying it was verified or refuted; `null` otherwise: its labels not read, a row truncated (the labels cut are unknown), or its verification not done (a placement stopped or a placement read refused leaves a label neither verified nor refuted) |
+
+Without labels a path has the first seven fields (`strand` or `orientation` once). Never `kmer`, `node`, `row`:
+`kmer` keeps its meaning, the k-mer of a context.
+
+**Support** (design §4.3, owner decision #14). A label of a path is
+- `label_intersection`: the label annotates every k-mer of the path; nothing says one record holds it (a path
+  may join k-mers of different records, or of different places of one record);
+- `record_verified`: there is a column coordinate c of the path's first k-mer such that c + i is a coordinate of
+  its i-th k-mer for every i < n, c maps (record mapping first) to (`seq_id`, local), and local + n − 1 is below
+  the record's k-mer count: one record of the label holds the whole path there. A chain of consecutive coordinates
+  that crosses into the next record of the column is not one. Possible only with `record` placement (BASIC,
+  coordinates, the `.seqs` mapping) and `output.occurrences` not `false`; the capabilities' `support` says whether
+  the index can give it.
+
+A label of a path (`label`, §14.5): `column`, `support`; with `record` placement `occurrences` (the label's placed
+occurrences of the whole path, unit `placed_occurrences`, `exact`: 0 when its coordinates show none inside one
+record, then `support` is `label_intersection`; `unknown` when a row of the path was not placed) and
+`occurrence_list` (`occurrence` objects: `seq_id`, `record`, `strand` (the path's), `nt_coords` "start-end" over the
+L bases, 1-based, `nt_length`; ordered by (`seq_id`, start)); with `global` placement `occurrence_list` holds the
+chains (`occurrence_global`: `kmer_coord` of the chain's first k-mer, `offset` 0, `strand`), nothing verified, every
+label `label_intersection`; `occurrence_list` is `null` when not placed and absent for `none`, `none_canonical`,
+`not_requested` (note `label_intersection_only`: every label `label_intersection`).
+
+**`require_support: "record_verified"`** lists the verified labels only: in each path's `labels`, in `by_label`
+and in the counts; each path counts the others in `labels_excluded_unverified` (an integer only when it is the
+true number, else `null`, above) and the entry in `labels_excluded_unverified` (a count, unit `labels`: the labels
+carrying some returned path but verified on none; `exact` or `unknown`; `exact` only when every path's is an
+integer and every path was returned). It acts on the labels of paths only (entries of L ≤ k keep `support: "kmer"`). On an index
+whose best support is not `record_verified` it is refused (400 `support_unavailable`) rather than answered in the
+weaker mode; with `output.occurrences: false` it is 400 `invalid_request`; in an answer that reads no labels it is
+stated as `annotation_not_read`.
+
+**The entry with labels** (`labels: "all"` in a retrieval mode): `placement`, `annotation`, `rows_refused`,
+`anchors_truncated` (the rows of the paths' k-mers, each named by its k-mer), `labels_cut`, `occurrences_cut` as for
+contexts (§14); `by_label` lists `by_label_paths` objects, ordered by (paths desc, column asc):
+
+<!-- schema: by_label_paths -->
+| field | type | meaning |
+|---|---|---|
+| `graph` | string \| null | as for contexts (§14.5) |
+| `column` | string | the label |
+| `paths` | count | the returned paths listing it, unit `paths` |
+| `paths_record_verified` | count | of them, those it verifies, unit `paths`; `unknown` without `record` placement |
+| `occurrences` | count | its deduplicated placed occurrences of the whole path over the returned paths, unit `placed_occurrences`; `unknown` without `record` placement |
+
+`counts.labels` (a `labels_count`, §8.6) carries `by_support`: `record_verified` (the labels verified on at least
+one returned path; `unknown` without `record` placement) and `label_intersection` (the listed labels verified on
+none); `counts.occurrences` the deduplicated `record_verified` occurrences summed over the labels.
+- `counts.labels` is `exact` iff every path was returned, every row of every path read completely and every
+  path's list made (with `require_support`, also every carried label verified or refuted); `at_least` otherwise
+  (`unknown` when nothing was read or returned). `by_support` is `exact` iff the same holds with the verification
+  complete; otherwise `record_verified` is `at_least` and `label_intersection` `unknown`. `by_label`'s `paths` as
+  `counts.labels`, its `paths_record_verified` `exact` iff the verification is; its `occurrences` as
+  `counts.occurrences` for contexts (§14.6).
+- `all_or_count` withholds as for contexts (§14.6: `deadline`, `annotation_budget`, `output_budget`,
+  `anchor_labels_truncated`); `partial` states what is missing as there.
+- Note `label_intersection_only` (after increment 3's notes) for placement `none`, `none_canonical` or
+  `not_requested`; `global` keeps `record_bounds_unknown`.
+
+**Memory and the deadline** (labels: §14.4's account). A released path costs 512 + 2k + 3L + 192n bytes, charged
+before its result object is built (`partial`: at most half of the account; the first that does not fit ends the
+list: `cut: max_memory` and `stop {output, max_memory}`, `all_or_count` withheld `output_budget`); a path's label
+list costs 32 + 8 per label (when it does not fit: `stop {output, max_memory}`, that path and the later ones
+`output_budget`). Rows are read one per read, each once per step, work units as for contexts. Not in the account,
+as the label-free descriptors (§7.6, "Memory"): the paths the engine retains during the extension (at most
+`max_paths`, O(L) each) before their release; without labels the route has no account (bounded by `max_paths`
+× O(L); a pattern has no length cap, §4.2). The work time is read before each annotation read and between its
+chunks, before each path's label list (`stop {output, time}`), before each path's verification (`stop {placement,
+time}`: the later paths' labels unverified) and before each path's labels are built (`stop {output, time}`).
+
+**Limits echo** (answers to `long_search: "paths"` only): `limits.long_search` `"paths"`, `limits.max_paths`; and
+`limits.require_support` in those that read labels.
+
+**Capabilities**: `long_search` `["anchors", "paths"]`, `default_long_search` `"anchors"`, `caps.max_paths`
+(1,000, `--pattern-max-paths`), `caps_rule` naming `max_paths` among the clamped caps and stating the rule;
+`long_patterns` stays `"anchors_counted"`; `support` states the best support of a path on the index.
+
+### 12.2 Increment 5, served: peptides (`protein`)
+
+Served by this build (`src/graph/alignment/genetic_code.{hpp,cpp}`, the codon automaton of
+`src/graph/alignment/pattern_search.cpp`, the route's `protein` kind; design §6, owner decision #15) as an addition
+to version 1. A request without a `protein` pattern is answered as before (§17); `genetic_code` acts on protein
+patterns only.
+
+**The kind.** `patterns[i].protein`: a peptide over the 20 amino acids A C D E F G H I K L M N P Q R S T V W Y and
+the ambiguity codes **X** (any residue: every codon that is not a stop), **B** (D or N), **Z** (E or Q) and **J** (I
+or L), any case (capabilities `protein_residues`). A peptide of m residues is a pattern of L = 3m bases.
+
+**The genetic code.** `genetic_code`: the NCBI translation table (gc.prt version 4.6) the request's peptides are
+read in, one of the capabilities' `genetic_codes` — 1–6, 9–16, 21–33 — default 1 (the standard code); another
+integer is 400 `genetic_code_unknown`, a value that is not an integer 400 `invalid_request`. A residue's codons are
+NCBI's `ncbieaa` column of the table. Tables 27, 28 and 31 list some codons both as a residue and as a stop in
+context (27: TGA W; 28: TAA, TAG Q and TGA W; 31: TAA, TAG E): they code their residue here and can match as it,
+which a translation that ends at them in context would not show.
+
+**What is searched: the codon automaton.** The instances of a peptide are exactly the codon strings c1 … cm with
+each ci a codon of residue i in the table: no superset (Leu TTR|CTN, Ser TCN|AGY, Arg CGN|AGR are exact, not the
+per-position union), no stop codon anywhere (X excludes the stops too). The bases allowed at a position depend on
+the bases already spelled in its codon; in discovery they are read from the range itself, in the extension from
+the path spelled so far, so the automaton's state is recomputed at the k boundary from the anchor's bases.
+
+**Strands.** As for dna (§7.3): `forward` searches P, `reverse` its reverse-complemented automaton rc(P) (the
+residues in reverse order, each codon reverse-complemented: GCN becomes NGC), on BASIC strands, elsewhere
+orientations. A peptide is palindromic when its codon sets equal their mirrored reverse complements: only runs of X
+in tables 27, 28 and 31 (the tables without a stop codon) are.
+
+**Counts, results and scopes** keep their meaning: offsets, `length`, scopes and instances are in bases.
+`length` is 3m and `residues` m; `instance` (`kmer[offset, offset + L)`, or a path's `sequence`) names the codons
+matched; `counts` count graph contexts, anchors and paths as for dna. A peptide of at most k / 3 residues (10 at
+k = 31) is searched within one k-mer (`suffix`, `any_offset`); a longer one is a pattern longer than k: anchors only
+(§7.7), its paths with `long_search: "paths"` (§12.1). Labels (`output.labels: "all"`) as for dna.
+
+**Bits and the floor.** `information_bits` is exact: 2 per base less log2 of the distinct strings the peptide's
+codons spell over the positions counted, residue by residue — for the whole peptide Σ log2(64 / |codons_i|) =
+6m − log2(the codon strings it admits). `anchor_information_bits` and `min_anchor_information_bits` are exact for
+windows that cut a codon. The floor (§7.8) gates on them as for dna; an exact peptide (every residue one codon) is
+exempt in `suffix` scope.
+
+**What is refused.**
+- In the pattern's slot (§8.9): `bad_alphabet` for an empty text or a character that is neither a residue nor the
+  stop (U, selenocysteine, and O, pyrrolysine, included; the first such is named, wherever a `*` is);
+  `stop_unsupported` for a peptide valid apart from its stop `*` — stops are not served in this version (the
+  owner's decision of 2026-10-08: no branch through a stop codon); a later version may serve them;
+  `information_below_floor` and `scope_unsupported` as for dna (the slot keeps `residues` and `genetic_code`).
+- The request: `genetic_code_unknown` (above).
+
+**Costs, stated.** A leading X is searched (the shortcut that skips a leading N run of a dna or iupac pattern,
+§7.8, does not apply: X excludes the stops), and a run of X inside a window branches about as an N run of three
+times its length (61 of the 64 codons in the standard code): §7.8's cost rule applies to it, whatever the bits.
+
+**The entry** of a peptide: `kind: "protein"`, `pattern` (its residues, upper case), `length` (3m), `residues`
+(m), `genetic_code` (the table used), and every other field as for dna.
+
+**Capabilities**: `kinds` lists `"protein"` (`kinds_later_increment` is `[]`), `protein_residues`,
+`genetic_codes`, `default_genetic_code` (1), `protein_rule` (prose).
 
 ## 13. Contract deltas against the design's draft (resolved)
 
@@ -1041,7 +1368,8 @@ Served by this build (`src/cli/pattern_retrieval.cpp`, design §4.3, §5.2–§5
   count was not admitted (`withheld` for any reason of milestone 1) reads no annotation row (design §5.2:
   `work.annotation_rows` 0). Mode `count` reads none whatever the projection (note `annotation_not_read`).
 - A pattern longer than k releases nothing (`paths_later_increment`, §7.7) and reads nothing; without anchors its
-  empty answer is complete, with `counts.labels` exact 0.
+  empty answer is complete, with `counts.labels` exact 0. With `long_search: "paths"` (increment 4) its released
+  paths are read instead: the rows of their k-mers, each path's labels and their support (§12.1).
 - The patterns are read in request order, under one memory account and one work budget for the whole request
   (§14.4); the deadline is the request's (§7.6).
 
@@ -1464,3 +1792,70 @@ and `/stats` (byte for byte apart from `timing`), the alignment, and every answe
   the same bytes (D1-02, M1-02); an `.edgemask` that exists but cannot be opened is now named in the log, by
   the loader's warning and by the start-up note (which said "no dummy-edge mask" and named a remedy `transform`
   refuses; M1-03).
+
+## 17. Increments 4 and 5
+
+Increment 4 (patterns longer than k as paths, §12.1) and increment 5 (peptides, §12.2), built in parallel and
+served together (2026-10-08; owner decisions #12–#15). **Contract version 1 stays: additions only** (§1, the
+owner's decision #12 of semantic compatibility): no field, value or count changes its meaning or its guarantee,
+and both increments are opt-ins — a request that sets neither `long_search: "paths"` nor a `protein` pattern (nor
+another field below) is answered as by the build of `44583b51`, byte for byte apart from `timing`. Checked against
+that build's binary on a masked copy of the mini index (`transform --mask-dummy`), with and without
+`--no-coord-mapping`: every `/pattern` request of the increment-3 review panel, every stored fixture request of
+those servers but the two deadline fixtures, patterns longer than k in every mode, projection and strand setting,
+with step and threshold stops, and refusals that name no new field — 544 comparisons (272 requests, plain and
+gzip), all identical apart from `timing`; `/search`, `/align`, `/resolve`, `/traverse`, `column_labels` and `/stats`
+— 42 comparisons, all identical apart from `timing`; both capabilities routes: only the additions below. The
+fixture `max_steps_then_time` depends on the clock (the base binary answers it differently from run to run) and
+was compared as `pattern_fixtures.py --check` compares it. The alignment golden gate (`run_gate.sh`,
+`diff_gate.sh`) is IDENTICAL (1,038 of 1,038 files). The refusal of a pattern object without a kind keeps its
+message; only one that names `protein` beside another kind gets the new message naming `protein`.
+
+**Additions, each opt-in or additive:**
+- **Request fields**: `long_search` (`"anchors"` | `"paths"`, default `"anchors"`), `max_paths` (≥ 0, default and
+  cap `caps.max_paths`), `require_support` (`"label_intersection"` | `"record_verified"`), `genetic_code` (an NCBI
+  table id, default 1); the pattern kind `protein`; `output.paths` accepted with either value (§4.1–§4.3).
+- **Refusal codes** (§6): 400 `support_unavailable` (check 11 of §5), 400 `genetic_code_unknown` (step 8).
+- **Slot error** (§8.9): `stop_unsupported`.
+- **Entry fields**: `residues` and `genetic_code` (protein patterns); `labels_excluded_unverified` (paths with
+  `require_support: "record_verified"`); `kind` value `"protein"`.
+- **Counts**: `counts.paths` of a path search with `by_strand` | `by_orientation`, `candidates_examined`,
+  `extension` (`no_anchors`, `not_started`, `not_admitted`, `stopped`, `completed`); `counts.labels.by_support`
+  (`record_verified`, `label_intersection`) for the labels of paths (§8.6).
+- **Results**: the path result (`sequence`, `anchor_kmer`, `instance`, `offset`, `strand` | `orientation`, `nodes`,
+  `rows`; with labels `support` — `record_verified`, `label_intersection`, `mixed` or null —, `labels_status`,
+  `labels_total`, `labels`, `labels_excluded_unverified`); a label of a path with `support` `record_verified` or
+  `label_intersection`; `by_label` of paths (`paths`, `paths_record_verified`, `occurrences`).
+- **Values**: `withheld.reason` `anchors_above_threshold`; `cut.reason` `max_paths`; `stop.phase` `extension`;
+  `stop.reason` `max_paths`; note `label_intersection_only`.
+- **Work and timing**: `work.extension_edges`, `timing.extension_ms` (path searches).
+- **Limits**: `long_search`, `max_paths` (answers to `long_search: "paths"`), `require_support` (those that read
+  labels); `limits.clamped` may name `max_paths`.
+- **Capabilities** (both routes): `long_search`, `default_long_search`, `caps.max_paths`, `protein_residues`,
+  `genetic_codes`, `default_genetic_code`, `protein_rule`; `kinds` gains `"protein"` and `kinds_later_increment`
+  becomes `[]`; `caps_rule` names `max_paths` and states the rule of `long_search`. `long_patterns` stays
+  `"anchors_counted"` (what a request without the option gets) and `default_projection` stays `"none"`.
+- **Server flag**: `--pattern-max-paths` (1,000; `server_query` and `pattern`).
+
+**Requests that were refused and are now answered** (the fields were refused by name, 400 `later_increment`, any
+value, §4.4 before): `long_search`, `max_paths`, `require_support`, `genetic_code`, `patterns[i].protein` and
+`output.paths: true`. A wrong value of the first four is now 400 `invalid_request` (`genetic_code` that is no table:
+`genetic_code_unknown`). The fields still refused by name: `predicate`, `max_predicate_contexts`,
+`max_predicate_work`, `graphs`, `budget_split`, `output.labels: "predicate_only"`.
+
+**Stated limits** (each also in §12.1 and §12.2): the paths the engine retains during the extension (at most
+`max_paths`, O(L) each) are not charged to the memory account, and without labels a path search has no account
+(bounded by `max_paths`); a label of a path that no record verifies is `label_intersection`, never a record claim;
+`record_verified` needs a BASIC index with coordinates and its record mapping; stops `*` in peptides are refused
+(`stop_unsupported`); a leading X is searched, not skipped; the context stops of tables 27, 28 and 31 match as
+their residue.
+
+**Fixtures** (§11): new `paths`, `paths_count`, `paths_labels`, `paths_require_support`,
+`paths_max_paths_partial`, `paths_count_above_threshold`, `paths_stop_at_max_paths`, `paths_anchors_above_threshold`,
+`paths_max_steps`, `paths_global`, `paths_primary`, `support_unavailable`, `peptide`, `peptide_count`,
+`peptide_paths`, `peptide_bad_residue`, `genetic_code_unknown` (80 in all); changed: the nine capabilities bodies
+of the single-graph servers (the capabilities additions above), `README.md`, `index.json`. Every other stored body
+is unchanged. The validator (`test_pattern_fixtures.py`) knows the new fields, values and codes (its tables
+`paths_count`, `labels_count`, `by_support`, `path_result`, `by_label_paths`), checks a peptide's bits and
+instances against its own copy of NCBI's genetic codes, and refuses answers that break the rules of §12.1 and
+§12.2.
