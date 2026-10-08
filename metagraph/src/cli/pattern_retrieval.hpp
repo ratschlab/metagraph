@@ -40,6 +40,14 @@
  * the context's or path's first), cut to the union's first once it is complete. Every refusal,
  * truncation, cut and stop is stated (the owner's
  * guarantee rule); a count is exact only when everything behind it was read.
+ *
+ * Increment 5b (pattern_selection.cpp; the internals shared through pattern_retrieval_impl.hpp):
+ * the selection of a request's predicate for patterns of L <= k — bind() once per request, then
+ * per pattern begin_selection(), admit_tested() and tested_context() as the engine releases the
+ * raw contexts, select() (the pass: rows and reverse-complement lookups, one restricted read
+ * per row under max_predicate_work, decisions in answer order, the relations of SPEC §19.7, the
+ * selection admission) and the projection of the chosen contexts: none, predicate_only
+ * (retrieve_given: the pass's rows instead of a discovery, placed) or all (retrieve()).
  */
 
 #include <algorithm>
@@ -53,6 +61,7 @@
 #include <json/json.h>
 
 #include "graph/alignment/pattern_search.hpp"
+#include "graph/traversal/traversal_types.hpp"
 
 
 namespace mtg {
@@ -69,6 +78,12 @@ class LabelOracle;
 }
 
 namespace cli {
+
+namespace predicate {
+struct Predicate;
+class Bound;
+struct Binding;
+}
 
 /**
  * What the answer of one /pattern request has built so far, and the time writing it is
@@ -286,6 +301,120 @@ struct LabelsAnswer {
 };
 
 /**
+ * The selection of a predicate (increment 5b, SPEC-pattern-search.md §19): which contexts of a
+ * pattern of L <= k satisfy the request's predicate, read from their annotation rows by the
+ * selection pass (PatternRetrieval::select, pattern_selection.cpp).
+ */
+
+// The request-wide options of the selection, effective (after the server's caps, §19.2)
+struct SelectionLimits {
+    // the work units of the selection's annotation reads, lookups and decisions over the
+    // request (§19.9), a budget of its own beside max_annotation_work
+    uint64_t max_predicate_work = 100'000'000;
+    // predicate_strands "either" (true): on a BASIC graph a label is present for a context
+    // when it annotates the context's k-mer or its reverse complement; "context" (false): the
+    // context's own k-mer only. On CANONICAL and PRIMARY graphs one row serves both
+    // orientations: "either" whatever is asked
+    bool either = true;
+};
+
+// output.labels of a predicate request (§19.2): what the selected contexts are returned with
+enum class Projection { NONE, PREDICATE_ONLY, ALL };
+
+// selection.pass (§19.7)
+enum class SelectionPass { COMPLETED, STOPPED, NOT_ADMITTED, NOT_STARTED, CONSTANT };
+const char* to_string(SelectionPass pass);
+
+/**
+ * One raw context of a pattern released into the selection pass, in answer order: what the
+ * engine released (orientation, offset, node, base_node) and the annotation key of its k-mer
+ * (row + 1, as RetrievalContext::key; PatternRetrieval::tested_context computes it as the
+ * route names a context's row), then what the pass made of it. 64 bytes in the memory model
+ * (admit_tested), whatever its layout.
+ */
+struct TestedContext {
+    graph::pattern::Orientation orientation = graph::pattern::Orientation::FORWARD;
+    uint32_t offset = 0;
+    uint64_t node = 0;
+    uint64_t base_node = 0;
+    uint64_t key = 0;
+    // the pass's: its row in the pass's table, whether every row it needs was read and it
+    // was decided (tested), and the decision
+    uint32_t row = UINT32_MAX;
+    bool decided = false;
+    bool selected = false;
+};
+
+// What one pattern's selection is asked for, beside the request-wide SelectionLimits
+struct SelectionRequest {
+    // the request's mode: COUNT (the counts only), ALL_OR_COUNT or PARTIAL
+    graph::pattern::Mode mode = graph::pattern::Mode::ALL_OR_COUNT;
+    // the selection admission's threshold (all_or_count), the list's cap (partial), and
+    // stop_at_threshold's threshold on the selected count
+    uint64_t max_contexts = 10'000;
+    bool stop_at_threshold = false;
+    // what the selected contexts are returned with: NONE keeps no row and no
+    // selection_labels; PREDICATE_ONLY keeps the chosen contexts' own rows for
+    // retrieve_given and builds their selection_labels; ALL their selection_labels (the
+    // projection reads the rows again, retrieve())
+    Projection projection = Projection::NONE;
+};
+
+/**
+ * What the selection pass made of one pattern (§19.6 steps 3 and 4, §19.7, §19.8). The
+ * route writes counts.tested and counts.selected, selection.pass, work.predicate_rows and
+ * work.predicate_units, timing.selection_ms, and composes withheld, cut and stop with the
+ * engine's.
+ */
+struct SelectionAnswer {
+    SelectionPass pass = SelectionPass::NOT_STARTED;
+    // unit graph_contexts: tested exact (the decisions made; a constant: the raw count),
+    // selected with the relation of §19.7
+    graph::pattern::Count tested
+            = graph::pattern::Count::unknown(graph::pattern::Unit::GRAPH_CONTEXTS);
+    graph::pattern::Count selected
+            = graph::pattern::Count::unknown(graph::pattern::Unit::GRAPH_CONTEXTS);
+    // the selected contexts the answer lists, indices into the pass's tested contexts in
+    // answer order: all_or_count all of them or none, partial the first max_contexts, count
+    // none
+    std::vector<uint32_t> chosen;
+    // with a projection that reads labels: per chosen context its selection_labels, the
+    // predicate's labels in the set it was evaluated on (its row's, and with "either" its
+    // reverse complement's), as ids into Bound::labels(), in label order (contexts desc over
+    // the chosen, column asc); charged when the context was decided
+    std::vector<std::vector<graph::traversal::LabelId>> selection_labels;
+    // all_or_count: why nothing is listed (predicate_budget, deadline, threshold_crossed,
+    // selected_above_threshold, output_budget)
+    std::optional<std::string> withheld;
+    // partial: why the list may be shorter than the selected contexts, by the pass itself
+    // (max_predicate_work, max_memory, time, max_contexts for a stop_at_threshold stop, or
+    // max_memory for refused rows and descriptors the account could not hold)
+    std::optional<std::string> cut;
+    // partial: more contexts were selected than the list holds (cut max_contexts, after the
+    // engine's and the pass's cuts, §19.8)
+    bool list_cut = false;
+    // the pass's stop, {selection, max_predicate_work | max_memory | time | max_contexts},
+    // or {output, max_memory | time} while its selection_labels were built
+    std::optional<std::pair<std::string, std::string>> stop;
+    bool time_limited = false;
+    // the statements of the rows the account could not hold (phase "selection")
+    Json::Value rows_refused = Json::Value(Json::arrayValue);
+    // work.predicate_rows: the rows the pass read; work.predicate_units: its units (refused
+    // and interrupted reads included); the reverse-complement lookups made
+    uint64_t rows = 0;
+    uint64_t units = 0;
+    uint64_t lookups = 0;
+    double ms = 0;
+};
+
+// The selection of a pattern without a pass (§19.7): its normal form a constant (pass
+// "constant": false selects nothing, tested the raw count; true selects the raw count, with
+// its relation), or a pass that did not run (not_admitted, not_started: selected unknown,
+// exact 0 when the raw count is exact 0)
+SelectionAnswer constant_selection(bool value, const graph::pattern::Count &raw);
+SelectionAnswer selection_without_pass(SelectionPass pass, const graph::pattern::Count &raw);
+
+/**
  * One request's labelled retrieval: the oracle, the label dictionary (LabelRecorder), the
  * memory and work accounts, shared by the request's patterns in request order. Used by one
  * thread. The deadline is the request's (|budget|): a time stop of the reads is recorded in
@@ -370,13 +499,118 @@ class PatternRetrieval {
     // the request's counters so far (the sum of its patterns')
     const RetrievalCounters& counters() const;
 
+    // ---- increment 5b: the selection of a predicate (pattern_selection.cpp; SPEC §19)
+
+    /**
+     * Binds the request's |predicate| to this index's columns (predicate::Bound::bind, the
+     * work time read every 4,096 names), its bytes (Bound::bytes) charged to the memory
+     * account for the whole request, once, before the first pattern; |limits| are the
+     * request's. The binding's stop ("time", "max_memory") stops every pattern's pass after
+     * it (not_started, stop {selection, <stop>}). Called once per request, before any select().
+     */
+    const predicate::Binding& bind(const predicate::Predicate &predicate,
+                                   const SelectionLimits &limits);
+    // the bound predicate (null before bind() and when bind() stopped)
+    const predicate::Bound* bound() const;
+    // predicate.strands as evaluated: "either" on CANONICAL and PRIMARY graphs whatever was
+    // asked, else as asked ("either" | "context")
+    const char* selection_strands() const;
+    // selection.access: "rows" (budget-aware, or unbudgeted rows) or "columns" (an
+    // unbudgeted annotation with direct access and at most 16 known labels)
+    const char* selection_access() const;
+    // the request's selection units so far (max_predicate_work)
+    uint64_t predicate_units() const;
+
+    /**
+     * Before the engine releases one pattern's raw contexts into the pass (the route runs
+     * enumerate() with max_contexts = max_predicate_contexts, mode ALL_OR_COUNT for a count
+     * request): frees what the previous pattern's pass still held (end_selection) and opens
+     * the allowance of the descriptors, as begin_release: what the account has left
+     * (all_or_count, count), half of it (partial).
+     */
+    void begin_selection(graph::pattern::Mode mode);
+    // One released raw context, before the route stores it: charges its descriptor (64 bytes
+    // of the model, §19.9). False when it does not fit the allowance, and for every one after
+    // the first that did not: the route stores none of them (the pass's set ends there)
+    bool admit_tested();
+    // the descriptor of the released context |c|: its key named as the route names a
+    // context's row (§7.10: the stored k-mer's on BASIC and wrapped PRIMARY graphs, the
+    // canonical k-mer's on a native CANONICAL graph, spelled; npos when it has no row)
+    TestedContext tested_context(const graph::pattern::Context &c) const;
+
+    /**
+     * The selection pass of one pattern (§19.6 steps 3 and 4; PLAN 5b-3). |tested| are the
+     * admitted raw contexts in answer order (admit_tested), the first of |released| the engine
+     * released (more when the account could not hold their descriptors: the pass's set ended
+     * there, stop {selection, max_memory}); |raw| is the raw count (counts.contexts.total) and
+     * |x| the engine's extraction (withheld: no pass, not_admitted for
+     * count_above_threshold, else not_started). In order:
+     *  1. the rows: each context's row and, with "either" on a BASIC graph, its reverse
+     *     complement's — the k-mer spelled, reverse-complemented and looked up
+     *     (LabelOracle::keys_of_sequence), k units charged and the gate checked before each;
+     *     one lookup per distinct row, its result kept (and the mirror's mirror known: rc is an
+     *     involution); every distinct row charged kSelectionRowBytes before it is added;
+     *  2. the reads: one row per read, in the order of first appearance (a context's row before
+     *     its mirror's), the time and max_predicate_work checked before each, a statement
+     *     reserved, a LabelQuery over Bound::labels() (Access::ROWS for the budget-aware fetch,
+     *     never AUTO; unbudgeted: rows, or single cells for at most 16 labels when the
+     *     annotation has direct access) with the account's remainder; 8 + KeyCost::entries +
+     *     dependency units charged on every outcome (a refused read what its decode reached,
+     *     at least 8; unbudgeted: 8 + the hits); a refused row stated (rows_refused, phase
+     *     "selection"; all_or_count ends the pass there, the other modes go on);
+     *  3. the decisions, in answer order as their rows are read: Bound::eval on the labels of
+     *     the context's row and its mirror's, its units charged (never refused), the clock
+     *     every 64 lookups and decisions; stop_at_threshold ends the pass once more than
+     *     max_contexts are selected; after a stop (but time) every context whose rows were
+     *     read is decided all the same. A selected context among the first max_contexts gets
+     *     its selection_labels (with a projection that reads labels) and, for predicate_only,
+     *     its row kept, both charged when it is decided;
+     *  4. the counts and their relations (§19.7), the selection admission (all_or_count: all
+     *     selected or none; partial: the first max_contexts), the label order of the
+     *     selection_labels; every row's hits freed but the chosen contexts' own rows
+     *     (predicate_only, for retrieve_given).
+     * Throws std::logic_error before bind(), for a constant normal form (no pass: see
+     * constant_selection), and std::runtime_error for a context without a row.
+     */
+    SelectionAnswer select(std::vector<TestedContext> &tested, uint64_t released,
+                           const graph::pattern::Count &raw,
+                           const graph::pattern::Extraction &x,
+                           const SelectionRequest &request);
+    // the j-th chosen context's selection_labels (the names; their bytes were charged by the
+    // pass)
+    Json::Value selection_labels_json(const SelectionAnswer &answer, size_t j) const;
+    // frees what the last pattern's pass still holds: its descriptors (after the route built
+    // the chosen contexts' results) and its kept rows (when retrieve_given did not take them)
+    void end_selection();
+
+    /**
+     * The projection predicate_only (§19.10) of the chosen contexts of the last select()
+     * (|contexts|, admitted by admit_context after begin_release as for retrieve()): retrieve()
+     * with the discovery replaced by the pass's rows — each context's labels are the
+     * predicate's labels on its own row, as the pass read them (never truncated; labels_total
+     * their number) — and the placement of those labels (LabelQuery with coordinates over the
+     * labels found on the rows, under max_annotation_work), with retrieve()'s statements,
+     * cuts, modes and answer. Takes the kept rows (end_selection is then needed for the
+     * descriptors only).
+     */
+    LabelsAnswer retrieve_given(const std::vector<RetrievalContext> &contexts, uint64_t released,
+                                size_t length, graph::pattern::Mode mode,
+                                const graph::pattern::Extraction &extraction,
+                                const Json::Value &graph_name);
+
   private:
     struct Impl;
+    struct Given;
     std::unique_ptr<Impl> impl_;
     RetrievalLimits limits_;
     AnnotationDescription description_;
 
     bool admit(uint64_t bytes);
+    // retrieve() and retrieve_given(): |given| null reads the rows' labels (discovery)
+    LabelsAnswer retrieve_rows(const std::vector<RetrievalContext> &contexts, uint64_t released,
+                               size_t length, graph::pattern::Mode mode,
+                               const graph::pattern::Extraction &extraction,
+                               const Json::Value &graph_name, Given *given);
 };
 
 /**

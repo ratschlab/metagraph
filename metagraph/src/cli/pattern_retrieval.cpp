@@ -1,4 +1,5 @@
 #include "pattern_retrieval.hpp"
+#include "pattern_retrieval_impl.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -34,202 +35,10 @@ using graph::traversal::ReadPacing;
 using graph::traversal::Column;
 using graph::traversal::Coord;
 using annot::matrix::DecodeBudget;
+// the memory and text models, the account and the rows (pattern_retrieval_impl.hpp)
+using namespace retrieval;
 
 namespace {
-
-/**
- * The memory model of the account (§5.3): deterministic prices of what the answer holds,
- * never a measurement, so that where a request stops does not depend on the allocator. What
- * the reads return is charged by the reads themselves (DecodeBudget, the model of
- * decode_budget.hpp); the rest is priced here.
- */
-// a released context: its result object (k-mer, instance, offset, strand, node, row) and its
-// descriptor, beside its k-mer twice (the result's strings); charged before the object is built
-uint64_t context_bytes(size_t k) { return 512 + 2 * k; }
-// Every copy of a label's name the request holds is priced where it is made, at its length
-// (review GPT-2, finding 3: a result's label was priced 256 whatever its name, and one label
-// of 512 KiB in 64 contexts built a 34 MB answer under max_memory_mb 2):
-// a dictionary label: its LabelRef and name in the recorder, its counters here, and the copy
-// of its name in each pattern's placement (the LabelQuery of step 2 copies the dictionary;
-// one at a time); charged inside the read that names it
-uint64_t label_name_bytes(std::string_view name) { return 192 + 2 * name.size(); }
-// a label object of a result (column, support, the occurrences count, the list) and its copy
-// of the label's name
-uint64_t label_entry_bytes(std::string_view name) { return 256 + name.size(); }
-// a by_label entry of a pattern (graph, column, contexts, contexts_suffix, occurrences) and its
-// copy of the label's name
-uint64_t by_label_bytes(std::string_view name) { return 512 + name.size(); }
-// a placed occurrence object (seq_id, record, strand, nt_coords, nt_length), its record name
-// beside it
-uint64_t occurrence_bytes(std::string_view record) { return 256 + record.size(); }
-// a (kmer_coord, offset, strand) object of the global placement
-constexpr uint64_t kGlobalOccurrenceBytes = 192;
-// a placed occurrence in a label's deduplication set (§5.4)
-constexpr uint64_t kDedupBytes = 64;
-// a statement of a row: a rows_refused entry (k-mer, row, phase, reason, needed_bytes,
-// available_bytes) or an anchors_truncated entry (k-mer, row, cap, total); reserved before
-// the read that can produce it, so that it always fits, and held with the answer
-uint64_t statement_bytes(size_t k) { return 384 + k; }
-// a released path (long_search "paths"): see path_descriptor_bytes in the header
-constexpr uint64_t kPathKmerBytes = 192;
-
-/**
- * The compact JSON text of the labels built for the answer, from above (AnswerVolume, review
- * of 2026-10-07, X-EFFICIENCY-04): estimated before the objects are built, so that the work
- * time is read with them counted. Integers at their widest (20 digits), strings as
- * string_text_bytes.
- */
-// a count {"relation":"at_least","unit":"placed_occurrences","value":<20 digits>}: 79
-constexpr uint64_t kCountText = 96;
-// a result's label fields: ,"labels":[],"labels_status":"output_budget","labels_total":<20
-// digits>,"support":"kmer" (about 100)
-constexpr uint64_t kResultLabelsText = 112;
-// a label object without its name and list: {"column":,"occurrence_list":[],"occurrences":
-// <count>,"support":"kmer"},
-constexpr uint64_t kLabelText = 64 + kCountText;
-// a placed occurrence without its record name: {"nt_coords":"<20>-<20>","nt_length":<20>,
-// "record":,"seq_id":<20>,"strand":"+"}, (142)
-constexpr uint64_t kOccurrenceText = 144;
-// a global one: {"kmer_coord":<20>,"offset":<20>,"strand":"+"}, (79)
-constexpr uint64_t kGlobalOccurrenceText = 80;
-// a by_label entry without its names: {"column":,"contexts":<count>,"contexts_suffix":
-// <count>,"graph":,"occurrences":<count>}, (68 and three counts)
-constexpr uint64_t kByLabelText = 72 + 3 * kCountText;
-// paths (long_search "paths"): a result's label fields, ,"labels":[],"labels_excluded_
-// unverified":<20 digits>,"labels_status":"output_budget","labels_total":<20 digits>,
-// "support":"label_intersection" (about 160)
-constexpr uint64_t kPathResultLabelsText = 176;
-// a path's label object without its name and list: {"column":,"occurrence_list":[],
-// "occurrences":<count>,"support":"label_intersection"},
-constexpr uint64_t kPathLabelText = 80 + kCountText;
-// a path's by_label entry without its names: {"column":,"graph":,"occurrences":<count>,
-// "paths":<count>,"paths_record_verified":<count>}, (73 and three counts)
-constexpr uint64_t kPathByLabelText = 80 + 3 * kCountText;
-
-// a string's text: quoted, every byte jsoncpp may escape (a control character, a quote, a
-// backslash, a byte of a non-ASCII character: \uXXXX) counted as 6
-uint64_t string_text_bytes(const char *begin, const char *end) {
-    uint64_t bytes = 2;
-    for (const char *c = begin; c != end; ++c) {
-        const unsigned char u = static_cast<unsigned char>(*c);
-        bytes += u < 0x20 || u >= 0x80 || u == '"' || u == '\\' ? 6 : 1;
-    }
-    return bytes;
-}
-
-uint64_t string_text_bytes(std::string_view s) {
-    return string_text_bytes(s.data(), s.data() + s.size());
-}
-
-uint64_t decimal_digits(uint64_t x) {
-    uint64_t digits = 1;
-    while (x >= 10) {
-        x /= 10;
-        ++digits;
-    }
-    return digits;
-}
-
-constexpr uint64_t kNoKey = graph::traversal::npos;
-
-Json::Value uint_json(uint64_t x) { return Json::Value(static_cast<Json::UInt64>(x)); }
-
-Json::Value count_json(Relation relation, uint64_t value, Unit unit) {
-    Json::Value v;
-    v["value"] = relation == Relation::UNKNOWN ? Json::Value() : uint_json(value);
-    v["relation"] = to_string(relation);
-    v["unit"] = to_string(unit);
-    return v;
-}
-
-Json::Value reason_json(const std::string &reason) {
-    Json::Value r;
-    r["reason"] = reason;
-    return r;
-}
-
-const char* strand_of(Orientation o) { return strand_symbol(o); }
-
-uint8_t strand_rank(Orientation o) {
-    switch (o) {
-        case Orientation::FORWARD: return 0;
-        case Orientation::REVERSE: return 1;
-        case Orientation::PALINDROMIC: return 2;
-    }
-    return 3;
-}
-
-// the account of §5.3: one per request, every item charged before it is held (what an
-// unbudgeted read returned excepted: force())
-class Account {
-  public:
-    explicit Account(uint64_t max) : max_(max) {}
-    // refused when it does not fit what is left; once an unbudgeted read's names were forced
-    // past the maximum nothing fits any more (left() is 0: no unsigned wrap of max_ - held_)
-    bool charge(uint64_t bytes) {
-        if (bytes > left())
-            return false;
-        held_ += bytes;
-        peak_ = std::max(peak_, held_);
-        return true;
-    }
-    // what an unbudgeted read returned, held whether or not it fits (the read is done); the
-    // answer states the unbudgeted access, and the peak shows any excess
-    void force(uint64_t bytes) {
-        held_ += bytes;
-        peak_ = std::max(peak_, held_);
-    }
-    void release(uint64_t bytes) {
-        assert(bytes <= held_);
-        held_ -= std::min(bytes, held_);
-    }
-    uint64_t left() const { return held_ < max_ ? max_ - held_ : 0; }
-    uint64_t held() const { return held_; }
-    uint64_t peak() const { return peak_; }
-
-  private:
-    uint64_t max_;
-    uint64_t held_ = 0;
-    uint64_t peak_ = 0;
-};
-
-// What the reads made of a row (the annotation key of one or more contexts)
-enum class RowStatus {
-    PENDING,
-    // read, every label of the row listed
-    COMPLETE,
-    // read, more labels than max_labels_per_anchor: the first that many listed, the total
-    // stated
-    TRUNCATED,
-    // the account could not hold the row's read (stated in rows_refused)
-    REFUSED,
-    // not read: the reads stopped before it (time, work), or all_or_count stopped reading
-    // once its results could no longer be published
-    NOT_READ,
-};
-
-const char* to_string(RowStatus s) {
-    switch (s) {
-        case RowStatus::COMPLETE: return "complete";
-        case RowStatus::TRUNCATED: return "truncated";
-        case RowStatus::REFUSED: return "refused";
-        case RowStatus::PENDING:
-        case RowStatus::NOT_READ: return "not_read";
-    }
-    return "not_read";
-}
-
-struct RowState {
-    uint64_t key = kNoKey;
-    // the first context of the pattern with this key: its k-mer names the row
-    size_t first = 0;
-    RowStatus status = RowStatus::PENDING;
-    LabelRecorder::NodeLabels labels;
-    // placement (step 2): read, refused by the account, or not reached
-    bool placed = false;
-    bool place_refused = false;
-    LabelQuery::NodeHits hits;
-};
 
 // one occurrence of a label in a context: (seq_id, 1-based start) with a record mapping,
 // (kmer_coord, offset) without one; the strand of the context
@@ -553,166 +362,6 @@ AnnotationDescription describe_annotation(const LabelOracle &oracle, GraphMode m
 }
 
 
-struct PatternRetrieval::Impl {
-    Impl(const AnnotatedDBG &anno_graph, const RetrievalLimits &limits, Budget &budget,
-         const RetrievalHooks *hooks, AnswerVolume *volume)
-          : oracle(anno_graph, hooks ? hooks->coord_to_header : nullptr),
-            limits(limits), budget(budget),
-            account(hooks && hooks->max_memory_bytes ? hooks->max_memory_bytes
-                                                     : limits.max_memory_bytes),
-            volume(volume) {
-        if (hooks) {
-            deny_decode = hooks->deny_decode;
-            output_hook = hooks->output_hook;
-            occurrences_hook = hooks->occurrences_hook;
-        }
-        // the reads under the deadline are decoded in paced chunks (as /traverse's)
-        oracle.pacer().target_ms = limits.chunk_target_ms;
-        if (hooks && hooks->read_hook)
-            oracle.test_read_hook = hooks->read_hook;
-        recorder = std::make_unique<LabelRecorder>(oracle, LabelKind::COLUMN,
-                                                   std::max<uint64_t>(1, limits.max_labels_per_anchor));
-        // no cache: every row is read once per step, its keys deduplicated, and nothing a
-        // cache held would be in the account (a fixed allotment of zero)
-        recorder->set_max_cache_bytes(0);
-    }
-
-    LabelOracle oracle;
-    const RetrievalLimits limits;
-    Budget &budget;
-    Account account;
-    std::unique_ptr<LabelRecorder> recorder;
-    bool budgeted = false;
-    bool place = false;          // placement record or global, and requested
-    bool records = false;        // placement record
-    // the request's annotation work (units) so far
-    uint64_t units = 0;
-    // tests: DecodeBudget::deny of every read
-    std::function<bool(uint64_t)> deny_decode;
-    // the request's answer volume (null: none), and the tests' hook before the work time is
-    // read for a context's labels
-    AnswerVolume *volume = nullptr;
-    std::function<void(size_t)> output_hook;
-    // tests: called before each context's occurrences are made and each path's verified
-    std::function<void(size_t)> occurrences_hook;
-    // the request's counters (RetrievalCounters)
-    RetrievalCounters counters;
-    // the pattern being released (admit_context): its descriptors' bytes, held, and what they
-    // may hold (all_or_count: what the account had left; partial: half of it); false once a
-    // descriptor did not fit
-    uint64_t descriptors = 0;
-    uint64_t allowance = 0;
-    bool admitting = false;
-
-    uint64_t statement() const { return statement_bytes(oracle.get_k()); }
-
-    // what a read may hold: the account's remainder, less the statements reserved for its rows
-    DecodeBudget decode_budget(uint64_t reserve) const {
-        DecodeBudget decode(account.left() - std::min(reserve, account.left()));
-        if (deny_decode)
-            decode.deny = deny_decode;
-        return decode;
-    }
-
-    // the stop of the current pattern's annotation work (the first one), and whether the
-    // reads themselves stopped (time, work, an unbudgeted read the account could not hold)
-    std::optional<std::pair<std::string, std::string>> stop;
-    bool time_stop = false;
-    bool read_stop = false;
-
-    ReadPacing pacing() {
-        ReadPacing p;
-        const Deadline *d = &budget.deadline();
-        p.ms_left = [d]() {
-            return d->time_budget_ms() - d->finalize_reserve_ms() - d->elapsed_ms();
-        };
-        p.stop = [d]() { return d->work_expired(); };
-        return p;
-    }
-
-    void set_stop(const char *phase, const char *reason) {
-        if (!stop)
-            stop = std::make_pair(std::string(phase), std::string(reason));
-        read_stop |= std::string_view(phase) != "output";
-    }
-
-    // the time and work checks before a read; false: stopped (recorded)
-    bool may_read(const char *phase) {
-        if (!budget.check_time()) {
-            set_stop(phase, "time");
-            time_stop = true;
-            return false;
-        }
-        if (units >= limits.max_annotation_work) {
-            set_stop(phase, "max_annotation_work");
-            return false;
-        }
-        return true;
-    }
-
-    // the work of a read, charged to the request and to the pattern
-    void charge_work(uint64_t u, uint64_t *pattern_units) {
-        units += u;
-        *pattern_units += u;
-    }
-
-    /**
-     * The clock of the retrieval's own work between the reads (review GPT-3, findings 1 and
-     * 4): the occurrences made for the counts and the output, the paths' label lists and their
-     * verification. Asked before |u| more units are done: the clock is read when they would
-     * take the units since its last reading past Budget::kClockStride, as the engine's steps
-     * read it; false when the work time passed (the caller states the stop and does not do the
-     * work).
-     */
-    uint64_t unclocked = 0;
-    bool may_work(uint64_t u) {
-        if (unclocked + u > Budget::kClockStride) {
-            unclocked = 0;
-            if (!budget.check_time())
-                return false;
-        }
-        unclocked += u;
-        return true;
-    }
-
-    // What a refused read is charged (review GPT-2, finding 1): the units of what it decoded
-    // (FetchRefusal::units: the row was read, and refused for its demand or its names), or 8
-    // when its read itself did not fit (its units are not known): a refused row is work like
-    // a row read, so that refusals cannot go on past the work budget
-    static uint64_t refused_units(const FetchRefusal &r) { return r.units ? r.units : 8; }
-
-    Json::Value refusal_json(const RowState &row, const std::vector<RetrievalContext> &contexts,
-                             const char *phase, const FetchRefusal *r) const {
-        Json::Value v;
-        v["kmer"] = contexts[row.first].kmer;
-        v["row"] = uint_json(AnnotatedDBG::graph_to_anno_index(row.key));
-        v["phase"] = phase;
-        v["reason"] = "max_memory";
-        // what reading the row alone needed (at least), against what the account had left
-        uint64_t need = 0;
-        if (r) {
-            need = r->cause == FetchRefusal::DECODE ? r->need
-                 : r->cause == FetchRefusal::NAMES ? r->demand + r->names_bytes : r->demand;
-        }
-        v["needed_bytes"] = r ? Json::Value(uint_json(need)) : Json::Value();
-        v["available_bytes"] = uint_json(r ? r->left : account.left());
-        return v;
-    }
-
-    // step 1: the labels of every row, at most max_labels_per_anchor each
-    void discover(std::vector<RowState> &rows, const std::vector<RetrievalContext> &contexts,
-                  Mode mode, uint64_t *rows_read, uint64_t *pattern_units,
-                  uint64_t *held_lists, Json::Value *refused);
-
-    // step 2: the coordinates of the rows' labels; |needed| (paths): only the rows it marks
-    // (those of a path with at least one label on every k-mer), every row read with a label
-    // when null (contexts)
-    void place_rows(std::vector<RowState> &rows, const std::vector<RetrievalContext> &contexts,
-                    Mode mode, uint64_t *rows_read, uint64_t *pattern_units,
-                    uint64_t *held_hits, Json::Value *refused,
-                    const std::vector<bool> *needed = nullptr);
-};
-
 // Both steps read one row at a time (review GPT-2, finding 2): the time and the work are
 // checked before every row, and every row whose read began is charged its units (also when it
 // is refused or interrupted), so that a read passes the work budget by its one row at most —
@@ -824,7 +473,8 @@ void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
                                         const std::vector<RetrievalContext> &contexts,
                                         Mode mode, uint64_t *rows_read, uint64_t *pattern_units,
                                         uint64_t *held_hits, Json::Value *refused,
-                                        const std::vector<bool> *needed) {
+                                        const std::vector<bool> *needed,
+                                        const std::vector<LabelRef> *dict) {
     // the rows read with at least one label (and, for paths, needed)
     std::vector<size_t> todo;
     for (size_t i = 0; i < rows.size(); ++i) {
@@ -836,8 +486,9 @@ void PatternRetrieval::Impl::place_rows(std::vector<RowState> &rows,
     if (todo.empty())
         return;
     // the permitted set: every label discovered so far (LabelQuery's ids are the
-    // dictionary's, so that a hit names its label by the recorder's id)
-    LabelQuery query(oracle, recorder->labels(), true);
+    // dictionary's, so that a hit names its label by the recorder's id), or the labels
+    // retrieve_given's rows name
+    LabelQuery query(oracle, dict ? *dict : recorder->labels(), true);
     query.set_max_cache_bytes(0);
     // the units of a row's hits: 8, 1 per label and 1 per coordinate, and its dependency rows'
     auto hits_units = [](const LabelQuery::NodeHits &hits, const KeyCost &cost) {
@@ -918,6 +569,7 @@ PatternRetrieval::PatternRetrieval(const AnnotatedDBG &anno_graph, GraphMode mod
       : impl_(std::make_unique<Impl>(anno_graph, limits, budget, hooks, volume)),
         limits_(limits) {
     description_ = describe_annotation(impl_->oracle, mode);
+    impl_->mode = mode;
     impl_->budgeted = description_.budgeted;
     const std::string placement = description_.placement;
     impl_->place = limits.occurrences && (placement == "record" || placement == "global");
@@ -969,6 +621,13 @@ const RetrievalCounters& PatternRetrieval::counters() const { return impl_->coun
 LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &contexts,
                                         uint64_t released, size_t length, Mode mode,
                                         const Extraction &x, const Json::Value &graph_name) {
+    return retrieve_rows(contexts, released, length, mode, x, graph_name, nullptr);
+}
+
+LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext> &contexts,
+                                             uint64_t released, size_t length, Mode mode,
+                                             const Extraction &x, const Json::Value &graph_name,
+                                             Given *given) {
     Impl &m = *impl_;
     // the descriptors admit_context() charged for |contexts|, the pattern's from here on
     const uint64_t descriptors = m.descriptors;
@@ -1062,7 +721,40 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
     Json::Value &refused = a.fields["rows_refused"];
     uint64_t held_lists = 0, held_hits = 0;
     const auto t0 = std::chrono::steady_clock::now();
-    m.discover(rows, contexts, mode, &rows_read, &pattern_units, &held_lists, &refused);
+    if (!given) {
+        m.discover(rows, contexts, mode, &rows_read, &pattern_units, &held_lists, &refused);
+    } else {
+        // retrieve_given: the labels the selection pass read on each row (the predicate's,
+        // never truncated), renamed into the given dictionary; the lists are smaller than the
+        // kept rows the account holds for them until retrieve_given ends. Light work, clocked
+        // as the retrieval's own: a time stop leaves the later rows not read, as discovery's
+        for (RowState &row : rows) {
+            auto it = given->rows->find(row.key);
+            if (it == given->rows->end())
+                throw std::logic_error("pattern: retrieve_given for a row the selection did "
+                                       "not keep");
+            const LabelQuery::NodeHits &hits = it->second.hits;
+            if (!m.may_work(1 + hits.size())) {
+                m.set_stop("label_discovery", "time");
+                m.time_stop = true;
+                break;
+            }
+            row.labels.labels.reserve(hits.size());
+            for (const LabelQuery::Hit &h : hits) {
+                auto id = std::lower_bound(given->ids->begin(), given->ids->end(), h.label);
+                if (id == given->ids->end() || *id != h.label)
+                    throw std::logic_error("pattern: a kept row's label is not in the given "
+                                           "dictionary");
+                row.labels.labels.push_back(static_cast<LabelId>(id - given->ids->begin()));
+            }
+            row.labels.total = row.labels.labels.size();
+            row.status = RowStatus::COMPLETE;
+        }
+        for (RowState &row : rows) {
+            if (row.status == RowStatus::PENDING)
+                row.status = RowStatus::NOT_READ;
+        }
+    }
     const auto t1 = std::chrono::steady_clock::now();
     discovery_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
@@ -1087,13 +779,14 @@ LabelsAnswer PatternRetrieval::retrieve(const std::vector<RetrievalContext> &con
     // (partial: on the rows read, unless a stop ended the reads)
     if (m.place && !m.read_stop && (partial || (rows_complete && !m.stop))) {
         const auto t2 = std::chrono::steady_clock::now();
-        m.place_rows(rows, contexts, mode, &rows_read, &pattern_units, &held_hits, &refused);
+        m.place_rows(rows, contexts, mode, &rows_read, &pattern_units, &held_hits, &refused,
+                     nullptr, given ? &given->dict : nullptr);
         placement_ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t2).count();
     }
 
     // the label order of §5.5 over the contexts read: contexts desc, column asc
-    const std::vector<LabelRef> &dict = m.recorder->labels();
+    const std::vector<LabelRef> &dict = given ? given->dict : m.recorder->labels();
     std::vector<uint64_t> label_contexts(dict.size(), 0), label_suffix(dict.size(), 0);
     for (size_t i = 0; i < keep; ++i) {
         const RowState &row = rows[row_of[i]];
