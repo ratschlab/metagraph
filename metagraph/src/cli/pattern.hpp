@@ -18,7 +18,16 @@
  *    fields sequence, anchor_kmer, nodes and rows (never kmer), and with output.labels "all"
  *    each path's labels, each with its support (label_intersection, record_verified) and
  *    require_support "record_verified" listing the verified ones only;
- *  - single-graph servers only; no predicate;
+ *  - a predicate (increment 5b, SPEC §19; patterns of L <= k): the request's predicate bound
+ *    once to the index's columns, each pattern's raw contexts (at most max_predicate_contexts)
+ *    tested by the selection pass of PatternRetrieval (their rows, with predicate_strands
+ *    "either" on a BASIC graph also their reverse complements', under max_predicate_work), the
+ *    selected ones returned with output.labels "none", "predicate_only" or "all"; counts.tested
+ *    and counts.selected, selection, absence_filter and the top-level predicate block. A
+ *    pattern longer than k under long_search "anchors" keeps its anchors' answer, its selection
+ *    not_started; with long_search "paths" a predicate is refused (it selects supported paths,
+ *    a later increment);
+ *  - single-graph servers only;
  *  - graphs with their dummy-edge mask (counting "exact") and, since owner decision #16 of
  *    2026-10-08, without it (counting "upper_bound"): a count is then the bounds [lower, U],
  *    U the BOSS entries of its ranges (source dummies among them), with the additive estimate
@@ -113,6 +122,13 @@ struct PatternLimits {
     uint64_t max_memory_mb = 256;
     uint64_t max_labels = 1'000;
     uint64_t max_occurrences_per_label = 16;
+    // increment 5b, a predicate's selection (SPEC §19.2): the raw contexts a pattern's selection
+    // may test (its compute admission) and the selection's work per request (the oracle's
+    // units), request fields' maxima like the others; and the names a predicate may list, the
+    // server's policy (a larger predicate is refused, predicate_too_large)
+    uint64_t max_predicate_contexts = 100'000;
+    uint64_t max_predicate_work = 100'000'000;
+    uint64_t max_predicate_labels = 10'000;
     // not a cap: the annotation reads under the deadline are decoded in chunks of about this
     // many ms (the server's --traverse-chunk-target-ms, as /traverse's reads); 0: one piece
     double chunk_target_ms = 50;
@@ -227,7 +243,8 @@ Json::Value parse_pattern_body(const std::string &content);
  * null) states the index in the answer's `index`. Throws PatternRefusal for a
  * whole-request refusal, 503 "deadline" included when the answer could not be assembled by
  * the deadline; refused patterns are answered in their slots. Reads
- * annotation rows only for output.labels "all" in a retrieval mode (PatternRetrieval);
+ * annotation rows only for output.labels "all" or "predicate_only" in a retrieval mode, and
+ * for a predicate's selection in every mode (PatternRetrieval);
  * |hooks| (tests): a record mapping instead of the index's, a hook on every read.
  */
 Json::Value process_pattern_request(
@@ -255,8 +272,10 @@ Json::Value process_pattern_request(const Json::Value &json,
  * references to the SPEC, owner decision P9), and what the graph is (mode, k, alphabet, mask,
  * counting: exact with the mask, upper_bound without it, and then its dummy_fraction; owner
  * decision #16) and what its annotation gives the labelled retrieval (placement, support,
- * annotation: budgeted or unbudgeted). |anno_graph| is null while the index loads;
- * |multi_graph| servers answer only that they are not served yet.
+ * annotation: budgeted or unbudgeted) and a predicate's selection (increment 5b: projections
+ * with "predicate_only", the caps max_predicate_contexts, max_predicate_work and
+ * max_predicate_labels, and the predicate object: operators, strands, access). |anno_graph| is
+ * null while the index loads; |multi_graph| servers answer only that they are not served yet.
  */
 Json::Value pattern_capabilities_json(const graph::AnnotatedDBG *anno_graph,
                                       const PatternLimits &limits, bool multi_graph);

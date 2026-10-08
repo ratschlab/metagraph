@@ -1,0 +1,4 @@
+{
+ "code": "predicate_too_large",
+ "error": "request.predicate: 5 names in its lists (a name in two lists counts twice), above the server's cap of 4 (caps.max_predicate_labels): send at most 4 names; split the cohort"
+}

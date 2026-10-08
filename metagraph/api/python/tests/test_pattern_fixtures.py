@@ -6,7 +6,8 @@ and SPEC §18, the owner's decisions #16, #17, #19 and #24 of 2026-10-08: graphs
 dummy-edge mask answered with bounds and an estimate, their tiny blocks checked and exact, and
 the stop '*' in peptides; and the review GPT-3 with the owner's decision P9: the work counters,
 the low-complexity note on completed searches only, the capabilities' references and their byte
-budget):
+budget; and increment 5b, SPEC §19: a request's predicate, the selection of each pattern of at
+most k bases, its relations, the projection "predicate_only" and the predicate block):
 
   - the field lists: every table of the SPEC marked `<!-- schema: NAME -->` names exactly the
     fields SCHEMA[NAME] below knows, so that the SPEC and this check cannot drift apart;
@@ -65,21 +66,28 @@ STRAND_SYMBOLS = {'forward': '+', 'reverse': '-', 'palindromic': '='}
 STRAND_KEYS = {'+': '+', '-': '-', '=': 'both'}
 # increment 3 (output.labels "all", SPEC §14) adds the annotation phases and reasons;
 # increment 4 (long_search "paths", SPEC §17) the phase extension and the reason max_paths
+# increment 5b (a predicate, SPEC §19.8) the phase selection, the reasons max_predicate_work and
+# max_predicate_contexts, three withheld reasons and two cut reasons
 ANNOTATION_PHASES = ('label_discovery', 'placement', 'output')
-STOP_PHASES = ('discovery', 'mask_scan', 'extraction') + ANNOTATION_PHASES + ('extension',)
+STOP_PHASES = ('discovery', 'mask_scan', 'extraction') + ANNOTATION_PHASES + ('extension',
+                                                                               'selection')
 STOP_REASONS = ('max_steps', 'time', 'max_contexts', 'max_anchors', 'max_annotation_work',
-                'max_memory', 'max_paths')
+                'max_memory', 'max_paths', 'max_predicate_work', 'max_predicate_contexts')
 WITHHELD = ('count_above_threshold', 'threshold_crossed', 'discovery_budget', 'deadline',
             'paths_later_increment', 'annotation_budget', 'anchor_labels_truncated',
-            'output_budget', 'anchors_above_threshold')
-CUT = ('max_contexts', 'max_steps', 'time', 'max_anchors', 'max_memory', 'max_paths')
+            'output_budget', 'anchors_above_threshold', 'predicate_above_threshold',
+            'selected_above_threshold', 'predicate_budget')
+CUT = ('max_contexts', 'max_steps', 'time', 'max_anchors', 'max_memory', 'max_paths',
+       'max_predicate_contexts', 'max_predicate_work')
 # in the order an entry lists them (SPEC §7.9): the engine's, then the route's estimate note
 # (SPEC §18: threshold_upper_bound, no_stop_codon, estimate_sampled_dummy_fraction), then the
 # annotation's
 NOTES = ('low_complexity_pattern', 'strand_unknown_canonical', 'paths_later_increment',
          'threshold_upper_bound', 'no_stop_codon', 'estimate_sampled_dummy_fraction',
          'annotation_unbudgeted', 'record_bounds_unknown', 'annotation_not_read',
-         'label_intersection_only')
+         'label_intersection_only',
+         # increment 5b (SPEC §19.10)
+         'predicate_constant', 'projection_not_read')
 # review GPT-3 (round fix3, SPEC §7.8): the bases of a pattern its low-complexity diagnostic always
 # reads (one piece of sdust, 128 + 63, before any clock reading); a longer one's can be cut by
 # the work time, its note then left out
@@ -91,6 +99,18 @@ KINDS = ('dna', 'iupac', 'protein')
 # increment 4: what the extension of a pattern longer than k did (counts.paths.extension)
 EXTENSIONS = ('no_anchors', 'not_started', 'not_admitted', 'stopped', 'completed')
 LONG_SEARCH = ('anchors', 'paths')
+# increment 5b (SPEC §19): the operators of a predicate, predicate_strands, what a pattern's
+# selection did (selection.pass), how it read the predicate's labels (selection.access), what a
+# label's presence means (selection.support), the scope of the claim, and the projections
+PREDICATE_OPERATORS = ('any', 'all', 'none', 'at_least', 'and', 'or', 'not')
+PREDICATE_STRANDS = ('either', 'context')
+PASSES = ('completed', 'stopped', 'not_admitted', 'not_started', 'constant')
+ACCESS = ('rows', 'columns')
+# a selected result's selection_strands (the owner's answer to P11, SPEC §19.10)
+SELECTION_STRANDS = {'context', 'reverse_complement', 'both', 'either'}
+SELECTION_SUPPORTS = ('kmer', 'label_intersection', 'record_verified')
+PREDICATE_SCOPES = ('shard_context',)
+PROJECTIONS = ('none', 'all', 'predicate_only')
 # a path result's support: its listed labels' (null when it lists none)
 PATH_SUPPORTS = ('record_verified', 'label_intersection', 'mixed')
 # increment 5: the residues of a protein pattern (any case), the stop '*' among them since owner
@@ -136,9 +156,10 @@ CODONS_TCAG = [a + b + c for a in 'TCAG' for b in 'TCAG' for c in 'TCAG']
 REFUSALS = ('invalid_request', 'later_increment', 'resident_only', 'mask_required',
             'representation_unsupported', 'primary_unwrapped', 'alphabet_unsupported', 'deadline',
             'annotation_unbudgeted', 'mask_invalid', 'alphabet_untested',
-            # increment 4 (require_support "record_verified" on an index that cannot verify) and
-            # increment 5 (genetic_code no NCBI table)
-            'support_unavailable', 'genetic_code_unknown')
+            # increment 4 (require_support "record_verified" on an index that cannot verify),
+            # increment 5 (genetic_code no NCBI table) and increment 5b (a predicate listing more
+            # names than caps.max_predicate_labels)
+            'support_unavailable', 'genetic_code_unknown', 'predicate_too_large')
 UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped',
                'alphabet_unsupported', 'multi_graph_later_increment', 'mask_invalid',
                'alphabet_untested')
@@ -193,12 +214,14 @@ SCHEMA = {
                 'max_anchors', 'max_steps', 'time_budget_ms', 'output',
                 'max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb', 'max_labels',
                 'max_occurrences_per_label', 'allow_unbudgeted_annotation',
-                'long_search', 'max_paths', 'require_support', 'genetic_code'],
+                'long_search', 'max_paths', 'require_support', 'genetic_code',
+                # increment 5b (SPEC §19.2)
+                'predicate', 'max_predicate_contexts', 'max_predicate_work', 'predicate_strands'],
     'request_pattern': ['id', 'dna', 'iupac', 'protein'],
     'request_output': ['labels', 'occurrences', 'paths'],
     'refusal': ['error', 'code'],
     'answer': ['pattern_contract_version', 'mode', 'output', 'index', 'limits', 'timing',
-               'patterns'],
+               'patterns', 'predicate'],
     'index': ['index_ns', 'index_fp', 'release', 'k', 'graph_mode', 'alphabet',
               'strand_stated', 'counting', 'dummy_fraction'],
     # owner decision #16 (SPEC §8.2): the dummy fraction of a graph without its mask
@@ -208,19 +231,24 @@ SCHEMA = {
                'stop_at_threshold', 'max_labels_per_anchor', 'max_annotation_work',
                'max_memory_mb', 'max_labels', 'max_occurrences_per_label',
                'allow_unbudgeted_annotation', 'long_search', 'max_paths', 'require_support',
-               'clamped'],
+               'max_predicate_contexts', 'max_predicate_work', 'max_predicate_labels',
+               'predicate_strands', 'clamped'],
     'clamped': ['field', 'requested', 'effective'],
     'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms', 'extension_ms',
                # review GPT-3 (round fix3, SPEC §18): the labels of paths
-               'label_intersection_ms', 'verification_ms'],
+               'label_intersection_ms', 'verification_ms',
+               # increment 5b (SPEC §19.10)
+               'selection_ms'],
     'entry': ['id', 'kind', 'pattern', 'length', 'residues', 'genetic_code', 'information_bits',
               'anchor_information_bits', 'min_anchor_information_bits', 'error', 'mode', 'scope',
               'strands', 'palindromic', 'counts', 'work', 'stop',
               'retrieval_complete', 'withheld', 'returned', 'cut', 'results', 'absence_scope',
               'determinism', 'notes', 'timing', 'placement', 'annotation', 'by_label',
               'rows_refused', 'anchors_truncated', 'labels_cut', 'occurrences_cut',
-              'labels_excluded_unverified'],
-    'counts': ['contexts', 'anchors', 'paths', 'labels', 'occurrences'],
+              'labels_excluded_unverified',
+              # increment 5b (SPEC §19.10)
+              'selection', 'absence_filter'],
+    'counts': ['contexts', 'anchors', 'paths', 'labels', 'occurrences', 'tested', 'selected'],
     'count': ['value', 'relation', 'unit', 'lower', 'upper', 'estimate'],
     'contexts_count': ['suffix', 'by_offset', 'by_strand', 'by_orientation'],
     'anchors_count': ['by_strand', 'by_orientation'],
@@ -232,11 +260,14 @@ SCHEMA = {
              'memory_bytes', 'extension_edges',
              # review GPT-3 (round fix3, SPEC §18): counters beside the steps
              'extension_anchors', 'extension_branches', 'annotation_rows_distinct',
-             'verification_steps'],
+             'verification_steps',
+             # increment 5b (SPEC §19.10)
+             'predicate_rows', 'predicate_units', 'predicate_lookups'],
     'stop': ['phase', 'reason'],
     'reason': ['reason'],
     'result': ['kmer', 'instance', 'offset', 'strand', 'orientation', 'node', 'row', 'support',
-               'labels_status', 'labels_total', 'labels'],
+               'labels_status', 'labels_total', 'labels', 'selection_labels',
+               'selection_strands'],
     # increment 4: a path (a result of a pattern longer than k under long_search "paths")
     'path_result': ['sequence', 'anchor_kmer', 'instance', 'offset', 'strand', 'orientation',
                     'nodes', 'rows', 'support', 'labels_status', 'labels_total', 'labels',
@@ -256,8 +287,17 @@ SCHEMA = {
                      # owner decision #16
                      'counting', 'dummy_fraction',
                      # owner decision P9 (round fix3, SPEC §18)
-                     'delivery_mbps'],
+                     'delivery_mbps',
+                     # increment 5b (SPEC §19.12)
+                     'predicate'],
     'delivery_mbps': ['build', 'compress'],
+    # increment 5b (SPEC §19): the predicate's operators (each a one-member object), the
+    # answer's predicate block, an entry's selection, and the capabilities' predicate object
+    'predicate': list(PREDICATE_OPERATORS),
+    'predicate_block': ['normal_form', 'names', 'known', 'unknown_labels', 'vacuous', 'scope',
+                        'strands'],
+    'selection': ['pass', 'support', 'access'],
+    'capabilities_predicate': ['operators', 'strands', 'access'],
     'capabilities_multi': ['pattern_contract_version', 'available', 'unavailable_reason'],
     # increment 3 (SPEC §14)
     'anchor_truncated': ['kmer', 'row', 'cap', 'total'],
@@ -284,7 +324,13 @@ LIMITS_LABELS = ['max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb'
 # (owner decision #24: max_checked_entries, the server's limit of the unchecked candidates a
 # pattern on a graph without its mask has tested; no request field)
 CAPS = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms', 'min_information_bits',
-        'max_patterns'] + LIMITS_LABELS + ['max_paths', 'max_checked_entries']
+        'max_patterns'] + LIMITS_LABELS + ['max_paths', 'max_checked_entries',
+                                           # increment 5b (SPEC §19.12)
+                                           'max_predicate_contexts', 'max_predicate_work',
+                                           'max_predicate_labels']
+# increment 5b: the limits a predicate answer echoes (SPEC §19.10)
+LIMITS_PREDICATE = ['max_predicate_contexts', 'max_predicate_work', 'max_predicate_labels',
+                    'predicate_strands']
 
 
 def load(*path):
@@ -308,9 +354,9 @@ def served_bytes(value):
 
 
 # The route's sources (src/cli/*.cpp) that the route does not call yet, with the refusal codes
-# they write: increment 5b's predicate language (pattern_predicate.cpp, built and unit-tested
-# since round fix3, not wired: `predicate` is still refused by name, later_increment)
-NOT_SERVED_SOURCES = {'pattern_predicate.cpp': ('predicate_too_large',)}
+# they write (increment 5b's predicate language, pattern_predicate.cpp, was one until the route
+# served predicates: its predicate_too_large is in REFUSALS since)
+NOT_SERVED_SOURCES = {}
 
 # The ceiling of the capabilities document the service's MCP tool returns in one piece
 # (api/python/metagraph/traverse/mcp_tools.py, CAPABILITIES_MAX_BYTES; read from its source by
@@ -343,6 +389,87 @@ def spec_tables(text):
         assert m.group(1) not in out, f'schema {m.group(1)} twice'
         out[m.group(1)] = rows
     return out
+
+
+def predicate_names(p):
+    """The names a predicate (or a normal form) lists, in the order of their first appearance."""
+    out = []
+
+    def walk(q):
+        if isinstance(q, bool):
+            return
+        (op, v), = q.items()
+        if op in ('any', 'all', 'none'):
+            names = v
+        elif op == 'at_least':
+            names = v['labels']
+        elif op == 'not':
+            walk(v)
+            return
+        else:
+            for x in v:
+                walk(x)
+            return
+        for n in names:
+            if n not in out:
+                out.append(n)
+    walk(p)
+    return out
+
+
+def predicate_holds(p, labels):
+    """A predicate (or a normal form, true and false included) on a set of column names: the
+    validator's own evaluator (SPEC §19.3), never the server's."""
+    if isinstance(p, bool):
+        return p
+    (op, v), = p.items()
+    if op in ('any', 'all', 'none'):
+        hits = sum(n in labels for n in v)
+        return hits > 0 if op == 'any' else hits == len(v) if op == 'all' else hits == 0
+    if op == 'at_least':
+        return sum(n in labels for n in v['labels']) >= v['n']
+    if op == 'and':
+        return all(predicate_holds(q, labels) for q in v)
+    if op == 'or':
+        return any(predicate_holds(q, labels) for q in v)
+    return not predicate_holds(v, labels)
+
+
+def predicate_fold(p, unknown):
+    """SPEC §19.4: the normal form of a request's predicate once the names of |unknown| are folded
+    away (the validator's own folding)."""
+    (op, v), = p.items()
+    if op in ('any', 'all', 'none', 'at_least'):
+        listed = v['labels'] if op == 'at_least' else v
+        known = [n for n in listed if n not in unknown]
+        if op == 'any' and not known:
+            return False
+        if op == 'all' and len(known) < len(listed):
+            return False
+        if op == 'none' and not known:
+            return True
+        if op == 'at_least':
+            if len(known) < v['n']:
+                return False
+            return {'at_least': {'n': v['n'], 'labels': known}}
+        return {op: known}
+    if op == 'not':
+        q = predicate_fold(v, unknown)
+        return (not q) if isinstance(q, bool) else {'not': q}
+    absorbing = op == 'or'
+    kept = []
+    for q in v:
+        f = predicate_fold(q, unknown)
+        if isinstance(f, bool):
+            if f == absorbing:
+                return absorbing
+            continue
+        kept.append(f)
+    if not kept:
+        return not absorbing
+    if len(kept) == 1:
+        return kept[0]
+    return {op: kept}
 
 
 def is_int(x):
@@ -483,6 +610,10 @@ class Checker:
         # server's max_checked_entries; and the answer's graph mode. Set by answer()
         self.checked_limit = None
         self.graph_mode = None
+        # increment 5b: the normal form of the answer's predicate (None without one, or when
+        # its binding stopped), and the capabilities of the fixture's server; set by answer()
+        self.normal_form = None
+        self.capabilities = None
 
     def ok(self, condition, path, what=''):
         if not condition:
@@ -498,12 +629,13 @@ class Checker:
 
     # ------------------------------------------------------------- counts
 
-    def count(self, c, unit, path, extra=()):
+    def count(self, c, unit, path, extra=(), graph=True):
         keys = ['value', 'relation', 'unit'] + list(extra)
         # owner decision #16 (SPEC §7.4): on a graph without its mask every bounds count of the
-        # graph (contexts, anchors, paths) carries its estimate, and no other count does
+        # graph (contexts, anchors, paths) carries its estimate, and no other count does (not
+        # the selection's tested and selected, |graph| false: increment 5b, SPEC §19.7)
         estimate = isinstance(c, dict) and c.get('relation') == 'bounds' \
-            and self.fraction is not None and unit in GRAPH_UNITS
+            and self.fraction is not None and unit in GRAPH_UNITS and graph
         if isinstance(c, dict) and c.get('relation') == 'bounds':
             keys += ['lower', 'upper']
         if estimate:
@@ -581,23 +713,238 @@ class Checker:
             self.count(v, unit, f'{path}.{key}.{k}')
         self.summed(c, list(c[key].values()), f'{path}.{key}')
 
+    # ------------------------------------------------------------- predicates (5b)
+
+    def predicate_form(self, p, path, depth=0):
+        """A predicate written in the request's syntax (SPEC §19.3): one operator per object,
+        lists of distinct non-empty strings, at_least's n within its list, nesting bounded."""
+        self.ok(isinstance(p, dict) and len(p) == 1, path, 'one operator per predicate')
+        if not isinstance(p, dict) or len(p) != 1:
+            return
+        (op, v), = p.items()
+        self.one_of(op, PREDICATE_OPERATORS, path)
+        self.ok(depth <= 64, path, 'nested at most 64 deep')
+        if op in ('any', 'all', 'none') or op == 'at_least':
+            names = v['labels'] if op == 'at_least' else v
+            if op == 'at_least':
+                self.keys(v, ['n', 'labels'], f'{path}.at_least')
+                self.ok(is_int(v['n']) and 1 <= v['n'] <= len(names), f'{path}.at_least.n')
+            self.ok(isinstance(names, list) and names
+                    and all(isinstance(n, str) and n for n in names)
+                    and len(set(names)) == len(names), f'{path}.{op}',
+                    'a list of distinct non-empty names')
+        elif op == 'not':
+            self.predicate_form(v, f'{path}.not', depth + 1)
+        else:
+            self.ok(isinstance(v, list) and v, f'{path}.{op}', 'a list of predicates')
+            for i, q in enumerate(v):
+                self.predicate_form(q, f'{path}.{op}[{i}]', depth + 1)
+
+    def predicate_block(self, b, request, index, path):
+        """The answer's predicate block (SPEC §19.10): the request's predicate as bound to this
+        index -- its normal form (the validator's own folding of the request's predicate with the
+        unknown names, SPEC §19.4), the names, the known ones, the unknown ones in the order of
+        their first appearance, vacuous (the normal form on a context carrying none of its
+        labels), the scope, the strands evaluated (either on CANONICAL and PRIMARY graphs). A
+        binding the account or the time stopped states the names only (the rest null)."""
+        self.keys(b, SCHEMA['predicate_block'], path)
+        asked = request['predicate']
+        names = predicate_names(asked)
+        self.ok(b['names'] == len(names), path + '.names', 'the distinct names of the request')
+        self.one_of(b['scope'], PREDICATE_SCOPES, path + '.scope')
+        self.one_of(b['strands'], PREDICATE_STRANDS, path + '.strands')
+        expected = request.get('predicate_strands', 'either') \
+            if index['graph_mode'] == 'basic' else 'either'
+        self.ok(b['strands'] == expected, path + '.strands',
+                f'{b["strands"]!r}, evaluated {expected!r}')
+        if b['normal_form'] is None:
+            for f in ('known', 'unknown_labels', 'vacuous'):
+                self.ok(b[f] is None, f'{path}.{f}', 'null with the normal form')
+            return
+        unknown = b['unknown_labels']
+        self.ok(isinstance(unknown, list) and all(isinstance(n, str) for n in unknown)
+                and unknown == [n for n in names if n in unknown], path + '.unknown_labels',
+                'names of the request, in the order of their first appearance')
+        self.ok(b['known'] == len(names) - len(unknown), path + '.known', 'names - unknown')
+        nf = b['normal_form']
+        if not isinstance(nf, bool):
+            self.predicate_form(nf, path + '.normal_form')
+        self.ok(nf == predicate_fold(asked, set(unknown)), path + '.normal_form',
+                f'{nf!r}, the request folded: {predicate_fold(asked, set(unknown))!r}')
+        self.ok(b['vacuous'] is predicate_holds(nf, set()), path + '.vacuous',
+                'the normal form on a context carrying none of its labels')
+        self.normal_form = nf
+
+    def selection(self, e, total, L, k, request, a, path):
+        """An entry's selection (SPEC §19.7): selection {pass, support, access}, counts.tested and
+        counts.selected with the relations of the pass, selected <= tested <= the raw count, the
+        work of a pass that read nothing."""
+        s = e['selection']
+        self.keys(s, SCHEMA['selection'], path + '.selection')
+        self.one_of(s['pass'], PASSES, path + '.selection.pass')
+        self.one_of(s['access'], ACCESS, path + '.selection.access')
+        self.one_of(s['support'], SELECTION_SUPPORTS, path + '.selection.support')
+        self.ok(e['absence_filter'] == 'predicate', path + '.absence_filter')
+        unit = 'graph_contexts' if L <= k else 'paths'
+        T, S = e['counts']['tested'], e['counts']['selected']
+        self.count(T, unit, path + '.counts.tested', graph=False)
+        self.count(S, unit, path + '.counts.selected', graph=False)
+        if L > k:
+            # a predicate selects supported paths, not served yet: never started (§19.5)
+            self.ok(s['pass'] == 'not_started', path + '.selection.pass',
+                    'a pattern longer than k: not_started')
+        else:
+            self.ok(s['support'] == 'kmer', path + '.selection.support', 'L <= k: kmer')
+        nf = self.normal_form
+        bound = isinstance(a.get('predicate'), dict) and a['predicate']['normal_form'] is not None
+        if L <= k:
+            self.ok((s['pass'] == 'constant') is (bound and isinstance(nf, bool)),
+                    path + '.selection.pass', 'constant exactly for a constant normal form')
+        if not bound:
+            self.ok(s['pass'] == 'not_started', path + '.selection.pass',
+                    'a predicate not bound: no pass')
+        p = s['pass']
+        R = total
+        r_upper = R['upper'] if R['relation'] == 'bounds' else R['value']
+        if p == 'completed':
+            self.ok(T['relation'] == 'exact' and R['relation'] == 'exact'
+                    and T['value'] == R['value'], path + '.counts.tested',
+                    'completed: every raw context tested')
+            self.ok(S['relation'] == 'exact', path + '.counts.selected', 'completed: exact')
+        elif p == 'stopped':
+            self.ok(T['relation'] == 'exact', path + '.counts.tested', 'the decisions made')
+            if R['relation'] in ('exact', 'bounds'):
+                self.ok(S['relation'] == 'bounds'
+                        and S['upper'] == S['lower'] + r_upper - T['value'],
+                        path + '.counts.selected', 'stopped: bounds [S, S + R_upper - T]')
+            else:
+                self.ok(S['relation'] == 'at_least', path + '.counts.selected',
+                        'stopped on a raw count without an upper bound: at_least')
+        elif p == 'not_admitted':
+            self.ok(T['relation'] == 'unknown' and S['relation'] == 'unknown', path + '.counts',
+                    'not_admitted: unknown')
+        elif p == 'not_started':
+            self.ok(T['relation'] == 'unknown', path + '.counts.tested', 'not_started: unknown')
+            no_raw = (R['relation'], R['value']) == ('exact', 0)
+            self.ok(S == ({'value': 0, 'relation': 'exact', 'unit': unit} if no_raw
+                          else {'value': None, 'relation': 'unknown', 'unit': unit}),
+                    path + '.counts.selected', 'not_started: unknown, exact 0 without a context')
+        else:
+            # constant: tested the raw count; false selects nothing, true the raw count
+            raw = {f: v for f, v in R.items() if f not in ('estimate', 'suffix', 'by_offset',
+                                                            'by_strand', 'by_orientation')}
+            self.ok(T == raw, path + '.counts.tested', 'constant: the raw count')
+            self.ok(S == (raw if nf is True else {'value': 0, 'relation': 'exact', 'unit': unit}),
+                    path + '.counts.selected', 'constant: 0, or the raw count')
+        if T['relation'] != 'unknown' and S['relation'] != 'unknown':
+            self.ok(S['value'] <= T['value'], path + '.counts', 'selected <= tested')
+        if T['relation'] != 'unknown' and R['relation'] in ('exact', 'bounds'):
+            self.ok(T['value'] <= r_upper, path + '.counts', 'tested <= the raw count')
+        w = e['work']
+        if p in ('constant', 'not_admitted', 'not_started'):
+            self.ok(w['predicate_rows'] == 0, path + '.work.predicate_rows', f'{p}: no row read')
+        if p in ('constant', 'not_admitted'):
+            self.ok(w['predicate_units'] == 0 and w['predicate_lookups'] == 0, path + '.work',
+                    f'{p}: no work')
+        self.ok(w['predicate_lookups'] == 0 or (a['index']['graph_mode'] == 'basic'
+                                                 and a['predicate']['strands'] == 'either'),
+                path + '.work.predicate_lookups', 'reverse-complement lookups: either on BASIC')
+
+    def rows_refused(self, e, path):
+        """The rows the account refused (SPEC §14.4): each with its phase (increment 5b: the
+        selection's, phase selection, first)."""
+        phases = [x.get('phase') for x in e['rows_refused']]
+        for i, x in enumerate(e['rows_refused']):
+            xp = f'{path}.rows_refused[{i}]'
+            self.keys(x, SCHEMA['row_refused'], xp)
+            self.one_of(x['phase'], ('label_discovery', 'placement', 'selection'), xp + '.phase')
+            self.ok(x['reason'] == 'max_memory', xp + '.reason')
+        self.ok(phases == sorted(phases, key=lambda p: p != 'selection'), path + '.rows_refused',
+                'the selection\'s first')
+
+    def selection_labels(self, e, path, a=None):
+        """The results' selection_labels (P22): the predicate's labels in the set each context was
+        evaluated on, names of the normal form, satisfying it, in label order (contexts desc,
+        column asc over the results); beside them selection_strands (the owner's answer to P11):
+        per label the orientation whose row carries it -- "either" on CANONICAL and PRIMARY
+        graphs, "context" for every label under predicate.strands "context", and otherwise
+        "context" or "both" exactly when the label is on the context's own row (its labels, when
+        the projection read them) and "reverse_complement" when it is not."""
+        names = set(predicate_names(self.normal_form)) \
+            if isinstance(self.normal_form, dict) else set()
+        basic = a is None or a['index']['graph_mode'] == 'basic'
+        either = a is None or a['predicate']['strands'] == 'either'
+        lists = []
+        for i, r in enumerate(e['results']):
+            rp = f'{path}.results[{i}].selection_labels'
+            got = r.get('selection_labels')
+            self.ok(isinstance(got, list), f'{path}.results[{i}]',
+                    f'fields: selection_labels missing')
+            if not isinstance(got, list):
+                continue
+            self.ok(all(isinstance(n, str) for n in got) and len(set(got)) == len(got), rp,
+                    'a list of distinct names')
+            self.ok(set(got) <= names, rp, 'names of the normal form')
+            self.ok(predicate_holds(self.normal_form, set(got)), rp,
+                    'a selected context\'s labels satisfy the normal form')
+            lists.append(got)
+            sp = f'{path}.results[{i}].selection_strands'
+            strands = r.get('selection_strands')
+            self.ok(isinstance(strands, list) and len(strands) == len(got),
+                    f'{path}.results[{i}]', 'fields: selection_strands, one per selection label')
+            if not isinstance(strands, list) or len(strands) != len(got):
+                continue
+            self.ok(all(x in SELECTION_STRANDS for x in strands), sp,
+                    f'one of {sorted(SELECTION_STRANDS)}')
+            if not basic:
+                self.ok(all(x == 'either' for x in strands), sp,
+                        'one row for both orientations: "either"')
+                continue
+            self.ok('either' not in strands, sp, 'a BASIC graph states the row')
+            if not either:
+                self.ok(all(x == 'context' for x in strands), sp,
+                        'predicate.strands "context": the own row only')
+            own = r.get('labels')
+            if isinstance(own, list):
+                own = {label['column'] for label in own}
+                for n, x in zip(got, strands):
+                    self.ok((n in own) == (x in ('context', 'both')), sp,
+                            f'{n!r} {x}: on the own row exactly when "context" or "both"')
+        count = {}
+        for got in lists:
+            for n in got:
+                count[n] = count.get(n, 0) + 1
+        for i, got in enumerate(lists):
+            self.ok(got == sorted(got, key=lambda n: (-count[n], n)),
+                    f'{path}.results[{i}].selection_labels', 'label order')
+
     # ------------------------------------------------------------- answers
 
     def answer(self, a, request, capabilities=None):
-        self.keys(a, SCHEMA['answer'], 'answer')
+        self.keys(a, [f for f in SCHEMA['answer'] if f != 'predicate' or 'predicate' in request],
+                  'answer')
         self.ok(a['pattern_contract_version'] == 1, 'pattern_contract_version')
         mode = request.get('mode', 'all_or_count')
         self.ok(a['mode'] == mode, 'mode', f'{a["mode"]!r}, the request asks {mode!r}')
         asked = request.get('output', {})
-        labelled = mode != 'count' and asked.get('labels') == 'all'
+        # increment 5b: a predicate request, and the projections that read labels ("all", and
+        # "predicate_only" with a predicate)
+        predicate = 'predicate' in request
+        labelled = mode != 'count' and asked.get('labels') in ('all', 'predicate_only')
         if mode == 'count':
             self.ok(a['output'] is None, 'output', 'null in mode count')
         elif labelled:
-            self.ok(a['output'] == {'labels': 'all',
+            self.ok(a['output'] == {'labels': asked['labels'],
                                     'occurrences': asked.get('occurrences', True)},
                     'output', repr(a['output']))
         else:
             self.ok(a['output'] == {'labels': 'none'}, 'output', repr(a['output']))
+        self.ok(('predicate' in a) is predicate, 'predicate',
+                'the predicate block exactly with a predicate request')
+        self.normal_form = None
+        self.capabilities = capabilities
+        if predicate:
+            self.predicate_block(a['predicate'], request, a['index'], 'predicate')
 
         index = a['index']
         # owner decision #16 (SPEC §8.2): counting and dummy_fraction only in the answers on a
@@ -634,12 +981,26 @@ class Checker:
         # path limits only in the answers to long_search "paths" (increment 4, SPEC §12.1),
         # require_support among them only when labels are read
         paths = request.get('long_search', 'anchors') == 'paths'
+        # increment 5b: with a predicate the account is used in every mode (the annotation
+        # limits echoed), and the selection's limits are echoed
+        annotated = labelled or predicate
         self.keys(limits, [f for f in SCHEMA['limits']
-                           if (labelled or f not in LIMITS_LABELS + ['allow_unbudgeted_annotation'])
+                           if (annotated
+                               or f not in LIMITS_LABELS + ['allow_unbudgeted_annotation'])
                            and (paths or f not in ('long_search', 'max_paths'))
-                           and (paths and labelled or f != 'require_support')],
+                           and (paths and labelled or f != 'require_support')
+                           and (predicate or f not in LIMITS_PREDICATE)],
                   'limits')
-        if labelled:
+        if predicate:
+            for f in ('max_predicate_contexts', 'max_predicate_work', 'max_predicate_labels'):
+                self.ok(is_int(limits[f]) and limits[f] >= 0, 'limits.' + f)
+            self.ok(limits['max_predicate_work'] >= 1, 'limits.max_predicate_work')
+            self.ok(limits['predicate_strands'] == request.get('predicate_strands', 'either'),
+                    'limits.predicate_strands', 'as requested')
+            if capabilities is not None:
+                self.ok(limits['max_predicate_labels'] == capabilities['caps']['max_predicate_labels'],
+                        'limits.max_predicate_labels', 'the server\'s')
+        if annotated:
             for f in LIMITS_LABELS:
                 self.ok(is_int(limits[f]) and limits[f] >= 0, 'limits.' + f)
             self.ok(limits['allow_unbudgeted_annotation']
@@ -663,7 +1024,7 @@ class Checker:
                 'limits.stop_at_threshold')
         self.ok(isinstance(limits['clamped'], list), 'limits.clamped')
         order = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms'] + LIMITS_LABELS \
-            + ['max_paths']
+            + ['max_paths', 'max_predicate_contexts', 'max_predicate_work']
         clamped = []
         for i, c in enumerate(limits['clamped']):
             path = f'limits.clamped[{i}]'
@@ -768,11 +1129,12 @@ class Checker:
                     out.append((f'{unit}.{key}.{k}', v))
         return out
 
-    def timing(self, t, path, labelled=False, extension=False):
+    def timing(self, t, path, labelled=False, extension=False, selection=False):
         self.keys(t, ['elapsed_ms'] + (['label_discovery_ms', 'placement_ms'] if labelled else [])
                   + (['extension_ms'] if extension else [])
                   + (['label_intersection_ms', 'verification_ms'] if labelled and extension
-                     else []), path)
+                     else [])
+                  + (['selection_ms'] if selection else []), path)
         for k, v in t.items():
             self.ok(is_num(v) and v >= 0, f'{path}.{k}')
 
@@ -835,11 +1197,20 @@ class Checker:
         k = a['index']['k']
         strand_stated = a['index']['strand_stated']
         mode = a['mode']
-        labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
+        labelled = isinstance(a['output'], dict) and a['output']['labels'] in ('all',
+                                                                               'predicate_only')
+        # increment 5b: a predicate request (its selection in every answered entry)
+        predicate = 'predicate' in request
         # the request named the labels (or an annotation field) and this answer reads none
         named = (request.get('output', {}).get('labels') == 'all'
                  or any(f in request for f in LIMITS_LABELS + ['allow_unbudgeted_annotation',
                                                                'require_support']))
+        # increment 5b: a field only a projection reads (SPEC §19.10, projection_not_read)
+        projection_named = (request.get('output', {}).get('labels') in ('all', 'predicate_only')
+                            or any(f in request for f in ('max_labels_per_anchor',
+                                                          'max_annotation_work', 'max_labels',
+                                                          'max_occurrences_per_label',
+                                                          'require_support')))
         self.ok(set(e) <= set(SCHEMA['entry']), path, f'fields outside the SPEC: '
                 f'{sorted(set(e) - set(SCHEMA["entry"]))}')
         self.ok(e['id'] == asked.get('id'), path + '.id', 'echoed')
@@ -884,7 +1255,9 @@ class Checker:
         verified_only = request.get('require_support') == 'record_verified'
         expected = description + ENTRY_ANSWERED[len(ENTRY_DESCRIPTION):] \
             + (ENTRY_RETRIEVAL if mode != 'count' else []) + (ENTRY_LABELS if labelled else []) \
-            + (['labels_excluded_unverified'] if labelled and paths and verified_only else [])
+            + (['labels_excluded_unverified'] if labelled and paths and verified_only else []) \
+            + (['selection', 'absence_filter'] if predicate else []) \
+            + (['rows_refused'] if predicate and not labelled else [])
         self.keys(e, expected, path)
         self.description(e, pk, k, path, request)
         # SPEC §7.8: a pattern answered is exempt or at or above the floor (for L > k: every
@@ -911,8 +1284,10 @@ class Checker:
 
         # counts
         counts = e['counts']
+        selection_counts = ['tested', 'selected'] if predicate else []
         if L > k:
-            self.keys(counts, ['anchors', 'paths', 'labels', 'occurrences'], path + '.counts')
+            self.keys(counts, ['anchors', 'paths', 'labels', 'occurrences'] + selection_counts,
+                      path + '.counts')
             anchors = counts['anchors']
             self.count(anchors, 'anchors', path + '.counts.anchors',
                        extra=['by_strand' if strand_stated else 'by_orientation'])
@@ -930,7 +1305,8 @@ class Checker:
                             'paths only with long_search "paths"')
             total = anchors
         else:
-            self.keys(counts, ['contexts', 'labels', 'occurrences'], path + '.counts')
+            self.keys(counts, ['contexts', 'labels', 'occurrences'] + selection_counts,
+                      path + '.counts')
             c = counts['contexts']
             self.count(c, 'graph_contexts', path + '.counts.contexts',
                        extra=['suffix', 'by_offset',
@@ -964,7 +1340,11 @@ class Checker:
                       'annotation_rows_distinct'] if labelled else [])
                   + (['extension_edges', 'extension_anchors', 'extension_branches']
                      if paths else [])
-                  + (['verification_steps'] if labelled and paths else []), path + '.work')
+                  + (['verification_steps'] if labelled and paths else [])
+                  # increment 5b: the selection's work, and the account (every mode)
+                  + (['predicate_rows', 'predicate_units', 'predicate_lookups']
+                     + ([] if labelled else ['memory_bytes']) if predicate else []),
+                  path + '.work')
         self.ok(all(is_int(v) and v >= 0 for v in w.values()), path + '.work')
         self.ok(w['steps'] >= w['ranges_visited'] + w.get('extension_edges', 0), path + '.work',
                 'steps >= ranges_visited (+ extension_edges, one step each)')
@@ -984,7 +1364,10 @@ class Checker:
                 self.ok(w['extension_anchors'] <= anchors['value'], path + '.work',
                         'at most the anchors listed')
         if labelled:
-            self.ok(w['annotation_rows_distinct'] <= w['annotation_rows'], path + '.work',
+            # (with "predicate_only" the rows of the selected contexts were read by the
+            # selection, work.predicate_rows: the projection's own reads are the placement's)
+            self.ok(w['annotation_rows_distinct']
+                    <= w['annotation_rows'] + w.get('predicate_rows', 0), path + '.work',
                     'each distinct row read is a row read')
             if paths and e['placement'] in ('none', 'none_canonical', 'not_requested'):
                 self.ok(w['verification_steps'] == 0, path + '.work',
@@ -995,10 +1378,22 @@ class Checker:
             self.one_of(stop['phase'], STOP_PHASES, path + '.stop.phase')
             self.one_of(stop['reason'], STOP_REASONS, path + '.stop.reason')
             self.ok(total['relation'] != 'exact'
-                    or stop['phase'] in ('extraction', 'extension') + ANNOTATION_PHASES,
+                    or stop['phase'] in ('extraction', 'extension', 'selection')
+                    + ANNOTATION_PHASES,
                     path + '.stop', 'a stop in discovery leaves no exact count')
-            self.ok(stop['phase'] not in ANNOTATION_PHASES or labelled, path + '.stop.phase',
+            self.ok(stop['phase'] not in ANNOTATION_PHASES or labelled
+                    or (predicate and stop['phase'] == 'output'), path + '.stop.phase',
                     'an annotation phase without labels "all"')
+            # increment 5b (SPEC §19.8): the selection's phase and reasons with a predicate only
+            self.ok(stop['phase'] != 'selection' or predicate, path + '.stop.phase',
+                    'a selection without a predicate')
+            self.ok(stop['reason'] not in ('max_predicate_work', 'max_predicate_contexts')
+                    or predicate, path + '.stop.reason', 'a predicate\'s reason without one')
+            self.ok(stop['reason'] != 'max_predicate_work' or stop['phase'] == 'selection',
+                    path + '.stop', 'max_predicate_work stops the selection')
+            self.ok(stop['reason'] != 'max_predicate_contexts'
+                    or stop['phase'] in ('discovery', 'extension'), path + '.stop',
+                    'max_predicate_contexts stops the raw discovery')
             self.ok(stop['phase'] != 'extension' or paths, path + '.stop.phase',
                     'an extension without long_search "paths"')
             self.ok((stop['reason'] == 'max_paths') <= (stop['phase'] == 'extension'),
@@ -1009,9 +1404,11 @@ class Checker:
                         'a stop in the extension: the anchors exact, the paths at_least')
             if stop['reason'] == 'max_steps':
                 self.ok(w['steps'] <= a['limits']['max_steps'], path + '.work.steps')
-            if stop['reason'] in ('max_contexts', 'max_anchors') and self.fraction is not None:
+            if stop['reason'] in ('max_contexts', 'max_anchors', 'max_predicate_contexts') \
+                    and self.fraction is not None and stop['phase'] != 'selection':
                 # stop_at_threshold without the mask compares the running upper bound: the
-                # count left is above the threshold, or the note says that it may not be
+                # count left is above the threshold, or the note says that it may not be (the
+                # selection's max_contexts compares the selected count)
                 self.ok(total['value'] > a['limits'][stop['reason']]
                         or 'threshold_upper_bound' in e['notes'], path + '.notes',
                         'a threshold stop below the threshold without threshold_upper_bound')
@@ -1044,8 +1441,8 @@ class Checker:
             # states time_limited with no stop)
             diagnosis_cut = stop is None and L > LOW_COMPLEXITY_UNCUT \
                 and 'low_complexity_pattern' not in e['notes']
-            self.ok(clocked or (labelled and stop is not None) or diagnosis_cut, path + '.stop',
-                    'time_limited without a time stop or a time cut')
+            self.ok(clocked or ((labelled or predicate) and stop is not None) or diagnosis_cut,
+                    path + '.stop', 'time_limited without a time stop or a time cut')
         self.ok(isinstance(e['notes'], list) and all(n in NOTES for n in e['notes']),
                 path + '.notes', repr(e['notes']))
         self.ok(e['notes'] == [n for n in NOTES if n in e['notes']], path + '.notes', 'order')
@@ -1056,8 +1453,21 @@ class Checker:
                 path + '.notes', 'strand_unknown_canonical exactly where no strand is known')
         self.ok(('paths_later_increment' in e['notes']) is (L > k and not paths),
                 path + '.notes', 'paths_later_increment exactly for L > k without paths')
-        self.ok(('annotation_not_read' in e['notes']) is (named and not labelled),
+        # (a predicate answer never says annotation_not_read: its selection read rows; it says
+        # projection_not_read for a projection named and not built, SPEC §19.10)
+        self.ok(('annotation_not_read' in e['notes']) is (named and not labelled
+                                                          and not predicate),
                 path + '.notes', 'annotation_not_read exactly where labels were named, not read')
+        self.ok(('projection_not_read' in e['notes'])
+                is (predicate and projection_named and not labelled), path + '.notes',
+                'projection_not_read exactly where a predicate request named a projection it did '
+                'not build')
+        if predicate:
+            self.ok(('predicate_constant' in e['notes'])
+                    is (e['selection']['pass'] == 'constant'), path + '.notes',
+                    'predicate_constant exactly for a constant normal form')
+        else:
+            self.ok('predicate_constant' not in e['notes'], path + '.notes')
         # SPEC §18 (owner decisions #16 and #19)
         self.ok(('estimate_sampled_dummy_fraction' in e['notes']) is self.estimated,
                 path + '.notes', 'estimate_sampled_dummy_fraction exactly where a count states an '
@@ -1090,10 +1500,13 @@ class Checker:
                     'threshold_upper_bound only on a graph without its mask')
             self.ok((e.get('withheld') or {}).get('reason') in ('count_above_threshold',
                                                                  'threshold_crossed',
-                                                                 'anchors_above_threshold')
-                    or (stop or {}).get('reason') in ('max_contexts', 'max_anchors')
-                    or ext == 'not_admitted', path + '.notes',
-                    'threshold_upper_bound without a threshold decision')
+                                                                 'anchors_above_threshold',
+                                                                 'predicate_above_threshold')
+                    or (stop or {}).get('reason') in ('max_contexts', 'max_anchors',
+                                                      'max_predicate_contexts')
+                    or ext == 'not_admitted'
+                    or (e.get('selection') or {}).get('pass') == 'not_admitted',
+                    path + '.notes', 'threshold_upper_bound without a threshold decision')
         if labelled:
             self.ok(('annotation_unbudgeted' in e['notes'])
                     is (e['annotation'] == 'unbudgeted'), path + '.notes')
@@ -1104,9 +1517,19 @@ class Checker:
                     is (paths and e['placement'] in ('none', 'none_canonical', 'not_requested')),
                     path + '.notes', 'label_intersection_only exactly for paths placed nowhere')
         else:
-            self.ok(not {'annotation_unbudgeted', 'record_bounds_unknown',
-                         'label_intersection_only'} & set(e['notes']), path + '.notes')
-        self.timing(e['timing'], path + '.timing', labelled, paths)
+            self.ok(not {'record_bounds_unknown', 'label_intersection_only'} & set(e['notes']),
+                    path + '.notes')
+            # increment 5b: a selection that read rows of an unbudgeted annotation says so
+            unbudgeted = 'annotation_unbudgeted' in e['notes']
+            self.ok(not unbudgeted or (predicate and e['work']['predicate_rows'] > 0),
+                    path + '.notes', 'annotation_unbudgeted where nothing was read')
+            if predicate and e['work']['predicate_rows'] > 0 and self.capabilities is not None:
+                self.ok(unbudgeted is (self.capabilities['annotation'] == 'unbudgeted'),
+                        path + '.notes', 'annotation_unbudgeted exactly on an unbudgeted index')
+        self.timing(e['timing'], path + '.timing', labelled, paths, predicate)
+        if predicate:
+            self.selection(e, total, L, k, request, a, path)
+            self.rows_refused(e, path)
 
         if mode == 'count':
             self.ok(e['retrieval_complete'] is False, path + '.retrieval_complete',
@@ -1158,7 +1581,9 @@ class Checker:
         k = a['index']['k']
         strand_stated = a['index']['strand_stated']
         mode = a['mode']
-        labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
+        labelled = isinstance(a['output'], dict) and a['output']['labels'] in ('all',
+                                                                               'predicate_only')
+        predicate = 'predicate' in request
         L = pk.length()
         limits = a['limits']
         results = e['results']
@@ -1180,7 +1605,19 @@ class Checker:
             self.ok(e['cut']['reason'] != 'max_paths'
                     or (paths and e['returned'] == limits['max_paths']), path + '.cut',
                     'max_paths: the first max_paths paths')
-        if e['retrieval_complete']:
+        if e['retrieval_complete'] and predicate:
+            # SPEC §19.11: every selected context returned (a constant false selects none,
+            # whatever stopped the raw search)
+            sel = e['counts']['selected']
+            self.ok(sel['relation'] == 'exact' and e['returned'] == sel['value']
+                    and e['withheld'] is None and e['cut'] is None, path,
+                    'complete with a predicate: selected exact, every selected context returned')
+            self.ok(e['selection']['pass'] in ('completed', 'constant', 'not_started'), path,
+                    'complete: the selection completed (or needed no pass)')
+            if e['selection']['pass'] != 'constant' or self.normal_form is True:
+                self.ok(total['relation'] == 'exact' and e['stop'] is None, path,
+                        'complete: exact, no stop')
+        elif e['retrieval_complete']:
             self.ok(total['relation'] == 'exact' and e['stop'] is None
                     and e['withheld'] is None and e['cut'] is None, path,
                     'complete: exact, no stop, nothing withheld or cut')
@@ -1239,6 +1676,8 @@ class Checker:
         if mode == 'partial':
             self.ok(e['returned'] <= (limits['max_paths'] if paths else limits['max_contexts']),
                     path + '.returned', 'the cap')
+        if predicate:
+            self.predicate_retrieval(e, total, L, k, a, path)
 
         if paths:
             self.path_results(e, pk, request, a, path)
@@ -1246,6 +1685,62 @@ class Checker:
             self.context_results(e, pk, a, path)
         if labelled:
             self.labels(e, total, L, a, path, paths, request)
+
+    def predicate_retrieval(self, e, total, L, k, a, path):
+        """What a predicate's withheld, cut and results mean (SPEC §19.8, §19.10)."""
+        limits = a['limits']
+        s = e['selection']
+        sel = e['counts']['selected']
+        stop = e['stop'] or {}
+        reason = (e['withheld'] or {}).get('reason')
+        if reason == 'predicate_above_threshold':
+            self.ok(s['pass'] == 'not_admitted'
+                    and self.above(total, limits['max_predicate_contexts']), path + '.withheld',
+                    'the raw count (or its upper bound) above max_predicate_contexts, '
+                    'not admitted')
+        if reason == 'selected_above_threshold':
+            self.ok(sel['relation'] == 'exact' and sel['value'] > limits['max_contexts'],
+                    path + '.withheld', 'the exact selected count above max_contexts')
+        if reason == 'predicate_budget':
+            self.ok(s['pass'] in ('stopped', 'not_started')
+                    and (stop.get('reason') in ('max_predicate_work', 'max_memory')
+                         or e['rows_refused']), path + '.withheld',
+                    'the selection stopped by its work or the account')
+        if reason == 'threshold_crossed':
+            self.ok(stop.get('reason') in ('max_contexts', 'max_predicate_contexts'),
+                    path + '.withheld', 'a stop_at_threshold stop of the pass or the raw search')
+        cut = (e['cut'] or {}).get('reason')
+        if cut == 'max_predicate_work':
+            self.ok(stop.get('reason') == 'max_predicate_work', path + '.cut')
+        if cut == 'max_predicate_contexts':
+            # the raw release's cut applies only when neither the engine nor the pass stopped
+            # (their cuts come first): every admitted raw context was decided
+            self.ok(stop.get('reason') in (None, 'max_predicate_contexts')
+                    and e['counts']['tested']['relation'] == 'exact'
+                    and e['counts']['tested']['value'] <= limits['max_predicate_contexts'],
+                    path + '.cut', 'the raw release held the first max_predicate_contexts')
+            if not stop:
+                self.ok(e['counts']['tested']['value'] == limits['max_predicate_contexts'],
+                        path + '.cut', 'the raw release held the first max_predicate_contexts')
+        if s['pass'] == 'not_admitted' and a['mode'] != 'count':
+            self.ok(reason == 'predicate_above_threshold' or e['returned'] == 0, path,
+                    'not admitted: nothing listed')
+        if L <= k:
+            labels = isinstance(a['output'], dict) and a['output']['labels'] in (
+                'all', 'predicate_only')
+            if labels and e['results'] and self.normal_form is not None:
+                self.selection_labels(e, path, a)
+            if a['output'] == {'labels': 'predicate_only',
+                               'occurrences': a['output'].get('occurrences')} \
+                    and isinstance(self.normal_form, dict):
+                names = set(predicate_names(self.normal_form))
+                for i, r in enumerate(e['results']):
+                    for label in r['labels'] or []:
+                        self.ok(label['column'] in names, f'{path}.results[{i}].labels',
+                                'predicate_only: the predicate\'s labels only')
+                        self.ok(label['column'] in r['selection_labels'],
+                                f'{path}.results[{i}].labels',
+                                'a label of its own row is in the set it was evaluated on')
 
     def path_results(self, e, pk, request, a, path):
         """The paths of long_search "paths" (SPEC §12.1): each with its L bases (sequence =
@@ -1307,7 +1802,11 @@ class Checker:
     def context_results(self, e, pk, a, path):
         k = a['index']['k']
         strand_stated = a['index']['strand_stated']
-        labelled = isinstance(a['output'], dict) and a['output']['labels'] == 'all'
+        labelled = isinstance(a['output'], dict) and a['output']['labels'] in ('all',
+                                                                               'predicate_only')
+        # increment 5b: the results of a predicate request are its selected contexts, with
+        # their selection_labels when the projection reads labels
+        predicate = 'predicate' in a
         L = pk.length()
         results = e['results']
         key = 'strand' if strand_stated else 'orientation'
@@ -1317,6 +1816,8 @@ class Checker:
             rp = f'{path}.results[{i}]'
             self.keys(r, ['kmer', 'instance', 'offset', key, 'node', 'row']
                       + (['support', 'labels_status', 'labels_total', 'labels'] if labelled
+                         else [])
+                      + (['selection_labels', 'selection_strands'] if labelled and predicate
                          else []), rp)
             self.ok(isinstance(r['kmer'], str) and len(r['kmer']) == k
                     and set(r['kmer']) <= set('ACGTN'), rp + '.kmer')
@@ -1359,7 +1860,7 @@ class Checker:
                                       per_strand)):
                 for part, count in parts.items():
                     n = got.get(part, 0)
-                    if e['retrieval_complete']:
+                    if e['retrieval_complete'] and not predicate:
                         # every context returned: the results per part are the part's count
                         self.ok(count['relation'] == 'exact' and n == count['value'],
                                 f'{path}.counts.contexts.{name}.{part}',
@@ -1390,11 +1891,7 @@ class Checker:
             self.keys(t, SCHEMA['anchor_truncated'], tp)
             self.ok(t['cap'] == a['limits']['max_labels_per_anchor'] and t['total'] > t['cap'],
                     tp, 'cut at the cap')
-        for i, x in enumerate(e['rows_refused']):
-            xp = f'{path}.rows_refused[{i}]'
-            self.keys(x, SCHEMA['row_refused'], xp)
-            self.one_of(x['phase'], ('label_discovery', 'placement'), xp + '.phase')
-            self.ok(x['reason'] == 'max_memory', xp + '.reason')
+        self.rows_refused(e, path)
         for f, schema in (('labels_cut', 'labels_cut'), ('occurrences_cut', 'occurrences_cut')):
             if e[f] is not None:
                 self.keys(e[f], SCHEMA[schema], f'{path}.{f}')
@@ -1704,6 +2201,19 @@ class Checker:
         self.keys(b['scopes_by_graph_mode'], GRAPH_MODES, path + '.scopes_by_graph_mode')
         self.keys(b['caps'], CAPS, path + '.caps')
         self.ok(all(is_num(v) for v in b['caps'].values()), path + '.caps')
+        # increment 5b (SPEC §19.12): "predicate_only" served with the predicate object (the
+        # operators, the strands, the access: null while the annotation is not described)
+        self.keys(b['predicate'], SCHEMA['capabilities_predicate'], path + '.predicate')
+        self.ok(b['predicate']['operators'] == list(PREDICATE_OPERATORS),
+                path + '.predicate.operators')
+        self.ok(b['predicate']['strands'] == list(PREDICATE_STRANDS), path + '.predicate.strands')
+        self.ok(b['predicate']['access'] is None or b['predicate']['access'] in ACCESS,
+                path + '.predicate.access')
+        self.ok(('predicate_only' in b['projections'])
+                is ('predicate_only' not in b['projections_later_increment']),
+                path + '.projections', 'predicate_only served or announced')
+        self.ok(1 <= b['caps']['max_predicate_work'] and b['caps']['max_predicate_labels']
+                <= 1_000_000, path + '.caps', 'the predicate caps in their ranges')
         self.ok(is_num(b['default_time_budget_ms'])
                 and b['finalize_reserve_ms'] < b['default_time_budget_ms']
                 <= b['caps']['time_budget_ms'], path + '.default_time_budget_ms')
@@ -1727,6 +2237,7 @@ class Checker:
             for f in ('graph_mode', 'k', 'alphabet', 'strand_stated', 'mask', 'scopes',
                       'placement', 'support', 'annotation'):
                 self.ok(b[f] is None, f'{path}.{f}', 'unknown while the index loads')
+            self.ok(b['predicate']['access'] is None, path + '.predicate.access')
             return
         self.ok(is_int(b['k']), path + '.k')
         if b['graph_mode'] is None:
@@ -1767,6 +2278,10 @@ class Checker:
         for f, values in (('placement', PLACEMENTS), ('support', SUPPORTS),
                           ('annotation', ANNOTATIONS)):
             self.ok(b[f] is None or b[f] in values, f'{path}.{f}')
+        # a budget-aware annotation is read by rows; an unbudgeted one with direct access by
+        # single cells (at most 16 labels)
+        if b['annotation'] == 'budgeted':
+            self.ok(b['predicate']['access'] == 'rows', path + '.predicate.access')
         if b['graph_mode'] != 'basic' and b['placement'] is not None:
             self.ok(b['placement'] == 'none_canonical', path + '.placement')
 
@@ -1843,6 +2358,13 @@ class TestPatternFixtures(unittest.TestCase):
             check.ok(set(p) <= set(SCHEMA['request_pattern']), f'request.patterns[{i}]')
             check.ok(len(set(p) & set(KINDS)) == 1, f'request.patterns[{i}]', 'one kind')
         check.ok(request.get('long_search', 'anchors') in LONG_SEARCH, 'request.long_search')
+        if 'predicate' in request:
+            check.predicate_form(request['predicate'], 'request.predicate')
+            check.ok(request.get('long_search', 'anchors') != 'paths', 'request.long_search',
+                     'a predicate with long_search "paths" is refused')
+        check.ok(request.get('output', {}).get('labels') != 'predicate_only'
+                 or 'predicate' in request, 'request.output.labels',
+                 'predicate_only needs a predicate')
         check.ok(set(request.get('output', {})) <= set(SCHEMA['request_output']),
                  'request.output')
 
@@ -1897,7 +2419,8 @@ class TestPatternFixtures(unittest.TestCase):
                         continue
                     noted = 'threshold_upper_bound' in e['notes']
                     if request.get('stop_at_threshold') and e['stop'] \
-                            and e['stop']['reason'] == 'max_contexts':
+                            and e['stop']['reason'] == 'max_contexts' \
+                            and e['stop']['phase'] != 'selection':
                         c = e['counts']['contexts']
                         self.assertEqual('at_least', c['relation'])
                         if unmasked:
@@ -1972,8 +2495,11 @@ class TestPatternFixtures(unittest.TestCase):
         # the smallest account, max_memory_mb 1); the cut max_memory from labels_all_rows_refused
         # (partial, four patterns sharing that account)
         self.assertEqual(set(WITHHELD), seen['withheld'])
-        self.assertEqual({'max_contexts', 'max_steps', 'time', 'max_memory', 'max_paths'},
-                         seen['cut'])
+        self.assertEqual({'max_contexts', 'max_steps', 'time', 'max_memory', 'max_paths',
+                          'max_predicate_contexts', 'max_predicate_work'}, seen['cut'])
+        # increment 5b: the selection's stops and the raw threshold's
+        self.assertLessEqual({('selection', 'max_predicate_work'), ('selection', 'max_contexts'),
+                              ('discovery', 'max_predicate_contexts')}, seen['stop'])
         self.assertEqual(set(SLOT_ERRORS), seen['slot'])
         self.assertEqual({'basic', 'primary'}, seen['graph_mode'])
         self.assertEqual(set(NOTES), seen['note'])
@@ -2535,6 +3061,141 @@ class TestPatternFixtures(unittest.TestCase):
                 with self.assertRaisesRegex(AssertionError, says):
                     Checker(Stub(), 'capabilities').block(b, 'pattern', False)
 
+    def test_predicate_rules_refuse_what_v1_never_answers(self):
+        """SPEC §19 (increment 5b): the stored bodies pass, and each rule refuses an answer that
+        breaks it -- the predicate block missing or where no predicate was asked, a normal form
+        that is not the request folded with its unknown names, a wrong vacuous, strands other
+        than evaluated; a selection pass whose counts break §19.7's relations (completed but not
+        every raw context tested, stopped without the bounds [S, S + R - T], constant tested other
+        than the raw count, a selected count above the tested one); a complete answer whose
+        results are not the selected count; withheld and cut reasons without their cause; a
+        result's selection_labels the normal form does not hold on, or out of label order, its
+        selection_strands missing, of another length, or naming a row its own labels contradict;
+        predicate_only labels outside the predicate; the notes predicate_constant and
+        projection_not_read where they do not apply, annotation_not_read on a predicate answer;
+        the selection's fields in an answer without a predicate; and capabilities whose predicate
+        object is not this build's."""
+        class Stub:
+            def fail(self, message):
+                raise AssertionError(message)
+
+        def check(name, mutate=None):
+            request, answer = self.bodies[name]
+            answer = copy.deepcopy(answer)
+            if mutate:
+                mutate(answer)
+            Checker(Stub(), name).answer(answer, request,
+                                         self.capabilities_of(self.fixtures[name]['server']))
+
+        def entry(i, **fields):
+            return lambda a: a['patterns'][i].update(fields)
+
+        def counts(i, name, **fields):
+            return lambda a: a['patterns'][i]['counts'][name].update(fields)
+
+        def block(**fields):
+            return lambda a: a['predicate'].update(fields)
+
+        def results(i, update):
+            def run(a):
+                for r in a['patterns'][i]['results']:
+                    update(r)
+            return run
+
+        names = [n for n in self.fixtures if n.startswith('predicate_')
+                 and self.fixtures[n]['status'] == 200]
+        self.assertGreaterEqual(len(names), 19)
+        for name in names:
+            check(name)
+        cases = [
+            ('predicate_filter', lambda a: a.pop('predicate'), 'fields'),
+            ('count', lambda a: a.update(predicate=None), 'fields'),
+            ('predicate_unknown_folded', block(normal_form={'any': ['562', '5622']}),
+             'the request folded'),
+            ('predicate_unknown_folded', block(unknown_labels=[]), 'names - unknown'),
+            ('predicate_either', block(vacuous=False), 'vacuous'),
+            ('predicate_context', block(strands='either'), 'evaluated'),
+            ('predicate_unbudgeted_allowed', block(strands='context'), 'evaluated'),
+            ('predicate_filter', counts(0, 'tested', value=1827), 'every raw context tested'),
+            ('predicate_budget', counts(0, 'selected', upper=1828), 'bounds'),
+            ('predicate_budget', counts(0, 'selected', relation='at_least'), 'fields'),
+            ('predicate_unknown_constant', counts(0, 'tested', value=23), 'the raw count'),
+            ('predicate_unknown_constant', counts(0, 'selected', value=24),
+             'selected <= tested|0, or the raw count'),
+            ('predicate_above_threshold', counts(0, 'selected', value=3, relation='exact'),
+             'not_admitted: unknown'),
+            ('predicate_filter', entry(0, returned=59,
+                                       results=[]), 'the length of results|every selected'),
+            ('predicate_filter', lambda a: a['patterns'][0]['results'].pop(),
+             'every selected context returned|the length'),
+            ('predicate_selected_above', counts(0, 'selected', value=5),
+             'above max_contexts'),
+            ('predicate_above_threshold',
+             lambda a: a['patterns'][0]['selection'].update({'pass': 'not_started'}),
+             'not admitted|not_started'),
+            ('predicate_budget_partial', entry(0, cut={'reason': 'max_predicate_contexts'}),
+             'the raw release held'),
+            ('predicate_filter', results(0, lambda r: r.update(selection_labels=[])),
+             'satisfy the normal form'),
+            ('predicate_filter', results(0, lambda r: r.update(selection_labels=['562', '287'])),
+             'satisfy the normal form|names of the normal form'),
+            ('predicate_all', results(0, lambda r: r.update(selection_labels=['546'])),
+             'satisfy the normal form'),
+            ('predicate_only_record', results(0, lambda r: r['labels'][0].update(column='573')),
+             'predicate_only|labels of by_label'),
+            ('predicate_filter', results(0, lambda r: r.pop('selection_labels')), 'fields'),
+            # the owner's answer to P11: per selected result and label its orientation
+            ('predicate_filter', results(0, lambda r: r.pop('selection_strands')), 'fields'),
+            ('predicate_selection_strands',
+             results(0, lambda r: r.update(selection_strands=['context'] * len(
+                 r['selection_labels']))), 'on the own row exactly'),
+            ('predicate_selection_strands',
+             results(0, lambda r: r.update(selection_strands=['either'] * len(
+                 r['selection_labels']))), 'states the row'),
+            ('predicate_only_record', results(0, lambda r: r.update(selection_strands=[])),
+             'one per selection label'),
+
+            ('predicate_unknown_folded', lambda a: a['patterns'][0]['notes'].append(
+                'predicate_constant'), 'predicate_constant'),
+            ('predicate_either', lambda a: a['patterns'][0].update(notes=[]),
+             'projection_not_read'),
+            ('predicate_context', lambda a: a['patterns'][0]['notes'].append(
+                'annotation_not_read'), 'annotation_not_read'),
+            ('count', lambda a: a['patterns'][0].update(absence_filter='predicate'), 'fields'),
+            ('count', lambda a: a['patterns'][0]['counts'].update(
+                tested={'value': 24, 'relation': 'exact', 'unit': 'graph_contexts'}), 'fields'),
+            ('predicate_long_anchors', lambda a: a['patterns'][0]['selection'].update(
+                {'pass': 'completed'}), 'not_started'),
+            ('predicate_stop_at_threshold', entry(0, stop={'phase': 'selection',
+                                                           'reason': 'max_predicate_contexts'}),
+             'max_predicate_contexts stops the raw discovery'),
+            ('predicate_filter', lambda a: a['patterns'][0]['work'].update(predicate_lookups=0)
+             or a['patterns'][0]['work'].pop('predicate_rows'), 'fields'),
+            ('predicate_unbudgeted_allowed',
+             lambda a: a['patterns'][0]['notes'].remove('annotation_unbudgeted'),
+             'annotation_unbudgeted exactly'),
+            ('predicate_filter', lambda a: a['limits'].update(predicate_strands='context'),
+             'as requested'),
+            ('predicate_filter', lambda a: a['limits'].pop('max_predicate_labels'), 'fields'),
+        ]
+        for name, mutate, says in cases:
+            with self.subTest(fixture=name, says=says):
+                with self.assertRaisesRegex(AssertionError, says):
+                    check(name, mutate)
+        # the capabilities (§19.12)
+        for field, value, says in (('operators', ['any', 'all'], 'operators'),
+                                   ('strands', ['either'], 'strands'),
+                                   ('access', 'cells', 'access')):
+            b = copy.deepcopy(self.capabilities_of('masked'))
+            b['predicate'][field] = value
+            with self.subTest(field=field, value=value):
+                with self.assertRaisesRegex(AssertionError, says):
+                    Checker(Stub(), 'capabilities').block(b, 'pattern', False)
+        b = copy.deepcopy(self.capabilities_of('masked'))
+        b['projections_later_increment'] = ['predicate_only']
+        with self.assertRaisesRegex(AssertionError, 'projections'):
+            Checker(Stub(), 'capabilities').block(b, 'pattern', False)
+
     def test_every_mask_value_has_a_capabilities_fixture(self):
         """file, built_at_load and absent (DESIGN §4), each on both capabilities routes."""
         seen = {}
@@ -2597,9 +3258,11 @@ class TestPatternFixtures(unittest.TestCase):
             with self.subTest(fixture=name):
                 self.assertLessEqual(size, budget, f'{name}: {size} bytes, {budget - size} '
                                                    f'over the budget of {budget}')
-        # every server a fixture runs on but the ones answering no GET
-        self.assertEqual({f['server'] for f in self.fixtures.values()} - {'masked_no_map',
-                                                                          'unmasked_unchecked'},
+        # every server a fixture runs on but the ones answering no GET (variants of a measured
+        # server by a flag: masked_small_predicate_cap's document is the masked one's with a
+        # smaller caps.max_predicate_labels, one digit shorter)
+        self.assertEqual({f['server'] for f in self.fixtures.values()}
+                         - {'masked_no_map', 'unmasked_unchecked', 'masked_small_predicate_cap'},
                          servers)
         # the measure: exact on what it does not bound from above
         self.assertEqual(len(json.dumps({'a': [1, 'b', None, True, {}]}, separators=(',', ':'))),

@@ -36,6 +36,9 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
   masked_no_map
              the masked copy served with --no-coord-mapping: coordinates without the record
              mapping (output.labels "all" places nothing: placement global)
+  masked_small_predicate_cap
+             the masked copy served with --pattern-max-predicate-labels 4: a predicate of more
+             names is refused (predicate_too_large; increment 5b)
   hash       a hash graph (build --graph hash) of one mini record (1296536.fa) with a column
              annotation: a graph the engine does not recognise (representation_unsupported;
              review of 2026-10-07, C2-01)
@@ -160,6 +163,17 @@ NDM_PEP_LONG = 'MELPNIMHPVAKLS'
 NDM_PEP_STOP = 'TARMADKLR*'
 # the same with X (any residue, never a stop) in place of the stop: no instance on the mini
 NDM_PEP_STOP_X = 'TARMADKLRX'
+
+# increment 5b (predicates, SPEC §19): a GCG repeat with 1,828 contexts on the mini, 1,760 of
+# them carrying 287 (Pseudomonas aeruginosa) only; the nine columns of the mini (taxids as
+# strings); a selective predicate (an E. coli column, not P. aeruginosa's) that keeps 60 of them;
+# a typo; and the server variant's cap on a predicate's names (masked_small_predicate_cap)
+GCG12 = 'GCGGCGGCGGCG'
+MINI_COLUMNS = ['1296536', '158836', '287', '470', '546', '562', '573', '615', '72407']
+SELECTIVE = {'and': [{'any': ['562']}, {'none': ['287']}]}
+SELECTIVE_COUNT = 60
+TYPO = '5622'
+SMALL_PREDICATE_CAP = 4
 
 # the server's defaults (--pattern-* flags, DESIGN-pattern-search.md §5.3), for the hand-made
 # 503 and the expectations
@@ -314,6 +328,58 @@ def entries(*per_entry):
         check(len(answer['patterns']) == len(per_entry), len(answer['patterns']))
         for entry, c in zip(answer['patterns'], per_entry):
             c(entry)
+    return run
+
+
+def selection(pass_, tested=None, selected=None, access='rows'):
+    """increment 5b (SPEC §19.7): selection.pass, counts.tested and counts.selected (each a
+    (relation, value) pair, or for selected bounds (lower, upper)), and the access."""
+    def run(entry):
+        check(entry['selection']['pass'] == pass_ and entry['selection']['access'] == access,
+              entry['selection'])
+        check(entry['absence_filter'] == 'predicate', entry.get('absence_filter'))
+        c = entry['counts']
+        if tested is not None:
+            check((c['tested']['relation'], c['tested']['value']) == tested, c['tested'])
+        if selected is not None:
+            got = (c['selected']['lower'], c['selected']['upper']) \
+                if c['selected']['relation'] == 'bounds' \
+                else (c['selected']['relation'], c['selected']['value'])
+            check(got == selected, c['selected'])
+    return run
+
+
+def selection_labels_are(*names):
+    """Every result's selection_labels (increment 5b, P22) is one of the lists |names|."""
+    def run(entry):
+        lists = {tuple(r['selection_labels']) for r in entry['results']}
+        check(lists <= {tuple(n) for n in names} and entry['results'], lists)
+    return run
+
+
+def selection_strands_are(*strands):
+    """Every result's selection_strands (increment 5b, the owner's answer to P11: per label the
+    orientation whose row carries it) is one of the lists |strands|, one per selection label."""
+    def run(entry):
+        lists = {tuple(r['selection_strands']) for r in entry['results']}
+        check(lists <= {tuple(n) for n in strands} and entry['results'], lists)
+        check(all(len(r['selection_strands']) == len(r['selection_labels'])
+                  for r in entry['results']), entry['results'])
+    return run
+
+
+def predicate_block(normal_form=None, unknown=None, vacuous=None, strands=None):
+    """The answer's predicate block (increment 5b, SPEC §19.10)."""
+    def run(answer):
+        b = answer['predicate']
+        if normal_form is not None:
+            check(b['normal_form'] == normal_form, b)
+        if unknown is not None:
+            check(b['unknown_labels'] == unknown, b)
+        if vacuous is not None:
+            check(b['vacuous'] is vacuous, b)
+        if strands is not None:
+            check(b['strands'] == strands, b)
     return run
 
 
@@ -1042,6 +1108,245 @@ FIXTURES = [
          entries(expect_all(exact(2), paths_count('exact', 2, 'completed'), complete),
                  expect_all(paths_count('exact', 0, 'no_anchors'), complete))),
 
+    # ---------------------------------------------------------------- predicates (increment 5b)
+    post('predicate_filter', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'max_contexts': 100, 'predicate': SELECTIVE,
+          'output': {'labels': 'predicate_only', 'occurrences': False}}, 200,
+         'a selective predicate on a pattern above max_contexts (SPEC §19.13 a): the GCG repeat\'s '
+         '1,828 contexts (withheld count_above_threshold without the predicate) tested in 1,777 '
+         'rows, 60 selected and returned, complete; the predicate block (normal form, names, '
+         'known, unknown_labels, vacuous, scope, strands either), selection {completed, kmer, '
+         'rows}, absence_filter predicate; each result with selection_labels ["562"] and its own '
+         'row\'s predicate labels (predicate_only, occurrences false: placement not_requested)',
+         expect_all(predicate_block(normal_form=SELECTIVE, unknown=[], vacuous=False,
+                                    strands='either'),
+                    entries(expect_all(exact(1828), complete, field('returned', SELECTIVE_COUNT),
+                                       selection('completed', ('exact', 1828),
+                                                 ('exact', SELECTIVE_COUNT)),
+                                       selection_labels_are(['562']),
+                                       selection_strands_are(['both'], ['context']),
+                                       lambda e: check(e['work']['predicate_rows'] == 1777,
+                                                       e['work']))))),
+    post('predicate_either', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'mode': 'count', 'predicate': {'none': ['546']},
+          'output': {'labels': 'predicate_only'}}, 200,
+         'P11, the strands of a BASIC graph: none(546) on the blaNDM-1 primer, predicate_strands '
+         'either (the default): 546\'s records hold the primer on + only, so each of the 24 '
+         'contexts has 546 on its k-mer or on its reverse complement: 0 selected; mode count '
+         'reads the rows (24, 12 reverse-complement lookups), and states the projection it '
+         'named and did not build (projection_not_read)',
+         expect_all(predicate_block(vacuous=True, strands='either'),
+                    entries(expect_all(exact(24), selection('completed', ('exact', 24),
+                                                            ('exact', 0)),
+                                       field('notes', ['projection_not_read']))))),
+    post('predicate_context', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'mode': 'count', 'predicate': {'none': ['546']},
+          'predicate_strands': 'context'}, 200,
+         'the same with predicate_strands "context" (the deposited strand only): the 12 - '
+         'contexts, whose own rows lack 546, are selected although 546\'s records carry the '
+         'primer on the other strand',
+         expect_all(predicate_block(strands='context'),
+                    entries(selection('completed', ('exact', 24), ('exact', 12))))),
+    post('predicate_at_least', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')],
+          'predicate': {'at_least': {'n': 8, 'labels': MINI_COLUMNS}},
+          'predicate_strands': 'context'}, 200,
+         'at_least 8 of the nine columns, "context": the 12 + contexts (9 columns on their rows; '
+         'the - contexts have 7), returned and complete',
+         entries(expect_all(complete, selection('completed', ('exact', 24), ('exact', 12)),
+                            lambda e: check({r['strand'] for r in e['results']} == {'+'},
+                                            e['results'])))),
+    post('predicate_unknown_constant', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'predicate': {'any': [TYPO]}}, 200,
+         'a typo (5622 is no column): reported in unknown_labels, never as an absence; the '
+         'normal form is false (P18): no row read, selection constant, tested the 24 contexts, '
+         'selected exact 0, complete; note predicate_constant',
+         expect_all(predicate_block(normal_form=False, unknown=[TYPO]),
+                    entries(expect_all(complete, field('returned', 0),
+                                       selection('constant', ('exact', 24), ('exact', 0)),
+                                       field('notes', ['predicate_constant']),
+                                       lambda e: check(e['work']['predicate_rows'] == 0,
+                                                       e['work']))))),
+    post('predicate_unknown_folded', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')],
+          'predicate': {'and': [{'any': ['562']}, {'none': [TYPO]}]}}, 200,
+         'an unknown name folded away (SPEC §19.4: none of an unknown is true): normal form '
+         '{"any": ["562"]}, unknown_labels ["5622"]; the 24 contexts selected and returned',
+         expect_all(predicate_block(normal_form={'any': ['562']}, unknown=[TYPO]),
+                    entries(expect_all(complete, selection('completed', ('exact', 24),
+                                                           ('exact', 24)))))),
+    post('predicate_vacuous', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'mode': 'partial', 'max_contexts': 5,
+          'predicate': {'none': ['287']}}, 200,
+         'a vacuous predicate (true on a context carrying none of its labels: vacuous true), '
+         'partial: 68 of the 1,828 contexts selected, the first 5 returned, cut max_contexts',
+         expect_all(predicate_block(vacuous=True),
+                    entries(expect_all(cut('max_contexts'), field('returned', 5),
+                                       selection('completed', ('exact', 1828),
+                                                 ('exact', 68)))))),
+    post('predicate_budget', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12'), p(NDM_F, ident='NDM-F')], 'predicate': SELECTIVE,
+          'predicate_strands': 'context', 'max_predicate_work': 1}, 200,
+         'max_predicate_work 1, "context" (SPEC §19.13 d): the first row is read (the budget is '
+         'checked before a read), the next is not: tested exact 1, selected bounds [0, 1827], '
+         'stop {selection, max_predicate_work}, withheld predicate_budget; the stop is sticky: '
+         'the next pattern\'s discovery runs, its selection not_started, predicate_budget',
+         entries(expect_all(withheld('predicate_budget'), exact(1828),
+                            selection('stopped', ('exact', 1), (0, 1827)),
+                            field('stop', {'phase': 'selection',
+                                           'reason': 'max_predicate_work'})),
+                 expect_all(withheld('predicate_budget'), exact(24),
+                            selection('not_started', ('unknown', None), ('unknown', None)),
+                            field('stop', {'phase': 'selection',
+                                           'reason': 'max_predicate_work'})))),
+    post('predicate_budget_partial', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'mode': 'partial', 'predicate': SELECTIVE,
+          'predicate_strands': 'context', 'max_predicate_work': 1}, 200,
+         'the same in partial: nothing selected among the one context tested, returned 0, cut '
+         'max_predicate_work',
+         entries(expect_all(cut('max_predicate_work'), field('returned', 0),
+                            selection('stopped', ('exact', 1), (0, 1827))))),
+    post('predicate_above_threshold', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'predicate': SELECTIVE,
+          'max_predicate_contexts': 100}, 200,
+         'the compute admission: 1,828 raw contexts above max_predicate_contexts 100, '
+         'all_or_count reads nothing: withheld predicate_above_threshold, selection '
+         'not_admitted, tested and selected unknown, work.predicate_rows 0',
+         entries(expect_all(withheld('predicate_above_threshold'),
+                            selection('not_admitted', ('unknown', None), ('unknown', None)),
+                            lambda e: check(e['work']['predicate_rows'] == 0, e['work'])))),
+    post('predicate_partial_admission', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'mode': 'partial', 'predicate': SELECTIVE,
+          'max_predicate_contexts': 100}, 200,
+         'the same admission in partial: the first 100 raw contexts in answer order are tested '
+         '(the count stays exact 1,828), selected bounds [S, S + 1,728], cut '
+         'max_predicate_contexts',
+         entries(expect_all(cut('max_predicate_contexts'), exact(1828),
+                            lambda e: check(e['selection']['pass'] == 'stopped'
+                                            and e['counts']['tested']['value'] == 100
+                                            and e['counts']['selected']['upper']
+                                            == e['counts']['selected']['lower'] + 1728,
+                                            e['counts'])))),
+    post('predicate_selected_above', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'max_contexts': 10, 'predicate': SELECTIVE},
+         200,
+         'more selected (60) than max_contexts (10): all_or_count withholds '
+         'selected_above_threshold, the counts kept (selected exact 60)',
+         entries(expect_all(withheld('selected_above_threshold'),
+                            selection('completed', ('exact', 1828),
+                                      ('exact', SELECTIVE_COUNT))))),
+    post('predicate_stop_at_threshold', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'mode': 'partial', 'max_contexts': 10,
+          'stop_at_threshold': True, 'predicate': SELECTIVE}, 200,
+         'stop_at_threshold on the selected count, partial: the pass ends once 11 are '
+         'selected (an early exit: 269 of the 1,777 rows read), stop {selection, max_contexts}, '
+         'the first 10 returned, cut max_contexts, selected bounds',
+         entries(expect_all(cut('max_contexts'), field('returned', 10),
+                            field('stop', {'phase': 'selection', 'reason': 'max_contexts'}),
+                            lambda e: check(e['selection']['pass'] == 'stopped'
+                                            and e['counts']['selected']['relation'] == 'bounds',
+                                            e['counts'])))),
+    post('predicate_stop_at_raw', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'stop_at_threshold': True,
+          'max_predicate_contexts': 100, 'predicate': SELECTIVE}, 200,
+         'stop_at_threshold on the raw count with a predicate: discovery stops once its running '
+         'count passes max_predicate_contexts (stop {discovery, max_predicate_contexts}), '
+         'withheld threshold_crossed, the selection not_started',
+         entries(expect_all(withheld('threshold_crossed'), relation('at_least'),
+                            field('stop', {'phase': 'discovery',
+                                           'reason': 'max_predicate_contexts'}),
+                            selection('not_started', ('unknown', None), ('unknown', None))))),
+    post('predicate_only_record', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'predicate': {'any': ['562']},
+          'output': {'labels': 'predicate_only'}}, 200,
+         'output.labels "predicate_only" with occurrences (the default): each selected context '
+         'with the predicate\'s labels on its own row, placed in the records (562\'s 13 placed '
+         'occurrences over the 24 contexts, as labels_all\'s by_label has them), by_label of '
+         'those labels only',
+         entries(expect_all(complete, selection('completed', ('exact', 24), ('exact', 24)),
+                            counted('labels', 'exact', 1), counted('occurrences', 'exact', 13),
+                            field('placement', 'record'), selection_labels_are(['562']),
+                            selection_strands_are(['both'])))),
+    post('predicate_selection_strands', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'predicate': {'any': ['546']},
+          'output': {'labels': 'predicate_only', 'occurrences': False}}, 200,
+         'per selected result and label the orientation whose row carries it (the owner\'s answer '
+         'to P11, selection_strands): 546 holds the blaNDM-1 primer on + only, so any(546) '
+         '"either" selects all 24 contexts, the 12 + ones by their own row ("context", their '
+         'labels [546]) and the 12 - ones by their reverse complement\'s ("reverse_complement", '
+         'their own labels empty)',
+         entries(expect_all(complete, selection('completed', ('exact', 24), ('exact', 24)),
+                            selection_labels_are(['546']),
+                            selection_strands_are(['context'], ['reverse_complement']),
+                            lambda e: check(all(
+                                r['selection_strands'] == (['context'] if r['strand'] == '+'
+                                                           else ['reverse_complement'])
+                                and len(r['labels']) == (r['strand'] == '+')
+                                for r in e['results']), e['results'])))),
+    post('predicate_all', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'predicate': {'none': ['546']},
+          'predicate_strands': 'context', 'output': {'labels': 'all'}}, 200,
+         'a predicate with output.labels "all" (P8): the 12 - contexts selected by none(546) '
+         '"context", each with every label of its row (7), placed; their selection_labels empty '
+         '(none of the predicate\'s labels is on them)',
+         entries(expect_all(complete, selection('completed', ('exact', 24), ('exact', 12)),
+                            counted('labels', 'exact', 7), selection_labels_are([]),
+                            selection_strands_are([]),
+                            lambda e: check(all(r['labels_total'] == 7 for r in e['results']),
+                                            e['results'])))),
+    post('predicate_long_anchors', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40')], 'predicate': {'any': ['562']}}, 200,
+         'a pattern longer than k with a predicate under long_search "anchors" (the default): '
+         'its anchors\' answer as without it (withheld paths_later_increment), its selection '
+         'not_started (a predicate selects supported paths, a later increment)',
+         entries(expect_all(exact(2), withheld('paths_later_increment'),
+                            lambda e: check(e['selection']['pass'] == 'not_started'
+                                            and e['counts']['selected']['relation']
+                                            == 'unknown', e)))),
+    post('predicate_unmasked', 'unmasked_unchecked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'predicate': {'any': ['562']}}, 200,
+         'a predicate on the graph without its mask, the check of decision #24 off: the raw '
+         'count bounds [2, 24] is admitted on its upper bound, the release enumerates every '
+         'candidate and drops the source dummies, so the raw count is exact 24; the 24 '
+         'contexts selected and returned, complete',
+         entries(expect_all(exact(24), complete,
+                            selection('completed', ('exact', 24), ('exact', 24))))),
+    post('predicate_unbudgeted', 'primary',
+         {'patterns': [p(NDM_F)], 'mode': 'count', 'predicate': {'any': ['562.fa']}}, 400,
+         '400 annotation_unbudgeted: a predicate reads the annotation in every mode, and the '
+         'PRIMARY index\'s column annotation has no budget-aware decode',
+         refused('annotation_unbudgeted')),
+    post('predicate_unbudgeted_allowed', 'primary',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'predicate': {'none': ['573.fa']},
+          'predicate_strands': 'context', 'allow_unbudgeted_annotation': True}, 200,
+         'the same with allow_unbudgeted_annotation: one row serves a k-mer and its reverse '
+         'complement on a PRIMARY graph, so the predicate block says strands either whatever '
+         'was asked (limits.predicate_strands: context, as requested); selection.access '
+         'columns (single cells for at most 16 labels); note annotation_unbudgeted',
+         expect_all(predicate_block(strands='either'),
+                    entries(expect_all(lambda e: check(e['selection']['access'] == 'columns',
+                                                       e['selection']),
+                                       has_note('annotation_unbudgeted'))),
+                    lambda a: check(a['limits']['predicate_strands'] == 'context',
+                                    a['limits']))),
+    post('predicate_invalid', 'masked',
+         {'patterns': [p(NDM_F)], 'predicate': {'any': [562]}}, 400,
+         '400 invalid_request: a name is a string (P7; the message names the path and the '
+         'fix, "write a taxid as \\"562\\"")',
+         refused('invalid_request')),
+    post('predicate_paths_refused', 'masked',
+         {'patterns': [p(NDM_40)], 'predicate': {'any': ['562']}, 'long_search': 'paths'}, 400,
+         '400 invalid_request: a predicate with long_search "paths" (P24: a predicate selects '
+         'among supported paths, long_search "supported_paths", a later increment)',
+         refused('invalid_request')),
+    post('predicate_too_large', 'masked_small_predicate_cap',
+         {'patterns': [p(NDM_F)], 'predicate': {'any': MINI_COLUMNS[:SMALL_PREDICATE_CAP + 1]}},
+         400,
+         '400 predicate_too_large on a server whose predicates may list 4 names '
+         '(--pattern-max-predicate-labels 4, capabilities caps.max_predicate_labels): 5 names; '
+         'the message names the count and the cap',
+         refused('predicate_too_large')),
+
     # ---------------------------------------------------------------- whole-request refusals
     post('unknown_field', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'bogus': 1}, 400,
@@ -1052,12 +1357,12 @@ FIXTURES = [
          '400 invalid_request: more patterns than the server\'s max_patterns (16): a list is '
          'refused, never cut',
          refused('invalid_request')),
-    post('later_increment_labels', 'masked',
+    post('predicate_only_without_predicate', 'masked',
          {'patterns': [p(NDM_F)], 'output': {'labels': 'predicate_only'}}, 400,
-         '400 later_increment: output.labels "predicate_only" (the labels a predicate names) '
-         'is not served yet (capabilities projections_later_increment; "all" is served since '
-         'increment 3)',
-         refused('later_increment')),
+         '400 invalid_request: output.labels "predicate_only" returns the labels a predicate '
+         'names, so it needs one (served with a predicate since increment 5b; 400 '
+         'later_increment before, fixture later_increment_labels)',
+         refused('invalid_request')),
     post('later_increment_graphs', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'graphs': [INDEX_NAME]}, 400,
          '400 later_increment: the request field graphs (multi-graph selection) is refused by '
@@ -1125,6 +1430,12 @@ SERVERS = {
     'masked_no_map': 'server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/' + MINI_ANNO
                      + ' --no-coord-mapping --index-name ' + INDEX_NAME + ' --index-release '
                      + INDEX_RELEASE + '  (the masked copy, its .seqs not loaded)',
+    'masked_small_predicate_cap': 'server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/'
+                                  + MINI_ANNO + ' --pattern-max-predicate-labels '
+                                  + str(SMALL_PREDICATE_CAP) + ' --index-name ' + INDEX_NAME
+                                  + ' --index-release ' + INDEX_RELEASE
+                                  + '  (the masked copy; a predicate may list '
+                                  + str(SMALL_PREDICATE_CAP) + ' names)',
     'hash': 'server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg'
             ' --index-release ' + INDEX_RELEASE + '  (a hash graph of ' + HASH_RECORD
             + ' at k = 31, column annotation by file name)',
@@ -1279,6 +1590,9 @@ def server_args(name, mini, work):
     if name == 'masked_no_map':
         return ['-i', os.path.join(masked, MINI_GRAPH), '-a', os.path.join(masked, MINI_ANNO),
                 '--no-coord-mapping'] + ident
+    if name == 'masked_small_predicate_cap':
+        return ['-i', os.path.join(masked, MINI_GRAPH), '-a', os.path.join(masked, MINI_ANNO),
+                '--pattern-max-predicate-labels', str(SMALL_PREDICATE_CAP)] + ident
     if name == 'hash':
         hashed = os.path.join(work, 'hash')
         return ['-i', os.path.join(hashed, 'graph.orhashdbg'),

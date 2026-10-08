@@ -20,6 +20,7 @@
 #include "graph/traversal/label_oracle.hpp"
 #include "config/config.hpp"
 #include "load/load_annotated_graph.hpp"
+#include "pattern_predicate.hpp"
 #include "traverse.hpp"
 
 
@@ -48,10 +49,11 @@ constexpr const char *kDefaultProjection = "none";
 // Request fields of later increments (§7.1): refused by name, any value (null included),
 // rather than reported as unknown, so that the answer says what to wait for. (long_search,
 // max_paths and require_support, reserved until increment 4, are served now: the paths of a
-// pattern longer than k, opt-in by long_search "paths", owner decisions #13 and #14; and
-// genetic_code with the peptides of increment 5, owner decision #15)
+// pattern longer than k, opt-in by long_search "paths", owner decisions #13 and #14;
+// genetic_code with the peptides of increment 5, owner decision #15; and predicate,
+// max_predicate_contexts and max_predicate_work with increment 5b, SPEC §19)
 const char *const kLaterIncrementFields[] = {
-    "predicate", "max_predicate_contexts", "max_predicate_work", "graphs", "budget_split",
+    "graphs", "budget_split",
 };
 
 // long_search (owner decision #13 of 2026-10-07): "anchors", the default, answers a pattern
@@ -72,12 +74,13 @@ constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ*";
 
 // The two prose fields of the capabilities, references to the SPEC since owner decision P9 of
 // 2026-10-08 (pattern_capabilities_json): every cap named in the first (the rule names each,
-// review of 2026-10-07, R2-04)
+// review of 2026-10-07, R2-04; increment 5b's three among them)
 constexpr const char kCapsRule[] = "max_contexts, max_anchors, max_paths, max_steps, "
     "time_budget_ms, max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels, "
-    "max_occurrences_per_label: maxima of request fields (lowered, in limits.clamped); "
-    "max_patterns, min_information_bits, max_checked_entries: server policy. "
-    "SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1";
+    "max_occurrences_per_label, max_predicate_contexts, max_predicate_work: maxima of request "
+    "fields (lowered, in limits.clamped); max_patterns, min_information_bits, "
+    "max_checked_entries, max_predicate_labels: server policy. "
+    "SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1, 19";
 constexpr const char kProteinRule[] = "SPEC-pattern-search.md sections 12.2, 18";
 
 // The note of an entry answered on a graph without its dummy-edge mask (counting
@@ -100,6 +103,23 @@ constexpr const char kNoteAnnotationNotRead[] = "annotation_not_read";
 // The JSON objects built between two readings of the answer's deadline (§5.3:
 // "serialisation every 4,096 objects")
 constexpr uint64_t kDeliveryStride = 4096;
+
+// Increment 5b (SPEC §19): output.labels of a predicate request that returns the predicate's
+// labels on each selected context; predicate_strands' values (P11: "either", the default,
+// reads a context's k-mer and its reverse complement on a BASIC graph, never mixing the two
+// orientations: a label is present when it annotates the one k-mer or the other); the scope of
+// a predicate's claim (§19.5: per context, per index); and the notes of a predicate entry, in
+// this order after the others (§19.10)
+constexpr const char kLabelsPredicateOnly[] = "predicate_only";
+constexpr const char kPredicateStrandsEither[] = "either";
+constexpr const char kPredicateStrandsContext[] = "context";
+constexpr const char kPredicateScope[] = "shard_context";
+constexpr const char kNotePredicateConstant[] = "predicate_constant";
+constexpr const char kNoteProjectionNotRead[] = "projection_not_read";
+// the operators of the predicate language, in the order the capabilities list them
+const char *const kPredicateOperators[] = {
+    "any", "all", "none", "at_least", "and", "or", "not",
+};
 
 // The deepest nesting of arrays and objects a request body may have (jsoncpp's stackLimit,
 // its default): a deeper one is refused invalid_request
@@ -206,6 +226,21 @@ struct ParsedRequest {
     bool require_verified = false;
     // the genetic code of the request's peptides (increment 5): genetic_code, default 1
     const GeneticCode *genetic_code = &GeneticCode::standard();
+    // increment 5b (SPEC §19): the request's predicate as parsed (bound to the index once,
+    // before the first pattern); none without one
+    std::optional<predicate::Predicate> predicate;
+    // output.labels "predicate_only": the predicate's labels on each selected context
+    bool labels_predicate_only = false;
+    // a field only a projection reads was named: output.labels "all" or "predicate_only",
+    // max_labels_per_anchor, max_annotation_work, max_labels, max_occurrences_per_label,
+    // require_support (a predicate answer that builds no projection says so,
+    // projection_not_read; max_memory_mb and allow_unbudgeted_annotation act on the selection
+    // too)
+    bool projection_named = false;
+    // max_predicate_contexts (effective): the raw contexts a pattern's selection may test
+    uint64_t max_predicate_contexts = 0;
+    // max_predicate_work (effective) and predicate_strands
+    SelectionLimits selection;
 };
 
 void note_clamped(Json::Value *clamped, const char *field, Json::Value requested,
@@ -250,8 +285,11 @@ std::string string_field(Fields &f, const char *key, const std::string &def) {
  * this order — a later-increment or resident-only field (named, whatever its value), the
  * patterns, mode, output, scope, strands, stop_at_threshold, the caps, the time budget, the
  * annotation caps, increment 4's long_search, max_paths, require_support, increment 5's
- * genetic_code (then the peptides are read in it: a slot error, never a refusal) — and a
- * field nothing read is refused last, as /traverse's Strict refuses it.
+ * genetic_code (then the peptides are read in it: a slot error, never a refusal), increment
+ * 5b's predicate (its form, then predicate_too_large), max_predicate_contexts,
+ * max_predicate_work, predicate_strands, then "predicate_only" without a predicate and a
+ * predicate with long_search "paths" — and a field nothing read is refused last, as
+ * /traverse's Strict refuses it.
  */
 ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits) {
     if (!json.isObject())
@@ -337,26 +375,25 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             if (!v.isString())
                 throw invalid(o.path("labels") + ": expected a string");
             const std::string labels = v.asString();
-            if (labels == "predicate_only") {
-                // even in mode count, where no projection applies: the request names a
-                // reading of the annotation this increment cannot do
-                throw later(o.path("labels") + ": \"" + labels + "\" (the labels a predicate "
-                            "names) in a later increment; this increment serves \"none\" and "
-                            "\"all\"");
-            }
-            if (labels != "none" && labels != "all")
+            if (labels != "none" && labels != "all" && labels != kLabelsPredicateOnly)
                 throw invalid(o.path("labels") + ": expected one of none|all|predicate_only");
             req.labels_all = labels == "all";
-            req.annotation_named |= req.labels_all;
+            // increment 5b: the predicate's labels on each selected context (§19.10); a
+            // request without a predicate is refused below, once the predicate is read
+            req.labels_predicate_only = labels == kLabelsPredicateOnly;
+            req.annotation_named |= req.labels_all || req.labels_predicate_only;
+            req.projection_named |= req.labels_all || req.labels_predicate_only;
         }
         if (o.has("occurrences")) {
             if (!o.raw("occurrences").isBool())
                 throw invalid(o.path("occurrences") + ": expected a boolean");
             // placed occurrences are the labels' (§4.3): without labels there is nothing
-            // to place
-            if (o.raw("occurrences").asBool() && !req.labels_all) {
-                throw invalid(o.path("occurrences") + ": true needs output.labels \"all\" "
-                              "(occurrences are placed per label)");
+            // to place (the predicate's labels, with "predicate_only", are placed alike)
+            if (o.raw("occurrences").asBool() && !req.labels_all && !req.labels_predicate_only) {
+                throw invalid(o.path("occurrences") + ": true needs output.labels \"all\""
+                              + std::string(json.isMember("predicate")
+                                                ? " or \"predicate_only\"" : "")
+                              + " (occurrences are placed per label)");
             }
             req.retrieval.occurrences = o.raw("occurrences").asBool();
         }
@@ -424,6 +461,12 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                              "allow_unbudgeted_annotation" }) {
         req.annotation_named |= f.has(key);
     }
+    // (with a predicate the account and its access act on the selection in every mode: only
+    // these four are a projection's alone)
+    for (const char *key : { "max_labels_per_anchor", "max_annotation_work", "max_labels",
+                             "max_occurrences_per_label" }) {
+        req.projection_named |= f.has(key);
+    }
     RetrievalLimits &r = req.retrieval;
     r.max_labels_per_anchor = capped_integer(f, "max_labels_per_anchor",
                                              limits.max_labels_per_anchor, 1, &req.clamped);
@@ -453,6 +496,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     // an annotation field (its effect is on the labels of paths): named in a request that
     // reads no labels, it is stated as not read (annotation_not_read)
     req.annotation_named |= f.has("require_support");
+    req.projection_named |= f.has("require_support");
     const std::string support = string_field(f, "require_support", kSupportIntersection);
     if (support != kSupportIntersection && support != kSupportVerified) {
         throw invalid(f.path("require_support") + ": expected one of label_intersection|"
@@ -496,6 +540,42 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             // decision #19
             spec.error = std::make_pair(e.code(), std::string(e.what()));
         }
+    }
+
+    // increment 5b (SPEC §19.2, §19.3): the predicate (its form, then its size: 400
+    // predicate_too_large above the server's max_predicate_labels), then the selection's two
+    // caps, accepted with any request and acting only with a predicate (lowered and listed
+    // after max_paths), then predicate_strands
+    if (f.has("predicate")) {
+        req.predicate = predicate::Predicate::parse(f.raw("predicate"),
+                                                    limits.max_predicate_labels,
+                                                    f.path("predicate"));
+    }
+    req.max_predicate_contexts = capped_integer(f, "max_predicate_contexts",
+                                                limits.max_predicate_contexts, 0, &req.clamped);
+    req.selection.max_predicate_work = capped_integer(f, "max_predicate_work",
+                                                      limits.max_predicate_work, 1,
+                                                      &req.clamped);
+    const std::string predicate_strands = string_field(f, "predicate_strands",
+                                                       kPredicateStrandsEither);
+    if (predicate_strands != kPredicateStrandsEither
+            && predicate_strands != kPredicateStrandsContext) {
+        throw invalid(f.path("predicate_strands") + ": expected one of either|context");
+    }
+    req.selection.either = predicate_strands == kPredicateStrandsEither;
+    // the combinations: the predicate's labels need a predicate (was later_increment, any
+    // request); a predicate selects among supported paths for L > k (owner decision P24), which
+    // long_search "paths" (every graph walk) does not search
+    if (req.labels_predicate_only && !req.predicate) {
+        throw invalid("request.output.labels: \"predicate_only\" returns the labels a "
+                      "predicate names: it needs a predicate (request.predicate)");
+    }
+    if (req.predicate && req.long_paths) {
+        throw invalid("request.long_search: \"paths\" with a predicate: a predicate selects "
+                      "among the supported paths of a pattern longer than k (long_search "
+                      "\"supported_paths\", a later increment), never among every graph walk; "
+                      "send long_search \"anchors\" (a pattern longer than k is then answered "
+                      "by its anchors, its selection not_started)");
     }
 
     f.finish();
@@ -773,6 +853,133 @@ void put_retrieval_counters(Json::Value *entry, const RetrievalCounters &c, bool
     e["timing"]["verification_ms"] = c.verification_ms;
 }
 
+/**
+ * What the route made of one pattern's selection (increment 5b, SPEC §19.6-§19.10), beside
+ * the SelectionAnswer of PatternRetrieval::select (or of constant_selection,
+ * selection_without_pass): how the entry is composed from the engine's answer and the pass's.
+ */
+struct SelectionEntry {
+    SelectionAnswer answer;
+    // the engine ran with the selection's raw threshold (max_contexts = max_predicate_contexts):
+    // its withheld count_above_threshold, its stop and cut max_contexts are the predicate's
+    // (predicate_above_threshold, max_predicate_contexts), and the results are the selected
+    // contexts the route built (a pass that ran, or could not start); false for a constant
+    // normal form and a pattern longer than k (the engine's own thresholds and results)
+    bool pass_path = false;
+    // selection.support and selection.access
+    const char *support = "kmer";
+    const char *access = "rows";
+    // the results of the selected contexts (built after the pass): a stop while building them
+    // (output: time, or max_memory without a projection), and what it does to the list
+    std::optional<std::pair<std::string, std::string>> output_stop;
+    std::optional<std::string> output_withheld;
+    std::optional<std::string> output_cut;
+    // the annotation was read without the budget-aware decode (stated by a note when no
+    // projection states it)
+    bool unbudgeted_read = false;
+    // the request's memory account at its peak once the pattern's work was done
+    uint64_t memory_bytes = 0;
+};
+
+/**
+ * Merges one pattern's selection into its |entry| (entry_json's, of the engine's answer; the
+ * results the route built for the selected contexts in it, for a pass): counts.tested and
+ * counts.selected, selection, absence_filter, work.predicate_*, timing.selection_ms, the stop
+ * (the engine's first, then the pass's, then the results' output), determinism, and on the
+ * pass path in a retrieval mode withheld (the engine's, then the pass's, then the output's),
+ * cut (partial, §19.8: the engine's stop, the pass's stop, the raw release's cut, the selected
+ * list's cut; a cut of the output replaces them, as the memory cut of increment 3 does) and
+ * retrieval_complete (every selected context returned). The projection's labels are merged
+ * after it (apply_labels); the notes after those.
+ */
+void put_selection(Json::Value *entry, const SelectionEntry &s, Mode mode) {
+    Json::Value &e = *entry;
+    if (e.isMember("error"))
+        return;
+    const SelectionAnswer &sel = s.answer;
+    e["counts"]["tested"] = count_json(sel.tested);
+    e["counts"]["selected"] = count_json(sel.selected);
+    Json::Value selection;
+    selection["pass"] = to_string(sel.pass);
+    selection["support"] = s.support;
+    selection["access"] = s.access;
+    e["selection"] = std::move(selection);
+    // the absence claims of this entry are the predicate's (§19.11): absence_scope keeps its
+    // closed values
+    e["absence_filter"] = "predicate";
+    e["work"]["predicate_rows"] = uint_json(sel.rows);
+    e["work"]["predicate_units"] = uint_json(sel.units);
+    e["work"]["predicate_lookups"] = uint_json(sel.lookups);
+    e["work"]["memory_bytes"] = uint_json(s.memory_bytes);
+    e["timing"]["selection_ms"] = sel.ms;
+
+    // (read without adding the member: an entry of mode count has no withheld and no cut)
+    auto reason_of = [&e](const char *key) {
+        return e.isMember(key) && e[key].isObject() ? e[key]["reason"].asString()
+                                                    : std::string();
+    };
+    if (s.pass_path) {
+        // the engine counted the raw contexts against max_predicate_contexts
+        if (reason_of("stop") == "max_contexts")
+            e["stop"]["reason"] = "max_predicate_contexts";
+        if (reason_of("withheld") == "count_above_threshold")
+            e["withheld"] = reason_json("predicate_above_threshold");
+    }
+    for (const auto &stop : { sel.stop, s.output_stop }) {
+        if (stop && e["stop"].isNull()) {
+            Json::Value v;
+            v["phase"] = stop->first;
+            v["reason"] = stop->second;
+            e["stop"] = std::move(v);
+        }
+    }
+    if (sel.time_limited || (s.output_stop && s.output_stop->second == "time"))
+        e["determinism"] = "time_limited";
+    if (mode == Mode::COUNT || !s.pass_path)
+        return;
+
+    if (!e["withheld"].isObject()) {
+        const std::optional<std::string> withheld = sel.withheld ? sel.withheld
+                                                                 : s.output_withheld;
+        if (withheld) {
+            e["withheld"] = reason_json(withheld->c_str());
+            e["retrieval_complete"] = false;
+            e["returned"] = 0;
+            e["results"] = Json::Value(Json::arrayValue);
+        }
+    }
+    if (e["withheld"].isObject()) {
+        e["cut"] = Json::Value();
+        return;
+    }
+    // every selected context of the pattern is in results: the engine released every raw
+    // context, the pass decided each, and every selected one was built
+    const uint64_t returned = e["results"].size();
+    e["returned"] = uint_json(returned);
+    e["retrieval_complete"] = e["retrieval_complete"].asBool()
+                                && sel.pass == SelectionPass::COMPLETED
+                                && sel.selected.relation == Relation::EXACT
+                                && returned == sel.selected.value;
+    if (mode != Mode::PARTIAL)
+        return;
+    // the cut (§19.8): the first that applies
+    std::optional<std::string> cut;
+    const std::string engine_cut = reason_of("cut");
+    if (!engine_cut.empty() && engine_cut != "max_contexts") {
+        cut = engine_cut;                   // the engine's stop (max_steps, time)
+    } else if (sel.cut) {
+        cut = *sel.cut;                     // the pass's stop, refused rows, descriptors
+    } else if (engine_cut == "max_contexts") {
+        cut = "max_predicate_contexts";     // the raw release held the first of them only
+    } else if (sel.list_cut) {
+        cut = "max_contexts";               // more selected than the list holds
+    }
+    if (s.output_cut)
+        cut = *s.output_cut;                // the output's: the list's length
+    e["cut"] = cut && !e["retrieval_complete"].asBool() ? reason_json(cut->c_str())
+                                                        : Json::Value();
+}
+
 } // namespace
 
 
@@ -925,6 +1132,9 @@ PatternLimits pattern_limits(const Config &config) {
     limits.max_memory_mb = config.pattern_max_memory_mb;
     limits.max_labels = config.pattern_max_labels;
     limits.max_occurrences_per_label = config.pattern_max_occurrences;
+    limits.max_predicate_contexts = config.pattern_max_predicate_contexts;
+    limits.max_predicate_work = config.pattern_max_predicate_work;
+    limits.max_predicate_labels = config.pattern_max_predicate_labels;
     limits.chunk_target_ms = static_cast<double>(config.traverse_chunk_target_ms);
     limits.delivery_build_mbps = config.pattern_delivery_build_mbps;
     limits.delivery_compress_mbps = config.pattern_delivery_compress_mbps;
@@ -1049,10 +1259,29 @@ Json::Value process_pattern_request(
     // output.labels "all" in a retrieval mode reads the annotation (increment 3, §4.3): on
     // the budget-aware path, or unbudgeted by the request's explicit opt-in
     const bool read_labels = req.labels_all && mode != Mode::COUNT;
+    // increment 5b (SPEC §19): a predicate's selection reads the annotation in every mode, and
+    // its projection is the selected contexts' labels: none, the predicate's ("predicate_only")
+    // or all of them, in a retrieval mode
+    const bool has_predicate = req.predicate.has_value();
+    const Projection projection = mode == Mode::COUNT ? Projection::NONE
+                                : req.labels_all ? Projection::ALL
+                                : req.labels_predicate_only ? Projection::PREDICATE_ONLY
+                                                            : Projection::NONE;
     std::optional<PatternRetrieval> retrieval;
-    if (read_labels) {
+    if (read_labels || has_predicate) {
         retrieval.emplace(anno_graph, support.mode, req.retrieval, budget, hooks, &volume);
         if (!retrieval->description().budgeted && !req.retrieval.allow_unbudgeted) {
+            if (has_predicate) {
+                throw PatternRefusal(400, "annotation_unbudgeted",
+                                     "pattern: a predicate reads the annotation in every mode "
+                                     "(its selection reads the rows of the contexts it tests), "
+                                     "and this index's annotation has no budget-aware decode "
+                                     "(only the row-diff family has one): its reads would run "
+                                     "without a memory bound. Set allow_unbudgeted_annotation: "
+                                     "true to read it anyway (selection.access then says how: "
+                                     "\"rows\", or \"columns\" for at most 16 labels), or ask "
+                                     "without the predicate");
+            }
             throw PatternRefusal(400, "annotation_unbudgeted",
                                  "pattern: output.labels \"all\" reads the annotation, and this "
                                  "index's annotation has no budget-aware decode (only the "
@@ -1065,7 +1294,7 @@ Json::Value process_pattern_request(
         // keeps the labels one record verifies, which needs a BASIC index with coordinates
         // and its record mapping; an index that cannot verify refuses it rather than answer
         // in the weaker mode
-        if (req.long_paths && req.require_verified
+        if (read_labels && req.long_paths && req.require_verified
                 && std::string(retrieval->description().support) != kSupportVerified) {
             throw PatternRefusal(400, "support_unavailable",
                                  "pattern: require_support \"record_verified\" needs a BASIC "
@@ -1209,70 +1438,335 @@ Json::Value process_pattern_request(
         std::optional<Result> result;
         Json::Value results;
         // the contexts the engine released (results.size(), or more when the memory account
-        // of output.labels "all" admitted only the first of them)
+        // of output.labels "all" admitted only the first of them; with a predicate's pass, the
+        // raw contexts released into it)
         uint64_t released = 0;
-        // output.labels "all": the pattern's labels, read in the work phase
+        // output.labels "all" (or "predicate_only"): the pattern's labels, read in the work
+        // phase
         std::optional<LabelsAnswer> labels;
         // the labels are a long pattern's paths' (retrieve_paths)
         bool label_paths = false;
+        // increment 5b: the pattern's selection (a request with a predicate)
+        std::optional<SelectionEntry> selection;
+        // its normal form is a constant (no pass, no read: note predicate_constant)
+        bool constant = false;
     };
+
+    /**
+     * One pattern answered by the engine's own thresholds (max_contexts, max_paths), as without
+     * a predicate: its contexts (paths) released as results, with their labels when |labels|
+     * (output.labels "all", or a projection's empty release of a long pattern's anchors).
+     */
+    auto answer_plain = [&](const Pattern &pattern, Answered &a, bool labels) {
+        // long_search "paths": a pattern longer than k is answered by its paths
+        const bool paths = req.long_paths && pattern.length() > k;
+        if (mode == Mode::COUNT) {
+            a.result = search.count(pattern, req.request, budget);
+        } else if (!labels) {
+            const size_t length = pattern.length();
+            a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
+                a.results.append(paths ? path_json(c, length) : context_json(c, length));
+            });
+            a.released = a.results.size();
+        } else if (paths) {
+            const size_t length = pattern.length();
+            std::vector<RetrievalPath> collected;
+            retrieval->begin_release(mode);
+            a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
+                ++a.released;
+                // the path's descriptor, sequence and arrays are charged to the memory
+                // account before its object is built; after the first that does not fit
+                // none is built
+                if (!retrieval->admit_path(length))
+                    return;
+                collected.emplace_back();
+                a.results.append(path_json(c, length, &collected.back()));
+            });
+            if (!a.result->refusal && a.result->extraction) {
+                a.labels = retrieval->retrieve_paths(collected, a.released, length, mode,
+                                                     *a.result->extraction, graph_name,
+                                                     req.require_verified);
+                a.label_paths = true;
+            }
+        } else {
+            const size_t length = pattern.length();
+            std::vector<RetrievalContext> collected;
+            retrieval->begin_release(mode);
+            a.result = search.enumerate(pattern, req.request, budget, [&](const Context &c) {
+                ++a.released;
+                // the context's descriptor is charged to the memory account before its
+                // object is built; after the first that does not fit none is built
+                if (!retrieval->admit_context())
+                    return;
+                collected.emplace_back();
+                a.results.append(context_json(c, length, &collected.back()));
+            });
+            // the labels of what was released (nothing when it was withheld), work
+            // still: the reads end where the deadline's work time does (§5.3)
+            if (!a.result->refusal && a.result->extraction) {
+                a.labels = retrieval->retrieve(collected, a.released, length, mode,
+                                               *a.result->extraction, graph_name);
+            }
+        }
+    };
+
+    // increment 5b: the request's predicate bound to the index's columns, once, before the
+    // first pattern (its bytes in the memory account; the work time read every 4,096 names); its
+    // echo (the normal form, the unknown names) is text the answer will hold. A binding the
+    // time or the account stopped leaves no bound predicate: every pattern's selection is then
+    // not_started, stopped as the binding was (stop {selection, time | max_memory})
+    const predicate::Bound *bound = nullptr;
+    if (has_predicate) {
+        retrieval->bind(*req.predicate, req.selection);
+        bound = retrieval->bound();
+        if (bound)
+            volume.add_pending(bound->text_bytes());
+    }
+    // the raw search of a pattern's selection (§19.6 steps 1 and 2): every raw context released
+    // into the pass up to max_predicate_contexts, all or none in all_or_count (and in count,
+    // which reads them too), the first ones in partial; stop_at_threshold on that threshold
+    Request selection_request = req.request;
+    selection_request.max_contexts = req.max_predicate_contexts;
+    if (mode == Mode::COUNT)
+        selection_request.mode = Mode::ALL_OR_COUNT;
+    SelectionRequest pass_request;
+    pass_request.mode = mode;
+    pass_request.max_contexts = req.request.max_contexts;
+    pass_request.stop_at_threshold = req.request.stop_at_threshold;
+    pass_request.projection = projection;
+
+    /**
+     * One pattern of L <= k with a predicate (PLAN §2.1, SPEC §19.6): a constant normal form
+     * without a pass (false: discovery as mode count, nothing selected; true: the unfiltered
+     * request), else the engine's release into the pass (each raw context's 64-byte descriptor
+     * admitted before it is kept), the pass (PatternRetrieval::select), the results of the
+     * chosen contexts (their objects admitted, 512 + 2k, before each is built; the clock every
+     * 64), then the projection: none, the predicate's labels on the chosen rows
+     * (retrieve_given) or every label of them (retrieve). A pass that cannot start (the
+     * predicate not bound, or the request's selection work spent by an earlier pattern:
+     * sticky) leaves the raw search as mode count does it, nothing retained.
+     */
+    auto answer_selection = [&](const Pattern &pattern, Answered &a) {
+        const size_t length = pattern.length();
+        SelectionEntry s;
+        s.access = retrieval->selection_access();
+        s.unbudgeted_read = !retrieval->description().budgeted;
+        auto finish = [&]() {
+            s.memory_bytes = retrieval->memory_peak();
+            a.selection = std::move(s);
+        };
+        // an empty release (nothing selected) as the projection reads it: nothing read, every
+        // count exact 0
+        auto nothing_selected = [&](const Extraction &x) {
+            if (projection == Projection::NONE)
+                return;
+            retrieval->begin_release(mode);
+            a.labels = retrieval->retrieve({}, 0, length, mode, x, graph_name);
+        };
+
+        if (bound && bound->constant()) {
+            a.constant = true;
+            if (!*bound->constant()) {
+                // false (P18): discovery as mode count does it, nothing retained, no read;
+                // nothing can pass, also after a discovery stop
+                a.result = search.count(pattern, req.request, budget);
+                if (a.result->refusal)
+                    return;
+                s.answer = constant_selection(false, a.result->contexts->total);
+                if (mode != Mode::COUNT) {
+                    // every selected context (none) is returned
+                    a.result->extraction = Extraction();
+                    a.result->extraction->complete = true;
+                    nothing_selected(*a.result->extraction);
+                }
+                finish();
+                return;
+            }
+            // true: the unfiltered request, the engine's thresholds; output.labels "all" reads
+            // the labels as without a predicate, "predicate_only" has none to read (the
+            // predicate names no column of the index)
+            answer_plain(pattern, a, projection == Projection::ALL);
+            if (a.result->refusal)
+                return;
+            s.answer = constant_selection(true, a.result->contexts->total);
+            if (mode != Mode::COUNT && projection != Projection::NONE) {
+                for (Json::Value &r : a.results) {
+                    r["selection_labels"] = Json::Value(Json::arrayValue);
+                    r["selection_strands"] = Json::Value(Json::arrayValue);
+                }
+                volume.add(a.results.size()
+                           * std::string(",\"selection_labels\":[],\"selection_strands\":[]")
+                                     .size());
+            }
+            if (projection == Projection::PREDICATE_ONLY && a.result->extraction) {
+                Extraction none;
+                none.complete = true;
+                if (a.result->extraction->withheld)
+                    none.withheld = a.result->extraction->withheld;
+                nothing_selected(none);
+                Json::Value f;
+                f["support"] = "kmer";
+                f["labels_status"] = "complete";
+                f["labels_total"] = 0;
+                f["labels"] = Json::Value(Json::arrayValue);
+                a.labels->result_fields.assign(a.results.size(), f);
+                volume.add(a.results.size() * compact_json_bytes(f));
+            }
+            finish();
+            return;
+        }
+
+        s.pass_path = true;
+        if (!bound || retrieval->predicate_units() >= req.selection.max_predicate_work) {
+            // the pass cannot start: the raw discovery as mode count does it (against the
+            // selection's threshold), nothing released; the pass states why it did not start
+            a.result = search.count(pattern, selection_request, budget);
+            if (a.result->refusal)
+                return;
+            Extraction x;
+            std::vector<TestedContext> none;
+            retrieval->begin_selection(mode);
+            s.answer = retrieval->select(none, 0, a.result->contexts->total, x, pass_request);
+            retrieval->end_selection();
+            if (mode != Mode::COUNT) {
+                a.result->extraction = x;
+                nothing_selected(x);
+            }
+            finish();
+            return;
+        }
+
+        // ---- the raw contexts released into the pass
+        std::vector<TestedContext> tested;
+        retrieval->begin_selection(mode);
+        a.result = search.enumerate(pattern, selection_request, budget, [&](const Context &c) {
+            ++a.released;
+            // its descriptor is charged before it is kept; after the first that does not fit
+            // none is kept (the pass's set ends there, stated)
+            if (!retrieval->admit_tested())
+                return;
+            tested.push_back(retrieval->tested_context(c));
+        });
+        if (a.result->refusal || !a.result->extraction) {
+            retrieval->end_selection();
+            return;
+        }
+        const Extraction &x = *a.result->extraction;
+        s.answer = retrieval->select(tested, a.released, a.result->contexts->total, x,
+                                     pass_request);
+        const SelectionAnswer &sel = s.answer;
+        if (mode == Mode::COUNT) {
+            retrieval->end_selection();
+            finish();
+            return;
+        }
+
+        // ---- the results of the chosen contexts, in answer order
+        std::vector<RetrievalContext> collected;
+        retrieval->begin_release(mode);
+        bool output_memory = false;
+        if (!x.withheld && !sel.withheld) {
+            for (size_t j = 0; j < sel.chosen.size(); ++j) {
+                // the clock every 64 result objects (spelling a k-mer is graph work)
+                if (j % Budget::kReleaseClockStride == 0 && !budget.check_time()) {
+                    s.output_stop = std::make_pair(std::string("output"), std::string("time"));
+                    if (mode == Mode::PARTIAL) {
+                        s.output_cut = "time";
+                    } else {
+                        s.output_withheld = "deadline";
+                    }
+                    break;
+                }
+                // its object charged before it is built (512 + 2k); after the first that does
+                // not fit none is built (a projection states it: its released is the chosen)
+                if (!retrieval->admit_context()) {
+                    output_memory = true;
+                    break;
+                }
+                const TestedContext &t = tested[sel.chosen[j]];
+                Context c;
+                c.orientation = t.orientation;
+                c.offset = t.offset;
+                c.node = t.node;
+                c.base_node = t.base_node;
+                collected.emplace_back();
+                Json::Value r = context_json(c, length, &collected.back());
+                if (projection != Projection::NONE) {
+                    // why it was selected (P22): the predicate's labels in the set it was
+                    // evaluated on, and per label the orientation whose row carries it (the
+                    // owner's answer to P11), their bytes charged by the pass
+                    r["selection_labels"] = retrieval->selection_labels_json(sel, j);
+                    r["selection_strands"] = retrieval->selection_strands_json(sel, j);
+                    volume.add(compact_json_bytes(r["selection_labels"])
+                               + std::string(",\"selection_labels\":").size()
+                               + compact_json_bytes(r["selection_strands"])
+                               + std::string(",\"selection_strands\":").size());
+                }
+                a.results.append(std::move(r));
+            }
+        }
+        if (output_memory && projection == Projection::NONE) {
+            // the account could not hold the next result object: the list ends there
+            s.output_stop = std::make_pair(std::string("output"), std::string("max_memory"));
+            if (mode == Mode::PARTIAL) {
+                s.output_cut = "max_memory";
+            } else {
+                s.output_withheld = "output_budget";
+            }
+        }
+        if (s.output_withheld)
+            a.results = Json::Value(Json::arrayValue);
+
+        // ---- the projection of what was built (nothing is read for what is withheld)
+        if (projection != Projection::NONE) {
+            Extraction given;
+            given.returned = collected.size();
+            given.complete = sel.selected.relation == Relation::EXACT
+                                && sel.chosen.size() == sel.selected.value;
+            if (x.withheld || sel.withheld || s.output_withheld) {
+                given.withheld = x.withheld ? *x.withheld : Withheld::DEADLINE;
+                collected.clear();
+            }
+            // a time stop of the output ended the list (cut: time): the projection's release
+            // is what was built; a memory refusal is the projection's own cut (max_memory)
+            const uint64_t released = s.output_stop || given.withheld ? collected.size()
+                                                                       : sel.chosen.size();
+            a.labels = projection == Projection::PREDICATE_ONLY
+                    ? retrieval->retrieve_given(collected, released, length, mode, given,
+                                                graph_name)
+                    : retrieval->retrieve(collected, released, length, mode, given,
+                                          graph_name);
+        }
+        retrieval->end_selection();
+        finish();
+    };
+
     std::vector<Answered> answered;
     answered.reserve(req.patterns.size());
     for (const PatternSpec &spec : req.patterns) {
         Answered a;
         a.results = Json::Value(Json::arrayValue);
         if (spec.pattern) {
-            // long_search "paths": a pattern longer than k is answered by its paths
-            const bool paths = req.long_paths && spec.pattern->length() > k;
-            if (mode == Mode::COUNT) {
-                a.result = search.count(*spec.pattern, req.request, budget);
-            } else if (!read_labels) {
-                const size_t length = spec.pattern->length();
-                a.result = search.enumerate(*spec.pattern, req.request, budget,
-                                            [&](const Context &c) {
-                    a.results.append(paths ? path_json(c, length) : context_json(c, length));
-                });
-                a.released = a.results.size();
-            } else if (paths) {
-                const size_t length = spec.pattern->length();
-                std::vector<RetrievalPath> collected;
-                retrieval->begin_release(mode);
-                a.result = search.enumerate(*spec.pattern, req.request, budget,
-                                            [&](const Context &c) {
-                    ++a.released;
-                    // the path's descriptor, sequence and arrays are charged to the memory
-                    // account before its object is built; after the first that does not fit
-                    // none is built
-                    if (!retrieval->admit_path(length))
-                        return;
-                    collected.emplace_back();
-                    a.results.append(path_json(c, length, &collected.back()));
-                });
-                if (!a.result->refusal && a.result->extraction) {
-                    a.labels = retrieval->retrieve_paths(collected, a.released, length, mode,
-                                                         *a.result->extraction, graph_name,
-                                                         req.require_verified);
-                    a.label_paths = true;
-                }
+            if (!has_predicate) {
+                answer_plain(*spec.pattern, a, read_labels);
+            } else if (spec.pattern->length() <= k) {
+                answer_selection(*spec.pattern, a);
             } else {
-                const size_t length = spec.pattern->length();
-                std::vector<RetrievalContext> collected;
-                retrieval->begin_release(mode);
-                a.result = search.enumerate(*spec.pattern, req.request, budget,
-                                            [&](const Context &c) {
-                    ++a.released;
-                    // the context's descriptor is charged to the memory account before its
-                    // object is built; after the first that does not fit none is built
-                    if (!retrieval->admit_context())
-                        return;
-                    collected.emplace_back();
-                    a.results.append(context_json(c, length, &collected.back()));
-                });
-                // the labels of what was released (nothing when it was withheld), work
-                // still: the reads end where the deadline's work time does (§5.3)
-                if (!a.result->refusal && a.result->extraction) {
-                    a.labels = retrieval->retrieve(collected, a.released, length, mode,
-                                                   *a.result->extraction, graph_name);
+                // a pattern longer than k under long_search "anchors" (with "paths" a predicate
+                // is refused): its anchors as without a predicate, a projection reading nothing
+                // (no context is released); its selection did not start (§19.5)
+                answer_plain(*spec.pattern, a, projection != Projection::NONE);
+                if (!a.result->refusal) {
+                    SelectionEntry s;
+                    s.answer = selection_without_pass(SelectionPass::NOT_STARTED,
+                                                      a.result->anchors->total);
+                    // what a long pattern's selection counts: its supported walks (§19.7)
+                    s.answer.tested.unit = Unit::PATHS;
+                    s.answer.selected.unit = Unit::PATHS;
+                    s.support = retrieval->description().support;
+                    s.access = retrieval->selection_access();
+                    s.memory_bytes = retrieval->memory_peak();
+                    a.selection = std::move(s);
                 }
             }
         }
@@ -1297,14 +1791,49 @@ Json::Value process_pattern_request(
         Json::Value entry = entry_json(req.patterns[i], a.result ? &*a.result : nullptr, mode,
                                        strand_stated, std::move(a.results), a.released,
                                        req.long_paths, fraction ? &*fraction : nullptr);
+        // increment 5b: the selection (before the projection's labels, whose withheld, cut and
+        // stop come after the pass's)
+        if (a.selection)
+            put_selection(&entry, *a.selection, mode);
+        const bool projected = a.labels.has_value();
         if (a.labels) {
             const RetrievalCounters counters = a.labels->counters;
             apply_labels(&entry, std::move(*a.labels), mode);
             put_retrieval_counters(&entry, counters, a.label_paths);
-        } else if (req.annotation_named && !read_labels && entry.isMember("notes")) {
+        }
+        if (a.selection && !entry.isMember("error")) {
+            // the rows the account refused: the selection's (phase "selection") first, then the
+            // projection's (§14.4), each once per phase
+            Json::Value refused = std::move(a.selection->answer.rows_refused);
+            if (entry["rows_refused"].isArray()) {
+                for (Json::Value &row : entry["rows_refused"]) {
+                    refused.append(std::move(row));
+                }
+            }
+            entry["rows_refused"] = std::move(refused);
+        }
+        if (!projected && req.annotation_named && !read_labels && !has_predicate
+                && entry.isMember("notes")) {
             // the labels were asked for (or bounded) and none are read here: said, not
             // ignored (mode count, or output.labels "none")
             entry["notes"].append(kNoteAnnotationNotRead);
+        }
+        if (a.selection && entry.isMember("notes")) {
+            // a predicate's notes, after the others (§19.10): the pass read without the
+            // budget-aware decode (when no projection said so), a constant normal form, a
+            // projection field named and no projection built (mode count, or labels "none"; a
+            // predicate answer never says annotation_not_read: its pass read rows)
+            Json::Value &notes = entry["notes"];
+            bool unbudgeted_stated = false;
+            for (const Json::Value &note : notes) {
+                unbudgeted_stated |= note.asString() == "annotation_unbudgeted";
+            }
+            if (a.selection->unbudgeted_read && a.selection->answer.rows && !unbudgeted_stated)
+                notes.append("annotation_unbudgeted");
+            if (a.constant)
+                notes.append(kNotePredicateConstant);
+            if (req.projection_named && !projected)
+                notes.append(kNoteProjectionNotRead);
         }
         entries.append(std::move(entry));
     }
@@ -1314,11 +1843,43 @@ Json::Value process_pattern_request(
     out["mode"] = to_string(mode);
     if (mode == Mode::COUNT) {
         out["output"] = Json::Value();
+    } else if (projection == Projection::PREDICATE_ONLY) {
+        out["output"]["labels"] = kLabelsPredicateOnly;
+        out["output"]["occurrences"] = req.retrieval.occurrences;
     } else if (!read_labels) {
         out["output"]["labels"] = "none";
     } else {
         out["output"]["labels"] = "all";
         out["output"]["occurrences"] = req.retrieval.occurrences;
+    }
+    if (has_predicate) {
+        // increment 5b (§19.10): the request's predicate as bound to this index: its normal
+        // form, the names of its lists and of them the index's columns, the others (a typo
+        // shows here, never as an absence), whether it holds on a context carrying none of its
+        // labels; null where the binding stopped (every entry says how: stop {selection,
+        // time | max_memory}). Written under the answer's delivery check
+        auto check = [delivery]() {
+            if (delivery)
+                delivery->check();
+        };
+        Json::Value p;
+        if (bound) {
+            p["normal_form"] = bound->normal_form_json(check);
+            p["names"] = uint_json(bound->num_names());
+            p["known"] = uint_json(bound->num_known());
+            p["unknown_labels"] = bound->unknown_labels_json(check);
+            p["vacuous"] = bound->vacuous();
+            volume.settle(bound->text_bytes());
+        } else {
+            p["normal_form"] = Json::Value();
+            p["names"] = uint_json(req.predicate->names.size());
+            p["known"] = Json::Value();
+            p["unknown_labels"] = Json::Value();
+            p["vacuous"] = Json::Value();
+        }
+        p["scope"] = kPredicateScope;
+        p["strands"] = retrieval->selection_strands();
+        out["predicate"] = std::move(p);
     }
 
     Json::Value index;
@@ -1349,9 +1910,10 @@ Json::Value process_pattern_request(
     l["min_information_bits"] = number_json(limits.min_information_bits);
     l["max_patterns"] = uint_json(limits.max_patterns);
     l["stop_at_threshold"] = req.request.stop_at_threshold;
-    if (read_labels) {
+    if (read_labels || has_predicate) {
         // the annotation limits, in the answers that read annotation only (the others answer
-        // as before increment 3)
+        // as before increment 3); with a predicate in every mode (its selection reads rows
+        // under the account)
         const RetrievalLimits &r = req.retrieval;
         l["max_labels_per_anchor"] = uint_json(r.max_labels_per_anchor);
         l["max_annotation_work"] = uint_json(r.max_annotation_work);
@@ -1366,6 +1928,15 @@ Json::Value process_pattern_request(
         l["max_paths"] = uint_json(req.request.max_paths);
         if (read_labels)
             l["require_support"] = req.require_verified ? kSupportVerified : kSupportIntersection;
+    }
+    if (has_predicate) {
+        // increment 5b (§19.10), in the answers with a predicate only: the selection's caps
+        // (effective), the server's cap on the names, and predicate_strands as requested
+        l["max_predicate_contexts"] = uint_json(req.max_predicate_contexts);
+        l["max_predicate_work"] = uint_json(req.selection.max_predicate_work);
+        l["max_predicate_labels"] = uint_json(limits.max_predicate_labels);
+        l["predicate_strands"] = req.selection.either ? kPredicateStrandsEither
+                                                      : kPredicateStrandsContext;
     }
     l["clamped"] = std::move(req.clamped);
     out["limits"] = std::move(l);
@@ -1393,9 +1964,11 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
 
     p["modes"] = strings_json({ "count", "all_or_count", "partial" });
     p["default_mode"] = to_string(Mode::ALL_OR_COUNT);
-    p["projections"] = strings_json({ "none", "all" });
+    // increment 5b: the predicate's labels ("predicate_only", with a predicate) served; the
+    // default stays "none" (owner decision P2: a client sends "predicate_only" explicitly)
+    p["projections"] = strings_json({ "none", "all", kLabelsPredicateOnly });
     p["default_projection"] = kDefaultProjection;
-    p["projections_later_increment"] = strings_json({ "predicate_only" });
+    p["projections_later_increment"] = Json::Value(Json::arrayValue);
     // output.occurrences with output.labels "all": placed where the index can place
     p["default_occurrences"] = true;
     p["kinds"] = strings_json({ "dna", "iupac", "protein" });
@@ -1453,7 +2026,26 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     caps["max_memory_mb"] = uint_json(limits.max_memory_mb);
     caps["max_labels"] = uint_json(limits.max_labels);
     caps["max_occurrences_per_label"] = uint_json(limits.max_occurrences_per_label);
+    // increment 5b's (SPEC §19.2, §19.3): a predicate's selection; max_predicate_labels is not
+    // a request field (caps_rule)
+    caps["max_predicate_contexts"] = uint_json(limits.max_predicate_contexts);
+    caps["max_predicate_work"] = uint_json(limits.max_predicate_work);
+    caps["max_predicate_labels"] = uint_json(limits.max_predicate_labels);
     p["caps"] = std::move(caps);
+    // increment 5b (SPEC §19.12): the operators served, the predicate_strands values (on
+    // CANONICAL and PRIMARY graphs both answer "either": one row serves a k-mer and its
+    // reverse complement) and the access the index gives a selection: "rows" (budget-aware, or
+    // an unbudgeted annotation without direct access) or "columns" (an unbudgeted annotation
+    // with direct access: single cells for at most 16 labels); null while it is not known
+    Json::Value predicate;
+    Json::Value operators(Json::arrayValue);
+    for (const char *op : kPredicateOperators) {
+        operators.append(op);
+    }
+    predicate["operators"] = std::move(operators);
+    predicate["strands"] = strings_json({ kPredicateStrandsEither, kPredicateStrandsContext });
+    predicate["access"] = Json::Value();
+    p["predicate"] = std::move(predicate);
     // the budget of a request that names none: unlike the other caps, below the maximum
     p["default_time_budget_ms"] = number_json(limits.default_time_ms);
     p["finalize_reserve_ms"] = number_json(limits.finalize_ms);
@@ -1528,6 +2120,7 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
         p["placement"] = d.placement;
         p["support"] = d.support;
         p["annotation"] = d.budgeted ? "budgeted" : "unbudgeted";
+        p["predicate"]["access"] = !d.budgeted && oracle.supports_direct() ? "columns" : "rows";
     } catch (const std::exception &e) {
         // stated as unknown (null) rather than failing the capabilities
         logger->warn("[Server] pattern capabilities: the annotation could not be described: {}",

@@ -1,0 +1,16 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "predicate": {
+  "any": [
+   "1296536",
+   "158836",
+   "287",
+   "470",
+   "546"
+  ]
+ }
+}

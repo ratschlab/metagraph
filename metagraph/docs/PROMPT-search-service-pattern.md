@@ -42,7 +42,7 @@ proposed, §13 the increments.
 **What a request says.** A list of patterns (`dna` | `iupac` | `protein`, the last since increment 5), a `mode`
 (`count` | `all_or_count` | `partial`), a `scope` (`suffix` | `any_offset`; `long` is implied for patterns longer
 than k), `strands`, caps (`max_contexts`, `max_steps`, `time_budget_ms`, …), and an `output.labels` projection:
-`none` (the label-free path), `all` (since milestone 3), later `predicate_only` (5b).
+`none` (the label-free path), `all` (since milestone 3), `predicate_only` (5b, with a `predicate`).
 
 **What an answer says.** Per pattern: every count as `{value, relation, unit}` with
 `relation ∈ {exact, at_least, bounds, unknown}` and `unit ∈ {graph_contexts, anchors, paths, placed_occurrences,
@@ -62,7 +62,7 @@ filter.
 `routes`, as the other features) and `GET /traverse/capabilities` — the document your probe already reads, which
 today carries `attempts`, `coordinates` and `deadline_check` and no feature list — so one cached probe serves
 both. The block: `modes`, `projections` (the list the host offers **now**: `["none"]` at milestone 1,
-`["none", "all"]` since milestone 3, `predicate_only` with 5b; gate the label projections on this list, never on
+`["none", "all"]` since milestone 3, `["none", "all", "predicate_only"]` since 5b; gate the label projections on this list, never on
 a milestone number),
 scopes per graph mode, the caps and floors, `placement` and `support` the index can give, `mask`,
 `annotation: budgeted | unbudgeted`, `pattern_contract_version` (accept only a version the service implements,
@@ -129,6 +129,58 @@ version 1, both opt-in, each gated on the capabilities block, never on a milesto
   at least 1 KiB under the 32 KiB ceiling of the tool that returns it whole (`CAPABILITIES_MAX_BYTES`; a test holds
   them to it), 1,643 bytes shorter than before.
 
+**Increment 5b: annotation predicates, patterns of at most k bases (in the build since 2026-10-08; SPEC §19).**
+Additions to contract version 1, opt-in by the request's `predicate`:
+- **Gate** on the block: offer predicates only where `projections` lists `"predicate_only"` (the block then has
+  `predicate`: its `operators`, its `strands`, its `access`) and send at most `caps.max_predicate_labels` names
+  (10,000 by default; above it 400 `predicate_too_large`, the message naming the count and the cap: split the
+  cohort into several requests). A host without `"predicate_only"` refuses a predicate (400 `later_increment`).
+- **The predicate is the request's, one for all its patterns**, written as operator objects: `{"any": [...]}`,
+  `{"all": [...]}`, `{"none": [...]}`, `{"at_least": {"n": m, "labels": [...]}}`, `{"and": [...]}`, `{"or":
+  [...]}`, `{"not": p}`. A name is a **string**, the column label as the index stores it (on refseq33m a taxid:
+  `"562"`, never 562). **Labels are column names, nothing more**: the engine knows no taxonomy. Expanding a named
+  cohort or a taxon ("E. coli", "Enterobacterales") into the list of its columns is the service's job, against
+  the host's columns, before the request is sent; on refseq33m a column holds exactly its taxid's records, so "in
+  E. coli" is the list of every strain taxid. Show the caller the answer's `predicate.unknown_labels` (names that
+  are no column of this index: a typo shows there, never as an absence) and `predicate.normal_form` (what was
+  evaluated after the unknown names were folded away); a normal form `false` or `true` (`selection.pass:
+  "constant"`, note `predicate_constant`) read nothing.
+- **Send `output.labels: "predicate_only"` explicitly** when the caller wants the predicate's labels: the default
+  stays `"none"` (the selected contexts without labels), and `"all"` reads every label of each selected row again.
+- **Strands.** `predicate_strands` defaults to `"either"`: on a BASIC index (refseq33m) a label is present for a
+  context when it annotates the context's k-mer **or** its reverse complement — one or the other as a whole,
+  never a mix — so a record holding the motif on its other strand counts. `"context"` reads the deposited strand
+  only (stranded data). CANONICAL and PRIMARY hosts always answer `"either"` (`predicate.strands`). Each result's
+  `selection_labels` (with `"predicate_only"` or `"all"`) is the set it was selected on; with `"either"` it may hold
+  a label its own `labels` lack (the reverse complement's). Beside it, `selection_strands` says per label which
+  orientation supported the context: `"context"` (the result's `kmer` as deposited), `"reverse_complement"` (the
+  records carry its reverse complement: the motif on their other strand), `"both"`, or `"either"` on CANONICAL and
+  PRIMARY hosts (one row for both orientations, no strand known). Show it when you say "this sample carries the
+  motif": `"reverse_complement"` means on the sample's other strand.
+- **Budgets.** `max_predicate_contexts` (the raw contexts a pattern's selection may test; 100,000 by default, the
+  host's flag; send at most 10,000 interactively on staging, where a row costs 1–4 ms) and `max_predicate_work`
+  (the selection's own work units). For "show me examples" send `mode: "partial"` with `stop_at_threshold: true`:
+  the pass ends once more than `max_contexts` are selected. A predicate request reads annotation in **every** mode
+  (`count` too); on `annotation: "unbudgeted"` it needs `allow_unbudgeted_annotation: true` (the caller's consent,
+  as for `"all"`).
+- **New answer fields**: the top-level `predicate` block; per entry `selection` (`pass`: `completed`, `stopped`,
+  `not_admitted`, `not_started`, `constant`), `counts.tested` and `counts.selected` (with relations: `bounds` after
+  a stopped pass), `absence_filter: "predicate"`, `work.predicate_rows`, `predicate_units`, `predicate_lookups`,
+  `timing.selection_ms`. New values: `withheld` `predicate_above_threshold` (too many raw contexts: narrow the
+  pattern or use `partial`), `selected_above_threshold` (more selected than `max_contexts`), `predicate_budget`;
+  `cut` `max_predicate_contexts`, `max_predicate_work`; `stop.phase` `selection`, `stop.reason`
+  `max_predicate_work`, `max_predicate_contexts`; notes `predicate_constant`, `projection_not_read`; the refusal
+  `predicate_too_large`. `output.labels: "predicate_only"` without a predicate is now 400 `invalid_request` (was
+  `later_increment`).
+- **What to claim.** The predicate is asked of each context, per index (`predicate.scope: "shard_context"`):
+  "these are the contexts of P whose k-mer (or reverse complement) carries the predicate's labels as asked" — with
+  `retrieval_complete: true` or `selected` `exact`. Never a motif-level claim ("the motif is absent from C"), never
+  anything from an `estimate`, never anything about contexts beyond `tested` when `selected` is `bounds` or
+  `at_least`. `absence_filter: "predicate"` marks these narrowed absence claims; state them as such.
+- **Patterns longer than k**: a predicate selects among supported paths (`long_search: "supported_paths"`, a
+  later increment, not served yet): with `long_search: "paths"` a predicate is 400 `invalid_request`; with
+  `"anchors"` (the default) a long pattern keeps its anchors' answer and its selection is `not_started`.
+
 ## 2. When
 
 | backend milestone | content | state |
@@ -136,7 +188,7 @@ version 1, both opt-in, each gated on the capabilities block, never on a milesto
 | 1 | count (`mode: count`) and the label-free extraction (`all_or_count` / `partial` with `labels: none`): k-mers, offsets, strands, node and row ids; exact DNA and IUPAC; both strands; `suffix` and `any_offset`; single-graph servers; the capabilities block; `metagraph pattern` CLI | running now; contract freezes on its commit |
 | 3 | `labels: all`: label discovery and placement (record, 1-based position, strand) on BASIC indexes with record mapping | in the build (SPEC §14), with fixtures |
 | 4 | patterns longer than k (extension), per-label `support`, `require_support`; opt-in: only a request with `long_search: "paths"` gets paths (new fields `sequence`, `anchor_kmer`; `kmer` keeps its meaning), every other request keeps today's anchor-only answer (SPEC §12.1) | in the build (2026-10-08, SPEC §17), with fixtures (`paths*`, `support_unavailable`) |
-| 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | 5 in the build (2026-10-08, SPEC §12.2), with fixtures (`peptide*`, `genetic_code_unknown`); 5b later |
+| 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | 5 in the build (2026-10-08, SPEC §12.2), with fixtures (`peptide*`, `genetic_code_unknown`); 5b for patterns of at most k bases in the build (2026-10-08, SPEC §19), with fixtures (`predicate_*`); predicates on long patterns with the supported-path search (5s), later |
 | 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
 | 7 | this service's job type (the backend's Python client methods are deferred until needed) | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
 | mask | refseq33m-experimental's graph has no `.edgemask` file. Since the owner's decision #16 (2026-10-08) the route answers without it: `mask: absent`, `counting: "upper_bound"`, counts `bounds` with an `estimate` where they cannot be proven, lists exact (before, it answered `mask_required`). For exact counts the owner runs `metagraph transform --mask-dummy` once on mex (decision #18: in a staging-only directory, on the host rather than in the 128 GiB container: it holds a transient bit vector of edges + 1 bits, about 78 GB, beside the graph). Node ids, rows, the annotation and `index_fp` stay (decision #17: the mask is derived data); `/stats` `graph.nodes` becomes the k-mer count and a `.bloom` beside the graph starts loading; the block then says `counting: "exact"`. `--pattern-build-mask` (the mask built in memory at every start-up) is for small indexes, not for refseq33m | the route answers from the `update.sh` that deploys it; exact counts after the mask (#18) |

@@ -93,7 +93,11 @@ DEFAULT_CAPS = {'max_contexts': 10000, 'max_anchors': 1000, 'max_steps': 1000000
                 'max_paths': 1000,
                 # owner decision #24: no request field, the unchecked candidates a pattern on a
                 # graph without its mask may have for each to be tested
-                'max_checked_entries': 50}
+                'max_checked_entries': 50,
+                # increment 5b (a predicate, SPEC §19): the raw contexts a selection may test, its
+                # work per request, and the names a predicate may list (no request field)
+                'max_predicate_contexts': 100000, 'max_predicate_work': 100000000,
+                'max_predicate_labels': 10000}
 DEFAULT_TIME_MS = 60000
 DEFAULT_FINALIZE_MS = 250
 
@@ -810,16 +814,34 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             ({'patterns': p, 'time_budget_ms': DEFAULT_FINALIZE_MS}, 'invalid_request',
              'time_budget_ms'),
             ({'patterns': p, 'stop_at_threshold': 'yes'}, 'invalid_request', 'stop_at_threshold'),
-            ({'patterns': p, 'output': {'labels': 'predicate_only'}}, 'later_increment',
-             'labels'),
+            # increment 5b: the predicate's labels need a predicate (later_increment before)
+            ({'patterns': p, 'output': {'labels': 'predicate_only'}}, 'invalid_request',
+             'needs a predicate'),
             ({'patterns': p, 'mode': 'count', 'output': {'labels': 'predicate_only'}},
-             'later_increment', 'labels'),
+             'invalid_request', 'needs a predicate'),
             # occurrences are placed per label (increment 3): they need labels "all"
             ({'patterns': p, 'output': {'occurrences': True}}, 'invalid_request', 'occurrences'),
             # output.paths is accepted with either value since increment 4 (a path result
             # always carries its node path); another type is refused
             ({'patterns': p, 'output': {'paths': 1}}, 'invalid_request', 'paths'),
-            ({'patterns': p, 'predicate': {'any': ['562']}}, 'later_increment', 'predicate'),
+            # increment 5b: a predicate is served (SPEC §19); its form and fields are checked
+            ({'patterns': p, 'predicate': {'any': [562]}}, 'invalid_request',
+             'write a taxid as "562"'),
+            ({'patterns': p, 'predicate': {'any': ['562'], 'none': ['287']}}, 'invalid_request',
+             'request.predicate'),
+            ({'patterns': p, 'predicate': {'at_least': {'n': 3, 'labels': ['562', '287']}}},
+             'invalid_request', 'request.predicate.at_least'),
+            ({'patterns': p, 'predicate': {'any': [str(i) for i in range(10001)]}},
+             'predicate_too_large', '10001 names'),
+            ({'patterns': p, 'predicate': {'any': ['562']}, 'long_search': 'paths'},
+             'invalid_request', 'supported paths'),
+            ({'patterns': p, 'predicate': {'any': ['562']}, 'predicate_strands': 'both'},
+             'invalid_request', 'predicate_strands'),
+            ({'patterns': p, 'max_predicate_work': 0}, 'invalid_request', 'max_predicate_work'),
+            ({'patterns': p, 'max_predicate_contexts': -1}, 'invalid_request',
+             'max_predicate_contexts'),
+            ({'patterns': p, 'long_search': 'supported_paths'}, 'invalid_request',
+             'long_search'),
             # increment 4: long_search, max_paths and require_support are served (paths
             # opt-in, owner decisions #13 and #14); their values are checked
             ({'patterns': p, 'max_paths': None}, 'invalid_request', 'max_paths'),
@@ -939,8 +961,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         expected = {
             'pattern_contract_version': 1, 'available': True, 'unavailable_reason': None,
             'modes': ['count', 'all_or_count', 'partial'], 'default_mode': 'all_or_count',
-            'projections': ['none', 'all'], 'default_projection': 'none',
-            'projections_later_increment': ['predicate_only'], 'default_occurrences': True,
+            'projections': ['none', 'all', 'predicate_only'], 'default_projection': 'none',
+            'projections_later_increment': [], 'default_occurrences': True,
             'kinds': ['dna', 'iupac', 'protein'], 'kinds_later_increment': [],
             # increment 5: the residues (the stop '*' since owner decision #19), the genetic
             # codes and the default
@@ -963,10 +985,14 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             # owner decision P9: the delivery rates as numbers (MB/s), the prose rules SPEC
             # references
             'delivery_mbps': {'build': 10, 'compress': 50},
+            # increment 5b: the operators, the strands and the access of a budget-aware index
+            'predicate': {'operators': ['any', 'all', 'none', 'at_least', 'and', 'or', 'not'],
+                          'strands': ['either', 'context'], 'access': 'rows'},
         }
         self.assertEqual(expected, {x: p[x] for x in expected})
         self.assertEqual(['any_offset'], p['scopes_by_graph_mode']['primary'])
-        for rule, sections in (('caps_rule', '4.5, 7.4, 7.6, 12.1'), ('protein_rule', '12.2, 18')):
+        for rule, sections in (('caps_rule', '4.5, 7.4, 7.6, 12.1, 19'),
+                               ('protein_rule', '12.2, 18')):
             self.assertTrue(p[rule].endswith('SPEC-pattern-search.md sections ' + sections), rule)
         self.assertTrue(all(cap in p['caps_rule'] for cap in p['caps']))
         # the same block on the probe a service reads (§7.3)
@@ -2074,6 +2100,184 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
 
     # ------------------------------------------------------------ the CLI
 
+    # ------------------------------------------------------------ predicates (increment 5b)
+
+    PREDICATE_PATTERNS = [('dna', 'GGTTTGGCGATCTGGTTTTC'), ('dna', 'CGGAATGGCTCATCACGATC'),
+                          ('dna', 'GCGGCGGCGGCG'), ('iupac', 'GTGYCAGCMGCCGCGGTAA'),
+                          ('iupac', 'GGACTACNVGGGTWTCTAAT')]
+
+    def kmer_columns(self, kmers):
+        """{k-mer: the columns whose records hold it as deposited}, by a scan of the FASTA files
+        (each record's every k-window; the mini's records hold no N)."""
+        if not hasattr(self.__class__, '_kmer_columns'):
+            self.__class__._kmer_columns = {}
+        cache = self.__class__._kmer_columns
+        todo = set(kmers) - set(cache)
+        if todo:
+            found = {x: set() for x in todo}
+            k = self.k
+            for column, recs in self.columns.items():
+                for _, seq in recs:
+                    seq = seq.upper()
+                    for i in range(len(seq) - k + 1):
+                        w = seq[i:i + k]
+                        if w in found:
+                            found[w].add(column)
+            cache.update(found)
+        return {x: cache[x] for x in kmers}
+
+    @staticmethod
+    def random_predicate(rng, names, depth=0):
+        def names_list():
+            return rng.sample(names, rng.randint(1, 3))
+        op = rng.randrange(4 if depth >= 2 else 7)
+        if op == 0:
+            return {'any': names_list()}
+        if op == 1:
+            return {'all': names_list()}
+        if op == 2:
+            return {'none': names_list()}
+        if op == 3:
+            labels = names_list()
+            return {'at_least': {'n': rng.randint(1, len(labels)), 'labels': labels}}
+        if op == 6:
+            return {'not': TestPatternMini.random_predicate(rng, names, depth + 1)}
+        return {('and', 'or')[op - 4]: [TestPatternMini.random_predicate(rng, names, depth + 1)
+                                        for _ in range(rng.randint(1, 3))]}
+
+    @staticmethod
+    def holds(p, labels):
+        (op, v), = p.items()
+        if op in ('any', 'all', 'none'):
+            hits = sum(n in labels for n in v)
+            return hits > 0 if op == 'any' else hits == len(v) if op == 'all' else hits == 0
+        if op == 'at_least':
+            return sum(n in labels for n in v['labels']) >= v['n']
+        if op == 'and':
+            return all(TestPatternMini.holds(q, labels) for q in v)
+        if op == 'or':
+            return any(TestPatternMini.holds(q, labels) for q in v)
+        return not TestPatternMini.holds(v, labels)
+
+    def test_predicate_against_the_fasta(self):
+        """SPEC §19 (TESTS §8): for the blaNDM-1 primers, the GCG repeat and two IUPAC primers,
+        20 random predicates over the nine columns, both strand settings: the selected contexts
+        are those of a scan of the mini's FASTA whose k-mer's columns (with "either" also its
+        reverse complement's) satisfy the predicate, all of them returned, counted exactly;
+        with "predicate_only" every result lists the predicate's columns of its own k-mer, its
+        selection_labels the set it was evaluated on, and per label in selection_strands the
+        orientation whose records carry it (the owner's answer to P11): "context" (its k-mer
+        only), "reverse_complement" (with "either", its reverse complement only) or "both"."""
+        rng = random.Random(5)
+        names = sorted(self.columns)
+        contexts = {p: self.contexts(p) for _, p in self.PREDICATE_PATTERNS}
+        kmers = {kmer for c in contexts.values() for _, kmer, _ in c}
+        columns = self.kmer_columns(kmers | {revcomp(x) for x in kmers})
+        for t in range(20):
+            pred = self.random_predicate(rng, names)
+            for strands in ('either', 'context'):
+                labels = 'predicate_only' if t % 4 == 0 else 'none'
+                request = {'patterns': [{kind: p} for kind, p in self.PREDICATE_PATTERNS],
+                           'predicate': pred, 'predicate_strands': strands,
+                           'output': {'labels': labels}}
+                out = self.pattern(self.server, request)
+                with self.subTest(predicate=pred, strands=strands):
+                    # every name a column: nothing folded away but single operands
+                    self.assertEqual([], out['predicate']['unknown_labels'])
+                    self.assertEqual(len(self.holds_names(pred)), out['predicate']['known'])
+                    self.assertEqual(strands, out['predicate']['strands'])
+                    for (_, p), e in zip(self.PREDICATE_PATTERNS, out['patterns']):
+                        def evaluated(kmer):
+                            s = set(columns[kmer])
+                            if strands == 'either':
+                                s |= columns[revcomp(kmer)]
+                            return s
+                        want = {c for c in contexts[p] if self.holds(pred, evaluated(c[1]))}
+                        got = {(r['strand'], r['kmer'], r['offset']) for r in e['results']}
+                        self.assertEqual(want, got, p)
+                        self.assertEqual('completed', e['selection']['pass'], p)
+                        self.assertCount(e['counts']['tested'], len(contexts[p]))
+                        self.assertCount(e['counts']['selected'], len(want))
+                        self.assertTrue(e['retrieval_complete'], p)
+                        self.assertEqual('predicate', e['absence_filter'])
+                        if labels == 'none':
+                            continue
+                        keep = {n for n in self.holds_names(pred)}
+                        for r in e['results']:
+                            own = {label['column'] for label in r['labels']}
+                            self.assertEqual(columns[r['kmer']] & keep, own, r['kmer'])
+                            self.assertEqual(evaluated(r['kmer']) & keep,
+                                             set(r['selection_labels']), r['kmer'])
+                            self.assertEqual(len(r['selection_labels']),
+                                             len(r['selection_strands']), r['kmer'])
+                            for n, strand in zip(r['selection_labels'], r['selection_strands']):
+                                x = n in columns[r['kmer']]
+                                y = strands == 'either' and n in columns[revcomp(r['kmer'])]
+                                want_strand = 'both' if x and y else \
+                                    'reverse_complement' if y else 'context'
+                                self.assertEqual(want_strand, strand, (r['kmer'], n))
+
+    @staticmethod
+    def holds_names(p):
+        (op, v), = p.items()
+        if op in ('any', 'all', 'none'):
+            return set(v)
+        if op == 'at_least':
+            return set(v['labels'])
+        if op == 'not':
+            return TestPatternMini.holds_names(v)
+        return set().union(*(TestPatternMini.holds_names(q) for q in v))
+
+    def test_predicate_strands_on_the_ndm_primer(self):
+        """P11 on the mini (SPEC §19.5): none(546) on the blaNDM-1 forward primer selects no
+        context with "either" and its 12 - contexts with "context"; a typo is reported unknown
+        and folded to a constant (no row read); the compute admission and the work budget stop
+        as stated; the CLI answers as the server."""
+        p = [{'dna': self.NDM_F}]
+        out = self.pattern(self.server, {'patterns': p, 'mode': 'count',
+                                         'predicate': {'none': ['546']}})
+        self.assertCount(out['patterns'][0]['counts']['selected'], 0)
+        self.assertTrue(out['predicate']['vacuous'])
+        out = self.pattern(self.server, {'patterns': p, 'predicate': {'none': ['546']},
+                                         'predicate_strands': 'context'})
+        e = out['patterns'][0]
+        self.assertCount(e['counts']['selected'], 12)
+        self.assertEqual({'-'}, {r['strand'] for r in e['results']})
+        out = self.pattern(self.server, {'patterns': p, 'predicate': {'any': ['5622']}})
+        e = out['patterns'][0]
+        self.assertEqual((['5622'], False), (out['predicate']['unknown_labels'],
+                                             out['predicate']['normal_form']))
+        self.assertEqual(('constant', 0, ['predicate_constant']),
+                         (e['selection']['pass'], e['work']['predicate_rows'], e['notes']))
+        self.assertTrue(e['retrieval_complete'])
+        out = self.pattern(self.server, {'patterns': [{'dna': 'GCGGCGGCGGCG'}],
+                                         'predicate': {'any': ['562']},
+                                         'max_predicate_contexts': 100})
+        e = out['patterns'][0]
+        self.assertEqual(({'reason': 'predicate_above_threshold'}, 'not_admitted', 0),
+                         (e['withheld'], e['selection']['pass'], e['work']['predicate_rows']))
+        out = self.pattern(self.server, {'patterns': [{'dna': 'GCGGCGGCGGCG'}], 'mode': 'partial',
+                                         'predicate': {'any': ['562']},
+                                         'predicate_strands': 'context', 'max_predicate_work': 1})
+        e = out['patterns'][0]
+        self.assertEqual(({'phase': 'selection', 'reason': 'max_predicate_work'},
+                          {'reason': 'max_predicate_work'}, 1),
+                         (e['stop'], e['cut'], e['counts']['tested']['value']))
+        self.assertEqual('bounds', e['counts']['selected']['relation'])
+        # the CLI answers as the server
+        request = {'patterns': [{'dna': self.NDM_F}, {'iupac': self.iupac16}, {'dna': self.p40}],
+                   'mode': 'partial', 'max_contexts': 9, 'predicate': {'any': ['562', '573']},
+                   'output': {'labels': 'predicate_only'}}
+        server_out = self.pattern(self.server, request)
+        path = os.path.join(self.tempdir.name, 'request_predicate.json')
+        with open(path, 'w') as f:
+            json.dump(request, f)
+        res = subprocess.run(shlex.split(METAGRAPH) + ['pattern', '--json', '-i', self.graph,
+                                                       '-a', self.anno, path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
+
     def test_cli_answers_as_the_server(self):
         request = {'patterns': [{'id': 'a', 'dna': self.p16}, {'iupac': self.iupac16},
                                 {'dna': self.p11}, {'dna': self.p40}],
@@ -2942,8 +3146,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             ('a retrieval', {'patterns': [{'dna': 'ACGAC'}]}, 200, None),
             ('not JSON', '{', 400, 'invalid_request'),
             ('no patterns', {'patterns': []}, 400, 'invalid_request'),
-            ('a later increment', {'patterns': [{'dna': 'ACGAC'}],
-                                   'output': {'labels': 'predicate_only'}}, 400,
+            ('a later increment', {'patterns': [{'dna': 'ACGAC'}], 'graphs': ['x']}, 400,
              'later_increment'),
             # refused once the request is parsed (the column annotation has no budgeted reads)
             ('unbudgeted labels', {'patterns': [{'dna': 'ACGAC'}], 'output': {'labels': 'all'}},
@@ -3018,6 +3221,57 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                              ret.json()['limits'])
         finally:
             server.stop()
+
+    def test_predicate_caps_at_start_up(self):
+        """Increment 5b (SPEC §4.5, §19.3): --pattern-max-predicate-labels is at most 1,000,000
+        and --pattern-max-predicate-work at least 1, refused at start-up otherwise, on the server
+        and the CLI alike; the CLI applies the caps as the server does (a predicate of more names
+        than the cap: predicate_too_large; the caps in its limits); both usages name the flags."""
+        for command in ('server_query', 'pattern'):
+            for flag, value, says in (('--pattern-max-predicate-labels', '1000001',
+                                       'must be an integer in [0, 1000000]'),
+                                      ('--pattern-max-predicate-work', '0', 'at least 1')):
+                cmd = shlex.split(METAGRAPH) + [command, '-i', self.graph_basic, '-a',
+                                                self.anno_basic, flag, value]
+                if command == 'server_query':
+                    cmd += ['--port', str(free_port()), '--address', '127.0.0.1']
+                else:
+                    cmd += [os.path.join(self.tempdir.name, 'none.json')]
+                try:
+                    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                         timeout=120)
+                except subprocess.TimeoutExpired:
+                    self.fail(f'{command} started with {flag} {value}')
+                self.assertNotEqual(0, res.returncode, (command, flag))
+                self.assertIn(says, res.stderr.decode(), (command, flag))
+            res = subprocess.run(shlex.split(METAGRAPH) + [command], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            text = (res.stdout + res.stderr).decode()
+            for flag in ('--pattern-max-predicate-contexts', '--pattern-max-predicate-work',
+                         '--pattern-max-predicate-labels'):
+                self.assertIn(flag, text, command)
+        # (names that are no column: folded to a constant, nothing read)
+        columns = ['a', 'b', 'c']
+        path = os.path.join(self.tempdir.name, 'request_predicate_cap.json')
+        with open(path, 'w') as f:
+            json.dump({'patterns': [{'iupac': self.PATTERNS[0]}], 'mode': 'count',
+                       'predicate': {'any': columns}, 'allow_unbudgeted_annotation': True}, f)
+        base = shlex.split(METAGRAPH) + ['pattern', '--json', '--pattern-min-information-bits',
+                                         str(self.FLOOR), '-i', self.graph_basic, '-a',
+                                         self.anno_basic]
+        res = subprocess.run(base + ['--pattern-max-predicate-labels', '2', path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(1, res.returncode)
+        self.assertEqual('predicate_too_large', json.loads(res.stdout)['code'])
+        res = subprocess.run(base + ['--pattern-max-predicate-labels', '3',
+                                     '--pattern-max-predicate-contexts', '7',
+                                     '--pattern-max-predicate-work', '1000', path],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, res.returncode, res.stderr.decode())
+        limits = json.loads(res.stdout)['limits']
+        self.assertEqual((7, 1000, 3), (limits['max_predicate_contexts'],
+                                        limits['max_predicate_work'],
+                                        limits['max_predicate_labels']))
 
     def test_usage_states_the_threads_and_the_limits(self):
         """The usage of server_query and pattern (review of 2026-10-07): the mask built at

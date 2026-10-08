@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "dna": "GCGGCGGCGGCG",
+   "id": "GCG12"
+  }
+ ],
+ "mode": "partial",
+ "max_contexts": 5,
+ "predicate": {
+  "none": [
+   "287"
+  ]
+ }
+}

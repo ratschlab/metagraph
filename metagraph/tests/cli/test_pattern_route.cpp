@@ -166,8 +166,9 @@ TEST(PatternRoute, Refusals) {
           "true}", 200, "" },
         // mode count reads no annotation, whatever the projection
         { "{" + p + ", \"mode\": \"count\", \"output\": {\"labels\": \"all\"}}", 200, "" },
+        // increment 5b: the predicate's labels need a predicate (was later_increment)
         { "{" + p + ", \"mode\": \"count\", \"output\": {\"labels\": \"predicate_only\"}}",
-          400, "later_increment" },
+          400, "invalid_request" },
         // occurrences are placed per label: they need labels "all"
         { "{" + p + ", \"output\": {\"occurrences\": true}}", 400, "invalid_request" },
         { "{" + p + ", \"max_labels_per_anchor\": 0}", 400, "invalid_request" },
@@ -176,7 +177,41 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"max_labels\": -1}", 400, "invalid_request" },
         { "{" + p + ", \"allow_unbudgeted_annotation\": 1}", 400, "invalid_request" },
         { "{" + p + ", \"max_labels\": 0, \"max_occurrences_per_label\": 0}", 200, "" },
-        { "{" + p + ", \"predicate\": null}", 400, "later_increment" },
+        // increment 5b (SPEC §19): a predicate is served; on this column annotation (no
+        // budget-aware decode) its reads need the opt-in, in every mode
+        { "{" + p + ", \"predicate\": null}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}}", 400, "annotation_unbudgeted" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"mode\": \"count\"}", 400,
+          "annotation_unbudgeted" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, "
+          "\"allow_unbudgeted_annotation\": true}", 200, "" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"output\": {\"labels\": "
+          "\"predicate_only\", \"occurrences\": true}, \"allow_unbudgeted_annotation\": "
+          "true}", 200, "" },
+        { "{" + p + ", \"predicate\": {\"any\": [562]}}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"any\": []}}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"a\"], \"all\": [\"b\"]}}", 400,
+          "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"some\": [\"a\"]}}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"at_least\": {\"n\": 2, \"labels\": [\"a\"]}}}",
+          400, "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"a\", \"b\", \"c\", \"d\", \"e\"]}}",
+          400, "predicate_too_large" },
+        // accepted with any request, acting with a predicate only
+        { "{" + p + ", \"max_predicate_contexts\": 0}", 200, "" },
+        { "{" + p + ", \"max_predicate_contexts\": -1}", 400, "invalid_request" },
+        { "{" + p + ", \"max_predicate_work\": 0}", 400, "invalid_request" },
+        { "{" + p + ", \"max_predicate_work\": 1}", 200, "" },
+        { "{" + p + ", \"predicate_strands\": \"context\"}", 200, "" },
+        { "{" + p + ", \"predicate_strands\": \"both\"}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate_strands\": null}", 400, "invalid_request" },
+        // a predicate selects supported paths (P24): long_search "paths" is refused,
+        // "anchors" answers long patterns by their anchors; "supported_paths" is not served yet
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": \"paths\", "
+          "\"allow_unbudgeted_annotation\": true}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": \"anchors\", "
+          "\"allow_unbudgeted_annotation\": true}", 200, "" },
+        { "{" + p + ", \"long_search\": \"supported_paths\"}", 400, "invalid_request" },
         // owner decision #13: long_search, reserved until increment 4, is served (paths
         // opt-in); its values are "anchors" (the default) and "paths", nothing else
         { "{" + p + ", \"long_search\": \"paths\"}", 200, "" },
@@ -263,8 +298,23 @@ TEST(PatternRoute, Refusals) {
         // at the limit: parsed, then refused for what it is
         { repeat("[", 1000) + repeat("]", 1000), 400, "invalid_request" },
     };
+    // a server whose predicates may list 4 names (--pattern-max-predicate-labels)
+    PatternLimits small_cap = limits();
+    small_cap.max_predicate_labels = 4;
+    auto refusal_small = [&](const std::string &body) -> std::pair<int, std::string> {
+        try {
+            run(*g, body, nullptr, nullptr, small_cap);
+        } catch (const PatternRefusal &e) {
+            return { e.status(), e.code() };
+        }
+        return { 200, "" };
+    };
     for (const auto &[body, status, code] : cases) {
-        EXPECT_EQ(std::make_pair(status, code), refusal(*g, body)) << body.substr(0, 200);
+        if (body.find("predicate\": {") != std::string::npos) {
+            EXPECT_EQ(std::make_pair(status, code), refusal_small(body)) << body.substr(0, 200);
+        } else {
+            EXPECT_EQ(std::make_pair(status, code), refusal(*g, body)) << body.substr(0, 200);
+        }
     }
     std::string error;
     refusal(*g, repeat("[", 1001) + repeat("]", 1001), &error);
@@ -283,7 +333,9 @@ TEST(PatternRoute, RefusalOrder) {
     const std::string p = "\"patterns\": [{\"dna\": \"AACG\"}]";
     const std::vector<std::tuple<std::string, std::string, std::string>> cases = {
         // 6 before 7: a later-increment field before the patterns
-        { "{\"patterns\": \"x\", \"predicate\": 1}", "later_increment", "request.predicate" },
+        { "{\"patterns\": \"x\", \"graphs\": 1}", "later_increment", "request.graphs" },
+        // (predicate is served since increment 5b: checked at the end of step 8)
+        { "{\"patterns\": \"x\", \"predicate\": 1}", "invalid_request", "request.patterns" },
         // 6, alphabetical: graphs < in_ram; in_ram < max_paths
         { "{" + p + ", \"in_ram\": true, \"graphs\": []}", "later_increment", "request.graphs" },
         { "{" + p + ", \"in_ram\": true, \"max_paths\": 1}", "resident_only", "request.in_ram" },
@@ -358,6 +410,31 @@ TEST(PatternRoute, RefusalOrder) {
         // a peptide's slot error is no refusal: the genetic code's comes first
         { "{\"patterns\": [{\"protein\": \"M*U\"}], \"genetic_code\": 8}",
           "genetic_code_unknown", "request.genetic_code" },
+        // then increment 5b's: predicate (its form, then its size), max_predicate_contexts,
+        // max_predicate_work, predicate_strands, then predicate_only without a predicate and a
+        // predicate with long_search "paths"
+        { "{" + p + ", \"genetic_code\": 7, \"predicate\": 1}", "genetic_code_unknown",
+          "request.genetic_code" },
+        { "{" + p + ", \"predicate\": {\"any\": [1]}, \"max_predicate_contexts\": -1}",
+          "invalid_request", "request.predicate.any[0]" },
+        { "{" + p + ", \"predicate\": {\"none\": [\"x\"]}, \"max_predicate_contexts\": -1}",
+          "invalid_request", "request.max_predicate_contexts" },
+        { "{" + p + ", \"max_predicate_contexts\": -1, \"max_predicate_work\": 0}",
+          "invalid_request", "request.max_predicate_contexts" },
+        { "{" + p + ", \"max_predicate_work\": 0, \"predicate_strands\": \"x\"}",
+          "invalid_request", "request.max_predicate_work" },
+        { "{" + p + ", \"predicate_strands\": \"x\", \"output\": {\"labels\": "
+          "\"predicate_only\"}}", "invalid_request", "request.predicate_strands" },
+        { "{" + p + ", \"output\": {\"labels\": \"predicate_only\"}, \"long_search\": "
+          "\"paths\", \"bogus\": 1}", "invalid_request", "request.output.labels" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": \"paths\", "
+          "\"bogus\": 1}", "invalid_request", "request.long_search" },
+        // 9 before 10: an unknown field before the predicate's annotation_unbudgeted
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"bogus\": 1}",
+          "invalid_request", "request: unknown field 'bogus'" },
+        // 10: the predicate's reads, in every mode
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"mode\": \"count\"}",
+          "annotation_unbudgeted", "pattern: a predicate reads the annotation" },
         // 8 before 9
         { "{" + p + ", \"max_steps\": 0, \"bogus\": 1}", "invalid_request", "request.max_steps" },
         // 9 before 10: on this column annotation labels "all" would be annotation_unbudgeted
@@ -925,12 +1002,40 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("basic", caps["graph_mode"].asString());
     EXPECT_EQ(kK, caps["k"].asUInt64());
     EXPECT_EQ("none", caps["default_projection"].asString());
-    // increment 3: the projection "all" is served; predicate_only is still to come
-    ASSERT_EQ(2u, caps["projections"].size());
+    // increment 3: the projection "all" is served; increment 5b: "predicate_only" (with a
+    // predicate), the default still "none" (owner decision P2)
+    ASSERT_EQ(3u, caps["projections"].size());
     EXPECT_EQ("none", caps["projections"][0].asString());
     EXPECT_EQ("all", caps["projections"][1].asString());
-    ASSERT_EQ(1u, caps["projections_later_increment"].size());
-    EXPECT_EQ("predicate_only", caps["projections_later_increment"][0].asString());
+    EXPECT_EQ("predicate_only", caps["projections"][2].asString());
+    ASSERT_TRUE(caps["projections_later_increment"].isArray());
+    EXPECT_EQ(0u, caps["projections_later_increment"].size());
+    // increment 5b (SPEC §19.12): the three caps, the operators, the strands and the access a
+    // column annotation (unbudgeted, direct access) gives a selection
+    EXPECT_EQ(100000u, caps["caps"]["max_predicate_contexts"].asUInt64());
+    EXPECT_EQ(100000000u, caps["caps"]["max_predicate_work"].asUInt64());
+    EXPECT_EQ(10000u, caps["caps"]["max_predicate_labels"].asUInt64());
+    EXPECT_EQ(3u, caps["predicate"].size());
+    std::vector<std::string> operators;
+    for (const Json::Value &op : caps["predicate"]["operators"]) {
+        operators.push_back(op.asString());
+    }
+    EXPECT_EQ(std::vector<std::string>({ "any", "all", "none", "at_least", "and", "or", "not" }),
+              operators);
+    ASSERT_EQ(2u, caps["predicate"]["strands"].size());
+    EXPECT_EQ("either", caps["predicate"]["strands"][0].asString());
+    EXPECT_EQ("context", caps["predicate"]["strands"][1].asString());
+    EXPECT_EQ("columns", caps["predicate"]["access"].asString());
+    {
+        PatternLimits p = limits();
+        p.max_predicate_contexts = 11;
+        p.max_predicate_work = 12;
+        p.max_predicate_labels = 13;
+        const Json::Value c = pattern_capabilities_json(g.get(), p, false)["caps"];
+        EXPECT_EQ(11u, c["max_predicate_contexts"].asUInt64());
+        EXPECT_EQ(12u, c["max_predicate_work"].asUInt64());
+        EXPECT_EQ(13u, c["max_predicate_labels"].asUInt64());
+    }
     EXPECT_TRUE(caps["default_occurrences"].asBool());
     EXPECT_EQ(4.0, caps["caps"]["min_information_bits"].asDouble());
     EXPECT_EQ(64u, caps["caps"]["max_labels_per_anchor"].asUInt64());
@@ -1024,6 +1129,8 @@ TEST(PatternRoute, Capabilities) {
 
     // loading: nothing about the graph is known yet
     caps = pattern_capabilities_json(nullptr, limits(), false);
+    EXPECT_TRUE(caps["predicate"]["access"].isNull());
+    EXPECT_EQ(7u, caps["predicate"]["operators"].size());
     EXPECT_TRUE(caps["available"].isNull());
     EXPECT_TRUE(caps["graph_mode"].isNull());
     EXPECT_TRUE(caps["k"].isNull());

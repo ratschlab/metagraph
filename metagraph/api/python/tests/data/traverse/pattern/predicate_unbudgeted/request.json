@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC"
+  }
+ ],
+ "mode": "count",
+ "predicate": {
+  "any": [
+   "562.fa"
+  ]
+ }
+}

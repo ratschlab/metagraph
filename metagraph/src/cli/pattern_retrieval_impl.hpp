@@ -243,6 +243,9 @@ constexpr uint64_t kTestedBytes = 64;
 constexpr uint64_t kSelectionRowBytes = 96;
 // a selected context's selection_labels (the list and its strings), the names' lengths beside
 inline uint64_t selection_labels_bytes(uint64_t names_length) { return 32 + names_length; }
+// beside them its selection_strands (the list; per label the row it was found on, a byte kept,
+// and its string in the answer, at most 18 characters): 32 + 24 per label
+inline uint64_t selection_strands_bytes(uint64_t labels) { return 32 + 24 * labels; }
 
 /**
  * A row of the selection pass held for the projection predicate_only (retrieve_given): the

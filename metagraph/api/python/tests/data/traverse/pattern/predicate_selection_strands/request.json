@@ -1,0 +1,17 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "predicate": {
+  "any": [
+   "546"
+  ]
+ },
+ "output": {
+  "labels": "predicate_only",
+  "occurrences": false
+ }
+}

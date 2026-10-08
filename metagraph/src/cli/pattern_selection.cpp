@@ -68,9 +68,11 @@ void without_pass(SelectionAnswer *a, SelectionPass pass, const Count &raw) {
 }
 
 // the selection_labels of a listed context: the list the pass keeps (ids, 4 bytes each) and,
-// for the answer, its strings (32 + the names' lengths, §19.9)
+// for the answer, its strings (32 + the names' lengths), and its selection_strands (32 + 24
+// per label, §19.9)
 uint64_t listed_labels_bytes(size_t ids, uint64_t names_length) {
-    return selection_labels_bytes(names_length) + 4 * static_cast<uint64_t>(ids);
+    return selection_labels_bytes(names_length) + 4 * static_cast<uint64_t>(ids)
+            + selection_strands_bytes(ids);
 }
 // a label of the listed contexts' label order: its count and rank (an entry of a hash map)
 constexpr uint64_t kOrderEntryBytes = 48;
@@ -228,6 +230,29 @@ Json::Value PatternRetrieval::selection_labels_json(const SelectionAnswer &answe
     return v;
 }
 
+Json::Value PatternRetrieval::selection_strands_json(const SelectionAnswer &answer,
+                                                     size_t j) const {
+    const Impl &m = *impl_;
+    if (j >= answer.selection_label_rows.size()
+            || answer.selection_label_rows[j].size() != answer.selection_labels.at(j).size()) {
+        throw std::logic_error("pattern: no selection_strands for this context");
+    }
+    Json::Value v(Json::arrayValue);
+    for (uint8_t on : answer.selection_label_rows[j]) {
+        if (m.mode != GraphMode::BASIC) {
+            // one row serves x and rc(x): no strand is known
+            v.append("either");
+        } else if (on == (SelectionAnswer::kOnContext | SelectionAnswer::kOnReverseComplement)) {
+            v.append("both");
+        } else if (on == SelectionAnswer::kOnReverseComplement) {
+            v.append("reverse_complement");
+        } else {
+            v.append("context");
+        }
+    }
+    return v;
+}
+
 
 SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uint64_t released,
                                          const Count &raw, const Extraction &x,
@@ -302,6 +327,15 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         } else if (partial) {
             a.cut = before;
         }
+        return finish();
+    }
+    if (tested.empty() && released == 0 && !x.complete
+            && (!x.cut || *x.cut != StopReason::MAX_CONTEXTS)) {
+        // partial: the engine stopped (max_steps, time) before it released a context. Nothing
+        // reached the pass, as when all_or_count's and count's release is withheld for the
+        // same stop: not_started in every mode (§19.7; the review of 5b, L1). A release cut
+        // by max_predicate_contexts alone is the pass's (stopped, its bounds)
+        without_pass(&a, SelectionPass::NOT_STARTED, raw);
         return finish();
     }
 
@@ -472,7 +506,9 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
     // for predicate_only, their own rows kept
     uint64_t selected = 0, decided = 0;
     std::vector<uint32_t> listed;
-    std::vector<std::vector<LabelId>> listed_labels;
+    // a listed label and the rows it was found on (SelectionAnswer::kOnContext, ...)
+    using Tagged = std::pair<LabelId, uint8_t>;
+    std::vector<std::vector<Tagged>> listed_labels;
     // what the list holds: the selection_labels, the label order's entries, the kept labels'
     // names (the dictionary of retrieve_given)
     uint64_t listed_bytes = 0, kept_names_bytes = 0;
@@ -506,16 +542,38 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         if (c.selected)
             ++selected;
         if (c.selected && listing && selected <= request.max_contexts) {
-            // listed: its selection_labels (the set it was evaluated on, ascending ids), its
-            // own row kept for predicate_only with the names of its labels, charged before
-            std::vector<LabelId> ids;
+            // listed: its selection_labels (the set it was evaluated on, ascending ids) with the
+            // row each was found on (the owner's answer to P11: per label the orientation that
+            // supported it), its own row kept for predicate_only with the names of its labels,
+            // charged before
+            std::vector<Tagged> ids;
             uint64_t bytes = 0;
             if (projection != Projection::NONE) {
-                ids = present;
+                // a palindromic k-mer under "either" is its own reverse complement
+                const uint8_t on_own = either && rows[c.row].mirror == c.row
+                        ? SelectionAnswer::kOnContext | SelectionAnswer::kOnReverseComplement
+                        : SelectionAnswer::kOnContext;
+                for (const LabelQuery::Hit &h : own.hits) {
+                    ids.emplace_back(h.label, on_own);
+                }
+                if (mr != kNoRow) {
+                    for (const LabelQuery::Hit &h : rows[mr].hits) {
+                        ids.emplace_back(h.label, SelectionAnswer::kOnReverseComplement);
+                    }
+                }
                 std::sort(ids.begin(), ids.end());
-                ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+                // one entry per label, the rows it was found on merged
+                size_t n = 0;
+                for (size_t t = 0; t < ids.size(); ++t) {
+                    if (n && ids[n - 1].first == ids[t].first) {
+                        ids[n - 1].second |= ids[t].second;
+                    } else {
+                        ids[n++] = ids[t];
+                    }
+                }
+                ids.resize(n);
                 uint64_t names = 0;
-                for (LabelId id : ids) {
+                for (const auto &[id, on] : ids) {
                     names += labels[id].name.size();
                     if (!label_count.count(id))
                         bytes += kOrderEntryBytes;
@@ -536,7 +594,7 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
             } else {
                 listed_bytes += bytes;
                 kept_names_bytes += name_bytes;
-                for (LabelId id : ids) {
+                for (const auto &[id, on] : ids) {
                     label_count[id]++;
                 }
                 if (projection == Projection::PREDICATE_ONLY) {
@@ -726,17 +784,28 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
     }
     if (keep_list && projection != Projection::NONE && !listed.empty()) {
         // the label order of §5.5 over the listed contexts' selection_labels: contexts desc,
-        // column asc (light work, clocked as the retrieval's own: Impl::may_work)
+        // column asc. The clock is read before it (§19.9; the review of 5b, L3), its sorts
+        // then counted as the retrieval's light work (n log n comparisons each, Impl::
+        // may_work: the next light work reads the clock once they pass its stride)
         std::vector<LabelId> order;
         order.reserve(label_count.size());
         for (const auto &[id, count] : label_count) {
             order.push_back(id);
         }
-        uint64_t sorting = order.size();
+        auto sort_units = [](uint64_t n) {
+            uint64_t u = n;
+            for (uint64_t h = n; h > 1; h >>= 1) {
+                u += n;
+            }
+            return u;
+        };
+        uint64_t sorting = sort_units(order.size());
         for (const auto &list : listed_labels) {
-            sorting += list.size();
+            sorting += sort_units(list.size());
         }
-        if (!m.may_work(sorting)) {
+        const bool in_time = m.budget.check_time();
+        m.unclocked = std::min<uint64_t>(sorting, Budget::kClockStride);
+        if (!in_time) {
             set_stop("output", "time");
             keep_list = false;
             if (all_or_count) {
@@ -756,16 +825,26 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
                 label_count[order[rank]] = rank;
             }
             for (auto &list : listed_labels) {
-                std::sort(list.begin(), list.end(), [&](LabelId p, LabelId q) {
-                    return label_count[p] < label_count[q];
+                std::sort(list.begin(), list.end(), [&](const Tagged &p, const Tagged &q) {
+                    return label_count[p.first] < label_count[q.first];
                 });
             }
         }
     }
     if (keep_list) {
         a.chosen = std::move(listed);
-        if (projection != Projection::NONE)
-            a.selection_labels = std::move(listed_labels);
+        if (projection != Projection::NONE) {
+            a.selection_labels.reserve(listed_labels.size());
+            a.selection_label_rows.reserve(listed_labels.size());
+            for (const auto &list : listed_labels) {
+                a.selection_labels.emplace_back();
+                a.selection_label_rows.emplace_back();
+                for (const auto &[id, on] : list) {
+                    a.selection_labels.back().push_back(id);
+                    a.selection_label_rows.back().push_back(on);
+                }
+            }
+        }
     }
 
     // what the answer holds: the chosen contexts' selection_labels (and the label order's

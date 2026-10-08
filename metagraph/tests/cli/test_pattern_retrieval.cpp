@@ -888,7 +888,9 @@ TEST(PatternRetrieval, ClampsAndRefusals) {
     EXPECT_EQ(256u, clamped[1]["effective"].asUInt64());
     EXPECT_EQ(256u, out["limits"]["max_memory_mb"].asUInt64());
 
-    EXPECT_EQ(std::make_pair(400, std::string("later_increment")),
+    // increment 5b: "predicate_only" is served with a predicate; without one it is
+    // invalid_request (was later_increment, SPEC §4.4)
+    EXPECT_EQ(std::make_pair(400, std::string("invalid_request")),
               refusal(idx, "{\"patterns\": [{\"dna\": \"AC\"}], "
                            "\"output\": {\"labels\": \"predicate_only\"}}"));
     EXPECT_EQ(std::make_pair(400, std::string("invalid_request")),

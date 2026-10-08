@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "predicate": {
+  "any": [
+   "562"
+  ]
+ }
+}

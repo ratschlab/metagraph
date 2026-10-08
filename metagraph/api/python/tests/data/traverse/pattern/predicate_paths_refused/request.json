@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA"
+  }
+ ],
+ "predicate": {
+  "any": [
+   "562"
+  ]
+ },
+ "long_search": "paths"
+}

@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "predicate": {
+  "none": [
+   "573.fa"
+  ]
+ },
+ "predicate_strands": "context",
+ "allow_unbudgeted_annotation": true
+}

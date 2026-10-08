@@ -1,0 +1,2885 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": false,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_patterns": 16,
+  "max_predicate_contexts": 100000,
+  "max_predicate_labels": 10000,
+  "max_predicate_work": 100000000,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "predicate_strands": "context",
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "all",
+  "occurrences": true
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_filter": "predicate",
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "anchors_truncated": [],
+   "annotation": "budgeted",
+   "by_label": [
+    {
+     "column": "1296536",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 1
+     }
+    },
+    {
+     "column": "158836",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 1
+     }
+    },
+    {
+     "column": "287",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 2
+     }
+    },
+    {
+     "column": "470",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 1
+     }
+    },
+    {
+     "column": "562",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 6
+     }
+    },
+    {
+     "column": "573",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 4
+     }
+    },
+    {
+     "column": "72407",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 12
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 1
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 2
+     }
+    }
+   ],
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "10": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "11": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "5": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "6": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "7": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "8": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      },
+      "9": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 2
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 12
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 12
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 2
+     },
+     "unit": "graph_contexts",
+     "value": 24
+    },
+    "labels": {
+     "relation": "exact",
+     "unit": "labels",
+     "value": 7
+    },
+    "occurrences": {
+     "relation": "exact",
+     "unit": "placed_occurrences",
+     "value": 17
+    },
+    "selected": {
+     "relation": "exact",
+     "unit": "graph_contexts",
+     "value": 12
+    },
+    "tested": {
+     "relation": "exact",
+     "unit": "graph_contexts",
+     "value": 24
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "NDM-F",
+   "information_bits": 40.0,
+   "kind": "dna",
+   "labels_cut": null,
+   "length": 20,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "occurrences_cut": null,
+   "palindromic": false,
+   "pattern": "GGTTTGGCGATCTGGTTTTC",
+   "placement": "record",
+   "results": [
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GCGAGCTGGCGGAAAACCAGATCGCCAAACC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 1537963,
+     "offset": 11,
+     "row": 1537962,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "CGAGCTGGCGGAAAACCAGATCGCCAAACCG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 1943332,
+     "offset": 10,
+     "row": 1943331,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GAAAACCAGATCGCCAAACCGTTGGTCGCCA",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 2385040,
+     "offset": 0,
+     "row": 2385039,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GGAAAACCAGATCGCCAAACCGTTGGTCGCC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 3146103,
+     "offset": 1,
+     "row": 3146102,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GCGGAAAACCAGATCGCCAAACCGTTGGTCG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 4013167,
+     "offset": 3,
+     "row": 4013166,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GAGCTGGCGGAAAACCAGATCGCCAAACCGT",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 4765208,
+     "offset": 9,
+     "row": 4765207,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "CGGAAAACCAGATCGCCAAACCGTTGGTCGC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 5502499,
+     "offset": 2,
+     "row": 5502498,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "TGGCGGAAAACCAGATCGCCAAACCGTTGGT",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 6273210,
+     "offset": 5,
+     "row": 6273209,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "CTGGCGGAAAACCAGATCGCCAAACCGTTGG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 6768728,
+     "offset": 6,
+     "row": 6768727,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "AGCTGGCGGAAAACCAGATCGCCAAACCGTT",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 7691279,
+     "offset": 8,
+     "row": 7691278,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GGCGGAAAACCAGATCGCCAAACCGTTGGTC",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 7943023,
+     "offset": 4,
+     "row": 7943022,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GAAAACCAGATCGCCAAACC",
+     "kmer": "GCTGGCGGAAAACCAGATCGCCAAACCGTTG",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3554-3573",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3049-3068",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1058-1077",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729510-1729529",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7018-7037",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12711-12730",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3061-3080",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77242-77261",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3012-3031",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6727-6746",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22476-22495",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "58935-58954",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10724-10743",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6601-6620",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28033-28052",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "kmer"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68311-68330",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14370-14389",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "node": 8195025,
+     "offset": 7,
+     "row": 8195024,
+     "selection_labels": [],
+     "selection_strands": [],
+     "strand": "-",
+     "support": "kmer"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 12,
+   "rows_refused": [],
+   "scope": "any_offset",
+   "selection": {
+    "access": "rows",
+    "pass": "completed",
+    "support": "kmer"
+   },
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.030042,
+    "label_discovery_ms": 0.156791,
+    "placement_ms": 0.113125,
+    "selection_ms": 0.2285
+   },
+   "withheld": null,
+   "work": {
+    "annotation_rows": 24,
+    "annotation_rows_distinct": 12,
+    "annotation_units": 17636,
+    "mask_scans": 0,
+    "memory_bytes": 101696,
+    "predicate_lookups": 0,
+    "predicate_rows": 24,
+    "predicate_units": 12004,
+    "ranges_visited": 122,
+    "steps": 122
+   }
+  }
+ ],
+ "predicate": {
+  "known": 1,
+  "names": 1,
+  "normal_form": {
+   "none": [
+    "546"
+   ]
+  },
+  "scope": "shard_context",
+  "strands": "context",
+  "unknown_labels": [],
+  "vacuous": true
+ },
+ "timing": {
+  "elapsed_ms": 0.7125
+ }
+}

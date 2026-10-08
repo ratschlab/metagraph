@@ -1,0 +1,1668 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": false,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 100,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_patterns": 16,
+  "max_predicate_contexts": 100000,
+  "max_predicate_labels": 10000,
+  "max_predicate_work": 100000000,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "predicate_strands": "either",
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "predicate_only",
+  "occurrences": false
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_filter": "predicate",
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "anchors_truncated": [],
+   "annotation": "budgeted",
+   "by_label": [
+    {
+     "column": "562",
+     "contexts": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 60
+     },
+     "contexts_suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 3
+     },
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "unknown",
+      "unit": "placed_occurrences",
+      "value": null
+     }
+    }
+   ],
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "10": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "11": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "12": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "13": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "14": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "15": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "16": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "17": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "18": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "19": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "5": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "6": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "7": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "8": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "9": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 940
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 888
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 92
+     },
+     "unit": "graph_contexts",
+     "value": 1828
+    },
+    "labels": {
+     "relation": "exact",
+     "unit": "labels",
+     "value": 1
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "selected": {
+     "relation": "exact",
+     "unit": "graph_contexts",
+     "value": 60
+    },
+    "tested": {
+     "relation": "exact",
+     "unit": "graph_contexts",
+     "value": 1828
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "GCG12",
+   "information_bits": 24.0,
+   "kind": "dna",
+   "labels_cut": null,
+   "length": 12,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "occurrences_cut": null,
+   "palindromic": false,
+   "pattern": "GCGGCGGCGGCG",
+   "placement": "not_requested",
+   "results": [
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "ACTGCGTACCAGCGGCGGCGGCGCGGACAAG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 81331,
+     "offset": 11,
+     "row": 81330,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CAGCAGCGGAATGCACGCCGCCGCCGCGAAC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 205417,
+     "offset": 15,
+     "row": 205416,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCAGCGGAATGCACGCCGCCGCCGCGAACAT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 334990,
+     "offset": 13,
+     "row": 334989,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CACTGCGTACCAGCGGCGGCGGCGCGGACAA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 374786,
+     "offset": 12,
+     "row": 374785,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "TACCAGCGGCGGCGGCGCGGACAAGCCCCAT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 439891,
+     "offset": 5,
+     "row": 439890,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCTTGTCCGCGCCGCCGCCGCTGGTACGCAG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 615902,
+     "offset": 9,
+     "row": 615901,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "ACGCCGCCGCCGCGAACATCATCCGTTGCAC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 740330,
+     "offset": 1,
+     "row": 740329,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCGGAATGCACGCCGCCGCCGCGAACATCAT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 746652,
+     "offset": 10,
+     "row": 746651,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCAGCAGCGGAATGCACGCCGCCGCCGCGAA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 1022481,
+     "offset": 16,
+     "row": 1022480,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CACACTGCGTACCAGCGGCGGCGGCGCGGAC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 1181621,
+     "offset": 14,
+     "row": 1181620,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "TGGGGCTTGTCCGCGCCGCCGCCGCTGGTAC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 1488434,
+     "offset": 13,
+     "row": 1488433,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "AGCAGCGGAATGCACGCCGCCGCCGCGAACA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 1597595,
+     "offset": 14,
+     "row": 1597594,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CGCCGCCGCCGCGAACATCATCCGTTGCACT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 1720680,
+     "offset": 0,
+     "row": 1720679,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "ACACTGCGTACCAGCGGCGGCGGCGCGGACA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 1838670,
+     "offset": 13,
+     "row": 1838669,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GGGGCTTGTCCGCGCCGCCGCCGCTGGTACG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 1928328,
+     "offset": 12,
+     "row": 1928327,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GTACCAGCGGCGGCGGCGCGGACAAGCCCCA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2131251,
+     "offset": 6,
+     "row": 2131250,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CGTACCAGCGGCGGCGGCGCGGACAAGCCCC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2145484,
+     "offset": 7,
+     "row": 2145483,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GCGTACCAGCGGCGGCGGCGCGGACAAGCCC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2226054,
+     "offset": 8,
+     "row": 2226053,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCGCCGCCGCCGCTGGTACGCAGTGTGGCCG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2480074,
+     "offset": 1,
+     "row": 2480073,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GAATGCACGCCGCCGCCGCGAACATCATCCG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2549063,
+     "offset": 7,
+     "row": 2549062,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "TGCGTACCAGCGGCGGCGGCGCGGACAAGCC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2670595,
+     "offset": 9,
+     "row": 2670594,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GGCTTGTCCGCGCCGCCGCCGCTGGTACGCA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2881225,
+     "offset": 10,
+     "row": 2881224,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CAGCAGCAGCGGAATGCACGCCGCCGCCGCG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2927584,
+     "offset": 18,
+     "row": 2927583,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCACATGGGGCTTGTCCGCGCCGCCGCCGCT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 2927604,
+     "offset": 18,
+     "row": 2927603,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GGCCACACTGCGTACCAGCGGCGGCGGCGCG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 3053271,
+     "offset": 17,
+     "row": 3053270,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GCGGCCACACTGCGTACCAGCGGCGGCGGCG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 3304594,
+     "offset": 19,
+     "row": 3304593,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CGCGCCGCCGCCGCTGGTACGCAGTGTGGCC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 3467490,
+     "offset": 2,
+     "row": 3467489,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GCGGCGGCGGCGCGGACAAGCCCCATGTGCT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 3615667,
+     "offset": 0,
+     "row": 3615666,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CACGCCGCCGCCGCGAACATCATCCGTTGCA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 3642052,
+     "offset": 2,
+     "row": 3642051,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "AGCGGAATGCACGCCGCCGCCGCGAACATCA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 3671430,
+     "offset": 11,
+     "row": 3671429,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GGAATGCACGCCGCCGCCGCGAACATCATCC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 3704884,
+     "offset": 8,
+     "row": 3704883,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CTGCGTACCAGCGGCGGCGGCGCGGACAAGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 4187860,
+     "offset": 10,
+     "row": 4187859,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CTTGTCCGCGCCGCCGCCGCTGGTACGCAGT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 4397940,
+     "offset": 8,
+     "row": 4397939,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GGGCTTGTCCGCGCCGCCGCCGCTGGTACGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 4761423,
+     "offset": 11,
+     "row": 4761422,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CCAGCAGCAGCGGAATGCACGCCGCCGCCGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 4891900,
+     "offset": 19,
+     "row": 4891899,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "AGCACATGGGGCTTGTCCGCGCCGCCGCCGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 4891981,
+     "offset": 19,
+     "row": 4891980,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CGCCGCCGCCGCTGGTACGCAGTGTGGCCGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 4963501,
+     "offset": 0,
+     "row": 4963500,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "AATGCACGCCGCCGCCGCGAACATCATCCGT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 4995218,
+     "offset": 6,
+     "row": 4995217,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "AGCAGCAGCGGAATGCACGCCGCCGCCGCGA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 5110205,
+     "offset": 17,
+     "row": 5110204,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "GCCACACTGCGTACCAGCGGCGGCGGCGCGG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 5145286,
+     "offset": 16,
+     "row": 5145285,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CGGCCACACTGCGTACCAGCGGCGGCGGCGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 5232207,
+     "offset": 18,
+     "row": 5232206,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CCACACTGCGTACCAGCGGCGGCGGCGCGGA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 5862475,
+     "offset": 15,
+     "row": 5862474,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CATGGGGCTTGTCCGCGCCGCCGCCGCTGGT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6189054,
+     "offset": 15,
+     "row": 6189053,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CCGCGCCGCCGCCGCTGGTACGCAGTGTGGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6259319,
+     "offset": 3,
+     "row": 6259318,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CCAGCGGCGGCGGCGCGGACAAGCCCCATGT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6304524,
+     "offset": 3,
+     "row": 6304523,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "ACATGGGGCTTGTCCGCGCCGCCGCCGCTGG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6509225,
+     "offset": 16,
+     "row": 6509224,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "TGTCCGCGCCGCCGCCGCTGGTACGCAGTGT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6607558,
+     "offset": 6,
+     "row": 6607557,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "AGCGGCGGCGGCGCGGACAAGCCCCATGTGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6702339,
+     "offset": 1,
+     "row": 6702338,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "TCCGCGCCGCCGCCGCTGGTACGCAGTGTGG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6709830,
+     "offset": 4,
+     "row": 6709829,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCACGCCGCCGCCGCGAACATCATCCGTTGC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6771570,
+     "offset": 3,
+     "row": 6771569,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CAGCGGAATGCACGCCGCCGCCGCGAACATC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6863416,
+     "offset": 12,
+     "row": 6863415,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "ACCAGCGGCGGCGGCGCGGACAAGCCCCATG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6885081,
+     "offset": 4,
+     "row": 6885080,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CGGAATGCACGCCGCCGCCGCGAACATCATC",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 6942530,
+     "offset": 9,
+     "row": 6942529,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CACATGGGGCTTGTCCGCGCCGCCGCCGCTG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 7398017,
+     "offset": 17,
+     "row": 7398016,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "TTGTCCGCGCCGCCGCCGCTGGTACGCAGTG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 7638547,
+     "offset": 7,
+     "row": 7638546,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "ATGCACGCCGCCGCCGCGAACATCATCCGTT",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 7720342,
+     "offset": 5,
+     "row": 7720341,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "ATGGGGCTTGTCCGCGCCGCCGCCGCTGGTA",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 7923405,
+     "offset": 14,
+     "row": 7923404,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CAGCGGCGGCGGCGCGGACAAGCCCCATGTG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 7948179,
+     "offset": 2,
+     "row": 7948178,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "+",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GTCCGCGCCGCCGCCGCTGGTACGCAGTGTG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 7988095,
+     "offset": 5,
+     "row": 7988094,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "both"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "TGCACGCCGCCGCCGCGAACATCATCCGTTG",
+     "labels": [
+      {
+       "column": "562",
+       "support": "kmer"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 1,
+     "node": 8202224,
+     "offset": 4,
+     "row": 8202223,
+     "selection_labels": [
+      "562"
+     ],
+     "selection_strands": [
+      "context"
+     ],
+     "strand": "-",
+     "support": "kmer"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 60,
+   "rows_refused": [],
+   "scope": "any_offset",
+   "selection": {
+    "access": "rows",
+    "pass": "completed",
+    "support": "kmer"
+   },
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 1.057625,
+    "label_discovery_ms": 0.001584,
+    "placement_ms": 0.0,
+    "selection_ms": 25.885166
+   },
+   "withheld": null,
+   "work": {
+    "annotation_rows": 0,
+    "annotation_rows_distinct": 60,
+    "annotation_units": 0,
+    "mask_scans": 0,
+    "memory_bytes": 296086,
+    "predicate_lookups": 1757,
+    "predicate_rows": 1777,
+    "predicate_units": 744365,
+    "ranges_visited": 5442,
+    "steps": 5442
+   }
+  }
+ ],
+ "predicate": {
+  "known": 2,
+  "names": 2,
+  "normal_form": {
+   "and": [
+    {
+     "any": [
+      "562"
+     ]
+    },
+    {
+     "none": [
+      "287"
+     ]
+    }
+   ]
+  },
+  "scope": "shard_context",
+  "strands": "either",
+  "unknown_labels": [],
+  "vacuous": false
+ },
+ "timing": {
+  "elapsed_ms": 27.421417
+ }
+}

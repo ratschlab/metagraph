@@ -228,6 +228,17 @@ class Config {
     uint64_t pattern_max_memory_mb = 256;
     uint64_t pattern_max_labels = 1'000;
     uint64_t pattern_max_occurrences = 16;
+    // increment 5b, a predicate's selection (SPEC-pattern-search.md §19.2, §19.3; owner
+    // decision P3 of 2026-10-08): the default and maximum of max_predicate_contexts (the raw
+    // contexts a pattern's selection may test) and of max_predicate_work (the selection's work
+    // per request, the oracle's units, a budget of its own beside max_annotation_work), and the
+    // names a predicate may list (not a request field: a larger predicate is refused,
+    // predicate_too_large). The last is at most kMaxPatternPredicateLabels (refused at
+    // start-up above): the bound predicate and its echo are linear in it
+    uint64_t pattern_max_predicate_contexts = 100'000;
+    uint64_t pattern_max_predicate_work = 100'000'000;
+    uint64_t pattern_max_predicate_labels = 10'000;
+    static constexpr uint64_t kMaxPatternPredicateLabels = 1'000'000;
     // server_query (-i / -a) and pattern: a succinct graph loaded without its .edgemask gets
     // the same dummy-edge mask built in memory before it is served (§4, mask: built_at_load),
     // for small indexes and tests; a large one is given the file once by transform --mask-dummy

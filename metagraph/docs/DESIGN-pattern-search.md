@@ -688,6 +688,35 @@ fixed share. The exception is a deadline stop, which depends on the machine and 
 
 ### 5.6 Annotation predicates: select contexts by a condition on their labels (extension, the owner's request)
 
+**As built (increment 5b, 2026-10-08; the contract is `SPEC-pattern-search.md` §19).** The owner's decisions
+P1–P24 of 2026-10-08 change this section where it said otherwise; the text below keeps the design and is marked
+where it differs:
+- **Strands, consistent per context.** On a BASIC graph a k-mer's row lists the columns whose records hold it as
+  deposited; a record holding the motif on its other strand annotates the reverse complement. A predicate is
+  evaluated with `predicate_strands: "either"` (the default) on the labels of the context's k-mer **or** of its
+  reverse complement — a label supports a context in one orientation as a whole, never by a mix of strands (the
+  owner's answer to P11; for a path, later: every k-mer of the walk as spelled, or every k-mer of its reverse
+  walk). `"context"` reads the context's own row only, for stranded indexes; CANONICAL and PRIMARY graphs share
+  one row and answer `"either"`. The answer states per selected result and label which orientation supported it
+  (`selection_strands`: `"context"`, `"reverse_complement"`, `"both"`, or `"either"` where one row serves both).
+- **The default projection stays `none`** (P2): `output.labels` omitted is `none` with a predicate too; a client
+  that wants the predicate's labels sends `"predicate_only"` (the "(the default)" below is the design's, not the
+  built contract's).
+- **The narrowed absence claim** is `absence_filter: "predicate"` beside `absence_scope`, which keeps its closed
+  values (P15).
+- **Counts**: `counts.tested` and `counts.selected` with relations; a pass stopped early states `selected` as
+  `bounds` [S, S + R_upper − T] where the raw count has an upper bound (P13), not `at_least`. The per-entry object
+  is `selection` {`pass`, `support`, `access`}; the request-wide part is the answer's `predicate` block (normal
+  form, unknown labels, `vacuous`, scope, strands); unknown labels are one list (a single graph), not per shard.
+- **Units**: a membership read is charged its whole decoded row (`KeyCost::entries`, P17) under its own
+  `max_predicate_work`, separate from `max_annotation_work` (P3).
+- **Long patterns**: a predicate selects among **supported paths** only (`long_search: "supported_paths"`, the
+  later increment 5s; P23, P24): the two-step raw-path design of "`long`: support before selection" below is not
+  built; with `long_search: "paths"` a predicate is refused, with `"anchors"` a long pattern's selection is
+  `not_started`.
+- **Labels are column names only** (P6): no taxonomy, a cohort is an explicit list (expanded by the client);
+  record headers are unknown names (P20).
+
 A broad pattern with thousands of contexts becomes a small, biologically meaningful answer when only the
 contexts whose annotation satisfies a condition are returned: "present in sample A or B and absent from C", "in
 at least three samples of cohort A and in none of cohort B". The condition is evaluated on the decoded
@@ -702,7 +731,8 @@ keeps the count-first contract: the request is admitted on counts, filtered or n
   so for a path it is asked of the labels that support all of it.
 - **Projection:** which labels and coordinates are returned for a selected context. `output.labels:
   predicate_only` (the default) returns only the labels the predicate names, with their coordinates where
-  placement exists; `all` runs the ordinary discovery of §4.3 for the selected contexts, under the per-anchor
+  placement exists (the design's default; as built the default stays `none`, P2); `all` runs the ordinary
+  discovery of §4.3 for the selected contexts, under the per-anchor
   cap. A selected row can carry thousands of other labels; selecting it does not mean returning them. A
   selected context is returned **whether or not** its projected list is empty: under `none(A)` a context
   annotated only with B passes and comes back with its k-mer, instance, offset and strand and `labels: []`,
@@ -766,7 +796,8 @@ is not refused for being broad when its filter is selective, and its descriptors
 deadline; (3) count the contexts that pass (`counts.selected`, with `counts.tested` beside it); (4) the
 **retrieval** threshold — `max_contexts`, or `max_paths` for `long` — applies to the selected aggregate, and
 `all_or_count` returns all selected results or the counts. A predicate pass stopped early leaves
-`counts.selected` as `at_least` over the contexts tested and withholds results (`withheld: predicate_budget`).
+`counts.selected` as `bounds` [S, S + R_upper − T] where the raw count has an upper bound, `at_least` otherwise
+(as built, P13), and withholds results (`withheld: predicate_budget`).
 The three shard barriers of §5.2 apply.
 
 **What a filter does and does not do.** A predicate reduces what is returned and what is placed; it does not
@@ -1190,7 +1221,9 @@ job-originated call holds no client connection, so a long budget costs only the 
    the oracle suite extended with per-row and per-path cases (one row with A and another with B on a path:
    `any(A, B)` selects no path), `at_least` on cohorts, a typo in a label name reported as unknown, a predicate
    pass stopped by its budget (`at_least`, withheld), and a selective filter on a pattern whose unfiltered count
-   exceeds `max_contexts`.
+   exceeds `max_contexts`. **Built for L ≤ k (2026-10-08, SPEC §19)**: the language (`pattern_predicate.cpp`), the
+   selection pass (`pattern_selection.cpp`, strand-consistent `"either"`, whole-row units) and the route
+   (`pattern.cpp`); the path-level part waits for the supported-path search (5s) and runs on it (5b-5).
 6. **Multi-graph, barriers, per-shard budgets, benchmark.** The shared fan-out helper with the sorted merge,
    shard identity, per-shard budget shares and the barriers; resident-only shards; a benchmark on
    refseq33m-experimental (16-, 20-, 25-nt motifs in both scopes, a 29-nt IUPAC promoter, three peptides)

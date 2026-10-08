@@ -21,7 +21,11 @@ answer say how the graph counts (`counting`, `dummy_fraction`); the mask (and th
 of the graph, outside the index identity `index_fp`; and the stop `*` is a residue of a peptide (a stop codon of
 its genetic code; the slot code `stop_unsupported`, which only `4596bb3b` answered, is retired). Answers on a
 masked graph were checked against the build of `4596bb3b` (panels, the stored fixtures and the alignment gate,
-§18): the same apart from `timing`, the stop `*` and the capabilities' additions. Version 1
+§18): the same apart from `timing`, the stop `*` and the capabilities' additions. **Increment 5b** (2026-10-08;
+§19) adds, additions only, a request's **predicate** over the annotation columns of each graph context of a
+pattern of at most k bases: the contexts it selects, read by a selection pass under its own work budget, with the
+projections `"none"`, `"predicate_only"` and `"all"`; a request without a predicate was checked byte for byte
+against the build of `9018f41b` (§19.15). Version 1
 promises the meaning of every field and count, not identical work from build to build (§1). Checked against
 the fixture bodies of §11, which this build answered.
 **Scope:** the server route `POST /pattern`, the `pattern` block of `GET /capabilities` and
@@ -55,8 +59,9 @@ other client. Source references are to this checkout (paths relative to `metagra
   - within a version, read fields by presence and tolerate fields it does not know (additions);
   - treat an unknown value of `withheld.reason`, `cut.reason`, `stop.phase`, `stop.reason`, a slot's
     `error.code`, a refusal's `code`, a note, `placement`, `support`, `annotation`, `mask`, `counting`,
-    `dummy_fraction.source`, `labels_status` or `unavailable_reason` (the extensible enumerations) as "not
-    understood": pass it through, claim nothing from it;
+    `dummy_fraction.source`, `labels_status`, `unavailable_reason`, `selection.pass`, `selection.access` or
+    `selection.support` (the extensible enumerations) as "not understood": pass it through, claim nothing from
+    it;
   - keep handling a code no build answers any more: `mask_required` (retired by the owner's decision #16 of
     2026-10-08, §6) is still answered by builds of version 1 before it, and the slot code `stop_unsupported`
     (a peptide holding `*`, retired by decision #19, §18) by `4596bb3b`, the one build that had it;
@@ -75,13 +80,14 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | design | served |
 |---|---|
 | modes `count`, `all_or_count`, `partial` (§5.2) | all three |
-| projections `none`, `all`, `predicate_only` (§4.3, §5.6) | `none`; `all` (increment 3, §14); `predicate_only` is 400 `later_increment` |
+| projections `none`, `all`, `predicate_only` (§4.3, §5.6) | `none`; `all` (increment 3, §14); `predicate_only` with a predicate (increment 5b, §19) |
+| predicates (§5.6) | increment 5b (§19): one predicate per request over the annotation columns (`any`, `all`, `none`, `at_least`, `and`, `or`, `not`), for patterns of at most k bases; a pattern longer than k keeps its anchors' answer, its selection `not_started` (the selection of supported paths is a later increment) |
 | kinds `dna`, `iupac`, `protein` (§3) | all three; `protein` since increment 5 (§12.2): the 20 amino acids and X, B, Z, J, every NCBI genetic code, and the stop `*` (a stop codon of the genetic code; the owner's decision #19 of 2026-10-08) |
 | scopes `suffix`, `any_offset`, `long` (§3) | all; `long` counts anchors only and extracts nothing (§7.7), unless the request sets `long_search: "paths"`: then its paths are counted and released (increment 4, §12.1) |
 | graph modes BASIC, native CANONICAL, wrapped PRIMARY (§4.1) | all three; `suffix` refused per pattern on PRIMARY |
 | alphabets `$ACGT`, `$ACGTN` (§3) | `$ACGT`; a `$ACGTN` (DNA5) graph is refused, `alphabet_untested` (§6, §10.2), until a DNA5 build passes the pattern tests (the owner's decision of 2026-10-07; §8.2) |
 | the dummy-edge mask (§4: required) | graphs with it (`counting: "exact"`: every count of a completed discovery `exact`) and, since the owner's decision #16 of 2026-10-08, without it (`counting: "upper_bound"`: counts `exact` where provable, otherwise `bounds` with an additive `estimate`; lists exact; §7.4, §18). The mask is derived data of the graph, not part of `index_fp` (decision #17, §10.2) |
-| labels, placement, occurrences (§4.3) | read only with `output.labels: "all"` in a retrieval mode (increment 3, §14): labels on every index, placement on BASIC indexes with coordinates; otherwise none read and their counts `unknown` |
+| labels, placement, occurrences (§4.3) | read only with `output.labels: "all"` (or `"predicate_only"`, §19) in a retrieval mode (increment 3, §14): labels on every index, placement on BASIC indexes with coordinates; otherwise none read and their counts `unknown`. A predicate's selection reads the rows of the contexts it tests in every mode (§19), its own labels only |
 | per-label `support` for paths, `require_support` (§4.3) | served with `long_search: "paths"` (increment 4, §12.1): `label_intersection` or `record_verified` per label; a context of L ≤ k has `support: "kmer"` |
 | multi-graph servers (§8) | 400 `later_increment`; the block says `multi_graph_later_increment` |
 | the deadline with a finalisation reserve, 503 `deadline` (§5.3) | as designed; the annotation reads are work and stop at the work time (§14.4) |
@@ -169,6 +175,10 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 | `max_paths` | integer ≥ 0 | `caps.max_paths` (1,000) | increment 4: per pattern, the paths an `all_or_count` answer releases at most (and partial's cut, and `stop_at_threshold`'s threshold in the extension, §12.1); lowered like `max_contexts`. Accepted with any request; it acts only with `long_search: "paths"` |
 | `require_support` | `"label_intersection"` \| `"record_verified"` | `"label_intersection"` | increment 4: the labels of paths listed: every label carrying the path with its support, or only those one record verifies (§12.1). An annotation field (§4.1, last bullet). `"record_verified"` with `output.occurrences: false` is 400 `invalid_request`; on an index that cannot verify, 400 `support_unavailable` (§6) |
 | `genetic_code` | integer | `1` (`default_genetic_code`) | increment 5 (§12.2): the NCBI translation table the request's peptides are read in, one of the capabilities' `genetic_codes` (1–6, 9–16, 21–33); another integer is 400 `genetic_code_unknown`, a value that is not an integer 400 `invalid_request`. Accepted with any request; it acts on protein patterns only |
+| `predicate` | object (§19.3) | absent | increment 5b: the condition on the annotation columns a graph context must satisfy to be selected (counted in `counts.selected`, returned); applies to every pattern of the request (§19). Its form is refused with 400 `invalid_request`, more names than `caps.max_predicate_labels` with 400 `predicate_too_large`; with `long_search: "paths"` 400 `invalid_request` |
+| `max_predicate_contexts` | integer ≥ 0 | `caps.max_predicate_contexts` (100,000) | increment 5b, per pattern: the compute admission of the selection, the raw contexts it may test (§19.6); lowered like `max_contexts`. Accepted with any request; it acts only with a predicate |
+| `max_predicate_work` | integer ≥ 1 | `caps.max_predicate_work` (10⁸) | increment 5b, per **request**: the work of the selection (its row reads, reverse-complement lookups and decisions) in the oracle's units (§19.9), a budget of its own beside `max_annotation_work`; lowered like `max_contexts`. Accepted with any request; it acts only with a predicate |
+| `predicate_strands` | `"either"` \| `"context"` | `"either"` | increment 5b (§19.5): on a BASIC graph, `"either"`: a label is present for a context when it annotates the context's k-mer or its reverse complement (the one or the other, never a mix: a single k-mer); `"context"`: the context's own k-mer only. On CANONICAL and PRIMARY graphs one row serves both: evaluated as `"either"` whatever is asked. Accepted with any request; it acts only with a predicate |
 
 - An integer is a JSON number with an integral value (`5.0` is 5). A negative or fractional value is 400
   `invalid_request`, except for `genetic_code`: a fractional value is 400 `invalid_request`, any integer (a
@@ -178,14 +188,20 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
   (§4.4); `in_ram` with 400 `resident_only`.
 - The information floor is server policy (`--pattern-min-information-bits`), not a request field (§7.8).
 - The six fields of increment 3 are accepted with every mode and projection; they bound only the reads of
-  `output.labels: "all"` in a retrieval mode. An answer that reads no annotation (mode `count`, or
-  `output.labels: "none"`) echoes none of them in `limits` (it is the milestone-1 answer) and, when the request
-  named one of them or `output.labels: "all"`, carries the note `annotation_not_read` in each answered entry.
+  `output.labels: "all"` in a retrieval mode (with a predicate, `max_memory_mb` and
+  `allow_unbudgeted_annotation` also the selection's reads, in every mode, §19.9). An answer that reads no annotation (mode `count`, or
+  `output.labels: "none"`, without a predicate) echoes none of them in `limits` (it is the milestone-1 answer)
+  and, when the request named one of them or `output.labels: "all"`, carries the note `annotation_not_read` in
+  each answered entry (a predicate answer echoes them in every mode and says `projection_not_read` instead,
+  §19.10).
   `require_support` (increment 4) is such an annotation field too.
 - The fields of increments 4 and 5 are opt-ins: a request that names none of them (nor a protein pattern) is
   answered as before them, byte for byte apart from `timing` (§17). `long_search` and `max_paths` are echoed in
   `limits` only in the answers to `long_search: "paths"`, `require_support` only in those that also read labels;
-  `genetic_code` is stated in each protein pattern's entry.
+  `genetic_code` is stated in each protein pattern's entry. A request that names no predicate (§19) is answered
+  as before increment 5b, byte for byte apart from `timing`; the three fields `max_predicate_contexts`,
+  `max_predicate_work`, `predicate_strands` are then accepted, lowered to their caps (listed in `limits.clamped`)
+  and echoed nowhere else.
 
 ### 4.2 A pattern
 
@@ -214,15 +230,21 @@ What this build serves (milestone 1, and increment 3 where marked), against the 
 <!-- schema: request_output -->
 | field | type | rule |
 |---|---|---|
-| `labels` | `"none"` \| `"all"` | `"none"`: the label-free projection (design §4.3), contexts without any annotation read. `"all"` (increment 3): every returned context with its labels, placed where the index can (§14); in mode `count` it reads nothing and is said so (note `annotation_not_read`). `"predicate_only"` is 400 `later_increment` in every mode, `count` included; any other string is 400 `invalid_request` |
-| `occurrences` | boolean | with `labels: "all"`: whether the labels are placed (default `true`, the capabilities' `default_occurrences`; `false` answers `placement: "not_requested"`). With `labels: "none"` (or omitted): `false` is accepted and changes nothing, `true` is 400 `invalid_request` (occurrences are placed per label) |
+| `labels` | `"none"` \| `"all"` \| `"predicate_only"` | `"none"`: the label-free projection (design §4.3), contexts without any annotation read. `"all"` (increment 3): every returned context with its labels, placed where the index can (§14); in mode `count` it reads nothing and is said so (note `annotation_not_read`; with a predicate `projection_not_read`). `"predicate_only"` (increment 5b, §19.10): with a predicate, each selected context with the predicate's labels on its own row, placed; without a predicate 400 `invalid_request` in every mode (it was 400 `later_increment` before increment 5b); any other string is 400 `invalid_request` |
+| `occurrences` | boolean | with `labels: "all"` or `"predicate_only"`: whether the labels are placed (default `true`, the capabilities' `default_occurrences`; `false` answers `placement: "not_requested"`). With `labels: "none"` (or omitted): `false` is accepted and changes nothing, `true` is 400 `invalid_request` (occurrences are placed per label) |
 | `paths` | boolean | accepted with either value and changes nothing (increment 4: a path result always carries its node path, `nodes` and `rows`, §12.1; `true` was 400 `later_increment` before); another type is 400 `invalid_request` |
 
 ### 4.4 Fields of later increments
 
-Refused by name (400 `later_increment`), whatever their value: `predicate`, `max_predicate_contexts`,
-`max_predicate_work`, `graphs`, `budget_split`; `output.labels: "predicate_only"`. So that a request written for
-a later increment is told what to wait for, not answered as if the field were absent.
+Refused by name (400 `later_increment`), whatever their value: `graphs`, `budget_split`. So that a request
+written for a later increment is told what to wait for, not answered as if the field were absent.
+
+`predicate`, `max_predicate_contexts` and `max_predicate_work` were refused so until increment 5b, which serves
+them with `predicate_strands` and `output.labels: "predicate_only"` (§19); `"predicate_only"` without a
+predicate is now 400 `invalid_request` (it was `later_increment`; the precedent is increment 3's
+`output.occurrences: true`, §15). The selection of patterns longer than k (on supported paths, `long_search:
+"supported_paths"`) is a later increment: that value is not served (400 `invalid_request`, an unknown value, as
+any other), and a predicate with `long_search: "paths"` is 400 `invalid_request`.
 
 `long_search` (the owner's decision of 2026-10-07) was reserved for the increment that extends patterns longer
 than k into paths: increment 4 serves it (§12.1), with `max_paths` and `require_support`, and `output.paths:
@@ -255,6 +277,9 @@ They are served now, §4.1–§4.3.)
 | `--pattern-max-memory-mb` | 256 | `max_memory_mb` (default = cap) | lowered, listed |
 | `--pattern-max-labels` | 1,000 | `max_labels` (default = cap) | lowered, listed |
 | `--pattern-max-occurrences` | 16 | `max_occurrences_per_label` (default = cap) | lowered, listed |
+| `--pattern-max-predicate-contexts` | 100,000 | `max_predicate_contexts` (default = cap; increment 5b) | lowered, listed |
+| `--pattern-max-predicate-work` | 100,000,000 | `max_predicate_work` (default = cap; increment 5b) | lowered, listed; at least 1 (refused at start-up below) |
+| `--pattern-max-predicate-labels` | 10,000 | — (increment 5b: the names of a predicate's lists, a name in two lists counted twice; the server's policy, `caps.max_predicate_labels`) | 400 `predicate_too_large`; the flag is refused at start-up above 1,000,000 |
 | `--traverse-chunk-target-ms` | 50 | — (not a cap: the annotation reads under the deadline are decoded in chunks of about this duration, as `/traverse`'s) | — |
 
 The capabilities state every value in force (`caps`, `default_time_budget_ms`, `finalize_reserve_ms`; the two
@@ -287,10 +312,14 @@ A request is refused by the first check it fails, in this order:
    `allow_unbudgeted_annotation`, then increment 4's `long_search`, `max_paths`, `require_support` (its value,
    then `"record_verified"` with `output.occurrences: false`), then increment 5's `genetic_code` (not an
    integer: 400 `invalid_request`; an integer that is no NCBI table: 400 `genetic_code_unknown`); the peptides are
-   read in the genetic code after it (their alphabet, again, is no refusal);
+   read in the genetic code after it (their alphabet, again, is no refusal); then increment 5b's `predicate` (its
+   form, the path of the first fault named: 400 `invalid_request`; then its size: 400 `predicate_too_large`),
+   `max_predicate_contexts`, `max_predicate_work`, `predicate_strands`, then `output.labels: "predicate_only"`
+   without a predicate and a predicate with `long_search: "paths"` (both 400 `invalid_request`);
 9. an unknown top-level field;
 10. increment 3: `output.labels: "all"` in a retrieval mode on an annotation without the budget-aware decode,
-    without `allow_unbudgeted_annotation: true`: 400 `annotation_unbudgeted`;
+    without `allow_unbudgeted_annotation: true`: 400 `annotation_unbudgeted`; increment 5b: also a request
+    with a predicate, in every mode;
 11. increment 4: `require_support: "record_verified"` with `long_search: "paths"` and `output.labels: "all"` in a
     retrieval mode, on an index whose best support (capabilities `support`) is not `record_verified`: 400
     `support_unavailable`, whatever the patterns' lengths.
@@ -307,8 +336,9 @@ The body is `{"error": <message>, "code": <code>}`, except the 503 during loadin
 
 | status | `code` | when | what a client does |
 |---|---|---|---|
-| 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein` | fix the request |
-| 400 | `later_increment` | a field or value of §4.4; a multi-graph server | wait for the increment the capabilities will announce |
+| 400 | `invalid_request` | not JSON (§3: a comment, a trailing comma, content after the value, a duplicated member name, nesting deeper than 1,000), not an object, a wrong type or value, an unknown field, an empty or too long `patterns` list, `max_steps` < 1, `time_budget_ms` ≤ the reserve, `max_labels_per_anchor`, `max_annotation_work` or `max_memory_mb` < 1, `output.occurrences: true` without `output.labels: "all"`; increments 4 and 5: a `long_search` or `require_support` value not listed (§4.1), `require_support: "record_verified"` with `output.occurrences: false`, a `genetic_code` that is not an integer, none or more than one of `dna` / `iupac` / `protein`; increment 5b: a predicate that breaks a rule of §19.3 (the message names the path of the first fault, `request.predicate.and[1].none[0]`; a name that is a number names the fix, "write a taxid as \"562\""), `max_predicate_contexts` < 0, `max_predicate_work` < 1, a `predicate_strands` value not listed, `output.labels: "predicate_only"` without a predicate, a predicate with `long_search: "paths"`, a `long_search` value not served (`"supported_paths"` included) | fix the request |
+| 400 | `later_increment` | a field of §4.4 (`graphs`, `budget_split`); a multi-graph server | wait for the increment the capabilities will announce |
+| 400 | `predicate_too_large` | increment 5b: the predicate's lists name more than `caps.max_predicate_labels` names (10,000 by default; a name in two lists counted twice); the message names the count and the cap (§19.3) | send at most `caps.max_predicate_labels` names; split the cohort |
 | 400 | `support_unavailable` | increment 4: `require_support: "record_verified"` with `long_search: "paths"` and `output.labels: "all"` in a retrieval mode, on an index that cannot verify a path in one record: not BASIC, no coordinates, or no record mapping (no `.seqs`, or `--no-coord-mapping`); capabilities `support` is then not `record_verified`. The message names the index's best support and placement | ask without `require_support`: each label of a path then states its support (`label_intersection` there) |
 | 400 | `genetic_code_unknown` | increment 5: `genetic_code` is an integer that is not an NCBI translation table id (1–6, 9–16, 21–33; 7 and 8 were merged into 4 and 1, 17–20 are unassigned); the message names the ids | send one of the capabilities' `genetic_codes`, or omit it (1, the standard code) |
 | 400 | `resident_only` | `in_ram`, any value: the route never loads an index inside a request (design §5.3) | drop `in_ram` |
@@ -318,7 +348,7 @@ The body is `{"error": <message>, "code": <code>}`, except the 503 during loadin
 | 400 | `primary_unwrapped` | a PRIMARY graph not wrapped in `CanonicalDBG` (the server always wraps; CLI or embedding misuse) | none |
 | 400 | `alphabet_untested` | the graph's alphabet is `$ACGTN` (a DNA5 build): no DNA5 build has passed the pattern tests yet (the owner's decision of 2026-10-07; §8.2), with its mask or without | none on this build; a later build that passes them serves it |
 | 400 | `alphabet_unsupported` | the graph's alphabet is neither `$ACGT` nor `$ACGTN` | none |
-| 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or disk annotation; only the row-diff family has one) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4), or ask for `labels: "none"` or mode `count` |
+| 400 | `annotation_unbudgeted` | increment 3: `output.labels: "all"` in a retrieval mode, and the annotation has no budget-aware decode (capabilities `annotation: "unbudgeted"`: a column, BRWT, row or disk annotation; only the row-diff family has one); increment 5b: a request with a predicate on such an annotation, in every mode (its selection reads rows) | set `allow_unbudgeted_annotation: true` to read it without a memory bound on the reads (§14.4; a selection then reads single cells for at most 16 labels where the annotation has direct access, `selection.access: "columns"`), or ask for `labels: "none"` or mode `count` (without a predicate) |
 | 503 | `deadline` | the answer could not be written by `time_budget_ms` (§7.6): nothing partial is sent | narrow the request: fewer patterns, a smaller `max_contexts` or `max_steps`; a larger budget helps only when it lets the work end early. The operator can raise `--pattern-finalize-ms` or lower the delivery rates (§4.5) |
 | 503 | (none) | the single index is still loading (`Retry-After: 60`); every route answers so | retry later |
 
@@ -515,10 +545,17 @@ labels alone — a row truncated or refused, a stop of the annotation reads or o
 | `anchors_above_threshold` | increment 4, `long_search: "paths"`, L > k, either retrieval mode (`partial` too): the anchors `exact` and more than `max_anchors` (on a graph without its mask also `bounds` with U > `max_anchors`, the note `threshold_upper_bound` when their `lower` ≤ `max_anchors`), so the extension was not admitted (§12.1) | the anchors' (`exact`, or without the mask `bounds`); `counts.paths` `unknown`, `extension: "not_admitted"` | raise `max_anchors`, or narrow the pattern's anchor window (its first k bases, and its last k with `strands` `both` or `reverse`) |
 | `annotation_budget` | increment 3, `all_or_count`, `labels: "all"`: a row the memory account refused (`rows_refused`), or the reads stopped at `max_annotation_work` | `exact` | raise `max_memory_mb` or `max_annotation_work`, narrow the pattern, or `partial` |
 | `anchor_labels_truncated` | increment 3, `all_or_count`, `labels: "all"`: a row carried more labels than `max_labels_per_anchor` (`anchors_truncated` lists each, with its total) | `exact` | raise `max_labels_per_anchor` to the largest total, or `partial` |
-| `output_budget` | increment 3, `all_or_count`, `labels: "all"`: the memory account could not hold the answer (the contexts' descriptors or the labels and occurrences built for them) | `exact` | raise `max_memory_mb`, narrow the pattern, or `partial` |
+| `output_budget` | increment 3, `all_or_count`, `labels: "all"`: the memory account could not hold the answer (the contexts' descriptors or the labels and occurrences built for them); increment 5b: also a selected context's result object, with any projection | `exact` | raise `max_memory_mb`, narrow the pattern, or `partial` |
+| `predicate_above_threshold` | increment 5b, `all_or_count` with a predicate: the raw count `exact` (without the mask: its upper bound) above `max_predicate_contexts`; nothing was read (§19.6, §19.8) | the raw count's | narrow the pattern, scope or strands, raise `max_predicate_contexts` up to its cap, or `partial` (it tests the first `max_predicate_contexts`) |
+| `selected_above_threshold` | increment 5b, `all_or_count` with a predicate: the selected count `exact` and above `max_contexts` | the raw count's; `selected` `exact` | narrow the predicate or the pattern, raise `max_contexts`, or `partial` |
+| `predicate_budget` | increment 5b, `all_or_count` with a predicate: the selection stopped at `max_predicate_work` (also an earlier pattern's: sticky), or the memory account could not hold it (its descriptors, its rows, a row it had to read: `rows_refused`, phase `selection`), or the predicate itself (§19.9) | the raw count's; `selected` `bounds` or `at_least` | raise `max_predicate_work` or `max_memory_mb`, narrow the pattern |
 
 With `labels: "all"`, `deadline` also names a time stop of the annotation reads or of the output of the labels
-(`stop.phase` `label_discovery`, `placement` or `output`); the graph count is then still the discovery's.
+(`stop.phase` `label_discovery`, `placement` or `output`); the graph count is then still the discovery's. With
+a predicate (§19.8) `deadline` also names a time stop of the selection (`stop.phase` `selection`) or of the
+results built for the selected contexts (`output`), `threshold_crossed` also a `stop_at_threshold` stop of the
+raw discovery at `max_predicate_contexts` or of the selection at `max_contexts`, and `cut` reasons `max_memory`
+and `time` also the selection's.
 
 An `all_or_count` release that disagrees with its `exact` count is never published: the request fails as a
 server bug (§6).
@@ -532,6 +569,8 @@ server bug (§6).
 | `time` | the work time passed: in discovery nothing is released (its membership would depend on the machine, `returned: 0`); in the release, what was released before (the clock is read every 64 contexts handed to the route, §7.6). Also the cut of a pattern already stopped by `max_steps` or the threshold whose release met the work time (§7.6: `stop` keeps the first stop) |
 | `max_memory` | increment 3, `labels: "all"`: the memory account held the descriptors of only the first `returned` contexts (`partial`'s descriptors take at most half of the account, §14.4; the list's length; it replaces the engine's `max_contexts` cut when both cut) |
 | `max_paths` | increment 4, `long_search: "paths"`: more paths than `max_paths` (completed, or stopped at the threshold in the extension): the first `max_paths` in answer order (§12.1) |
+| `max_predicate_contexts` | increment 5b, with a predicate: the raw release held the first `max_predicate_contexts` contexts in answer order (or stopped at that threshold): the selected among them (§19.8) |
+| `max_predicate_work` | increment 5b, with a predicate: the selection stopped at its work budget: the selected among the contexts it decided (§19.8) |
 
 `max_anchors` is a value of `cut.reason` reserved for a later increment's release of anchors; version 1 never
 releases anchors (a path search cut before any extension, by `stop_at_threshold` on the anchors, says
@@ -605,7 +644,11 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
   built for the answer), and the reasons `max_annotation_work` and `max_memory` (§14.4); `output` is stopped by
   `max_memory` or by `time` (§14.4); the engine's stop, when there is one, is the one stated. Every assignment of
   `stop` in this document applies only while `stop` is still `null` (first stop wins, the owner's decision of
-  2026-10-07). So a later stop shows only in what it left: `labels_status: "output_budget"` (a memory or a time
+  2026-10-07). Increment 5b (a predicate, §19.8) adds the phase `selection` (the selection pass: its
+  reverse-complement lookups, its row reads and its decisions) with the reasons `max_predicate_work`,
+  `max_memory`, `time` and `max_contexts` (`stop_at_threshold` on the selected count), and the reason
+  `max_predicate_contexts` of the phase `discovery` (`stop_at_threshold` on the raw count with a predicate); the
+  results built for the selected contexts stop in the phase `output` (`time`, `max_memory`). So a later stop shows only in what it left: `labels_status: "output_budget"` (a memory or a time
   stop of the output) or `not_read`, `cut: time`, `withheld`, while `stop` names an earlier phase. Any time stop,
   stated in `stop` or not, sets `determinism: "time_limited"` (§7.9); so does a low-complexity diagnostic the work
   time cut (§7.8), with `stop` `null`.
@@ -636,7 +679,8 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
     unchecked ranges for the check while they are that few (at most `max_checked_entries` of them);
   - the results built for the answer: at most `max_contexts` per pattern.
 
-  With `output.labels: "all"`, `max_memory_mb` bounds the labelled retrieval (§14.4).
+  With `output.labels: "all"`, `max_memory_mb` bounds the labelled retrieval (§14.4). With a predicate the
+  account exists in every mode and bounds the selection too (§19.9).
 
 ### 7.7 Patterns longer than k
 
@@ -709,10 +753,15 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 - `notes`: `low_complexity_pattern`, `strand_unknown_canonical`, `paths_later_increment`, then those of the
   owner's decisions of 2026-10-08 (§18), `threshold_upper_bound`, `no_stop_codon` and
   `estimate_sampled_dummy_fraction`, then increment 3's `annotation_unbudgeted`, `record_bounds_unknown` or
-  `annotation_not_read`, then increment 4's `label_intersection_only`, in that order.
+  `annotation_not_read`, then increment 4's `label_intersection_only`, then increment 5b's
+  `predicate_constant` and `projection_not_read`, in that order.
 - `limits.clamped`: `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, then increment 3's
   `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`,
-  then increment 4's `max_paths`, in that order.
+  then increment 4's `max_paths`, then increment 5b's `max_predicate_contexts`, `max_predicate_work`, in that
+  order.
+- Increment 5b: a result's `selection_labels` in the label order of the pattern's returned results (contexts
+  desc, column asc), its `selection_strands` in the same order (one per label); the predicate's echo in the
+  request's syntax, its names in the request's order.
 - Increment 4: the labels of paths in `by_label` and in each path by (paths desc, column asc); a label's
   occurrences by (`seq_id`, start), or by `kmer_coord` without a record mapping.
 - Increment 3: labels in `by_label` and in each result by (contexts desc, column asc) (design §5.5); a label's
@@ -755,11 +804,12 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 |---|---|---|
 | `pattern_contract_version` | integer | 1 |
 | `mode` | string | the request's mode, defaults applied |
-| `output` | object \| null | `null` in mode `count`; in the retrieval modes the projection applied: `{"labels": "none"}`, or `{"labels": "all", "occurrences": <boolean>}` (increment 3) |
+| `output` | object \| null | `null` in mode `count`; in the retrieval modes the projection applied: `{"labels": "none"}`, or `{"labels": "all", "occurrences": <boolean>}` (increment 3), or `{"labels": "predicate_only", "occurrences": <boolean>}` (increment 5b) |
 | `index` | object (§8.2) | what was searched |
 | `limits` | object (§8.3) | the effective caps of this request |
 | `timing` | object (§8.4) | the request's elapsed time |
 | `patterns` | list of entries (§8.5) | one per request pattern, in request order |
+| `predicate` | object (`predicate_block`, §19.10) | increment 5b, **exactly when the request names a predicate**: the predicate as bound to this index (its normal form, its names, the unknown ones, `vacuous`, the scope and strands of its claim) |
 
 ### 8.2 `index`
 
@@ -806,12 +856,16 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `long_search` | `"paths"` | increment 4, answers to `long_search: "paths"` only: as requested |
 | `max_paths` | integer | likewise: effective (§4.1) |
 | `require_support` | string | likewise, and only when labels are read (`labels: "all"` in a retrieval mode): as requested, default applied |
+| `max_predicate_contexts` | integer | increment 5b, answers with a predicate only: effective (§4.1). With a predicate the annotation limits above (`max_labels_per_anchor` … `allow_unbudgeted_annotation`) are echoed in every mode: the selection uses the account |
+| `max_predicate_work` | integer | likewise: effective |
+| `max_predicate_labels` | integer | likewise: the server's (`caps.max_predicate_labels`) |
+| `predicate_strands` | string | likewise: as requested, default applied (`predicate.strands` states what was evaluated) |
 | `clamped` | list of objects | one per request value lowered to its cap, in the order of §7.9; `[]` when none |
 
 <!-- schema: clamped -->
 | field | type | meaning |
 |---|---|---|
-| `field` | string | `max_contexts`, `max_anchors`, `max_steps` or `time_budget_ms`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths` |
+| `field` | string | `max_contexts`, `max_anchors`, `max_steps` or `time_budget_ms`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths`; increment 5b: `max_predicate_contexts`, `max_predicate_work` (named also in a request without a predicate) |
 | `requested` | number | the value asked for |
 | `effective` | number | the cap applied |
 
@@ -826,6 +880,7 @@ releases anchors (a path search cut before any extension, by `stop_at_threshold`
 | `extension_ms` | number | increment 4, entries of a pattern longer than k with `long_search: "paths"`: the extension (§12.1). Varies between runs |
 | `label_intersection_ms` | number | review GPT-3 (§18), entries of a pattern longer than k with `long_search: "paths"` and `labels: "all"`: the intersection of the label lists of each path's rows (§12.1). Varies between runs |
 | `verification_ms` | number | likewise: the verification of the labels carrying the paths — the chains' join, their record placement, the runs kept for the output (§12.1) — apart from `placement_ms`, the coordinates' reads; the loop's time also where nothing is verified (no coordinates). Varies between runs |
+| `selection_ms` | number | increment 5b, every answered entry of a request with a predicate: the selection pass (its lookups, reads and decisions; 0 where it did not run). Varies between runs |
 
 ### 8.5 A pattern's entry
 
@@ -860,14 +915,16 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 | `determinism` | `"full"` \| `"time_limited"` | answered | §7.9 |
 | `notes` | list of strings | answered | §8.10 |
 | `timing` | object (§8.4) | answered | |
-| `placement` | string | answered, `labels: "all"` | increment 3: what this answer places: `record`, `global`, `none`, `none_canonical` (§14.3), or `not_requested` (`output.occurrences: false`) |
+| `placement` | string | answered, `labels: "all"` (or `"predicate_only"`, increment 5b: the projection fields `placement` to `occurrences_cut` alike) | increment 3: what this answer places: `record`, `global`, `none`, `none_canonical` (§14.3), or `not_requested` (`output.occurrences: false`) |
 | `annotation` | `"budgeted"` \| `"unbudgeted"` | answered, `labels: "all"` | the reads' access (§14.4) |
 | `by_label` | list \| null | answered, `labels: "all"` | the per-label summary over the returned contexts (§14.5), or over the returned paths (`by_label_paths`, §12.1); `null` when the results are withheld or, in `partial`, when the memory account could not hold it (§14.4) |
-| `rows_refused` | list | answered, `labels: "all"` | the rows the memory account refused, each once (§14.4) |
+| `rows_refused` | list | answered, `labels: "all"` or `"predicate_only"`, or with a predicate (any mode) | the rows the memory account refused, each once per phase (§14.4; a predicate's selection first, phase `selection`, §19.9) |
 | `anchors_truncated` | list | answered, `labels: "all"` | the rows cut at `max_labels_per_anchor`, each once (§14.2) |
 | `labels_cut` | object \| null | answered, `labels: "all"` | `partial`: `{reason: "max_labels", returned}` when `by_label` and the results list fewer labels than were found |
 | `occurrences_cut` | object \| null | answered, `labels: "all"` | `partial`: `{reason: "max_occurrences_per_label", labels}` when that many labels list fewer occurrences than they have |
 | `labels_excluded_unverified` | count | answered, `labels: "all"`, L > k, `long_search: "paths"` and `require_support: "record_verified"` | increment 4, unit `labels`: the labels carrying a returned path but verified on none, left out of `by_label` (§12.1) |
+| `selection` | object (`selection`, §19.10) | answered, with a predicate | increment 5b: what this pattern's selection did (`pass`), what a label's presence means (`support`) and how the predicate's labels were read (`access`) |
+| `absence_filter` | `"predicate"` | answered, with a predicate | increment 5b: the entry's absence claims are narrowed by the predicate (§19.11); `absence_scope` keeps its values |
 
 ### 8.6 `counts`
 
@@ -877,8 +934,10 @@ An entry is one of three shapes: answered, refused by the engine, or refused for
 | `contexts` | contexts count | L ≤ k | unit `graph_contexts` |
 | `anchors` | anchors count | L > k | unit `anchors` (§7.7) |
 | `paths` | count | L > k | unit `paths`; `unknown` (`exact` 0 without anchors); with `long_search: "paths"` a paths count (`paths_count` below, §12.1) |
-| `labels` | count | always | unit `labels`; `unknown` unless `labels: "all"` read them (§14.6); for the paths of `long_search: "paths"` with `by_support` besides (`labels_count` below) |
-| `occurrences` | count | always | unit `placed_occurrences`; `unknown` unless `labels: "all"` placed them in records (§14.6) |
+| `labels` | count | always | unit `labels`; `unknown` unless `labels: "all"` (or `"predicate_only"`: the predicate's labels on the returned contexts, §19.7) read them (§14.6); for the paths of `long_search: "paths"` with `by_support` besides (`labels_count` below) |
+| `occurrences` | count | always | unit `placed_occurrences`; `unknown` unless `labels: "all"` (or `"predicate_only"`) placed them in records (§14.6) |
+| `tested` | count | with a predicate | increment 5b, unit `graph_contexts` (L ≤ k; `paths` for L > k): the raw contexts the selection decided; relations §19.7 |
+| `selected` | count | with a predicate | increment 5b, same unit: the contexts whose labels satisfy the predicate; relations §19.7 (never with an `estimate`) |
 
 <!-- schema: count -->
 | field | type | meaning |
@@ -948,12 +1007,15 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `extension_branches` | integer | likewise: the nodes the extension expanded (anchors included) with two or more k-mers allowed at the next pattern position, where its paths fan out (each enters two candidates or more, `counts.paths.candidates_examined`); 0 when it did not run. Not part of `steps` |
 | `annotation_rows_distinct` | integer | review GPT-3 (§18), every entry with `labels: "all"`: the distinct rows whose labels this pattern read (complete or truncated), each once however many contexts or path k-mers share it, the placement's second read not counted again; refused and unread rows not counted (0 where nothing was read, e.g. a withheld count). At most `annotation_rows`, which counts the reads of both steps |
 | `verification_steps` | integer | likewise, entries of a pattern longer than k with `long_search: "paths"`: the verification's units of work (§12.1) — one per k-mer row looked up for a label carrying a path, per list ordered, per galloping seek, per run of chains extended and per record a run crosses; the work time is read at least every 4,096 of them. 0 where no coordinate is read. Not part of `annotation_units`; deterministic |
+| `predicate_rows` | integer | increment 5b, every answered entry with a predicate: the rows the selection read (refused rows not counted); with `"predicate_only"` the projection's rows are these (its `annotation_rows` are its placement's reads only, `annotation_rows_distinct` the distinct rows of the returned contexts). With a predicate `memory_bytes` is in every answered entry (the account exists in every mode) |
+| `predicate_units` | integer | likewise: the selection's work units (§19.9), refused and interrupted reads included; the request's `max_predicate_work` bounds their sum over the patterns |
+| `predicate_lookups` | integer | likewise: the reverse-complement lookups made (`"either"` on a BASIC graph; k units each), one per distinct row |
 
 <!-- schema: stop -->
 | field | type | meaning |
 |---|---|---|
-| `phase` | `"discovery"` \| `"mask_scan"` \| `"extraction"`; increment 3: `"label_discovery"` \| `"placement"` \| `"output"`; increment 4: `"extension"` | §7.6 |
-| `reason` | `"max_steps"` \| `"time"` \| `"max_contexts"` \| `"max_anchors"`; increment 3: `"max_annotation_work"` \| `"max_memory"`; increment 4: `"max_paths"` (phase `extension` only) | §7.6 |
+| `phase` | `"discovery"` \| `"mask_scan"` \| `"extraction"`; increment 3: `"label_discovery"` \| `"placement"` \| `"output"`; increment 4: `"extension"`; increment 5b: `"selection"` | §7.6 |
+| `reason` | `"max_steps"` \| `"time"` \| `"max_contexts"` \| `"max_anchors"`; increment 3: `"max_annotation_work"` \| `"max_memory"`; increment 4: `"max_paths"` (phase `extension` only); increment 5b: `"max_predicate_work"` (phase `selection` only), `"max_predicate_contexts"` (phase `discovery`) | §7.6 |
 
 <!-- schema: reason -->
 | field | type | meaning |
@@ -975,7 +1037,9 @@ and the labels count of the paths (with `labels: "all"`) has:
 | `support` | `"kmer"` | increment 3, `labels: "all"`: the label annotates the one k-mer (design §4.3) |
 | `labels_status` | string | likewise: `complete`, `truncated`, `refused`, `not_read`, `output_budget` (§14.5) |
 | `labels_total` | integer \| null | likewise: the labels the row carries (its true total, also when truncated); `null` when it was not read |
-| `labels` | list \| null | likewise: the context's labels (§14.5); `null` unless the row was read and held |
+| `labels` | list \| null | likewise: the context's labels (§14.5); `null` unless the row was read and held. With `"predicate_only"` (increment 5b) the predicate's labels on its own row |
+| `selection_labels` | list of strings | increment 5b, a selected context of a predicate request whose projection reads labels (`"predicate_only"`, `"all"`): the predicate's labels in the set it was evaluated on (its row's, and with `"either"` on a BASIC graph its reverse complement's), in the label order of the returned results: why it was selected; the normal form holds on them (§19.10) |
+| `selection_strands` | list of strings | increment 5b, beside `selection_labels` (one per label, the same order): the orientation whose row carries the label (the owner's answer to P11). On a BASIC graph `"context"` (the row of the context's k-mer x, as `kmer` spells it), `"reverse_complement"` (the row of rc(x) only: `"either"`), `"both"` (both rows; a palindromic x, which is its own reverse complement, under `"either"`); `"either"` on CANONICAL and PRIMARY graphs (one row serves x and rc(x): no strand is known) (§19.10) |
 
 With `output.labels: "none"` a result has the first seven fields only: nothing of the annotation is read. A
 path (a result of a pattern longer than k under `long_search: "paths"`) has its own fields (`path_result`,
@@ -1005,13 +1069,15 @@ It costs no step.
 | `low_complexity_pattern` | an exact pattern that sdust flags over its whole text (T = 20, W = 64, the seeder's parameters): a hint that its counts may be large; for L > k the flag can come from bases outside the anchor windows. Since the review GPT-3 (§18) stated only in an answer without a stop (never beside one, whatever its phase and reason, an earlier pattern's request-wide stop included), and left out of a pattern of more than 191 bases whose diagnostic the work time cut (`determinism: "time_limited"`, `stop` `null`; §7.8). Its absence is no claim that a pattern is not low-complexity |
 | `strand_unknown_canonical` | a CANONICAL or PRIMARY graph: orientations, not strands |
 | `paths_later_increment` | L > k without `long_search: "paths"`: anchors counted, paths neither extended nor extracted (ask with `long_search: "paths"`, §12.1) |
-| `annotation_unbudgeted` | increment 3: the labels were read without the budget-aware decode (`allow_unbudgeted_annotation`): no memory bound on the reads themselves (what they returned is in the account), the deadline checked between chunks of keys |
+| `annotation_unbudgeted` | increment 3: the labels were read without the budget-aware decode (`allow_unbudgeted_annotation`): no memory bound on the reads themselves (what they returned is in the account), the deadline checked between chunks of keys. Increment 5b: also an entry whose selection read rows so, without a projection |
 | `record_bounds_unknown` | increment 3: coordinates without a record mapping (`placement: "global"`): occurrences are (`kmer_coord`, `offset`), placed in no record, not deduplicated, not counted |
 | `annotation_not_read` | increment 3: the request asked for labels (`output.labels: "all"`) or named an annotation field (`require_support` included), and this answer reads none (mode `count`, or `labels: "none"`): the fields had no effect |
 | `label_intersection_only` | increment 4: the labels of paths where no coordinate is read (placement `none`, `none_canonical`, `not_requested`): every label is `label_intersection`, none can be verified (§12.1) |
 | `threshold_upper_bound` | the owner's decision #16, a graph without its mask: a threshold was decided on a count's upper bound U against the request while its lower bound was within the threshold — `all_or_count` withheld `count_above_threshold`, `stop_at_threshold` stopped (`threshold_crossed`, or in `partial` `cut: max_contexts` / `max_anchors`), or the extension was not admitted (`anchors_above_threshold`): the true count may be within the threshold (§7.5) |
 | `no_stop_codon` | the owner's decision #19: a peptide holding `*` read in a genetic code without an unconditional stop codon (tables 27, 28, 31): `*` matches nothing there, so the pattern has no instance; its contexts (L ≤ k, `exact` 0, answered without a search, §7.6) or paths (L > k) are 0 for that reason. A long one's anchors are its anchor windows', which may not reach the `*` (§12.2) |
 | `estimate_sampled_dummy_fraction` | the owner's decision #16: a count of the entry carries an `estimate` (a `bounds` count of a graph without its mask): round(U × f), f sampled (`index.dummy_fraction`); not a bound (§7.4) |
+| `predicate_constant` | increment 5b: the predicate's normal form is a constant (§19.4): nothing was read for the selection (`selection.pass: "constant"`) |
+| `projection_not_read` | increment 5b: a predicate request named a projection field (`output.labels` `"all"` or `"predicate_only"`, `max_labels_per_anchor`, `max_annotation_work`, `max_labels`, `max_occurrences_per_label`, `require_support`) and this answer built no projection (mode `count`, or `labels: "none"`): the fields had no effect. A predicate answer never says `annotation_not_read`: its selection read rows |
 
 ## 9. What an answer licenses
 
@@ -1042,6 +1108,10 @@ It costs no step.
   "record_verified"` a label left out (counted in `labels_excluded_unverified`) is not absent from the path's
   k-mers. With labels, `retrieval_complete: true` also says that every label carrying a returned path is listed
   with its support (§12.1).
+- Increment 5b, a predicate (`absence_filter: "predicate"`): the absence claims of the entry are those of §19.11,
+  per context and per index, never motif-level: `retrieval_complete: true` says that every context of the
+  pattern whose label set (at `predicate.strands`) satisfies the predicate is in `results`, `selected` `exact` 0
+  that none does; the raw counts keep the licences above.
 - Increment 3, `output.labels: "all"`, `retrieval_complete: true`: every graph context of the pattern in its scope
   and strands is in `results` with **all** the labels its row carries (`labels_status: "complete"` everywhere),
   each placed where `placement` is `record` or `global` — so a column absent from `by_label` carries no
@@ -1076,9 +1146,9 @@ It costs no step.
 | `unavailable_reason` | string \| null | | `mask_invalid`, `representation_unsupported`, `primary_unwrapped`, `alphabet_untested`, `alphabet_unsupported`, `multi_graph_later_increment`; `mask_required` is retired (§6: builds of version 1 before the owner's decision #16 state it; this one never does). A later build may add others: pass an unknown one through, §1; `null` when available or loading |
 | `modes` | list | `["count", "all_or_count", "partial"]` | §7.5 |
 | `default_mode` | string | `"all_or_count"` | an omitted `mode` |
-| `projections` | list | `["none", "all"]` | the `output.labels` values served **now**; gate label projections on this list (`"all"` since increment 3; `["none"]` before) |
+| `projections` | list | `["none", "all", "predicate_only"]` | the `output.labels` values served **now**; gate label projections on this list (`"all"` since increment 3, `"predicate_only"` since increment 5b, with a predicate; `["none"]` before increment 3) |
 | `default_projection` | string | `"none"` | an omitted `output.labels`; frozen for version 1 (§1) |
-| `projections_later_increment` | list | `["predicate_only"]` | refused with `later_increment` today (`["all", "predicate_only"]` before increment 3) |
+| `projections_later_increment` | list | `[]` | refused with `later_increment` today (`["predicate_only"]` before increment 5b, `["all", "predicate_only"]` before increment 3) |
 | `default_occurrences` | boolean | `true` | increment 3: an omitted `output.occurrences` with `labels: "all"` |
 | `kinds` | list | `["dna", "iupac", "protein"]` | pattern kinds served (`protein` since increment 5; `["dna", "iupac"]` before) |
 | `kinds_later_increment` | list | `[]` | (`["protein"]` before increment 5) |
@@ -1097,11 +1167,12 @@ It costs no step.
 | `graph_cleaned` | string | `"unknown"` | whether graph cleaning may have pruned k-mers (design §3); not known in version 1 |
 | `records_shorter_than_k` | string | `"not_indexed"` | such records have no k-mer |
 | `resident_only` | boolean | `true` | the route never loads an index (`in_ram` refused) |
-| `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths`; the owner's decision #24: `max_checked_entries` (no request field: the unchecked candidates a pattern on a graph without its mask may have for each to be tested, §7.4; on every server, masked or not) |
+| `caps` | object | | the maxima (§4.5): `max_contexts`, `max_anchors`, `max_steps`, `time_budget_ms`, `min_information_bits` (the floor), `max_patterns`; increment 3: `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`; increment 4: `max_paths`; the owner's decision #24: `max_checked_entries` (no request field: the unchecked candidates a pattern on a graph without its mask may have for each to be tested, §7.4; on every server, masked or not); increment 5b: `max_predicate_contexts`, `max_predicate_work` and `max_predicate_labels` (no request field: the names a predicate may list, §19.3) |
 | `default_time_budget_ms` | number | 60,000 | the budget of a request that names none, below `caps.time_budget_ms` |
 | `finalize_reserve_ms` | number | 250 | §7.6 |
-| `caps_rule` | string | | which caps are request fields' maxima (each named: lowered and listed in `limits.clamped` above it) and which are the server's policy (`max_patterns`, `min_information_bits`, `max_checked_entries`), and a reference to the sections stating the rules (`SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1`: the caps and defaults, the check of few unchecked candidates, the time kept back for the answer, the two admissions of `long_search: "paths"`). Since the owner's decision P9 (§18) a reference: it stated those rules in prose before, the delivery rates among them (now `delivery_mbps`). Printable ASCII; every cap of `caps` is named in it; for people, not parsed |
+| `caps_rule` | string | | which caps are request fields' maxima (each named: lowered and listed in `limits.clamped` above it) and which are the server's policy (`max_patterns`, `min_information_bits`, `max_checked_entries`, `max_predicate_labels`), and a reference to the sections stating the rules (`SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1, 19`: the caps and defaults, the check of few unchecked candidates, the time kept back for the answer, the two admissions of `long_search: "paths"`, a predicate's admissions and budgets). Since the owner's decision P9 (§18) a reference: it stated those rules in prose before, the delivery rates among them (now `delivery_mbps`). Printable ASCII; every cap of `caps` is named in it; for people, not parsed |
 | `delivery_mbps` | object (`delivery_mbps` below) | | the owner's decision P9 (§18): the rates in force of the time kept back for the answer (§7.6) |
+| `predicate` | object (`capabilities_predicate` below) | | increment 5b (§19.12): the operators of a predicate served, the `predicate_strands` values and the access this index gives a selection |
 | `graph_mode` | string \| null | | `basic`, `canonical`, `primary` |
 | `k` | integer \| null | | |
 | `alphabet` | string \| null | | `$ACGT` or `$ACGTN` (`$ACGTN`: `available: false`, `alphabet_untested`, §8.2) |
@@ -1122,6 +1193,13 @@ recognised (`representation_unsupported`, `primary_unwrapped`) only `k` is set; 
 |---|---|---|
 | `build` | number | MB/s at which the answer's JSON text is assumed to be built and written (`--pattern-delivery-build-mbps`, 10; a positive number, the server refuses another at start-up) |
 | `compress` | number | MB/s at which it is assumed to be compressed (`--pattern-delivery-compress-mbps`, 50; likewise) |
+
+<!-- schema: capabilities_predicate -->
+| field | type | meaning |
+|---|---|---|
+| `operators` | list | `["any", "all", "none", "at_least", "and", "or", "not"]`: the operators a predicate may use (§19.3) |
+| `strands` | list | `["either", "context"]`: the `predicate_strands` values (on CANONICAL and PRIMARY graphs both are evaluated as `"either"`, §19.5) |
+| `access` | `"rows"` \| `"columns"` \| null | how a selection reads this index's annotation: `"rows"` (the budget-aware decode, or an unbudgeted annotation without direct access) or `"columns"` (an unbudgeted annotation with direct access: single cells for at most 16 labels of a predicate, rows above); `null` while the index loads or when the annotation could not be described |
 
 **The mask, for a client** (the operator's side is design §4):
 - It is read when the graph is loaded: an `.edgemask` written beside a running server changes nothing until
@@ -1184,6 +1262,11 @@ before increment 4).
 - Peptides (increment 5): send `protein` patterns only where `kinds` lists `"protein"`, with residues of
   `protein_residues` (the stop `*` only where that list has it), and `genetic_code` only from
   `genetic_codes`.
+- Predicates (increment 5b, §19): send `predicate` only where `projections` lists `"predicate_only"` (and the
+  block has `predicate`), with operators of `predicate.operators`, at most `caps.max_predicate_labels` names,
+  `predicate_strands` from `predicate.strands`, `max_predicate_contexts` and `max_predicate_work` within their
+  caps; on `annotation: "unbudgeted"` it needs `allow_unbudgeted_annotation: true` in every mode. A host whose
+  capabilities lack `"predicate_only"` refuses a predicate (400 `later_increment`, a build before increment 5b).
 
 ## 11. Fixtures
 
@@ -1217,7 +1300,8 @@ of the blaNDM-1 forward primer, equal to a scan of the mini's FASTA),
 `labels_all_work_budget` and `labels_all_work_budget_partial` (a stop at `max_annotation_work`),
 `labels_all_global` (no record mapping), `labels_all_count` (mode `count`: `annotation_not_read`),
 `annotation_unbudgeted` (the 400 on the PRIMARY index's column annotation) and `labels_all_unbudgeted` (the same
-with `allow_unbudgeted_annotation`); `later_increment_labels` now asks for `"predicate_only"` (`"all"` is served).
+with `allow_unbudgeted_annotation`); `later_increment_labels` asked for `"predicate_only"` (`"all"` being served)
+until increment 5b replaced it by `predicate_only_without_predicate` (below).
 
 After the outside review of 2026-10-07 (GPT #11): `labels_all_output_budget` (a GCG repeat whose 1,828 contexts
 fill the smallest account, `max_memory_mb` 1: `stop {output, max_memory}`, `withheld: output_budget`, the contexts
@@ -1281,6 +1365,35 @@ nothing, note `no_stop_codon`; 30 bases: `exact` 0 with no work; 45 bases: ancho
 `peptide_no_stop_codon_after_stop` (the same 30 bases after a `max_steps` stop: `exact` 0, `stop` `null`,
 `determinism: "full"`, §7.6).
 
+Increment 5b (§19) adds the predicates, on the masked copy unless named: `predicate_filter` (GCG12, 1,828
+contexts, `and(any 562, none 287)`, `max_contexts` 100, `predicate_only` without occurrences: 60 selected and
+returned in 1,777 rows, complete, with the predicate block and `selection_labels`), `predicate_either` and
+`predicate_context` (the blaNDM-1 forward primer, `none(546)`, mode `count`: 0 with `"either"`, 12 with
+`"context"`; the first also `projection_not_read`), `predicate_at_least` (`at_least` 8 of the nine columns,
+`"context"`: the 12 `+` contexts), `predicate_unknown_constant` (the typo `5622`: `unknown_labels`, normal form
+`false`, `pass: "constant"`, no row read, `predicate_constant`), `predicate_unknown_folded` (`and(any 562, none
+5622)` folded to `any(562)`), `predicate_vacuous` (`none(287)`, partial, `max_contexts` 5: `vacuous` true, 68
+selected, the first 5, `cut: max_contexts`), `predicate_budget` and `predicate_budget_partial`
+(`max_predicate_work` 1, `"context"`: `tested` exact 1, `selected` `bounds` [0, 1827], `stop {selection,
+max_predicate_work}`, `predicate_budget` / `cut: max_predicate_work`; the next pattern's selection
+`not_started`, sticky), `predicate_above_threshold` and `predicate_partial_admission` (`max_predicate_contexts`
+100: `not_admitted`, nothing read / the first 100 tested, `cut: max_predicate_contexts`),
+`predicate_selected_above` (`selected_above_threshold`, 60 > 10), `predicate_stop_at_threshold` (the selected
+count's early exit, `stop {selection, max_contexts}`) and `predicate_stop_at_raw` (the raw count's, `stop
+{discovery, max_predicate_contexts}`, `threshold_crossed`), `predicate_only_record` (`any(562)` with
+`predicate_only`: 562's 13 placed occurrences), `predicate_selection_strands` (`any(546)`, `predicate_only`: the
+12 `+` contexts selected by their own row, `selection_strands: ["context"]`, the 12 `-` ones by their reverse
+complement's, `["reverse_complement"]`), `predicate_all` (`none(546)`, `"context"`, labels `"all"`: the
+12 `-` contexts with their 7 labels), `predicate_long_anchors` (a 40-mer: its anchors' answer, selection
+`not_started`), `predicate_unmasked` (server `unmasked_unchecked`: the raw `bounds` [2, 24] admitted on U, the
+release exact, 24 selected), `predicate_unbudgeted` and `predicate_unbudgeted_allowed` (the PRIMARY index: 400
+`annotation_unbudgeted` in mode `count`; with the opt-in `selection.access: "columns"`, `predicate.strands:
+"either"` although `"context"` was asked, note `annotation_unbudgeted`), and the refusals `predicate_invalid` (a
+number as a name), `predicate_paths_refused` (with `long_search: "paths"`), `predicate_too_large` (server
+`masked_small_predicate_cap`, `--pattern-max-predicate-labels 4`: five names) and
+`predicate_only_without_predicate` (replacing `later_increment_labels`). The nine capabilities bodies of the
+single-graph servers gained §19.12's fields; no other stored body changed.
+
 - `pattern_fixtures.py --check` regenerates them and compares: bodies byte for byte, except
   `timing.elapsed_ms` (and every other `timing` value of an entry: `label_discovery_ms`, `placement_ms`),
   `server_instance` and the counts and work of the first `time_limited` entry of an answer (and, when the
@@ -1311,7 +1424,8 @@ a client may use it. (Milestone 1b, the edge mask, is in this build and its fixt
 | 3: labels and placement — **served in this build (§14)** | `output.labels: "all"`; `max_labels_per_anchor`, `max_annotation_work`, `max_memory_mb`, `max_labels`, `max_occurrences_per_label`, `allow_unbudgeted_annotation`; `output.occurrences` | `labels` on each result (column, support, placed occurrences `seq_id`, `record`, `strand`, `nt_coords`, `nt_length`; or `kmer_coord`, `offset`); `by_label`; `counts.labels` and `counts.occurrences` known; `rows_refused`, `anchors_truncated`, `labels_cut`, `occurrences_cut`; `withheld` reasons `annotation_budget`, `anchor_labels_truncated`, `output_budget`; notes `record_bounds_unknown`, `annotation_unbudgeted`, `annotation_not_read` (`label_intersection_only` arrives with paths, milestone 4) | `projections` gains `"all"`; `default_occurrences`; five caps; `default_projection` stays `"none"` (§1) |
 | 4: patterns longer than k, **opt-in** (the owner's decision of 2026-10-07) — **served in this build (§12.1)** | `long_search: "paths"` (default `"anchors"`), `max_paths`, `require_support`; `output.paths` accepted with either value | only for a request with `long_search: "paths"`: results for L > k are paths, with the new fields `sequence` (the L spelled bases), `anchor_kmer` (the anchor's k bases) and their node path (`nodes`, `rows`) — never `kmer`, which keeps its meaning, the k-mer of a context; `counts.paths` known with its split, `candidates_examined` and `extension`; the labels of each path with their `support` (`label_intersection`, `record_verified`) and `require_support`; `withheld` `anchors_above_threshold`, `cut` `max_paths`, stop phase `extension` and reason `max_paths`; 400 `support_unavailable`. A request without it gets the answer of §7.7 as before: anchors counted, `counts.paths` `unknown` (`exact` 0 without anchors), `withheld: paths_later_increment` and its note | `long_search` `["anchors", "paths"]`, `default_long_search` `"anchors"`; `caps.max_paths`; `long_patterns` stays `"anchors_counted"` (what a request without the option gets); `support` states the best support of a path |
 | 5: peptides — **served in this build (§12.2)** | `patterns[i].protein`, `genetic_code`; the stop `*` since the owner's decision #19 (§18) | `kind: "protein"` with `residues` and `genetic_code` (instances name the codons); note `no_stop_codon` (§18; the slot error `stop_unsupported`, answered by `4596bb3b` only, is retired); 400 `genetic_code_unknown` | `kinds` gains `"protein"`; `protein_residues` (with `*` since §18), `genetic_codes`, `default_genetic_code`, `protein_rule` |
-| 5b: predicates | `predicate`, `max_predicate_contexts`, `max_predicate_work`, `output.labels: "predicate_only"` | `selection` (tested, selected, access, unknown labels); `withheld` `predicate_above_threshold`, `predicate_budget`; filtered answers state their narrower absence claim (design §5.1) | `projections` gains `"predicate_only"` |
+| 5b: predicates, patterns of L ≤ k — **served in this build (§19)** | `predicate`, `max_predicate_contexts`, `max_predicate_work`, `predicate_strands`, `output.labels: "predicate_only"` | the top-level `predicate` block (normal form, names, known, `unknown_labels`, `vacuous`, scope, strands); per entry `selection` (`pass`, `support`, `access`), `counts.tested` and `counts.selected` (relations §19.7), `absence_filter`, `work.predicate_rows`, `predicate_units`, `predicate_lookups`, `timing.selection_ms`, `rows_refused` with phase `selection`; results the selected contexts, with `selection_labels` under a projection that reads labels; `withheld` `predicate_above_threshold`, `selected_above_threshold`, `predicate_budget`; `cut` `max_predicate_contexts`, `max_predicate_work`; `stop` phase `selection`, reasons `max_predicate_work`, `max_predicate_contexts`; notes `predicate_constant`, `projection_not_read`; 400 `predicate_too_large` | `projections` gains `"predicate_only"` (`projections_later_increment` `[]`); `caps.max_predicate_contexts`, `max_predicate_work`, `max_predicate_labels`; `predicate` {operators, strands, access} |
+| 5s and 5b's L > k part: supported paths | `long_search: "supported_paths"`, `supported_paths_level`; a predicate on supported paths | `counts.supported_paths`; the selection of the supported walks (strand-consistent: a label supports a walk on one strand as a whole) | `long_search` gains `"supported_paths"` |
 | 6: multi-graph | `graphs` (as `/search` names graphs and chunks), `budget_split` | each result carries `graph`, `index_fp`, `release`; counts `by_shard` with `per_shard`; `stop` and `withheld` gain the shard; the merged order of design §8 | the block on multi-graph servers becomes available, with the resident graphs |
 
 - What stays: every field of §8 with its type and meaning; the relations and their algebra; the absence licences
@@ -1600,6 +1714,11 @@ The design's §7 is a draft of the full contract; milestone 1 built the followin
 | §7.2 (increment 3): a result's labels are its labels | each result states `labels_status` and `labels_total` | a truncated, refused or unread row is told apart from a row without labels (`labels: null` unless read) |
 | §5.3, §7.2 (increment 3): `memory.stop` with the phase | `stop: {phase, reason: max_memory}` (phases `label_discovery`, `placement`, `output`) and `work.memory_bytes` | the one `stop` object of the entry |
 | §5.2 (increment 3): `max_annotation_work` gives `rows_refused` | a work stop is `stop: {phase, reason: max_annotation_work}`, the unread rows `labels_status: "not_read"`; `rows_refused` holds the rows the memory account refused, each with what it needed | a refused row is a property of the row; a work stop is not |
+| §5.6 (increment 5b): a filtered answer marks `absence_scope: …filtered` | `absence_filter: "predicate"` beside `absence_scope`, which keeps its closed values (§19.11) | `absence_scope` is a closed enumeration (§1) |
+| §5.6, §7.1 (increment 5b): `predicate_only` is the default projection with a predicate | the default stays `"none"`; a client sends `"predicate_only"` (owner decision P2) | `default_projection` is frozen for version 1 (§1) |
+| §5.6 (increment 5b): a predicate is evaluated on the context's row | with `predicate_strands: "either"` (the default) on a BASIC graph also on its reverse complement's row, the one or the other, never a mix; `"context"` on request (owner decision P11, §19.5) | a record holding the motif on its other strand annotates the reverse complement: `none(B)` would pass contexts B carries |
+| §5.6, §7.2 (increment 5b): `tested` and `selected` inside `selection`; a stopped selection `at_least` | `counts.tested` and `counts.selected` (counts with relations), `selection` {pass, support, access} per entry, the request's parts in the top-level `predicate` block; a stopped selection `bounds` [S, S + R_upper − T] where the raw count has an upper bound (P13) | they are counts; an upper bound exists |
+| §5.2, §5.6 (increment 5b): raw paths kept for a selection | a predicate selects patterns longer than k only on supported paths, a later increment (`long_search: "paths"` with a predicate: 400; P24) | an enumeration cut at `max_paths` can hold no supported walk |
 | §4.3 (increment 3): placement `global` with `kmer_coord` + `offset` | as designed, and nothing deduplicated or counted (`counts.occurrences` unknown) | without record bounds, `kmer_coord + offset` of two records can coincide (records are concatenated), so equal sums are not one occurrence |
 
 ## 14. Increment 3: `output.labels: "all"` (labels and placement)
@@ -2487,3 +2606,406 @@ against the graph-walk oracle `Records.branchings`, the distinct rows against th
 - The 100,000-sink test compares costs (a ratio, not machine speed): a timing test still.
 - The item-5 cause was confirmed on the mini, not re-measured cold on refseq33m: rerunning the staging benchmark's
   `GNCNGNTNCNGNANANANTNANGNTNTNCNCNANGNGNTN` cold should now give a stated stop.
+
+## 19. Increment 5b: annotation predicates (`predicate`), patterns of L ≤ k
+
+### 19.1 What is served
+
+A request may name **one predicate** (owner decision P21): a logical condition on the annotation columns of each
+graph context of a pattern of at most k bases (§7.1). The predicate **selects** contexts; the projection
+(`output.labels`) decides which labels a selected context is returned with. Served by this build
+(`src/cli/pattern.cpp`: the request, the per-pattern pipeline, the answer; `src/cli/pattern_predicate.cpp`: the
+language, its binding and evaluation; `src/cli/pattern_selection.cpp`: the selection pass and the projection
+`"predicate_only"`), as additions to version 1 (§1): a request that names no predicate is answered as before,
+byte for byte apart from `timing` (§19.15). The capabilities announce it (§19.12). Design:
+`DESIGN-pattern-search.md` §5.6, as corrected by the owner's decisions of 2026-10-08 (P1–P22, P24): the strands of
+a BASIC graph (§19.5, P11), the default projection (P2), the relation of an interrupted selection (§19.7, P13),
+the absence claim (§19.11, P15), the honest units of a read (§19.9, P17).
+
+Not in this increment: the selection of patterns longer than k (a predicate selects among **supported paths**,
+`long_search: "supported_paths"`, a later increment, P24). A pattern longer than k in a predicate request keeps the
+answer of §7.7 (`long_search: "anchors"`), its selection `not_started`; with `long_search: "paths"` a predicate is
+400 `invalid_request`. Labels are column names only: no taxonomy (owner decision P6; a cohort is an explicit list,
+its expansion a client's business).
+
+### 19.2 Request
+
+The fields are §4.1's rows `predicate`, `max_predicate_contexts`, `max_predicate_work`, `predicate_strands`;
+`output.labels` gains `"predicate_only"` (§4.3). With a predicate `output.labels` may be:
+
+- `"none"` (the default, frozen, owner decision P2): the selected contexts without labels;
+- `"predicate_only"`: each selected context with the predicate's labels on its **own** row, placed where the
+  index can (`output.occurrences`, default `true`, as with `"all"`); the service sends it explicitly;
+- `"all"` (P8): the ordinary retrieval of §14 on the selected contexts (their rows read again).
+
+In mode `count` no projection is built (note `projection_not_read` when one was named, §19.10). With a predicate
+`max_memory_mb` and `allow_unbudgeted_annotation` act in every mode (the selection reads rows under the account);
+`max_labels_per_anchor`, `max_annotation_work`, `max_labels`, `max_occurrences_per_label` and
+`require_support` act only on a projection.
+
+### 19.3 The predicate
+
+<!-- schema: predicate -->
+| operator | form | meaning on a context's label set S |
+|---|---|---|
+| `any` | `{"any": [n1, n2, …]}` | at least one listed name is in S |
+| `all` | `{"all": [n1, n2, …]}` | every listed name is in S |
+| `none` | `{"none": [n1, n2, …]}` | no listed name is in S |
+| `at_least` | `{"at_least": {"n": m, "labels": [n1, …]}}` | at least m of the listed names are in S |
+| `and` | `{"and": [p1, p2, …]}` | every operand holds |
+| `or` | `{"or": [p1, p2, …]}` | at least one operand holds |
+| `not` | `{"not": p}` | p does not hold |
+
+(P1.) Each rule is refused with 400 `invalid_request` naming the path of the first fault
+(`request.predicate.and[1].none[0]: …`), unless said otherwise:
+
+- a predicate is a JSON object with **exactly one** member, one of the seven operators;
+- a name is a **non-empty JSON string**, an annotation column label as stored (case-sensitive, not trimmed; on
+  refseq33m a taxid written as a string, `"562"`); a number is refused with the fix (P7: `write a taxid as
+  "562"`, fixture `predicate_invalid`); a record header is not a predicate term in version 1 (P20: unknown,
+  §19.4);
+- a list (`any`, `all`, `none`, `at_least.labels`) has at least one name and no name twice;
+- `at_least` is an object of exactly `n` and `labels`, `n` an integer with 1 ≤ `n` ≤ the list's length;
+- `and` and `or` take a non-empty list of predicates, `not` one predicate; `not` may stand anywhere, the top
+  level included (P5); nesting (`and`, `or`, `not`) at most 64 deep;
+- **size**: the names of all lists together (a name in two lists counted twice) at most
+  `caps.max_predicate_labels` (`--pattern-max-predicate-labels`, 10,000 by default, at most 1,000,000; not a
+  request field, P3): above it 400 **`predicate_too_large`**, the message naming the count and the cap. Past the
+  cap a name's form is still checked, its repetition in one list no longer: a body above the cap is refused for
+  its size (the parse keeps at most the cap's names, whatever the body's size).
+
+The form is checked in step 8 of §5, after `genetic_code`. Examples on the mini index (its columns are the
+taxids 1296536, 158836, 287, 470, 546, 562, 573, 615, 72407): `{"and": [{"any": ["562"]}, {"none": ["287"]}]}`,
+`{"at_least": {"n": 2, "labels": ["562", "573", "615", "546"]}}`, `{"or": [{"all": ["546", "615"]}, {"not":
+{"any": ["287"]}}]}`.
+
+### 19.4 Binding: unknown names, the normal form, constants
+
+The names are resolved once per request, before the first pattern, against the index's column labels (one hash
+lookup each; the work time read every 4,096 names). A name that is not a column is **unknown**: absent from every
+context. Unknown names are folded away before anything is read:
+
+| form | with unknown names |
+|---|---|
+| `any(L)` | the known names; none known: `false` |
+| `all(L)` | an unknown name: `false` |
+| `none(L)` | the known names; none known: `true` |
+| `at_least(m, L)` | the known names; fewer than m known: `false` |
+| `and` | `false` if an operand is `false`; `true` operands dropped; none left: `true`; one left: that operand |
+| `or` | `true` if an operand is `true`; `false` operands dropped; none left: `false`; one left: that operand |
+| `not` | of a constant: the other constant |
+
+The result is the **normal form**, echoed in the answer (`predicate.normal_form`, P19) and evaluated. A normal form
+that is the constant `false` or `true` is evaluated **without reading any annotation** (P18; `selection.pass:
+"constant"`, note `predicate_constant`): `false` selects nothing, `true` every context. A predicate is **vacuous**
+when its normal form holds on a context carrying none of its labels (`none(A)`, `not(any(A))`): it passes contexts
+the index labels with other columns only, and the answer says so (`predicate.vacuous`). The bound predicate (its
+labels, nodes and unknown names; model below) is charged to the request's memory account; a binding the account
+cannot hold, or that the work time stops, leaves no bound predicate: every pattern's selection is then
+`not_started` with `stop {selection, max_memory | time}`, and the predicate block states its `names` only (the
+rest `null`).
+
+### 19.5 What is selected
+
+A context is selected when the normal form holds on its label set S: the predicate's labels present on the
+annotation row of the context's k-mer x (§7.10) and, with `predicate_strands: "either"` (the default, owner
+decision P11) on a BASIC graph, those on the row of rc(x). **Support is strand-consistent** (the owner's answer to
+P11): a label supports a context in one orientation as a whole — it annotates x, or it annotates rc(x); for L ≤ k
+this is a single k-mer either way, so nothing can be mixed. rc(x) has no row when no record holds it as
+deposited (it then adds nothing). `"context"` reads x's row only (for stranded indexes). On CANONICAL and PRIMARY
+graphs x and rc(x) share one row: S is that row's whatever is asked, and the answer states `"either"`
+(`predicate.strands`).
+
+Why `"either"` is the default: on a BASIC graph (refseq33m) a k-mer's row lists the columns whose records hold it
+as deposited; a record holding the motif on its other strand annotates rc(x). On the mini the blaNDM-1 forward
+primer's 12 `+` contexts carry 9 columns and its 12 `-` contexts 7 (546 and 615 hold the gene on `+` only):
+`none(["546"])` selects the 12 `-` contexts with `"context"` although 546's records carry the primer, and none
+with `"either"` (fixtures `predicate_context`, `predicate_either`).
+
+**Scope `shard_context`** (`predicate.scope`): the predicate is asked of each context on its own, on this index —
+"is this sequence context supported by these labels", never "does the motif occur anywhere in A and nowhere in C"
+(a motif-level predicate is a later increment, design §12). With k = 5 and the pattern `AC`, a sample A holding
+`TACGG` and a sample C holding `CACCC` give two contexts, and `any(A) and none(C)` selects A's although C carries
+the motif in another flank.
+
+### 19.6 The pipeline, per pattern
+
+1. **Discovery** of the raw contexts as without a predicate, against the threshold `max_predicate_contexts`
+   instead of `max_contexts`: `stop_at_threshold` stops it once its running lower bound (without the mask: its
+   running upper bound) passes `max_predicate_contexts`, `stop {discovery, max_predicate_contexts}`.
+2. **Compute admission**: the raw count `exact` (without the mask: its upper bound) at most
+   `max_predicate_contexts`. Above it nothing is read: `all_or_count` withholds `predicate_above_threshold`,
+   `count` states `selection.pass: "not_admitted"`, `partial` tests the first `max_predicate_contexts` in
+   answer order (cut `max_predicate_contexts`). Without the mask an admitted release enumerates every candidate
+   and drops the source dummies (§7.4): the raw count becomes `exact` (fixture `predicate_unmasked`). Each raw
+   context kept for the pass is charged 64 bytes before it is kept (§19.9); the first that does not fit ends the
+   pass's set (`all_or_count` reads nothing, `predicate_budget`; the other modes test what was admitted, `cut:
+   max_memory`).
+3. **The selection pass** (`stop` phase `selection`): (a) the rows: each tested context's row and, with
+   `"either"` on a BASIC graph, its reverse complement's — the k-mer spelled, reverse-complemented and looked
+   up, one lookup per distinct row, kept (the mirror of a mirror is known: no lookup); (b) the reads: one row per
+   read in the order of first appearance (a context's row before its mirror's), each **restricted to the
+   predicate's known labels** (rows access, budget-aware; an unbudgeted annotation with direct access single
+   cells for at most 16 labels, `selection.access: "columns"`), the time and `max_predicate_work` checked before
+   each; a row the account cannot hold is stated (`rows_refused`, phase `selection`) and its contexts stay
+   untested (`all_or_count` stops reading there) — but an unbudgeted read (`allow_unbudgeted_annotation`), whose
+   size is known only after it, that the account cannot hold stops the reads with `stop {selection,
+   max_memory}` and is not stated in `rows_refused`, as §14.4's unbudgeted reads stop; (c) the decisions, in answer order as the rows are read: a
+   context is **tested** once every row it needs was read, **selected** when the normal form holds on S.
+   `stop_at_threshold` ends the pass once more than `max_contexts` are selected (`stop {selection,
+   max_contexts}`); after any stop but time, every context whose rows were read is still decided.
+4. **Selection admission**: the selected count `exact` and at most `max_contexts`. Above it `all_or_count`
+   withholds `selected_above_threshold` (P14), the counts kept; `partial` returns the first `max_contexts`
+   selected in answer order (cut `max_contexts`).
+5. **The results** of the selected contexts, in answer order, each charged 512 + 2k bytes before its object is
+   built, the clock read every 64 (`stop` phase `output`: `time`; without a projection `max_memory`, which the
+   projections state as §14.4 does), then **the projection**: none; `"predicate_only"` (the pass's own rows of
+   the selected contexts, their predicate labels placed by a second read of those labels' coordinates under
+   `max_annotation_work`); `"all"` (the retrieval of §14).
+6. **Publication**: `all_or_count` publishes every selected context or none.
+
+| mode | with a predicate |
+|---|---|
+| `count` | steps 1–3 (the pass runs: a `count` with a predicate reads annotation); no results, no `withheld`, `returned`, `cut`; `retrieval_complete` false; the pass in `selection.pass` |
+| `all_or_count` | steps 1–6; every selected context or none |
+| `partial` | steps 1–6 on the first `max_predicate_contexts` raw contexts; the pass tests every one of them it can (P4); the first `max_contexts` selected are returned |
+
+A normal form `false` runs discovery as mode `count` does (nothing retained, no read) and answers `selected`
+`exact` 0 and, in a retrieval mode, `results: []` with `retrieval_complete: true` — also after a discovery stop: no
+context can pass (P18). `true` is the unfiltered request: the engine's own thresholds (`max_contexts`) and no
+read for the selection; `selected` is the raw count with its relation (`"predicate_only"` then lists no label:
+the predicate names no column of the index).
+
+### 19.7 Counts and their relations
+
+`counts.tested` and `counts.selected` (§8.6), unit `graph_contexts` (`paths` for a pattern longer than k). With
+R the raw count (`counts.contexts`), T the decisions made and S the selected among them:
+
+| `selection.pass` | when | `tested` | `selected` |
+|---|---|---|---|
+| `completed` | every raw context was tested (R `exact`, T = R) | `exact` T | `exact` S |
+| `stopped` | the pass stopped (work, memory, time, `stop_at_threshold`), a row was refused, the descriptors' admission cut its set, or `partial`'s release held fewer than R | `exact` T | `bounds` [S, S + R_upper − T] where R has an upper bound (`exact` R, or `bounds` up to R_upper; P13); `at_least` S where R is `at_least` |
+| `not_admitted` | R above `max_predicate_contexts` (`all_or_count`, `count`) | `unknown` | `unknown` |
+| `not_started` | a stop before the pass (the engine's withheld release; in `partial` an engine stop, `max_steps` or `time`, before it released a context, so that every mode answers that stop alike; a sticky `max_predicate_work` stop of an earlier pattern; a binding that stopped), or a pattern longer than k | `unknown` | `unknown`; `exact` 0 when R is `exact` 0 |
+| `constant` | the normal form is `false` or `true` | R, its relation | `false`: `exact` 0; `true`: R, its relation |
+
+- `selected` ≤ `tested` ≤ the raw count's upper bound, whatever the relations.
+- The raw counts keep their meaning: what discovery found, unfiltered. A predicate never changes them, except that
+  an admitted `all_or_count` release on a graph without its mask makes them `exact`, as without a predicate.
+- `counts.labels` and `counts.occurrences` are over the returned contexts and the projection's labels: `unknown`
+  with `"none"`; with `"predicate_only"` the predicate's labels found on the returned contexts' own rows (`exact`
+  when the list and its placement are complete); with `"all"` as §14.6.
+- A `selected` count carries no `estimate`, also without the mask.
+
+### 19.8 `withheld`, `cut`, `stop`
+
+`withheld.reason` (`all_or_count`; §7.5's table): `predicate_above_threshold` (the compute admission, nothing
+read), `selected_above_threshold` (more selected than `max_contexts`, the counts kept), `predicate_budget` (the
+pass stopped at `max_predicate_work`, also an earlier pattern's, sticky; or the account could not hold the
+bound predicate, the descriptors, a row, a statement); and, unchanged in name: `deadline` (a time stop of the
+pass, `stop {selection, time}`, or of the results, `stop {output, time}`), `threshold_crossed` (`stop_at_threshold`
+on the raw count, reason `max_predicate_contexts`, or on the selected count, reason `max_contexts`),
+`discovery_budget`, `output_budget` (the results' objects), and §14.6's reasons for the projection's reads.
+`count_above_threshold` is not used on L ≤ k with a predicate (its raw threshold is `predicate_above_threshold`).
+
+`cut.reason` (`partial`), the first that applies in this order: the engine's stop (`max_steps`, `time`), the
+pass's stop (`max_predicate_work`, `max_memory`, `time`, `max_contexts` of `stop_at_threshold`; `max_memory` also
+for refused rows and descriptors the account could not hold), the raw release's cut (`max_predicate_contexts`),
+the selected list's cut (`max_contexts`); a cut of the results themselves (`time`, `max_memory`) replaces them
+(the list's length is the results', as §7.5's memory cut). An incompleteness of the projection alone (a refused
+placement row, a time stop of its reads) sets `retrieval_complete: false` without a cut, as §7.5 says.
+
+`stop`: the phase **`selection`** (the pass: lookups, reads, decisions) with the reasons `max_predicate_work`,
+`max_memory`, `time`, `max_contexts`; the reason **`max_predicate_contexts`** for the phase `discovery`. First stop
+wins (§7.6): the engine's, then the pass's, then the results' (`output`), then the projection's. A time stop of the
+pass is recorded in the request's budget: the later patterns answer as after any time stop. A `max_predicate_work`
+stop is sticky for the selection of the later patterns (their discovery runs as mode `count` does, their pass
+`not_started`, `withheld: predicate_budget` / `cut: max_predicate_work`), as `max_annotation_work` is for §14.4's
+reads.
+
+### 19.9 Budgets: work, memory, the deadline
+
+**Work** (`max_predicate_work`, one budget per request, separate from `max_annotation_work`, P3), in the
+oracle's units:
+
+| item | units | when charged |
+|---|---|---|
+| a row read by the pass | 8 + E + D: E the decoded row's entries — **all its labels, not only the predicate's** (P17: a row-diff decode builds the whole row) — and D its row-diff dependency units (8 per dependency row, 1 per entry it stores) | gate `units < max_predicate_work` before the read; the units when it returns. A refused read: what its decode reached (counting the restricted hits, at least 8: the whole row's size is not returned for a refused key); an interrupted one at least 8; an unbudgeted read 8 + its hits (the row's size is unknown) |
+| a reverse-complement lookup (`"either"`, BASIC) | k | gate before it; one per distinct row, none for a row found as another's mirror |
+| deciding a context | 1, and 1 per leaf each distinct present label is listed in | after its rows were read; never refused |
+
+The pass checks `units < max_predicate_work` before every read and every lookup: it passes the budget by at most
+one read's units, as §14.4's reads do. All lookups come before the first read (step 3a), so an early exit by
+`stop_at_threshold` saves reads, not lookups.
+
+**Memory** (the request's account, `max_memory_mb`, §14.4; with a predicate it exists in every mode). The model,
+beside §14.4's items:
+
+| item | bytes (model) | when charged |
+|---|---|---|
+| the bound predicate | per label of the normal form 192 + 2 × its length; per name a leaf lists 8; per node 64; per unknown name 64 + its length | once, before the first pattern (its echo's text is covered by it) |
+| a raw context kept for the pass | 64 | as the engine releases it, before it is kept |
+| a distinct row of the pass | 96 (its entry and the index of its key) | before it is added (step 3a) |
+| a row's hits | as the `DecodeBudget` models them (§14.4), restricted to the predicate's labels | by the read; held until its contexts are decided, then freed (but a listed context's own row with `"predicate_only"`) |
+| the statement of a refused row | 384 + k | reserved before each read |
+| a listed context's `selection_labels` and `selection_strands` | 32 + the names' lengths + 4 per label (the ids kept until the results name them); 32 + 24 per label (a byte kept per label, its string in the answer) | when it is decided |
+| a label of the listed contexts' label order | 48 | likewise, once per distinct label |
+| `"predicate_only"`'s dictionary | 192 + 2 × the length, per distinct predicate label on the listed rows | likewise |
+| a selected context's result object | 512 + 2k (§14.4) | before it is built |
+
+**The deadline** (§7.6): read while the names are bound (every 4,096), every 4,096 contexts and before every
+lookup batch of 64, before every row read (and between its paced pieces), every 64 decisions, before the label
+order of the listed contexts (stop `{output, time}`, the list then dropped; its sorts, n log n comparisons each,
+are then counted as light work, so that the next light work reads the clock once they pass 4,096) and every 64
+result objects built. A time stop: `stop {selection, time}` (or `{output, time}`), `determinism: "time_limited"`.
+The loops that only free what the pass held (its rows, at most 2 × `max_predicate_contexts`) are not clocked: a
+stop would not skip them.
+
+The engine's own retention for the raw release (24-byte descriptors, up to `max_predicate_contexts`) is outside
+the account, as the label-free path's is (§7.6). The result objects of `output.labels: "none"` are charged while
+their pattern is answered and released when the next pattern's release begins.
+
+### 19.10 The answer
+
+**Top level.** `output` (§8.1): `{"labels": "predicate_only", "occurrences": <bool>}` beside the other values.
+`predicate`, present exactly when the request named one:
+
+<!-- schema: predicate_block -->
+| field | type | meaning |
+|---|---|---|
+| `normal_form` | object \| boolean \| null | the predicate after folding (§19.4), in the request's syntax; `false` / `true` for a constant; `null` when the binding stopped |
+| `names` | integer | the distinct names of the request's lists |
+| `known` | integer \| null | of them, the index's columns (also the ones the folding dropped) |
+| `unknown_labels` | list of strings \| null | the others, in the order of their first appearance in the request: a typo shows here, never as an absence |
+| `vacuous` | boolean \| null | the normal form holds on a context carrying none of its labels (§19.4) |
+| `scope` | `"shard_context"` | §19.5: per context, per index; not motif-level |
+| `strands` | `"either"` \| `"context"` | what was evaluated (§19.5): `"either"` on CANONICAL and PRIMARY graphs whatever was asked (`limits.predicate_strands` echoes the request) |
+
+**Entry.** Every answered entry of a predicate request gains `counts.tested`, `counts.selected` (§19.7),
+`absence_filter: "predicate"` (§19.11), `rows_refused` (in every mode; the pass's first), `work.predicate_rows`,
+`work.predicate_units`, `work.predicate_lookups`, `work.memory_bytes` (§8.7), `timing.selection_ms` (§8.4), and:
+
+<!-- schema: selection -->
+| field | type | meaning |
+|---|---|---|
+| `pass` | `"completed"` \| `"stopped"` \| `"not_admitted"` \| `"not_started"` \| `"constant"` | §19.7 |
+| `support` | `"kmer"` \| `"label_intersection"` \| `"record_verified"` | what a label's presence means: on the context's k-mer (`kmer`, L ≤ k); for a pattern longer than k the index's best support of a walk (the level of the supported-path selection, a later increment) |
+| `access` | `"rows"` \| `"columns"` | how the predicate's labels are read: rows decoded and restricted (budget-aware, or unbudgeted rows), or single cells (an unbudgeted annotation with direct access and at most 16 known labels, `allow_unbudgeted_annotation`) |
+
+With `"none"` the entry has no `placement`, `annotation`, `by_label`, … (as §8.5); with `"predicate_only"` and
+`"all"` it has the fields of §14. **Results** are the selected contexts, in answer order (§7.9); under a projection
+that reads labels each carries `selection_labels` (§8.8, P22): the predicate's labels in the set it was evaluated
+on, in label order — why it was selected (with `"either"` possibly a label of its reverse complement's row only,
+which its own `labels` then lack) — and beside them `selection_strands` (§8.8; the owner's answer to P11: per
+selected result and label the orientation that supported it): `"context"`, `"reverse_complement"` or `"both"` on a
+BASIC graph (every label `"context"` under `predicate.strands: "context"`, which reads x's row only), `"either"` on
+CANONICAL and PRIMARY graphs. Fixture `predicate_selection_strands`: `any(546)` on the blaNDM-1 forward primer
+selects the 12 `+` contexts by their own row (`"context"`) and the 12 `-` ones by their reverse complement's
+(`"reverse_complement"`, their own `labels` empty). With `"predicate_only"` its `labels` are the predicate's labels on its own row
+(`labels_total` their number), placed as §14.3 places them; `annotation_rows` counts the placement's reads only (the
+rows were read by the pass, `predicate_rows`), `annotation_rows_distinct` the distinct rows of the returned
+contexts.
+
+**`limits`** (§8.3): `max_predicate_contexts`, `max_predicate_work` (effective), `max_predicate_labels` (the
+server's), `predicate_strands` (as requested), and the annotation limits of §8.3 in every mode; `clamped` may name
+`max_predicate_contexts` and `max_predicate_work` (after `max_paths`).
+
+**Notes** (§8.10, after the others in this order): `annotation_unbudgeted` (a selection that read an unbudgeted
+annotation, when no projection said it), `predicate_constant`, `projection_not_read`. `annotation_not_read` is never
+set on a predicate answer.
+
+### 19.11 What a filtered answer licenses (`absence_filter: "predicate"`)
+
+- `retrieval_complete: true` with a predicate: `selected` is `exact` and every selected context is in `results`
+  with its projected labels. So a raw context of the pattern in its scope and strands that is **not** in
+  `results` does not satisfy the predicate — on this index, per context (`scope: "shard_context"`), at
+  `selection.support` and `predicate.strands`.
+- `selected` `exact` 0: no context of the pattern in its scope and strands satisfies the predicate there.
+- With `"predicate_only"` and `retrieval_complete: true`: a predicate label absent from a result's `labels` is absent
+  from that context's own row; with `"either"` its `selection_labels` may still hold it, with `selection_strands`
+  `"reverse_complement"` (the label carries the context's reverse complement as deposited, not the context).
+- **Not licensed**: motif-level statements ("A carries the motif, C does not", §19.5); anything about the labels
+  a projection did not read (`"none"`, or labels outside the predicate with `"predicate_only"`); anything about
+  contexts beyond `tested` when `selected` is `bounds` or `at_least`; anything about unknown names (they are no
+  columns of this index); with `"context"` on BASIC, anything about the other strand's records.
+- A `count` answer with a predicate licenses its counts (`selected` `exact` 0 is the absence above), no list.
+- `absence_filter: "predicate"` says that the entry's absence claims are this section's, not §9's unfiltered
+  ones; the raw counts keep §9's.
+
+### 19.12 Capabilities
+
+Added to the `pattern` block (§10.2, both routes): `projections` lists `"predicate_only"`,
+`projections_later_increment` is `[]`, `caps` gains `max_predicate_contexts` (100,000), `max_predicate_work`
+(10⁸) and `max_predicate_labels` (10,000), `caps_rule` names them, and `predicate` (`capabilities_predicate`,
+§10.2) states the operators, the strands and the access. A client offers predicates where `projections` lists
+`"predicate_only"`, sends at most `caps.max_predicate_labels` names and `predicate_strands` from
+`predicate.strands`. Measured on the mini: the largest document, the unmasked server's `/traverse/capabilities`,
+grew by 285 bytes, from 31,085 to 31,370 as the server writes it, 374 under the budget of 32,768 − 1,024
+(`test_capabilities_byte_budget`); the validator's measure from above (floats counted at 24 characters) is 31,504,
+240 under it (`test_capabilities_documents_keep_a_kibibyte`); the masked server's is 31,251 (31,368 from above).
+
+### 19.13 Worked examples (the mini index, this build)
+
+Measured with this build's server on the masked copy of the mini (the fixtures of §11; `timing` varies):
+
+| fixture | request | answer |
+|---|---|---|
+| `predicate_filter` | `GCGGCGGCGGCG`, `all_or_count`, `max_contexts` 100, `and(any 562, none 287)`, `predicate_only`, occurrences false | 1,828 contexts tested in 1,777 rows (1,757 lookups, 744,365 units, ~20 ms), 60 selected and returned, complete (without the predicate: `withheld: count_above_threshold`); each with `selection_labels: ["562"]` and its own row's 562 |
+| `predicate_either` / `predicate_context` | NDM-F, `count`, `none(546)` | 24 tested in 24 rows; 0 selected with `"either"` (12 lookups, 12,388 units), 12 (the `-` contexts) with `"context"` (12,004 units) |
+| `predicate_budget` | GCG12, `"context"`, `max_predicate_work` 1, then NDM-F | the first row read (485 units: the budget is checked before a read), `tested` 1, `selected` `bounds` [0, 1827], `stop {selection, max_predicate_work}`, `predicate_budget`; NDM-F's discovery runs, its selection `not_started` (sticky) |
+| `predicate_partial_admission` | GCG12, `partial`, `max_predicate_contexts` 100 | the first 100 raw contexts tested (103 rows), 6 selected, `bounds` [6, 1734], `cut: max_predicate_contexts` |
+| `predicate_stop_at_threshold` | GCG12, `partial`, `max_contexts` 10, `stop_at_threshold` | 272 contexts decided in 269 of the 1,777 rows, 17 selected (`bounds` [17, 1573]), the first 10 returned, `stop {selection, max_contexts}` |
+| `predicate_unknown_constant` | NDM-F, `any(5622)` | `unknown_labels: ["5622"]`, `normal_form: false`, `pass: "constant"`, `tested` `exact` 24, `selected` `exact` 0, no row, `predicate_constant`, complete |
+| `predicate_only_record` | NDM-F, `any(562)`, `predicate_only` | 24 selected, each with 562 placed: 13 placed occurrences (`labels_all`'s 562 has 13); `selection_strands: ["both"]` (562's records hold the primer on both strands) |
+| `predicate_selection_strands` | NDM-F, `any(546)`, `predicate_only`, occurrences false | 24 selected: the 12 `+` contexts by their own row (`selection_strands: ["context"]`, `labels` [546]), the 12 `-` ones by their reverse complement's (`["reverse_complement"]`, `labels` empty) |
+| `predicate_unbudgeted_allowed` | the PRIMARY index, `none(573.fa)`, `"context"`, `allow_unbudgeted_annotation` | 12 rows (one per k-mer pair), `access: "columns"`, `predicate.strands: "either"`, note `annotation_unbudgeted` |
+
+### 19.14 Stated limitations
+
+- Context-level, per index (`scope: "shard_context"`): no motif-level predicates (design §12).
+- Columns only; record headers are unknown names (P20). Cohorts larger than `caps.max_predicate_labels` are split by
+  the client or need a raised cap; no taxonomy terms (P6). On refseq33m a column holds exactly its taxid's records,
+  not its descendants: "in E. coli" is a list of every strain taxid.
+- `access: "rows"`: a row is decoded whole to read one label of it; the units say so (P17).
+- Each selected row is read again by `output.labels: "all"` (P8).
+- A predicate request in mode `count` reads annotation (unlike a count without one).
+- The pass costs a row per distinct row: about 1–4 ms a row on staging refseq33m (the coordinator's measurement of
+  2026-10-08), so its compute admission there is the host's `--pattern-max-predicate-contexts` 10,000 (P3).
+- The reverse-complement lookups all come before the first read: `stop_at_threshold` saves reads, not lookups.
+- The result objects of `output.labels: "none"` are held by the account for their pattern only (§19.9).
+
+### 19.15 What changed
+
+**Additions only** (contract version 1): the request fields and values of §19.2, the answer fields of §19.10, the
+values of §19.8, the notes `predicate_constant` and `projection_not_read`, the refusal code `predicate_too_large`,
+the capabilities' additions of §19.12. **Changed for requests that were refused anyway**: `output.labels:
+"predicate_only"` without a predicate is 400 `invalid_request` (was `later_increment`); `predicate`,
+`max_predicate_contexts`, `max_predicate_work` are read (were `later_increment` by name), so a body naming them
+with another fault can now be refused for that fault first; `caps_rule` (prose) names the three caps.
+
+Checked with the identity panel (`round-5bA/route/panel`: every POST fixture of the single-graph mini servers but the
+time budgets, and the variants of the 2026-10-07 panel and of round fix3 — 182 requests and both capabilities routes
+— on the masked copy and on the mini as built, against the build of `9018f41b`): 181 of 184 identical apart from
+`timing` on each graph; the three others are `/capabilities` and `/traverse/capabilities` (the additions of §19.12
+and `caps_rule`, nothing else in the document) and `later_increment_labels` (the code above). Rerun on the
+integrated build (`round-5bA/integrator/panel`): the same on each graph (beside them the 21 predicate requests,
+which the baseline refused); 5s-2's engine panel (every POST fixture, long-pattern shapes, peptides, 294 step
+budgets inside extensions) on six server configurations, its 558 requests without a predicate identical on each;
+303 `/traverse`, `/resolve` and labelled `/pattern` requests identical apart from `timing` but
+`/traverse/capabilities`.
+
+**Fixtures** (§11): 25 new (`predicate_only_without_predicate` among them, replacing `later_increment_labels`), a
+server variant `masked_small_predicate_cap`; the nine capabilities bodies of the single-graph servers regenerated; no other stored
+body changed. The validator (`test_pattern_fixtures.py`) knows the new tables (`predicate`, `predicate_block`,
+`selection`, `capabilities_predicate`) and rows, the new values, and checks the predicate block against its own
+folding of the request's predicate, the relations of §19.7, the withheld and cut reasons, every result's
+`selection_labels` against its own evaluation of the normal form and its `selection_strands` against its own
+labels and the graph's mode, and `"predicate_only"`'s labels against the normal form's names (`test_predicate_rules_refuse_what_v1_never_answers`: mutated answers each rule refuses).
+
+**Tests with independent oracles** (records scanned, a recursive evaluator of the request's JSON, never the
+modules under test): `PatternSelection.*` (`tests/cli/test_pattern_selection.cpp`, through the route), among them
+every `max_predicate_work` up to the pass's total in three modes and both strand settings, every reading of a
+virtual clock, the memory account from the smallest, the descriptors' admission, refused rows, the sticky stop,
+CANONICAL and PRIMARY builds, unbudgeted access, a graph without its mask; `PatternRoute.Refusals`, `RefusalOrder`
+and `Capabilities`; the integration's `test_predicate_against_the_fasta` (the mini's FASTA scanned per k-mer and
+its reverse complement).

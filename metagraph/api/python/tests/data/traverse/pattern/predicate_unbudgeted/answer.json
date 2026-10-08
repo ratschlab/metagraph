@@ -1,0 +1,4 @@
+{
+ "code": "annotation_unbudgeted",
+ "error": "pattern: a predicate reads the annotation in every mode (its selection reads the rows of the contexts it tests), and this index's annotation has no budget-aware decode (only the row-diff family has one): its reads would run without a memory bound. Set allow_unbudgeted_annotation: true to read it anyway (selection.access then says how: \"rows\", or \"columns\" for at most 16 labels), or ask without the predicate"
+}

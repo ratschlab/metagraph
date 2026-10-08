@@ -1,0 +1,25 @@
+{
+ "patterns": [
+  {
+   "dna": "GCGGCGGCGGCG",
+   "id": "GCG12"
+  }
+ ],
+ "mode": "partial",
+ "max_contexts": 10,
+ "stop_at_threshold": true,
+ "predicate": {
+  "and": [
+   {
+    "any": [
+     "562"
+    ]
+   },
+   {
+    "none": [
+     "287"
+    ]
+   }
+  ]
+ }
+}

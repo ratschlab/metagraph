@@ -383,6 +383,13 @@ struct SelectionAnswer {
     // reverse complement's), as ids into Bound::labels(), in label order (contexts desc over
     // the chosen, column asc); charged when the context was decided
     std::vector<std::vector<graph::traversal::LabelId>> selection_labels;
+    // beside each of them, which row it was found on (the owner's answer to P11: per selected
+    // result and label the orientation that supported it): kOnContext (the context's k-mer x
+    // as spelled), kOnReverseComplement (rc(x), "either" on a BASIC graph), or both (a
+    // palindromic x under "either": x is rc(x)). selection_strands_json names them
+    static constexpr uint8_t kOnContext = 1;
+    static constexpr uint8_t kOnReverseComplement = 2;
+    std::vector<std::vector<uint8_t>> selection_label_rows;
     // all_or_count: why nothing is listed (predicate_budget, deadline, threshold_crossed,
     // selected_above_threshold, output_budget)
     std::optional<std::string> withheld;
@@ -579,6 +586,11 @@ class PatternRetrieval {
     // the j-th chosen context's selection_labels (the names; their bytes were charged by the
     // pass)
     Json::Value selection_labels_json(const SelectionAnswer &answer, size_t j) const;
+    // beside them, per label the orientation whose row carries it (§19.10, the owner's answer
+    // to P11): "context" (the context's k-mer as spelled), "reverse_complement" (its reverse
+    // complement's row only, "either" on a BASIC graph), "both", or "either" on CANONICAL and
+    // PRIMARY graphs (one row serves both orientations: no strand is known)
+    Json::Value selection_strands_json(const SelectionAnswer &answer, size_t j) const;
     // frees what the last pattern's pass still holds: its descriptors (after the route built
     // the chosen contexts' results) and its kept rows (when retrieve_given did not take them)
     void end_selection();

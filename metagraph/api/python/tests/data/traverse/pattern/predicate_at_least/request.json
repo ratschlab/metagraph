@@ -1,0 +1,25 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "predicate": {
+  "at_least": {
+   "n": 8,
+   "labels": [
+    "1296536",
+    "158836",
+    "287",
+    "470",
+    "546",
+    "562",
+    "573",
+    "615",
+    "72407"
+   ]
+  }
+ },
+ "predicate_strands": "context"
+}

@@ -1,0 +1,4 @@
+{
+ "code": "invalid_request",
+ "error": "request.output.labels: \"predicate_only\" returns the labels a predicate names: it needs a predicate (request.predicate)"
+}

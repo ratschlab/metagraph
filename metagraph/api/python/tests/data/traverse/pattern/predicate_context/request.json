@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "mode": "count",
+ "predicate": {
+  "none": [
+   "546"
+  ]
+ },
+ "predicate_strands": "context"
+}

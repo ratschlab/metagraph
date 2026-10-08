@@ -1,0 +1,308 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": false,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_patterns": 16,
+  "max_predicate_contexts": 100,
+  "max_predicate_labels": 10000,
+  "max_predicate_work": 100000000,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "predicate_strands": "either",
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "partial",
+ "output": {
+  "labels": "none"
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_filter": "predicate",
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "10": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "11": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "12": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "13": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "14": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "15": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "16": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "17": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "18": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "19": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 92
+      },
+      "2": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "3": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "4": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "5": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "6": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "7": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "8": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      },
+      "9": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 91
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 940
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 888
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 92
+     },
+     "unit": "graph_contexts",
+     "value": 1828
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "selected": {
+     "lower": 6,
+     "relation": "bounds",
+     "unit": "graph_contexts",
+     "upper": 1734,
+     "value": 6
+    },
+    "tested": {
+     "relation": "exact",
+     "unit": "graph_contexts",
+     "value": 100
+    }
+   },
+   "cut": {
+    "reason": "max_predicate_contexts"
+   },
+   "determinism": "full",
+   "id": "GCG12",
+   "information_bits": 24.0,
+   "kind": "dna",
+   "length": 12,
+   "min_anchor_information_bits": null,
+   "mode": "partial",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "GCGGCGGCGGCG",
+   "results": [
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "ACTGCGTACCAGCGGCGGCGGCGCGGACAAG",
+     "node": 81331,
+     "offset": 11,
+     "row": 81330,
+     "strand": "+"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "CAGCAGCGGAATGCACGCCGCCGCCGCGAAC",
+     "node": 205417,
+     "offset": 15,
+     "row": 205416,
+     "strand": "-"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCAGCGGAATGCACGCCGCCGCCGCGAACAT",
+     "node": 334990,
+     "offset": 13,
+     "row": 334989,
+     "strand": "-"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "CACTGCGTACCAGCGGCGGCGGCGCGGACAA",
+     "node": 374786,
+     "offset": 12,
+     "row": 374785,
+     "strand": "+"
+    },
+    {
+     "instance": "GCGGCGGCGGCG",
+     "kmer": "TACCAGCGGCGGCGGCGCGGACAAGCCCCAT",
+     "node": 439891,
+     "offset": 5,
+     "row": 439890,
+     "strand": "+"
+    },
+    {
+     "instance": "CGCCGCCGCCGC",
+     "kmer": "GCTTGTCCGCGCCGCCGCCGCTGGTACGCAG",
+     "node": 615902,
+     "offset": 9,
+     "row": 615901,
+     "strand": "-"
+    }
+   ],
+   "retrieval_complete": false,
+   "returned": 6,
+   "rows_refused": [],
+   "scope": "any_offset",
+   "selection": {
+    "access": "rows",
+    "pass": "stopped",
+    "support": "kmer"
+   },
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.364167,
+    "selection_ms": 1.407875
+   },
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "memory_bytes": 16956,
+    "predicate_lookups": 99,
+    "predicate_rows": 103,
+    "predicate_units": 42243,
+    "ranges_visited": 5442,
+    "steps": 5442
+   }
+  }
+ ],
+ "predicate": {
+  "known": 2,
+  "names": 2,
+  "normal_form": {
+   "and": [
+    {
+     "any": [
+      "562"
+     ]
+    },
+    {
+     "none": [
+      "287"
+     ]
+    }
+   ]
+  },
+  "scope": "shard_context",
+  "strands": "either",
+  "unknown_labels": [],
+  "vacuous": false
+ },
+ "timing": {
+  "elapsed_ms": 1.794584
+ }
+}

@@ -10,6 +10,7 @@
   "multi": "server_query {work}/graphs.csv --index-release fixtures-mini_refseq  (one line: mini_refseq,{work}/masked/graph_k31.dbg,{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg)",
   "primary": "server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg --index-name mini_primary --index-release fixtures-mini_refseq  (a PRIMARY graph of 562.fa and 573.fa at k = 31 with --mask-dummy, column annotation by file name)",
   "masked_no_map": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --no-coord-mapping --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy, its .seqs not loaded)",
+  "masked_small_predicate_cap": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-max-predicate-labels 4 --index-name mini_refseq --index-release fixtures-mini_refseq  (the masked copy; a predicate may list 4 names)",
   "hash": "server_query -i {work}/hash/graph.orhashdbg -a {work}/hash/anno.column.annodbg --index-release fixtures-mini_refseq  (a hash graph of 1296536.fa at k = 31, column annotation by file name)"
  },
  "fixtures": {
@@ -742,6 +743,222 @@
    "headers": {},
    "shows": "patterns longer than k without the mask: an anchor window without a leading N is spelled whole, so the anchors are exact (no source dummy can hold one), and the paths are the masked graph's: exact, released, complete"
   },
+  "predicate_filter": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a selective predicate on a pattern above max_contexts (SPEC §19.13 a): the GCG repeat's 1,828 contexts (withheld count_above_threshold without the predicate) tested in 1,777 rows, 60 selected and returned, complete; the predicate block (normal form, names, known, unknown_labels, vacuous, scope, strands either), selection {completed, kmer, rows}, absence_filter predicate; each result with selection_labels [\"562\"] and its own row's predicate labels (predicate_only, occurrences false: placement not_requested)"
+  },
+  "predicate_either": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "P11, the strands of a BASIC graph: none(546) on the blaNDM-1 primer, predicate_strands either (the default): 546's records hold the primer on + only, so each of the 24 contexts has 546 on its k-mer or on its reverse complement: 0 selected; mode count reads the rows (24, 12 reverse-complement lookups), and states the projection it named and did not build (projection_not_read)"
+  },
+  "predicate_context": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same with predicate_strands \"context\" (the deposited strand only): the 12 - contexts, whose own rows lack 546, are selected although 546's records carry the primer on the other strand"
+  },
+  "predicate_at_least": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "at_least 8 of the nine columns, \"context\": the 12 + contexts (9 columns on their rows; the - contexts have 7), returned and complete"
+  },
+  "predicate_unknown_constant": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a typo (5622 is no column): reported in unknown_labels, never as an absence; the normal form is false (P18): no row read, selection constant, tested the 24 contexts, selected exact 0, complete; note predicate_constant"
+  },
+  "predicate_unknown_folded": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "an unknown name folded away (SPEC §19.4: none of an unknown is true): normal form {\"any\": [\"562\"]}, unknown_labels [\"5622\"]; the 24 contexts selected and returned"
+  },
+  "predicate_vacuous": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a vacuous predicate (true on a context carrying none of its labels: vacuous true), partial: 68 of the 1,828 contexts selected, the first 5 returned, cut max_contexts"
+  },
+  "predicate_budget": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "max_predicate_work 1, \"context\" (SPEC §19.13 d): the first row is read (the budget is checked before a read), the next is not: tested exact 1, selected bounds [0, 1827], stop {selection, max_predicate_work}, withheld predicate_budget; the stop is sticky: the next pattern's discovery runs, its selection not_started, predicate_budget"
+  },
+  "predicate_budget_partial": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same in partial: nothing selected among the one context tested, returned 0, cut max_predicate_work"
+  },
+  "predicate_above_threshold": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the compute admission: 1,828 raw contexts above max_predicate_contexts 100, all_or_count reads nothing: withheld predicate_above_threshold, selection not_admitted, tested and selected unknown, work.predicate_rows 0"
+  },
+  "predicate_partial_admission": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same admission in partial: the first 100 raw contexts in answer order are tested (the count stays exact 1,828), selected bounds [S, S + 1,728], cut max_predicate_contexts"
+  },
+  "predicate_selected_above": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "more selected (60) than max_contexts (10): all_or_count withholds selected_above_threshold, the counts kept (selected exact 60)"
+  },
+  "predicate_stop_at_threshold": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "stop_at_threshold on the selected count, partial: the pass ends once 11 are selected (an early exit: 269 of the 1,777 rows read), stop {selection, max_contexts}, the first 10 returned, cut max_contexts, selected bounds"
+  },
+  "predicate_stop_at_raw": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "stop_at_threshold on the raw count with a predicate: discovery stops once its running count passes max_predicate_contexts (stop {discovery, max_predicate_contexts}), withheld threshold_crossed, the selection not_started"
+  },
+  "predicate_only_record": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "output.labels \"predicate_only\" with occurrences (the default): each selected context with the predicate's labels on its own row, placed in the records (562's 13 placed occurrences over the 24 contexts, as labels_all's by_label has them), by_label of those labels only"
+  },
+  "predicate_selection_strands": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "per selected result and label the orientation whose row carries it (the owner's answer to P11, selection_strands): 546 holds the blaNDM-1 primer on + only, so any(546) \"either\" selects all 24 contexts, the 12 + ones by their own row (\"context\", their labels [546]) and the 12 - ones by their reverse complement's (\"reverse_complement\", their own labels empty)"
+  },
+  "predicate_all": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a predicate with output.labels \"all\" (P8): the 12 - contexts selected by none(546) \"context\", each with every label of its row (7), placed; their selection_labels empty (none of the predicate's labels is on them)"
+  },
+  "predicate_long_anchors": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a pattern longer than k with a predicate under long_search \"anchors\" (the default): its anchors' answer as without it (withheld paths_later_increment), its selection not_started (a predicate selects supported paths, a later increment)"
+  },
+  "predicate_unmasked": {
+   "server": "unmasked_unchecked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a predicate on the graph without its mask, the check of decision #24 off: the raw count bounds [2, 24] is admitted on its upper bound, the release enumerates every candidate and drops the source dummies, so the raw count is exact 24; the 24 contexts selected and returned, complete"
+  },
+  "predicate_unbudgeted": {
+   "server": "primary",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 annotation_unbudgeted: a predicate reads the annotation in every mode, and the PRIMARY index's column annotation has no budget-aware decode"
+  },
+  "predicate_unbudgeted_allowed": {
+   "server": "primary",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same with allow_unbudgeted_annotation: one row serves a k-mer and its reverse complement on a PRIMARY graph, so the predicate block says strands either whatever was asked (limits.predicate_strands: context, as requested); selection.access columns (single cells for at most 16 labels); note annotation_unbudgeted"
+  },
+  "predicate_invalid": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 invalid_request: a name is a string (P7; the message names the path and the fix, \"write a taxid as \\\"562\\\"\")"
+  },
+  "predicate_paths_refused": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 invalid_request: a predicate with long_search \"paths\" (P24: a predicate selects among supported paths, long_search \"supported_paths\", a later increment)"
+  },
+  "predicate_too_large": {
+   "server": "masked_small_predicate_cap",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 predicate_too_large on a server whose predicates may list 4 names (--pattern-max-predicate-labels 4, capabilities caps.max_predicate_labels): 5 names; the message names the count and the cap"
+  },
   "unknown_field": {
    "server": "masked",
    "method": "POST",
@@ -760,14 +977,14 @@
    "headers": {},
    "shows": "400 invalid_request: more patterns than the server's max_patterns (16): a list is refused, never cut"
   },
-  "later_increment_labels": {
+  "predicate_only_without_predicate": {
    "server": "masked",
    "method": "POST",
    "path": "/pattern",
    "status": 400,
    "hand_made": false,
    "headers": {},
-   "shows": "400 later_increment: output.labels \"predicate_only\" (the labels a predicate names) is not served yet (capabilities projections_later_increment; \"all\" is served since increment 3)"
+   "shows": "400 invalid_request: output.labels \"predicate_only\" returns the labels a predicate names, so it needs one (served with a predicate since increment 5b; 400 later_increment before, fixture later_increment_labels)"
   },
   "later_increment_graphs": {
    "server": "masked",

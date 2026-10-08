@@ -1,0 +1,4 @@
+{
+ "code": "invalid_request",
+ "error": "request.predicate.any[0]: expected a string (a column label; write a taxid as \"562\")"
+}
