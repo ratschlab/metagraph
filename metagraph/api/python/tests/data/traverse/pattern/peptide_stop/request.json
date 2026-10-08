@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "protein": "TARMADKLR*",
+   "id": "NDM-1 end"
+  },
+  {
+   "protein": "TARMADKLRX",
+   "id": "X"
+  }
+ ],
+ "output": {
+  "labels": "none"
+ }
+}

@@ -5,10 +5,11 @@
 four contract corrections, §18; v4: six findings and three corrections on the predicate extension, §19; v5: six
 findings and one naming decision, §20; all confirmed against the code). Written from a read-only check of the code at
 `804731aa` (gr/labeled-traversal); its line numbers point there, as pointers, not anchors. Implemented since on
-that branch: milestone 1 (increments 0–2), milestone 1b (§13), increment 3 and the engine part of increment 4 (not
-yet served by the route). `SPEC-pattern-search.md` is the contract as built; where this design and the build
-differ, its §13 says how and why, and the review of 2026-10-07 corrected the sentences below that the build did
-not keep.
+that branch: milestone 1 (increments 0–2), milestone 1b (§13), increments 3, 4 and 5, and the owner's decisions of
+2026-10-08 (§4.4, SPEC §18): graphs without the dummy-edge mask served with upper bounds and an estimate, the mask
+and the Bloom filter outside the index identity, the stop `*` in peptides. `SPEC-pattern-search.md` is the
+contract as built; where this design and the build differ, its §13 says how and why, and the review of 2026-10-07
+corrected the sentences below that the build did not keep.
 
 Companion documents: `NOTE-mismatch-search.md` (bounded mismatches: a later increment on the same engine, §12),
 `SPEC-labeled-traversal-core.md` (`/resolve` and `/traverse`, whose conventions for caps, truncation statements,
@@ -85,7 +86,7 @@ never matches a record's N symbol (DNA5 builds, `alphabets.hpp:81`); the unconst
 |---|---|---|
 | `dna` | a string over A, C, G, T | one base each |
 | `iupac` | a string over the 15 IUPAC codes | the code's set (R = {A, G}, N = {A, C, G, T}, …) |
-| `protein` | a string over the 20 amino acids and the ambiguity codes X (any residue), B (D/N), Z (E/Q), J (I/L) (the owner's decision #15 of 2026-10-08; no stop `*` in this version) | 3 per residue; the codon automaton of the residue (§6) |
+| `protein` | a string over the 20 amino acids, the ambiguity codes X (any residue), B (D/N), Z (E/Q), J (I/L) (the owner's decision #15 of 2026-10-08) and the stop `*` (a stop codon of the genetic code; decision #19) | 3 per residue; the codon automaton of the residue (§6) |
 
 A pattern's **information** is Σ log2(4 / |set_i|) bits over its positions (for a peptide, log2(64 / codons) per
 residue). For a pattern longer than k the information of each searched orientation's **anchor window** (positions
@@ -174,12 +175,14 @@ as `c + alph_size` when another edge into the same target carries the same symbo
 both are k-mers ending in c; `pick_edge(node_edge, c)` selects a node's edge with symbol c (:365). On top of BOSS,
 `DBGSuccinct` keeps `valid_edges_` (`dbg_succinct.hpp:124-147`, the `.edgemask` file), a `bit_vector` with rank
 and select that is 0 on every dummy edge (those containing `$`, sources and sinks) and on pruned ones. **The mask
-is required:** without it `in_graph` treats every edge as a k-mer (`dbg_succinct.cpp:935`), dummies included, and
-no count of this route is right. The mask lives in a separate `.edgemask` file beside the `.dbg`
-(`serialize`, `dbg_succinct.cpp:898`; loaded if present at :802), and **neither the mini index nor
-refseq33m-experimental's graph has one today** (`build/mini_refseq/graph_k31.dbg` and staging's
-`graph_k31.indexed.dbg` sit without it), so "required" alone would refuse the route everywhere. Three ways to
-have it, stated in the capabilities as `pattern.mask: file | built_at_load | absent`:
+makes the counts exact:** without it `in_graph` treats every edge as a k-mer (`dbg_succinct.cpp:935`), dummies
+included. The mask lives in a separate `.edgemask` file beside the `.dbg` (`serialize`, `dbg_succinct.cpp:898`;
+loaded if present at :802), and **neither the mini index nor refseq33m-experimental's graph has one today**
+(`build/mini_refseq/graph_k31.dbg` and staging's `graph_k31.indexed.dbg` sit without it). Until the owner's
+decision #16 of 2026-10-08 the route required the mask and refused a graph without it (`mask_required`); since,
+some graphs have masks and some not, and a graph without one is served with upper bounds and an estimate (§4.4).
+Three states, stated in the capabilities as `pattern.mask: file | built_at_load | absent` and `pattern.counting:
+exact | upper_bound`:
 - `file`: the `.edgemask` written by `metagraph build`, or once, offline, by a new `metagraph transform
   --mask-dummy` that calls the build's own `mask_dummy_kmers(threads, false)` (no pruning: node ids and the
   annotation stay valid) and writes the file. The cost (review of 2026-10-07, D1-02, M1-01, X-EFFICIENCY-06):
@@ -194,18 +197,18 @@ have it, stated in the capabilities as `pattern.mask: file | built_at_load | abs
   - **where**: on the host, not inside the 128 GiB container, with `--mmap` so that the graph's pages are mapped
     rather than read into RAM.
 
-  This is the one-time step for staging, run by the owner on mex before the route answers there. What it
-  changes beyond the route:
+  This is the one-time step for staging's exact counts, run by the owner on mex (decision #18: in a staging-only
+  directory, once decisions #16 and #17 are deployed; the route answers there before it, with upper bounds). What
+  it changes beyond the route:
   - every loader of the graph reads the `.edgemask` from then on, the build already deployed included: node ids,
     rows and what `/search`, `/align`, `/resolve` and `/traverse` find stay as they were, but `GET /stats`
     `graph.nodes` becomes the k-mer count, and a `.bloom` beside the graph is loaded from then on;
-  - a server started with `--index-manifest` refuses to start until the manifest lists the new file, and the
-    index identity `index_fp` that every route states changes (clients that key on it see a new index). So the
-    order is: `transform --mask-dummy`, regenerate the manifest (`scripts/traversal/index_manifest.py`; it hashes
-    the bundle again, about 650 GiB, unless its batch mode, `--server-csv`, is given the unchanged files'
-    digests with `--digests`), then `update.sh`, which restarts the container even without a new commit;
-  - the mask is read when the graph is loaded: a server running when the file is written answers
-    `mask_required` until it is restarted;
+  - a server started with `--index-manifest` keeps its manifest and its `index_fp` (the owner's decision #17 of
+    2026-10-08: the mask is derived data of the graph, not part of the identity; before it, the manifest had to
+    be regenerated and `index_fp` changed). The order is: `transform --mask-dummy`, then `update.sh` (it restarts
+    the container even without a new commit). No manifest is regenerated and nothing is re-hashed;
+  - the mask is read when the graph is loaded: a server running when the file is written counts upper bounds
+    (`counting: upper_bound`, §4.4) until it is restarted;
   - the mask is checked once when the graph is loaded for the one known defect (the owner's decision of
     2026-10-07): `metagraph extend` on a masked graph used to write a mask that marks its new dummy edges valid
     (`DBGSuccinct::add_sequence`, its TODO), and counts on such a graph could be overstated, `exact` included. A
@@ -215,10 +218,11 @@ have it, stated in the capabilities as `pattern.mask: file | built_at_load | abs
 - `built_at_load`: a server started with `--pattern-build-mask` builds the same mask in memory when the file is
   absent, with `--threads-each` threads on `server_query` (`-p` in the `pattern` CLI), at every start-up and
   before any route answers (the same transient vector, so for small indexes and the tests — "small" meaning few
-  edges, not the SMALL state —, not for a 362 GB graph on every restart). No file changes: `index_fp` stays,
-  `/stats` changes, and `mask: built_at_load` tells the two apart.
-- `absent`: the route answers `mask_required` and names the two remedies, and that the server must be restarted
-  once the file exists.
+  edges, not the SMALL state —, not for a 362 GB graph on every restart). No file changes: `/stats` changes, and
+  `mask: built_at_load` tells it from a file (`index_fp` stays either way, decision #17).
+- `absent`: served since the owner's decision #16 (`counting: upper_bound`, §4.4); the start-up log names the two
+  ways to exact counts (`transform --mask-dummy` once, read at the next start; `--pattern-build-mask`). Before the
+  decision the route answered `mask_required` here.
 The test setup builds the mini index's mask with the `transform` step.
 
 ### 4.1 Phase 1: anchors and contexts, by range narrowing (reused from the seeder)
@@ -431,6 +435,64 @@ the `TA` at offset 3 of the first record is local 3, not global 3. Without recor
 `kmer_coord` (global, 0-based) and `offset` as two fields and places nothing. The `nt_coords` / `nt_length` format
 of `metagraph align --json` is reused for placed occurrences (`alignment.cpp:946-1001`; the writer moves into a
 shared header, its caller's output unchanged).
+
+### 4.4 Graphs without a mask (the owner's decisions #16 and #17, 2026-10-08)
+
+Some graphs have masks, some not: the route serves both. With the mask (`mask: file | built_at_load`,
+`counting: exact`) nothing changes. Without it (`mask: absent`, `counting: upper_bound`) the engine
+(`PatternSearch`, "Graphs without the dummy-edge mask") discovers the same ranges with the same steps, and every
+place that read the mask counts candidates instead:
+
+- A flank range counts its entries whose W is not `$` (`DBGSuccinct::count_non_sink_edges_in_range`: ranks of W,
+  so a sink dummy never counts), the last position its entries with W the allowed base, plain or marked
+  (`count_edges_with_symbol`); no deferred scan of masked edges exists.
+- **Checked and unchecked ranges.** A source dummy is `$^j` followed by the first k − j bases of a sequence start
+  no k-mer enters. A range whose nodes the search spelled whole (depth k − 1: every node symbol a pattern base or a
+  flank base) cannot hold one, so its count is exact. Any other range (an offset p > 0 of `any_offset`, whose
+  first p node symbols are not spelled; `suffix` scope with L < k; a window whose leading N run was skipped) is
+  **unchecked**: its candidates go into the upper bound U and not into the lower bound. On an even-k wrapped
+  PRIMARY graph the palindrome scans spell every candidate they check, which settles it too.
+- **The count** is `exact` when nothing of it is unchecked, when U = 0 (an empty block: absence holds), or after a
+  release that enumerated every candidate; otherwise `bounds` {lower, U}. Stops leave `at_least` and `unknown` as
+  on a masked graph.
+- **The estimate** U × f, rounded and kept inside [lower, U], is stated beside every `bounds` count (the route,
+  `count_json`), with the note `estimate_sampled_dummy_fraction`. f is the fraction of real k-mers among the
+  graph's entries whose W is not `$`, sampled once per graph at load (`pattern::sample_real_fraction`: 10,000
+  entries drawn uniformly with replacement, `std::mt19937_64` seeded with the number of edges, so the same graph
+  gives the same f after every restart; a drawn entry with W = `$` is drawn again; an entry is a source dummy iff
+  its node holds `$`, found by `BOSS::node_has_sentinel` within k − 1 symbols), stated with Wilson's 95% interval
+  and its source (`sampled`) in the capabilities and in every answer's `index`. On the mini index: f 0.9999
+  [0.999434, 0.999982], the exact f (`stats --count-dummy`: 375 source and 12 sink dummies among 8,335,760
+  edges) 0.999955 inside it; 40–60 ms at load. The estimate is not a bound: a pattern at a record start, held by
+  the dummies before that start, can have a true count far below it (the mini's island start
+  `GATGCCGGTGAACAAC`: U = 32, estimate 32, 17 contexts).
+- **Admission on U** (conservative): `all_or_count`'s threshold, `stop_at_threshold` (on the running U) and the
+  extension's admission (`max_anchors`) compare the upper bound, and the note `threshold_upper_bound` says when such
+  a decision went against the request while the lower bound did not cross.
+- **Lists stay exact.** The release tests each unchecked candidate with `node_has_sentinel` (at most k − 1
+  symbols, about the spelling the route does per context anyway, under the deadline and not charged as steps) and
+  never releases a source dummy. A release that enumerated every candidate (`all_or_count` within U; `partial`
+  drained; a long pattern's anchors listed before their extension) makes the counts `exact`; a cut `partial`
+  release raises each lower bound to what it released.
+- **Stated limitations**: without the mask `partial` keeps every unchecked range it discovers (24 bytes each, at
+  most one per step) rather than about `max_contexts`; on an even-k wrapped PRIMARY graph `stop_at_threshold` can
+  fire late or not at all (the running U leaves out ranges whose palindrome scan is pending; the admission after
+  discovery compares the final U); mode `count` states `bounds` where a retrieval of the same request states
+  `exact`.
+
+**Identity (decision #17).** The mask (and the `.bloom` the loader reads with it) is derived data of the graph,
+closely linked to it: it changes which results are exact, never the number of an exact count (an exact count is
+the same with and without the mask). It is not part of `index_fp` and a manifest never lists it
+(`SPEC-labeled-traversal-core.md`, "The index identity"): masking a deployed index keeps its `index_fp`. The
+limitation that comes back with it: no fingerprint covers derived data, so a stale or foreign Bloom filter of the
+same k and mode beside the graph is not detected by `index_fp` (a stale mask is caught only by its size and by the
+`mask_invalid` check).
+
+Tests (independent oracles): `PatternUnmasked` builds every graph twice from the same records, one with its mask
+reset, and checks U against a scan of the unmasked graph's entries, the lower bound and the exact counts against a
+graph walk of the masked twin and a scan of the records, the lists against the masked twin's, and the sampled f
+against BOSS's own dummy-tree count; the route's `PatternRoute.Unmasked*` and `PatternMaskUnmasked.*` and the
+integration's `TestPatternMini.test_unmasked_*` check the same on the real loader and the mini index.
 
 ## 5. Admission, budgets and determinism
 
@@ -707,10 +769,14 @@ over cohorts larger than the list cap are later increments too.
 A residue is a set of codons; the automaton's state is (residue index, position in codon, codon prefix so far)
 and `allowed(position, prefix)` returns the bases that extend the prefix to one of the residue's codons. This
 admits exactly the residue's codons: no superset for Leu (TTA, TTG, CTN), Ser (TCN, AGY) or Arg (CGN, AGR), no
-translation filter, and no branch through a stop codon. The standard code (table 1) is built in; `genetic_code`
-is a request field for others. As served (increment 5, the owner's decision #15 of 2026-10-08; SPEC §12.2): every
-NCBI translation table (1–6, 9–16, 21–33), the ambiguity codes X (every codon that is not a stop), B, Z and J, and
-a stop `*` refused in the pattern's slot (`stop_unsupported`) until stops are served.
+translation filter, and no branch through a stop codon except where the peptide has `*`. The standard code
+(table 1) is built in; `genetic_code` is a request field for others. As served (increment 5, the owner's decision
+#15 of 2026-10-08; SPEC §12.2): every NCBI translation table (1–6, 9–16, 21–33), the ambiguity codes X (every
+codon that is not a stop), B, Z and J, and since decision #19 the stop `*`: the stop codons of the table at that
+position (X still never matches one). Tables 27, 28 and 31 have no unconditional stop codon (their context stops
+code their residue, decision #21): there `*` matches nothing, the peptide has no instance, and every entry of it
+says so (note `no_stop_codon`; L ≤ k is answered `exact` 0 without a search). (`4596bb3b` refused `*` in the
+pattern's slot, `stop_unsupported`; that code is retired, `4596bb3b` the one build that answers it.)
 
 Both strands: the reverse-complemented automaton — residues in reverse order, each codon replaced by its
 reverse complement (GCN becomes NGC, AAR becomes YTT) — is searched as the oriented pattern rc(P); it is a
@@ -848,7 +914,7 @@ malformed request is a 400 for the whole; a request whose finalisation reserve i
 `GET /capabilities` lists `"pattern"` under `features` and `routes.pattern = "POST /pattern"`
 (`server.cpp:1421-1480`), with a `pattern` block: the floors, caps and the finalisation reserve, the modes, the projections (`none`,
 `all`, `predicate_only`, with `none` available everywhere) and scopes (and which scope each graph mode supports), `placement` (the best this index can give), `strand_stated`,
-`mask: file | built_at_load | absent`, `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
+`mask: file | built_at_load | absent` with `counting: exact | upper_bound` and the sampled `dummy_fraction` (§4.4), `annotation: budgeted | unbudgeted`, the build alphabet and `graph_cleaned`, the
 resident graphs, `records_shorter_than_k: not_indexed`, and `pattern_contract_version: 1`. The same `pattern`
 block is carried by `GET /traverse/capabilities` (`server.cpp:1340-1370`), the document the search service's
 probe reads, which today has `attempts`, `coordinates` and `deadline_check` and no feature list: one cached probe
@@ -1024,7 +1090,8 @@ job-originated call holds no client connection, so a long budget costs only the 
    with the reviews' counterexamples: a record start whose dummy chain is pruned (`TACGAT` then `ACGA`, `AC`);
    the length-k lookup (`AAC` at k = 3); a motif with one plain and two marked matching edges; a sink dummy `AC$`
    inside a range and a source dummy leaving one; an interrupted mask scan with its bounds; a graph loaded
-   without its mask (refused); the DNA5 flank (`ACNTA`, `AC` at offset 0; written under `_DNA5_GRAPH`, run once
+   without its mask (refused until the owner's decision #16 of 2026-10-08; answered since, with bounds, its lists
+   the masked twin's: `PatternUnmasked`, §4.4); the DNA5 flank (`ACNTA`, `AC` at offset 0; written under `_DNA5_GRAPH`, run once
    by hand on a DNA5 build of the engine and its tests, not in CI: CI builds DNA and Protein only); a DNA4 island shorter than k
    (`AAAAANACNCCCCC`, `AC`: not covered, not claimed); zero suffix anchors with a prefix context (`ACGTT`, `AC`);
    the cross-record path (`ACG`, `CGT` at coordinates 0, 1); the double occurrence in one k-mer (`ACGAC`, `AC`);
@@ -1080,8 +1147,16 @@ job-originated call holds no client connection, so a long budget costs only the 
    1, every answer to a request without the option unchanged.
 5. **Peptides.** The codon automaton and genetic code; tests with Leu/Ser/Arg-rich peptides and a peptide whose
    only graph instance crosses a stop codon. **Served (2026-10-08; SPEC §12.2, §17)**: the 20 residues and X, B,
-   Z, J, every NCBI genetic code (1 the default), stops refused for now (`stop_unsupported`; the owner's decision
-   #15); peptides longer than k through the paths of increment 4.
+   Z, J, every NCBI genetic code (1 the default; the owner's decision #15); peptides longer than k through the
+   paths of increment 4. **The stop `*` served too (the owner's decisions #19 and #21 of 2026-10-08; SPEC §18)**:
+   a stop codon of the table; in tables 27, 28 and 31 it matches nothing, with the note `no_stop_codon`; tested
+   against a six-frame translation oracle in tables 1, 2, 11, 27, 28 and 31 (`PatternPeptide.StopResidue`,
+   `RandomStopPeptidesAgainstOracles`). (`4596bb3b` refused it, `stop_unsupported`, now retired.)
+5c. **Masks optional (the owner's decisions #16 and #17 of 2026-10-08) — served (§4.4; SPEC §18)**: graphs
+   without the dummy-edge mask answered with upper bounds and an estimate, lists exact, `mask_required` retired;
+   the mask and the Bloom filter outside `index_fp`. Masked answers unchanged (checked against `4596bb3b`; the
+   alignment golden gate IDENTICAL). Staging's mask (#18) follows once this is deployed: built in a staging-only
+   directory and wired into `~/metagraph-refseq33m-experimental`, its `index_fp` unchanged.
 5b. **Predicates** (§5.6). The predicate parser and evaluator over `LabelQuery` reads restricted to the
    predicate's labels; `output.labels: predicate_only`; the compute admission on the unfiltered count and the
    retrieval threshold on the selected count; path-level evaluation for `long`; unknown labels per shard. Tests:
@@ -1111,7 +1186,16 @@ serves it **as a job**, not as a synchronous tool, with the job's defaults `mode
 and `partial` exposed; every host carrying the block offers it, canonical indexes included; the service session
 builds the job, org-id integrates, this side delivers the frozen contract, the fixture bodies and the `pattern`
 block on both capabilities routes with milestone 1; the route's default `time_budget_ms` is 60 s and the cap
-600 s (§5.3). Still open:
+600 s (§5.3).
+
+Decided on 2026-10-08 (the owner's decisions #12–#21, `OWNER_DECISIONS_2026-10-07.md`): semantic compatibility
+for contract version 1 (#12); paths opt-in through `long_search: "paths"` (#13); the labels of paths returned, each
+with its support, `require_support: "record_verified"` filtering (#14); peptides with X, B, Z, J and every NCBI
+table (#15); **masks optional**: a graph without its mask served with upper bounds and an estimate, f sampled at
+load (#16, §4.4); **the mask and the Bloom filter derived data**, outside `index_fp` (#17); staging's mask built
+once this is deployed (#18, the owner's step); **the stop `*` served** as a stop codon of the table, a note where
+the table has none (#19); `genetic_code_unknown` (#20); the context stops of tables 27, 28 and 31 as their residue,
+never as `*` (#21). Still open:
 
 1. Whether to keep `/pattern` or rename to `/motif` (this draft keeps `/pattern`).
 2. The route's own default mode (`all_or_count`, this draft) and default scope (`any_offset` for L ≤ k; `suffix`
@@ -1119,10 +1203,11 @@ block on both capabilities routes with milestone 1; the route's default `time_bu
 3. Defaults: the information floor (24 bits, discovery only), `max_contexts` (10,000), `max_anchors` and
    `max_paths` (1,000), `max_labels_per_anchor` (64), `max_steps` (10⁸ per shard, §5.3), `max_memory_mb` (256 per
    request), the finalisation reserve (250 ms); all server policy.
-4. Whether `label_intersection` labels are returned for `long` without `require_support`, or only counted. This
-   draft returns them, each marked with its `support`.
-5. Whether canonical indexes get the route at all in v1 (presence and contexts only), or answer
-   `pattern_unsupported` until placement exists.
+4. *(Decided, #14: returned, each marked with its `support`.)* Whether `label_intersection` labels are returned
+   for `long` without `require_support`, or only counted.
+5. *(Decided 2026-10-07, above: every host carrying the block, canonical indexes included.)* Whether canonical
+   indexes get the route at all in v1 (presence and contexts only), or answer `pattern_unsupported` until
+   placement exists.
 6. Whether `allow_unbudgeted_annotation` exists at all, or unbudgeted backends get `count` only.
 7. The CLI subcommand: keep (tests and offline use) or server-only.
 8. The service's job kind and tool names (the service's call, in the `pattern_` family).
@@ -1139,8 +1224,11 @@ block on both capabilities routes with milestone 1; the route's default `time_bu
 - Absence of a label is claimed only with `retrieval_complete: true`; a `count` answer claims nothing about labels.
 - A label's path for `long` without record mapping is not a proof of one record (`support: label_intersection`).
 - A pattern's N never matches a record's N symbol; flanks do (DNA5 builds only, untested: below).
-- The engine needs the succinct graph representation with its edge mask (the `.edgemask` file, or built at load
-  with `--pattern-build-mask`); other representations, or a graph without a mask, answer 400 with the reason.
+- The engine needs the succinct graph representation; other representations answer 400 with the reason. Its
+  edge mask (the `.edgemask` file, or built at load with `--pattern-build-mask`) makes the counts exact; without
+  it (the owner's decision #16) counts are `exact` where provable and otherwise `bounds` with an estimate that is
+  not a bound, the thresholds admit on the upper bound (note `threshold_upper_bound`), and the lists stay exact
+  (§4.4).
 - Budgeted retrieval exists only on the row-diff family with the budgeted decode; elsewhere `count` only, or
   unbudgeted by explicit opt-in; an anchor with more labels than the per-anchor cap withholds the results.
 - Indexes are served resident only; a shard not resident is a stopped shard.
@@ -1162,6 +1250,15 @@ Limitations of the build, found or confirmed by the review of 2026-10-07 and sta
   and releases it twice (that run confirms it: 2 + 2 for `AC` in `ACNGT` at k = 5). A leading N run is
   searched there, not skipped (§7.8 of the SPEC). These are the items a DNA5 build must settle before the
   refusal is lifted.
+- **Without the mask** (§4.4; the owner's decision #16 of 2026-10-08): the estimate assumes source dummies as
+  frequent among a count's candidates as in the whole graph (false for a pattern at a record start); `partial`
+  keeps every unchecked range it discovers (24 bytes each, at most one per step) rather than about
+  `max_contexts`; on an even-k wrapped PRIMARY graph `stop_at_threshold` can fire late or not at all. The mask and
+  the Bloom filter are fingerprinted nowhere (decision #17): a foreign Bloom filter of the same k and mode can hide
+  k-mers under an unchanged `index_fp`.
+- **The stop `*`** (§6; decisions #19, #21): a long peptide with `*` in tables 27, 28 and 31 has no path but is
+  still searched for its anchors and gated by the floor on its anchor windows; the `bad_alphabet` message of a
+  protein pattern does not name `*` (kept byte for byte).
 - **A mask with a valid W = `$` edge is refused** (§4; the owner's decision of 2026-10-07): `extend` on a masked
   graph used to write a mask with valid dummy edges, on which counts could be overstated, `exact` included. Such
   a mask is found once at load and answered `mask_invalid` (capabilities `available: false`) until the graph is
@@ -1222,7 +1319,7 @@ Limitations of the build, found or confirmed by the review of 2026-10-07 and sta
 | 1 | `LabelQuery` needs a permitted label set and cannot discover labels | §4.3: two steps, `LabelRecorder` discovery with a per-anchor cap (stated, withholding when cut) then `LabelQuery` placement; a one-pass visitor deferred to §12; estimate raised |
 | 2 | `all_or_count` undefined across shards; exact counts alone do not justify absence | §5.2, §8: two barriers per pattern (aggregate admission, publication only after every shard's retrieval); `retrieval_complete` is the one flag that licenses absence; `count` answers claim nothing about labels |
 | 3 | `suffix` on wrapped PRIMARY graphs misses matches (a virtual suffix is a stored prefix) | §3, §4.1: `suffix` refused on wrapped PRIMARY (`scope_unsupported`), `any_offset` shown complete there; a prefix lookup deferred to §12 |
-| 4 | the mask may be absent; the invalid-edge scan is work; an interrupted subtraction is an upper bound | §4: the mask is required (`mask_required`); §4.1: the scan charged to `max_steps` and deadline-checked; `bounds` relation with `lower` and `upper`; §5.3 wording corrected |
+| 4 | the mask may be absent; the invalid-edge scan is work; an interrupted subtraction is an upper bound | §4: the mask is required (`mask_required`; optional since the owner's decision #16 of 2026-10-08, §4.4); §4.1: the scan charged to `max_steps` and deadline-checked; `bounds` relation with `lower` and `upper`; §5.3 wording corrected |
 | 5 | completeness claimed over whole records, not over k-mer-covered sequence | §3 "Covered sequence", §5.1, §15: every claim is over retained, k-mer-covered regions; the DNA4 island example in the oracle suite |
 | 6 | count-only mode should not retain descriptors; "later retrieval" undefined | §5.2: `count` discards descriptors; `all_or_count` retains them only while eligible; descriptors live for the request only |
 | 7 | loading cannot be interrupted; serialisation checks do not produce the count-only fallback | §5.3: resident indexes only, `in_ram` refused, non-resident shards stopped; a finalisation reserve with the counts maintained incrementally; 503 `deadline` as the explicit outcome |

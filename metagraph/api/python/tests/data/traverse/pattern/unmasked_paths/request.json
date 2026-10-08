@@ -1,0 +1,16 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "id": "NDM-40"
+  },
+  {
+   "dna": "GATAGAGAACTCGAGAGAGGTTCCACCTTCATATTGAATT",
+   "id": "absent"
+  }
+ ],
+ "long_search": "paths",
+ "output": {
+  "labels": "none"
+ }
+}

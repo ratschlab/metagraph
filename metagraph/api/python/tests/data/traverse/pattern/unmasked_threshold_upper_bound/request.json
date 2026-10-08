@@ -1,0 +1,12 @@
+{
+ "patterns": [
+  {
+   "dna": "GATGCCGGTGAACAAC",
+   "id": "start"
+  }
+ ],
+ "max_contexts": 17,
+ "output": {
+  "labels": "none"
+ }
+}

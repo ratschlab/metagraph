@@ -2628,7 +2628,8 @@ the server.
     finished attempt's id held until its `not_after_ms` + skew (the release rule's finished state), the hold
     live through `suppressed_until_ms` inclusive, and a refused copy's suppression judged against its own
     `not_after_ms` alone; the loader dependency inventory (a manifest must cover every file the pair loads, the
-    `.bloom` included, with distinct base names and no optional file of the inventory the pair does not load;
+    `.bloom` included — until the owner's decision #17 of 2026-10-08 took the mask and the Bloom filter out of it,
+    below —, with distinct base names and no optional file of the inventory the pair does not load;
     bundles grouped by their whole inventory; `traverse --index-inventory`); the path cache's retention rule and flat tuple rows (§8.4), the
     sequence header index built while the index loads, the header labels' range filter (§8.2), a `/resolve`'s
     rows decoded in bounded batches, a discovery accumulating its profiles as it reads (§4.2), the budgeted
@@ -2738,19 +2739,40 @@ the server.
       `index_ns` (metadata) is not read for it; a different one is logged.
     - `index_fp`: the identity — the lowercase hex sha256 of the index bundle's **manifest** file list
       (`--index-manifest FILE` for a single index, the graph list's fourth column per pair): a JSON object with
-      `files: [{path, size, sha256}, …]` (every file the server loads: graph, annotation and the sidecars it reads
-      beside them), hashed as the lines `<path>\t<size>\t<sha256>\n` in ascending byte order of path; other keys
+      `files: [{path, size, sha256}, …]` (every identity file the server loads: graph, annotation and the
+      sidecars it reads beside them, never the graph's derived mask and Bloom filter, below), hashed as the lines `<path>\t<size>\t<sha256>\n` in ascending byte order of path; other keys
       (builder, inputs, an entry's `digest`) are metadata. The build hashes the files once; the server reads the
-      digests and checks, before loading anything, that every file it loads is listed (by base name) with its
+      digests and checks, before loading anything, that every identity file it loads is listed (by base name) with its
       size — the **loader dependency inventory** of the pair *(review of pass 5, findings 2 and 3; one C++
       definition, `index_load_inventory`, which `metagraph traverse --index-inventory -i GRAPH -a ANNOTATION`
       prints as JSON and `scripts/traversal/index_manifest.py` mirrors, an integration test comparing the two on
-      every sidecar kind)*: the graph; `<graph without .dbg>.edgemask` when it opens and then `<graph without
-      .dbg>.bloom` when it exists (`DBGSuccinct::load`; a Bloom filter that was loaded but listed nowhere changed
-      `/resolve`'s `graph_runs` from `[[0, 36]]` to `[]` under an unchanged fingerprint); the annotation;
+      every sidecar kind)*: the graph; the annotation;
       `<graph>.anchors` and `<graph>.rd_succ` for a `.row_diff.annodbg` (required: the loader exits without them);
       `<annotation without .<type>.annodbg>.seqs` for a coordinate annotation unless `--no-coord-mapping` — each
       path derived from the LISTED spelling, as the loaders derive it (beside a symlink, not beside its target).
+      *(The owner's decision #17 of 2026-10-08.)* The graph's **derived data** is **not part of `index_fp`**:
+      `<graph without .dbg>.edgemask` (the dummy-edge mask, loaded when it opens) and `<graph without .dbg>.bloom`
+      (the Bloom filter, loaded when it exists and the mask was loaded), both computed from the graph alone. They
+      decide which counts are exact (`/pattern`: exact with the mask, bounds and an estimate without,
+      `SPEC-pattern-search.md` §18) and how fast k-mers are looked up, never what an exact answer is; so adding,
+      removing or rebuilding them leaves `index_fp` unchanged: a manifest made for a graph without a mask stays
+      valid, with the same `index_fp`, after `metagraph transform --mask-dummy`. A manifest lists neither: one with
+      an entry whose base name ends in `.edgemask` or `.bloom` (whichever graph it belongs to, loaded or not) is
+      refused at start-up (server, single and multi-graph, and the CLIs), naming the entry and the rule
+      (`kIndexDerivedDataRule`: "the dummy-edge mask (.edgemask) and the Bloom filter (.bloom) are derived data of
+      the graph, not part of index_fp: they decide which counts are exact and how fast k-mers are looked up, never
+      what an exact answer is, so adding, removing or rebuilding one leaves index_fp unchanged, and a manifest
+      lists neither") and saying to write it again without the entry, which changes its `index_fp` once.
+      `index_manifest.py` never writes them, refuses them with `--extra` and flags them with `--verify`.
+      `traverse --index-inventory` (and `index_manifest.py --inventory`) lists them apart (`derived: [{path,
+      role: graph_mask | graph_bloom, exists, loaded}]`, `derived_rule`), and the start-up log names the derived
+      files loaded beside a checked manifest (`[Server] Derived data of <graph> loaded beside it, not part of
+      index_fp: …`). **Limitation, stated:** no fingerprint covers derived data, so a stale or foreign derived
+      file beside the graph is not detected by `index_fp`. The loader checks a mask's size and its W = `$` edges
+      (`mask_invalid` on `/pattern`), and only a Bloom filter's k and mode: a Bloom filter of another graph with
+      the same k and mode can hide k-mers (the pass-5 probe: `/resolve`'s `graph_runs` `[[0, 36]]` became `[]`)
+      under an unchanged `index_fp`. Write derived data only with `build --mask-dummy`, `transform --mask-dummy`
+      or `transform --initialize-bloom` on the graph it sits beside.
       A file of the inventory the manifest does not name is refused, naming it; a named one of another size too.
       *(Review of the pass-5 fixes.)* Loaded files are matched to entries by base name, so the entries' **base
       names must be distinct**: a manifest written for a directory of bundles sharing names (`A/graph.dbg`,
@@ -2758,10 +2780,9 @@ the server.
       servers stated one `index_fp` and one `index_meta_fp` while answering with different accessions; such a
       manifest is refused, naming the shared base name (`index_manifest.py --verify` refuses it too, and writes
       bare base names). And it must **not list an optional file of the pair's inventory that the pair does not
-      load** — `<graph without .dbg>.edgemask` or `.bloom`, or the annotation's `.seqs`, when it is missing beside
-      the listed spelling, the mask is not read, or with `--no-coord-mapping` —, so that `index_fp` identifies
-      the loaded files (a server without the `.seqs` beside its symlinks, or with `--no-coord-mapping`, stated the
-      `index_fp` of one that loads it; for a mask or a Bloom filter even `index_meta_fp` was the same). Files
+      load** — the annotation's `.seqs`, when it is missing beside the listed spelling or with
+      `--no-coord-mapping` —, so that `index_fp` identifies the loaded files (a server without the `.seqs` beside
+      its symlinks, or with `--no-coord-mapping`, stated the `index_fp` of one that loads it). Files
       outside the inventory (`index_manifest.py --extra`: a `.coords`, a `.weights`, anchors beside another
       annotation type) stay allowed.
       Deliberately not in it, because the server does not open them: a column annotation's `.coords`
@@ -2795,8 +2816,9 @@ the server.
     misread). Every listed manifest is checked against the files its pair loads exactly as `--index-manifest` is
     (sizes and the digest of its list, no re-hashing), before anything is loaded; a mismatch refuses to start. One
     index, one identity: lines naming the same index — the same files, however their paths are spelled: two lines
-    are one index only when their pairs' **whole loader inventories** resolve to the same real paths in the same
-    roles *(review of pass 5, finding 2: grouped by the graph's and annotation's real paths alone, two pairs of
+    are one index only when their pairs' **whole loader inventories** (its identity files: derived data does not
+    split an index, so two spellings of one graph, one with a mask beside it, are one index with one identity)
+    resolve to the same real paths in the same roles *(review of pass 5, finding 2: grouped by the graph's and annotation's real paths alone, two pairs of
     symlinks to one graph and annotation with different `.seqs` beside them shared one manifest check, and both
     stated A's `index_fp` while answering with different accessions)*, so each distinct bundle is validated
     against the manifest it names — must agree on what they state (an empty column states nothing and takes what another line of the
@@ -3093,11 +3115,13 @@ the server.
     (`--traverse-clock-skew-ms`).
   - A graph list that gives manifests (column 4) refuses to start when one does not describe its pair's files:
     regenerate them with `index_manifest.py --server-csv` after an index changes. Manifests written before the
-    review of pass 5 may lack files the server now checks (`<graph without .dbg>.edgemask`, `<graph without
-    .dbg>.bloom` beside a masked graph, `<base>.seqs` of a coordinate annotation, which the tool used to look for
-    under other names), or list a second annotation (`--extra`): such a list refuses to start, naming the file;
-    regenerate the manifests (`index_manifest.py`, whose default bundle is now the loader inventory: it no longer
-    adds a `.coords` or a `.weights` the server does not open — `--extra` adds them, changing the fingerprint).
+    review of pass 5 may lack files the server now checks (`<base>.seqs` of a coordinate annotation, which the
+    tool used to look for under other names), or list a second annotation (`--extra`): such a list refuses to
+    start, naming the file; regenerate the manifests (`index_manifest.py`, whose default bundle is now the loader
+    inventory: it no longer adds a `.coords` or a `.weights` the server does not open — `--extra` adds them,
+    changing the fingerprint). A manifest that lists a mask or a Bloom filter (written between the review of
+    pass 5 and the owner's decision #17 of 2026-10-08) refuses to start, naming the rule: write it again without
+    them (its `index_fp` changes once; after that, adding a mask leaves it unchanged).
   - **The sequence header index** (header name → `(column, seq_id)`) is built while the index loads, before the
     server answers traversal requests, and logged with its size and time (`[Server] Sequence header index built:
     N headers in S s`; 4.6 s for 33 M synthetic headers on the M5 Max): built by the first request naming a header

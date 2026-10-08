@@ -1,0 +1,178 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "counting": "upper_bound",
+  "dummy_fraction": {
+   "interval": [
+    0.9994337311025987,
+    0.9999823473263989
+   ],
+   "samples": 10000,
+   "source": "sampled",
+   "value": 0.9999
+  },
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "max_anchors": 1000,
+  "max_contexts": 5,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": true,
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "none"
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "1": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "10": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "11": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "2": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "3": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "4": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "5": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "6": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "7": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "8": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "9": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "-": {
+       "relation": "unknown",
+       "unit": "graph_contexts",
+       "value": null
+      }
+     },
+     "relation": "at_least",
+     "suffix": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 0
+     },
+     "unit": "graph_contexts",
+     "value": 0
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "NDM-F",
+   "information_bits": 40.0,
+   "kind": "dna",
+   "length": 20,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [
+    "threshold_upper_bound"
+   ],
+   "palindromic": false,
+   "pattern": "GGTTTGGCGATCTGGTTTTC",
+   "results": [],
+   "retrieval_complete": false,
+   "returned": 0,
+   "scope": "any_offset",
+   "stop": {
+    "phase": "discovery",
+    "reason": "max_contexts"
+   },
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.013833
+   },
+   "withheld": {
+    "reason": "threshold_crossed"
+   },
+   "work": {
+    "mask_scans": 0,
+    "ranges_visited": 37,
+    "steps": 37
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 0.022084
+ }
+}

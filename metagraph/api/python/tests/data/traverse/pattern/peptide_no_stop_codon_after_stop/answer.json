@@ -14,7 +14,7 @@
   "max_anchors": 1000,
   "max_contexts": 10000,
   "max_patterns": 16,
-  "max_steps": 100000000,
+  "max_steps": 10,
   "min_information_bits": 24,
   "stop_at_threshold": false,
   "time_budget_ms": 60000
@@ -24,32 +24,36 @@
  "pattern_contract_version": 1,
  "patterns": [
   {
-   "error": {
-    "code": "bad_alphabet",
-    "message": "pattern: character 'U' at position 4 is not in the protein alphabet (A C D E F G H I K L M N P Q R S T V W Y, and X B Z J)"
-   },
-   "id": "U",
-   "kind": "protein"
-  },
-  {
-   "absence_scope": "long",
-   "anchor_information_bits": 48.83007499855769,
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
    "counts": {
-    "anchors": {
-     "by_strand": {
-      "+": {
-       "relation": "exact",
-       "unit": "anchors",
-       "value": 0
-      },
-      "-": {
-       "relation": "exact",
-       "unit": "anchors",
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
        "value": 0
       }
      },
-     "relation": "exact",
-     "unit": "anchors",
+     "by_strand": {
+      "+": {
+       "relation": "unknown",
+       "unit": "graph_contexts",
+       "value": null
+      },
+      "-": {
+       "relation": "at_least",
+       "unit": "graph_contexts",
+       "value": 0
+      }
+     },
+     "relation": "at_least",
+     "suffix": {
+      "relation": "at_least",
+      "unit": "graph_contexts",
+      "value": 0
+     },
+     "unit": "graph_contexts",
      "value": 0
     },
     "labels": {
@@ -61,41 +65,35 @@
      "relation": "unknown",
      "unit": "placed_occurrences",
      "value": null
-    },
-    "paths": {
-     "relation": "exact",
-     "unit": "paths",
-     "value": 0
     }
    },
    "determinism": "full",
-   "genetic_code": 1,
-   "id": "stop",
-   "information_bits": 51.24511249783654,
-   "kind": "protein",
-   "length": 33,
-   "min_anchor_information_bits": 47.24511249783654,
+   "id": "heavy",
+   "information_bits": 24.0,
+   "kind": "iupac",
+   "length": 31,
+   "min_anchor_information_bits": null,
    "mode": "count",
-   "notes": [
-    "paths_later_increment"
-   ],
+   "notes": [],
    "palindromic": false,
-   "pattern": "MELPNIMHPV*",
-   "residues": 11,
+   "pattern": "GGNNNNNNNNNNNNNNNNNNNTTGGCGATCT",
    "retrieval_complete": false,
-   "scope": "long",
-   "stop": null,
+   "scope": "any_offset",
+   "stop": {
+    "phase": "discovery",
+    "reason": "max_steps"
+   },
    "strands": [
     "+",
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.088875
+    "elapsed_ms": 0.005041
    },
    "work": {
     "mask_scans": 0,
-    "ranges_visited": 517,
-    "steps": 517
+    "ranges_visited": 10,
+    "steps": 10
    }
   },
   {
@@ -107,34 +105,34 @@
       "0": {
        "relation": "exact",
        "unit": "graph_contexts",
-       "value": 2
+       "value": 0
       },
       "1": {
        "relation": "exact",
        "unit": "graph_contexts",
-       "value": 2
+       "value": 0
       }
      },
      "by_strand": {
       "+": {
        "relation": "exact",
        "unit": "graph_contexts",
-       "value": 2
+       "value": 0
       },
       "-": {
        "relation": "exact",
        "unit": "graph_contexts",
-       "value": 2
+       "value": 0
       }
      },
      "relation": "exact",
      "suffix": {
       "relation": "exact",
       "unit": "graph_contexts",
-      "value": 2
+      "value": 0
      },
      "unit": "graph_contexts",
-     "value": 4
+     "value": 0
     },
     "labels": {
      "relation": "unknown",
@@ -148,16 +146,18 @@
     }
    },
    "determinism": "full",
-   "genetic_code": 1,
-   "id": "ok",
-   "information_bits": 46.83007499855769,
+   "genetic_code": 27,
+   "id": "NDM-1 end",
+   "information_bits": 44.24511249783654,
    "kind": "protein",
    "length": 30,
    "min_anchor_information_bits": null,
    "mode": "count",
-   "notes": [],
+   "notes": [
+    "no_stop_codon"
+   ],
    "palindromic": false,
-   "pattern": "MELPNIMHPV",
+   "pattern": "TARMADKLR*",
    "residues": 10,
    "retrieval_complete": false,
    "scope": "any_offset",
@@ -167,16 +167,16 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.056917
+    "elapsed_ms": 0.000792
    },
    "work": {
     "mask_scans": 0,
-    "ranges_visited": 432,
-    "steps": 432
+    "ranges_visited": 0,
+    "steps": 0
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.172583
+  "elapsed_ms": 0.011958
  }
 }

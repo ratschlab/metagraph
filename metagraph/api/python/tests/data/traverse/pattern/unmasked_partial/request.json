@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "dna": "GGTTTGGCGATCTGGTTTTC",
+   "id": "NDM-F"
+  }
+ ],
+ "mode": "partial",
+ "max_contexts": 5,
+ "output": {
+  "labels": "none"
+ }
+}

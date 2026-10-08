@@ -4,7 +4,7 @@
  "spec": "docs/SPEC-pattern-search.md",
  "servers": {
   "masked": "server_query -i {work}/masked/graph_k31.dbg -a {work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --index-name mini_refseq --index-release fixtures-mini_refseq  (a copy of the mini graph with the .edgemask of transform --mask-dummy; annotation, .seqs and sidecars linked from the mini)",
-  "unmasked": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built: no .edgemask)",
+  "unmasked": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built: no .edgemask; counting upper_bound)",
   "built_at_load": "server_query -i {mini}/graph_k31.dbg -a {mini}/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg --pattern-build-mask --index-name mini_refseq --index-release fixtures-mini_refseq  (the mini index as built, its mask built in memory at start-up)",
   "multi": "server_query {work}/graphs.csv --index-release fixtures-mini_refseq  (one line: mini_refseq,{work}/masked/graph_k31.dbg,{work}/masked/annotation.relaxed.relabeled.row_diff_brwt_coord.annodbg)",
   "primary": "server_query -i {work}/primary/graph.dbg -a {work}/primary/anno.column.annodbg --index-name mini_primary --index-release fixtures-mini_refseq  (a PRIMARY graph of 562.fa and 573.fa at k = 31 with --mask-dummy, column annotation by file name)",
@@ -19,7 +19,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, placement record)"
+   "shows": "GET /capabilities of a single-graph server whose graph has its mask: `pattern` in features and routes, the block available (basic, mask file, counting exact, placement record)"
   },
   "traverse_capabilities": {
    "server": "masked",
@@ -37,7 +37,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the mini index as built, without its .edgemask: the feature and route listed, the block available false, unavailable_reason mask_required, mask absent"
+   "shows": "the mini index as built, without its .edgemask (owner decision #16): the feature and route listed, the block available, mask absent, counting upper_bound with the dummy_fraction sampled at load (value, 95% interval, samples, source sampled); it said available false, mask_required before"
   },
   "traverse_capabilities_mask_absent": {
    "server": "unmasked",
@@ -55,7 +55,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "the mini index as built, served with --pattern-build-mask: the block available, mask built_at_load (the mask built in memory at start-up), otherwise as with the file"
+   "shows": "the mini index as built, served with --pattern-build-mask: the block available, mask built_at_load (the mask built in memory at start-up), counting exact, otherwise as with the file"
   },
   "traverse_capabilities_built_at_load": {
    "server": "built_at_load",
@@ -631,7 +631,34 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "error slots of protein patterns: bad_alphabet (U, selenocysteine, is not served), stop_unsupported (the stop * is not served in this version: no branch through a stop codon); the last pattern is answered"
+   "shows": "error slot bad_alphabet of a protein pattern (U, selenocysteine, is not served); the stop * is a residue since owner decision #19 (a stop codon of the genetic code): MELPNIMHPV* (33 bases, longer than k) is answered, its anchors counted (it was refused stop_unsupported by 4596bb3b, a code now retired); the last pattern is answered"
+  },
+  "peptide_stop": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the stop * (owner decision #19) in the standard code (1): a stop codon (TAA, TAG, TGA) at that position; NDM-1's last 9 residues and its stop, 30 bases: the contexts end in its stop codon TGA; X (any residue) never matches a stop: the same peptide with X for * has no context"
+  },
+  "peptide_no_stop_codon": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a table without an unconditional stop codon (27; also 28 and 31: their context stops match as their residue, owner decision #21): * matches nothing, and the answer says so (note no_stop_codon): 30 bases, exact 0 without a search (work 0); 45 bases, longer than k: its anchor window holds no *, its anchors counted, its paths exact 0"
+  },
+  "peptide_no_stop_codon_after_stop": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a peptide without instances (note no_stop_codon) of at most k bases is answered exact 0 without a search, also after the request's budget stopped: stop null, work 0, determinism full, unlike the patterns a sticky stop leaves unknown (SPEC §7.6)"
   },
   "genetic_code_unknown": {
    "server": "masked",
@@ -641,6 +668,60 @@
    "hand_made": false,
    "headers": {},
    "shows": "400 genetic_code_unknown: genetic_code is not an NCBI translation table id (7 was merged into 4; capabilities genetic_codes lists the ids)"
+  },
+  "unmasked_count": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a graph without its dummy-edge mask (owner decision #16; it answered 400 mask_required before): index counting upper_bound and dummy_fraction; a count the search could not resolve is bounds [lower, upper], upper the candidate entries (the source dummies among them), lower what was spelled whole (offset 0), each with its estimate round(upper x f) and the note estimate_sampled_dummy_fraction. NDM-F: [2, 24], estimate 24 (exact 24 with the mask); an island start: [2, 32], estimate 32, while the masked graph counts 17 -- the estimate is not a bound; an absent primer: an empty block, exact 0"
+  },
+  "unmasked_labels_all": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "all_or_count with labels \"all\" without the mask: the upper bound (24) within max_contexts, so every candidate is enumerated and the source dummies dropped: the list is exact (the masked graph's 24 contexts, 9 labels, 42 placed occurrences), and the counts, made from it, exact; the absent primer complete"
+  },
+  "unmasked_threshold_upper_bound": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "all_or_count admits on the upper bound without the mask (conservative): the island start's 17 contexts would fit max_contexts 17 (the masked graph returns them), its upper bound 32 does not: withheld count_above_threshold with the count bounds, and the note threshold_upper_bound says that the lower bound was within the threshold"
+  },
+  "unmasked_stop_at_threshold": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "stop_at_threshold without the mask compares the running upper bound: discovery stops earlier than on the masked graph (at_least 0 here, 6 there), withheld threshold_crossed, note threshold_upper_bound (the lower bound had not crossed)"
+  },
+  "unmasked_partial": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "partial without the mask: the first 5 contexts (the masked graph's first 5, no source dummy among them), cut max_contexts; the release raises each lower bound to what it released at that strand and offset: bounds [6, 24]"
+  },
+  "unmasked_paths": {
+   "server": "unmasked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "patterns longer than k without the mask: an anchor window without a leading N is spelled whole, so the anchors are exact (no source dummy can hold one), and the paths are the masked graph's: exact, released, complete"
   },
   "unknown_field": {
    "server": "masked",
@@ -686,15 +767,6 @@
    "hand_made": false,
    "headers": {},
    "shows": "400 resident_only: in_ram, whatever its value (the route never loads an index)"
-  },
-  "mask_required": {
-   "server": "unmasked",
-   "method": "POST",
-   "path": "/pattern",
-   "status": 400,
-   "hand_made": false,
-   "headers": {},
-   "shows": "400 mask_required: the graph has no dummy-edge mask, whatever the request asks"
   },
   "multi_graph": {
    "server": "multi",

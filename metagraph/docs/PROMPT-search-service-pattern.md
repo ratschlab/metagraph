@@ -84,10 +84,32 @@ version 1, both opt-in, each gated on the capabilities block, never on a milesto
   only where the block's `support` is `record_verified` (else 400 `support_unavailable`). New values to handle: `withheld` `anchors_above_threshold`,
   `cut` `max_paths`, `stop.phase` `extension`, `stop.reason` `max_paths`, note `label_intersection_only`.
 - **Peptides**: offer them only where `kinds` lists `"protein"`: a `protein` pattern over `protein_residues` (the
-  20 amino acids and X, B, Z, J), in `genetic_code` (one of `genetic_codes`, default `default_genetic_code`, 1;
-  another integer is 400 `genetic_code_unknown`). A stop `*` is answered in its slot with `stop_unsupported`; the
-  entry states `residues` and `genetic_code`, and `length` stays in bases (3 per residue), so a peptide of more
-  than k / 3 residues is a long pattern (paths as above).
+  20 amino acids and X, B, Z, J, and the stop `*` where the list has it), in `genetic_code` (one of
+  `genetic_codes`, default `default_genetic_code`, 1; another integer is 400 `genetic_code_unknown`). The entry
+  states `residues` and `genetic_code`, and `length` stays in bases (3 per residue), so a peptide of more than
+  k / 3 residues is a long pattern (paths as above).
+
+**The owner's decisions of 2026-10-08 (in the build; SPEC §18).** Additions to contract version 1:
+- **Graphs without the dummy-edge mask are served.** Gate on the block's `counting`: `"exact"` (a mask) or
+  `"upper_bound"` (none; the block then gives `dummy_fraction`, the sampled fraction of real k-mers with its 95%
+  interval). On an `upper_bound` host a count is `exact` where the backend can prove it and otherwise `bounds`
+  [`lower`, `upper`] with an `estimate` (round(upper × f)): show the estimate **as an estimate**, beside its bounds
+  and the host's `dummy_fraction`, never as the count and never as a bound (a pattern at a record start can sit far
+  below it). The merge algebra of §3.1 item 2 adds `lower` and `upper` and leaves estimates out; a merged estimate,
+  if the service shows one, is labelled as such. The host admits on the upper bound (`all_or_count` can withhold a
+  pattern whose true count fits, note `threshold_upper_bound`; `partial` lists it); its lists are exact. New notes:
+  `estimate_sampled_dummy_fraction`, `threshold_upper_bound`, `no_stop_codon`. `mask_required` is retired: no
+  current build answers it (an older one may: keep passing it through).
+- **The stop `*`** is a residue where `protein_residues` lists it: a stop codon of `genetic_code` at that
+  position (X never matches one). In tables 27, 28 and 31 it matches nothing, and the entry says so (note
+  `no_stop_codon`; its contexts, or a long one's paths, `exact` 0); never read such a 0 as an absence of the
+  protein. Such a pattern of at most k bases is answered without a search, so even after an earlier pattern's
+  budget stop it states `exact` 0 with `stop: null` (SPEC §7.6, the one exception to "every later pattern
+  `unknown`"). The slot code `stop_unsupported` (`4596bb3b`'s answer to a `*`, in that commit's fixtures) is
+  retired: no current build answers it; a host still on `4596bb3b` may, so keep passing it through as a slot
+  error.
+- **Identity**: the mask and the Bloom filter are derived data of the graph, outside `index_fp`; a host that gains
+  a mask keeps its `index_fp` (only its counting becomes `exact`).
 
 ## 2. When
 
@@ -99,7 +121,7 @@ version 1, both opt-in, each gated on the capabilities block, never on a milesto
 | 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | 5 in the build (2026-10-08, SPEC §12.2), with fixtures (`peptide*`, `genetic_code_unknown`); 5b later |
 | 6 | multi-graph servers (per-shard budgets, barriers, shard identity per result), the real-index benchmark | after 5 |
 | 7 | this service's job type (the backend's Python client methods are deferred until needed) | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
-| mask | refseq33m-experimental's graph has no `.edgemask` file, and the route needs one (DESIGN §4): before the route answers on staging the owner runs `metagraph transform --mask-dummy` once on mex, on the host rather than in the 128 GiB container (it holds a transient bit vector of edges + 1 bits, about 78 GB, beside the graph). Node ids, rows and the annotation stay; but `/stats` `graph.nodes` becomes the k-mer count, a `.bloom` beside the graph starts loading, and with `--index-manifest` the manifest is regenerated before `update.sh` restarts the server, after which `index_fp` changes: the service sees a new index identity. `--pattern-build-mask` (the mask built in memory at every start-up, with `--threads-each` threads, before any route answers) is for small indexes, not for refseq33m. Until then the host states `mask: absent` and the job answers `mask_required` | before the owner's `update.sh` that enables the route |
+| mask | refseq33m-experimental's graph has no `.edgemask` file. Since the owner's decision #16 (2026-10-08) the route answers without it: `mask: absent`, `counting: "upper_bound"`, counts `bounds` with an `estimate` where they cannot be proven, lists exact (before, it answered `mask_required`). For exact counts the owner runs `metagraph transform --mask-dummy` once on mex (decision #18: in a staging-only directory, on the host rather than in the 128 GiB container: it holds a transient bit vector of edges + 1 bits, about 78 GB, beside the graph). Node ids, rows, the annotation and `index_fp` stay (decision #17: the mask is derived data); `/stats` `graph.nodes` becomes the k-mer count and a `.bloom` beside the graph starts loading; the block then says `counting: "exact"`. `--pattern-build-mask` (the mask built in memory at every start-up) is for small indexes, not for refseq33m | the route answers from the `update.sh` that deploys it; exact counts after the mask (#18) |
 | fixtures | with milestone 1's freeze commit, as for level 6: the capabilities block on both routes, one answer per mode and per `withheld` reason, an error slot, from the mini index, under `api/python/tests/data/traverse/pattern/`, so your unit tests do not wait for a host | with milestone 1 |
 
 Staging (`refseq33m-experimental`, a BASIC index with record mapping) gets the route when the owner runs
@@ -159,7 +181,8 @@ capabilities block are what to build on.
    the service implements (1) **and** `available: true` (SPEC §10.3). Any other version (missing, malformed,
    lower or higher), or no block, answers `pattern_unsupported` with the host's feature list, as
    `traversal_disabled` does. `available: false` answers unavailable with the host's `unavailable_reason` kept
-   verbatim (`mask_required`, `mask_invalid`, `alphabet_untested`, … or one the service does not know);
+   verbatim (`mask_invalid`, `alphabet_untested`, … an older build's `mask_required`, or one the service does
+   not know);
    `available: null` means the index is loading: availability unknown, re-probe later, never cache it as
    unavailable. Every option is gated on its capability: label projections exactly when the host's
    `projections` list has them; on `annotation: "unbudgeted"`, `labels: all` only with the caller's explicit
@@ -228,7 +251,8 @@ task's HTTP timeout and the job's lifetime are separate, larger clocks.
 ## 5. Tests and acceptance
 
 - Unit: capabilities gating (block present, absent; contract version 1, missing, malformed, lower, higher;
-  `available` true, false with its reason, null); the per-task call and its timeout; the merge (the algebra of
+  `available` true, false with its reason, null; `counting` exact and upper_bound, an estimate shown as one); the
+  per-task call and its timeout; the merge (the algebra of
   §3.1 item 2 with its two examples, entries mapped by position across pattern chunks, label counts never
   summed, `retrieval_complete` only with every contributing task, per-task `withheld`); the pass-through keeps
   every field; the error envelope (SPEC §6: an unexpected status or body is a backend failure, never an empty

@@ -1,6 +1,7 @@
 # Design: the traversal graphlet — retrieve once, process locally
 
-**Status:** v5.10 (2026-10-06; v5.10 = the P3 server items of the review of 2026-10-06, folded into feature level 6
+**Status:** v5.11 (2026-10-08; v5.11 = the owner's decision #17: the graph's mask and Bloom filter are derived
+data outside the index identity, §29; v5.10 = the P3 server items of the review of 2026-10-06, folded into feature level 6
 as corrections, §28; v5.9 = the P2 fixes of the review of 2026-10-06, folded into feature level 6, §27;
 v5.8 = record coordinates as built, feature level 6, §26, after the review of levels 4–5, §25; v5.7 = the review of pass 5 and the path cache's first reads, §24; v5.6 = pass 5 as implemented, §23; v5.5 = the backend half of stage 4 as implemented, §22; v5.4 = stage 3 as implemented and the answers of its review, §20; v5.3 = the resource contract and library decisions as implemented after implementation reviews 3 and 4, §19; v5.2 = the owner's conservative outcome rule in §14) — **stages 1–3 and the backend half of stage 4 implemented. MGT v1 is FROZEN (2026-10-02, owner's decision after the implementation review: no finding required a format change). Every later change — fixes, stages 2–4 — stays within the v1 records, fields and tokens; a format change requires MGT v2. Spec §7.5 is the normative text where a design excerpt differs** (`3ecbfc47`…`5fbd9057`); the freeze criteria of the fifth review are met (golden vectors and round-trip fixtures pass, size measured on SRA, §7) — MGT v1 freezes on the owner's confirmation; **approved for implementation** by the fifth external review (no further architecture
 review needed; MGT v1 freezes once the codec corrections and the round-trip fixtures pass; hard resource guarantees
@@ -250,7 +251,8 @@ which sequences columns A and B annotate get the same fingerprint, and the per-r
 *(v4)* **`index_fp` is the digest of the immutable index bundle**, not of its metadata:
 
 - The index build writes a **manifest** next to the files (`<prefix>.manifest.json`: every file of the bundle —
-  graph, annotation, sidecars (`.seqs`, `.anchors`, `.rd_succ`, `.edgemask`, `.coords`) — with size and sha256, plus
+  graph, annotation, sidecars (`.seqs`, `.anchors`, `.rd_succ`, `.coords`; never the graph's derived `.edgemask` and
+  `.bloom`, decision #17, §29) — with size and sha256, plus
   the builder's version and inputs), and `index_fp` = sha256 over the canonical manifest. Hashing hundreds of GB at
   server start is not an option; hashing at build time is free. For public indexes whose files were not built with
   a manifest, the deployment supplies one (computed once, or from immutable object-store digests such as S3
@@ -1146,7 +1148,8 @@ confirmed finding is fixed; MGT v1 is unchanged (no record, field or token). The
 - **One loader dependency inventory (findings 2, 3).** Two pairs of symlinks to one graph and annotation with
   different `.seqs` beside them shared one manifest check (bundles were grouped by the main files' real paths), and
   stated one `index_fp` while answering with different accessions; a masked graph's `.bloom`, loaded by
-  `DBGSuccinct::load` and able to turn `graph_runs` `[[0, 36]]` into `[]`, was in no manifest. `index_load_inventory`
+  `DBGSuccinct::load` and able to turn `graph_runs` `[[0, 36]]` into `[]`, was in no manifest (the mask and the
+  `.bloom` left the inventory again with the owner's decision #17, §29, this risk stated). `index_load_inventory`
   now lists every file the server's loaders open for a pair, derived from the listed spelling as the loaders derive
   it: graph; mask when it opens, then Bloom filter when it exists; annotation; anchors and fork successors beside the
   graph for `.row_diff`; `.seqs` for a coordinate annotation unless `--no-coord-mapping`. A unit test checks its
@@ -1249,8 +1252,8 @@ confirmed finding is fixed; MGT v1 is unchanged (no record, field or token). The
   - *A manifest listing an optional file the pair does not load (minor).* The check ran one way (loaded ⊆ listed):
     a bundle without its `.seqs` beside the symlinks, or a server with `--no-coord-mapping`, stated the `index_fp`
     of one that loads it, and for a mask or a Bloom filter both fingerprints were equal. A manifest may not list an
-    optional inventory file (`.edgemask`, `.bloom`, `.seqs`) the pair does not load; `--extra` files outside the
-    inventory stay allowed.
+    optional inventory file (`.edgemask`, `.bloom`, `.seqs`; since §29 the `.seqs` only, a mask or a Bloom filter
+    never) the pair does not load; `--extra` files outside the inventory stay allowed.
   - *`/resolve` held every row anyway, and decoded most twice (moderate).* The first R6 fix kept a 256 MiB prefix of
     a discovery's rows and decoded the rest again in one call for the profile pass: the same peak (1.66 GB on the
     synthetic 3 kb locus of 8,000 wide columns) and 40–56% more CPU. Now every `/resolve` decodes in batches (64
@@ -1877,3 +1880,28 @@ what else changes, and a client keyed on `feature_level` cannot tell a corrected
   scan (trace: 2,000 labels 3,457 → 262 ms; the same profiles, checked against the discovery's); presence uses
   the same accumulator instead of a labels × k-mers bitmap; the client is checked every 4,096 k-mers of the pass.
   The per-k-mer hit copies of `fetch`, the larger memory term with many labels, are the planned label cap's.
+
+# 29. The owner's decision #17 (2026-10-08): derived data outside the identity *(v5.11)*
+
+The graph's dummy-edge mask (`<graph without .dbg>.edgemask`) and its Bloom filter (`<graph without .dbg>.bloom`)
+are **derived data** of the graph: computed from it alone, they decide which counts are exact (`/pattern` counts
+exactly with the mask and states bounds with an estimate without it, `SPEC-pattern-search.md` §18) and how fast
+k-mers are looked up, never what an exact answer is. They leave the identity inventory (`index_load_inventory`,
+`index_bundle_files`); `index_derived_files` lists them apart, and `traverse --index-inventory` prints them under
+`derived` with the rule (`derived_rule`). A manifest listing one (`*.edgemask`, `*.bloom`) is refused, naming the
+entry and the rule; `index_manifest.py` never writes them, refuses them with `--extra` and flags them with
+`--verify`. Consequence: adding a mask to a deployed index (`transform --mask-dummy`) leaves its `index_fp` and
+`index_meta_fp` unchanged (shown on a copy of `build/mini_refseq`: the stored graphlets still compare as one
+index, and every `/traverse` and `/resolve` answer replayed byte for byte apart from timing). Two spellings of one
+graph, one with a mask beside it, are one index with one identity.
+
+This reverses the pass-5 finding-3 fix (§24) for these two files, and its risk comes back, stated
+(`SPEC-labeled-traversal-core.md`, "The index identity"): no fingerprint covers derived data, so a stale or
+foreign derived file beside the graph is not detected by `index_fp`. The loader checks a mask's size and its
+W = `$` edges (`mask_invalid` on `/pattern`) and a Bloom filter's k and mode only; a Bloom filter of another graph
+with the same k and mode can hide k-mers under an unchanged `index_fp` (the pass-5 probe). Derived data is written
+only by `build --mask-dummy`, `transform --mask-dummy` or `transform --initialize-bloom` on the graph it sits beside.
+A spot check at load (a fixed-seed sample of the graph's k-mers looked up through the Bloom filter), or the graph's
+size and digest stored in the derived files' headers, would close it; the owner's call. Manifests written between
+the pass-5 review and this decision that list a mask or a Bloom filter refuse to start and are written again
+without them (their `index_fp` changes once).

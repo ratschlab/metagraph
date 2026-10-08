@@ -19,85 +19,12 @@
   "stop_at_threshold": false,
   "time_budget_ms": 60000
  },
- "mode": "count",
- "output": null,
+ "mode": "all_or_count",
+ "output": {
+  "labels": "none"
+ },
  "pattern_contract_version": 1,
  "patterns": [
-  {
-   "error": {
-    "code": "bad_alphabet",
-    "message": "pattern: character 'U' at position 4 is not in the protein alphabet (A C D E F G H I K L M N P Q R S T V W Y, and X B Z J)"
-   },
-   "id": "U",
-   "kind": "protein"
-  },
-  {
-   "absence_scope": "long",
-   "anchor_information_bits": 48.83007499855769,
-   "counts": {
-    "anchors": {
-     "by_strand": {
-      "+": {
-       "relation": "exact",
-       "unit": "anchors",
-       "value": 0
-      },
-      "-": {
-       "relation": "exact",
-       "unit": "anchors",
-       "value": 0
-      }
-     },
-     "relation": "exact",
-     "unit": "anchors",
-     "value": 0
-    },
-    "labels": {
-     "relation": "unknown",
-     "unit": "labels",
-     "value": null
-    },
-    "occurrences": {
-     "relation": "unknown",
-     "unit": "placed_occurrences",
-     "value": null
-    },
-    "paths": {
-     "relation": "exact",
-     "unit": "paths",
-     "value": 0
-    }
-   },
-   "determinism": "full",
-   "genetic_code": 1,
-   "id": "stop",
-   "information_bits": 51.24511249783654,
-   "kind": "protein",
-   "length": 33,
-   "min_anchor_information_bits": 47.24511249783654,
-   "mode": "count",
-   "notes": [
-    "paths_later_increment"
-   ],
-   "palindromic": false,
-   "pattern": "MELPNIMHPV*",
-   "residues": 11,
-   "retrieval_complete": false,
-   "scope": "long",
-   "stop": null,
-   "strands": [
-    "+",
-    "-"
-   ],
-   "timing": {
-    "elapsed_ms": 0.088875
-   },
-   "work": {
-    "mask_scans": 0,
-    "ranges_visited": 517,
-    "steps": 517
-   }
-  },
   {
    "absence_scope": "any_offset",
    "anchor_information_bits": null,
@@ -147,19 +74,55 @@
      "value": null
     }
    },
+   "cut": null,
    "determinism": "full",
    "genetic_code": 1,
-   "id": "ok",
-   "information_bits": 46.83007499855769,
+   "id": "NDM-1 end",
+   "information_bits": 42.66014999711538,
    "kind": "protein",
    "length": 30,
    "min_anchor_information_bits": null,
-   "mode": "count",
+   "mode": "all_or_count",
    "notes": [],
    "palindromic": false,
-   "pattern": "MELPNIMHPV",
+   "pattern": "TARMADKLR*",
    "residues": 10,
-   "retrieval_complete": false,
+   "results": [
+    {
+     "instance": "ACGGCCCGCATGGCCGACAAGCTGCGCTGA",
+     "kmer": "ACGGCCCGCATGGCCGACAAGCTGCGCTGAG",
+     "node": 1301191,
+     "offset": 0,
+     "row": 1301190,
+     "strand": "+"
+    },
+    {
+     "instance": "TCAGCGCAGCTTGTCGGCCATGCGGGCCGT",
+     "kmer": "CTCAGCGCAGCTTGTCGGCCATGCGGGCCGT",
+     "node": 4952801,
+     "offset": 1,
+     "row": 4952800,
+     "strand": "-"
+    },
+    {
+     "instance": "ACGGCCCGCATGGCCGACAAGCTGCGCTGA",
+     "kmer": "TACGGCCCGCATGGCCGACAAGCTGCGCTGA",
+     "node": 6525336,
+     "offset": 1,
+     "row": 6525335,
+     "strand": "+"
+    },
+    {
+     "instance": "TCAGCGCAGCTTGTCGGCCATGCGGGCCGT",
+     "kmer": "TCAGCGCAGCTTGTCGGCCATGCGGGCCGTA",
+     "node": 7714579,
+     "offset": 0,
+     "row": 7714578,
+     "strand": "-"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 4,
    "scope": "any_offset",
    "stop": null,
    "strands": [
@@ -167,16 +130,98 @@
     "-"
    ],
    "timing": {
-    "elapsed_ms": 0.056917
+    "elapsed_ms": 0.311083
    },
+   "withheld": null,
    "work": {
     "mask_scans": 0,
-    "ranges_visited": 432,
-    "steps": 432
+    "ranges_visited": 1433,
+    "steps": 1433
+   }
+  },
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 0
+     },
+     "unit": "graph_contexts",
+     "value": 0
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "genetic_code": 1,
+   "id": "X",
+   "information_bits": 38.31437516027365,
+   "kind": "protein",
+   "length": 30,
+   "min_anchor_information_bits": null,
+   "mode": "all_or_count",
+   "notes": [],
+   "palindromic": false,
+   "pattern": "TARMADKLRX",
+   "residues": 10,
+   "results": [],
+   "retrieval_complete": true,
+   "returned": 0,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 2.276791
+   },
+   "withheld": null,
+   "work": {
+    "mask_scans": 0,
+    "ranges_visited": 19140,
+    "steps": 19140
    }
   }
  ],
  "timing": {
-  "elapsed_ms": 0.172583
+  "elapsed_ms": 2.597375
  }
 }

@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "iupac": "GGNNNNNNNNNNNNNNNNNNNTTGGCGATCT",
+   "id": "heavy"
+  },
+  {
+   "protein": "TARMADKLR*",
+   "id": "NDM-1 end"
+  }
+ ],
+ "mode": "count",
+ "genetic_code": 27,
+ "max_steps": 10
+}

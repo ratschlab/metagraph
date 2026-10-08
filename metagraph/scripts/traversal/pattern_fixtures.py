@@ -15,7 +15,11 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
              .edgemask by `metagraph transform --mask-dummy` (DESIGN-pattern-search.md §4, the
              one-time step for a host; the .dbg is unchanged, checked, so the mini's annotation
              and .seqs serve it as they are), as integration_tests/test_pattern.py makes it
-  unmasked   the mini index as built (no .edgemask): the route answers mask_required
+  unmasked   the mini index as built (no .edgemask): served all the same since owner decision
+             #16 of 2026-10-08 (capabilities counting upper_bound): a count the search could not
+             resolve is the bounds [lower, U], U the graph's candidate entries (its source dummies
+             among them), with the additive estimate U x f (f the dummy fraction sampled at
+             load, index.dummy_fraction); the lists stay exact (it answered mask_required before)
   built_at_load
              the mini index as built, served with --pattern-build-mask: the same mask built in
              memory at start-up (capabilities mask: built_at_load)
@@ -121,6 +125,14 @@ SCAN_10 = 'ATGCCGGTGA'
 SCAN_STEPS = 20
 # the record the hash graph is built from (a graph the engine does not recognise)
 HASH_RECORD = '1296536.fa'
+# owner decision #16 (graphs without the dummy-edge mask): the first 16 bases of an E. coli
+# record (562.fa, NZ_CP021206.1) whose first k-mer no k-mer enters, so that the graph's source
+# dummies ($^j and its first k - j bases, 1 <= j <= 15) hold it at offsets 1 to 15: 17 contexts
+# on the masked graph (1 on +, 16 on -), an upper bound of 32 without the mask (15 source
+# dummies more), its estimate 32 -- the estimate is not a bound
+START16 = 'GATGCCGGTGAACAAC'
+START16_EXACT = 17
+START16_UPPER = 32
 # increment 4 (paths, long_search "paths"): a 51-mer of two copies of a repeated 31-mer of the
 # E. coli records (562): 10 bases before one copy, the 31-mer, 10 bases after another. Every
 # k-mer of it is in the index (each window lies in one copy), so it is a path of the graph, but
@@ -131,6 +143,11 @@ CHIMERA = 'CGGCCTCCAGAGCACTTTGTCGTTTTTGGACGGAAAATCCCTAGAACCCCT'
 # one k-mer; 14 residues are 42 bases, a pattern longer than k
 NDM_PEP = 'MELPNIMHPV'
 NDM_PEP_LONG = 'MELPNIMHPVAKLS'
+# owner decision #19: '*' is a stop codon of the request's genetic code. NDM-1's last 9 residues
+# and its stop (... ACG GCC CGC ATG GCC GAC AAG CTG CGC TGA): 30 bases, within one k-mer
+NDM_PEP_STOP = 'TARMADKLR*'
+# the same with X (any residue, never a stop) in place of the stop: no instance on the mini
+NDM_PEP_STOP_X = 'TARMADKLRX'
 
 # the server's defaults (--pattern-* flags, DESIGN-pattern-search.md §5.3), for the hand-made
 # 503 and the expectations
@@ -288,13 +305,29 @@ def entries(*per_entry):
     return run
 
 
-def caps_block(available, reason=None, mask=None):
+def caps_block(available, reason=None, mask=None, counting=None):
     def run(doc):
         b = doc['pattern']
         check(b['pattern_contract_version'] == 1, b)
         check(b['available'] is available and b['unavailable_reason'] == reason, b)
         if mask is not None:
             check(b['mask'] == mask, b)
+        if counting is not None:
+            # owner decision #16: exact with the mask, upper_bound (and the dummy fraction the
+            # estimates rest on) without it
+            check(b['counting'] == counting, b)
+            check((b['dummy_fraction'] is not None) is (counting == 'upper_bound'), b)
+    return run
+
+
+def estimated(lower, upper, estimate):
+    """A graph without its mask (owner decision #16): counts.contexts (or anchors) is the bounds
+    [lower, upper] with this estimate, and the entry says so (estimate_sampled_dummy_fraction)."""
+    def run(entry):
+        c = counts_of(entry)
+        check((c['relation'], c['lower'], c['upper'], c.get('estimate'))
+              == ('bounds', lower, upper, estimate), c)
+        check('estimate_sampled_dummy_fraction' in entry['notes'], entry['notes'])
     return run
 
 
@@ -354,26 +387,30 @@ FIXTURES = [
     # ---------------------------------------------------------------- capabilities
     get('capabilities', 'masked', '/capabilities',
         'GET /capabilities of a single-graph server whose graph has its mask: `pattern` in '
-        'features and routes, the block available (basic, mask file, placement record)',
-        expect_all(features(True), caps_block(True, mask='file'))),
+        'features and routes, the block available (basic, mask file, counting exact, placement '
+        'record)',
+        expect_all(features(True), caps_block(True, mask='file', counting='exact'))),
     get('traverse_capabilities', 'masked', '/traverse/capabilities',
         'GET /traverse/capabilities (the document the service probe reads) on the same server: '
         'the same `pattern` block',
-        caps_block(True, mask='file')),
+        caps_block(True, mask='file', counting='exact')),
     get('capabilities_mask_absent', 'unmasked', '/capabilities',
-        'the mini index as built, without its .edgemask: the feature and route listed, the '
-        'block available false, unavailable_reason mask_required, mask absent',
-        expect_all(features(True), caps_block(False, 'mask_required', 'absent'))),
+        'the mini index as built, without its .edgemask (owner decision #16): the feature and '
+        'route listed, the block available, mask absent, counting upper_bound with the '
+        'dummy_fraction sampled at load (value, 95% interval, samples, source sampled); it '
+        'said available false, mask_required before',
+        expect_all(features(True), caps_block(True, mask='absent', counting='upper_bound'))),
     get('traverse_capabilities_mask_absent', 'unmasked', '/traverse/capabilities',
         'the same unmasked server on the probe route',
-        caps_block(False, 'mask_required', 'absent')),
+        caps_block(True, mask='absent', counting='upper_bound')),
     get('capabilities_built_at_load', 'built_at_load', '/capabilities',
         'the mini index as built, served with --pattern-build-mask: the block available, mask '
-        'built_at_load (the mask built in memory at start-up), otherwise as with the file',
-        expect_all(features(True), caps_block(True, mask='built_at_load'))),
+        'built_at_load (the mask built in memory at start-up), counting exact, otherwise as '
+        'with the file',
+        expect_all(features(True), caps_block(True, mask='built_at_load', counting='exact'))),
     get('traverse_capabilities_built_at_load', 'built_at_load', '/traverse/capabilities',
         'the same server on the probe route',
-        caps_block(True, mask='built_at_load')),
+        caps_block(True, mask='built_at_load', counting='exact')),
     get('capabilities_multi_graph', 'multi', '/capabilities',
         'a multi-graph server: no `pattern` feature or route; the block says '
         'multi_graph_later_increment and nothing else',
@@ -861,15 +898,108 @@ FIXTURES = [
     post('peptide_bad_residue', 'masked',
          {'patterns': [p('MELPUIMHPV', 'protein', 'U'), p('MELPNIMHPV*', 'protein', 'stop'),
                        p(NDM_PEP, 'protein', 'ok')], 'mode': 'count'}, 200,
-         'error slots of protein patterns: bad_alphabet (U, selenocysteine, is not served), '
-         'stop_unsupported (the stop * is not served in this version: no branch through a stop '
-         'codon); the last pattern is answered',
-         entries(slot_error('bad_alphabet'), slot_error('stop_unsupported'), exact(4))),
+         'error slot bad_alphabet of a protein pattern (U, selenocysteine, is not served); the '
+         'stop * is a residue since owner decision #19 (a stop codon of the genetic code): '
+         'MELPNIMHPV* (33 bases, longer than k) is answered, its anchors counted (it was '
+         'refused stop_unsupported by 4596bb3b, a code now retired); the last pattern is answered',
+         entries(slot_error('bad_alphabet'), expect_all(field('scope', 'long'),
+                                                        field('residues', 11)),
+                 exact(4))),
+    post('peptide_stop', 'masked',
+         {'patterns': [p(NDM_PEP_STOP, 'protein', 'NDM-1 end'),
+                       p(NDM_PEP_STOP_X, 'protein', 'X')], 'output': {'labels': 'none'}}, 200,
+         'the stop * (owner decision #19) in the standard code (1): a stop codon (TAA, TAG, TGA) '
+         'at that position; NDM-1\'s last 9 residues and its stop, 30 bases: the contexts end '
+         'in its stop codon TGA; X (any residue) never matches a stop: the same peptide with X '
+         'for * has no context',
+         entries(expect_all(exact(4), complete,
+                            lambda e: check(all(r['instance'].endswith('TGA') if r['strand'] == '+'
+                                                else r['instance'].startswith('TCA')
+                                                for r in e['results']), e['results'])),
+                 expect_all(exact(0), complete))),
+    post('peptide_no_stop_codon', 'masked',
+         {'patterns': [p(NDM_PEP_STOP, 'protein', 'NDM-1 end'),
+                       p(NDM_PEP_LONG + '*', 'protein', 'NDM-1 1-14 and a stop')],
+          'mode': 'count', 'genetic_code': 27, 'long_search': 'paths'}, 200,
+         'a table without an unconditional stop codon (27; also 28 and 31: their context stops '
+         'match as their residue, owner decision #21): * matches nothing, and the answer says '
+         'so (note no_stop_codon): 30 bases, exact 0 without a search (work 0); 45 bases, '
+         'longer than k: its anchor window holds no *, its anchors counted, its paths exact 0',
+         entries(expect_all(exact(0), has_note('no_stop_codon'),
+                            lambda e: check(e['work']['steps'] == 0, e['work'])),
+                 expect_all(has_note('no_stop_codon'), paths_count('exact', 0, 'completed')))),
+    post('peptide_no_stop_codon_after_stop', 'masked',
+         {'patterns': [p(HEAVY, 'iupac', 'heavy'), p(NDM_PEP_STOP, 'protein', 'NDM-1 end')],
+          'mode': 'count', 'genetic_code': 27, 'max_steps': 10}, 200,
+         'a peptide without instances (note no_stop_codon) of at most k bases is answered exact '
+         '0 without a search, also after the request\'s budget stopped: stop null, work 0, '
+         'determinism full, unlike the patterns a sticky stop leaves unknown (SPEC §7.6)',
+         entries(field('stop', {'phase': 'discovery', 'reason': 'max_steps'}),
+                 expect_all(exact(0), field('stop', None), has_note('no_stop_codon'),
+                            work_zero))),
     post('genetic_code_unknown', 'masked',
          {'patterns': [p(NDM_PEP, 'protein')], 'genetic_code': 7}, 400,
          '400 genetic_code_unknown: genetic_code is not an NCBI translation table id (7 was '
          'merged into 4; capabilities genetic_codes lists the ids)',
          refused('genetic_code_unknown')),
+
+    # ---------------------------------------------------------------- without a mask (#16)
+    post('unmasked_count', 'unmasked',
+         {'patterns': [p(NDM_F, ident='NDM-F'), p(START16, ident='start'),
+                       p(ABSENT_20, ident='absent')], 'mode': 'count'}, 200,
+         'a graph without its dummy-edge mask (owner decision #16; it answered 400 mask_required '
+         'before): index counting upper_bound and dummy_fraction; a count the search could not '
+         'resolve is bounds [lower, upper], upper the candidate entries (the source dummies '
+         'among them), lower what was spelled whole (offset 0), each with its estimate round(upper '
+         'x f) and the note estimate_sampled_dummy_fraction. NDM-F: [2, 24], estimate 24 (exact '
+         '24 with the mask); an island start: [2, 32], estimate 32, while the masked graph counts '
+         '17 -- the estimate is not a bound; an absent primer: an empty block, exact 0',
+         entries(estimated(2, 24, 24), estimated(2, START16_UPPER, START16_UPPER),
+                 expect_all(exact(0), field('notes', [])))),
+    post('unmasked_labels_all', 'unmasked',
+         {'patterns': [p(NDM_F, ident='NDM-F'), p(ABSENT_20, ident='absent')],
+          'output': {'labels': 'all'}}, 200,
+         'all_or_count with labels "all" without the mask: the upper bound (24) within '
+         'max_contexts, so every candidate is enumerated and the source dummies dropped: the '
+         'list is exact (the masked graph\'s 24 contexts, 9 labels, 42 placed occurrences), and '
+         'the counts, made from it, exact; the absent primer complete',
+         entries(expect_all(exact(24), complete, labelled, counted('labels', 'exact', 9),
+                            counted('occurrences', 'exact', 42)),
+                 expect_all(exact(0), complete, counted('labels', 'exact', 0)))),
+    post('unmasked_threshold_upper_bound', 'unmasked',
+         {'patterns': [p(START16, ident='start')], 'max_contexts': START16_EXACT,
+          'output': {'labels': 'none'}}, 200,
+         'all_or_count admits on the upper bound without the mask (conservative): the island '
+         'start\'s 17 contexts would fit max_contexts 17 (the masked graph returns them), its '
+         'upper bound 32 does not: withheld count_above_threshold with the count bounds, and '
+         'the note threshold_upper_bound says that the lower bound was within the threshold',
+         entries(expect_all(withheld('count_above_threshold'),
+                            estimated(2, START16_UPPER, START16_UPPER),
+                            has_note('threshold_upper_bound')))),
+    post('unmasked_stop_at_threshold', 'unmasked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'max_contexts': 5, 'stop_at_threshold': True,
+          'output': {'labels': 'none'}}, 200,
+         'stop_at_threshold without the mask compares the running upper bound: discovery stops '
+         'earlier than on the masked graph (at_least 0 here, 6 there), withheld '
+         'threshold_crossed, note threshold_upper_bound (the lower bound had not crossed)',
+         entries(expect_all(withheld('threshold_crossed'), relation('at_least'),
+                            field('stop', {'phase': 'discovery', 'reason': 'max_contexts'}),
+                            has_note('threshold_upper_bound')))),
+    post('unmasked_partial', 'unmasked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'mode': 'partial', 'max_contexts': 5,
+          'output': {'labels': 'none'}}, 200,
+         'partial without the mask: the first 5 contexts (the masked graph\'s first 5, no '
+         'source dummy among them), cut max_contexts; the release raises each lower bound to '
+         'what it released at that strand and offset: bounds [6, 24]',
+         entries(expect_all(cut('max_contexts'), field('returned', 5), estimated(6, 24, 24)))),
+    post('unmasked_paths', 'unmasked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(ABSENT_40, ident='absent')],
+          'long_search': 'paths', 'output': {'labels': 'none'}}, 200,
+         'patterns longer than k without the mask: an anchor window without a leading N is '
+         'spelled whole, so the anchors are exact (no source dummy can hold one), and the paths '
+         'are the masked graph\'s: exact, released, complete',
+         entries(expect_all(exact(2), paths_count('exact', 2, 'completed'), complete),
+                 expect_all(paths_count('exact', 0, 'no_anchors'), complete))),
 
     # ---------------------------------------------------------------- whole-request refusals
     post('unknown_field', 'masked',
@@ -896,10 +1026,6 @@ FIXTURES = [
          {'patterns': [p(NDM_F)], 'mode': 'count', 'in_ram': False}, 400,
          '400 resident_only: in_ram, whatever its value (the route never loads an index)',
          refused('resident_only')),
-    post('mask_required', 'unmasked',
-         {'patterns': [p(NDM_F)], 'mode': 'count'}, 400,
-         '400 mask_required: the graph has no dummy-edge mask, whatever the request asks',
-         refused('mask_required')),
     post('multi_graph', 'multi',
          {'patterns': [p(NDM_F)], 'mode': 'count'}, 400,
          '400 later_increment on a multi-graph server, whatever the request',
@@ -937,7 +1063,7 @@ SERVERS = {
                 'annotation, .seqs and sidecars linked from the mini)',
     'unmasked': 'server_query -i {mini}/graph_k31.dbg -a {mini}/' + MINI_ANNO
                 + ' --index-name ' + INDEX_NAME + ' --index-release ' + INDEX_RELEASE
-                + '  (the mini index as built: no .edgemask)',
+                + '  (the mini index as built: no .edgemask; counting upper_bound)',
     'built_at_load': 'server_query -i {mini}/graph_k31.dbg -a {mini}/' + MINI_ANNO
                      + ' --pattern-build-mask --index-name ' + INDEX_NAME + ' --index-release '
                      + INDEX_RELEASE + '  (the mini index as built, its mask built in memory at '
@@ -1221,6 +1347,9 @@ def readme(fixtures):
         '`alphabet_unsupported` (a graph of another alphabet does not load in this build),',
         '`mask_invalid` (a graph extended after masking by an older build, or a stale mask) or',
         '`alphabet_untested` (a DNA5 build); test_pattern_fixtures.py names them in NO_FIXTURE.',
+        '`mask_required` is retired (owner decision #16 of 2026-10-08): a graph without its',
+        'dummy-edge mask is served with upper bounds and estimates (the `unmasked_*` fixtures),',
+        'and no build since answers it; test_pattern_fixtures.py names it in RETIRED.',
         '',
     ]
     for f in fixtures:

@@ -1,0 +1,194 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "long_search": "paths",
+  "max_anchors": 1000,
+  "max_contexts": 10000,
+  "max_paths": 1000,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "stop_at_threshold": false,
+  "time_budget_ms": 60000
+ },
+ "mode": "count",
+ "output": null,
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "any_offset",
+   "anchor_information_bits": null,
+   "counts": {
+    "contexts": {
+     "by_offset": {
+      "0": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "1": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      }
+     },
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "graph_contexts",
+       "value": 0
+      }
+     },
+     "relation": "exact",
+     "suffix": {
+      "relation": "exact",
+      "unit": "graph_contexts",
+      "value": 0
+     },
+     "unit": "graph_contexts",
+     "value": 0
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    }
+   },
+   "determinism": "full",
+   "genetic_code": 27,
+   "id": "NDM-1 end",
+   "information_bits": 44.24511249783654,
+   "kind": "protein",
+   "length": 30,
+   "min_anchor_information_bits": null,
+   "mode": "count",
+   "notes": [
+    "no_stop_codon"
+   ],
+   "palindromic": false,
+   "pattern": "TARMADKLR*",
+   "residues": 10,
+   "retrieval_complete": false,
+   "scope": "any_offset",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.001208
+   },
+   "work": {
+    "mask_scans": 0,
+    "ranges_visited": 0,
+    "steps": 0
+   }
+  },
+  {
+   "absence_scope": "long",
+   "anchor_information_bits": 48.83007499855769,
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 0
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 1
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "paths": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 0
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 0
+      }
+     },
+     "candidates_examined": 11,
+     "extension": "completed",
+     "relation": "exact",
+     "unit": "paths",
+     "value": 0
+    }
+   },
+   "determinism": "full",
+   "genetic_code": 27,
+   "id": "NDM-1 1-14 and a stop",
+   "information_bits": 68.66014999711538,
+   "kind": "protein",
+   "length": 45,
+   "min_anchor_information_bits": 46.24511249783654,
+   "mode": "count",
+   "notes": [
+    "no_stop_codon"
+   ],
+   "palindromic": false,
+   "pattern": "MELPNIMHPVAKLS*",
+   "residues": 15,
+   "retrieval_complete": false,
+   "scope": "long",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.0375,
+    "extension_ms": 0.008209
+   },
+   "work": {
+    "extension_edges": 12,
+    "mask_scans": 0,
+    "ranges_visited": 124,
+    "steps": 136
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 0.049
+ }
+}

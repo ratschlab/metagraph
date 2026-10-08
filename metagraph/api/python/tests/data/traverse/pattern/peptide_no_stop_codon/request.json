@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "protein": "TARMADKLR*",
+   "id": "NDM-1 end"
+  },
+  {
+   "protein": "MELPNIMHPVAKLS*",
+   "id": "NDM-1 1-14 and a stop"
+  }
+ ],
+ "mode": "count",
+ "genetic_code": 27,
+ "long_search": "paths"
+}
