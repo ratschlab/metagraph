@@ -65,9 +65,10 @@ constexpr const char kSupportIntersection[] = "label_intersection";
 constexpr const char kSupportVerified[] = "record_verified";
 
 // The residues a protein pattern may hold (increment 5, owner decision #15; DESIGN §6): the 20
-// amino acids and the ambiguity codes X, B, Z, J, as the engine's Pattern::parse reads them
-// (the stop '*' is answered stop_unsupported in its slot); listed in the capabilities
-constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ";
+// amino acids, the ambiguity codes X, B, Z, J and, since owner decision #19 of 2026-10-08, the
+// stop '*' (a stop codon of the request's genetic code), as the engine's Pattern::parse reads
+// them; listed in the capabilities
+constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ*";
 
 // The note of an entry answered on a graph without its dummy-edge mask (counting
 // "upper_bound", owner decision #16) where a count carries an estimate: each such count is the
@@ -164,8 +165,7 @@ class Fields {
     std::set<std::string> seen_;
 };
 
-// One pattern of the request: parsed, or refused in its slot (bad_alphabet; a peptide's stop
-// stop_unsupported)
+// One pattern of the request: parsed, or refused in its slot (bad_alphabet)
 struct PatternSpec {
     Json::Value id;                      // the string given, or null
     PatternKind kind = PatternKind::DNA;
@@ -480,7 +480,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         try {
             spec.pattern = Pattern::parse(PatternKind::PROTEIN, spec.protein, *req.genetic_code);
         } catch (const PatternError &e) {
-            // bad_alphabet, or stop_unsupported for a stop '*': the slot's error (§8.9)
+            // bad_alphabet: the slot's error (§8.9); the stop '*' is a residue since owner
+            // decision #19
             spec.error = std::make_pair(e.code(), std::string(e.what()));
         }
     }
@@ -722,7 +723,8 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     for (const std::string &note : result->notes) {
         notes.append(note);
     }
-    // (the engine's notes first; then the route's note of the estimates, decision #16)
+    // (the engine's notes first, no_stop_codon among them, owner decision #19; then the
+    // route's note of the estimates, decision #16)
     if (estimated)
         notes.append(kNoteEstimate);
     e["notes"] = std::move(notes);
@@ -1373,13 +1375,13 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // which the mini index's document nearly fills)
     p["protein_rule"] = "A protein pattern (patterns[i].protein) is a peptide over "
         "protein_residues (any case): the 20 amino acids, X (any residue, never a stop), B (D "
-        "or N), Z (E or Q) and J (I or L). It is searched as its codon automaton in "
-        "genetic_code (an id of genetic_codes, default_genetic_code when omitted): its "
-        "instances are exactly the codon strings that translate to it, no stop codon "
-        "anywhere, on both strands. Its length is in bases (3 per residue), so more than k / 3 "
-        "residues make a pattern longer than k (long_search). A stop '*': stop_unsupported in "
-        "its slot; any other character: bad_alphabet. Tables 27, 28 and 31 code some codons "
-        "as a residue and as a stop in context: they match as their residue";
+        "or N), Z (E or Q), J (I or L) and the stop '*' (a stop codon). It is searched as its "
+        "codon automaton in genetic_code (an id of genetic_codes, default_genetic_code when "
+        "omitted): its instances are exactly the codon strings that translate to it, on both "
+        "strands. Its length is in bases (3 per residue), so more than k / 3 residues make a "
+        "pattern longer than k (long_search). Any other character: bad_alphabet in its slot. "
+        "Tables 27, 28 and 31 code some codons as a residue and as a stop in context: they "
+        "match as their residue, and '*' matches nothing there (note no_stop_codon)";
     p["default_scope"] = to_string(Scope::ANY_OFFSET);
     Json::Value by_mode;
     by_mode["basic"] = strings_json({ "suffix", "any_offset" });

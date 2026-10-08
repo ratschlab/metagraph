@@ -116,6 +116,10 @@ GENETIC_CODES = {
     1: 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
     2: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNKKSS**VVVVAAAADDEEGGGG',
     11: 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    # Karyorelict and Blastocrithidia nuclear: their stop codons code a residue unless in
+    # context (TAA, TAG Q and TGA W in 27; TAA, TAG E in 31): no unconditional stop
+    27: 'FFLLSSSSYYQQCCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
+    31: 'FFLLSSSSYYEECCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
 }
 CODONS_TCAG = [a + b + c for a in 'TCAG' for b in 'TCAG' for c in 'TCAG']
 
@@ -128,10 +132,12 @@ def translate(seq, table):
 
 
 def residue_admits(residue, aa):
-    """A peptide's residue (X, B, Z, J the ambiguity codes) admits the amino acid |aa|; no
-    residue admits a stop."""
-    if aa in '*?':
+    """A peptide's residue (X, B, Z, J the ambiguity codes) admits the amino acid |aa|; a stop
+    is admitted by the stop '*' only (owner decision #19), which admits nothing else."""
+    if aa == '?':
         return False
+    if residue == '*' or aa == '*':
+        return residue == aa
     return {'X': True, 'B': aa in 'DN', 'Z': aa in 'EQ', 'J': aa in 'IL'}.get(residue,
                                                                          aa == residue)
 
@@ -900,8 +906,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'projections': ['none', 'all'], 'default_projection': 'none',
             'projections_later_increment': ['predicate_only'], 'default_occurrences': True,
             'kinds': ['dna', 'iupac', 'protein'], 'kinds_later_increment': [],
-            # increment 5: the residues, the genetic codes and the default
-            'protein_residues': list('ACDEFGHIKLMNPQRSTVWYXBZJ'),
+            # increment 5: the residues (the stop '*' since owner decision #19), the genetic
+            # codes and the default
+            'protein_residues': list('ACDEFGHIKLMNPQRSTVWYXBZJ*'),
             'genetic_codes': [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25,
                               26, 27, 28, 29, 30, 31, 32, 33],
             'default_genetic_code': 1,
@@ -1567,7 +1574,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(('protein', residues, 3 * len(residues), len(residues), table),
                          (entry['kind'], entry['pattern'], entry['length'], entry['residues'],
                           entry['genetic_code']))
-        bits = sum(math.log2(64 / len(peptide_codons(r, table))) for r in residues)
+        # a residue without a codon (a stop '*' in a table without one) counts as one codon
+        bits = sum(math.log2(64 / max(1, len(peptide_codons(r, table)))) for r in residues)
         self.assertAlmostEqual(bits, entry['information_bits'], places=9)
         self.assertFalse(entry['palindromic'])
 
@@ -1657,17 +1665,19 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                 self.assertEqual('unknown', plain['counts']['paths']['relation'])
 
     def test_peptide_slots_and_genetic_codes(self):
-        """The slot errors of a peptide (bad_alphabet, stop_unsupported), an unknown genetic
-        code refused, and the genetic code read: a peptide in the vertebrate mitochondrial code
-        (2) answered as the six-frame translation in that code finds it."""
+        """The slot error of a peptide (bad_alphabet; the stop '*' is a residue since owner
+        decision #19), an unknown genetic code refused, and the genetic code read: a peptide in
+        the vertebrate mitochondrial code (2) answered as the six-frame translation in that code
+        finds it."""
         out = self.pattern(self.server, {'patterns': [{'protein': 'MELPUIMHPV'},
                                                       {'protein': 'MELPNIMHPV*'},
                                                       {'protein': 'melpnimhpv'}],
                                          'mode': 'count'})
-        self.assertEqual(['bad_alphabet', 'stop_unsupported'],
-                         [e['error']['code'] for e in out['patterns'][:2]])
-        for e in out['patterns'][:2]:
-            self.assertEqual({'id', 'kind', 'error'}, set(e))
+        self.assertEqual('bad_alphabet', out['patterns'][0]['error']['code'])
+        self.assertEqual({'id', 'kind', 'error'}, set(out['patterns'][0]))
+        # 11 residues, 33 bases: a pattern longer than k, its anchors counted
+        self.assertPeptideEntry(out['patterns'][1], 'MELPNIMHPV*', 1)
+        self.assertEqual('exact', out['patterns'][1]['counts']['anchors']['relation'])
         self.assertPeptideEntry(out['patterns'][2], 'MELPNIMHPV', 1)
         ret = self.server.post('pattern', {'patterns': [{'protein': 'MELPNIMHPV'}],
                                            'genetic_code': 7})
@@ -1682,6 +1692,80 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertCount({x: entry['counts']['contexts'][x]
                               for x in ('value', 'relation', 'unit')},
                              len(self.peptide_contexts(residues, 2)))
+
+    def stop_peptides(self):
+        """Peptides of 10 residues (30 bases, one k-mer) read from the records' translations
+        with a stop codon among their middle residues, each with the table it was read in (1,
+        2, 11: their stops differ, table 2 stopping at AGA and AGG and reading TGA as W)."""
+        rng = random.Random(1919)
+        recs = [seq.upper() for r in self.columns.values() for _, seq in r]
+        out = []
+        for table in (1, 2, 11, 11):
+            while True:
+                seq = rng.choice(recs)
+                i = rng.randrange(len(seq) - 40)
+                residues = translate(seq[i:i + 30], table)
+                if residues.count('*') == 1 and 2 <= residues.index('*') <= 7 \
+                        and '?' not in residues and (residues, table) not in out:
+                    out.append((residues, table))
+                    break
+        return out
+
+    def test_peptide_stops_against_the_six_frames(self):
+        """Owner decisions #19 and #21: the stop '*' is a stop codon of the request's table at
+        that position, against the six-frame oracle in tables 1, 2 and 11 (contexts, labels and
+        placed occurrences); X never a stop; in table 27 or 31, whose stop codons code a residue
+        unless in context, '*' matches nothing (exact 0, the note no_stop_codon) and those
+        codons match as their residue (Q at TAA and TAG in 27, E in 31)."""
+        for residues, table in self.stop_peptides():
+            with self.subTest(peptide=residues, table=table):
+                request = {'patterns': [{'protein': residues}], 'genetic_code': table,
+                           'output': {'labels': 'all'}}
+                entry = self.pattern(self.server, request)['patterns'][0]
+                self.assertPeptideEntry(entry, residues, table)
+                expected = self.peptide_contexts(residues, table)
+                self.assertGreater(len(expected), 0)
+                self.assertCount({x: entry['counts']['contexts'][x]
+                                  for x in ('value', 'relation', 'unit')}, len(expected))
+                self.assertCompleteRetrieval(entry)
+                self.assertEqual(expected, {(r['strand'], r['kmer'], r['offset'])
+                                            for r in entry['results']})
+                placed = {(label['column'], o['seq_id'], int(o['nt_coords'].split('-')[0]),
+                           o['strand'])
+                          for r in entry['results'] for label in r['labels']
+                          for o in label['occurrence_list']}
+                self.assertEqual(self.peptide_placed(residues, table), placed)
+                self.assertNotIn('no_stop_codon', entry['notes'])
+                # X in the stop's place: never a stop, so not these hits
+                x = residues.replace('*', 'X')
+                entry = self.pattern(self.server, dict(request, patterns=[{'protein': x}],
+                                                       mode='count'))['patterns'][0]
+                self.assertEqual(len(self.peptide_contexts(x, table)),
+                                 entry['counts']['contexts']['value'])
+                self.assertTrue(self.peptide_contexts(x, table).isdisjoint(expected))
+                # tables without a stop: '*' matches nothing, and the entry says why; the
+                # codon read as a stop in |table| matches as its residue there when it codes one
+                i = residues.index('*')
+                for other in (27, 31):
+                    entry = self.pattern(self.server, dict(request, genetic_code=other)
+                                         )['patterns'][0]
+                    self.assertPeptideEntry(entry, residues, other)
+                    self.assertEqual({'value': 0, 'relation': 'exact', 'unit': 'graph_contexts'},
+                                     {x: entry['counts']['contexts'][x]
+                                      for x in ('value', 'relation', 'unit')})
+                    self.assertEqual([], entry['results'])
+                    self.assertTrue(entry['retrieval_complete'])
+                    self.assertIn('no_stop_codon', entry['notes'])
+                    for aa in 'QEW':
+                        r = residues[:i] + aa + residues[i + 1:]
+                        if '*' in r:
+                            continue
+                        entry = self.pattern(self.server, {'patterns': [{'protein': r}],
+                                                           'genetic_code': other,
+                                                           'mode': 'count'})['patterns'][0]
+                        self.assertEqual(len(self.peptide_contexts(r, other)),
+                                         entry['counts']['contexts']['value'], (r, other))
+                        self.assertNotIn('no_stop_codon', entry['notes'])
 
     def test_peptide_cli_answers_as_the_server(self):
         request = {'patterns': [{'protein': 'MELPNIMHPV'}, {'protein': 'MELPNIMHPVAKLS'}],

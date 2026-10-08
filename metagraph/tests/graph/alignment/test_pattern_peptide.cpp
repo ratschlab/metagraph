@@ -213,8 +213,12 @@ const OracleCode& oracle_code(int id) {
     return cache.emplace(id, std::move(code)).first->second;
 }
 
-// a peptide letter admits a coded residue: X any, B D or N, Z E or Q, J I or L; never a stop
+// a peptide letter admits a coded residue: X any, B D or N, Z E or Q, J I or L; never a
+// stop, which only the letter '*' admits (owner decision #19 of 2026-10-08: a stop of the
+// table, the codons this file's table codes '*')
 bool admits(char letter, char coded) {
+    if (letter == '*')
+        return coded == '*';
     if (coded == '*' || coded == '?')
         return false;
     switch (letter) {
@@ -1030,8 +1034,32 @@ TEST(PatternPeptide, ParsePeptides) {
     EXPECT_TRUE(Pattern::parse(PatternKind::PROTEIN, "MWMW").is_exact());
     EXPECT_FALSE(Pattern::parse(PatternKind::PROTEIN, "MWMW", GeneticCode::get(2)).is_exact());
 
-    // refusals: the stop (its own code, stop_unsupported, once every other character is a
-    // residue), the residues not served, every other character (bad_alphabet, named first
+    // the stop '*' is a residue (owner decision #19 of 2026-10-08; the refusal
+    // stop_unsupported of 4596bb3b is gone): the table's stop codons at that position
+    for (const char *text : { "M*K", "*", "MK**w*" }) {
+        const Pattern p = Pattern::parse(PatternKind::PROTEIN, text);
+        EXPECT_EQ(3 * std::string(text).size(), p.length()) << text;
+        EXPECT_TRUE(p.has_instances()) << text;
+    }
+    const Pattern stop = Pattern::parse(PatternKind::PROTEIN, "M*K");
+    EXPECT_EQ("M*K", stop.text());
+    EXPECT_EQ(CodonSet(1) << codon_index("TAA") | CodonSet(1) << codon_index("TAG")
+                  | CodonSet(1) << codon_index("TGA"),
+              stop.codon_sets()[1]);
+    EXPECT_EQ(GeneticCode::standard().stops(), stop.codon_sets()[1]);
+    // a table without an unconditional stop (27, 28, 31): '*' admits no codon, the peptide
+    // has no instance (answered EXACT 0 with a note), its bits stay finite
+    for (int table : { 27, 28, 31 }) {
+        const Pattern none = Pattern::parse(PatternKind::PROTEIN, "M*K", GeneticCode::get(table));
+        EXPECT_FALSE(none.has_instances()) << table;
+        EXPECT_EQ(0u, none.codon_sets()[1]) << table;
+        EXPECT_TRUE(std::isfinite(none.information_bits())) << table;
+        EXPECT_FALSE(none.reverse_complement().has_instances()) << table;
+    }
+    EXPECT_TRUE(Pattern::parse(PatternKind::PROTEIN, "MXK", GeneticCode::get(27)).has_instances());
+    EXPECT_TRUE(Pattern::parse(PatternKind::DNA, "ACGT").has_instances());
+
+    // refusals: the residues not served, every other character (bad_alphabet, named
     // wherever a stop is), the empty text
     struct Bad {
         std::string text;
@@ -1040,9 +1068,6 @@ TEST(PatternPeptide, ParsePeptides) {
         std::string code = "bad_alphabet";
     };
     for (const Bad &bad : std::vector<Bad> {
-            { "M*K", 1, "is a stop", "stop_unsupported" },
-            { "*", 0, "is a stop", "stop_unsupported" },
-            { "MK**w*", 2, "is a stop", "stop_unsupported" },
             { "*MU", 2, "protein alphabet" }, { "M*K-", 3, "protein alphabet" },
             { "MUK", 1, "protein alphabet" },
             { "MKO", 2, "protein alphabet" }, { "M K", 1, "protein alphabet" },
@@ -1587,6 +1612,258 @@ TEST(PatternPeptide, PrunedMiddleKmer) {
     EXPECT_EQ(0u, r.anchors->paths.value);
     check_peptide(*graph, records, DeBruijnGraph::BASIC, "MLW", 1, make_request(
                       Scope::ANY_OFFSET, Strands::BOTH, true), true, { middle });
+}
+
+
+// ---------------------------------------------------------------- the stop '*'
+
+TEST(PatternPeptide, StopResidue) {
+    // owner decisions #19 and #21 of 2026-10-08: '*' is a stop codon of the table at that
+    // position, X never one; in tables 27, 28 and 31 the codons that stop only in context
+    // code their residue (Q, W, E) and '*' matches nothing
+    const std::vector<std::string> records {
+        "CC" "ATGTAA" "GG",       // M then TAA: a stop in 1, 2, 11; Q in 27 and 28, E in 31
+        "AA" "ATGAGA" "TGGCC",    // M then AGA: R in 1 and 11, a stop in 2
+        "TT" "TGGTGA" "AAA",      // W then TGA: a stop in 1 and 11, W in 2, 27, 28
+    };
+    auto graph = build(8, records, DeBruijnGraph::BASIC);
+    auto forward = make_request(Scope::ANY_OFFSET, Strands::FORWARD);
+    auto count = [&](const char *peptide, int table) {
+        const Result r = count_of(*graph, peptide_pattern(peptide, table), forward);
+        EXPECT_EQ(Relation::EXACT, r.contexts->total.relation) << peptide << " " << table;
+        return r.contexts->total.value;
+    };
+    // ATGTAA sits in 3 k-mers (offsets 0, 1, 2): "M*" in 1 and 11 (and 2, below); not in 27
+    // (TAA is Q)
+    for (int table : { 1, 2, 11 }) {
+        if (table != 2) {
+            EXPECT_EQ(3u, count("M*", table)) << table;
+        }
+        EXPECT_EQ(0u, count("MQ", table)) << table;
+    }
+    EXPECT_EQ(0u, count("M*", 27));
+    EXPECT_EQ(3u, count("MQ", 27));
+    EXPECT_EQ(3u, count("MQ", 28));
+    EXPECT_EQ(3u, count("ME", 31));
+    // ATGAGA: "M*" in table 2 only (AGA a stop there), with ATGTAA's: 6; "MR" in 1 and 11
+    EXPECT_EQ(3u + 3u, count("M*", 2));
+    EXPECT_EQ(3u, count("MR", 1));
+    EXPECT_EQ(0u, count("MR", 2));
+    // TGGTGA: "W*" in 1 and 11 (TGA), "WW" in 2 and 27
+    EXPECT_EQ(3u, count("W*", 1));
+    EXPECT_EQ(3u, count("W*", 11));
+    EXPECT_EQ(0u, count("W*", 2));
+    EXPECT_EQ(3u, count("WW", 2));
+    EXPECT_EQ(3u, count("WW", 27));
+    // X never matches a stop: "MX" misses ATGTAA in 1, finds it in 27 (TAA is Q there);
+    // ATGAGA (3 k-mers) and ATGGCC (1, at the end of the second record) in both
+    EXPECT_EQ(4u, count("MX", 1));
+    EXPECT_EQ(7u, count("MX", 27));
+    // the note says why a 0 is a 0 in a table without a stop codon, and only there
+    for (int table : { 1, 2, 11, 27, 28, 31 }) {
+        const Result r = count_of(*graph, peptide_pattern("M*", table), forward);
+        const bool none = !GeneticCode::get(table).stops();
+        EXPECT_EQ(none, table == 27 || table == 28 || table == 31);
+        EXPECT_EQ(none, std::count(r.notes.begin(), r.notes.end(),
+                                   std::string(kNoteNoStopCodon)) > 0) << table;
+        const Result plain = count_of(*graph, peptide_pattern("MW", table), forward);
+        EXPECT_EQ(0, std::count(plain.notes.begin(), plain.notes.end(),
+                                std::string(kNoteNoStopCodon))) << table;
+    }
+
+    // against both oracles, every mode, short and long (k 4: the extension through a stop)
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
+                       DeBruijnGraph::PRIMARY }) {
+        for (size_t k : { size_t(4), size_t(5), size_t(8), size_t(11) }) {
+            auto g = build(k, records, mode);
+            for (int table : { 1, 2, 11, 27, 28, 31 }) {
+                for (std::string peptide : { "M*", "*", "W*", "MR", "M*W", "X*", "*X", "R*",
+                                             "**", "MX", "*G", "Z*", "M*G" }) {
+                    check_peptide(*g, records, mode, peptide, table,
+                                  make_request(Scope::ANY_OFFSET, Strands::BOTH,
+                                               3 * peptide.size() > k));
+                    if (3 * peptide.size() <= k && mode != DeBruijnGraph::PRIMARY) {
+                        check_peptide(*g, records, mode, peptide, table,
+                                      make_request(Scope::SUFFIX, Strands::FORWARD));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(PatternPeptide, StopIsNeverAMirror) {
+    // a peptide is palindromic iff each residue's codons are the reverse complements of its
+    // mirror's: in a table with stop codons the stops are no residue's mirror, nor their own
+    // (so '*' never makes a peptide palindromic); without stops '*' is the empty set
+    for (int id : GeneticCode::ids()) {
+        const GeneticCode &code = GeneticCode::get(id);
+        const CodonSet stops = code.stops();
+        if (!stops) {
+            EXPECT_TRUE(id == 27 || id == 28 || id == 31) << id;
+            continue;
+        }
+        const CodonSet mirror = reverse_complement_codons(stops);
+        EXPECT_NE(stops, mirror) << id;
+        for (char letter : std::string("ACDEFGHIKLMNPQRSTVWYXBZJ")) {
+            const Pattern p = Pattern::parse(PatternKind::PROTEIN, std::string(1, letter), code);
+            EXPECT_NE(p.codon_sets()[0], mirror) << id << " " << letter;
+        }
+        EXPECT_EQ(stops, Pattern::parse(PatternKind::PROTEIN, "*", code).codon_sets()[0]);
+        EXPECT_FALSE(Pattern::parse(PatternKind::PROTEIN, "*", code).is_palindromic()) << id;
+    }
+}
+
+TEST(PatternPeptide, NoStopCodonAnswered) {
+    // a peptide holding '*' in a table without a stop codon has no instance. L <= k: answered
+    // EXACT 0 in every count, nothing searched or charged, the information floor not
+    // consulted (nothing to gate). L > k: searched as any other (the anchors are the anchor
+    // window's, which may not reach the '*'), no path. Both with the note; in a table with
+    // stops the floor applies as ever
+    const std::vector<std::string> records { "ATGTAAGGCTGGTGAATGCCC", "ATGCAATGGTAG" };
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::PRIMARY }) {
+        auto graph = build(6, records, mode);
+        for (int table : { 27, 28, 31 }) {
+            for (const char *peptide : { "*", "M*", "**", "*W" }) {
+                SCOPED_TRACE(std::string(peptide) + " " + std::to_string(table));
+                const Pattern p = peptide_pattern(peptide, table);
+                EXPECT_FALSE(p.has_instances());
+                Request request = make_request();
+                request.min_information_bits = 24;
+                const Result r = count_of(*graph, p, request, 0);
+                EXPECT_FALSE(r.refusal);
+                EXPECT_FALSE(r.stop);
+                EXPECT_EQ(0u, r.work.steps);
+                EXPECT_TRUE(std::isfinite(r.information_bits));
+                EXPECT_EQ(1, std::count(r.notes.begin(), r.notes.end(),
+                                        std::string(kNoteNoStopCodon)));
+                EXPECT_EQ(Relation::EXACT, r.contexts->total.relation);
+                EXPECT_EQ(0u, r.contexts->total.value);
+                EXPECT_EQ(7 - p.length(), r.contexts->by_offset.size());
+                for (const auto &[offset, c] : r.contexts->by_offset) {
+                    EXPECT_EQ(Relation::EXACT, c.relation);
+                    EXPECT_EQ(0u, c.value);
+                }
+                EXPECT_EQ(Relation::EXACT, r.contexts->suffix.relation);
+                // enumerate(): nothing, and that is complete
+                request.mode = Mode::PARTIAL;
+                Budget budget(kManySteps, Deadline::unbounded());
+                size_t called = 0;
+                const Result e = PatternSearch(*graph).enumerate(
+                        p, request, budget, [&](const Context &) { ++called; });
+                EXPECT_EQ(0u, called);
+                EXPECT_TRUE(e.extraction && e.extraction->complete);
+                EXPECT_EQ(0u, e.work.steps);
+                check_peptide(*graph, records, mode, peptide, table, make_request());
+            }
+            // longer than k: MQW's anchors exist in table 27/28 (CAA, TAA, TAG are Q), "MQ*"'s
+            // anchor window [0, 6) is MQ's: anchors, and no path through the '*'
+            for (const char *peptide : { "MQ*", "M*W", "*MQ", "MQW*" }) {
+                SCOPED_TRACE(std::string(peptide) + " " + std::to_string(table));
+                const Pattern p = peptide_pattern(peptide, table);
+                const Result r = count_of(*graph, p, make_request(Scope::ANY_OFFSET,
+                                                                  Strands::BOTH, true));
+                ASSERT_FALSE(r.refusal);
+                EXPECT_EQ(Relation::EXACT, r.anchors->paths.relation);
+                EXPECT_EQ(0u, r.anchors->paths.value);
+                EXPECT_EQ(1, std::count(r.notes.begin(), r.notes.end(),
+                                        std::string(kNoteNoStopCodon)));
+                check_peptide(*graph, records, mode, peptide, table,
+                              make_request(Scope::ANY_OFFSET, Strands::BOTH, true));
+                check_peptide(*graph, records, mode, peptide, table, make_request());
+            }
+        }
+    }
+    // in the standard code "*" (three stops, 4.4 bits) is below a floor of 24: refused
+    auto graph = build(6, records, DeBruijnGraph::BASIC);
+    Request request = make_request();
+    request.min_information_bits = 24;
+    const Result r = count_of(*graph, peptide_pattern("*", 1), request);
+    ASSERT_TRUE(r.refusal);
+    EXPECT_EQ("information_below_floor", r.refusal->code);
+    EXPECT_EQ(0, std::count(r.notes.begin(), r.notes.end(), std::string(kNoteNoStopCodon)));
+}
+
+// a peptide read from a record with its stops: a random frame and strand, translated with the
+// oracle's table, some residues replaced by an ambiguity code that admits them (never a stop
+// by X), some by '*'
+std::string stop_peptide_from(const std::vector<std::string> &records, const OracleCode &code,
+                              size_t m, std::mt19937 &rng) {
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        std::string s = records[rng() % records.size()];
+        if (rng() % 2)
+            s = rev_comp(s);
+        if (s.size() < 3 * m)
+            continue;
+        const size_t start = rng() % (s.size() - 3 * m + 1);
+        std::string peptide;
+        for (size_t i = 0; i < m; ++i) {
+            peptide.push_back(code.translate(std::string_view(s).substr(start + 3 * i, 3)));
+        }
+        if (peptide.find('?') != std::string::npos)
+            continue;
+        for (char &residue : peptide) {
+            if (residue == '*' || rng() % 4)
+                continue;
+            residue = rng() % 2 ? 'X' : '*';
+        }
+        return peptide;
+    }
+    std::string peptide;
+    for (size_t i = 0; i < m; ++i) {
+        peptide.push_back("MKWX*"[rng() % 5]);
+    }
+    return peptide;
+}
+
+TEST(PatternPeptide, RandomStopPeptidesAgainstOracles) {
+    // records with planted stop codons, peptides from their six-frame translations with
+    // their stops, tables 1, 2, 11 and the tables without a stop (27, 28, 31), every mode,
+    // short and long, every strand choice and scope
+    const std::vector<std::string> stops { "TAA", "TAG", "TGA", "AGA", "AGG" };
+    size_t cases = 0;
+    size_t with_stop = 0;
+    size_t nonempty = 0;
+    for (uint32_t seed = 1; seed <= 40; ++seed) {
+        std::mt19937 rng(7100 + seed);
+        const size_t k = 4 + rng() % 12;
+        const auto mode = static_cast<DeBruijnGraph::Mode>(rng() % 3);
+        std::vector<std::string> records(1 + rng() % 3);
+        for (std::string &record : records) {
+            const size_t length = k + 10 + rng() % 40;
+            while (record.size() < length) {
+                if (rng() % 5 == 0) {
+                    record += stops[rng() % stops.size()];
+                } else {
+                    record.push_back("ACGT"[rng() % 4]);
+                }
+            }
+        }
+        auto graph = build(k, records, mode, rng() % 2);
+        const int ids[] = { 1, 2, 11, 27, 28, 31 };
+        const int id = ids[rng() % 6];
+        const OracleCode &code = oracle_code(id);
+        for (int t = 0; t < 6; ++t) {
+            const size_t m = 1 + rng() % 6;
+            const std::string peptide = stop_peptide_from(records, code, m, rng);
+            const bool long_peptide = 3 * m > k;
+            Scope scope = Scope::ANY_OFFSET;
+            if (!long_peptide && mode != DeBruijnGraph::PRIMARY && rng() % 3 == 0)
+                scope = Scope::SUFFIX;
+            const auto strands = static_cast<Strands>(rng() % 3);
+            SCOPED_TRACE("seed " + std::to_string(seed));
+            const size_t found = check_peptide(*graph, records, mode, peptide, id,
+                                               make_request(scope, strands, long_peptide));
+            ++cases;
+            with_stop += peptide.find('*') != std::string::npos;
+            nonempty += found > 0;
+        }
+    }
+    EXPECT_EQ(240u, cases);
+    EXPECT_LT(80u, with_stop);
+    EXPECT_LT(60u, nonempty);
+    std::cerr << "random stop peptide cases: " << cases << ", with '*': " << with_stop
+              << ", with hits: " << nonempty << std::endl;
 }
 
 

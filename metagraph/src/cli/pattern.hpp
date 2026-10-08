@@ -23,7 +23,9 @@
  *    2026-10-08, without it (counting "upper_bound"): a count is then the bounds [lower, U],
  *    U the BOSS entries of its ranges (source dummies among them), with the additive estimate
  *    U x f (f the graph's sampled dummy fraction, DummyFraction), while every list stays exact
- *    (the engine drops the dummies it releases).
+ *    (the engine drops the dummies it releases);
+ *  - peptides with the stop '*' (owner decision #19): a stop codon of the request's genetic
+ *    code; a table without an unconditional stop codon matches nothing there, stated in a note.
  * Everything a later increment adds is refused (400 "later_increment"), never ignored: the
  * owner's guarantee rule, nothing weakened silently.
  */

@@ -35,13 +35,17 @@
  *  - `protein` (increment 5, §6; owner decision #15 of 2026-10-08): patterns[i].protein is the
  *    third kind; the request field genetic_code (an integer, default GeneticCode::kStandard)
  *    is looked up with GeneticCode::find (an unknown id: 400 genetic_code_unknown), and
- *    Pattern::parse(PatternKind::PROTEIN, text, code)'s PatternError (bad_alphabet,
- *    stop_unsupported) is the slot's error as for dna and iupac. A peptide is a Pattern like
+ *    Pattern::parse(PatternKind::PROTEIN, text, code)'s PatternError (bad_alphabet; the
+ *    stop_unsupported of 4596bb3b is retired, decision #19) is the slot's error as for dna and
+ *    iupac. A peptide is a Pattern like
  *    any other: counts, contexts, anchors, the extension and its paths need no route code of
  *    their own; its entry states kind "protein", pattern = text() (the residues), length =
  *    length() (3m bases: every offset, scope decision, information bit and instance is in
  *    bases), residues (m) and genetic_code. The capabilities list the kind, the residues, the
- *    genetic codes (GeneticCode::ids()) and the default 1.
+ *    genetic codes (GeneticCode::ids()) and the default 1. The stop '*' is a residue since
+ *    owner decision #19 of 2026-10-08 (a stop codon of the table; see Pattern::parse): a
+ *    peptide holding it in a table without an unconditional stop codon has no instance and is
+ *    answered with the note kNoteNoStopCodon (EXACT 0 contexts without a search for L <= k).
  *  - graphs without the dummy-edge mask (owner decision #16 of 2026-10-08): served, see
  *    "Graphs without the dummy-edge mask" at PatternSearch. Their counts that the engine could
  *    not resolve are BOUNDS [lower, U] (Count), the route adding the estimate U x f with f
@@ -231,16 +235,20 @@ class Pattern {
      * As above; for PROTEIN (§6, owner decision #15 of 2026-10-08) |code| is the genetic
      * code (the route passes GeneticCode::get(request genetic_code), 1 by default), for DNA
      * and IUPAC it is not read. A peptide is a string over the 20 residues A C D E F G H I
-     * K L M N P Q R S T V W Y and the ambiguity codes X (any residue: every codon of |code|
-     * that is not a stop), B (D or N), Z (E or Q) and J (I or L), case-insensitive; it is the
+     * K L M N P Q R S T V W Y, the ambiguity codes X (any residue: every codon of |code|
+     * that is not a stop), B (D or N), Z (E or Q) and J (I or L), and the stop '*' (owner
+     * decision #19 of 2026-10-08: a stop codon of |code| at that position, the codons whose
+     * residue in NCBI's ncbieaa is '*', GeneticCode::stops()), case-insensitive; it is the
      * pattern of L = 3m positions whose instances are exactly the codon strings c_1 .. c_m
-     * with c_i a codon of residue i in |code| (§6: no superset, no stop codon anywhere).
+     * with c_i a codon of residue i in |code| (§6: no superset; a stop codon only where the
+     * peptide has '*', X never matching one). The codons tables 27, 28 and 31 list as a
+     * residue that ends translation only in context (GeneticCode::context_stops()) are that
+     * residue's (decision #21) and never a '*': those tables have no unconditional stop, so
+     * there '*' admits no codon and the peptide has no instance (has_instances() false; the
+     * engine answers it with the note kNoteNoStopCodon, see PatternSearch::count).
      * Refused with "bad_alphabet": U (selenocysteine), O (pyrrolysine), '-', digits,
      * whitespace and every other character outside these 24 letters and '*', naming the
-     * first such 0-based residue position (wherever a '*' is), and an empty text. A text
-     * whose every other character is a residue but which holds the stop '*' is refused with
-     * "stop_unsupported" (SPEC §8.9: not served in this version, no branch through a stop),
-     * naming the first '*'.
+     * first such 0-based residue position, and an empty text.
      */
     static Pattern parse(PatternKind kind, std::string_view text, const GeneticCode &code);
 
@@ -299,10 +307,20 @@ class Pattern {
      * a codon: the anchor window [0, k), its reverse P[L - k, L)), never a per-position sum
      * (which overstates a residue whose codons share no position-wise structure). For a
      * whole peptide: the sum of log2(64 / |codons_i|) = 6m - log2(the number of codon
-     * strings it admits).
+     * strings it admits). A residue admitting no codon (a '*' in a table without a stop
+     * codon, has_instances() false) is counted as one exact codon, 2 bits per position it
+     * covers, so that the value stays finite (a window holding it admits no string, and its
+     * search ends at that position).
      */
     double information_bits(size_t begin, size_t end) const;
     double information_bits() const { return information_bits(0, length()); }
+
+    /**
+     * False iff the pattern has no instance at all: a peptide holding a '*' read in a genetic
+     * code without an unconditional stop codon (tables 27, 28, 31; owner decision #19). Every
+     * DNA and IUPAC pattern has instances.
+     */
+    bool has_instances() const { return has_instances_; }
 
     // every position is a single base, whatever the kind (the floor is waived for such a
     // pattern in `suffix` scope, §5.3: one range, a few ranks); a peptide is exact when
@@ -324,7 +342,10 @@ class Pattern {
      * position by position; a peptide residue by residue (its instances are a product of
      * codon sets, equal to rc's iff every residue's codons are the reverse complements of
      * those of its mirror residue): only X runs in the tables without a stop codon (27, 28,
-     * 31) are palindromic peptides.
+     * 31) are palindromic peptides (and there a peptide whose '*' mirror one another, which
+     * has no instance: has_instances()). In a table with stop codons the stops are never the
+     * reverse complements of a residue's codons, nor of themselves (PatternPeptide,
+     * StopIsNeverAMirror).
      */
     bool is_palindromic() const;
 
@@ -338,6 +359,7 @@ class Pattern {
     // PROTEIN only
     std::vector<CodonSet> codons_;
     int genetic_code_ = 0;
+    bool has_instances_ = true;
 };
 
 
@@ -962,10 +984,17 @@ struct Context {
 //                            (ALL_OR_COUNT withheld COUNT_ABOVE_THRESHOLD, stop_at_threshold
 //                            stopped, the extension NOT_ADMITTED): the true count may be
 //                            within the threshold (PARTIAL lists the contexts regardless)
+//  no_stop_codon             a peptide holding '*' read in a genetic code without an
+//                            unconditional stop codon (tables 27, 28, 31; owner decision #19):
+//                            '*' matches nothing there, so the pattern has no instance: its
+//                            contexts (L <= k) and paths (L > k) are 0 for that reason (never a
+//                            silent 0); a long one's anchors are the anchor window's, which may
+//                            not reach the '*'. Set on every answered such pattern
 constexpr const char kNoteLowComplexity[] = "low_complexity_pattern";
 constexpr const char kNoteStrandUnknown[] = "strand_unknown_canonical";
 constexpr const char kNotePathsLater[] = "paths_later_increment";
 constexpr const char kNoteThresholdUpperBound[] = "threshold_upper_bound";
+constexpr const char kNoteNoStopCodon[] = "no_stop_codon";
 
 /**
  * The answer for one pattern. With |refusal| set nothing was searched and only the pattern
@@ -1134,7 +1163,13 @@ class PatternSearch {
      * frontier, O(k * alphabet). Refusals (information floor, SUFFIX on a wrapped PRIMARY graph) come
      * back as Result::refusal without charging anything. On a budget already stopped (or
      * whose work time has passed at the pattern's check_time) every count is UNKNOWN and
-     * stop is {DISCOVERY, the budget's reason}. Never throws for a parsed pattern, except
+     * stop is {DISCOVERY, the budget's reason}. A pattern without instances
+     * (Pattern::has_instances: '*' in a table without a stop codon) of L <= k is answered
+     * EXACT 0 in every count, before the information floor and without reading the budget
+     * (nothing is searched, nothing charged); one of L > k is searched as any other (its
+     * anchors instantiate the anchor window only, which may not reach the '*'; the extension
+     * finds no path); both carry the note kNoteNoStopCodon. Never throws for a parsed
+     * pattern, except
      * std::logic_error on a broken internal invariant (never expected: an answer that
      * cannot be stated correctly is not stated at all).
      * L > k with request.extend_paths: the anchors are retained (§5.2: kept through the
@@ -1235,6 +1270,11 @@ class PatternSearch {
     // count() and enumerate(): the release runs when |callback| is set
     Result run(const Pattern &pattern, const Request &request, Budget &budget,
                const std::function<void(const Context&)> *callback) const;
+
+    // a pattern with no instance (Pattern::has_instances, owner decision #19) and L <= k:
+    // every count EXACT 0, nothing charged
+    void answer_no_instance(const Pattern &pattern, const Request &request, bool enumerating,
+                            Result *result) const;
 };
 
 

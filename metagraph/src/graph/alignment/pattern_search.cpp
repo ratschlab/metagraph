@@ -141,42 +141,34 @@ Pattern Pattern::parse(PatternKind kind, std::string_view text, const GeneticCod
     std::vector<BaseSet> positions;
     positions.reserve(3 * text.size());
 
-    // the first stop '*', refused with its own code once every other character is a residue
-    // (a character outside the alphabet is named first, wherever it is)
-    size_t stop = std::string_view::npos;
+    bool has_instances = true;
     for (size_t i = 0; i < text.size(); ++i) {
         const char residue = std::toupper(static_cast<unsigned char>(text[i]));
-        if (residue == '*') {
-            stop = std::min(stop, i);
-            continue;
-        }
-        const CodonSet set = residue_codons(residue, code);
-        if (!set) {
+        // the stop '*' (owner decision #19 of 2026-10-08): the table's stop codons, none in
+        // a table without an unconditional stop (27, 28, 31), whose context stops code their
+        // residue (decision #21): the peptide then has no instance
+        const CodonSet set = residue == '*' ? code.stops() : residue_codons(residue, code);
+        if (!set && residue != '*') {
             std::ostringstream msg;
+            // (the text of 4596bb3b, kept so that the answers of every request it served
+            // stay byte-identical; '*' is a residue now, and never named here)
             msg << "pattern: character '" << text[i] << "' at position " << i
                 << " is not in the protein alphabet (A C D E F G H I K L M N P Q R S T V W Y, "
                    "and X B Z J)";
             throw PatternError("bad_alphabet", msg.str());
         }
+        has_instances &= set != 0;
         upper.push_back(residue);
         codons.push_back(set);
         for (size_t j = 0; j < 3; ++j) {
             positions.push_back(codon_position_set(set, j));
         }
     }
-    if (stop != std::string_view::npos) {
-        // owner decision #15 of 2026-10-08: stop codons are refused for now (no branch
-        // through a stop): its own slot code, so that a client can tell a peptide that is
-        // valid apart from its stops from a malformed one
-        std::ostringstream msg;
-        msg << "pattern: character '*' at position " << stop << " is a stop, not served in "
-               "this version (no branch through a stop codon)";
-        throw PatternError("stop_unsupported", msg.str());
-    }
 
     Pattern pattern(kind, std::move(upper), std::move(positions));
     pattern.codons_ = std::move(codons);
     pattern.genetic_code_ = code.id();
+    pattern.has_instances_ = has_instances;
     return pattern;
 }
 
@@ -207,9 +199,10 @@ double Pattern::information_bits(size_t begin, size_t end) const {
         for (size_t i = begin / 3; 3 * i < end; ++i) {
             const size_t first = std::max(begin, 3 * i) - 3 * i;
             const size_t last = std::min(end, 3 * i + 3) - 3 * i;
+            // a residue admitting no codon (has_instances() false) as one exact codon: finite
             bits += 2.0 * (last - first)
-                    - std::log2(static_cast<double>(
-                            distinct_projections(codons_[i], first, last)));
+                    - std::log2(static_cast<double>(std::max<uint32_t>(
+                            1, distinct_projections(codons_[i], first, last))));
         }
         return bits;
     }
@@ -246,6 +239,7 @@ Pattern Pattern::reverse_complement() const {
             rc.codons_.push_back(reverse_complement_codons(*it));
         }
         rc.genetic_code_ = genetic_code_;
+        rc.has_instances_ = has_instances_;
         return rc;
     }
     std::string text;
@@ -2447,6 +2441,16 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         };
         return finish();
     }
+    // a pattern without instances (owner decision #19: '*' read in a table without an
+    // unconditional stop codon) and L <= k, where a context instantiates the whole pattern:
+    // answered EXACT 0 with nothing searched, so that there is nothing for the information
+    // floor to gate. A longer one is searched as any other: its anchors instantiate the
+    // anchor window only, which may not reach the '*', and its paths (none) are the
+    // extension's
+    if (!pattern.has_instances() && !is_long) {
+        answer_no_instance(pattern, request, callback != nullptr, &result);
+        return finish();
+    }
     // the information floor gates discovery, except for an exact pattern in suffix scope:
     // one range, a few ranks (§5.3)
     if (!(result.scope == Scope::SUFFIX && pattern.is_exact())) {
@@ -2861,8 +2865,44 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         result.notes.push_back(kNotePathsLater);
     if (engine.upper_bound_decision())
         result.notes.push_back(kNoteThresholdUpperBound);
+    if (!pattern.has_instances())
+        result.notes.push_back(kNoteNoStopCodon);
 
     return finish();
+}
+
+void PatternSearch::answer_no_instance(const Pattern &pattern, const Request &request,
+                                       bool enumerating, Result *result) const {
+    const size_t k = support_.k;
+    const size_t L = pattern.length();
+    assert(!pattern.has_instances() && L <= k);
+    // the orientations a search would have had, each with every count EXACT 0: an absence
+    // derived from the pattern (owner decision #19), nothing searched or charged
+    result->searched = searched_orientations(pattern, request.strands);
+    ContextCounts contexts;
+    contexts.total = Count::exact(Unit::GRAPH_CONTEXTS, 0);
+    contexts.suffix = Count::exact(Unit::GRAPH_CONTEXTS, 0);
+    if (request.scope == Scope::SUFFIX) {
+        contexts.by_offset.emplace(static_cast<uint32_t>(k - L),
+                                   Count::exact(Unit::GRAPH_CONTEXTS, 0));
+    } else {
+        for (uint32_t p = 0; p + L <= k; ++p) {
+            contexts.by_offset.emplace(p, Count::exact(Unit::GRAPH_CONTEXTS, 0));
+        }
+    }
+    for (Orientation o : result->searched) {
+        contexts.by_orientation.emplace(o, Count::exact(Unit::GRAPH_CONTEXTS, 0));
+    }
+    result->contexts = std::move(contexts);
+    if (enumerating) {
+        // nothing to release, and that is all of it
+        Extraction extraction;
+        extraction.complete = true;
+        result->extraction = extraction;
+    }
+    if (support_.mode != GraphMode::BASIC)
+        result->notes.push_back(kNoteStrandUnknown);
+    result->notes.push_back(kNoteNoStopCodon);
 }
 
 } // namespace pattern

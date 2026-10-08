@@ -967,9 +967,11 @@ TEST(PatternRoute, Capabilities) {
         ASSERT_EQ(1u, r.asString().size());
         residues += r.asString();
     }
-    EXPECT_EQ("ACDEFGHIKLMNPQRSTVWYXBZJ", residues);
+    // owner decision #19: the stop '*' is a residue (a stop codon of the genetic code)
+    EXPECT_EQ("ACDEFGHIKLMNPQRSTVWYXBZJ*", residues);
     // the list is what the engine parses: each residue alone is a peptide, every other
-    // character of the alphabet, the stop '*' included, is not
+    // character of the alphabet is not
+    EXPECT_NO_THROW(pattern::Pattern::parse(pattern::PatternKind::PROTEIN, "*"));
     for (char c = 'A'; c <= 'Z'; ++c) {
         const bool listed = residues.find(c) != std::string::npos;
         bool parsed = true;
@@ -988,7 +990,9 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ(std::vector<int>({ 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23,
                                  24, 25, 26, 27, 28, 29, 30, 31, 32, 33 }), codes);
     EXPECT_EQ(1, caps["default_genetic_code"].asInt());
-    EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("stop_unsupported"));
+    EXPECT_EQ(std::string::npos, caps["protein_rule"].asString().find("stop_unsupported"));
+    EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("the stop '*'"));
+    EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("no_stop_codon"));
     // owner decision #16: a graph with its mask counts exactly, and has no dummy fraction
     EXPECT_EQ("exact", caps["counting"].asString());
     EXPECT_TRUE(caps.isMember("dummy_fraction"));

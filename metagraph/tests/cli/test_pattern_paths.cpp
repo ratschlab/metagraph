@@ -1561,7 +1561,8 @@ TEST(PatternPaths, CountMode) {
 // (3m > k, long_search "paths") with their labels, against oracles that never ask the engine
 // nor its tables:
 //  - the genetic codes are the test's own copy of NCBI's ncbieaa strings (gc.prt 4.6) for the
-//    tables used here (1, 2, 11);
+//    tables used here (1, 2, 11; 27 and 31, whose stops code a residue unless in context:
+//    owner decisions #19 and #21);
 //  - a GRAPH-WALK oracle over the k-mers of the records (both orientations on CANONICAL and
 //    PRIMARY graphs): every k-mer window, and every walk of k-mers, whose bases translate to
 //    the peptide (forward), or whose reverse complement does (reverse);
@@ -1574,6 +1575,10 @@ const std::map<int, std::string> kTables = {
     { 1, "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG" },
     { 2, "FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNKKSS**VVVVAAAADDEEGGGG" },
     { 11, "FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG" },
+    // Karyorelict: TAA, TAG Q and TGA W (a stop in context only)
+    { 27, "FFLLSSSSYYQQCCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG" },
+    // Blastocrithidia: TAA, TAG E (a stop in context only), TGA W
+    { 31, "FFLLSSSSYYEECCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG" },
 };
 
 char translate(int table, const std::string &codon) {
@@ -1601,10 +1606,10 @@ const std::vector<std::string>& all_codons() {
 }
 
 // a residue of a peptide (X, B, Z, J the ambiguity codes) admits the amino acid |aa|; a stop
-// is admitted by none
+// is admitted by the stop '*' only (owner decision #19), and '*' admits nothing else
 bool residue_admits(char residue, char aa) {
-    if (aa == '*')
-        return false;
+    if (residue == '*' || aa == '*')
+        return residue == aa;
     switch (residue) {
         case 'X': return true;
         case 'B': return aa == 'D' || aa == 'N';
@@ -1652,7 +1657,8 @@ struct Peptide {
         return s.size() == length() && prefix(s, reverse);
     }
 
-    // log2 of 64 / (the codons of the residue), summed: the bits of the whole peptide
+    // log2 of 64 / (the codons of the residue), summed: the bits of the whole peptide; a
+    // residue without a codon (a stop '*' in a table without one) counts as one codon, 6 bits
     double bits() const {
         double out = 0;
         for (char r : residues) {
@@ -1660,7 +1666,7 @@ struct Peptide {
             for (const std::string &codon : all_codons()) {
                 n += residue_admits(r, translate(table, codon));
             }
-            out += std::log2(64.0 / n);
+            out += std::log2(64.0 / std::max<size_t>(n, 1));
         }
         return out;
     }
@@ -2103,17 +2109,21 @@ TEST(PatternRoutePeptide, TheEntryItsSlotsAndTheGeneticCode) {
     // ATG TGG AAA in b0, in the 4 k-mers holding it (offsets 0 to 3)
     EXPECT_EQ(4u, peptide_contexts(walk, { "MWK", 1 }, true).size());
     EXPECT_EQ(4u, mwk["counts"]["contexts"]["value"].asUInt64()) << mwk;
-    for (int i : { 1, 2, 3 }) {
+    for (int i : { 2, 3 }) {
         const Json::Value &slot = out["patterns"][i];
         EXPECT_EQ(std::vector<std::string>({ "error", "id", "kind" }), slot.getMemberNames());
         EXPECT_EQ("protein", slot["kind"].asString());
-        EXPECT_EQ(i == 1 ? "stop_unsupported" : "bad_alphabet",
-                  slot["error"]["code"].asString()) << slot;
+        EXPECT_EQ("bad_alphabet", slot["error"]["code"].asString()) << slot;
     }
-    EXPECT_NE(std::string::npos, out["patterns"][1]["error"]["message"].asString()
-                                         .find("position 1 is a stop"));
     EXPECT_NE(std::string::npos, out["patterns"][2]["error"]["message"].asString()
                                          .find("'U' at position 2"));
+    // owner decision #19: the stop '*' is a residue (stop_unsupported is gone): M*K is read,
+    // its bits those of M, a stop codon (3 in table 1) and K, below this floor of 16
+    const Json::Value &stop = out["patterns"][1];
+    EXPECT_EQ("information_below_floor", stop["error"]["code"].asString()) << stop;
+    EXPECT_EQ("M*K", stop["pattern"].asString());
+    EXPECT_EQ(3u, stop["residues"].asUInt64());
+    EXPECT_NEAR(6 + std::log2(64.0 / 3) + 5, stop["information_bits"].asDouble(), 1e-9);
     // below the floor (M 6 bits + K 5): the slot keeps the peptide's description
     const Json::Value &low = out["patterns"][4];
     EXPECT_EQ("information_below_floor", low["error"]["code"].asString());
@@ -2134,6 +2144,81 @@ TEST(PatternRoutePeptide, TheEntryItsSlotsAndTheGeneticCode) {
     // an unknown table refuses the request
     EXPECT_EQ(std::make_pair(400, std::string("genetic_code_unknown")),
               refusal(idx, "{\"patterns\": [{\"protein\": \"MWK\"}], \"genetic_code\": 19}"));
+}
+
+
+// Owner decisions #19 and #21: the stop '*' of a peptide is a stop codon of the request's
+// genetic code at that position (the codons the table translates to '*'), against the
+// graph-walk and six-frame oracles in tables 1, 2 and 11 (whose stops differ: table 2 stops at
+// AGA and AGG and reads TGA as W); X never matches a stop; in tables 27 and 31, whose stop
+// codons code a residue unless in context, those codons match as the residue and '*' matches
+// nothing: the counts are exact 0 and the entry says why (no_stop_codon)
+TEST(PatternRoutePeptide, TheStopIsAStopCodonOfTheTable) {
+    const std::vector<Record> records = {
+        // ATG TGA AAA: M * K (tables 1, 11), M W K (2, 27, 31)
+        { "a", "a0", "CCCATGTGAAAAGGGTTTCCC" },
+        // ATG AGG AAA: M R K (1, 11, 27, 31), M * K (2)
+        { "b", "b0", "GGGATGAGGAAATTTGGG" },
+        // ATG TAA AAA: M * K (1, 2, 11), M Q K (27), M E K (31)
+        { "c", "c0", "TTTATGTAAAAACCCAAAT" },
+        // ATG TAG AAA on the minus strand: M * K (1, 2, 11)
+        { "d", "d0", "GGGTTTCTACATGGG" },
+    };
+    Index idx = build<annot::RowDiffColumnAnnotator>(13, records, true);
+    const Walk walk(idx);
+    const std::vector<Peptide> peptides = {
+        { "M*K", 1 }, { "M*K", 2 }, { "M*K", 11 }, { "M*", 1 }, { "*K", 11 }, { "MX*", 11 },
+        { "M*X", 2 }, { "MXK", 1 }, { "MXK", 27 }, { "MQK", 27 }, { "MWK", 27 }, { "MEK", 31 },
+        { "M*K", 27 }, { "M*K", 31 },
+    };
+    for (const Peptide &p : peptides) {
+        SCOPED_TRACE(p.residues + " in table " + std::to_string(p.table));
+        const bool none = (p.table == 27 || p.table == 31)
+                            && p.residues.find('*') != std::string::npos;
+        const Json::Value answer = run(idx, "{\"patterns\": [" + p.json() + "], "
+                                            "\"genetic_code\": " + std::to_string(p.table)
+                                            + ", \"output\": {\"labels\": \"all\"}}");
+        const Json::Value &e = answer["patterns"][0];
+        check_peptide_contexts(idx, e, p);
+        const ContextSet expected = peptide_contexts(walk, p, true);
+        if (none) {
+            EXPECT_TRUE(expected.empty());
+        }
+        bool noted = false;
+        for (const Json::Value &n : e["notes"]) {
+            noted |= n.asString() == "no_stop_codon";
+        }
+        EXPECT_EQ(none, noted) << e;
+        if (none) {
+            EXPECT_EQ(0u, e["counts"]["contexts"]["value"].asUInt64());
+            EXPECT_EQ(0u, e["returned"].asUInt64());
+        }
+        // the count mode states the same count
+        const Json::Value count = run(idx, "{\"patterns\": [" + p.json() + "], \"mode\": "
+                                           "\"count\", \"genetic_code\": "
+                                           + std::to_string(p.table) + "}")["patterns"][0];
+        EXPECT_EQ(e["counts"]["contexts"], count["counts"]["contexts"]);
+    }
+    // the stop alone in a table without one: no instance at all (palindromic vacuously, as
+    // its reverse complement has none either), exact 0, the note
+    const Json::Value lone = run(idx, "{\"patterns\": [{\"protein\": \"*\"}], "
+                                      "\"genetic_code\": 27, \"output\": {\"labels\": "
+                                      "\"all\"}}")["patterns"][0];
+    EXPECT_EQ("exact", lone["counts"]["contexts"]["relation"].asString()) << lone;
+    EXPECT_EQ(0u, lone["counts"]["contexts"]["value"].asUInt64());
+    EXPECT_TRUE(lone["retrieval_complete"].asBool());
+    EXPECT_EQ(0u, lone["returned"].asUInt64());
+    EXPECT_NE(lone["notes"].end(), std::find(lone["notes"].begin(), lone["notes"].end(),
+                                             Json::Value("no_stop_codon")));
+    // the hits the records were written for: M*K at TGA, TAA, TAG in tables 1 and 11 and at
+    // AGG, TAA, TAG in table 2; X never a stop (MXK in table 1: MRK only), every codon a
+    // residue in table 27 (MXK four times); MQK and MEK at the context stops TAA and TAG
+    EXPECT_EQ(3u, six_frames(idx, { "M*K", 1 }).size());
+    EXPECT_EQ(3u, six_frames(idx, { "M*K", 2 }).size());
+    EXPECT_EQ(1u, six_frames(idx, { "MXK", 1 }).size());
+    EXPECT_EQ(4u, six_frames(idx, { "MXK", 27 }).size());
+    EXPECT_EQ(2u, six_frames(idx, { "MQK", 27 }).size());
+    EXPECT_EQ(2u, six_frames(idx, { "MEK", 31 }).size());
 }
 
 } // namespace

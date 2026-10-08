@@ -1120,13 +1120,13 @@ TEST(PatternUnmasked, RandomPatternsAgainstOracles) {
 }
 
 TEST(PatternUnmasked, PeptidesWithoutTheMask) {
-    // peptides (the codon automaton) give the masked twin's contexts and paths
+    // peptides (the codon automaton, '*' included) give the masked twin's contexts and paths
     const std::vector<std::string> records { "ATGTAAGGCTGGTGAATGCCC", "ATGAAATAGTGGCC" };
     for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
                        DeBruijnGraph::PRIMARY }) {
         for (size_t k : { size_t(4), size_t(6), size_t(9) }) {
             Twin twin = build_twin(k, records, mode);
-            for (const char *peptide : { "MK", "MP", "GW", "MX", "WG", "MKX" }) {
+            for (const char *peptide : { "M*", "MK*", "W*", "MX", "*G", "M*GW" }) {
                 for (int table : { 1, 2, 11, 27 }) {
                     const Pattern p = Pattern::parse(PatternKind::PROTEIN, peptide,
                                                      GeneticCode::get(table));
@@ -1154,6 +1154,7 @@ TEST(PatternUnmasked, PeptidesWithoutTheMask) {
                                                          : results[1].anchors->paths;
                     EXPECT_EQ(Relation::EXACT, u.relation);
                     EXPECT_EQ(m.value, u.value);
+                    EXPECT_EQ(!p.has_instances(), has_note(results[0], kNoteNoStopCodon));
                 }
             }
         }
