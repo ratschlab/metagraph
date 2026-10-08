@@ -1,0 +1,16 @@
+{
+  "patterns": [
+    {
+      "iupac": "NNN"
+    },
+    {
+      "dna": "AAA"
+    }
+  ],
+  "mode": "partial",
+  "output": {
+    "labels": "all",
+    "occurrences": false
+  },
+  "max_memory_mb": 2
+}

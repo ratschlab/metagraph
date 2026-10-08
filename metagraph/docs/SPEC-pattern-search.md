@@ -946,14 +946,17 @@ After the outside review of 2026-10-07 (GPT #11): `labels_all_output_budget` (a 
 fill the smallest account, `max_memory_mb` 1: `stop {output, max_memory}`, `withheld: output_budget`, the contexts
 count `exact`), `labels_all_partial_exact_cut` (`max_labels` and `max_occurrences_per_label` cut the lists while the
 counts stay `exact`) and `labels_all_mixed_slots` (refused and answered slots side by side with labels "all"; also
-`bad_alphabet` and `information_floor` without labels).
+`bad_alphabet` and `information_floor` without labels); after its recheck `labels_all_rows_refused` (four patterns
+sharing one account of 1 MB in `partial`: the last one's rows are refused, `rows_refused` and `labels_status:
+"refused"`, `cut: max_memory`, its labels counted `at_least`).
 
-Situations without a stored body: a row refused by the memory account (`rows_refused`, `labels_status:
-"refused"`, `withheld: annotation_budget` for that cause: every row of the mini is far smaller than the smallest
-account, 1 MB); `cut: max_memory` in `partial`; an earlier stop followed by a time stop of the output of the labels
+Situations without a stored body: `withheld: annotation_budget` for a refused row (in `all_or_count`); `by_label:
+null` in `partial` (the mini's label names are too short to exhaust the account there; a real answer of a tiny
+long-label index in `data/traverse/pattern_validator/by_label_null_partial` checks that the validator accepts it);
+an earlier stop followed by a time stop of the output of the labels
 (it depends on the machine's speed); the refusals `mask_invalid` (it needs a graph extended after masking with an
 older build; the unit test `PatternMask.MaskWithAValidSentinelIsRefused` shows it) and `alphabet_untested` (a DNA5
-build). The first three are exercised by the unit tests of `tests/cli/test_pattern_retrieval.cpp` on small graphs
+build). The first and the third are exercised by the unit tests of `tests/cli/test_pattern_retrieval.cpp` on small graphs
 (the third by `PatternRetrieval.AWorkStopThenATimeStopOfTheOutput`, on a virtual clock: a work stop in discovery
 kept as the first stop, then the output's time stop).
 How a client merges answers is in `PROMPT-search-service-pattern.md` §3.1 item 2, not in a fixture.
@@ -1454,7 +1457,8 @@ and `/stats` (byte for byte apart from `timing`), the alignment, and every answe
     answer `by_label: null`;
   - nothing is written to a client that left, errors included (finding 4, §3);
   - the fixture validator knows `mask_invalid` and `alphabet_untested` and checks its code lists against the
-    sources (finding 6).
+    sources (finding 6), and accepts `by_label: null` in `partial` (its recheck);
+  - a new fixture `labels_all_rows_refused` (63 in all) shows a refused row and `cut: max_memory`.
 - **No answer changes** (stated for completeness): the deleted per-offset completion rule was never in effect
   (T1-04: no offset was `exact` after a discovery stop before either); the dummy-edge mask is built faster with
   the same bytes (D1-02, M1-02); an `.edgemask` that exists but cannot be opened is now named in the log, by

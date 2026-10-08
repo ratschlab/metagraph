@@ -646,10 +646,9 @@ FIXTURES = [
          entries(expect_all(exact(24), complete, labelled, counted('labels', 'exact', 9)),
                  slot_error('bad_alphabet'), slot_error('information_below_floor'),
                  expect_all(exact(0), complete, counted('labels', 'exact', 0)))),
-    # (the one below rests on the memory model of SPEC
-    # §14.4; its expect fails loudly if the account stops elsewhere. No fixture shows a refused
-    # row: on the mini every row is far smaller than the smallest account (1 MB), so rows_refused
-    # is covered by the unit tests PatternRetrieval.* only)
+    # (the two below rest on the memory model of SPEC
+    # §14.4; their expects fail loudly if the account stops elsewhere. A refused row needs the
+    # account nearly spent: on the mini only a request whose earlier patterns hold most of it)
     post('labels_all_output_budget', 'masked',
          {'patterns': [p('GCGGCGGCGGCG', 'dna', 'repeat')], 'max_memory_mb': 1,
           'max_contexts': 10000, 'output': {'labels': 'all'}}, 200,
@@ -658,6 +657,19 @@ FIXTURES = [
          'max_memory}, all_or_count withholds (output_budget), the contexts count exact',
          entries(expect_all(exact(1828), withheld('output_budget'),
                             field('stop', {'phase': 'output', 'reason': 'max_memory'})))),
+    post('labels_all_rows_refused', 'masked',
+         {'patterns': [p('GCGGCGGCGGCG'), p('CGCCAGCGCCAG'), p('CGCCAGCGCCAG'), p('GCGGCGGCGGCG')],
+          'mode': 'partial', 'max_memory_mb': 1, 'max_contexts': 10000,
+          'output': {'labels': 'all'}}, 200,
+         'one memory account over four patterns (max_memory_mb 1): the earlier patterns hold most '
+         'of it, so a row of the last cannot be held alone and is refused: listed in rows_refused '
+         '(phase, reason max_memory, needed_bytes), its contexts labels_status "refused", partial '
+         'answers on; the labels count at_least',
+         entries(lambda e: None, lambda e: None, lambda e: None,
+                 expect_all(lambda e: check(len(e['rows_refused']) > 0, e['rows_refused']),
+                            lambda e: check(any(r['labels_status'] == 'refused'
+                                                for r in e['results']), e['results']),
+                            counted('labels', 'at_least')))),
     post('labels_all_count', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'count', 'output': {'labels': 'all'}}, 200,
          'mode count with output.labels "all": counted, no annotation read, output null, the '

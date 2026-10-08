@@ -453,6 +453,15 @@
    "headers": {},
    "shows": "the memory account (max_memory_mb 1, the smallest) holds the 1,828 contexts of a GCG repeat but not the labels and placed occurrences built for them: stop {output, max_memory}, all_or_count withholds (output_budget), the contexts count exact"
   },
+  "labels_all_rows_refused": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "one memory account over four patterns (max_memory_mb 1): the earlier patterns hold most of it, so a row of the last cannot be held alone and is refused: listed in rows_refused (phase, reason max_memory, needed_bytes), its contexts labels_status \"refused\", partial answers on; the labels count at_least"
+  },
   "labels_all_count": {
    "server": "masked",
    "method": "POST",

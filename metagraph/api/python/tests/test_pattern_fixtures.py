@@ -786,6 +786,26 @@ class Checker:
                 self.ok(e['counts'][f]['relation'] == 'unknown', f'{path}.counts.{f}',
                         'nothing published when withheld')
             return
+        if e['by_label'] is None:
+            # partial whose memory account could not hold by_label (SPEC §14.4; outside review
+            # GPT-2 recheck): no label of the pattern is built, every context read answers
+            # output_budget, the answer is incomplete and states a stop (the output's, or an
+            # earlier one: the first stop wins); the counts keep their own relations
+            self.ok(mode == 'partial', path + '.by_label', 'null only when withheld or in partial')
+            self.ok(not e['retrieval_complete'], path + '.retrieval_complete',
+                    'by_label null: not complete')
+            self.ok(e['stop'] is not None, path + '.stop', 'by_label null only under a stop')
+            self.ok(e['labels_cut'] is None and e['occurrences_cut'] is None, path,
+                    'no list is cut when none is built')
+            for i, r in enumerate(e['results']):
+                rp = f'{path}.results[{i}]'
+                self.one_of(r['labels_status'], LABELS_STATUS, rp + '.labels_status')
+                self.ok(r['labels_status'] not in ('complete', 'truncated'), rp + '.labels_status',
+                        'nothing listed without by_label')
+                self.ok(r['labels'] is None, rp + '.labels', 'null without by_label')
+                self.ok((r['labels_total'] is None) is (r['labels_status'] in ('refused', 'not_read')),
+                        rp + '.labels_total')
+            return
         self.ok(isinstance(e['by_label'], list), path + '.by_label')
         if e['retrieval_complete']:
             self.ok(not e['rows_refused'] and not e['anchors_truncated'], path,
@@ -1105,10 +1125,10 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(set(SCOPES), seen['scope'])
         self.assertEqual({'both', 'forward', 'reverse'}, seen['strands'])
         # output_budget from labels_all_output_budget (a GCG repeat whose 1,828 contexts fill
-        # the smallest account, max_memory_mb 1); the cut max_memory only in partial, which no
-        # fixture requests at that size (tests/cli/test_pattern_retrieval shows it)
+        # the smallest account, max_memory_mb 1); the cut max_memory from labels_all_rows_refused
+        # (partial, four patterns sharing that account)
         self.assertEqual(set(WITHHELD), seen['withheld'])
-        self.assertEqual({'max_contexts', 'max_steps', 'time'}, seen['cut'])
+        self.assertEqual({'max_contexts', 'max_steps', 'time', 'max_memory'}, seen['cut'])
         self.assertEqual(set(SLOT_ERRORS), seen['slot'])
         self.assertEqual({'basic', 'primary'}, seen['graph_mode'])
         self.assertEqual(set(NOTES), seen['note'])
@@ -1221,6 +1241,40 @@ class TestPatternFixtures(unittest.TestCase):
                              'support_message\'s branches not found in pattern.cpp')
         self.assertEqual(set(REFUSALS), literal | support)
         self.assertEqual(set(UNAVAILABLE), support | unavailable)
+
+    def test_by_label_null_in_partial_is_valid(self):
+        """SPEC §14.4: in partial, when the memory account cannot hold by_label, the answer has
+        by_label null, every context read output_budget and a stop -- a valid v1 answer the
+        validator refused (outside review GPT-2 recheck). The body is a real CLI answer on a
+        tiny long-label index (data/traverse/pattern_validator/by_label_null_partial); no
+        fixture of the mini index can show it (its label names are short)."""
+        d = os.path.join(HERE, 'data', 'traverse', 'pattern_validator', 'by_label_null_partial')
+        with open(os.path.join(d, 'request.json')) as f:
+            request = json.load(f)
+        with open(os.path.join(d, 'answer.json')) as f:
+            answer = json.load(f)
+        e = answer['patterns'][1]
+        self.assertEqual((None, {'phase': 'output', 'reason': 'max_memory'}, 'exact'),
+                         (e['by_label'], e['stop'], e['counts']['labels']['relation']))
+
+        class Stub:
+            def fail(self, message):
+                raise AssertionError(message)
+
+        def check(a, req=request):
+            Checker(Stub(), 'by_label_null_partial').answer(a, req)
+
+        check(answer)
+        # what v1 never answers: a label listed without by_label
+        a = copy.deepcopy(answer)
+        a['patterns'][1]['results'][0]['labels_status'] = 'complete'
+        with self.assertRaisesRegex(AssertionError, 'nothing listed without by_label'):
+            check(a)
+        # by_label null without a stop (an earlier rule may name it first)
+        a = copy.deepcopy(answer)
+        a['patterns'][1]['stop'] = None
+        with self.assertRaisesRegex(AssertionError, 'by_label null only under a stop|states its cut'):
+            check(a)
 
     def test_the_new_codes_are_valid_answers(self):
         """Hand-made bodies of v1 with mask_invalid and alphabet_untested -- a 400 refusal, and

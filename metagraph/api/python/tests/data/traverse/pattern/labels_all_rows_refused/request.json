@@ -1,0 +1,22 @@
+{
+ "patterns": [
+  {
+   "dna": "GCGGCGGCGGCG"
+  },
+  {
+   "dna": "CGCCAGCGCCAG"
+  },
+  {
+   "dna": "CGCCAGCGCCAG"
+  },
+  {
+   "dna": "GCGGCGGCGGCG"
+  }
+ ],
+ "mode": "partial",
+ "max_memory_mb": 1,
+ "max_contexts": 10000,
+ "output": {
+  "labels": "all"
+ }
+}
