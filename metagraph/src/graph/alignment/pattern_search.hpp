@@ -230,11 +230,11 @@ constexpr BaseSet kAllBases = kBaseA | kBaseC | kBaseG | kBaseT;
  *    going on), and a bound on the score a branch can still reach (a bound(state) the DFS
  *    prunes on). The DFS would then key its work by (node, state); the trackers and sinks keep
  *    their interfaces (a walk is still a walk).
- *  - a selective anchor: a Model that also steps left (prev(), the codon automaton read
- *    backwards), with SearchState::side LEFT along incoming edges. It also needs start(window,
- *    offset) for a window at offset w (Pattern::start derives a peptide's codon phase from the
- *    window's length alone), and a left arm's SearchState: spelled growing at the left,
- *    position = w - depth, base the node's first base (support_step's Arm::LEFT).
+ *  - a selective anchor (each orientation anchored on its least ambiguous window): the Model's
+ *    left arm and its start at any offset exist (start_at, start_left, bases_left, prev, used by
+ *    the segment search); what is open is the choice of the window by its anchor count (a
+ *    WindowChoice) and a support tracker's left frames (SearchState::side LEFT, spelled growing
+ *    at the left, base the node's first base: support_step's Arm::LEFT).
  *  - the entry point: only extend_anchor<Pattern> is instantiated, from
  *    PatternRun::extend_listed with the oriented Pattern, and the anchor phase does not ask the
  *    Model. Another Model needs a per-orientation `const Model*` (a Request field or a
@@ -264,6 +264,31 @@ class Model {
         (void)s;
         return position == length();
     }
+
+    /**
+     * The arms of a search anchored on a window inside the pattern (the segment search): its
+     * anchor is a k-mer instantiating positions [offset, offset + |anchor_kmer|.size()), read
+     * from the graph; the right arm then appends bases at positions offset + k, offset + k + 1,
+     * ..., the left arm prepends bases at offset - 1, offset - 2, ... down to 0.
+     *  start_at    the right arm's state after the anchor (what start() is for offset 0): next()
+     *              and bases() go on from it at position offset + |anchor_kmer|.size()
+     *  start_left  the left arm's state before the anchor: what the bases at positions >=
+     *              offset that the left arm's next base can depend on (for a peptide, the bases
+     *              of the codon of position offset - 1 that lie inside the anchor)
+     *  bases_left  the bases allowed at |position| (the one left of the leftmost spelled base) in
+     *              left state |s|; 0: none
+     *  prev        the left state after |base| (one of bases_left(s, position)) at |position|
+     * Both arms read one language: a string x at offset t is admitted iff the pattern admits it
+     * there position by position (for a peptide: every residue x overlaps has a codon agreeing
+     * with x on the positions inside x), so that a walk the left arm spells from an anchor is
+     * one the right arm spells from its leftmost k-mer, which instantiates the window at its
+     * offset. The defaults belong to a model without a left arm: start_at at offset 0 is
+     * start(), everything else throws std::logic_error (no search asks it).
+     */
+    virtual State start_at(uint32_t offset, std::string_view anchor_kmer) const;
+    virtual State start_left(uint32_t offset, std::string_view anchor_kmer) const;
+    virtual BaseSet bases_left(State s, uint32_t position) const;
+    virtual State prev(State s, uint32_t position, char base) const;
 
   protected:
     Model() = default;
@@ -388,6 +413,21 @@ class Pattern final : public Model {
     State next(State s, uint32_t position, char base) const override;
     // every walk of L bases the automaton admitted is an instance
     bool accepting(State, uint32_t position) const override { return position == length(); }
+
+    /**
+     * The arms of the segment search (Model::start_at and the left arm). DNA and IUPAC: state 0
+     * everywhere, bases_left(0, p) == positions()[p]. A peptide: start_at reads the anchor's
+     * last (offset + k) mod 3 bases (the codon prefix at position offset + k, as start() reads k
+     * mod 3); the left state holds the bases already spelled at the later positions of the codon
+     * of the next position to the left (none when that position ends a codon), so that
+     * bases_left is the exact codon test: the bases b at codon position j of residue p / 3 such
+     * that some codon of the residue agrees with the known later bases and has b at j. A base
+     * other than A, C, G, T among the known ones admits nothing (as allowed()).
+     */
+    State start_at(uint32_t offset, std::string_view anchor_kmer) const override;
+    State start_left(uint32_t offset, std::string_view anchor_kmer) const override;
+    BaseSet bases_left(State s, uint32_t position) const override;
+    State prev(State s, uint32_t position, char base) const override;
 
     /**
      * The information of the positions [begin, end) (§3): DNA and IUPAC, the sum of

@@ -333,6 +333,138 @@ bool Pattern::is_palindromic() const {
 }
 
 
+// ---------------------------------------------------------------- the arms of the segment search
+
+Model::State Model::start_at(uint32_t offset, std::string_view anchor_kmer) const {
+    if (!offset)
+        return start(anchor_kmer);
+    throw std::logic_error("pattern: this model has no start inside the pattern");
+}
+
+Model::State Model::start_left(uint32_t, std::string_view) const {
+    throw std::logic_error("pattern: this model has no left arm");
+}
+
+BaseSet Model::bases_left(State, uint32_t) const {
+    throw std::logic_error("pattern: this model has no left arm");
+}
+
+Model::State Model::prev(State, uint32_t, char) const {
+    throw std::logic_error("pattern: this model has no left arm");
+}
+
+namespace {
+
+/**
+ * The codons with base b at codon position i (bit c of a CodonSet, c = 16 b0 + 4 b1 + b2):
+ * kCodonsWith[i][b]. A residue's codons agreeing with known bases are its set intersected with
+ * these, so that the left arm's codon test is a few ANDs.
+ */
+constexpr std::array<std::array<CodonSet, 4>, 3> codons_with_table() {
+    std::array<std::array<CodonSet, 4>, 3> table {};
+    for (size_t c = 0; c < 64; ++c) {
+        for (size_t i = 0; i < 3; ++i) {
+            table[i][(c >> (2 * (2 - i))) & 3] |= CodonSet(1) << c;
+        }
+    }
+    return table;
+}
+constexpr std::array<std::array<CodonSet, 4>, 3> kCodonsWith = codons_with_table();
+
+/**
+ * A peptide's left state (Pattern::start_left, prev): the bases known at the later positions of
+ * the codon of the next position to the left, codon position i (1 or 2; position 0 is never
+ * known, since the next position to the left is then in the codon before) in bits
+ * [3 (i - 1), 3 i) as its base index + 1 (0: not known), and kCodonDead for a base other than
+ * A, C, G, T among them
+ */
+int left_codon_base(Model::State s, size_t i) {
+    assert(i == 1 || i == 2);
+    return static_cast<int>((s >> (3 * (i - 1))) & 7) - 1;
+}
+
+Model::State with_left_codon_base(Model::State s, size_t i, int b) {
+    assert((i == 1 || i == 2) && b >= 0 && b < 4);
+    return (s & ~(Model::State(7) << (3 * (i - 1)))) | Model::State(b + 1) << (3 * (i - 1));
+}
+
+} // namespace
+
+Model::State Pattern::start_at(uint32_t offset, std::string_view anchor_kmer) const {
+    if (kind_ != PatternKind::PROTEIN)
+        return 0;
+
+    // the codon prefix at position offset + |anchor_kmer|: its last j bases, as start() reads
+    // them for offset 0
+    const size_t j = (offset + anchor_kmer.size()) % 3;
+    State s = 0;
+    for (size_t i = 0; i < j && i < anchor_kmer.size(); ++i) {
+        const int b = base_index(anchor_kmer[anchor_kmer.size() - 1 - i]);
+        if (b < 0)
+            return kCodonDead;
+        s |= State(b + 1) << (3 * (j - 1 - i));
+    }
+    return s;
+}
+
+Model::State Pattern::start_left(uint32_t offset, std::string_view anchor_kmer) const {
+    if (kind_ != PatternKind::PROTEIN)
+        return 0;
+
+    // the codon of position offset - 1 starts before it: its positions offset % 3 .. 2 lie at
+    // the anchor's first bases. At a codon start nothing of the next codon to the left is known
+    const size_t first = offset % 3;
+    State s = 0;
+    for (size_t i = first; first && i < 3 && i - first < anchor_kmer.size(); ++i) {
+        const int b = base_index(anchor_kmer[i - first]);
+        if (b < 0)
+            return kCodonDead;
+        s = with_left_codon_base(s, i, b);
+    }
+    return s;
+}
+
+BaseSet Pattern::bases_left(State s, uint32_t position) const {
+    assert(position < positions_.size());
+    if (kind_ != PatternKind::PROTEIN)
+        return positions_[position];
+    if (s & kCodonDead)
+        return 0;
+
+    // the residue's codons agreeing with the bases known at the codon's later positions
+    const size_t j = position % 3;
+    CodonSet set = codons_[position / 3];
+    for (size_t i = j + 1; i < 3; ++i) {
+        const int b = left_codon_base(s, i);
+        if (b >= 0)
+            set &= kCodonsWith[i][b];
+    }
+    BaseSet bases = 0;
+    for (size_t b = 0; b < 4; ++b) {
+        if (set & kCodonsWith[j][b])
+            bases |= BaseSet(1) << b;
+    }
+    return bases;
+}
+
+Model::State Pattern::prev(State s, uint32_t position, char base) const {
+    assert(position < positions_.size());
+    // |base| is one the state admits (the precondition of Model::prev)
+    assert(bases_left(s, position) & iupac_set(base));
+    if (kind_ != PatternKind::PROTEIN)
+        return 0;
+
+    const size_t j = position % 3;
+    // the codon's first base: the next position to the left ends the codon before
+    if (!j)
+        return 0;
+    const int b = base_index(base);
+    if (b < 0)
+        return kCodonDead;
+    return with_left_codon_base(s, j, b);
+}
+
+
 // ---------------------------------------------------------------- deadline and budget
 
 Deadline::Deadline(Clock::time_point start, double time_budget_ms, double finalize_reserve_ms,
