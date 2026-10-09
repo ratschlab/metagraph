@@ -1,0 +1,316 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": false,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "long_search": "supported_paths",
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_paths": 1000,
+  "max_patterns": 16,
+  "max_predicate_contexts": 100000,
+  "max_predicate_labels": 10000,
+  "max_predicate_work": 100000000,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "predicate_scope": "motif",
+  "predicate_strands": "either",
+  "stop_at_threshold": false,
+  "supported_paths_level": "best",
+  "time_budget_ms": 60000
+ },
+ "mode": "count",
+ "output": null,
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_filter": "predicate",
+   "absence_scope": "long",
+   "anchor_information_bits": 62.0,
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 2
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "paths": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 2
+    },
+    "selected": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 0
+    },
+    "supported_paths": {
+     "branches_pruned": 0,
+     "branches_pruned_by_predicate": 0,
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      }
+     },
+     "candidates_examined": 18,
+     "level": "record_verified",
+     "relation": "exact",
+     "search": "completed",
+     "unit": "paths",
+     "value": 2
+    },
+    "tested": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 2
+    }
+   },
+   "determinism": "full",
+   "id": "NDM-40",
+   "information_bits": 80.0,
+   "kind": "dna",
+   "length": 40,
+   "min_anchor_information_bits": 62.0,
+   "mode": "count",
+   "motif": {
+    "decided_by": null,
+    "labels": 1,
+    "labels_absent": null,
+    "labels_present": [],
+    "selected": null,
+    "stop": null,
+    "untested": "not_started"
+   },
+   "notes": [],
+   "palindromic": false,
+   "pattern": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "retrieval_complete": false,
+   "rows_refused": [],
+   "scope": "long",
+   "selection": {
+    "access": "rows",
+    "pass": "completed",
+    "support": "record_verified"
+   },
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.14875,
+    "extension_ms": 0.131833,
+    "selection_ms": 0.001666,
+    "support_ms": 0.11333500000000003
+   },
+   "work": {
+    "anchor_rows": 2,
+    "annotation_rows": 22,
+    "annotation_units": 14074,
+    "extension_anchors": 2,
+    "extension_branches": 0,
+    "extension_edges": 18,
+    "mask_scans": 0,
+    "memory_bytes": 67127326,
+    "mirror_rows": 0,
+    "motif_units": 0,
+    "predicate_lookups": 0,
+    "predicate_rows": 0,
+    "predicate_units": 4,
+    "ranges_visited": 62,
+    "row_cache_evictions": 0,
+    "row_cache_hits": 0,
+    "steps": 80
+   }
+  },
+  {
+   "absence_filter": "predicate",
+   "absence_scope": "long",
+   "anchor_information_bits": 62.0,
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 0
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 0
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 0
+    },
+    "labels": {
+     "relation": "unknown",
+     "unit": "labels",
+     "value": null
+    },
+    "occurrences": {
+     "relation": "unknown",
+     "unit": "placed_occurrences",
+     "value": null
+    },
+    "paths": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 0
+    },
+    "selected": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 0
+    },
+    "supported_paths": {
+     "branches_pruned": 0,
+     "branches_pruned_by_predicate": 0,
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 0
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 0
+      }
+     },
+     "candidates_examined": 0,
+     "level": "record_verified",
+     "relation": "exact",
+     "search": "no_anchors",
+     "unit": "paths",
+     "value": 0
+    },
+    "tested": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 0
+    }
+   },
+   "determinism": "full",
+   "id": "no-instance",
+   "information_bits": 152.0,
+   "kind": "dna",
+   "length": 76,
+   "min_anchor_information_bits": 62.0,
+   "mode": "count",
+   "motif": {
+    "decided_by": "every_context",
+    "labels": 1,
+    "labels_absent": 1,
+    "labels_present": [],
+    "selected": true,
+    "stop": null,
+    "untested": null
+   },
+   "notes": [
+    "low_complexity_pattern"
+   ],
+   "palindromic": false,
+   "pattern": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+   "retrieval_complete": false,
+   "rows_refused": [],
+   "scope": "long",
+   "selection": {
+    "access": "rows",
+    "pass": "completed",
+    "support": "record_verified"
+   },
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.996958,
+    "extension_ms": 0.0,
+    "selection_ms": 4.2e-05,
+    "support_ms": 0.0
+   },
+   "work": {
+    "anchor_rows": 0,
+    "annotation_rows": 0,
+    "annotation_units": 0,
+    "extension_anchors": 0,
+    "extension_branches": 0,
+    "extension_edges": 0,
+    "mask_scans": 0,
+    "memory_bytes": 67127326,
+    "mirror_rows": 0,
+    "motif_units": 0,
+    "predicate_lookups": 0,
+    "predicate_rows": 0,
+    "predicate_units": 0,
+    "ranges_visited": 20,
+    "row_cache_evictions": 0,
+    "row_cache_hits": 0,
+    "steps": 20
+   }
+  }
+ ],
+ "predicate": {
+  "known": 1,
+  "motif_scope": "shard_motif",
+  "names": 1,
+  "normal_form": {
+   "none": [
+    "562"
+   ]
+  },
+  "scope": "shard_context",
+  "strands": "either",
+  "unknown_labels": [],
+  "vacuous": true
+ },
+ "timing": {
+  "elapsed_ms": 1.172417
+ }
+}

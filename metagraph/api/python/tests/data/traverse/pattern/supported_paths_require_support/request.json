@@ -1,0 +1,13 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "id": "NDM-40"
+  }
+ ],
+ "long_search": "supported_paths",
+ "require_support": "record_verified",
+ "output": {
+  "labels": "all"
+ }
+}

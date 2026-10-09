@@ -128,6 +128,10 @@ struct PathSupportOptions {
     // require_support "record_verified" (TRACE only): a path lists its verified labels only,
     // the others counted (labels_excluded_unverified)
     bool require_verified = false;
+    // the labels a kept path lists, by column (output.labels "predicate_only": the predicate's
+    // columns); a label it does not accept is neither listed nor counted (labels_total). Empty:
+    // every label carrying the path
+    std::function<bool(graph::traversal::Column)> listed;
 };
 
 /**
@@ -178,6 +182,14 @@ class PathTracker final : public graph::pattern::SupportTracker {
     // after it: frees what the pattern held (its dictionary and the row cache's allotment)
     // and restores the oracle's path cache
     void end_pattern();
+    /**
+     * After the pattern's search, before end_pattern, when other reads follow it (the mirror
+     * walks of a predicate's selection, pattern_supported.hpp): empties the row cache, returns
+     * its allotment to the account and restores the oracle's path cache, so that the next
+     * reader's allotment replaces this one instead of adding to it. The dictionary stays (the
+     * labels' answer names its labels); no row of the pattern is read after it.
+     */
+    void release_rows();
 
     // SupportTracker
     bool prepare(const std::vector<graph::pattern::Context> &anchors) override;
@@ -213,6 +225,15 @@ class PathTracker final : public graph::pattern::SupportTracker {
     // before walk_labels(): how many labels it gives, and the runs of label i (bytes before)
     size_t walk_num_labels() const;
     size_t walk_num_runs(size_t i) const;
+
+    /**
+     * The labels the top frame's support holds, at any depth (ascending dictionary ids): at
+     * the record level those with a chain (a record holding the branch so far), else every
+     * label of the frame (carrying every k-mer of it). Empty when no frame is open. What a
+     * predicate is evaluated on (pattern_supported.hpp): a branch's support only shrinks as
+     * it is extended, so a monotone predicate false on it is false on every walk below it.
+     */
+    void frame_support(std::vector<graph::traversal::LabelId> *out) const;
 
     // the pattern's dictionary: the labels of the anchors' rows (LabelId == index)
     const std::vector<graph::traversal::LabelRef>& labels() const;
@@ -271,6 +292,14 @@ class SupportedPathSink final : public graph::pattern::PathSink {
     // (the result objects of the paths the answer lists stay in the account, as a released
     // path's do)
     void end_pattern(size_t returned = 0);
+
+    /**
+     * After the search, before labels_answer: keeps the kept paths |indices| (ascending
+     * indices into paths()) and frees what the others hold, so that paths() is those, in that
+     * order. A predicate's selection among held paths (pattern_supported.hpp) lists the
+     * selected ones only.
+     */
+    void retain(const std::vector<size_t> &indices);
 
     bool accept(const graph::pattern::PathView &path,
                 const graph::pattern::SupportTracker *support) override;

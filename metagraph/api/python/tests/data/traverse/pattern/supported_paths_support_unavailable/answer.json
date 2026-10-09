@@ -1,0 +1,4 @@
+{
+ "code": "support_unavailable",
+ "error": "pattern: require_support \"record_verified\" needs a BASIC index with coordinates and its record mapping (.seqs), to check that one record holds the whole path; this index's best support is \"label_intersection\" (placement \"global\"). Ask without require_support: each label of a path then states its support"
+}

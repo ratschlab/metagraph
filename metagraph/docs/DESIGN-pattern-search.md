@@ -696,8 +696,8 @@ where it differs:
   deposited; a record holding the motif on its other strand annotates the reverse complement. A predicate is
   evaluated with `predicate_strands: "either"` (the default) on the labels of the context's k-mer **or** of its
   reverse complement — a label supports a context in one orientation as a whole, never by a mix of strands (the
-  owner's answer to P11; for a path, later: every k-mer of the walk as spelled, or every k-mer of its reverse
-  walk). `"context"` reads the context's own row only, for stranded indexes; CANONICAL and PRIMARY graphs share
+  owner's answer to P11; for a supported path, every k-mer of the walk as spelled, or every k-mer of its reverse
+  walk, SPEC §20.9). `"context"` reads the context's own row only, for stranded indexes; CANONICAL and PRIMARY graphs share
   one row and answer `"either"`. The answer states per selected result and label which orientation supported it
   (`selection_strands`: `"context"`, `"reverse_complement"`, `"both"`, or `"either"` where one row serves both).
 - **The default projection stays `none`** (P2): `output.labels` omitted is `none` with a predicate too; a client
@@ -711,10 +711,20 @@ where it differs:
   form, unknown labels, `vacuous`, scope, strands); unknown labels are one list (a single graph), not per shard.
 - **Units**: a membership read is charged its whole decoded row (`KeyCost::entries`, P17) under its own
   `max_predicate_work`, separate from `max_annotation_work` (P3).
-- **Long patterns**: a predicate selects among **supported paths** only (`long_search: "supported_paths"`, the
-  later increment 5s; P23, P24): the two-step raw-path design of "`long`: support before selection" below is not
-  built; with `long_search: "paths"` a predicate is refused, with `"anchors"` a long pattern's selection is
+- **Long patterns**: a predicate selects among **supported paths** only (`long_search: "supported_paths"`,
+  increment 5s, built in round C, SPEC §20; P23, P24): the search carries each branch's support (the labels
+  carrying every k-mer, or the records holding the walk whole) and prunes a branch nothing supports; the
+  predicate is decided at a walk's completion on its support at the level searched, a monotone normal form also
+  pruning, and `"either"` holding the walks until their mirrors' support is known (found by the search on the
+  other strand, or read). The two-step raw-path design of "`long`: support before selection" below is not built;
+  with `long_search: "paths"` a predicate is refused, with `"anchors"` a long pattern's selection is
   `not_started`.
+- **Motif-level predicates** (§12's item, built in round C for patterns of L ≤ k, SPEC §25): with
+  `predicate_scope: "motif"` the normal form is also evaluated once per pattern on the union of its contexts'
+  labels (each context's set as the selection evaluates it), from the pass's own reads: exact when every context
+  was tested, else Kleene's value on the labels found (definite only when the untested contexts cannot change it).
+  "Present in A, absent throughout C" on one index; across chunks the client evaluates the predicate on the union
+  of the chunks' labels.
 - **Labels are column names only** (P6): no taxonomy, a cohort is an explicit list (expanded by the client);
   record headers are unknown names (P20).
 
@@ -1119,8 +1129,15 @@ job-originated call holds no client connection, so a long budget costs only the 
 
 - **A one-pass paced row/tuple visitor** replacing the discovery-then-placement pair (§4.3), extracted from the
   two fetch loops.
-- **Motif-level predicates** (§5.6): quantifiers over all contexts of a pattern (`any_context`, `no_context`),
-  across shards, on the pattern-level label sets, for "present in A and absent throughout C".
+- **Motif-level predicates** (§5.6): built for patterns of L ≤ k on one index (round C, SPEC §25,
+  `predicate_scope: "motif"`); left: patterns longer than k (on their supported paths), and a server-side merge
+  across shards (today the client's: the predicate on the union of the chunks' labels).
+- **Supported paths** (moved into increment 5s, built in round C, SPEC §20): what remains for later is their
+  **selective anchor** (anchoring each orientation on its least ambiguous k-window and extending both ways, DECISIONS
+  P30: a pattern with an ambiguous end is still `anchors_above_threshold` today) and an **alignment projection**
+  of the supported paths (consensus and variant columns, P27). Counting walks by dynamic programming is not planned
+  (later at most: the enumeration counts millions of walks in seconds, and `supported_paths` is the count that
+  answers the question).
 - **Paced, budgeted selected-column access** for predicates (`predicate.access: columns` under a budget), so that
   `any(A) and none(B)` on a column-major backend reads two bits instead of a row.
 - **Labels for given rows:** a request naming the row ids of contexts an earlier label-free answer returned,
@@ -1233,6 +1250,15 @@ job-originated call holds no client connection, so a long budget costs only the 
    exceeds `max_contexts`. **Built for L ≤ k (2026-10-08, SPEC §19)**: the language (`pattern_predicate.cpp`), the
    selection pass (`pattern_selection.cpp`, strand-consistent `"either"`, whole-row units) and the route
    (`pattern.cpp`); the path-level part waits for the supported-path search (5s) and runs on it (5b-5).
+5s. **Supported paths** (P23–P29). The engine's extension with a support tracker and a path sink
+   (`pattern_search.cpp`); the label and record-level trackers over the request's labelled retrieval, the
+   anchors' rows read whole as the permitted set, a row cache, strand-consistent support
+   (`pattern_support.cpp`); the route's `long_search: "supported_paths"` (`pattern.cpp`); and 5b-5, a predicate's
+   selection of the supported paths (`pattern_supported.cpp`: decided at completion, monotone pruning, `"either"`
+   with the mirror walks found or read). **Built in round C (2026-10-09, SPEC §20)** with the motif-level predicate
+   of L ≤ k (SPEC §25), tested against a walk oracle over the records, a recursive evaluator of the request's
+   predicate and the labels of `long_search: "paths"` (`PatternSupportedRoute.*`, `PatternSupport.*`,
+   `PatternMotif.*`).
 6. **Multi-graph, barriers, per-shard budgets, benchmark.** The shared fan-out helper with the sorted merge,
    shard identity, per-shard budget shares and the barriers; resident-only shards; a benchmark on
    refseq33m-experimental (16-, 20-, 25-nt motifs in both scopes, a 29-nt IUPAC promoter, three peptides)

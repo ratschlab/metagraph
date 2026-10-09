@@ -1,0 +1,14 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "id": "NDM-40"
+  }
+ ],
+ "long_search": "supported_paths",
+ "predicate": {
+  "any": [
+   "5622"
+  ]
+ }
+}

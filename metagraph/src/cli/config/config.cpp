@@ -1777,7 +1777,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-checked-entries [INT] \twithout a dummy-edge mask: a pattern with at most this many unchecked candidate k-mers has each tested (k - 1 steps each), its counts exact; 0: none; at most 1000 [50]\n");
             fprintf(stderr, "\t   --pattern-max-contexts [INT] \tdefault and maximum of max_contexts per pattern (retrieval threshold, partial's cap) [10000]\n");
             fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
-            fprintf(stderr, "\t   --pattern-max-paths [INT] \tdefault and maximum of max_paths per pattern longer than k with long_search paths (retrieval threshold, partial's cap) [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-paths [INT] \tdefault and maximum of max_paths per pattern longer than k with long_search paths or supported_paths (retrieval threshold, partial's cap) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-steps [INT] \tdefault and maximum of max_steps per request (range and mask-scan steps) [100000000]\n");
             fprintf(stderr, "\t   --pattern-default-time-ms [INT] \ttime_budget_ms of a request that names none [60000]\n");
             fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request [600000]\n");
@@ -1844,7 +1844,7 @@ if (advanced) {
             fprintf(stderr, "\t   --pattern-max-checked-entries [INT] \twithout a dummy-edge mask: a pattern with at most this many unchecked candidate k-mers has each tested (k - 1 steps each), its counts exact; 0: none; at most 1000 [50]\n");
             fprintf(stderr, "\t   --pattern-max-contexts [INT] \tdefault and maximum of max_contexts per pattern (retrieval threshold, partial's cap) [10000]\n");
             fprintf(stderr, "\t   --pattern-max-anchors [INT] \tdefault and maximum of max_anchors per pattern longer than k [1000]\n");
-            fprintf(stderr, "\t   --pattern-max-paths [INT] \tdefault and maximum of max_paths per pattern longer than k with long_search paths (retrieval threshold, partial's cap) [1000]\n");
+            fprintf(stderr, "\t   --pattern-max-paths [INT] \tdefault and maximum of max_paths per pattern longer than k with long_search paths or supported_paths (retrieval threshold, partial's cap) [1000]\n");
             fprintf(stderr, "\t   --pattern-max-steps [INT] \tdefault and maximum of max_steps per request (range and mask-scan steps) [100000000]\n");
             fprintf(stderr, "\t   --pattern-default-time-ms [INT] \ttime_budget_ms of a request that names none [60000]\n");
             fprintf(stderr, "\t   --pattern-max-time-ms [INT] \tmaximum of time_budget_ms per request, at most 899000 (the 900 s content timeout less 1 s for the transport) [600000]\n");

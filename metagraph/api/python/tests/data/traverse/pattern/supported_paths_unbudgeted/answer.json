@@ -1,0 +1,4 @@
+{
+ "code": "annotation_unbudgeted",
+ "error": "pattern: long_search \"supported_paths\" reads the annotation in every mode (the search reads the row of every k-mer it enters, to carry each branch's support), and this index's annotation has no budget-aware decode (only the row-diff family has one): its reads would run without a memory bound. Set allow_unbudgeted_annotation: true to read it anyway, or ask with long_search \"paths\""
+}

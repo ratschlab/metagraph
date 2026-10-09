@@ -51,7 +51,7 @@
   "release_rule": "SPEC-labeled-traversal-core.md section 10.3, the release rule",
   "retention_count": 10000,
   "retention_s": 3600,
-  "server_instance": "ada5403a50ea890f",
+  "server_instance": "015e1626ac1d17be",
   "state": "GET /traverse/attempt/{attempt_id}",
   "suppression": "SPEC-labeled-traversal-core.md section 10.3, POST /traverse/cancel: the tombstone",
   "tombstone_max_s": 86400
@@ -212,7 +212,8 @@
   "long_patterns": "anchors_counted",
   "long_search": [
    "anchors",
-   "paths"
+   "paths",
+   "supported_paths"
   ],
   "mask": "file",
   "modes": [
@@ -232,6 +233,10 @@
     "and",
     "or",
     "not"
+   ],
+   "scopes": [
+    "context",
+    "motif"
    ],
    "strands": [
     "either",

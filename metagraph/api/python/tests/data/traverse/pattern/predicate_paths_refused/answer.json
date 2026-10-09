@@ -1,4 +1,4 @@
 {
  "code": "invalid_request",
- "error": "request.long_search: \"paths\" with a predicate: a predicate selects among the supported paths of a pattern longer than k (long_search \"supported_paths\", not served by this build), never among every graph walk; send long_search \"anchors\" (a pattern longer than k is then answered by its anchors, its selection not_started)"
+ "error": "request.long_search: \"paths\" with a predicate: a predicate selects among the supported paths of a pattern longer than k (long_search \"supported_paths\"), never among every graph walk; send long_search \"supported_paths\", or \"anchors\" (a pattern longer than k is then answered by its anchors, its selection not_started)"
 }

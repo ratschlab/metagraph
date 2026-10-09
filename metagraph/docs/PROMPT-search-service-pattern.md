@@ -130,7 +130,11 @@ version 1, both opt-in, each gated on the capabilities block, never on a milesto
 - `determinism: "time_limited"` can come with `stop: null` (a completed pattern of more than 191 bases whose
   low-complexity diagnostic the clock cut: complete counts, the note left out). Never infer a stop from
   `time_limited`; keep showing `time_limited` as "not reproducible".
-- The note `low_complexity_pattern` is never stated beside a stop; its absence says nothing about the pattern.
+- The note `low_complexity_pattern` is never stated beside a budget stop (`max_steps`, `time`, the supported-path
+  search's `max_annotation_work` and `max_memory`); it can stand beside a threshold stop (`stop_at_threshold`:
+  `max_contexts`, `max_anchors`, `max_paths`, and on supported paths a predicate's `max_paths` and
+  `max_predicate_contexts`; since round C), whose large counts it is about, and beside a stop of a later phase (the
+  labels' reads, a predicate's selection, the output). Its absence says nothing about the pattern.
 - New counters in an entry's `work` and `timing` (`extension_anchors`, `extension_branches`,
   `annotation_rows_distinct`, `verification_steps`, `label_intersection_ms`, `verification_ms`): pass them through;
   they describe the work, never the pattern.
@@ -184,12 +188,68 @@ Additions to contract version 1, opt-in by the request's `predicate`:
   `later_increment`).
 - **What to claim.** The predicate is asked of each context, per index (`predicate.scope: "shard_context"`):
   "these are the contexts of P whose k-mer (or reverse complement) carries the predicate's labels as asked" — with
-  `retrieval_complete: true` or `selected` `exact`. Never a motif-level claim ("the motif is absent from C"), never
+  `retrieval_complete: true` or `selected` `exact`. Never a motif-level claim ("the motif is absent from C"; that is
+  `predicate_scope: "motif"`, below), never
   anything from an `estimate`, never anything about contexts beyond `tested` when `selected` is `bounds` or
   `at_least`. `absence_filter: "predicate"` marks these narrowed absence claims; state them as such.
-- **Patterns longer than k**: a predicate selects among supported paths (`long_search: "supported_paths"`, a
-  later increment, not served yet): with `long_search: "paths"` a predicate is 400 `invalid_request`; with
-  `"anchors"` (the default) a long pattern keeps its anchors' answer and its selection is `not_started`.
+- **Patterns longer than k**: a predicate selects among supported paths (`long_search: "supported_paths"`,
+  increment 5s below): with `long_search: "paths"` a predicate is 400 `invalid_request`; with `"anchors"` (the
+  default) a long pattern keeps its anchors' answer and its selection is `not_started`.
+
+**Increment 5s: supported paths, and predicates on them (in the build since round C, 2026-10-09; SPEC §20).**
+Additions to contract version 1, opt-in by `long_search: "supported_paths"`:
+- **Gate** on the block: offer it only where `long_search` lists `"supported_paths"`. For labelled questions
+  about a pattern longer than k ("which samples hold this 40-mer / this peptide as one stretch"), use it rather
+  than `"paths"`: a `"paths"` sample cut at `max_paths` can hold no supported walk at all (on staging 97–100% of
+  the walks of 30–40-residue peptides are mosaics of records sharing repeats).
+- **What it answers**: the walks spelling the pattern that some label supports along their whole length, on one
+  strand as a whole: at the record level (`record_verified`: one record of the label holds the walk whole) where
+  the block's `support` is `record_verified`, else at the label level (`label_intersection`: the label annotates
+  every k-mer of the walk). `supported_paths_level: "label_intersection"` asks for the label level on a record
+  index (cheaper: no coordinates; the labels then come without occurrences, `placement: "none"`). The entry has
+  `counts.supported_paths` (with `level`, `search`, `candidates_examined`, `branches_pruned`) beside
+  `counts.paths`, which is now a **plain count** (no `extension`, no split): the complete graph walks, `at_least`
+  when the search pruned a branch before its end. Results are path results (`sequence`, `anchor_kmer`, `nodes`,
+  `rows`), with `output.labels: "all"` each label with its support and, at the record level, its occurrences.
+- **Costs**: the annotation is read in **every** mode (`count` too): send `max_annotation_work` and
+  `max_memory_mb` as budgets of the search itself; an unbudgeted annotation needs `allow_unbudgeted_annotation:
+  true` (else 400 `annotation_unbudgeted`); `require_support: "record_verified"` where the block's `support` is not
+  `record_verified` is 400 `support_unavailable` in every mode. A row costs about 1–4 ms on staging: the rows the
+  search enters (the k-mers of supported walks, one per pruned branch), not the number of walks, set the time.
+- **New values**: `stop {extension, max_annotation_work | max_memory}` (with `rows_refused` entries of phase
+  `extension`), `cut` `max_annotation_work`, `withheld` `annotation_budget` and `output_budget` for the search;
+  new `work` counters `anchor_rows`, `row_cache_hits`, `row_cache_evictions`, `mirror_rows` and
+  `timing.support_ms` (work, never the pattern).
+- **With a predicate** (§19's, one for the request): it selects among the supported walks, evaluated on each
+  walk's support at the level searched (`selection.support`), with `"either"` (the default) also on the support of
+  the reverse-complement walk. `counts.tested` and `counts.selected` are in `paths`; `max_paths` is the threshold on
+  the **selected** paths (`withheld: selected_above_threshold`); a monotone predicate (no `none`, no `not`) under
+  `"context"` prunes the search (`branches_pruned_by_predicate`; `supported_paths` then `at_least`, `selected`
+  still `exact`). With `"either"` and one strand searched the mirror walks are read (`work.mirror_rows`, as
+  annotation work; `predicate_lookups` counts them); the walks awaiting their decision are held up to
+  `max_predicate_contexts` (`withheld: predicate_above_threshold` above it). Selected paths carry
+  `selection_labels` and `selection_strands` (`"reverse_complement"`: only the mirror walk carries the label) as
+  contexts do.
+- **What to claim**: with `retrieval_complete: true`, every supported walk (or every selected one) is listed;
+  `supported_paths` `exact` 0: no record (no label, at the label level) holds the pattern as one walk, in the
+  strands searched. A `label_intersection` support is no record claim. Never an absence of the walk from the graph
+  (that is `counts.paths` `exact` 0).
+
+**Motif-level predicates (in the build since round C; SPEC §25).** Opt-in by `predicate_scope: "motif"` beside a
+predicate, for patterns of at most k bases: the predicate asked once of the pattern as a whole, on the union of
+its contexts' labels ("present in A, absent throughout C"), from the same reads as the context selection (no
+extra cost but the evaluation). Gate on the block's `predicate.scopes` listing `"motif"`; mode `count` is enough.
+Each entry gains `motif`: `selected` (`true`, `false`, `null`), `decided_by` (`every_context`: every context
+tested, an exact answer; `tested_contexts`: not every context was tested but the labels found decide it;
+`constant`; `null`: undecided, `untested` says why), `labels_present` (each label of the predicate found, with
+its `contexts` and `strands`), `labels_absent` (only with `every_context`). **What to claim**: with
+`every_context`, a label of the predicate not in `labels_present` carries no context of the pattern on this
+index, in the strands searched (with `"either"`, on neither strand of its records); with `tested_contexts` only
+presences; never anything about unknown labels or other chunks. **Across chunks** (a multi-graph database): never
+combine per-chunk `selected` values (each chunk folds away the names it lacks); take the union of the chunks'
+`labels_present` and evaluate the request's predicate on it — exact when every chunk says `every_context`. A
+pattern longer than k answers `untested: "not_started"` (motifs of long patterns are not asked), except one
+without anchors (no instance: decided on the empty union).
 
 **Multi-graph servers and `in_ram` (in the build since round C, 2026-10-09; SPEC §24,
 `SPEC-labeled-traversal-core.md` §6.1 and §10.3).** The owner: pattern search and traversal on a multi-graph server
@@ -254,7 +314,7 @@ follow `/search` ("the same logic as for the general search"). Additions to cont
 | 1 | count (`mode: count`) and the label-free extraction (`all_or_count` / `partial` with `labels: none`): k-mers, offsets, strands, node and row ids; exact DNA and IUPAC; both strands; `suffix` and `any_offset`; single-graph servers; the capabilities block; `metagraph pattern` CLI | running now; contract freezes on its commit |
 | 3 | `labels: all`: label discovery and placement (record, 1-based position, strand) on BASIC indexes with record mapping | in the build (SPEC §14), with fixtures |
 | 4 | patterns longer than k (extension), per-label `support`, `require_support`; opt-in: only a request with `long_search: "paths"` gets paths (new fields `sequence`, `anchor_kmer`; `kmer` keeps its meaning), every other request keeps today's anchor-only answer (SPEC §12.1) | in the build (2026-10-08, SPEC §17), with fixtures (`paths*`, `support_unavailable`) |
-| 5 / 5b | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`) | 5 in the build (2026-10-08, SPEC §12.2), with fixtures (`peptide*`, `genetic_code_unknown`); 5b for patterns of at most k bases in the build (2026-10-08, SPEC §19), with fixtures (`predicate_*`); predicates on long patterns with the supported-path search (5s), later |
+| 5 / 5b / 5s | peptides (codon automaton); annotation predicates (`any`, `all`, `none`, `at_least`, `and`/`or`/`not`); supported paths | 5 in the build (2026-10-08, SPEC §12.2), with fixtures (`peptide*`, `genetic_code_unknown`); 5b for patterns of at most k bases in the build (2026-10-08, SPEC §19), with fixtures (`predicate_*`); 5s, supported paths and predicates on them, and motif-level predicates in the build (round C, 2026-10-09, SPEC §20, §25), with fixtures (`supported_paths*`, `motif_*`) |
 | 6 | multi-graph servers: `graphs` as `/search` selects, one answer per pair tagged with its pair and `index_fp`, `in_ram`, `graph_summary` (the merged view is the service's, §3.1 item 2); the real-index benchmark | multi-graph serving in the build (round C, 2026-10-09, SPEC §24), with fixtures (`multi_graph_*`, `in_ram_single_graph`, `graphs_single_graph`); first on the owner's local test bed of Logan chunks; the benchmark later |
 | 7 | this service's job type (the backend's Python client methods are deferred until needed) | with you; on refseq33m-experimental after backend milestone 1, on chunked databases after milestone 6 (§3.1 item 3) |
 | mask | refseq33m-experimental's graph has no `.edgemask` file. Since the owner's decision #16 (2026-10-08) the route answers without it: `mask: absent`, `counting: "upper_bound"`, counts `bounds` with an `estimate` where they cannot be proven, lists exact (before, it answered `mask_required`). For exact counts the owner runs `metagraph transform --mask-dummy` once on mex (decision #18: in a staging-only directory, on the host rather than in the 128 GiB container: it holds a transient bit vector of edges + 1 bits, about 78 GB, beside the graph). Node ids, rows, the annotation and `index_fp` stay (decision #17: the mask is derived data); `/stats` `graph.nodes` becomes the k-mer count and a `.bloom` beside the graph starts loading; the block then says `counting: "exact"`. `--pattern-build-mask` (the mask built in memory at every start-up) is for small indexes, not for refseq33m | the route answers from the `update.sh` that deploys it; exact counts after the mask (#18) |

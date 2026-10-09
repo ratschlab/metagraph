@@ -1,0 +1,994 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": false,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "long_search": "supported_paths",
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_paths": 1000,
+  "max_patterns": 16,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "require_support": "label_intersection",
+  "stop_at_threshold": false,
+  "supported_paths_level": "best",
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "all",
+  "occurrences": true
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_scope": "long",
+   "anchor_information_bits": 62.0,
+   "anchors_truncated": [],
+   "annotation": "budgeted",
+   "by_label": [
+    {
+     "column": "1296536",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 2
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     }
+    },
+    {
+     "column": "158836",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 3
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     }
+    },
+    {
+     "column": "287",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 4
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     }
+    },
+    {
+     "column": "470",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 3
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     }
+    },
+    {
+     "column": "562",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 13
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     }
+    },
+    {
+     "column": "573",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 11
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     }
+    },
+    {
+     "column": "72407",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 4
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 2
+     }
+    },
+    {
+     "column": "546",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 1
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 1
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 1
+     }
+    },
+    {
+     "column": "615",
+     "graph": "mini_refseq",
+     "occurrences": {
+      "relation": "exact",
+      "unit": "placed_occurrences",
+      "value": 1
+     },
+     "paths": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 1
+     },
+     "paths_record_verified": {
+      "relation": "exact",
+      "unit": "paths",
+      "value": 1
+     }
+    }
+   ],
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 2
+    },
+    "labels": {
+     "by_support": {
+      "label_intersection": {
+       "relation": "exact",
+       "unit": "labels",
+       "value": 0
+      },
+      "record_verified": {
+       "relation": "exact",
+       "unit": "labels",
+       "value": 9
+      }
+     },
+     "relation": "exact",
+     "unit": "labels",
+     "value": 9
+    },
+    "occurrences": {
+     "relation": "exact",
+     "unit": "placed_occurrences",
+     "value": 42
+    },
+    "paths": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 2
+    },
+    "supported_paths": {
+     "branches_pruned": 0,
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      }
+     },
+     "candidates_examined": 18,
+     "level": "record_verified",
+     "relation": "exact",
+     "search": "completed",
+     "unit": "paths",
+     "value": 2
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "NDM-40",
+   "information_bits": 80.0,
+   "kind": "dna",
+   "labels_cut": null,
+   "length": 40,
+   "min_anchor_information_bits": 62.0,
+   "mode": "all_or_count",
+   "notes": [],
+   "occurrences_cut": null,
+   "palindromic": false,
+   "pattern": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "placement": "record",
+   "results": [
+    {
+     "anchor_kmer": "ATGGAATTGCCCAATATTATGCACCCGGTCG",
+     "instance": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3549-3588",
+         "nt_length": 11137,
+         "record": "NZ_LPPQ01000025.1",
+         "seq_id": 0,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "21039-21078",
+         "nt_length": 152715,
+         "record": "NZ_CP030345.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "528-567",
+         "nt_length": 7852,
+         "record": "NZ_MRAB01000034.1",
+         "seq_id": 1,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "442-481",
+         "nt_length": 1654,
+         "record": "NZ_BIFO01000144.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "6030270-6030309",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "9068-9107",
+         "nt_length": 47098,
+         "record": "NC_020818.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "170-209",
+         "nt_length": 8078,
+         "record": "NZ_NXGU01000132.1",
+         "seq_id": 1,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "58629-58668",
+         "nt_length": 138340,
+         "record": "NZ_CP021936.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "725-764",
+         "nt_length": 4525,
+         "record": "NZ_MOHB01000080.1",
+         "seq_id": 1,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "4150-4189",
+         "nt_length": 15095,
+         "record": "NZ_RJAB01000061.1",
+         "seq_id": 2,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "87980-88019",
+         "nt_length": 133234,
+         "record": "NZ_MPCO01000003.1",
+         "seq_id": 3,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "5726-5765",
+         "nt_length": 8746,
+         "record": "NZ_MOIC01000010.1",
+         "seq_id": 7,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "251-290",
+         "nt_length": 7144,
+         "record": "NZ_MOHX01000127.1",
+         "seq_id": 8,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "74846-74885",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 7
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "71256-71295",
+         "nt_length": 110432,
+         "record": "NZ_CM008882.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "429-468",
+         "nt_length": 5501,
+         "record": "NZ_CDQG01000062.1",
+         "seq_id": 1,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "486-525",
+         "nt_length": 15013,
+         "record": "NZ_STBC01000047.1",
+         "seq_id": 2,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "2634-2673",
+         "nt_length": 54064,
+         "record": "NZ_CP021947.1",
+         "seq_id": 3,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "5860-5899",
+         "nt_length": 7363,
+         "record": "NZ_QFMG01000210.1",
+         "seq_id": 7,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "39497-39536",
+         "nt_length": 44058,
+         "record": "NZ_NICZ01000017.1",
+         "seq_id": 8,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "109568-109607",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 7
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "138222-138261",
+         "nt_length": 223434,
+         "record": "NZ_CP023488.1",
+         "seq_id": 0,
+         "strand": "+"
+        },
+        {
+         "nt_coords": "486-525",
+         "nt_length": 15009,
+         "record": "NZ_STDH01000048.1",
+         "seq_id": 1,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "546",
+       "occurrence_list": [
+        {
+         "nt_coords": "7796-7835",
+         "nt_length": 26537,
+         "record": "NZ_LJES02000051.1",
+         "seq_id": 0,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "615",
+       "occurrence_list": [
+        {
+         "nt_coords": "71326-71365",
+         "nt_length": 105614,
+         "record": "NZ_CM008884.1",
+         "seq_id": 0,
+         "strand": "+"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "record_verified"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 9,
+     "nodes": [
+      3980269,
+      5488838,
+      3141987,
+      5170940,
+      1033811,
+      207491,
+      4230264,
+      2684316,
+      7357061,
+      6491280
+     ],
+     "offset": 0,
+     "rows": [
+      3980268,
+      5488837,
+      3141986,
+      5170939,
+      1033810,
+      207490,
+      4230263,
+      2684315,
+      7357060,
+      6491279
+     ],
+     "sequence": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+     "strand": "+",
+     "support": "record_verified"
+    },
+    {
+     "anchor_kmer": "TCAGCTTCGCGACCGGGTGCATAATATTGGG",
+     "instance": "TCAGCTTCGCGACCGGGTGCATAATATTGGGCAATTCCAT",
+     "labels": [
+      {
+       "column": "1296536",
+       "occurrence_list": [
+        {
+         "nt_coords": "3667-3706",
+         "nt_length": 4210,
+         "record": "NZ_LRJE01000029.1",
+         "seq_id": 1,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "158836",
+       "occurrence_list": [
+        {
+         "nt_coords": "3162-3201",
+         "nt_length": 18783,
+         "record": "NZ_SSCT01000033.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "287",
+       "occurrence_list": [
+        {
+         "nt_coords": "1171-1210",
+         "nt_length": 2365,
+         "record": "NZ_NDFR01000042.1",
+         "seq_id": 1,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "1729623-1729662",
+         "nt_length": 6937609,
+         "record": "NZ_CP034369.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "470",
+       "occurrence_list": [
+        {
+         "nt_coords": "7131-7170",
+         "nt_length": 7338,
+         "record": "NZ_NQXH01000034.1",
+         "seq_id": 2,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 1
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "562",
+       "occurrence_list": [
+        {
+         "nt_coords": "12824-12863",
+         "nt_length": 111688,
+         "record": "NZ_CP021206.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3174-3213",
+         "nt_length": 7845,
+         "record": "NZ_RYBD01000068.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "77355-77394",
+         "nt_length": 87021,
+         "record": "NC_019089.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "3125-3164",
+         "nt_length": 8995,
+         "record": "NZ_RYEE01000044.1",
+         "seq_id": 9,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6840-6879",
+         "nt_length": 7130,
+         "record": "NZ_MOGZ01000079.1",
+         "seq_id": 10,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "22589-22628",
+         "nt_length": 144225,
+         "record": "NZ_CP025626.1",
+         "seq_id": 11,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 6
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "573",
+       "occurrence_list": [
+        {
+         "nt_coords": "59048-59087",
+         "nt_length": 105259,
+         "record": "NZ_CP031884.1",
+         "seq_id": 4,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "10837-10876",
+         "nt_length": 11788,
+         "record": "NZ_BFCQ01000022.1",
+         "seq_id": 5,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "6714-6753",
+         "nt_length": 54064,
+         "record": "NZ_CP014757.1",
+         "seq_id": 6,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "28146-28185",
+         "nt_length": 110723,
+         "record": "NZ_CABHKL010000003.1",
+         "seq_id": 9,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 4
+       },
+       "support": "record_verified"
+      },
+      {
+       "column": "72407",
+       "occurrence_list": [
+        {
+         "nt_coords": "68424-68463",
+         "nt_length": 212326,
+         "record": "NZ_CP023554.1",
+         "seq_id": 2,
+         "strand": "-"
+        },
+        {
+         "nt_coords": "14483-14522",
+         "nt_length": 15007,
+         "record": "NZ_STBI01000048.1",
+         "seq_id": 3,
+         "strand": "-"
+        }
+       ],
+       "occurrences": {
+        "relation": "exact",
+        "unit": "placed_occurrences",
+        "value": 2
+       },
+       "support": "record_verified"
+      }
+     ],
+     "labels_status": "complete",
+     "labels_total": 7,
+     "nodes": [
+      6263842,
+      6106883,
+      3407326,
+      701993,
+      131953,
+      6831792,
+      8022757,
+      4039112,
+      2627650,
+      555291
+     ],
+     "offset": 0,
+     "rows": [
+      6263841,
+      6106882,
+      3407325,
+      701992,
+      131952,
+      6831791,
+      8022756,
+      4039111,
+      2627649,
+      555290
+     ],
+     "sequence": "TCAGCTTCGCGACCGGGTGCATAATATTGGGCAATTCCAT",
+     "strand": "-",
+     "support": "record_verified"
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 2,
+   "rows_refused": [],
+   "scope": "long",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.433459,
+    "extension_ms": 0.380959,
+    "support_ms": 0.32591599999999993
+   },
+   "withheld": null,
+   "work": {
+    "anchor_rows": 2,
+    "annotation_rows": 22,
+    "annotation_units": 14074,
+    "extension_anchors": 2,
+    "extension_branches": 0,
+    "extension_edges": 18,
+    "mask_scans": 0,
+    "memory_bytes": 67138790,
+    "ranges_visited": 62,
+    "row_cache_evictions": 0,
+    "row_cache_hits": 0,
+    "steps": 80
+   }
+  },
+  {
+   "absence_scope": "long",
+   "anchor_information_bits": 62.0,
+   "anchors_truncated": [],
+   "annotation": "budgeted",
+   "by_label": [],
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 2
+    },
+    "labels": {
+     "by_support": {
+      "label_intersection": {
+       "relation": "exact",
+       "unit": "labels",
+       "value": 0
+      },
+      "record_verified": {
+       "relation": "exact",
+       "unit": "labels",
+       "value": 0
+      }
+     },
+     "relation": "exact",
+     "unit": "labels",
+     "value": 0
+    },
+    "occurrences": {
+     "relation": "exact",
+     "unit": "placed_occurrences",
+     "value": 0
+    },
+    "paths": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 2
+    },
+    "supported_paths": {
+     "branches_pruned": 2,
+     "by_strand": {
+      "+": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 0
+      },
+      "-": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 0
+      }
+     },
+     "candidates_examined": 40,
+     "level": "record_verified",
+     "relation": "exact",
+     "search": "completed",
+     "unit": "paths",
+     "value": 0
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "chimera",
+   "information_bits": 102.0,
+   "kind": "dna",
+   "labels_cut": null,
+   "length": 51,
+   "min_anchor_information_bits": 62.0,
+   "mode": "all_or_count",
+   "notes": [],
+   "occurrences_cut": null,
+   "palindromic": false,
+   "pattern": "CGGCCTCCAGAGCACTTTGTCGTTTTTGGACGGAAAATCCCTAGAACCCCT",
+   "placement": "record",
+   "results": [],
+   "retrieval_complete": true,
+   "returned": 0,
+   "rows_refused": [],
+   "scope": "long",
+   "stop": null,
+   "strands": [
+    "+",
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.468125,
+    "extension_ms": 0.418167,
+    "support_ms": 0.3613349999999998
+   },
+   "withheld": null,
+   "work": {
+    "anchor_rows": 2,
+    "annotation_rows": 44,
+    "annotation_units": 25666,
+    "extension_anchors": 2,
+    "extension_branches": 0,
+    "extension_edges": 43,
+    "mask_scans": 0,
+    "memory_bytes": 67139024,
+    "ranges_visited": 62,
+    "row_cache_evictions": 0,
+    "row_cache_hits": 0,
+    "steps": 105
+   }
+  }
+ ],
+ "timing": {
+  "elapsed_ms": 1.0815
+ }
+}

@@ -1,0 +1,15 @@
+{
+ "patterns": [
+  {
+   "dna": "CGGCCTCCAGAGCACTTTGTCGTTTTTGGACGGAAAATCCCTAGAACCCCT",
+   "id": "chimera"
+  }
+ ],
+ "long_search": "supported_paths",
+ "supported_paths_level": "label_intersection",
+ "predicate": {
+  "any": [
+   "562"
+  ]
+ }
+}

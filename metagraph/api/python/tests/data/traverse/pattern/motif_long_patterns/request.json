@@ -1,0 +1,20 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "id": "NDM-40"
+  },
+  {
+   "dna": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+   "id": "no-instance"
+  }
+ ],
+ "mode": "count",
+ "long_search": "supported_paths",
+ "predicate": {
+  "none": [
+   "562"
+  ]
+ },
+ "predicate_scope": "motif"
+}

@@ -1,0 +1,17 @@
+{
+ "patterns": [
+  {
+   "dna": "GCGGCGGCGGCG",
+   "id": "GCG12"
+  }
+ ],
+ "mode": "count",
+ "predicate": {
+  "any": [
+   "287"
+  ]
+ },
+ "predicate_strands": "context",
+ "predicate_scope": "motif",
+ "max_predicate_work": 3000
+}

@@ -17,16 +17,22 @@
  *    counts.paths, path results with the fields sequence, anchor_kmer, nodes and rows (never
  *    kmer), and with output.labels "all" each path's labels, each with its support
  *    (label_intersection, record_verified) and require_support "record_verified" listing the
- *    verified ones only;
- *  - a predicate (SPEC §19; patterns of L <= k): the request's predicate bound once to the
- *    index's columns, each pattern's raw contexts (at most max_predicate_contexts) tested by
- *    the selection pass of PatternRetrieval (their rows, with predicate_strands "either" on a
- *    BASIC graph also their reverse complements', under max_predicate_work), the selected ones
+ *    verified ones only; or with long_search "supported_paths" (SPEC §20) into the walks some
+ *    label supports along their whole length, the annotation read during the extension
+ *    (pattern_support.hpp: the trackers and the list of supported paths), counts.supported_paths
+ *    beside a plain counts.paths;
+ *  - a predicate (SPEC §19): the request's predicate bound once to the index's columns; for a
+ *    pattern of L <= k each of its raw contexts (at most max_predicate_contexts) tested by the
+ *    selection pass of PatternRetrieval (their rows, with predicate_strands "either" on a BASIC
+ *    graph also their reverse complements', under max_predicate_work), the selected ones
  *    returned with output.labels "none", "predicate_only" or "all"; counts.tested and
  *    counts.selected, selection, absence_filter and the top-level predicate block. A pattern
- *    longer than k under long_search "anchors" keeps its anchors' answer, its selection
- *    not_started; with long_search "paths" a predicate is refused (a predicate selects among
- *    supported paths, which are not served);
+ *    longer than k: its supported paths selected under long_search "supported_paths" (SPEC
+ *    §20.9, pattern_supported.hpp); under "anchors" it keeps its anchors' answer, its selection
+ *    not_started; with "paths" a predicate is refused (it selects among supported paths, never
+ *    among every graph walk). With predicate_scope "motif" (SPEC §25) the predicate is also
+ *    asked once of each pattern of L <= k, on the union of its contexts' labels (the entry's
+ *    motif);
  *  - one graph per call: a multi-graph server calls it once per (graph, annotation) pair a
  *    request selects (`graphs`, as /search's) and concatenates the answers (server.cpp);
  *  - graphs with their dummy-edge mask (counting "exact") and without it (counting

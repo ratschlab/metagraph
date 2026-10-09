@@ -966,7 +966,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a pattern longer than k with a predicate under long_search \"anchors\" (the default): its anchors' answer as without it (withheld paths_later_increment), its selection not_started (a predicate selects supported paths, not served by this build)"
+   "shows": "a pattern longer than k with a predicate under long_search \"anchors\" (the default): its anchors' answer as without it (withheld paths_later_increment), its selection not_started (a predicate selects among supported paths: long_search \"supported_paths\")"
   },
   "predicate_unmasked": {
    "server": "unmasked_unchecked",
@@ -1011,7 +1011,7 @@
    "status": 400,
    "hand_made": false,
    "headers": {},
-   "shows": "400 invalid_request: a predicate with long_search \"paths\" (P24: a predicate selects among supported paths, long_search \"supported_paths\", not served by this build)"
+   "shows": "400 invalid_request: a predicate with long_search \"paths\" (P24: a predicate selects among the supported paths, long_search \"supported_paths\", never among every walk)"
   },
   "predicate_too_large": {
    "server": "masked_small_predicate_cap",
@@ -1021,6 +1021,222 @@
    "hand_made": false,
    "headers": {},
    "shows": "400 predicate_too_large on a server whose predicates may list 4 names (--pattern-max-predicate-labels 4, capabilities caps.max_predicate_labels): 5 names; the message names the count and the cap"
+  },
+  "supported_paths": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "long_search \"supported_paths\" (SPEC §20): the walks some label supports along their whole length, at the index's best level (record_verified: one record holds the walk whole). blaNDM-1's first 40 bases: 2 supported paths, + with 9 columns, - with 7, every label record_verified with its placed occurrences; the chimera of paths_labels, 2 walks of the graph that no record holds whole: 0 supported, both pruned at their last k-mer (counts.paths exact 2, a plain count), results [], complete"
+  },
+  "supported_paths_label": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "supported_paths_level \"label_intersection\": a label supports a walk when it carries every k-mer of it; the chimera's 2 walks are supported by 562 and 573, as the paths of long_search \"paths\" list them; no coordinate read (note label_intersection_only)"
+  },
+  "supported_paths_count": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "mode count: the supported paths counted (the annotation read: work.annotation_rows), nothing listed, the projection named and not built (projection_not_read); a pattern of at most k bases answered as without the option (annotation_not_read)"
+  },
+  "supported_paths_partial": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "partial, more supported paths (2) than max_paths (1): the first in answer order, cut max_paths, the count exact"
+  },
+  "supported_paths_above_threshold": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "all_or_count, the supported paths (exact 2) above max_paths (1): withheld count_above_threshold"
+  },
+  "supported_paths_work_budget": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "max_annotation_work 1: the search's first row read (the work is checked before a read) stops it, stop {extension, max_annotation_work}, the supported paths at_least, withheld annotation_budget"
+  },
+  "supported_paths_work_budget_partial": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same in partial: cut max_annotation_work, nothing listed"
+  },
+  "supported_paths_memory": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the memory stops of the supported-path search, with a 1 MB account: six copies of a pattern of 47 supported paths; each listed path's result stays in the account, so the fifth copy's list ends where its paths no longer fit (stop {output, max_memory}, cut max_memory, the counts exact) and the sixth stops in the search at a row the account cannot hold (stop {extension, max_memory}, a rows_refused entry of phase extension, the supported paths at_least, the ones completed before it listed)"
+  },
+  "supported_paths_require_support": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "require_support \"record_verified\": the verified labels only (here every label), limits.require_support echoed"
+  },
+  "supported_paths_global": {
+   "server": "masked_no_map",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "coordinates without the record mapping: the best level is label_intersection, every label label_intersection, its occurrence_list the chains (record_bounds_unknown)"
+  },
+  "supported_paths_primary": {
+   "server": "primary",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a PRIMARY index: one row for a k-mer and its reverse complement, the label level only, orientations instead of strands, note label_intersection_only; the column annotation read without the budget-aware decode (annotation_unbudgeted)"
+  },
+  "supported_paths_unbudgeted": {
+   "server": "primary",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 annotation_unbudgeted: the supported-path search reads the annotation in every mode, and the PRIMARY index's column annotation has no budget-aware decode"
+  },
+  "supported_paths_support_unavailable": {
+   "server": "masked_no_map",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 400,
+   "hand_made": false,
+   "headers": {},
+   "shows": "400 support_unavailable: require_support \"record_verified\" with supported_paths on an index that cannot verify, in every mode"
+  },
+  "supported_paths_predicate": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a predicate selects among the supported paths (SPEC §20.9): the chimera has no supported path at the record level, so any(562) selects none (tested 0)"
+  },
+  "supported_paths_predicate_label": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same at the label level: both walks supported by 562 and 573, both selected"
+  },
+  "supported_paths_predicate_context": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "none(546), predicate_strands \"context\": the - walk, whose 7 supporting columns lack 546, is selected; selection_labels [] (none of the predicate's labels is in its support) and labels [] (predicate_only: the predicate's labels on the walk)"
+  },
+  "supported_paths_predicate_either": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same with \"either\" (the default): a walk is decided on its support and its reverse-complement walk's, found by the search on the other strand: 546 supports the + walk, which is the - walk's mirror, so none is selected"
+  },
+  "supported_paths_predicate_mirror": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "one strand with \"either\": the mirror walk is looked up (predicate_lookups 1) and its rows read as annotation work (work.mirror_rows, part of annotation_rows; predicate_rows 0); the - walk is selected by its mirror's support (selection_strands [\"reverse_complement\"]), its own labels [] (546 does not carry it)"
+  },
+  "supported_paths_predicate_pruned": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a monotone predicate (no none, no not) under \"context\" prunes a branch on whose support it is already false (the - anchor: 546 is not on it): branches_pruned_by_predicate 1, the supported paths at_least 1 (the walks it did not follow are not counted), counts.paths at_least, the selection exact; fewer rows read"
+  },
+  "supported_paths_predicate_constant": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a constant normal form (the typo 5622: false): nothing can be selected, the search counts the supported paths (tested 2), selected exact 0, complete; note predicate_constant"
+  },
+  "motif_context": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "predicate_scope \"motif\" (SPEC §25): \"present in 562, absent throughout 546\" asked of the pattern as a whole, on the union of its contexts' labels: the 12 - contexts of the blaNDM-1 primer carry 562 and, as deposited, not 546: true, every context tested (an absence claim: labels_absent 1); predicate.motif_scope shard_motif"
+  },
+  "motif_either": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the same with \"either\": 546 holds the primer on its other strand (the reverse complements' rows), so the motif is false"
+  },
+  "motif_tested_contexts": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "a pass the work stopped (max_predicate_work 3000): not every context tested (untested \"selection\"), but 287 found on the tested ones decides any(287): true, decided_by tested_contexts (a presence claim only; labels_absent null)"
+  },
+  "motif_long_patterns": {
+   "server": "masked",
+   "method": "POST",
+   "path": "/pattern",
+   "status": 200,
+   "hand_made": false,
+   "headers": {},
+   "shows": "the motif of a pattern longer than k is not asked of its walks: NDM-40 (2 anchors) is undecided, untested not_started, while its supported paths are selected; a pattern without anchors has no instance on this graph, so its motif is decided on the empty union (none(562): true, every_context, labels_absent 1)"
   },
   "unknown_field": {
    "server": "masked",

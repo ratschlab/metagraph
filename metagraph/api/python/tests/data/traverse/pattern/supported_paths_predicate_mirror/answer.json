@@ -1,0 +1,231 @@
+{
+ "index": {
+  "alphabet": "$ACGT",
+  "graph_mode": "basic",
+  "index_fp": null,
+  "index_ns": "mini_refseq",
+  "k": 31,
+  "release": "fixtures-mini_refseq",
+  "strand_stated": true
+ },
+ "limits": {
+  "allow_unbudgeted_annotation": false,
+  "clamped": [],
+  "finalize_reserve_ms": 250,
+  "long_search": "supported_paths",
+  "max_anchors": 1000,
+  "max_annotation_work": 100000000,
+  "max_contexts": 10000,
+  "max_labels": 1000,
+  "max_labels_per_anchor": 64,
+  "max_memory_mb": 256,
+  "max_occurrences_per_label": 16,
+  "max_paths": 1000,
+  "max_patterns": 16,
+  "max_predicate_contexts": 100000,
+  "max_predicate_labels": 10000,
+  "max_predicate_work": 100000000,
+  "max_steps": 100000000,
+  "min_information_bits": 24,
+  "predicate_strands": "either",
+  "require_support": "label_intersection",
+  "stop_at_threshold": false,
+  "supported_paths_level": "best",
+  "time_budget_ms": 60000
+ },
+ "mode": "all_or_count",
+ "output": {
+  "labels": "predicate_only",
+  "occurrences": true
+ },
+ "pattern_contract_version": 1,
+ "patterns": [
+  {
+   "absence_filter": "predicate",
+   "absence_scope": "long",
+   "anchor_information_bits": 62.0,
+   "anchors_truncated": [],
+   "annotation": "budgeted",
+   "by_label": [],
+   "counts": {
+    "anchors": {
+     "by_strand": {
+      "-": {
+       "relation": "exact",
+       "unit": "anchors",
+       "value": 1
+      }
+     },
+     "relation": "exact",
+     "unit": "anchors",
+     "value": 1
+    },
+    "labels": {
+     "by_support": {
+      "label_intersection": {
+       "relation": "exact",
+       "unit": "labels",
+       "value": 0
+      },
+      "record_verified": {
+       "relation": "exact",
+       "unit": "labels",
+       "value": 0
+      }
+     },
+     "relation": "exact",
+     "unit": "labels",
+     "value": 0
+    },
+    "occurrences": {
+     "relation": "exact",
+     "unit": "placed_occurrences",
+     "value": 0
+    },
+    "paths": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 1
+    },
+    "selected": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 1
+    },
+    "supported_paths": {
+     "branches_pruned": 0,
+     "branches_pruned_by_predicate": 0,
+     "by_strand": {
+      "-": {
+       "relation": "exact",
+       "unit": "paths",
+       "value": 1
+      }
+     },
+     "candidates_examined": 9,
+     "level": "record_verified",
+     "relation": "exact",
+     "search": "completed",
+     "unit": "paths",
+     "value": 1
+    },
+    "tested": {
+     "relation": "exact",
+     "unit": "paths",
+     "value": 1
+    }
+   },
+   "cut": null,
+   "determinism": "full",
+   "id": "NDM-40",
+   "information_bits": 80.0,
+   "kind": "dna",
+   "labels_cut": null,
+   "length": 40,
+   "min_anchor_information_bits": 62.0,
+   "mode": "all_or_count",
+   "notes": [],
+   "occurrences_cut": null,
+   "palindromic": false,
+   "pattern": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA",
+   "placement": "record",
+   "results": [
+    {
+     "anchor_kmer": "TCAGCTTCGCGACCGGGTGCATAATATTGGG",
+     "instance": "TCAGCTTCGCGACCGGGTGCATAATATTGGGCAATTCCAT",
+     "labels": [],
+     "labels_status": "complete",
+     "labels_total": 0,
+     "nodes": [
+      6263842,
+      6106883,
+      3407326,
+      701993,
+      131953,
+      6831792,
+      8022757,
+      4039112,
+      2627650,
+      555291
+     ],
+     "offset": 0,
+     "rows": [
+      6263841,
+      6106882,
+      3407325,
+      701992,
+      131952,
+      6831791,
+      8022756,
+      4039111,
+      2627649,
+      555290
+     ],
+     "selection_labels": [
+      "546"
+     ],
+     "selection_strands": [
+      "reverse_complement"
+     ],
+     "sequence": "TCAGCTTCGCGACCGGGTGCATAATATTGGGCAATTCCAT",
+     "strand": "-",
+     "support": null
+    }
+   ],
+   "retrieval_complete": true,
+   "returned": 1,
+   "rows_refused": [],
+   "scope": "long",
+   "selection": {
+    "access": "rows",
+    "pass": "completed",
+    "support": "record_verified"
+   },
+   "stop": null,
+   "strands": [
+    "-"
+   ],
+   "timing": {
+    "elapsed_ms": 0.099625,
+    "extension_ms": 0.0905,
+    "selection_ms": 0.072709,
+    "support_ms": 0.08095800000000002
+   },
+   "withheld": null,
+   "work": {
+    "anchor_rows": 1,
+    "annotation_rows": 22,
+    "annotation_units": 14114,
+    "extension_anchors": 1,
+    "extension_branches": 0,
+    "extension_edges": 9,
+    "mask_scans": 0,
+    "memory_bytes": 67131510,
+    "mirror_rows": 11,
+    "predicate_lookups": 1,
+    "predicate_rows": 0,
+    "predicate_units": 2,
+    "ranges_visited": 31,
+    "row_cache_evictions": 0,
+    "row_cache_hits": 0,
+    "steps": 40
+   }
+  }
+ ],
+ "predicate": {
+  "known": 1,
+  "names": 1,
+  "normal_form": {
+   "any": [
+    "546"
+   ]
+  },
+  "scope": "shard_context",
+  "strands": "either",
+  "unknown_labels": [],
+  "vacuous": false
+ },
+ "timing": {
+  "elapsed_ms": 0.195375
+ }
+}

@@ -80,7 +80,8 @@
  "long_patterns": "anchors_counted",
  "long_search": [
   "anchors",
-  "paths"
+  "paths",
+  "supported_paths"
  ],
  "mask": "file",
  "modes": [
@@ -100,6 +101,10 @@
    "and",
    "or",
    "not"
+  ],
+  "scopes": [
+   "context",
+   "motif"
   ],
   "strands": [
    "either",

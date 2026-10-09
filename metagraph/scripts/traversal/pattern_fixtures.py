@@ -174,6 +174,9 @@ MINI_COLUMNS = ['1296536', '158836', '287', '470', '546', '562', '573', '615', '
 SELECTIVE = {'and': [{'any': ['562']}, {'none': ['287']}]}
 SELECTIVE_COUNT = 60
 TYPO = '5622'
+# a pattern longer than k without an instance on the mini (no anchor on either strand): a
+# poly-T run and a poly-G run
+NO_INSTANCE = 'T' * 38 + 'G' * 38
 SMALL_PREDICATE_CAP = 4
 
 # the server's defaults (--pattern-* flags, DESIGN-pattern-search.md §5.3), for the hand-made
@@ -206,11 +209,46 @@ def paths_count(relation, value=None, extension=None):
     return run
 
 
+def supported_paths(relation, value=None, level=None, search=None, pruned=None):
+    """counts.supported_paths (long_search "supported_paths", SPEC §20.4) with |relation|, and
+    |value|, the level searched, what the search did and the branches pruned, when given;
+    counts.paths a plain count beside it."""
+    def run(entry):
+        c = entry['counts']['supported_paths']
+        check(c['relation'] == relation and (value is None or c['value'] == value)
+              and (level is None or c['level'] == level)
+              and (search is None or c['search'] == search)
+              and (pruned is None or c['branches_pruned'] == pruned), c)
+        check(set(entry['counts']['paths']) == {'value', 'relation', 'unit'},
+              entry['counts']['paths'])
+    return run
+
+
+def motif(selected, decided_by, untested=None, present=None):
+    """predicate_scope "motif" (SPEC §25): the entry's motif block, its value, what decided it,
+    why not every context was tested, and the columns found (with their strands) when given"""
+    def run(entry):
+        m = entry['motif']
+        check(m['selected'] is selected and m['decided_by'] == decided_by
+              and m['untested'] == untested, m)
+        if present is not None:
+            check([(l['column'], l['strands']) for l in m['labels_present']] == present, m)
+    return run
+
+
 def label_supports(*supports):
     """Every label of every path result has a support of |supports|, and each is shown."""
     def run(entry):
         seen = {label['support'] for r in entry['results'] for label in r['labels']}
         check(seen == set(supports), seen)
+    return run
+
+
+def paths_count_plain(relation, value):
+    """counts.paths a plain count (long_search "supported_paths")"""
+    def run(entry):
+        c = entry['counts']['paths']
+        check((c['relation'], c['value']) == (relation, value) and len(c) == 3, c)
     return run
 
 
@@ -1410,7 +1448,8 @@ FIXTURES = [
          {'patterns': [p(NDM_40, ident='NDM-40')], 'predicate': {'any': ['562']}}, 200,
          'a pattern longer than k with a predicate under long_search "anchors" (the default): '
          'its anchors\' answer as without it (withheld paths_later_increment), its selection '
-         'not_started (a predicate selects supported paths, not served by this build)',
+         'not_started (a predicate selects among supported paths: long_search '
+         '"supported_paths")',
          entries(expect_all(exact(2), withheld('paths_later_increment'),
                             lambda e: check(e['selection']['pass'] == 'not_started'
                                             and e['counts']['selected']['relation']
@@ -1449,7 +1488,7 @@ FIXTURES = [
     post('predicate_paths_refused', 'masked',
          {'patterns': [p(NDM_40)], 'predicate': {'any': ['562']}, 'long_search': 'paths'}, 400,
          '400 invalid_request: a predicate with long_search "paths" (P24: a predicate selects '
-         'among supported paths, long_search "supported_paths", not served by this build)',
+         'among the supported paths, long_search "supported_paths", never among every walk)',
          refused('invalid_request')),
     post('predicate_too_large', 'masked_small_predicate_cap',
          {'patterns': [p(NDM_F)], 'predicate': {'any': MINI_COLUMNS[:SMALL_PREDICATE_CAP + 1]}},
@@ -1458,6 +1497,247 @@ FIXTURES = [
          '(--pattern-max-predicate-labels 4, capabilities caps.max_predicate_labels): 5 names; '
          'the message names the count and the cap',
          refused('predicate_too_large')),
+
+    # ---------------------------------------------------------------- supported paths (§20)
+    post('supported_paths', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(CHIMERA, ident='chimera')],
+          'long_search': 'supported_paths', 'output': {'labels': 'all'}}, 200,
+         'long_search "supported_paths" (SPEC §20): the walks some label supports along their '
+         'whole length, at the index\'s best level (record_verified: one record holds the walk '
+         'whole). blaNDM-1\'s first 40 bases: 2 supported paths, + with 9 columns, - with 7, '
+         'every label record_verified with its placed occurrences; the chimera of paths_labels, '
+         '2 walks of the graph that no record holds whole: 0 supported, both pruned at their '
+         'last k-mer (counts.paths exact 2, a plain count), results [], complete',
+         entries(expect_all(supported_paths('exact', 2, 'record_verified', 'completed', 0),
+                            complete, field('returned', 2), label_supports('record_verified'),
+                            counted('labels', 'exact', 9)),
+                 expect_all(supported_paths('exact', 0, 'record_verified', 'completed', 2),
+                            complete, field('returned', 0),
+                            paths_count_plain('exact', 2)))),
+    post('supported_paths_label', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(CHIMERA, ident='chimera')],
+          'long_search': 'supported_paths', 'supported_paths_level': 'label_intersection',
+          'output': {'labels': 'all'}}, 200,
+         'supported_paths_level "label_intersection": a label supports a walk when it carries '
+         'every k-mer of it; the chimera\'s 2 walks are supported by 562 and 573, as the paths '
+         'of long_search "paths" list them; no coordinate read (note label_intersection_only)',
+         entries(expect_all(supported_paths('exact', 2, 'label_intersection', 'completed'),
+                            complete, label_supports('label_intersection')),
+                 expect_all(supported_paths('exact', 2, 'label_intersection', 'completed'),
+                            complete, label_supports('label_intersection'),
+                            has_note('label_intersection_only')))),
+    post('supported_paths_count', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(NDM_F, ident='NDM-F')], 'mode': 'count',
+          'long_search': 'supported_paths', 'output': {'labels': 'all'}}, 200,
+         'mode count: the supported paths counted (the annotation read: work.annotation_rows), '
+         'nothing listed, the projection named and not built (projection_not_read); a pattern of '
+         'at most k bases answered as without the option (annotation_not_read)',
+         entries(expect_all(supported_paths('exact', 2, 'record_verified', 'completed'),
+                            has_note('projection_not_read')),
+                 expect_all(exact(24), has_note('annotation_not_read')))),
+    post('supported_paths_partial', 'masked',
+         {'patterns': [p(NDM_40)], 'mode': 'partial', 'long_search': 'supported_paths',
+          'max_paths': 1}, 200,
+         'partial, more supported paths (2) than max_paths (1): the first in answer order, cut '
+         'max_paths, the count exact',
+         entries(expect_all(supported_paths('exact', 2), cut('max_paths'),
+                            field('returned', 1), field('stop', None)))),
+    post('supported_paths_above_threshold', 'masked',
+         {'patterns': [p(NDM_40)], 'long_search': 'supported_paths', 'max_paths': 1}, 200,
+         'all_or_count, the supported paths (exact 2) above max_paths (1): withheld '
+         'count_above_threshold',
+         entries(expect_all(supported_paths('exact', 2), withheld('count_above_threshold')))),
+    post('supported_paths_work_budget', 'masked',
+         {'patterns': [p(NDM_40)], 'long_search': 'supported_paths', 'max_annotation_work': 1},
+         200,
+         'max_annotation_work 1: the search\'s first row read (the work is checked before a '
+         'read) stops it, stop {extension, max_annotation_work}, the supported paths at_least, '
+         'withheld annotation_budget',
+         entries(expect_all(supported_paths('at_least', 0, search='stopped'),
+                            withheld('annotation_budget'),
+                            field('stop', {'phase': 'extension',
+                                           'reason': 'max_annotation_work'})))),
+    post('supported_paths_work_budget_partial', 'masked',
+         {'patterns': [p(NDM_40)], 'mode': 'partial', 'long_search': 'supported_paths',
+          'max_annotation_work': 1}, 200,
+         'the same in partial: cut max_annotation_work, nothing listed',
+         entries(expect_all(supported_paths('at_least', 0, search='stopped'),
+                            cut('max_annotation_work'), field('returned', 0)))),
+    post('supported_paths_memory', 'masked',
+         {'patterns': [p(GCG12 + 'N' * 34, 'iupac', ident=f'GCG12-N34-{i}') for i in range(6)],
+          'mode': 'partial', 'strands': 'forward', 'long_search': 'supported_paths',
+          'max_memory_mb': 1, 'output': {'labels': 'all'}}, 200,
+         'the memory stops of the supported-path search, with a 1 MB account: six copies of a '
+         'pattern of 47 supported paths; each listed path\'s result stays in the account, so the '
+         'fifth copy\'s list ends where its paths no longer fit (stop {output, max_memory}, '
+         'cut max_memory, the counts exact) and the sixth stops in the search at a row the '
+         'account cannot hold (stop {extension, max_memory}, a rows_refused entry of phase '
+         'extension, the supported paths at_least, the ones completed before it listed)',
+         entries(*([expect_all(supported_paths('exact', 47, 'record_verified', 'completed'),
+                               field('returned', 47), field('stop', None),
+                               field('cut', None))] * 4),
+                 expect_all(supported_paths('exact', 47, 'record_verified', 'completed'),
+                            cut('max_memory'),
+                            field('stop', {'phase': 'output', 'reason': 'max_memory'})),
+                 expect_all(supported_paths('at_least', search='stopped'), cut('max_memory'),
+                            field('stop', {'phase': 'extension', 'reason': 'max_memory'}),
+                            lambda e: check([r['phase'] for r in e['rows_refused']]
+                                            == ['extension'], e['rows_refused'])))),
+    post('supported_paths_require_support', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40')], 'long_search': 'supported_paths',
+          'require_support': 'record_verified', 'output': {'labels': 'all'}}, 200,
+         'require_support "record_verified": the verified labels only (here every label), '
+         'limits.require_support echoed',
+         entries(expect_all(supported_paths('exact', 2), complete,
+                            label_supports('record_verified')))),
+    post('supported_paths_global', 'masked_no_map',
+         {'patterns': [p(NDM_40)], 'long_search': 'supported_paths',
+          'output': {'labels': 'all'}}, 200,
+         'coordinates without the record mapping: the best level is label_intersection, every '
+         'label label_intersection, its occurrence_list the chains (record_bounds_unknown)',
+         entries(expect_all(supported_paths('exact', 2, 'label_intersection'), complete,
+                            label_supports('label_intersection'),
+                            field('placement', 'global'), has_note('record_bounds_unknown')))),
+    post('supported_paths_primary', 'primary',
+         {'patterns': [p(NDM_40)], 'long_search': 'supported_paths',
+          'output': {'labels': 'all'}, 'allow_unbudgeted_annotation': True}, 200,
+         'a PRIMARY index: one row for a k-mer and its reverse complement, the label level only, '
+         'orientations instead of strands, note label_intersection_only; the column '
+         'annotation read without the budget-aware decode (annotation_unbudgeted)',
+         entries(expect_all(supported_paths('exact', 2, 'label_intersection'), complete,
+                            label_supports('label_intersection'),
+                            field('placement', 'none_canonical'),
+                            has_note('label_intersection_only'),
+                            has_note('annotation_unbudgeted')))),
+    post('supported_paths_unbudgeted', 'primary',
+         {'patterns': [p(NDM_40)], 'mode': 'count', 'long_search': 'supported_paths'}, 400,
+         '400 annotation_unbudgeted: the supported-path search reads the annotation in every '
+         'mode, and the PRIMARY index\'s column annotation has no budget-aware decode',
+         refused('annotation_unbudgeted')),
+    post('supported_paths_support_unavailable', 'masked_no_map',
+         {'patterns': [p(NDM_40)], 'mode': 'count', 'long_search': 'supported_paths',
+          'require_support': 'record_verified'}, 400,
+         '400 support_unavailable: require_support "record_verified" with supported_paths on '
+         'an index that cannot verify, in every mode',
+         refused('support_unavailable')),
+    post('supported_paths_predicate', 'masked',
+         {'patterns': [p(CHIMERA, ident='chimera')], 'long_search': 'supported_paths',
+          'predicate': {'any': ['562']}}, 200,
+         'a predicate selects among the supported paths (SPEC §20.9): the chimera has no '
+         'supported path at the record level, so any(562) selects none (tested 0)',
+         entries(expect_all(supported_paths('exact', 0), complete,
+                            selection('completed', ('exact', 0), ('exact', 0))))),
+    post('supported_paths_predicate_label', 'masked',
+         {'patterns': [p(CHIMERA, ident='chimera')], 'long_search': 'supported_paths',
+          'supported_paths_level': 'label_intersection', 'predicate': {'any': ['562']}}, 200,
+         'the same at the label level: both walks supported by 562 and 573, both selected',
+         entries(expect_all(supported_paths('exact', 2), complete, field('returned', 2),
+                            selection('completed', ('exact', 2), ('exact', 2))))),
+    post('supported_paths_predicate_context', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40')], 'long_search': 'supported_paths',
+          'predicate': {'none': ['546']}, 'predicate_strands': 'context',
+          'output': {'labels': 'predicate_only'}}, 200,
+         'none(546), predicate_strands "context": the - walk, whose 7 supporting columns lack '
+         '546, is selected; selection_labels [] (none of the predicate\'s labels is in its '
+         'support) and labels [] (predicate_only: the predicate\'s labels on the walk)',
+         entries(expect_all(complete, field('returned', 1),
+                            selection('completed', ('exact', 2), ('exact', 1)),
+                            lambda e: check([r['strand'] for r in e['results']] == ['-'],
+                                            e['results'])))),
+    post('supported_paths_predicate_either', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40')], 'long_search': 'supported_paths',
+          'predicate': {'none': ['546']}}, 200,
+         'the same with "either" (the default): a walk is decided on its support and its '
+         'reverse-complement walk\'s, found by the search on the other strand: 546 supports the '
+         '+ walk, which is the - walk\'s mirror, so none is selected',
+         entries(expect_all(complete, field('returned', 0),
+                            selection('completed', ('exact', 2), ('exact', 0)),
+                            lambda e: check(e['work']['mirror_rows'] == 0
+                                            and e['work']['predicate_rows'] == 0, e['work'])))),
+    post('supported_paths_predicate_mirror', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40')], 'strands': 'reverse',
+          'long_search': 'supported_paths', 'predicate': {'any': ['546']},
+          'output': {'labels': 'predicate_only'}}, 200,
+         'one strand with "either": the mirror walk is looked up (predicate_lookups 1) and its '
+         'rows read as annotation work (work.mirror_rows, part of annotation_rows; '
+         'predicate_rows 0); the - walk is selected by its mirror\'s support '
+         '(selection_strands ["reverse_complement"]), its own labels [] (546 does not carry it)',
+         entries(expect_all(complete, field('returned', 1),
+                            selection('completed', ('exact', 1), ('exact', 1)),
+                            selection_labels_are(['546']),
+                            selection_strands_are(['reverse_complement']),
+                            lambda e: check(e['work']['predicate_lookups'] == 1
+                                            and e['work']['predicate_rows'] == 0
+                                            and 0 < e['work']['mirror_rows']
+                                            < e['work']['annotation_rows'], e['work'])))),
+    post('supported_paths_predicate_pruned', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40')], 'long_search': 'supported_paths',
+          'predicate': {'any': ['546']}, 'predicate_strands': 'context',
+          'output': {'labels': 'predicate_only'}}, 200,
+         'a monotone predicate (no none, no not) under "context" prunes a branch on whose '
+         'support it is already false (the - anchor: 546 is not on it): '
+         'branches_pruned_by_predicate 1, the supported paths at_least 1 (the walks it did not '
+         'follow are not counted), counts.paths at_least, the selection exact; fewer rows read',
+         entries(expect_all(complete, field('returned', 1),
+                            supported_paths('at_least', 1),
+                            selection('completed', ('exact', 1), ('exact', 1)),
+                            lambda e: check(e['counts']['supported_paths']
+                                            ['branches_pruned_by_predicate'] == 1,
+                                            e['counts']['supported_paths'])))),
+    post('supported_paths_predicate_constant', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40')], 'long_search': 'supported_paths',
+          'predicate': {'any': [TYPO]}}, 200,
+         'a constant normal form (the typo 5622: false): nothing can be selected, the search '
+         'counts the supported paths (tested 2), selected exact 0, complete; note '
+         'predicate_constant',
+         entries(expect_all(complete, field('returned', 0),
+                            selection('constant', ('exact', 2), ('exact', 0)),
+                            has_note('predicate_constant')))),
+
+    # ---------------------------------------------------------------- the motif (§25)
+    post('motif_context', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'mode': 'count', 'strands': 'reverse',
+          'predicate': {'and': [{'any': ['562']}, {'none': ['546']}]},
+          'predicate_strands': 'context', 'predicate_scope': 'motif'}, 200,
+         'predicate_scope "motif" (SPEC §25): "present in 562, absent throughout 546" asked of '
+         'the pattern as a whole, on the union of its contexts\' labels: the 12 - contexts of '
+         'the blaNDM-1 primer carry 562 and, as deposited, not 546: true, every context tested '
+         '(an absence claim: labels_absent 1); predicate.motif_scope shard_motif',
+         expect_all(lambda a: check(a['predicate']['motif_scope'] == 'shard_motif'
+                                    and a['limits']['predicate_scope'] == 'motif', a),
+                    entries(motif(True, 'every_context', present=[('562', 'context')])))),
+    post('motif_either', 'masked',
+         {'patterns': [p(NDM_F, ident='NDM-F')], 'mode': 'count', 'strands': 'reverse',
+          'predicate': {'and': [{'any': ['562']}, {'none': ['546']}]},
+          'predicate_scope': 'motif'}, 200,
+         'the same with "either": 546 holds the primer on its other strand (the reverse '
+         'complements\' rows), so the motif is false',
+         entries(motif(False, 'every_context',
+                       present=[('546', 'reverse_complement'), ('562', 'both')]))),
+    post('motif_tested_contexts', 'masked',
+         {'patterns': [p(GCG12, ident='GCG12')], 'mode': 'count', 'predicate': {'any': ['287']},
+          'predicate_strands': 'context', 'predicate_scope': 'motif',
+          'max_predicate_work': 3000}, 200,
+         'a pass the work stopped (max_predicate_work 3000): not every context tested '
+         '(untested "selection"), but 287 found on the tested ones decides any(287): true, '
+         'decided_by tested_contexts (a presence claim only; labels_absent null)',
+         entries(motif(True, 'tested_contexts', untested='selection',
+                       present=[('287', 'context')]))),
+
+    post('motif_long_patterns', 'masked',
+         {'patterns': [p(NDM_40, ident='NDM-40'), p(NO_INSTANCE, ident='no-instance')],
+          'mode': 'count', 'long_search': 'supported_paths', 'predicate': {'none': ['562']},
+          'predicate_scope': 'motif'}, 200,
+         'the motif of a pattern longer than k is not asked of its walks: NDM-40 (2 anchors) '
+         'is undecided, untested not_started, while its supported paths are selected; a pattern '
+         'without anchors has no instance on this graph, so its motif is decided on the empty '
+         'union (none(562): true, every_context, labels_absent 1)',
+         entries(expect_all(motif(None, None, untested='not_started', present=[]),
+                            selection('completed', ('exact', 2), ('exact', 0))),
+                 expect_all(motif(True, 'every_context', present=[]),
+                            lambda e: check(e['counts']['anchors']['value'] == 0
+                                            and e['motif']['labels_absent'] == 1,
+                                            e['counts'])))),
 
     # ---------------------------------------------------------------- whole-request refusals
     post('unknown_field', 'masked',

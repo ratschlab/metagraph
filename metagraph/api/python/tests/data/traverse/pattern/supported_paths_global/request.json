@@ -1,0 +1,11 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA"
+  }
+ ],
+ "long_search": "supported_paths",
+ "output": {
+  "labels": "all"
+ }
+}

@@ -256,6 +256,21 @@ void PathTracker::end_pattern() {
     m.active = false;
 }
 
+void PathTracker::release_rows() {
+    Impl &m = *impl_;
+    if (!m.active)
+        return;
+    m.release_transient();
+    m.clear_cache();
+    if (m.path_cache) {
+        env_.oracle.path_cache().clear();
+        env_.oracle.path_cache().set_bound(env_.oracle.path_cache_max());
+        m.path_cache = false;
+    }
+    env_.account.release(m.allotment);
+    m.allotment = 0;
+}
+
 // The rows of the anchors, read whole (every label: never truncated) in answer order of their
 // keys' first appearance, one row per read, the time, the work and room for a statement checked
 // before each; their labels are the pattern's dictionary. At the label level the rows are kept
@@ -708,6 +723,18 @@ size_t PathTracker::walk_num_runs(size_t i) const {
     return chains_ ? m.frames[m.depth - 1].num_chains(i) : 0;
 }
 
+void PathTracker::frame_support(std::vector<LabelId> *out) const {
+    const Impl &m = *impl_;
+    out->clear();
+    if (!m.depth)
+        return;
+    const step::Frame &f = m.frames[m.depth - 1];
+    for (size_t i = 0; i < f.labels().size(); ++i) {
+        if (!prune_on_chains_ || f.num_chains(i) > 0)
+            out->push_back(f.labels()[i]);
+    }
+}
+
 bool PathTracker::walk_labels(bool occurrences, std::vector<WalkLabel> *out) {
     Impl &m = *impl_;
     if (m.depth != m.length - m.k + 1)
@@ -811,6 +838,26 @@ void SupportedPathSink::drop_all() {
     std::vector<Kept>().swap(kept_);
 }
 
+void SupportedPathSink::retain(const std::vector<size_t> &indices) {
+    std::vector<Context> paths;
+    std::vector<Kept> kept;
+    paths.reserve(indices.size());
+    kept.reserve(indices.size());
+    uint64_t bytes = 0;
+    for (size_t j = 0; j < indices.size(); ++j) {
+        const size_t i = indices[j];
+        if (i >= kept_.size() || (j && i <= indices[j - 1]))
+            throw std::logic_error("pattern: the supported paths retained are not kept ones");
+        bytes += kept_[i].descriptor + kept_[i].label_bytes;
+        paths.push_back(std::move(paths_[i]));
+        kept.push_back(std::move(kept_[i]));
+    }
+    tracker_.env().account.release(held_ - bytes);
+    held_ = bytes;
+    paths_.swap(paths);
+    kept_.swap(kept);
+}
+
 bool SupportedPathSink::accept(const PathView &path, const SupportTracker *support) {
     if (support != &tracker_)
         throw std::logic_error("pattern: a supported path from another tracker");
@@ -859,9 +906,13 @@ bool SupportedPathSink::accept(const PathView &path, const SupportTracker *suppo
             stop_ = "time";
             return false;
         }
-        kept.total = all.size();
         const bool verified_only = tracker_.options().require_verified;
+        const auto &listed = tracker_.options().listed;
+        const std::vector<LabelRef> &dict = tracker_.labels();
         for (PathTracker::WalkLabel &w : all) {
+            if (listed && !listed(dict[w.label].column))
+                continue;
+            ++kept.total;
             if (verified_only && !w.verified) {
                 kept.unverified.push_back(w.label);
                 continue;
@@ -1002,7 +1053,11 @@ LabelsAnswer SupportedPathSink::labels_answer(const Extraction &x, uint64_t rele
     const bool records = place && index_placement == "record";
     const bool verified_only = tracker_.options().require_verified;
     const std::vector<LabelRef> &dict = tracker_.labels();
-    const char *placement = env.limits.occurrences ? d.placement : "not_requested";
+    // what this answer places: nothing at the label level of an index that could place (its
+    // search read no coordinates), else the index's placement, or not_requested
+    const char *placement = !env.limits.occurrences ? "not_requested"
+                          : !place && index_placement == "record" ? "none"
+                                                                  : d.placement;
 
     LabelsAnswer a;
     a.fields["placement"] = placement;
@@ -1030,7 +1085,9 @@ LabelsAnswer SupportedPathSink::labels_answer(const Extraction &x, uint64_t rele
         a.notes.push_back("annotation_unbudgeted");
     if (place && !records)
         a.notes.push_back("record_bounds_unknown");
-    if (!place)
+    // (at the record level a label is verified by the chains the search carried, placed or
+    // not: output.occurrences false leaves its occurrences out, not its support)
+    if (!place && !tracker_.prunes_on_chains())
         a.notes.push_back("label_intersection_only");
 
     std::optional<std::pair<std::string, std::string>> stop;

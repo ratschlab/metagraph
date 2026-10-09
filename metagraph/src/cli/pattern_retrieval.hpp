@@ -85,6 +85,8 @@ class Bound;
 struct Binding;
 }
 
+struct PathSupportEnv;
+
 /**
  * What the answer of one /pattern request has built so far, and the time writing it is expected
  * to take. The finalisation reserve (--pattern-finalize-ms) is the floor of the time kept back
@@ -589,6 +591,10 @@ class PatternRetrieval {
     // the request's counters so far (the sum of its patterns')
     const RetrievalCounters& counters() const;
 
+    // what the supported-path search (pattern_support.hpp) reads with: this request's oracle,
+    // memory account, annotation units and deadline (defined in pattern_supported.cpp)
+    PathSupportEnv path_support_env();
+
     // ---- the selection of a predicate (pattern_selection.cpp; SPEC §19)
 
     /**
@@ -610,6 +616,10 @@ class PatternRetrieval {
     const char* selection_access() const;
     // the request's selection units so far (max_predicate_work)
     uint64_t predicate_units() const;
+    // the units of a predicate's decisions made outside the pass (the supported paths of a
+    // pattern longer than k, pattern_supported.hpp), added to the request's selection work
+    // after the decisions, never refused (as a decision's units in the pass)
+    void charge_predicate_units(uint64_t units);
 
     /**
      * Before the engine releases one pattern's raw contexts into the pass (the route runs

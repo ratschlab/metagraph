@@ -4,9 +4,11 @@
 /**
  * The labelled retrieval's internals (pattern_retrieval.hpp), shared by the files that make up
  * PatternRetrieval: pattern_retrieval.cpp (the labels of contexts and paths) and
- * pattern_selection.cpp (the selection pass of a predicate). Not an interface of the route:
- * nothing outside those files includes it. It holds the memory and text models, the request's
- * account, the rows' states and PatternRetrieval::Impl.
+ * pattern_selection.cpp (the selection pass of a predicate); and by the supported-path search,
+ * which reads through the retrieval's oracle and account (pattern_support.cpp,
+ * pattern_supported.cpp), and its tests. Not an interface of the route: pattern.cpp reaches
+ * these through PatternRetrieval and the supported-path search only. It holds the memory and
+ * text models, the request's account, the rows' states and PatternRetrieval::Impl.
  */
 
 #include <algorithm>

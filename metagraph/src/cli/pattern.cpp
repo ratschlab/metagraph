@@ -6,9 +6,11 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "common/logger.hpp"
@@ -20,6 +22,8 @@
 #include "json_helpers.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "pattern_predicate.hpp"
+#include "pattern_support.hpp"
+#include "pattern_supported.hpp"
 #include "traverse.hpp"
 
 
@@ -50,13 +54,19 @@ const char *const kLaterIncrementFields[] = {
 };
 
 // long_search: "anchors", the default, answers a pattern longer than k by its anchors; "paths"
-// extends them into paths. A pattern of at most k bases is answered alike under both
+// extends them into paths (every graph walk spelling it); "supported_paths" into the walks some
+// label supports along their whole length (SPEC §20). A pattern of at most k bases is answered
+// alike under all three
 constexpr const char kLongSearchAnchors[] = "anchors";
 constexpr const char kLongSearchPaths[] = "paths";
+constexpr const char kLongSearchSupported[] = "supported_paths";
 // require_support: every label carrying a path is returned with its support
 // ("label_intersection", the default), or only the record-verified ones
 constexpr const char kSupportIntersection[] = "label_intersection";
 constexpr const char kSupportVerified[] = "record_verified";
+// supported_paths_level: the level the supported-path search prunes on, "best" (the index's
+// best support: record_verified where it can verify) or "label_intersection"
+constexpr const char kLevelBest[] = "best";
 
 // The residues a protein pattern may hold (DESIGN §6): the 20 amino acids, the ambiguity codes
 // X, B, Z, J and the stop '*' (a stop codon of the request's genetic code), as the engine's
@@ -74,8 +84,8 @@ constexpr const char kProteinRule[] = "SPEC-pattern-search.md section 12.2";
 constexpr const char kPatternDetails[] = "GET /pattern/capabilities";
 
 // The keys of the pattern block a client of GET /traverse/capabilities alone gates on or parses
-// (SPEC §23, the gate block; what the search service reads, its interface inventory of
-// 2026-10-08 §3.10): the contract version and availability, the values a request is checked
+// (SPEC §23, the gate block: what the search service reads before it sends a request): the
+// contract version and availability, the values a request is checked
 // against (modes, projections, kinds, residues, genetic codes, strands, scopes, k, the long
 // patterns' search), the budget floor and the defaults its parser reads, what the annotation
 // gives (support, placement, annotation), the mask and counting. Each keeps the full block's
@@ -127,6 +137,12 @@ constexpr const char kLabelsPredicateOnly[] = "predicate_only";
 constexpr const char kPredicateStrandsEither[] = "either";
 constexpr const char kPredicateStrandsContext[] = "context";
 constexpr const char kPredicateScope[] = "shard_context";
+// predicate_scope (SPEC §25): "context", the default, selects contexts; "motif" also asks the
+// predicate once of each pattern of at most k bases, on the union of its contexts' labels;
+// the scope of that claim (predicate.motif_scope)
+constexpr const char kPredicateScopeContext[] = "context";
+constexpr const char kPredicateScopeMotif[] = "motif";
+constexpr const char kMotifScope[] = "shard_motif";
 constexpr const char kNotePredicateConstant[] = "predicate_constant";
 constexpr const char kNoteProjectionNotRead[] = "projection_not_read";
 // the operators of the predicate language, in the order the capabilities list them
@@ -172,6 +188,11 @@ struct ParsedRequest {
     // long_search "paths": patterns longer than k are extended into paths
     // (Request::extend_paths); false for "anchors" or when omitted
     bool long_paths = false;
+    // long_search "supported_paths": patterns longer than k are extended into their supported
+    // paths (SPEC §20), the annotation read in every mode
+    bool long_supported = false;
+    // supported_paths_level "label_intersection" (else "best")
+    bool level_intersection = false;
     // require_support "record_verified": the labels of paths that one record verifies only
     bool require_verified = false;
     // the genetic code of the request's peptides: genetic_code, default 1
@@ -187,10 +208,18 @@ struct ParsedRequest {
     // projection_not_read; max_memory_mb and allow_unbudgeted_annotation act on the selection
     // too)
     bool projection_named = false;
+    // the same for a pattern searched for its supported paths (SPEC §20), whose search reads
+    // under max_annotation_work and never reads max_labels_per_anchor: output.labels "all" or
+    // "predicate_only", max_labels, max_occurrences_per_label, require_support
+    bool supported_projection_named = false;
     // max_predicate_contexts (effective): the raw contexts a pattern's selection may test
     uint64_t max_predicate_contexts = 0;
     // max_predicate_work (effective) and predicate_strands
     SelectionLimits selection;
+    // predicate_scope "motif" (SPEC §25), and whether the request named predicate_scope (then
+    // echoed in limits)
+    bool motif = false;
+    bool predicate_scope_named = false;
 };
 
 // A cap of the request (max_contexts, max_anchors, max_steps): the server's cap when omitted,
@@ -216,11 +245,12 @@ uint64_t capped_integer(Fields &f, const char *key, uint64_t cap, uint64_t min,
  * The request as the route serves it (§7.1; SPEC §5): the first error wins, in this order — a
  * field that is not served or resident-only (named, whatever its value), the patterns, mode,
  * output, scope, strands, stop_at_threshold, the caps, the time budget, the annotation caps,
- * long_search, max_paths, require_support, genetic_code (then the peptides are read in it: a
- * slot error, never a refusal), the predicate (its form, then predicate_too_large),
- * max_predicate_contexts, max_predicate_work, predicate_strands, then "predicate_only" without
- * a predicate and a predicate with long_search "paths" — and a field nothing read is refused
- * last, as /traverse's Strict refuses it.
+ * long_search, max_paths, require_support, supported_paths_level, genetic_code (then the
+ * peptides are read in it: a slot error, never a refusal), the predicate (its form, then
+ * predicate_too_large), max_predicate_contexts, max_predicate_work, predicate_strands,
+ * predicate_scope, then "predicate_only" without a predicate, a predicate with long_search
+ * "paths" and predicate_scope "motif" without a predicate — and a field nothing read is
+ * refused last, as /traverse's Strict refuses it.
  */
 ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits) {
     if (!json.isObject())
@@ -309,6 +339,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             req.labels_predicate_only = labels == kLabelsPredicateOnly;
             req.annotation_named |= req.labels_all || req.labels_predicate_only;
             req.projection_named |= req.labels_all || req.labels_predicate_only;
+            req.supported_projection_named |= req.labels_all || req.labels_predicate_only;
         }
         if (o.has("occurrences")) {
             const bool occurrences = o.boolean("occurrences", false);
@@ -386,6 +417,9 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                              "max_occurrences_per_label" }) {
         req.projection_named |= f.has(key);
     }
+    for (const char *key : { "max_labels", "max_occurrences_per_label" }) {
+        req.supported_projection_named |= f.has(key);
+    }
     RetrievalLimits &r = req.retrieval;
     r.max_labels_per_anchor = capped_integer(f, "max_labels_per_anchor",
                                              limits.max_labels_per_anchor, 1, &req.clamped);
@@ -400,11 +434,15 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     r.allow_unbudgeted = f.boolean("allow_unbudgeted_annotation", r.allow_unbudgeted);
     r.chunk_target_ms = limits.chunk_target_ms;
 
-    // the paths of a pattern longer than k, opt-in
+    // the paths of a pattern longer than k, opt-in: every walk, or the supported ones
     const std::string long_search = f.str("long_search", kLongSearchAnchors);
-    if (long_search != kLongSearchAnchors && long_search != kLongSearchPaths)
-        throw invalid(f.path("long_search") + ": expected one of anchors|paths");
+    if (long_search != kLongSearchAnchors && long_search != kLongSearchPaths
+            && long_search != kLongSearchSupported) {
+        throw invalid(f.path("long_search") + ": expected one of anchors|paths|supported_paths");
+    }
     req.long_paths = long_search == kLongSearchPaths;
+    req.long_supported = long_search == kLongSearchSupported;
+    // (the supported-path search sets its own, per pattern longer than k)
     req.request.extend_paths = req.long_paths;
     // accepted with any request; it bounds the paths of long_search "paths" only
     req.request.max_paths = capped_integer(f, "max_paths", limits.max_paths, 0, &req.clamped);
@@ -412,17 +450,34 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     // reads no labels, it is stated as not read (annotation_not_read)
     req.annotation_named |= f.has("require_support");
     req.projection_named |= f.has("require_support");
+    req.supported_projection_named |= f.has("require_support");
     const std::string support = f.str("require_support", kSupportIntersection);
     if (support != kSupportIntersection && support != kSupportVerified) {
         throw invalid(f.path("require_support") + ": expected one of label_intersection|"
                       "record_verified");
     }
     req.require_verified = support == kSupportVerified;
-    if (req.require_verified && !r.occurrences) {
+    if (req.require_verified && !r.occurrences && !req.long_supported) {
         // the verification reads the labels' coordinates, which output.occurrences false
-        // declines: the two contradict each other
+        // declines: the two contradict each other (the supported-path search verifies by the
+        // chains it carries, placed or not)
         throw invalid(f.path("require_support") + ": \"record_verified\" needs the labels' "
                       "coordinates, which output.occurrences false does not read");
+    }
+    // the level the supported-path search prunes on: accepted with any request, acting only
+    // with long_search "supported_paths"
+    const std::string level = f.str("supported_paths_level", kLevelBest);
+    if (level != kLevelBest && level != kSupportIntersection) {
+        throw invalid(f.path("supported_paths_level") + ": expected one of "
+                      "best|label_intersection");
+    }
+    req.level_intersection = level == kSupportIntersection;
+    if (req.long_supported && req.level_intersection && req.require_verified) {
+        // a search that keeps the walks no record holds whole cannot list verified labels only
+        throw invalid(f.path("supported_paths_level") + ": \"label_intersection\" with "
+                      "require_support \"record_verified\": the labels of a path are verified "
+                      "by the record-level search (supported_paths_level \"best\" on an index "
+                      "that can verify)");
     }
 
     // the genetic code of the request's peptides, an NCBI translation table id; accepted with
@@ -477,8 +532,16 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         throw invalid(f.path("predicate_strands") + ": expected one of either|context");
     }
     req.selection.either = predicate_strands == kPredicateStrandsEither;
+    // what the predicate is asked of: each context ("context"), or also each pattern of at
+    // most k bases as a whole ("motif", SPEC §25)
+    req.predicate_scope_named = f.has("predicate_scope");
+    const std::string predicate_scope = f.str("predicate_scope", kPredicateScopeContext);
+    if (predicate_scope != kPredicateScopeContext && predicate_scope != kPredicateScopeMotif)
+        throw invalid(f.path("predicate_scope") + ": expected one of context|motif");
+    req.motif = predicate_scope == kPredicateScopeMotif;
     // the combinations: the predicate's labels need a predicate; a predicate selects among
-    // supported paths for L > k, which long_search "paths" (every graph walk) does not search
+    // supported paths for L > k, which long_search "paths" (every graph walk) does not search;
+    // a motif-level answer is the predicate's
     if (req.labels_predicate_only && !req.predicate) {
         throw invalid("request.output.labels: \"predicate_only\" returns the labels a "
                       "predicate names: it needs a predicate (request.predicate)");
@@ -486,9 +549,13 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     if (req.predicate && req.long_paths) {
         throw invalid("request.long_search: \"paths\" with a predicate: a predicate selects "
                       "among the supported paths of a pattern longer than k (long_search "
-                      "\"supported_paths\", not served by this build), never among every graph "
-                      "walk; send long_search \"anchors\" (a pattern longer than k is then "
+                      "\"supported_paths\"), never among every graph walk; send long_search "
+                      "\"supported_paths\", or \"anchors\" (a pattern longer than k is then "
                       "answered by its anchors, its selection not_started)");
+    }
+    if (req.motif && !req.predicate) {
+        throw invalid("request.predicate_scope: \"motif\" asks the request's predicate of each "
+                      "pattern: it needs a predicate (request.predicate)");
     }
 
     f.finish();
@@ -593,15 +660,57 @@ Json::Value error_json(const std::string &code, const std::string &message) {
 }
 
 /**
+ * What an entry of a pattern longer than k under long_search "supported_paths" states beside
+ * the anchors (SPEC §20.4): counts.paths a plain count of the complete walks, and
+ * counts.supported_paths, the supported walks with their split, the level searched, what the
+ * search did, the branches it entered and pruned — by the support, and with a predicate by a
+ * monotone normal form already false on a branch's support (§20.9), which leaves the supported
+ * paths of that orientation at_least.
+ */
+struct SupportedCounts {
+    const char *level = kSupportIntersection;
+    // a request with a predicate (branches_pruned_by_predicate stated)
+    bool predicate = false;
+    uint64_t pruned = 0;
+    std::map<Orientation, uint64_t> pruned_by;
+};
+
+Json::Value supported_paths_json(const AnchorCounts &a, const SupportedCounts &s,
+                                 bool strand_stated) {
+    Count total = a.supported;
+    std::map<Orientation, Count> by = a.supported_by_orientation;
+    // the walks a predicate pruned were not completed: their supported paths not counted
+    for (auto &[orientation, c] : by) {
+        auto it = s.pruned_by.find(orientation);
+        if (it != s.pruned_by.end() && it->second && c.relation == Relation::EXACT)
+            c = Count::at_least(Unit::PATHS, c.value);
+    }
+    if (s.pruned && total.relation == Relation::EXACT)
+        total = Count::at_least(Unit::PATHS, total.value);
+    Json::Value v = count_json(total);
+    put_orientations(&v, by, strand_stated);
+    v["level"] = s.level;
+    v["search"] = to_string(a.extension);
+    v["candidates_examined"] = uint_json(a.candidates_examined);
+    v["branches_pruned"] = uint_json(a.branches_pruned - std::min(s.pruned, a.branches_pruned));
+    if (s.predicate)
+        v["branches_pruned_by_predicate"] = uint_json(s.pruned);
+    return v;
+}
+
+/**
  * The answer's entry for one pattern (§7.2). |results| holds the JSON
  * of the contexts enumerate() released (empty after count()); it is published only when the
  * engine withheld nothing, and moved into the entry. |released| is the number of contexts the
  * engine released: results.size(), or more with output.labels "all" when the memory account
  * admitted only the first of them (their objects not built; apply_labels states the cut).
+ * |supported|: a pattern longer than k searched for its supported paths (the extension's work
+ * and time stated as for long_search "paths").
  */
 Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
                        bool strand_stated, Json::Value results, uint64_t released,
-                       bool long_paths, const DummyFraction *fraction) {
+                       bool long_paths, const DummyFraction *fraction,
+                       const SupportedCounts *supported = nullptr) {
     Json::Value e;
     e["id"] = spec.id;
     e["kind"] = to_string(spec.kind);
@@ -660,7 +769,11 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
                          &estimated);
         counts["anchors"] = std::move(a);
         Json::Value paths = count_json(result->anchors->paths, fraction, &estimated);
-        if (long_paths) {
+        if (supported) {
+            // a plain count of the complete walks beside the supported ones (§20.4)
+            counts["supported_paths"] = supported_paths_json(*result->anchors, *supported,
+                                                             strand_stated);
+        } else if (long_paths) {
             // long_search "paths" (§4.2): the paths counted by the extension, per orientation,
             // beside the branches it entered (work, not a count of the pattern) and what it did
             // (no_anchors, not_started, not_admitted, stopped, completed)
@@ -682,7 +795,8 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     work["ranges_visited"] = uint_json(result->work.ranges_visited);
     work["mask_scans"] = uint_json(result->work.mask_scans);
     work["steps"] = uint_json(result->work.steps);
-    if (long_paths && result->anchors) {
+    const bool extended = long_paths || supported;
+    if (extended && result->anchors) {
         // the outgoing edges the extension examined, one step each (part of steps)
         work["extension_edges"] = uint_json(result->work.extension_edges);
         // (not steps) the anchors whose extension began, each spelled once (k - 1 BOSS steps no
@@ -732,7 +846,7 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     e["notes"] = std::move(notes);
     Json::Value timing;
     timing["elapsed_ms"] = result->elapsed_ms;
-    if (long_paths && result->anchors)
+    if (extended && result->anchors)
         timing["extension_ms"] = result->extension_ms;
     e["timing"] = std::move(timing);
     return e;
@@ -783,6 +897,10 @@ struct SelectionEntry {
     bool unbudgeted_read = false;
     // the request's memory account at its peak once the pattern's work was done
     uint64_t memory_bytes = 0;
+    // predicate_scope "motif": the pattern's motif block (built in the work phase, its text in
+    // the answer's volume) and the units of its evaluation (SPEC §25)
+    std::optional<Json::Value> motif;
+    uint64_t motif_units = 0;
 };
 
 /**
@@ -816,6 +934,10 @@ void put_selection(Json::Value *entry, const SelectionEntry &s, Mode mode) {
     e["work"]["predicate_lookups"] = uint_json(sel.lookups);
     e["work"]["memory_bytes"] = uint_json(s.memory_bytes);
     e["timing"]["selection_ms"] = sel.ms;
+    if (s.motif) {
+        e["motif"] = *s.motif;
+        e["work"]["motif_units"] = uint_json(s.motif_units);
+    }
 
     // (read without adding the member: an entry of mode count has no withheld and no cut)
     auto reason_of = [&e](const char *key) {
@@ -882,6 +1004,89 @@ void put_selection(Json::Value *entry, const SelectionEntry &s, Mode mode) {
         cut = *s.output_cut;                // the output's: the list's length
     e["cut"] = cut && !e["retrieval_complete"].asBool() ? reason_json(cut->c_str())
                                                         : Json::Value();
+}
+
+/**
+ * What the route made of one pattern longer than k under long_search "supported_paths" (SPEC
+ * §20), beside the engine's result and the labels' answer: the counts entry_json writes, the
+ * release named (the engine's EXTERNAL stop is the tracker's, the sink's or a predicate's
+ * selection's reason), the stops after the engine's, and the search's work.
+ */
+struct SupportedEntry {
+    SupportedCounts counts;
+    // the reason of the engine's stop {extension, external}
+    std::string external = "external";
+    // the release: withheld (all_or_count) and cut (partial), the first that applies
+    std::optional<std::string> withheld;
+    std::optional<std::string> cut;
+    // the stops after the engine's, in order: the selection's, the output's
+    std::vector<std::pair<std::string, std::string>> stops;
+    bool time_limited = false;
+    // the rows the search read and their units (the mirror walks' included), its time, the
+    // anchors' whole rows among them and the steps the row cache served; the rows refused
+    PathSupportWork work;
+    uint64_t rows = 0;
+    uint64_t units = 0;
+    // of those rows, the mirror walks' (a predicate's "either" with one strand searched, §20.9):
+    // annotation work, so counted in rows and in no selection counter
+    uint64_t mirror_rows = 0;
+    Json::Value rows_refused = Json::Value(Json::arrayValue);
+    // the reads went without the budget-aware decode
+    bool unbudgeted = false;
+    // the labels of the listed paths were built (SupportedPathSink::labels_answer)
+    bool labels = false;
+    // the request's memory account at its peak once the pattern's work was done
+    uint64_t memory_bytes = 0;
+};
+
+/**
+ * Merges the release and the stops of a supported entry into |entry| (entry_json's, its
+ * results the listed paths), before the labels: the engine's stop named, withheld and cut
+ * named and composed (a cut only while not complete), the later stops (first stop wins), and
+ * determinism.
+ */
+void put_supported(Json::Value *entry, const SupportedEntry &s, Mode mode) {
+    Json::Value &e = *entry;
+    if (e.isMember("error"))
+        return;
+    if (e["stop"].isObject() && e["stop"]["reason"].asString() == "external")
+        e["stop"]["reason"] = s.external;
+    for (const auto &[phase, reason] : s.stops) {
+        if (e["stop"].isNull()) {
+            Json::Value v;
+            v["phase"] = phase;
+            v["reason"] = reason;
+            e["stop"] = std::move(v);
+        }
+    }
+    if (s.time_limited)
+        e["determinism"] = "time_limited";
+    if (mode == Mode::COUNT)
+        return;
+    if (s.withheld) {
+        e["withheld"] = reason_json(*s.withheld);
+        e["retrieval_complete"] = false;
+        e["returned"] = 0;
+        e["results"] = Json::Value(Json::arrayValue);
+        e["cut"] = Json::Value();
+        return;
+    }
+    e["withheld"] = Json::Value();
+    e["cut"] = mode == Mode::PARTIAL && s.cut && !e["retrieval_complete"].asBool()
+            ? reason_json(*s.cut) : Json::Value();
+}
+
+// The withheld reason of the engine's release of supported paths, |external| naming its
+// EXTERNAL stop: the tracker's own budgets (annotation_budget), a predicate's thresholds with
+// stop_at_threshold (threshold_crossed), a time stop (deadline)
+std::string withheld_name(Withheld withheld, const std::string &external) {
+    if (withheld != Withheld::EXTERNAL)
+        return to_string(withheld);
+    if (external == "max_paths" || external == "max_predicate_contexts")
+        return "threshold_crossed";
+    if (external == "time")
+        return "deadline";
+    return "annotation_budget";
 }
 
 } // namespace
@@ -1183,9 +1388,19 @@ Json::Value process_pattern_request(
                                 : req.labels_predicate_only ? Projection::PREDICATE_ONLY
                                                             : Projection::NONE;
     std::optional<PatternRetrieval> retrieval;
-    if (read_labels || has_predicate) {
+    if (read_labels || has_predicate || req.long_supported) {
         retrieval.emplace(anno_graph, support.mode, req.retrieval, budget, hooks, &volume);
         if (!retrieval->description().budgeted && !req.retrieval.allow_unbudgeted) {
+            if (req.long_supported && !has_predicate) {
+                throw PatternRefusal(400, "annotation_unbudgeted",
+                                     "pattern: long_search \"supported_paths\" reads the "
+                                     "annotation in every mode (the search reads the row of "
+                                     "every k-mer it enters, to carry each branch's support), "
+                                     "and this index's annotation has no budget-aware decode "
+                                     "(only the row-diff family has one): its reads would run "
+                                     "without a memory bound. Set allow_unbudgeted_annotation: "
+                                     "true to read it anyway, or ask with long_search \"paths\"");
+            }
             if (has_predicate) {
                 throw PatternRefusal(400, "annotation_unbudgeted",
                                      "pattern: a predicate reads the annotation in every mode "
@@ -1208,7 +1423,7 @@ Json::Value process_pattern_request(
         // require_support "record_verified" (DESIGN §4.3) keeps the labels one record verifies,
         // which needs a BASIC index with coordinates and its record mapping; an index that
         // cannot verify refuses it rather than answer in the weaker mode
-        if (read_labels && req.long_paths && req.require_verified
+        if (((read_labels && req.long_paths) || req.long_supported) && req.require_verified
                 && std::string(retrieval->description().support) != kSupportVerified) {
             throw PatternRefusal(400, "support_unavailable",
                                  "pattern: require_support \"record_verified\" needs a BASIC "
@@ -1364,6 +1579,8 @@ Json::Value process_pattern_request(
         std::optional<SelectionEntry> selection;
         // its normal form is a constant (no pass, no read: note predicate_constant)
         bool constant = false;
+        // a pattern longer than k searched for its supported paths (SPEC §20)
+        std::optional<SupportedEntry> supported;
     };
 
     /**
@@ -1430,8 +1647,9 @@ Json::Value process_pattern_request(
     // stopped leaves no bound predicate: every pattern's selection is then not_started, stopped
     // as the binding was (stop {selection, time | max_memory})
     const predicate::Bound *bound = nullptr;
+    const predicate::Binding *binding = nullptr;
     if (has_predicate) {
-        retrieval->bind(*req.predicate, req.selection);
+        binding = &retrieval->bind(*req.predicate, req.selection);
         bound = retrieval->bound();
         if (bound)
             volume.add_pending(bound->text_bytes());
@@ -1448,6 +1666,18 @@ Json::Value process_pattern_request(
     pass_request.max_contexts = req.request.max_contexts;
     pass_request.stop_at_threshold = req.request.stop_at_threshold;
     pass_request.projection = projection;
+    pass_request.motif = req.motif;
+
+    // predicate_scope "motif" (SPEC §25): a pattern's motif block, built in the work phase
+    // (its text counted in the answer's volume)
+    auto put_motif = [&](SelectionEntry &s) {
+        if (!req.motif || !s.answer.motif)
+            return;
+        s.motif = retrieval->motif_json(*s.answer.motif);
+        s.motif_units = s.answer.motif->units;
+        volume.add(compact_json_bytes(*s.motif) + std::string(",\"motif\":").size()
+                   + std::string(",\"motif_units\":").size() + 20);
+    };
 
     /**
      * One pattern of L <= k with a predicate (SPEC §19.6): a constant normal form without a
@@ -1467,6 +1697,7 @@ Json::Value process_pattern_request(
         s.unbudgeted_read = !retrieval->description().budgeted;
         auto finish = [&]() {
             s.memory_bytes = retrieval->memory_peak();
+            put_motif(s);
             a.selection = std::move(s);
         };
         // an empty release (nothing selected) as the projection reads it: nothing read, every
@@ -1487,6 +1718,8 @@ Json::Value process_pattern_request(
                 if (a.result->refusal)
                     return;
                 s.answer = constant_selection(false, a.result->contexts->total);
+                if (req.motif)
+                    s.answer.motif = constant_motif(false);
                 if (mode != Mode::COUNT) {
                     // every selected context (none) is returned
                     a.result->extraction = Extraction();
@@ -1503,6 +1736,8 @@ Json::Value process_pattern_request(
             if (a.result->refusal)
                 return;
             s.answer = constant_selection(true, a.result->contexts->total);
+            if (req.motif)
+                s.answer.motif = constant_motif(true);
             if (mode != Mode::COUNT && projection != Projection::NONE) {
                 for (Json::Value &r : a.results) {
                     r["selection_labels"] = Json::Value(Json::arrayValue);
@@ -1655,15 +1890,361 @@ Json::Value process_pattern_request(
         finish();
     };
 
+    // ---- the supported-path search (long_search "supported_paths", SPEC §20): one tracker and
+    // one sink per request over the labelled retrieval's oracle, account, work and deadline,
+    // made at the first pattern longer than k (and destroyed before the retrieval), and with a
+    // predicate the selection of the supported paths (§20.9). The level: the index's best
+    // support (record_verified where it can verify) unless the request asks for the labels'
+    const bool supported_labels = req.long_supported && projection != Projection::NONE;
+    const graph::traversal::Support level
+            = req.long_supported && !req.level_intersection
+                && std::string(retrieval->description().support) == kSupportVerified
+            ? graph::traversal::Support::TRACE : graph::traversal::Support::KMER;
+    const char *const level_name = level == graph::traversal::Support::TRACE
+            ? kSupportVerified : kSupportIntersection;
+    std::optional<PathSupportEnv> path_env;
+    std::unique_ptr<PathTracker> path_tracker;
+    std::unique_ptr<SupportedPathSink> path_sink;
+    std::unique_ptr<PathSelection> path_selection;
+    auto start_supported = [&]() {
+        if (path_tracker)
+            return;
+        path_env.emplace(retrieval->path_support_env());
+        PathSupportOptions o;
+        o.level = level;
+        o.labels = supported_labels;
+        o.require_verified = supported_labels && req.require_verified;
+        if (projection == Projection::PREDICATE_ONLY) {
+            // the predicate's labels only (none for a predicate not bound, or a constant one)
+            auto columns = std::make_shared<std::unordered_set<graph::traversal::Column>>();
+            if (bound) {
+                for (const graph::traversal::LabelRef &l : bound->labels()) {
+                    columns->insert(l.column);
+                }
+            }
+            o.listed = [columns](graph::traversal::Column c) { return columns->count(c) > 0; };
+        }
+        path_tracker = std::make_unique<PathTracker>(*path_env, o);
+        path_sink = std::make_unique<SupportedPathSink>(*path_tracker);
+        if (bound && !bound->constant())
+            path_selection = std::make_unique<PathSelection>(*path_tracker, *path_sink, *bound);
+    };
+    // the names of a selected path's selection_labels and of the walks that carry each
+    // (§20.9): "context" (the walk as spelled), "reverse_complement" (its reverse-complement
+    // walk's support only), "both"; "either" on CANONICAL and PRIMARY graphs, where the two
+    // walks have one support
+    auto path_selection_json = [&](const PathSelectionAnswer &sel, size_t j, Json::Value *r) {
+        Json::Value names(Json::arrayValue), strands(Json::arrayValue);
+        for (size_t i = 0; i < sel.selection_labels[j].size(); ++i) {
+            names.append(bound->labels()[sel.selection_labels[j][i]].name);
+            const uint8_t on = sel.selection_rows[j][i];
+            strands.append(support.mode != GraphMode::BASIC ? "either"
+                           : on == (PathSelectionAnswer::kOnWalk | PathSelectionAnswer::kOnMirror)
+                                ? "both"
+                           : on == PathSelectionAnswer::kOnMirror ? "reverse_complement"
+                                                                 : "context");
+        }
+        volume.add(compact_json_bytes(names) + std::string(",\"selection_labels\":").size()
+                   + compact_json_bytes(strands) + std::string(",\"selection_strands\":").size());
+        (*r)["selection_labels"] = std::move(names);
+        (*r)["selection_strands"] = std::move(strands);
+    };
+
+    // how one pattern's supported-path search runs: SEARCH as the request asks (no predicate,
+    // or a constant true one), SELECT with the predicate's selection, COUNT_ONLY counting the
+    // supported paths only (nothing kept, no label read: a constant false predicate, or a
+    // selection that cannot start)
+    enum class SupportedRun { SEARCH, SELECT, COUNT_ONLY };
+
+    /**
+     * One pattern longer than k under long_search "supported_paths" (SPEC §20): the engine's
+     * extension with the request's tracker (rows read during the extension, each branch's
+     * support carried, a branch nothing supports pruned) and its sink (the supported paths
+     * kept under the mode's rule, their memory admitted first), counted by count(); the release
+     * (supported_release, or the selection's), named (the engine's EXTERNAL stop is the
+     * tracker's, the sink's or the selection's reason); the listed paths' result objects (the
+     * clock every 64: spelling an anchor is graph work), with their selection labels; their
+     * labels from the sink (nothing read again). |given| (COUNT_ONLY): the release the caller
+     * decided; |seed|: what the caller already named (withheld, cut). Returns the selection's
+     * answer (SELECT).
+     */
+    auto answer_supported = [&](const Pattern &pattern, Answered &a, SupportedRun run,
+                                std::optional<Extraction> given, SupportedEntry seed)
+            -> std::optional<PathSelectionAnswer> {
+        start_supported();
+        const size_t length = pattern.length();
+        SupportedEntry s = std::move(seed);
+        s.counts.level = level_name;
+        s.counts.predicate = has_predicate;
+        s.unbudgeted = !retrieval->description().budgeted;
+        const bool selecting = run == SupportedRun::SELECT;
+        Request rq = req.request;
+        rq.extend_paths = true;
+        rq.support = path_tracker.get();
+        rq.sink = path_sink.get();
+        path_tracker->begin_pattern(length);
+        if (selecting) {
+            PathSelectionOptions o;
+            o.mode = mode;
+            o.max_paths = req.request.max_paths;
+            o.stop_at_threshold = req.request.stop_at_threshold;
+            o.max_predicate_contexts = req.max_predicate_contexts;
+            o.either = support.mode == GraphMode::BASIC && req.selection.either;
+            o.mirrors_searched = req.request.strands == Strands::BOTH || pattern.is_palindromic();
+            o.selection_labels = projection != Projection::NONE;
+            path_sink->begin_pattern(PathSelection::sink_mode(o),
+                                     PathSelection::sink_threshold(o));
+            path_selection->begin_pattern(o, length);
+            rq.support = path_selection.get();
+            rq.sink = path_selection.get();
+            // the selection's own threshold is on the selected paths
+            rq.max_paths = std::numeric_limits<uint64_t>::max();
+        } else if (run == SupportedRun::COUNT_ONLY) {
+            // (the request's mode, so that the labels' answer of the empty list states it as
+            // the mode does; nothing kept). No path is selected: none crosses a threshold
+            path_sink->begin_pattern(mode, 0);
+            rq.max_paths = std::numeric_limits<uint64_t>::max();
+        } else {
+            path_sink->begin_pattern(mode, rq.max_paths);
+        }
+        auto end = [&](size_t listed) {
+            if (selecting)
+                path_selection->end_pattern();
+            path_sink->end_pattern(listed);
+            path_tracker->end_pattern();
+        };
+        a.result = search.count(pattern, rq, budget);
+        if (a.result->refusal) {
+            end(0);
+            return std::nullopt;
+        }
+        std::optional<PathSelectionAnswer> sel;
+        if (selecting) {
+            sel = path_selection->finish(*a.result);
+            s.counts.pruned = sel->pruned;
+            s.counts.pruned_by = sel->pruned_by;
+            if (sel->stop)
+                s.stops.push_back(*sel->stop);
+            s.time_limited |= sel->time_limited;
+        }
+        const char *external = selecting ? path_selection->stop_reason()
+                             : path_tracker->stop_reason() ? path_tracker->stop_reason()
+                                                           : path_sink->stop_reason();
+        if (external)
+            s.external = external;
+
+        // the release (retrieval modes)
+        std::optional<Extraction> x;
+        uint64_t named = 0;
+        if (mode != Mode::COUNT) {
+            if (given) {
+                x = given;
+            } else {
+                x = supported_release(*a.result, rq, *path_sink, &named);
+                const Extension ext = a.result->anchors->extension;
+                if (selecting && x && ext == Extension::COMPLETED) {
+                    // the selection's release of the selected paths
+                    x->withheld.reset();
+                    x->cut.reset();
+                    x->returned = sel->listed;
+                    x->complete = sel->complete;
+                    named = sel->named;
+                } else if (selecting && x && ext == Extension::STOPPED) {
+                    // the engine's stop withholds (all_or_count) or cuts (partial) the release;
+                    // partial lists the selected paths completed before it
+                    x->returned = mode == Mode::PARTIAL ? sel->listed : 0;
+                    named = x->returned;
+                }
+            }
+        }
+        uint64_t listed = 0;
+        if (x) {
+            if (!s.withheld && x->withheld) {
+                s.withheld = withheld_name(*x->withheld, s.external);
+            } else if (!s.withheld && sel && sel->withheld) {
+                s.withheld = sel->withheld;
+            }
+            if (mode == Mode::PARTIAL && !s.cut) {
+                if (x->cut) {
+                    s.cut = *x->cut == StopReason::EXTERNAL ? s.external
+                                                            : std::string(to_string(*x->cut));
+                }
+                if (sel && sel->cut && (!s.cut || sel->output_cut))
+                    s.cut = sel->cut;
+            }
+            if (!sel && !s.withheld && named > x->returned) {
+                // the sink could not hold every path the release names: the list ends there
+                s.stops.emplace_back("output", "max_memory");
+                if (mode == Mode::PARTIAL) {
+                    s.cut = "max_memory";
+                } else {
+                    s.withheld = "output_budget";
+                }
+            }
+            listed = s.withheld ? 0 : x->returned;
+        }
+        // the listed paths' result objects (their descriptors are in the account: the sink
+        // charged them as it kept them)
+        const uint64_t releasing = listed;
+        for (uint64_t j = 0; j < releasing; ++j) {
+            if (j % Budget::kReleaseClockStride == 0 && !budget.check_time()) {
+                s.stops.emplace_back("output", "time");
+                s.time_limited = true;
+                if (mode == Mode::PARTIAL) {
+                    s.cut = "time";
+                    listed = j;
+                } else {
+                    s.withheld = "deadline";
+                    listed = 0;
+                }
+                break;
+            }
+            Json::Value r = path_json(path_sink->paths()[j], length);
+            if (sel && projection != Projection::NONE)
+                path_selection_json(*sel, j, &r);
+            a.results.append(std::move(r));
+        }
+        if (s.withheld)
+            a.results = Json::Value(Json::arrayValue);
+        if (x) {
+            if (listed < x->returned)
+                x->complete = false;
+            x->returned = listed;
+            if (s.withheld) {
+                // (named by put_supported; nothing is listed, no label built)
+                x->withheld = Withheld::DEADLINE;
+                x->complete = false;
+            }
+            a.released = listed;
+            if (supported_labels) {
+                a.labels = path_sink->labels_answer(*x, listed, length, graph_name);
+                s.labels = true;
+            }
+            a.result->extraction = x;
+        }
+        s.work = path_tracker->work();
+        s.mirror_rows = sel ? sel->rows : 0;
+        s.rows = s.work.rows + s.mirror_rows;
+        s.units = s.work.units + (sel ? sel->mirror_units : 0);
+        s.rows_refused = path_tracker->rows_refused();
+        if (!s.labels)
+            volume.add(compact_json_bytes(s.rows_refused));
+        end(listed);
+        s.memory_bytes = retrieval->memory_peak();
+        a.supported = std::move(s);
+        return sel;
+    };
+
+    /**
+     * One pattern longer than k under long_search "supported_paths" with a predicate (SPEC
+     * §20.9): a constant normal form selects without deciding (true: the supported paths as
+     * without the predicate; false: none, the search counting only); a selection that cannot
+     * start (the predicate not bound, or the request's selection work spent: sticky) counts
+     * the supported paths only, not_started; otherwise the search with the predicate's
+     * selection (PathSelection), its decisions' units charged to the request's selection work.
+     */
+    auto answer_supported_predicate = [&](const Pattern &pattern, Answered &a) {
+        SelectionEntry s;
+        s.support = level_name;
+        s.access = "rows";
+        s.unbudgeted_read = !retrieval->description().budgeted;
+        auto in_paths = [](SelectionAnswer *x) {
+            x->tested.unit = Unit::PATHS;
+            x->selected.unit = Unit::PATHS;
+        };
+        if (bound && bound->constant()) {
+            a.constant = true;
+            const bool value = *bound->constant();
+            if (value) {
+                answer_supported(pattern, a, SupportedRun::SEARCH, std::nullopt,
+                                 SupportedEntry());
+            } else {
+                // nothing can be selected, also after a stop: every selected path (none) listed
+                Extraction none;
+                none.complete = true;
+                answer_supported(pattern, a, SupportedRun::COUNT_ONLY, none, SupportedEntry());
+            }
+            if (a.result->refusal)
+                return;
+            s.answer = constant_selection(value, a.result->anchors->supported);
+            in_paths(&s.answer);
+            if (value && mode != Mode::COUNT && projection != Projection::NONE) {
+                // the predicate names no column of the index: no label selected a path
+                for (Json::Value &r : a.results) {
+                    r["selection_labels"] = Json::Value(Json::arrayValue);
+                    r["selection_strands"] = Json::Value(Json::arrayValue);
+                }
+                volume.add(a.results.size()
+                           * std::string(",\"selection_labels\":[],\"selection_strands\":[]")
+                                     .size());
+            }
+        } else if (!bound || retrieval->predicate_units() >= req.selection.max_predicate_work) {
+            const char *before = bound ? "max_predicate_work"
+                               : binding && binding->stop
+                                    && std::string_view(binding->stop) == "time"
+                               ? "time" : "max_memory";
+            SupportedEntry seed;
+            if (mode == Mode::ALL_OR_COUNT) {
+                seed.withheld = std::string_view(before) == "time" ? "deadline"
+                                                                   : "predicate_budget";
+            } else if (mode == Mode::PARTIAL) {
+                seed.cut = before;
+            }
+            answer_supported(pattern, a, SupportedRun::COUNT_ONLY, Extraction(),
+                             std::move(seed));
+            if (a.result->refusal)
+                return;
+            s.answer = selection_without_pass(SelectionPass::NOT_STARTED,
+                                              a.result->anchors->supported);
+            in_paths(&s.answer);
+            s.answer.stop = std::make_pair(std::string("selection"), std::string(before));
+            s.answer.time_limited = std::string_view(before) == "time";
+        } else {
+            const std::optional<PathSelectionAnswer> sel
+                    = answer_supported(pattern, a, SupportedRun::SELECT, std::nullopt,
+                                       SupportedEntry());
+            if (a.result->refusal || !sel)
+                return;
+            SelectionAnswer &x = s.answer;
+            x.pass = sel->pass;
+            x.tested = sel->tested;
+            x.selected = sel->selected;
+            x.time_limited = sel->time_limited;
+            x.units = sel->units;
+            x.lookups = sel->lookups;
+            x.ms = sel->ms;
+            x.rows_refused = sel->rows_refused;
+            retrieval->charge_predicate_units(sel->units);
+        }
+        if (req.motif) {
+            // the motif of a pattern longer than k is not asked of its walks (SPEC §25): it is
+            // undecided, untested not_started, but for a pattern without anchors, which has no
+            // instance on this graph (the normal form's value on the empty union)
+            s.answer.motif = retrieval->motif_without_pass(SelectionPass::NOT_STARTED,
+                                                           a.result->anchors->total);
+        }
+        s.memory_bytes = retrieval->memory_peak();
+        put_motif(s);
+        a.selection = std::move(s);
+    };
+
     std::vector<Answered> answered;
     answered.reserve(req.patterns.size());
     for (const PatternSpec &spec : req.patterns) {
         Answered a;
         a.results = Json::Value(Json::arrayValue);
         if (spec.pattern) {
-            if (!has_predicate) {
+            const bool longer = spec.pattern->length() > k;
+            if (longer && req.long_supported) {
+                if (has_predicate) {
+                    answer_supported_predicate(*spec.pattern, a);
+                } else {
+                    answer_supported(*spec.pattern, a, SupportedRun::SEARCH, std::nullopt,
+                                     SupportedEntry());
+                }
+            } else if (!has_predicate) {
                 answer_plain(*spec.pattern, a, read_labels);
-            } else if (spec.pattern->length() <= k) {
+            } else if (!longer) {
                 answer_selection(*spec.pattern, a);
             } else {
                 // a pattern longer than k under long_search "anchors" (with "paths" a predicate
@@ -1677,9 +2258,14 @@ Json::Value process_pattern_request(
                     // what a long pattern's selection counts: its supported walks (§19.7)
                     s.answer.tested.unit = Unit::PATHS;
                     s.answer.selected.unit = Unit::PATHS;
+                    if (req.motif) {
+                        s.answer.motif = retrieval->motif_without_pass(
+                                SelectionPass::NOT_STARTED, a.result->anchors->total);
+                    }
                     s.support = retrieval->description().support;
                     s.access = retrieval->selection_access();
                     s.memory_bytes = retrieval->memory_peak();
+                    put_motif(s);
                     a.selection = std::move(s);
                 }
             }
@@ -1704,16 +2290,46 @@ Json::Value process_pattern_request(
         }
         Json::Value entry = entry_json(req.patterns[i], a.result ? &*a.result : nullptr, mode,
                                        strand_stated, std::move(a.results), a.released,
-                                       req.long_paths, fraction ? &*fraction : nullptr);
-        // the selection (before the projection's labels, whose withheld, cut and stop come
-        // after the pass's)
+                                       req.long_paths, fraction ? &*fraction : nullptr,
+                                       a.supported ? &a.supported->counts : nullptr);
+        // the supported paths' release and stops, then the selection (both before the
+        // projection's labels, whose withheld, cut and stop come after theirs)
+        if (a.supported)
+            put_supported(&entry, *a.supported, mode);
         if (a.selection)
             put_selection(&entry, *a.selection, mode);
         const bool projected = a.labels.has_value();
         if (a.labels) {
             const RetrievalCounters counters = a.labels->counters;
             apply_labels(&entry, std::move(*a.labels), mode);
-            put_retrieval_counters(&entry, counters, a.label_paths);
+            // (the supported-path search counts no distinct rows: its rows are its reads)
+            if (!a.supported)
+                put_retrieval_counters(&entry, counters, a.label_paths);
+        }
+        if (a.supported && !entry.isMember("error")) {
+            // the search's work, with or without labels: every row it read and their units
+            // (the mirror walks' included), the account's peak, the anchors' whole rows among
+            // them and the steps the row cache served; its time and its refused rows where no
+            // labels' answer stated them
+            const SupportedEntry &s = *a.supported;
+            Json::Value &w = entry["work"];
+            w["annotation_rows"] = uint_json(s.rows);
+            if (has_predicate)
+                w["mirror_rows"] = uint_json(s.mirror_rows);
+            w["annotation_units"] = uint_json(s.units);
+            w["memory_bytes"] = uint_json(s.memory_bytes);
+            w["anchor_rows"] = uint_json(s.work.anchor_rows);
+            w["row_cache_hits"] = uint_json(s.work.cache_hits);
+            w["row_cache_evictions"] = uint_json(s.work.evictions);
+            if (!s.labels) {
+                entry["timing"]["support_ms"] = s.work.ms;
+                entry["rows_refused"] = s.rows_refused;
+            }
+            Json::Value &notes = entry["notes"];
+            if (!s.labels && s.unbudgeted && s.rows)
+                notes.append("annotation_unbudgeted");
+            if (!a.selection && req.supported_projection_named && !projected)
+                notes.append(kNoteProjectionNotRead);
         }
         if (a.selection && !entry.isMember("error")) {
             // the rows the account refused: the selection's (phase "selection") first, then the
@@ -1727,7 +2343,7 @@ Json::Value process_pattern_request(
             entry["rows_refused"] = std::move(refused);
         }
         if (!projected && req.annotation_named && !read_labels && !has_predicate
-                && entry.isMember("notes")) {
+                && !a.supported && entry.isMember("notes")) {
             // the labels were asked for (or bounded) and none are read here: said, not
             // ignored (mode count, or output.labels "none")
             entry["notes"].append(kNoteAnnotationNotRead);
@@ -1746,8 +2362,10 @@ Json::Value process_pattern_request(
                 notes.append("annotation_unbudgeted");
             if (a.constant)
                 notes.append(kNotePredicateConstant);
-            if (req.projection_named && !projected)
+            if ((a.supported ? req.supported_projection_named : req.projection_named)
+                    && !projected) {
                 notes.append(kNoteProjectionNotRead);
+            }
         }
         entries.append(std::move(entry));
     }
@@ -1793,6 +2411,9 @@ Json::Value process_pattern_request(
         }
         p["scope"] = kPredicateScope;
         p["strands"] = retrieval->selection_strands();
+        // predicate_scope "motif": the scope of each pattern's motif claim (SPEC §25)
+        if (req.motif)
+            p["motif_scope"] = kMotifScope;
         out["predicate"] = std::move(p);
     }
 
@@ -1822,9 +2443,10 @@ Json::Value process_pattern_request(
     l["min_information_bits"] = number_json(limits.min_information_bits);
     l["max_patterns"] = uint_json(limits.max_patterns);
     l["stop_at_threshold"] = req.request.stop_at_threshold;
-    if (read_labels || has_predicate) {
-        // the annotation limits, in the answers that read annotation only; with a predicate in
-        // every mode (its selection reads rows under the account)
+    if (read_labels || has_predicate || req.long_supported) {
+        // the annotation limits, in the answers that read annotation only; with a predicate or
+        // long_search "supported_paths" in every mode (the selection and the supported-path
+        // search read rows under the account)
         const RetrievalLimits &r = req.retrieval;
         l["max_labels_per_anchor"] = uint_json(r.max_labels_per_anchor);
         l["max_annotation_work"] = uint_json(r.max_annotation_work);
@@ -1839,6 +2461,13 @@ Json::Value process_pattern_request(
         l["max_paths"] = uint_json(req.request.max_paths);
         if (read_labels)
             l["require_support"] = req.require_verified ? kSupportVerified : kSupportIntersection;
+    } else if (req.long_supported) {
+        // in the answers that ask for supported paths only (§20.2): the level as requested
+        l["long_search"] = kLongSearchSupported;
+        l["max_paths"] = uint_json(req.request.max_paths);
+        l["supported_paths_level"] = req.level_intersection ? kSupportIntersection : kLevelBest;
+        if (supported_labels)
+            l["require_support"] = req.require_verified ? kSupportVerified : kSupportIntersection;
     }
     if (has_predicate) {
         // in the answers with a predicate only (§19.10): the selection's caps (effective), the
@@ -1848,6 +2477,9 @@ Json::Value process_pattern_request(
         l["max_predicate_labels"] = uint_json(limits.max_predicate_labels);
         l["predicate_strands"] = req.selection.either ? kPredicateStrandsEither
                                                       : kPredicateStrandsContext;
+        // (SPEC §25) as requested, when named
+        if (req.predicate_scope_named)
+            l["predicate_scope"] = req.motif ? kPredicateScopeMotif : kPredicateScopeContext;
     }
     l["clamped"] = std::move(req.clamped);
     out["limits"] = std::move(l);
@@ -1913,7 +2545,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // what a pattern longer than k gets without the option (paths are opt-in: SPEC §12)
     p["long_patterns"] = "anchors_counted";
     // the long_search values served, and the default
-    p["long_search"] = strings_json({ kLongSearchAnchors, kLongSearchPaths });
+    p["long_search"] = strings_json({ kLongSearchAnchors, kLongSearchPaths,
+                                      kLongSearchSupported });
     p["default_long_search"] = kLongSearchAnchors;
     p["strands"] = strings_json({ "both", "forward", "reverse" });
     p["default_strands"] = to_string(Strands::BOTH);
@@ -1958,6 +2591,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     }
     predicate["operators"] = std::move(operators);
     predicate["strands"] = strings_json({ kPredicateStrandsEither, kPredicateStrandsContext });
+    // predicate_scope's values: per context, and also per pattern (SPEC §25)
+    predicate["scopes"] = strings_json({ kPredicateScopeContext, kPredicateScopeMotif });
     predicate["access"] = Json::Value();
     p["predicate"] = std::move(predicate);
     // the budget of a request that names none: unlike the other caps, below the maximum

@@ -1,0 +1,35 @@
+{
+ "patterns": [
+  {
+   "iupac": "GCGGCGGCGGCGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "id": "GCG12-N34-0"
+  },
+  {
+   "iupac": "GCGGCGGCGGCGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "id": "GCG12-N34-1"
+  },
+  {
+   "iupac": "GCGGCGGCGGCGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "id": "GCG12-N34-2"
+  },
+  {
+   "iupac": "GCGGCGGCGGCGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "id": "GCG12-N34-3"
+  },
+  {
+   "iupac": "GCGGCGGCGGCGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "id": "GCG12-N34-4"
+  },
+  {
+   "iupac": "GCGGCGGCGGCGNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+   "id": "GCG12-N34-5"
+  }
+ ],
+ "mode": "partial",
+ "strands": "forward",
+ "long_search": "supported_paths",
+ "max_memory_mb": 1,
+ "output": {
+  "labels": "all"
+ }
+}

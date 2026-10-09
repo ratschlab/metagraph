@@ -912,8 +912,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'default_genetic_code': 1,
             'scopes': ['suffix', 'any_offset'],
             'default_scope': 'any_offset', 'long_patterns': 'anchors_counted',
-            # the paths of long patterns, opt-in
-            'long_search': ['anchors', 'paths'], 'default_long_search': 'anchors',
+            # the paths of long patterns, and their supported paths, opt-in
+            'long_search': ['anchors', 'paths', 'supported_paths'],
+            'default_long_search': 'anchors',
             'strands': ['both', 'forward', 'reverse'], 'graph_mode': 'basic', 'k': self.k,
             'alphabet': '$ACGT', 'strand_stated': True, 'mask': 'file',
             # the masked graph counts exactly, no dummy fraction
@@ -925,9 +926,11 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'finalize_reserve_ms': DEFAULT_FINALIZE_MS,
             # the delivery rates as numbers (MB/s), the prose rules SPEC references
             'delivery_mbps': {'build': 10, 'compress': 50},
-            # predicates: the operators, the strands and the access of a budget-aware index
+            # predicates: the operators, the strands, the scopes (per context, and per
+            # pattern: the motif) and the access of a budget-aware index
             'predicate': {'operators': ['any', 'all', 'none', 'at_least', 'and', 'or', 'not'],
-                          'strands': ['either', 'context'], 'access': 'rows'},
+                          'strands': ['either', 'context'], 'scopes': ['context', 'motif'],
+                          'access': 'rows'},
         }
         self.assertEqual(expected, {x: p[x] for x in expected})
         self.assertEqual(['any_offset'], p['scopes_by_graph_mode']['primary'])
@@ -2178,6 +2181,149 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(0, res.returncode, res.stderr.decode())
         self.assertEqual(untimed(server_out), untimed(json.loads(res.stdout)))
+
+    def test_supported_paths_against_the_fasta(self):
+        """SPEC §20 (TESTS §8): long_search "supported_paths" on the patterns of 35-50 bases, at
+        both levels: the supported paths are the graph-walk oracle's paths (Records.paths) that a
+        column supports along their whole length -- one of its records holding the walk whole
+        (record level), or it carrying every k-mer of the walk (label level) --, each with the
+        columns carrying it, record_verified exactly where a record holds it, with those
+        occurrences; and a predicate on them (SPEC §20.9) selects the supported walks whose
+        support (with "either" also the reverse-complement walk's) satisfies it."""
+        k = self.k
+        patterns = self.long_patterns()
+        rng = random.Random(7)
+        names = sorted(self.columns)
+        supports = {}
+
+        def support(seq, level):
+            if (seq, level) not in supports:
+                carriers, verified = self.path_columns(seq)
+                supports[(seq, level)] = (set(verified) if level == 'record_verified'
+                                          else carriers), carriers, verified
+            return supports[(seq, level)]
+
+        for level in ('record_verified', 'label_intersection'):
+            request = {'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
+                                    for p in patterns],
+                       'long_search': 'supported_paths', 'output': {'labels': 'all'},
+                       'supported_paths_level': 'best' if level == 'record_verified'
+                       else 'label_intersection'}
+            out = self.pattern(self.server, request)
+            for entry, p in zip(out['patterns'], patterns):
+                with self.subTest(pattern=p, level=level):
+                    walks = self.records.paths(p, k)
+                    expected = {(t, w) for t, w in walks if support(w, level)[0]}
+                    c = entry['counts']['supported_paths']
+                    self.assertEqual(level, c['level'])
+                    self.assertCount({x: c[x] for x in ('value', 'relation', 'unit')},
+                                     len(expected), unit='paths')
+                    self.assertEqual(expected, {(r['strand'], r['sequence'])
+                                                for r in entry['results']})
+                    self.assertTrue(entry['retrieval_complete'])
+                    self.assertLessEqual(len(expected), entry['counts']['paths']['value'])
+                    if entry['counts']['paths']['relation'] == 'exact':
+                        self.assertEqual(len(walks), entry['counts']['paths']['value'])
+                    for r in entry['results']:
+                        _, carriers, verified = support(r['sequence'], level)
+                        self.assertEqual(carriers, {x['column'] for x in r['labels']})
+                        for x in r['labels']:
+                            on_record = level == 'record_verified' and x['column'] in verified
+                            self.assertEqual('record_verified' if on_record
+                                             else 'label_intersection', x['support'])
+                            if on_record:
+                                got = {(o['seq_id'], int(o['nt_coords'].split('-')[0]))
+                                       for o in x['occurrence_list']}
+                                self.assertEqual(verified[x['column']], got)
+        # a predicate on the supported paths, both strand settings, every strand set
+        selected = mirrored = 0
+        for t in range(6):
+            pred = self.random_predicate(rng, names)
+            for strands, predicate_strands in (('both', 'either'), ('both', 'context'),
+                                               ('forward', 'either')):
+                request = {'patterns': [{'iupac' if set(p) - set('ACGT') else 'dna': p}
+                                        for p in patterns],
+                           'long_search': 'supported_paths', 'strands': strands,
+                           'predicate': pred, 'predicate_strands': predicate_strands,
+                           'output': {'labels': 'predicate_only'}}
+                out = self.pattern(self.server, request)
+                for entry, p in zip(out['patterns'], patterns):
+                    with self.subTest(predicate=pred, strands=strands,
+                                      predicate_strands=predicate_strands, pattern=p):
+                        walks = {(t2, w) for t2, w in self.records.paths(p, k, strands)
+                                 if support(w, 'record_verified')[0]}
+
+                        def evaluated(w):
+                            got = set(support(w, 'record_verified')[0])
+                            if predicate_strands == 'either':
+                                got |= support(revcomp(w), 'record_verified')[0]
+                            return got
+                        want = {(t2, w) for t2, w in walks if self.holds(pred, evaluated(w))}
+                        self.assertEqual(want, {(r['strand'], r['sequence'])
+                                                for r in entry['results']})
+                        self.assertCount(entry['counts']['selected'], len(want), unit='paths')
+                        selected += len(want)
+                        mirrored += entry['work']['mirror_rows'] > 0
+                        self.assertEqual('completed', entry['selection']['pass'])
+                        self.assertEqual(0, entry['work']['predicate_rows'])
+                        # one strand with "either": each supported walk's mirror is looked
+                        # up, and its rows read where every k-mer of it is in the graph
+                        mirrors_read = predicate_strands == 'either' and strands == 'forward'
+                        readable = any(all(self.records.has_kmer(revcomp(w)[i:i + k])
+                                           for i in range(len(w) - k + 1)) for _, w in walks)
+                        self.assertEqual(mirrors_read and readable,
+                                         entry['work']['mirror_rows'] > 0)
+                        self.assertEqual(len(walks) if mirrors_read else 0,
+                                         entry['work']['predicate_lookups'])
+                        keep = self.holds_names(pred)
+                        for r in entry['results']:
+                            self.assertEqual(evaluated(r['sequence']) & keep,
+                                             set(r['selection_labels']))
+        self.assertGreater(selected, 10)
+        self.assertGreater(mirrored, 0)
+
+    def test_motif_against_the_fasta(self):
+        """SPEC §25 (predicate_scope "motif"): for the predicate patterns and random predicates,
+        both strand settings, the motif is the predicate on the union of the columns over the
+        pattern's contexts (each context's k-mer, with "either" also its reverse complement:
+        the FASTA scan's), decided by every context; each label found listed with the contexts
+        carrying it and the rows it was found on; the absence claim the others."""
+        rng = random.Random(9)
+        names = sorted(self.columns)
+        contexts = {p: self.contexts(p) for _, p in self.PREDICATE_PATTERNS}
+        kmers = {kmer for c in contexts.values() for _, kmer, _ in c}
+        columns = self.kmer_columns(kmers | {revcomp(x) for x in kmers})
+        for t in range(10):
+            pred = self.random_predicate(rng, names)
+            for strands in ('either', 'context'):
+                request = {'patterns': [{kind: p} for kind, p in self.PREDICATE_PATTERNS],
+                           'mode': 'count', 'predicate': pred, 'predicate_strands': strands,
+                           'predicate_scope': 'motif'}
+                out = self.pattern(self.server, request)
+                self.assertEqual('shard_motif', out['predicate']['motif_scope'])
+                keep = self.holds_names(pred)
+                for (_, p), e in zip(self.PREDICATE_PATTERNS, out['patterns']):
+                    with self.subTest(predicate=pred, strands=strands, pattern=p):
+                        found = {}
+                        for _, kmer, _ in contexts[p]:
+                            for n in keep:
+                                x = n in columns[kmer]
+                                y = strands == 'either' and n in columns[revcomp(kmer)]
+                                if x or y:
+                                    f = found.setdefault(n, [0, False, False])
+                                    f[0] += 1
+                                    f[1] |= x
+                                    f[2] |= y
+                        m = e['motif']
+                        self.assertEqual(('every_context', None),
+                                         (m['decided_by'], m['untested']))
+                        self.assertIs(self.holds(pred, set(found)), m['selected'])
+                        got = {x['column']: (x['contexts']['value'], x['strands'])
+                               for x in m['labels_present']}
+                        self.assertEqual({n: (f[0], 'both' if f[1] and f[2] else
+                                              'reverse_complement' if f[2] else 'context')
+                                          for n, f in found.items()}, got)
+                        self.assertEqual(len(keep) - len(found), m['labels_absent'])
 
     def test_cli_answers_as_the_server(self):
         """`metagraph pattern` answers each request file as the server: one process over a panel

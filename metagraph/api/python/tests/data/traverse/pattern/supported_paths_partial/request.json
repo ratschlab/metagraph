@@ -1,0 +1,10 @@
+{
+ "patterns": [
+  {
+   "dna": "ATGGAATTGCCCAATATTATGCACCCGGTCGCGAAGCTGA"
+  }
+ ],
+ "mode": "partial",
+ "long_search": "supported_paths",
+ "max_paths": 1
+}

@@ -126,6 +126,15 @@ struct VirtualClock {
     }
 };
 
+// a JSON list of strings, as the capabilities state their lists
+Json::Value strings_of(std::initializer_list<const char*> values) {
+    Json::Value v(Json::arrayValue);
+    for (const char *s : values) {
+        v.append(s);
+    }
+    return v;
+}
+
 std::string repeat(const std::string &s, size_t n) {
     std::string out;
     for (size_t i = 0; i < n; ++i) {
@@ -206,12 +215,48 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"predicate_strands\": \"both\"}", 400, "invalid_request" },
         { "{" + p + ", \"predicate_strands\": null}", 400, "invalid_request" },
         // a predicate selects supported paths: long_search "paths" is refused, "anchors"
-        // answers long patterns by their anchors; "supported_paths" is not served
+        // answers long patterns by their anchors, "supported_paths" selects among them
         { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": \"paths\", "
           "\"allow_unbudgeted_annotation\": true}", 400, "invalid_request" },
         { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": \"anchors\", "
           "\"allow_unbudgeted_annotation\": true}", 200, "" },
-        { "{" + p + ", \"long_search\": \"supported_paths\"}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": "
+          "\"supported_paths\", \"allow_unbudgeted_annotation\": true}", 200, "" },
+        // the supported-path search reads the annotation in every mode: on this column
+        // annotation it needs the opt-in, whatever the patterns' lengths
+        { "{" + p + ", \"long_search\": \"supported_paths\"}", 400, "annotation_unbudgeted" },
+        { "{" + p + ", \"long_search\": \"supported_paths\", \"mode\": \"count\"}", 400,
+          "annotation_unbudgeted" },
+        { "{" + p + ", \"long_search\": \"supported_paths\", \"allow_unbudgeted_annotation\": "
+          "true}", 200, "" },
+        // supported_paths_level: best or label_intersection, accepted with any request; with
+        // require_support "record_verified" its label level contradicts it (supported_paths)
+        { "{" + p + ", \"supported_paths_level\": \"label_intersection\"}", 200, "" },
+        { "{" + p + ", \"supported_paths_level\": \"best\"}", 200, "" },
+        { "{" + p + ", \"supported_paths_level\": \"record_verified\"}", 400,
+          "invalid_request" },
+        { "{" + p + ", \"supported_paths_level\": null}", 400, "invalid_request" },
+        { "{" + p + ", \"supported_paths_level\": \"label_intersection\", \"require_support\": "
+          "\"record_verified\"}", 200, "" },
+        { "{" + p + ", \"long_search\": \"supported_paths\", \"supported_paths_level\": "
+          "\"label_intersection\", \"require_support\": \"record_verified\", "
+          "\"allow_unbudgeted_annotation\": true}", 400, "invalid_request" },
+        // record_verified on an index that cannot verify: refused with supported_paths in every
+        // mode and projection; the supported-path search verifies without placing, so
+        // occurrences false does not contradict it there
+        { "{" + p + ", \"long_search\": \"supported_paths\", \"require_support\": "
+          "\"record_verified\", \"mode\": \"count\", \"allow_unbudgeted_annotation\": true}", 400,
+          "support_unavailable" },
+        { "{" + p + ", \"long_search\": \"supported_paths\", \"require_support\": "
+          "\"record_verified\", \"output\": {\"labels\": \"all\", \"occurrences\": false}, "
+          "\"allow_unbudgeted_annotation\": true}", 400, "support_unavailable" },
+        // predicate_scope: context or motif, motif needing a predicate
+        { "{" + p + ", \"predicate_scope\": \"context\"}", 200, "" },
+        { "{" + p + ", \"predicate_scope\": \"motif\"}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate_scope\": \"shard_motif\"}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate_scope\": null}", 400, "invalid_request" },
+        { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"predicate_scope\": \"motif\", "
+          "\"allow_unbudgeted_annotation\": true}", 200, "" },
         // long_search is served (paths opt-in); its values are "anchors" (the default) and
         // "paths", nothing else
         { "{" + p + ", \"long_search\": \"paths\"}", 200, "" },
@@ -415,6 +460,16 @@ TEST(PatternRoute, RefusalOrder) {
         { "{" + p + ", \"require_support\": \"record_verified\", \"output\": {\"labels\": "
           "\"all\", \"occurrences\": false}, \"genetic_code\": 7}", "invalid_request",
           "request.require_support" },
+        // then supported_paths_level (its value, then its label level with record_verified
+        // under supported_paths), before genetic_code
+        { "{" + p + ", \"require_support\": \"x\", \"supported_paths_level\": \"x\"}",
+          "invalid_request", "request.require_support" },
+        { "{" + p + ", \"supported_paths_level\": \"x\", \"genetic_code\": 7}",
+          "invalid_request", "request.supported_paths_level: expected one of" },
+        { "{" + p + ", \"long_search\": \"supported_paths\", \"supported_paths_level\": "
+          "\"label_intersection\", \"require_support\": \"record_verified\", "
+          "\"genetic_code\": 7}", "invalid_request",
+          "request.supported_paths_level: \"label_intersection\" with require_support" },
         // then genetic_code (its type, then the table)
         { "{" + p + ", \"genetic_code\": \"x\", \"bogus\": 1}", "invalid_request",
           "request.genetic_code: expected an integer" },
@@ -438,10 +493,20 @@ TEST(PatternRoute, RefusalOrder) {
           "invalid_request", "request.max_predicate_work" },
         { "{" + p + ", \"predicate_strands\": \"x\", \"output\": {\"labels\": "
           "\"predicate_only\"}}", "invalid_request", "request.predicate_strands" },
+        // predicate_scope after predicate_strands, before the combinations
+        { "{" + p + ", \"predicate_strands\": \"x\", \"predicate_scope\": \"x\"}",
+          "invalid_request", "request.predicate_strands" },
+        { "{" + p + ", \"predicate_scope\": \"x\", \"output\": {\"labels\": "
+          "\"predicate_only\"}}", "invalid_request", "request.predicate_scope" },
         { "{" + p + ", \"output\": {\"labels\": \"predicate_only\"}, \"long_search\": "
           "\"paths\", \"bogus\": 1}", "invalid_request", "request.output.labels" },
         { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": \"paths\", "
           "\"bogus\": 1}", "invalid_request", "request.long_search" },
+        { "{" + p + ", \"predicate_scope\": \"motif\", \"bogus\": 1}", "invalid_request",
+          "request.predicate_scope: \"motif\"" },
+        // 10: the supported-path search's reads, in every mode
+        { "{" + p + ", \"long_search\": \"supported_paths\", \"mode\": \"count\"}",
+          "annotation_unbudgeted", "pattern: long_search \"supported_paths\" reads" },
         // 9 before 10: an unknown field before the predicate's annotation_unbudgeted
         { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"bogus\": 1}",
           "invalid_request", "request: unknown field 'bogus'" },
@@ -1007,9 +1072,13 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("file", caps["mask"].asString());
     EXPECT_EQ("basic", caps["graph_mode"].asString());
     EXPECT_EQ(kK, caps["k"].asUInt64());
-    // the access a column annotation (unbudgeted, direct access) gives a selection
-    EXPECT_EQ(3u, caps["predicate"].size());
+    // the access a column annotation (unbudgeted, direct access) gives a selection, and the
+    // scopes a predicate is asked in (SPEC §25)
+    EXPECT_EQ(4u, caps["predicate"].size());
     EXPECT_EQ("columns", caps["predicate"]["access"].asString());
+    EXPECT_EQ(strings_of({ "context", "motif" }), caps["predicate"]["scopes"]);
+    // the long patterns' searches: anchors (the default), every walk, the supported walks
+    EXPECT_EQ(strings_of({ "anchors", "paths", "supported_paths" }), caps["long_search"]);
     {
         PatternLimits p = limits();
         p.max_predicate_contexts = 11;
