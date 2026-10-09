@@ -3409,7 +3409,7 @@ OVERSTATED_KINDS = ('trace_record_boundaries',)
 
 
 # compare() of retrievals with record coordinates
-COORDINATES_NOTE = 'coordinates are not compared (v1)'
+COORDINATES_NOTE = 'coordinates are not compared'
 
 
 def _displayed_parent_price(a, b, sides, depth, rules=None):
@@ -3554,7 +3554,7 @@ def compare(a, b, *, arm=None, labels=None, mode='claims', budget=None):
     labels) when equality must be decided.
 
     Record coordinates are not compared: two retrievals with them compare
-    exactly as without them, and the answer notes it ('coordinates are not compared (v1)').
+    exactly as without them, and the answer notes it ('coordinates are not compared').
 
     Displayed parents (the majority-parent rule, SPEC §7.1): from feature level 6 a merge
     displays the parent carried by the most labels, before it the first to arrive. Claims,

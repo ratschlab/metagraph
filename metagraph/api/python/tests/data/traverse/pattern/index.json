@@ -903,7 +903,7 @@
    "status": 200,
    "hand_made": false,
    "headers": {},
-   "shows": "a pattern longer than k with a predicate under long_search \"anchors\" (the default): its anchors' answer as without it (withheld paths_later_increment), its selection not_started (a predicate selects supported paths, a later increment)"
+   "shows": "a pattern longer than k with a predicate under long_search \"anchors\" (the default): its anchors' answer as without it (withheld paths_later_increment), its selection not_started (a predicate selects supported paths, not served by this build)"
   },
   "predicate_unmasked": {
    "server": "unmasked_unchecked",
@@ -948,7 +948,7 @@
    "status": 400,
    "hand_made": false,
    "headers": {},
-   "shows": "400 invalid_request: a predicate with long_search \"paths\" (P24: a predicate selects among supported paths, long_search \"supported_paths\", a later increment)"
+   "shows": "400 invalid_request: a predicate with long_search \"paths\" (P24: a predicate selects among supported paths, long_search \"supported_paths\", not served by this build)"
   },
   "predicate_too_large": {
    "server": "masked_small_predicate_cap",

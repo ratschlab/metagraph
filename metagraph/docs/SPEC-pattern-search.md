@@ -1155,7 +1155,7 @@ It costs no step.
 | `protein_residues` | list of one-letter strings | the 20 amino acids then `X`, `B`, `Z`, `J`, `*` | increment 5: the residues a `protein` pattern may hold (§12.2); the stop `*` since the owner's decision #19 of 2026-10-08 (it was not among them before) |
 | `genetic_codes` | list of integers | `[1, 2, 3, 4, 5, 6, 9, 10, …, 16, 21, …, 33]` | increment 5: the NCBI translation table ids `genetic_code` accepts (gc.prt version 4.6) |
 | `default_genetic_code` | integer | `1` | increment 5: an omitted `genetic_code` (the standard code) |
-| `protein_rule` | string | `"SPEC-pattern-search.md sections 12.2, 18"` | increment 5: a reference to the rule of how a peptide is read (§12.2: the ambiguity codes, the stop `*`, the codon automaton, the length in bases, the slot error, the context stops of tables 27, 28 and 31 and the note `no_stop_codon`; §18); since the owner's decision P9 (§18) a reference, the rule in prose before. Printable ASCII; for people, not parsed |
+| `protein_rule` | string | `"SPEC-pattern-search.md section 12.2"` | increment 5: a reference to the rule of how a peptide is read (§12.2: the ambiguity codes, the stop `*`, the codon automaton, the length in bases, the slot error, the context stops of tables 27, 28 and 31 and the note `no_stop_codon`); since the owner's decision P9 (§18) a reference, the rule in prose before. Printable ASCII; for people, not parsed |
 | `default_scope` | string | `"any_offset"` | |
 | `scopes_by_graph_mode` | object | `basic`, `canonical`: `["suffix", "any_offset"]`; `primary`: `["any_offset"]` | the rule |
 | `scopes` | list \| null | | this graph's requestable scopes |

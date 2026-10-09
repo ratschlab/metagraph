@@ -180,9 +180,9 @@ NO_FIXTURE = {
 # since an older build of version 1 answers them and a client keeps handling them, but written
 # by no source of this build and held by no fixture.
 RETIRED = {
-    'mask_required': 'owner decision #16 of 2026-10-08: a graph without its dummy-edge mask is '
-                     'served, its counts upper bounds with an estimate (capabilities counting '
-                     'upper_bound; the unmasked_* fixtures)',
+    'mask_required': 'a graph without its dummy-edge mask is served, its counts upper bounds '
+                     'with an estimate (capabilities counting upper_bound; the unmasked_* '
+                     'fixtures)',
 }
 # The alphabet the route serves (pattern.cpp alphabet_refusal): on any other the alphabet's
 # reason comes first, mask or none
@@ -2163,7 +2163,7 @@ class Checker:
         # server escapes any other byte as \uXXXX), and the delivery rates of the time kept
         # back for the answer (§7.6) are numbers
         for f in ('protein_rule', 'caps_rule'):
-            self.ok(isinstance(b[f], str) and 'SPEC-pattern-search.md sections ' in b[f]
+            self.ok(isinstance(b[f], str) and 'SPEC-pattern-search.md section' in b[f]
                     and all(' ' <= c <= '~' for c in b[f]), f'{path}.{f}',
                     'a reference to the SPEC, printable ASCII')
         self.keys(b['delivery_mbps'], SCHEMA['delivery_mbps'], path + '.delivery_mbps')
@@ -3001,7 +3001,7 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertRefusesMutations(cases)
         # the capabilities
         for field, value, says in (('caps_rule', 'max_contexts ... see the SPEC', 'reference'),
-                                   ('protein_rule', 'SPEC-pattern-search.md sections §12.2',
+                                   ('protein_rule', 'SPEC-pattern-search.md section §12.2',
                                     'ASCII'),
                                    ('delivery_mbps', {'build': 10}, 'fields'),
                                    ('delivery_mbps', {'build': 10, 'compress': '50'}, 'MB/s'),

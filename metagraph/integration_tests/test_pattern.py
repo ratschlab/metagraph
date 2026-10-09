@@ -929,9 +929,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         }
         self.assertEqual(expected, {x: p[x] for x in expected})
         self.assertEqual(['any_offset'], p['scopes_by_graph_mode']['primary'])
-        for rule, sections in (('caps_rule', '4.5, 7.4, 7.6, 12.1, 19'),
-                               ('protein_rule', '12.2, 18')):
-            self.assertTrue(p[rule].endswith('SPEC-pattern-search.md sections ' + sections), rule)
+        for rule, sections in (('caps_rule', 'sections 4.5, 7.4, 7.6, 12.1, 19'),
+                               ('protein_rule', 'section 12.2')):
+            self.assertTrue(p[rule].endswith('SPEC-pattern-search.md ' + sections), rule)
         self.assertTrue(all(cap in p['caps_rule'] for cap in p['caps']))
         # the same block on the probe a service reads (§7.3)
         probe = self.server.get('traverse/capabilities').json()
@@ -2838,7 +2838,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
         try:
             ret = server.post('pattern', {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'})
             self.assertEqual(400, ret.status_code)
-            self.assertEqual({'error': 'pattern: multi-graph servers in a later increment',
+            self.assertEqual({'error': 'pattern: not served by this build on a multi-graph server',
                               'code': 'later_increment'}, ret.json())
             # nor is this refusal written to a client that left
             self.assertEqual(b'', half_closed_request(
@@ -3189,8 +3189,21 @@ class TestPatternRegression(TestingBase):
             if isinstance(value, list):
                 return [without_instance(v) for v in value]
             return value
-        a = without_instance(self.base.get('capabilities').json())
-        b = without_instance(self.new.get('capabilities').json())
+
+        def without_reworded(caps):
+            # prose whose wording this build changed, the rule it states unchanged: compared as
+            # present, not by its text
+            for path in (('attempts', 'delivery_reserve', 'calibration'),
+                         ('deadline_check', 'rule'), ('decode_cache', 'rule')):
+                block = caps
+                for key in path[:-1]:
+                    block = block.get(key, {})
+                if path[-1] in block:
+                    self.assertIsInstance(block[path[-1]], str, path)
+                    block[path[-1]] = None
+            return caps
+        a = without_reworded(without_instance(self.base.get('capabilities').json()))
+        b = without_reworded(without_instance(self.new.get('capabilities').json()))
         self.assertIn('pattern', b)
         self.assertEqual(a['features'] + ['pattern'], b['features'])
         self.assertEqual(dict(a['routes'], pattern='POST /pattern'), b['routes'])
@@ -3204,8 +3217,8 @@ class TestPatternRegression(TestingBase):
         self.assertTrue(b['resolve']['time_budget']['accepted'])
         self.assertIsNone(b['resolve']['time_budget']['default'])
         # the probe gains the same two blocks and nothing else
-        a = without_instance(self.base.get('traverse/capabilities').json())
-        b = without_instance(self.new.get('traverse/capabilities').json())
+        a = without_reworded(without_instance(self.base.get('traverse/capabilities').json()))
+        b = without_reworded(without_instance(self.new.get('traverse/capabilities').json()))
         new_caps = self.new.get('capabilities').json()
         for block in ('pattern', 'resolve'):
             self.assertEqual(new_caps[block], b.pop(block), block)

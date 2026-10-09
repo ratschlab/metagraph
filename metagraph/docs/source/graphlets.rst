@@ -1513,7 +1513,7 @@ with the reason ``a`` recorded for them).
 
 ``equal`` is ``None`` whenever ``comparable`` is not ``True``; a note then says whether a
 difference was found. Record coordinates are not compared: two retrievals with them
-compare exactly as without, and the notes say ``coordinates are not compared (v1)``.
+compare exactly as without, and the notes say ``coordinates are not compared``.
 The constrained trie over ``{acc1, acc3}`` equals the
 label-free oracle filtered to those labels, and without the filter the oracle's
 ``acc2`` claim is reported:

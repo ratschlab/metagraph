@@ -921,8 +921,8 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
   seeds, also reads the clock (the bound) and, at most every 100 ms, the client's socket — so a cancel reaches the
   walk at its next checkpoint, the bound and a gone client within eight. The poll before every chunk of a paced
   annotation read (*chunked deadlines*, below) reads the clock and the socket too, so a stop that falls inside
-  a read the deadline splits is seen within one chunk; a read far from its deadline is one piece, as before
-  pass 5, and a cancel or a gone client is seen at the checkpoint after it.
+  a read the deadline splits is seen within one chunk; a read far from its deadline is one piece, and a
+  cancel or a gone client is seen at the checkpoint after it.
   - **`cancelled`** (`POST /traverse/cancel`) and **`attempt_deadline`** (the attempt reached its bound,
     below), requests with `attempt_id` only: the seed being walked stops like a budget at the next checkpoint —
     its heads censored with `resource_limit` (`Y`), `complete_to_bp` the last complete level, a `resource_stop`
@@ -1017,10 +1017,10 @@ response is delivered whole (`outcome.delivery: inline`, §7.0; spooled / paged 
     that vary between responses, and `stop_ms` the time from the walk-until to the walk's end — the walk stops
     at its first poll that reads the clock after the walk-until (after a chunk of an annotation read, a
     lookahead's poll, or the heads between two readings of the clock), then finalises the stopped seed: `delivery_reserve.stop_ms`
-    (`--traverse-chunk-target-ms` + 950; + 200 before feature level 4: SRA attempts stopped 352 ms after their
-    walk-until on a quiet fresh server in the efficiency pass and 1,001 ms on a loaded one, once 1,699 ms under
-    load in pass 5 on a 400 MB result — a finalisation that grows with the result is covered by the 1.25 margin as
-    long as it runs faster than 4 × `build_mbps`, about 235 MB/s for that result against 40 MB/s needed), or the longest such time the server
+    (`--traverse-chunk-target-ms` + 950: SRA attempts stopped 352 ms after their walk-until on a quiet fresh
+    server and 1,001 ms on a loaded one, once 1,699 ms under load on a 400 MB result — a finalisation that grows
+    with the result is covered by the 1.25 margin as long as it runs faster than 4 × `build_mbps`, about 235 MB/s
+    for that result against 40 MB/s needed), or the longest such time the server
     measured over its last 16 attempts that walked past their walk-until when longer (`measured_stop_ms`). Both
     capabilities routes state where these starting estimates come from (`delivery_reserve.calibration`, feature
     level 4); only the walk-until of attempts (`usage.bound.walk_until_ms`, and where a reserve stops a walk) can

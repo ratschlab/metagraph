@@ -71,7 +71,7 @@ constexpr const char kCapsRule[] = "max_contexts, max_anchors, max_paths, max_st
     "fields (lowered, in limits.clamped); max_patterns, min_information_bits, "
     "max_checked_entries, max_predicate_labels: server policy. "
     "SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1, 19";
-constexpr const char kProteinRule[] = "SPEC-pattern-search.md sections 12.2, 18";
+constexpr const char kProteinRule[] = "SPEC-pattern-search.md section 12.2";
 
 // The note of an entry answered on a graph without its dummy-edge mask (counting "upper_bound")
 // where a count carries an estimate: each such count is the bounds [lower, upper], upper the
@@ -211,7 +211,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         }
         for (const char *field : kLaterIncrementFields) {
             if (name == field)
-                throw later("request." + name + ": '" + name + "' in a later increment");
+                throw later("request." + name + ": '" + name + "' is not served by this build");
         }
     }
 
@@ -458,9 +458,9 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     if (req.predicate && req.long_paths) {
         throw invalid("request.long_search: \"paths\" with a predicate: a predicate selects "
                       "among the supported paths of a pattern longer than k (long_search "
-                      "\"supported_paths\", a later increment), never among every graph walk; "
-                      "send long_search \"anchors\" (a pattern longer than k is then answered "
-                      "by its anchors, its selection not_started)");
+                      "\"supported_paths\", not served by this build), never among every graph "
+                      "walk; send long_search \"anchors\" (a pattern longer than k is then "
+                      "answered by its anchors, its selection not_started)");
     }
 
     f.finish();
@@ -487,8 +487,8 @@ std::string support_message(const GraphSupport &support) {
     }
     if (support.reason == "mask_invalid") {
         return "pattern: the graph's dummy-edge mask (.edgemask) marks dummy edges with W = $ "
-               "valid (as `metagraph extend` on a masked graph used to write it, or a stale "
-               "mask): counts on it would take dummy edges for k-mers and could be claimed "
+               "valid (as an older build's `metagraph extend` writes it on a masked graph, or a "
+               "stale mask): counts on it would take dummy edges for k-mers and could be claimed "
                "exact while too large; rebuild the mask with `metagraph transform --mask-dummy "
                "--force <graph>.dbg` (writes the .edgemask beside the graph; node ids and "
                "annotation unchanged) and restart the server";

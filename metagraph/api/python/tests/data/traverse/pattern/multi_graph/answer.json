@@ -1,4 +1,4 @@
 {
  "code": "later_increment",
- "error": "pattern: multi-graph servers in a later increment"
+ "error": "pattern: not served by this build on a multi-graph server"
 }

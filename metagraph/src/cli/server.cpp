@@ -968,7 +968,8 @@ int run_server(Config *config) {
             return translated([&]() {
                 if (config->fnames.size()) {
                     throw PatternRefusal(400, "later_increment",
-                                         "pattern: multi-graph servers in a later increment");
+                                         "pattern: not served by this build on a multi-graph "
+                                         "server");
                 }
                 if (anno_graph.wait_for(0s) != std::future_status::ready)
                     throw CurrentlyInitializingError();
@@ -1326,7 +1327,7 @@ int run_server(Config *config) {
             "the time left), taken in the walk's order (the rows of one path share their "
             "row-diff decoding), and the rest is one piece once predicted at that rate to take "
             "less than 1/{} of the time left. A read far from its deadline is thus one piece, "
-            "as before, and a cancel or a gone client is seen after it. A seed's validation is "
+            "and a cancel or a gone client is seen after it. A seed's validation is "
             "stopped by the attempt only, never by its own time budget. One chunk, at least "
             "one row, is uninterruptible, and no time bound on one piece is stated "
             "(max_uninterruptible_ms: null, and it stays null: checkpoints inside reads bound "
@@ -1335,8 +1336,8 @@ int run_server(Config *config) {
             "single piece of this process (below), a whole read far from its deadline included, "
             "an observation, not a bound. A chunked read returns exactly what one read would (the "
             "same rows, caches and counters) unless the deadline stops it, and a stopped read "
-            "censors the walk at the read (the unchunked walk ran it to its end, past the "
-            "deadline, before its next check). The lookahead's chains (graph steps along "
+            "censors the walk at the read (an unchunked read would run to its end, past the "
+            "deadline, before the walk's next check). The lookahead's chains (graph steps along "
             "unbranched runs, up to min(annotation.batch_kmers, the radius left) per head of a "
             "level) read the same deadlines every {} graph steps and before each chain's key "
             "mapping, and a stop ends the lookahead there. The text of each seed's result and of "
@@ -1441,9 +1442,9 @@ int run_server(Config *config) {
             "generations: the older is dropped when the current one fills half the bound): the "
             "rows asked for, the 8 rows after each on its path, every row whose distance to its "
             "anchor is a multiple of 16 (anchors included) and every row whose copy holds less "
-            "than 4096 bytes — not every row of every path, which copied each wide row of a long "
-            "path and made first reads slower than without the cache (tuple rows are kept flat: "
-            "columns, ends, coordinates). What a "
+            "than 4096 bytes — not every row of every path, which would copy each wide row of a "
+            "long path and make first reads slower than without the cache (tuple rows are kept "
+            "flat: columns, ends, coordinates). What a "
             "read returns, the work units charged (each row with its whole row-diff path) and "
             "the memory admissions (each row by the demand of its whole path) do not depend on "
             "it; the decode time and the physical counters in timing do. Without a memory budget "

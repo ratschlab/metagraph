@@ -5319,8 +5319,8 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     t["check_kmers"] = uint_json(kResolveCheckKmers);
     t["check_labels"] = uint_json(kResolveCheckLabels);
     t["stop_phases"] = strings_json({ "rows", "support" });
-    t["rule"] = "opt-in: a request without bounds.time_budget_ms runs without a deadline, as "
-        "before, whatever max_time_ms; with it, a number of ms above finalize_reserve_ms (else "
+    t["rule"] = "opt-in: a request without bounds.time_budget_ms runs without a deadline, "
+        "whatever max_time_ms; with it, a number of ms above finalize_reserve_ms (else "
         "400), lowered to max_time_ms when that is not 0 (stated in limits.clamped), the "
         "deadline starting when the request's body is parsed. The work stops at the budget "
         "less finalize_reserve_ms: the deadline is read between two batches of annotation rows "

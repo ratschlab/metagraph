@@ -1021,7 +1021,7 @@ TEST(PatternRoute, Capabilities) {
                             .asDouble());
     for (const char *rule : { "caps_rule", "protein_rule" }) {
         const std::string text = caps[rule].asString();
-        EXPECT_NE(std::string::npos, text.find("SPEC-pattern-search.md sections ")) << rule;
+        EXPECT_NE(std::string::npos, text.find("SPEC-pattern-search.md section")) << rule;
         // written as it is (a byte outside printable ASCII would be escaped as \uXXXX)
         EXPECT_TRUE(std::all_of(text.begin(), text.end(),
                                 [](char c) { return c >= 0x20 && c < 0x7f; })) << rule;
@@ -1068,8 +1068,8 @@ TEST(PatternRoute, Capabilities) {
                                  24, 25, 26, 27, 28, 29, 30, 31, 32, 33 }), codes);
     EXPECT_EQ(1, caps["default_genetic_code"].asInt());
     EXPECT_EQ(std::string::npos, caps["protein_rule"].asString().find("stop_unsupported"));
-    // §12.2 holds the rule (residues, the stop '*', no_stop_codon), §18 the stop's decisions
-    EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("12.2, 18"));
+    // §12.2 holds the rule (residues, the stop '*', no_stop_codon)
+    EXPECT_EQ("SPEC-pattern-search.md section 12.2", caps["protein_rule"].asString());
     // a graph with its mask counts exactly, and has no dummy fraction
     EXPECT_EQ("exact", caps["counting"].asString());
     EXPECT_TRUE(caps.isMember("dummy_fraction"));

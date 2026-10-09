@@ -1297,7 +1297,7 @@ FIXTURES = [
          {'patterns': [p(NDM_40, ident='NDM-40')], 'predicate': {'any': ['562']}}, 200,
          'a pattern longer than k with a predicate under long_search "anchors" (the default): '
          'its anchors\' answer as without it (withheld paths_later_increment), its selection '
-         'not_started (a predicate selects supported paths, a later increment)',
+         'not_started (a predicate selects supported paths, not served by this build)',
          entries(expect_all(exact(2), withheld('paths_later_increment'),
                             lambda e: check(e['selection']['pass'] == 'not_started'
                                             and e['counts']['selected']['relation']
@@ -1336,7 +1336,7 @@ FIXTURES = [
     post('predicate_paths_refused', 'masked',
          {'patterns': [p(NDM_40)], 'predicate': {'any': ['562']}, 'long_search': 'paths'}, 400,
          '400 invalid_request: a predicate with long_search "paths" (P24: a predicate selects '
-         'among supported paths, long_search "supported_paths", a later increment)',
+         'among supported paths, long_search "supported_paths", not served by this build)',
          refused('invalid_request')),
     post('predicate_too_large', 'masked_small_predicate_cap',
          {'patterns': [p(NDM_F)], 'predicate': {'any': MINI_COLUMNS[:SMALL_PREDICATE_CAP + 1]}},
@@ -1709,12 +1709,12 @@ def readme(fixtures):
         '`alphabet_unsupported` (a graph of another alphabet does not load in this build),',
         '`mask_invalid` (a graph extended after masking by an older build, or a stale mask) or',
         '`alphabet_untested` (a DNA5 build); test_pattern_fixtures.py names them in NO_FIXTURE.',
-        '`mask_required` is retired (owner decision #16 of 2026-10-08): a graph without its',
-        'dummy-edge mask is served with upper bounds and estimates (the `unmasked_*` fixtures),',
-        'and no build since answers it; test_pattern_fixtures.py names it in RETIRED. A pattern',
-        'with few unchecked candidates there (at most `caps.max_checked_entries`, 50 by default)',
-        'has each tested and its counts exact (owner decision #24: `unmasked_checked`,',
-        '`unmasked_checked_dummies`); the server `unmasked_unchecked` has the check off.',
+        '`mask_required` is retired: a graph without its dummy-edge mask is served with upper',
+        'bounds and estimates (the `unmasked_*` fixtures), and no build that serves such a graph',
+        'answers it; test_pattern_fixtures.py names it in RETIRED. A pattern with few unchecked',
+        'candidates there (at most `caps.max_checked_entries`, 50 by default) has each tested',
+        'and its counts exact (`unmasked_checked`, `unmasked_checked_dummies`); the server',
+        '`unmasked_unchecked` has the check off.',
         '',
     ]
     for f in fixtures:
