@@ -181,7 +181,8 @@ inline std::vector<uint32_t> in_submitted(std::vector<uint32_t> positions,
         for (uint32_t &i : positions) {
             i = static_cast<uint32_t>(L - 1 - i);
         }
-        std::sort(positions.begin(), positions.end());
+        // (ascending positions mirrored are descending)
+        std::reverse(positions.begin(), positions.end());
     }
     return positions;
 }

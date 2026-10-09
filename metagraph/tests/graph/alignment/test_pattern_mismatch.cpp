@@ -525,8 +525,9 @@ TEST(PatternMismatch, PassZeroIsTheSearchWithoutMismatches) {
             ASSERT_TRUE(b.stop || s == steps);
             if (s == steps) {
                 // pass 0 completed; a stop, if any, came in a later pass
-                if (b.stop)
+                if (b.stop) {
                     EXPECT_LT(0, *b.stop->mismatch_level);
+                }
                 EXPECT_EQ(steps, b.work.steps_by_mismatches.at(0));
                 EXPECT_EQ(v1.contexts->total.value, b.contexts->by_mismatches.at(0).value);
                 EXPECT_EQ(v1.contexts->total.relation, b.contexts->by_mismatches.at(0).relation);
@@ -596,8 +597,9 @@ uint8_t check_stopped(const Result &r, const Truth &truth, bool exact_below = tr
     for (uint8_t u = 0; u < levels.size(); ++u) {
         EXPECT_TRUE(true_relation(levels[u], truth.by_level[u])) << "level " << int(u);
         if (u < t) {
-            if (exact_below)
+            if (exact_below) {
                 EXPECT_EQ(Relation::EXACT, levels[u].relation) << "level " << int(u);
+            }
         } else if (u == t) {
             switch (levels[u].relation) {
                 case Relation::AT_LEAST:
@@ -979,8 +981,9 @@ TEST(PatternMismatch, PartialKeepsTheClosestLevels) {
             EXPECT_EQ(all.work.steps, r.work.steps);
             EXPECT_LE(r.work.spans_retained_peak, std::max<uint64_t>(4096, 2 * (cap + 500)) + 1)
                 << mode_name(mode) << " cap " << cap;
-            if (!cap)
+            if (!cap) {
                 EXPECT_EQ(0u, r.work.spans_retained_peak);
+            }
         }
     }
 }
