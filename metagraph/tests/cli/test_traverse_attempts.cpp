@@ -72,8 +72,8 @@ AttemptSettings settings_with(FakeClock *clock, uint64_t retention_s = 60,
     s.client_check_ms = 0;
     s.poll_stride = 1;
     // a stop time below the floor (allowance / 2), so that the bounds these tests compute are
-    // the floor's unless a test sets the reserve's parts (the default, 1000 since the
-    // efficiency pass's calibration, would exceed this allowance's floor)
+    // the floor's unless a test sets the reserve's parts (the default, 1000, would exceed this
+    // allowance's floor)
     s.delivery_stop_ms = 250;
     if (clock) {
         s.clock = clock->fn();
@@ -127,7 +127,7 @@ TEST(GraphletAttempt, IdsAreValidated) {
     EXPECT_THROW(attempt_ids(r), InvalidRequest);
     r.removeMember("locus_id");
     EXPECT_NO_THROW(attempt_ids(r));
-    // expect_server_instance (review of pass 5, finding 1): a token, with attempt_id only
+    // expect_server_instance: a token, with attempt_id only
     r["expect_server_instance"] = "0123456789abcdef";
     EXPECT_THROW(attempt_ids(r), InvalidRequest);
     r["attempt_id"] = "a1";
@@ -232,9 +232,9 @@ TEST(GraphletAttempt, GoneClientAbandonsTheAttempt) {
     EXPECT_THROW(b->check_delivery(), AttemptAborted);
 }
 
-// The review of the stage-4 backend, F5: a seed whose walk the client's departure cut is
-// abandoned, not finished — in the usage and in the state kept after the attempt finished; a
-// seed whose walk ended before its result was abandoned stays finished
+// A seed whose walk the client's departure cut is abandoned, not finished — in the usage and
+// in the state kept after the attempt finished; a seed whose walk ended before its result was
+// abandoned stays finished
 TEST(GraphletAttempt, AbandonedWalksAreNotFinished) {
     FakeClock clock;
     AttemptRegistry registry(settings_with(&clock));
@@ -270,8 +270,8 @@ TEST(GraphletAttempt, AbandonedWalksAreNotFinished) {
 // The stop latency is measured where a seed's walk ends: its first seed_walked. A second call
 // for the seed comes while its result is built (the client left, or a writer refused it), and
 // the time since the walk-until then includes building, which the reserve prices apart. Taken
-// as a stop, it became the server's measured_stop_ms, and later attempts whose bound was no
-// longer walked nothing (review of 2026-10-06, U11-01: 10.5 s recorded after a 400 ms stop)
+// as a stop, it would become the server's measured_stop_ms, and later attempts whose bound was
+// no longer than it would walk nothing (10.5 s recorded after a 400 ms stop)
 TEST(GraphletAttempt, StopLatencyIsMeasuredWhereTheWalkEnds) {
     FakeClock clock;
     AttemptRegistry registry(settings_with(&clock));
@@ -303,7 +303,7 @@ TEST(GraphletAttempt, StopLatencyIsMeasuredWhereTheWalkEnds) {
         EXPECT_NEAR(stop, registry.measured().stop_ms, 1e-6) << second;
     }
     // a walk that ended before its walk-until measures nothing, however late a second call
-    // comes (the reviewer's variant B: 6,000 ms recorded for a walk that never passed it)
+    // comes (not 6,000 ms for a walk that never passed it)
     AttemptRegistry other(settings_with(&clock));
     clock.ms = 0;
     auto b = attempt_of(other, "early");
@@ -326,12 +326,12 @@ TEST(GraphletAttempt, StopLatencyIsMeasuredWhereTheWalkEnds) {
     other.note_stop_latency(b->own_stop_ms());
     EXPECT_EQ(0.0, other.measured().stop_ms);
     EXPECT_TRUE(other.capabilities_json()["delivery_reserve"]["measured_stop_ms"].isNull());
-    // the counters are once per seed, as before
+    // the counters are once per seed
     EXPECT_EQ(1u, b->usage_json("client_gone")["seeds"]["finished"].asUInt64());
 }
 
-// not_after_ms (pass 5, W1): an integer in [0, 2^53 - 1], with or without attempt_id; a
-// fraction, a sign, a string or a value no JSON reader keeps exactly is a 400 naming the field
+// not_after_ms: an integer in [0, 2^53 - 1], with or without attempt_id; a fraction, a sign, a
+// string or a value no JSON reader keeps exactly is a 400 naming the field
 TEST(GraphletAttempt, NotAfterMsIsParsedStrictly) {
     Json::Value r;
     r["not_after_ms"] = Json::UInt64(1759601000000ull);
@@ -457,8 +457,8 @@ TEST(GraphletAttemptRegistry, NotAfterMsRefusesAtStart) {
     EXPECT_FALSE(registry.state("c").second.isMember("not_after_ms"));
 }
 
-// The attempts block of both capabilities routes (W1, W4): integers where usage.bound states
-// integers, the hard cap, the clock skew a ledger adds, the not_after rule
+// The attempts block of both capabilities routes: integers where usage.bound states integers,
+// the hard cap, the clock skew a ledger adds, the not_after rule
 TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
     AttemptSettings s;
     s.clock_skew_ms = 2500;
@@ -482,7 +482,7 @@ TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
     }
     EXPECT_EQ(fields, att["fields"]);
     EXPECT_NE(std::string::npos, att["not_after"].asString().find("clock_skew_allowance_ms"));
-    // the review's sentence: an unanswered request may already be running
+    // an unanswered request may already be running
     EXPECT_NE(std::string::npos, att["not_after"].asString().find("cannot start subsequently"));
     EXPECT_EQ(std::string::npos, att["not_after"].asString().find("never started"));
     EXPECT_EQ(registry.server_instance(), att["server_instance"].asString());
@@ -498,16 +498,16 @@ TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
                                 "exactly that not_after_ms", "expect_server_instance",
                                 "never released early",
                                 "not_after_ms + clock_skew_allowance_ms + bound_ms",
-                                // the review of the pass-5 fixes, finding 1: what a finished
-                                // state promises, and what it assumes
+                                // what a finished state promises, and what it
+                                // assumes
                                 "A finished attempt's id stays refused (409)",
                                 "never dropped early",
                                 "assumes that no copy of the request arrives after the attempt "
                                 "left retention" }) {
         EXPECT_NE(std::string::npos, att["release_rule"].asString().find(phrase)) << phrase;
     }
-    // findings 2 and 3: the hold is live through suppressed_until_ms inclusive, and a refused
-    // copy is judged by its own not_after_ms alone
+    // the hold is live through suppressed_until_ms inclusive, and a refused copy is judged by
+    // its own not_after_ms alone
     for (const char *phrase : { "suppressed_until_ms",
                                 "the wall clock while it reads at most suppressed_until_ms "
                                 "(inclusive)",
@@ -526,12 +526,12 @@ TEST(GraphletAttemptRegistry, CapabilitiesStateIntegers) {
                                          .find("no_suppression"));
 }
 
-// Pass 5, W6: the seeds stop being walked at bound - max(allowance / 2, reserve), the reserve
-// 1.25 times the time to compress the text written so far and the walked seed's estimated text
-// (its account / the account per text byte), and to build the latter — at the configured rates
-// and ratios until the server or the attempt measured its own — plus the time from the
-// walk-until to the walk's end (review of pass 5, F3: without the margin and that time, a
-// response the model fitted exactly was a 503 about half the time)
+// The seeds stop being walked at bound - max(allowance / 2, reserve), the reserve 1.25 times
+// the time to compress the text written so far and the walked seed's estimated text (its
+// account / the account per text byte), and to build the latter — at the configured rates and
+// ratios until the server or the attempt measured its own — plus the time from the walk-until
+// to the walk's end (without the margin and that time, a response the model fitted exactly
+// would be a 503 about half the time)
 TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     FakeClock clock;
     AttemptSettings s = settings_with(&clock);
@@ -539,8 +539,7 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     s.delivery_compress_mbps = 50;     // 50,000 bytes per ms
     s.delivery_build_mbps = 5;         // 5,000 bytes per ms
     s.delivery_stop_ms = 100;
-    // the ratios this arithmetic is written for (the defaults are 30 and 50 since the
-    // efficiency pass's calibration)
+    // the ratios this arithmetic is written for (the defaults are 30 and 50)
     s.account_per_text_byte_json = 20;
     s.account_per_text_byte_graphlet = 40;
     auto reserve = [](double model, double stop = 100) { return 1.25 * model + stop; };
@@ -576,7 +575,7 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     EXPECT_NEAR(until, a->walk_until_ms(), 1e-9);
     // the walk stops at the moved instant; usage states the walk-until in force when it stopped
     // the walk (not the lowest computed, 70,000 - reserve(8800), before the first seed was
-    // delivered: review of pass 5, F4), also once the seed is delivered and the reserve shrinks
+    // delivered), also once the seed is delivered and the reserve shrinks
     ASSERT_FALSE(registry.start(a));
     clock.ms = static_cast<int64_t>(until) - 1;
     EXPECT_EQ(ExternalStop::NONE, a->poll(true));
@@ -609,8 +608,8 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     f->progress(1000);
     EXPECT_EQ(35'000u, f->usage_json("completed")["bound"]["walk_until_ms"].asUInt64());
     // ... also when the walk-until falls only once the last seed's text is written (its exact
-    // bytes, no walk left): no poll read that one, so it bounded no walk (review of pass 5:
-    // usage read 20174 for a walk its own 30 s budget ended)
+    // bytes, no walk left): no poll read that one, so it bounded no walk (usage does not state
+    // 20174 for a walk its own 30 s budget ended)
     clock.ms = 0;
     ASSERT_FALSE(registry.start(f));
     EXPECT_EQ(ExternalStop::NONE, f->poll(true));          // before the seed (between seeds)
@@ -653,7 +652,7 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
     EXPECT_EQ(20, r["account_per_text_byte"]["json"].asDouble());
     EXPECT_EQ(40, r["account_per_text_byte"]["graphlet"].asDouble());
     EXPECT_NE(std::string::npos, r["calibration"].asString().find("starting estimates"));
-    // the calibrated starting estimates (the efficiency pass; 20, 40 and 250 before)
+    // the calibrated starting estimates
     const AttemptSettings defaults;
     EXPECT_EQ(30, defaults.account_per_text_byte_json);
     EXPECT_EQ(50, defaults.account_per_text_byte_graphlet);
@@ -719,13 +718,12 @@ TEST(GraphletAttempt, DeliveryReserveMovesTheWalkUntil) {
 // a poll READING THE CLOCK compared with: every poll_stride-th poll of a walk, every forced poll
 // (between seeds, before a paced read's chunk, in the lookahead). A lower one that the reserve
 // set at a level's end and that only polls not reading the clock saw is not stated — the rule
-// "a value no poll read bounded no walk" (review of pass 5, F4). The review of 2026-10-06 (C20,
-// U11-02) found the texts claiming "the lowest in force while a seed was walked"; this pins the
-// code's rule with the server's stride (8) as the corrected texts state it. The reviewer's
-// driver: one head per level and one non-forced poll before each; at the end of level 8 the
-// seed's estimated text jumps from 1 MB to 40 MB (walk-until 65,000 -> 58,900); the clock-reading
-// poll was the 8th (level 7), so levels 9-11 are walked under 58,900 with polls that do not read
-// the clock, and the delivered seed raises the walk-until again: stride 8 states 65,000, stride 1
+// "a value no poll read bounded no walk". The texts state this rule ("the lowest in force while
+// a seed was walked" would be wrong); this pins it with the server's stride (8). The driver:
+// one head per level and one non-forced poll before each; at the end of level 8 the seed's
+// estimated text jumps from 1 MB to 40 MB (walk-until 65,000 -> 58,900); the clock-reading poll
+// was the 8th (level 7), so levels 9-11 are walked under 58,900 with polls that do not read the
+// clock, and the delivered seed raises the walk-until again: stride 8 states 65,000, stride 1
 // (every poll reads the clock) 58,900
 TEST(GraphletAttempt, WalkUntilStatedIsTheLowestAClockReadingPollSaw) {
     for (uint32_t stride : { 8u, 1u }) {
@@ -775,7 +773,7 @@ TEST(GraphletAttempt, WalkUntilStatedIsTheLowestAClockReadingPollSaw) {
                   a->usage_json("completed")["bound"]["walk_until_ms"].asUInt64())
             << "poll_stride " << stride;
     }
-    // the texts state the clock-reading polls, not "every poll" (C20)
+    // the texts state the clock-reading polls, not "every poll"
     FakeClock clock;
     AttemptRegistry registry(settings_with(&clock));
     const std::string bound = registry.capabilities_json()["bound"].asString();
@@ -785,9 +783,9 @@ TEST(GraphletAttempt, WalkUntilStatedIsTheLowestAClockReadingPollSaw) {
                                             "polls")) << bound;
 }
 
-// The delivery reserve's coordinate share (C3, plan revision 3): the walked seed's record
-// coordinates (their part of its account) are estimated at kCoordinateAccountPerTextByte, the
-// rest at the ratio in use; without coordinates the estimate is the one before the split
+// The delivery reserve's coordinate share: the walked seed's record coordinates (their part of
+// its account) are estimated at kCoordinateAccountPerTextByte, the rest at the ratio in use;
+// without coordinates the estimate is the whole account at the ratio in use
 TEST(GraphletAttempt, ReserveCountsCoordinateText) {
     FakeClock clock;
     AttemptSettings s = settings_with(&clock);
@@ -804,7 +802,7 @@ TEST(GraphletAttempt, ReserveCountsCoordinateText) {
     // 20 account bytes a text byte for the rest, 12 for the coordinates: 1e6 + 1e5 bytes of text
     a->progress(20 * 1'000'000ull + 12 * 100'000ull, 12 * 100'000ull);
     EXPECT_NEAR(reserve(1'100'000), a->reserve_ms(), 1e-9);
-    // the same account without a coordinate share: all of it at 20 (the formula before C3)
+    // the same account without a coordinate share: all of it at 20
     a->progress(20 * 1'000'000ull + 12 * 100'000ull);
     EXPECT_NEAR(reserve(1'060'000), a->reserve_ms(), 1e-9);
     // both rounded up apart (a byte of text never priced below its account)
@@ -834,12 +832,11 @@ TEST(GraphletAttempt, ReserveCountsCoordinateText) {
     EXPECT_NE(std::string::npos, r["rule"].asString().find("ceil(C / coordinate_account_per_text_byte)"));
 }
 
-// Plan revision 3 (review of W1, finding 3): an attempt with record coordinates feeds the
-// server's measured ratio with the sample the same walk without them gives (their account and
-// their exact text left out), so a later attempt without coordinates reads the same
-// measured_account_per_text_byte, and walks to the same walk-until, whether or not one with
-// coordinates came first. The exactness of the two parts on real responses is
-// MiniRefSeq.CoordinateShareIsExact's
+// An attempt with record coordinates feeds the server's measured ratio with the sample the same
+// walk without them gives (their account and their exact text left out), so a later attempt
+// without coordinates reads the same measured_account_per_text_byte, and walks to the same
+// walk-until, whether or not one with coordinates came first. The exactness of the two parts
+// on real responses is MiniRefSeq.CoordinateShareIsExact's
 TEST(GraphletAttempt, CoordinatesLeaveTheServersRatioUnchanged) {
     struct Seen {
         double measured;
@@ -978,10 +975,10 @@ TEST(GraphletAttemptRegistry, CancelOfAnUnknownIdRefusesItLater) {
     EXPECT_FALSE(registry.start(late));
 }
 
-// The review of the stage-4 backend, F6: a tombstone is kept its whole retention period,
-// whatever finishes after it (they shared retention_count, so later finishes evicted it and the
-// cancelled id ran); at most retention_count tombstones are held, and a cancel of an unknown id
-// beyond that is refused (429, tombstone: false) rather than promised for less
+// A tombstone is kept its whole retention period, whatever finishes after it (with a shared
+// retention_count, later finishes would evict it and the cancelled id would run); at most
+// retention_count tombstones are held, and a cancel of an unknown id beyond that is refused
+// (429, tombstone: false) rather than promised for less
 TEST(GraphletAttemptRegistry, TombstonesOutliveLaterFinishes) {
     FakeClock clock;
     AttemptRegistry registry(settings_with(&clock, 30, 3));
@@ -999,7 +996,7 @@ TEST(GraphletAttemptRegistry, TombstonesOutliveLaterFinishes) {
     auto conflict = registry.start(late);
     ASSERT_TRUE(conflict);
     EXPECT_TRUE(conflict->body["tombstone"].asBool());
-    // the finished attempts are kept by count as before
+    // the finished attempts are kept by count
     EXPECT_EQ(404, registry.state("done0").first);
     EXPECT_EQ(200, registry.state("done9").first);
     // two more tombstones fill the room; a fourth is refused, nothing promised
@@ -1015,7 +1012,7 @@ TEST(GraphletAttemptRegistry, TombstonesOutliveLaterFinishes) {
     auto z3 = attempt_of(registry, "Z3");
     EXPECT_FALSE(registry.start(z3));
     registry.finish(z3, "completed", 200, 1);
-    // a known tombstone answers as before, without taking more room
+    // a known tombstone answers unchanged, without taking more room
     EXPECT_EQ(404, registry.cancel("Z1", 0).first);
     // by age only: after retention_s (inclusive) they go, and the ids are free
     clock.ms += 30'001;
@@ -1023,15 +1020,14 @@ TEST(GraphletAttemptRegistry, TombstonesOutliveLaterFinishes) {
     EXPECT_EQ(404, registry.cancel("Z4", 0).first);
 }
 
-// Review of pass 5, finding 1: a tombstone held for retention_s alone let a half-uploaded
-// request whose not_after_ms lay beyond it run once it expired. A cancel naming the request's
-// not_after_ms holds the tombstone until not_after_ms + clock_skew_ms (within the cap), every
-// tombstone answer states suppressed_until_ms and covers_admission, and the timeline the review
-// walked ends with the late copy refused: by the tombstone while it is live, by the strict
-// not_after check once it is gone
+// A tombstone held for retention_s alone would let a half-uploaded request whose not_after_ms
+// lay beyond it run once it expired. A cancel naming the request's not_after_ms holds the
+// tombstone until not_after_ms + clock_skew_ms (within the cap), every tombstone answer states
+// suppressed_until_ms and covers_admission, and the timeline below ends with the late copy
+// refused: by the tombstone while it is live, by the strict not_after check once it is gone
 TEST(GraphletAttemptRegistry, CancelNotAfterMsHoldsTheTombstoneThroughAdmission) {
     FakeClock clock;
-    AttemptSettings settings = settings_with(&clock, 1);   // retention 1 s, as the review's
+    AttemptSettings settings = settings_with(&clock, 1);   // retention 1 s
     settings.clock_skew_ms = 2000;
     AttemptRegistry registry(settings);
     const uint64_t t0 = clock.wall_ms();
@@ -1095,7 +1091,7 @@ TEST(GraphletAttemptRegistry, CancelNotAfterMsHoldsTheTombstoneThroughAdmission)
     EXPECT_FALSE(registry.state("delayed-original").second.isMember("tombstone"));
 
     // Without not_after_ms the tombstone is held retention_s and covers nothing: a ledger may
-    // not release on it, and the review's late upload runs once it expired
+    // not release on it, and the late upload runs once it expired
     const uint64_t t1 = clock.wall_ms();
     auto [plain_status, plain] = registry.cancel("no-not-after", 0);
     EXPECT_EQ(404, plain_status);
@@ -1220,8 +1216,8 @@ TEST(GraphletAttemptRegistry, TombstonesSurviveWallClockSteps) {
     EXPECT_FALSE(registry.start(attempt_of(registry, "back")));
 }
 
-// Review of pass 5, finding 4: retention 0 means no suppression — a cancel of an unknown id is
-// refused (429, tombstone: false, reason no_suppression), never promised and expired at once
+// Retention 0 means no suppression — a cancel of an unknown id is refused (429, tombstone:
+// false, reason no_suppression), never promised and expired at once
 TEST(GraphletAttemptRegistry, RetentionZeroKeepsNoTombstones) {
     FakeClock clock;
     AttemptRegistry registry(settings_with(&clock, 0));
@@ -1237,9 +1233,9 @@ TEST(GraphletAttemptRegistry, RetentionZeroKeepsNoTombstones) {
     EXPECT_NE(std::string::npos, registry.retention_text().find("not kept"));
 }
 
-// The restart hole of finding 1: a request naming another server_instance is refused before
-// anything (409 instance_mismatch, nothing registered, ahead of a duplicate or an expired
-// not_after_ms); naming this one, it runs
+// The restart hole: a request naming another server_instance is refused before anything (409
+// instance_mismatch, nothing registered, ahead of a duplicate or an expired not_after_ms);
+// naming this one, it runs
 TEST(GraphletAttemptRegistry, ExpectServerInstanceRefusesAnotherProcess) {
     FakeClock clock;
     AttemptRegistry registry(settings_with(&clock));
@@ -1277,12 +1273,12 @@ TEST(GraphletAttemptRegistry, ExpectServerInstanceRefusesAnotherProcess) {
     EXPECT_FALSE(instance_mismatch(attempt_of(registry, "y")->ids(), registry.server_instance()));
 }
 
-// Review of the pass-5 fixes, finding 1: a ledger releases on a finished state, so a finished
-// attempt's id must stay refused while a replay of the request could still be admitted — until
-// its not_after_ms + clock_skew_ms (within the cap from its finish), past retention_s and past
-// retention_count, among the tombstones (a cancel of an unknown id is refused while they fill
-// the table). Without not_after_ms nothing bounds a replay: the id goes with its retention, as
-// stated, and with retention 0 nothing is kept at all
+// A ledger releases on a finished state, so a finished attempt's id must stay refused while a
+// replay of the request could still be admitted — until its not_after_ms + clock_skew_ms
+// (within the cap from its finish), past retention_s and past retention_count, among the
+// tombstones (a cancel of an unknown id is refused while they fill the table). Without
+// not_after_ms nothing bounds a replay: the id goes with its retention, as stated, and with
+// retention 0 nothing is kept at all
 TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
     auto sent = [](AttemptRegistry &registry, const std::string &id,
                    std::optional<uint64_t> not_after) {
@@ -1294,7 +1290,7 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
         return a;
     };
     {
-        // by age (the reviewer's p1: retention 1 s, the replay at 1.3 s ran)
+        // by age (retention 1 s, a replay at 1.3 s)
         FakeClock clock;
         AttemptSettings settings = settings_with(&clock, 1);
         settings.clock_skew_ms = 2000;
@@ -1325,7 +1321,7 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
         EXPECT_TRUE(replay->expired);
     }
     {
-        // by count (the reviewer's p1b: retention_count 1, one later finish evicted it)
+        // by count (retention_count 1, one later finish)
         FakeClock clock;
         AttemptRegistry registry(settings_with(&clock, 3600, 1));
         const uint64_t not_after = clock.wall_ms() + 60'000;
@@ -1344,7 +1340,7 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
         auto [full, refused] = registry.cancel("unknown-1", 0);
         EXPECT_EQ(429, full);
         EXPECT_EQ("tombstones_full", refused["reason"].asString());
-        // one without not_after_ms is dropped by count as before: a replay of it runs
+        // one without not_after_ms is dropped by count: a replay of it runs
         auto bare = sent(registry, "ev-3", std::nullopt);
         ASSERT_FALSE(registry.start(bare));
         registry.finish(bare, "completed", 200, 1);
@@ -1399,13 +1395,12 @@ TEST(GraphletAttemptRegistry, FinishedAttemptsAreHeldThroughTheirNotAfterMs) {
     }
 }
 
-// Review of levels 4-5, finding 6 (the reviewer's finish-restart-replay probe; the restarted
-// process is a second registry, with its own server_instance): a finished attempt's hold is its
-// process's. A request finished with not_after_ms 60 s ahead and replayed within its hold is
-// refused by that process whether pinned or not; after a restart the unpinned replay runs again
-// (on the reviewer's server: 200, 170 work units), which the release rule now states — a finished
-// state is replay-safe only for an attempt sent with expect_server_instance — and the pinned one
-// is refused there, 409 instance_mismatch
+// Finish, restart, replay (the restarted process is a second registry, with its own
+// server_instance): a finished attempt's hold is its process's. A request finished with
+// not_after_ms 60 s ahead and replayed within its hold is refused by that process whether
+// pinned or not; after a restart the unpinned replay runs again, which the release rule
+// states — a finished state is replay-safe only for an attempt sent with
+// expect_server_instance — and the pinned one is refused there, 409 instance_mismatch
 TEST(GraphletAttemptRegistry, AFinishedStateIsReplaySafeOnlyWhenPinned) {
     FakeClock clock;
     AttemptRegistry first(settings_with(&clock, 1, 1));
@@ -1459,7 +1454,7 @@ TEST(GraphletAttemptRegistry, AFinishedStateIsReplaySafeOnlyWhenPinned) {
                                 "A finished state of an attempt sent without "
                                 "expect_server_instance assumes that no copy of the request "
                                 "reaches a restarted process",
-                                // kept from the review of the pass-5 fixes
+                                // what a finished state promises
                                 "A finished attempt's id stays refused (409)",
                                 "assumes that no copy of the request arrives after the attempt "
                                 "left retention" }) {
@@ -1472,13 +1467,11 @@ TEST(GraphletAttemptRegistry, AFinishedStateIsReplaySafeOnlyWhenPinned) {
             "a copy sent with expect_server_instance is still refused by a restarted process"));
 }
 
-// The review of 2026-10-06 (X2, the search service's release parity LRG-R1/R2, and C16, C20,
-// C24, C30, X4 on the same strings), text only: the clock release takes the attempt as stopped
-// at its bound, which it is apart from what it runs past it until its next delivery check, of
-// no stated length (the review of the P2 fixes: not "one uninterruptible step", since only the
-// delivery checks compare the bound), and an answer of running or stopping past that instant
-// shows that run; the 409 refusing a copy
-// carries the id's state as GET answers it, so its finished state is a finished state; an
+// The release texts, text only: the clock release takes the attempt as stopped at its bound,
+// which it is apart from what it runs past it until its next delivery check, of no stated
+// length (not "one uninterruptible step", since only the delivery checks compare the bound),
+// and an answer of running or stopping past that instant shows that run; the 409 refusing a
+// copy carries the id's state as GET answers it, so its finished state is a finished state; an
 // expired 409 releases, because the id's registration is checked before the expiry (the order
 // the not_after text states), and settles nothing; refused copies extend a finished attempt's
 // hold; expect_server_instance has the ids' pattern and a 400; the bound names its cap and the
@@ -1510,7 +1503,7 @@ TEST(GraphletAttemptRegistry, ReleaseTextsStateTheOverrunAndTheGrounds) {
                                     "a run of no stated length" }) {
             has("bound", phrase);
         }
-        // the overrun is not one step (the review of the P2 fixes)
+        // the overrun is not one step
         for (const char *field : { "bound", "not_after", "release_rule" }) {
             EXPECT_EQ(std::string::npos, caps[field].asString().find("uninterruptible step"))
                 << what << ", " << field;
@@ -1582,10 +1575,10 @@ TEST(GraphletAttemptRegistry, ReleaseTextsStateTheOverrunAndTheGrounds) {
     }
 }
 
-// Review of the pass-5 fixes, finding 2: with clock_skew_ms 0 a cancel's covers_admission
-// (suppressed_until_ms == not_after_ms) must hold at the instant the wall clock reads
-// not_after_ms, which the strict not_after check still admits — the tombstone is live through
-// suppressed_until_ms inclusive, also after its steady hold passed
+// With clock_skew_ms 0 a cancel's covers_admission (suppressed_until_ms == not_after_ms) must
+// hold at the instant the wall clock reads not_after_ms, which the strict not_after check still
+// admits — the tombstone is live through suppressed_until_ms inclusive, also after its steady
+// hold passed
 TEST(GraphletAttemptRegistry, TombstonesHoldThroughSuppressedUntilInclusive) {
     FakeClock clock;
     AttemptSettings settings = settings_with(&clock, 1);
@@ -1621,9 +1614,9 @@ TEST(GraphletAttemptRegistry, TombstonesHoldThroughSuppressedUntilInclusive) {
     EXPECT_TRUE(refused->expired);
 }
 
-// Review of the pass-5 fixes, finding 3: a refused copy's suppression is judged against its own
-// not_after_ms alone — a copy without one is not covered (no_not_after_ms), whatever not_after_ms
-// a cancel named, and indeed runs once re-sent after the tombstone
+// A refused copy's suppression is judged against its own not_after_ms alone — a copy without
+// one is not covered (no_not_after_ms), whatever not_after_ms a cancel named, and indeed runs
+// once re-sent after the tombstone
 TEST(GraphletAttemptRegistry, ARefusedCopyIsJudgedByItsOwnNotAfterMs) {
     FakeClock clock;
     AttemptSettings settings = settings_with(&clock, 1);
@@ -1801,8 +1794,8 @@ bool becomes_closed(int fd) {
 
 } // namespace
 
-// B1's check: a peek that consumes nothing tells a connected client (idle, or with a request
-// waiting) from one that closed, half-closed or reset its connection
+// The departure check: a peek that consumes nothing tells a connected client (idle, or with a
+// request waiting) from one that closed, half-closed or reset its connection
 TEST(GraphletServer, PeerClosedTellsAGoneClient) {
     {
         auto [client, server] = tcp_pair();
@@ -1837,10 +1830,9 @@ TEST(GraphletServer, PeerClosedTellsAGoneClient) {
     EXPECT_TRUE(peer_closed(-1));
 }
 
-// The review of the stage-4 backend, F3: bytes waiting past the request — a trailing CRLF (RFC
-// 9112 §2.2), a pipelined request — hide a close behind them from a peek, which returns the
-// bytes: the connection's TCP state tells. A client that sent them and stays connected is not
-// gone; nothing is consumed either way
+// Bytes waiting past the request — a trailing CRLF (RFC 9112 §2.2), a pipelined request — hide
+// a close behind them from a peek, which returns the bytes: the connection's TCP state tells. A
+// client that sent them and stays connected is not gone; nothing is consumed either way
 TEST(GraphletServer, PeerClosedSeesACloseBehindWaitingBytes) {
 #if defined(__linux__) || defined(__APPLE__)
     for (const std::string &waiting : { std::string("\r\n"),
@@ -1877,11 +1869,11 @@ TEST(GraphletServer, PeerClosedSeesACloseBehindWaitingBytes) {
 }
 
 // The server's own shutdown (the HTTP server's content timeout) behind waiting bytes: Linux
-// keeps the bytes, so the peek returns them and the state is FIN_WAIT2, which read "connected"
-// while the client kept its end open — the walk computed on past the timeout (review of
-// 2026-10-06, U13-02). macOS discards them on SHUT_RD: the peek reads the end. Gone on both.
-// A descriptor that holds no connection — not a socket, or closed — is gone too, as the
-// header says (ENOTSOCK and EBADF read "connected" before)
+// keeps the bytes, so the peek returns them and the state is FIN_WAIT2, which must not read
+// "connected" while the client keeps its end open — the walk would compute on past the
+// timeout. macOS discards them on SHUT_RD: the peek reads the end. Gone on both. A descriptor
+// that holds no connection — not a socket, or closed — is gone too, as the header says
+// (ENOTSOCK and EBADF must not read "connected")
 TEST(GraphletServer, PeerClosedSeesTheServersOwnShutdown) {
 #if defined(__linux__) || defined(__APPLE__)
     for (const std::string &waiting : { std::string("\r\n"),
@@ -1899,7 +1891,7 @@ TEST(GraphletServer, PeerClosedSeesTheServersOwnShutdown) {
         ::close(server);
     }
     {
-        // nothing waiting: the peek reads the end on both platforms (as before)
+        // nothing waiting: the peek reads the end on both platforms
         auto [client, server] = tcp_pair();
         ::shutdown(server, SHUT_RDWR);
         EXPECT_TRUE(becomes_closed(server)) << "own shutdown, nothing waiting";
@@ -1953,11 +1945,10 @@ TEST(GraphletServer, CheckedWriterIsByteIdentical) {
     }
 }
 
-// Review of pass 5, finding 6 (the reviewer's pass5_delivery_probe.cpp): one JSON string value
-// of 16 MiB was appended whole by the checked writer, and a seed's 16 MiB text whole by the
-// response's assembly — one check each. Both now copy in pieces up to the next check: at
-// least size / 64 KiB checks, the bytes unchanged, and the longest stretch between two checks
-// (the value's escaping, before it is copied) measured
+// One JSON string value of 16 MiB appended whole by the checked writer, and a seed's 16 MiB
+// text whole by the response's assembly, would be one check each. Both copy in pieces up to
+// the next check: at least size / 64 KiB checks, the bytes unchanged, and the longest stretch
+// between two checks (the value's escaping, before it is copied) measured
 TEST(GraphletServer, DeliveryChecksEvery64KiBOfALargeToken) {
     Json::Value v;
     v["text"] = std::string(16 * 1024 * 1024, 'A');
@@ -1994,13 +1985,12 @@ TEST(GraphletServer, DeliveryChecksEvery64KiBOfALargeToken) {
     EXPECT_EQ(3u, calls);
 }
 
-// The review of 2026-10-06, C9 (U12-02, U13-03, X-EFFICIENCY-02): the server held 2.5x (gzip) to
-// 3.5x (identity) a /traverse response's text while delivering it — the per-seed texts lived
-// until the handler returned, beside the assembled copy, which grew by doubling. The texts are
-// now moved into the assembly, each freed once copied, and the response is reserved at its exact
-// size: its capacity is its size (no doubling step held an old and a new buffer), and its bytes
-// are unchanged, with and without checks, whichever side of "results" the envelope's members
-// are on
+// The server holds a /traverse response's text about once while delivering it: per-seed texts
+// living until the handler returned, beside an assembled copy grown by doubling, would hold
+// 2.5x (gzip) to 3.5x (identity) of it. The texts are moved into the assembly, each freed once
+// copied, and the response is reserved at its exact size: its capacity is its size (no doubling
+// step holds an old and a new buffer), and its bytes are unchanged, with and without checks,
+// whichever side of "results" the envelope's members are on
 TEST(GraphletServer, AssemblyReservesTheResponseOnce) {
     std::mt19937 rng(17);
     std::vector<std::string> texts;
@@ -2051,12 +2041,12 @@ TEST(GraphletServer, AssemblyReservesTheResponseOnce) {
     }
 }
 
-// zlib counts its input in 32 bits (uInt avail_in): a text of 4 GiB or more was cut to its size
-// modulo 2^32 and the server answered 200 with a well-formed stream of that prefix (review of
-// 2026-10-06, U13-04). compress_string hands the text over in pieces of at most 2^32 - 1 bytes;
-// tested with small pieces, which take the same path: the stream inflates to the whole text
-// across every boundary, in both containers, under the check; a text of one piece is compressed
-// by the same calls as before, so its bytes are those of the whole-text call
+// zlib counts its input in 32 bits (uInt avail_in): a text of 4 GiB or more handed over whole
+// would be cut to its size modulo 2^32, and the server would answer 200 with a well-formed
+// stream of that prefix. compress_string hands the text over in pieces of at most 2^32 - 1
+// bytes; tested with small pieces, which take the same path: the stream inflates to the whole
+// text across every boundary, in both containers, under the check; a text of one piece is
+// compressed as the whole-text call compresses it, so its bytes are that call's
 TEST(GraphletServer, CompressionTakesTheTextInPieces) {
     auto inflate_all = [](const std::string &compressed) {
         z_stream zs;
@@ -2112,12 +2102,12 @@ TEST(GraphletServer, CompressionTakesTheTextInPieces) {
 }
 
 // What process_request writes (answer_request, without the HTTP library) for every outcome of
-// a request: as before for a route that does not ask whether its client left (every route but
+// a request: everything for a route that does not ask whether its client left (every route but
 // /pattern: no control, or a control without |gone|); and, for a route that asks
 // (ResponseControl::gone, /pattern; SPEC-pattern-search.md §3), nothing at all once its
-// client is gone or the server stops, its errors included — review GPT-2 of 2026-10-08,
-// finding 4: `{` and {"patterns":[]} from a half-closed client were answered 400, the success
-// path alone asked. The deadline is not that question: its 503 reaches a client that is there
+// client is gone or the server stops, its errors included — `{` and {"patterns":[]} from a
+// half-closed client are not answered 400, as if only the success path asked. The deadline is
+// not that question: its 503 reaches a client that is there
 TEST(ServerRequest, ARouteThatAsksAnswersNobodyWhoLeft) {
     using Process = std::function<Json::Value(const std::string &)>;
     using Header = std::vector<std::pair<std::string, std::string>>;
@@ -2166,7 +2156,7 @@ TEST(ServerRequest, ARouteThatAsksAnswersNobodyWhoLeft) {
             EXPECT_EQ(o.header, a.header);
         };
         // no control (/search, /align, ...) and a control without |gone| (/resolve,
-        // /traverse): every outcome written, as before
+        // /traverse): every outcome written
         expect_written(answer_request("{}", "", 1, o.process, true));
         ResponseControl plain;
         size_t checks = 0;
@@ -2243,9 +2233,9 @@ TEST(ServerRequest, ARouteThatAsksAnswersNobodyWhoLeft) {
     }
 }
 
-// The multi-graph list (pass 5, W2): three columns read as they always were, two optional
-// ones (manifest_path, index_ns), empty meaning none; more than five columns, fewer than
-// three, or an index_ns that is no token refuse the line
+// The multi-graph list: three columns, two optional ones (manifest_path, index_ns), empty
+// meaning none; more than five columns, fewer than three, or an index_ns that is no token
+// refuse the line
 TEST(GraphletServer, GraphListLinesAreParsedStrictly) {
     GraphListEntry e = parse_graph_list_line("uhgg,/d/g.dbg,/d/a.annodbg", 3);
     EXPECT_EQ(3u, e.line);
@@ -2254,7 +2244,7 @@ TEST(GraphletServer, GraphListLinesAreParsedStrictly) {
     EXPECT_EQ("/d/a.annodbg", e.annotation_path);
     EXPECT_EQ("", e.manifest_path);
     EXPECT_EQ("", e.index_ns);
-    // as before: an empty annotation column is read as given (the loader names it)
+    // an empty annotation column is read as given (the loader names it)
     EXPECT_EQ("", parse_graph_list_line("n,g,", 1).annotation_path);
     e = parse_graph_list_line("n,g,a,/m/a.manifest.json", 1);
     EXPECT_EQ("/m/a.manifest.json", e.manifest_path);
@@ -2322,8 +2312,8 @@ TEST(GraphletServer, GraphListIdentitiesAgreePerPair) {
         return fp(e);
     }), std::invalid_argument);
     entries.pop_back();
-    // Review of pass 5: one index is one pair of files however its paths are spelled — a
-    // second spelling takes the pair's identity, and may not state another one
+    // One index is one pair of files however its paths are spelled — a second spelling takes
+    // the pair's identity, and may not state another one
     entries.push_back(parse_graph_list_line("G,./g1,./a1", 8));
     ids = graph_list_identities(entries, fp);
     EXPECT_EQ(std::make_pair(std::string("ns1"), std::string("fp-m1")), ids.at({ "./g1", "./a1" }));
@@ -2343,12 +2333,12 @@ TEST(GraphletServer, GraphListIdentitiesAgreePerPair) {
 }
 
 
-// Review of pass 5, findings 2 and 3: one inventory of what the loaders open. Its table of
-// annotation types is checked against the loader itself — for every annotation type the CLI
-// knows, the extension of the object initialize_annotation constructs is in the table, maps
-// back to that type, and the table says it reads the row-diff anchors beside the graph exactly
-// when its matrix is RowDiff<ColumnMajor>, and the sequence headers exactly when it is a
-// MultiIntMatrix (build_annotated_dbg's and load_coord_to_header's own tests)
+// One inventory of what the loaders open. Its table of annotation types is checked against
+// the loader itself — for every annotation type the CLI knows, the extension of the object
+// initialize_annotation constructs is in the table, maps back to that type, and the table says
+// it reads the row-diff anchors beside the graph exactly when its matrix is
+// RowDiff<ColumnMajor>, and the sequence headers exactly when it is a MultiIntMatrix
+// (build_annotated_dbg's and load_coord_to_header's own tests)
 TEST(GraphletServer, InventoryTableMatchesTheLoadersTypes) {
     using namespace mtg::annot;
     size_t seen = 0;
@@ -2380,11 +2370,11 @@ TEST(GraphletServer, InventoryTableMatchesTheLoadersTypes) {
     EXPECT_EQ(index_annotation_kinds().size(), seen);
 }
 
-// The owner's decision #17 of 2026-10-08: the graph's dummy-edge mask and Bloom filter are
-// derived data, not part of the identity. index_derived_files says which of them the loader
-// reads — checked here against what DBGSuccinct::load reads (an independent oracle: the loaded
-// graph's mask and Bloom filter) in every state a deployment passes through — and the identity
-// (the inventory a manifest is checked against, the manifest's fingerprint) is the same in each
+// The graph's dummy-edge mask and Bloom filter are derived data, not part of the identity.
+// index_derived_files says which of them the loader reads — checked here against what
+// DBGSuccinct::load reads (an independent oracle: the loaded graph's mask and Bloom filter) in
+// every state a deployment passes through — and the identity (the inventory a manifest is
+// checked against, the manifest's fingerprint) is the same in each
 TEST(GraphletServer, DerivedDataIsWhatTheLoaderReadsAndNotTheIdentity) {
     namespace fs = std::filesystem;
     using mtg::graph::DBGSuccinct;
@@ -2496,7 +2486,7 @@ TEST(GraphletServer, DerivedDataIsWhatTheLoaderReadsAndNotTheIdentity) {
     fs::remove_all(dir);
 }
 
-// Finding 2 itself: two lines whose graph and annotation are symlinks to the same files, but
+// Symlinked bundles: two lines whose graph and annotation are symlinks to the same files, but
 // whose .seqs beside the symlinks differ, are two indexes — each validated against the manifest
 // it names, so the shared manifest (A's) refuses B, naming B's own .seqs; with B's own
 // manifest they state different index_fp

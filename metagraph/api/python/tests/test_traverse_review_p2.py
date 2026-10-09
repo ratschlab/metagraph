@@ -1,25 +1,23 @@
-"""The P2 items of the review of 2026-10-06 in the library's tools, store and exports:
+"""The library's tools, store and exports under local budgets:
 
-  * O1: a replay or continuation whose parse stops on its local budget is checked against
-    its entry's index like a parsed one -- the identity its H record states, read without a
+  * a replay or continuation whose parse stops on its local budget is checked against its
+    entry's index like a parsed one -- the identity its H record states, read without a
     parse -- before its entry and parent link are stored; and the capabilities read before
     a continuation are those of the graph it is sent to (overrides={'graph': ...});
-  * O2: store.standalone_text() builds its text in one join of slices of the body (about
-    3 bodies held, the account's 3), and charges a call's base (CALL_BASE);
-  * O3: to_json(budget=) charges the seed block (dropped labels and their runs), the
+  * store.standalone_text() builds its text in one join of slices of the body (about 3
+    bodies held, the account's 3), and charges a call's base (CALL_BASE);
+  * to_json(budget=) charges the seed block (dropped labels and their runs), the
     seed-level and arm-level limitations and label_dict before building them;
-  * X1 (library part): the derivation limitation states k-mers read on a walked (D3)
-    result and elapsed ms on a failed seed; the library reads the first as k-mers and
-    passes the second on untouched.
-
-And the review of those fixes:
-
+  * the derivation limitation states k-mers read on a result walked from a partial
+    derivation and elapsed ms on a failed seed; the library reads the first as k-mers and
+    passes the second on untouched;
   * next_request() with a change_cost table: the copies of its entries, the switch
     search's table, edges and heap are in the account and the work (work model 2), so the
-    account bounds the traced peak (it stayed at the 0-entry figure, 9.8x short at 900
+    account bounds the traced peak (at the 0-entry figure it would be 9.8x short at 900
     entries);
-  * the texts: the derivation row states D3 at feature level 6, and no text says an
-    attempt_id is "used up" -- the server refuses it while it holds it and runs it after.
+  * the texts: the derivation row states the partial derivation at feature level 6, and no
+    text says an attempt_id is "used up" -- the server refuses it while it holds it and runs
+    it after.
 """
 
 import copy
@@ -54,7 +52,7 @@ def _traced(fn):
         tracemalloc.stop()
 
 
-# ======================================================================= O1
+# ======================================================================= unparsed identity
 
 class _Stamped(M.FakeClient):
     """The fake backend answering with index_fp |stamp| in H (what answered), while its
@@ -92,7 +90,7 @@ class TestUnparsedIdentity(unittest.TestCase):
         return out['handle']
 
     def stopping_parse(self, t):
-        # the continuation's parse stops on this (the review's work_units 500)
+        # the continuation's parse stops on this (work_units 500)
         t.local_limits = ToolLimits(parse=LocalLimits(500, 1024))
 
     def entries(self):
@@ -159,14 +157,14 @@ class TestUnparsedIdentity(unittest.TestCase):
             self.assertEqual('index_mismatch', out.get('error'), out)
         self.assertEqual(['g2', 'g2'], c.caps_asked)
         self.assertEqual(n, len(c.requests))          # refused before it was sent
-        # on the client's own graph the capabilities are asked as before (no argument)
+        # on the client's own graph the capabilities are asked without an argument
         c.caps_asked.clear()
         t.local_limits = ToolLimits()
         self.assertNotIn('error', t.traverse_continue(h, 'right', 1, max_bytes=8192))
         self.assertEqual([None], c.caps_asked)
 
 
-# ======================================================================= O2
+# ======================================================================= standalone_text
 
 def _items():
     import glob
@@ -176,9 +174,9 @@ def _items():
 
 
 class TestStandaloneText(unittest.TestCase):
-    """O2: the account of standalone_text() bounds its traced peak, on every fixture, with
-    and without a delivery written into the O record (the review: 26 of 90 calls peaked
-    above their account, mini_ndm1__trace by 30%)."""
+    """The account of standalone_text() bounds its traced peak, on every fixture, with and
+    without a delivery written into the O record (otherwise 26 of 90 calls could peak above
+    their account, mini_ndm1__trace by 30%)."""
 
     def test_the_account_bounds_the_peak(self):
         n = 0
@@ -223,8 +221,8 @@ class TestStandaloneText(unittest.TestCase):
                         self.assertEqual(f.read(), st.standalone_text(h), (key, delivery))
 
     def test_a_limit_between_the_old_peak_and_the_account(self):
-        # the review's library case: a limit equal to the call's account completes, and
-        # the traced peak stays under it
+        # the library case: a limit equal to the call's account completes, and the traced
+        # peak stays under it
         key, r, resp = next(x for x in _items() if 'mini_ndm1__trace' in x[0])
         with tempfile.TemporaryDirectory() as d:
             st = GraphletStore(os.path.join(d, 'sp'))
@@ -240,11 +238,11 @@ class TestStandaloneText(unittest.TestCase):
                 st.standalone_text(h, budget=LocalBudget(memory_mb=(acc - 1) / float(1 << 20)))
 
 
-# ======================================================================= O3
+# ======================================================================= to_json's envelope
 
 def _dropped_body(dropped, runs, nseed=1000):
-    """The review's realistic case: a 1,000-bp seed, |dropped| X records with the server's
-    reason (seed_unsupported) and |runs| presence runs each."""
+    """A realistic case: a 1,000-bp seed, |dropped| X records with the server's reason
+    (seed_unsupported) and |runs| presence runs each."""
     from test_traverse_scale import comb_annotate
     t = comb_annotate(1)
     seq = ('ACGTTGCA' * (nseed // 8 + 1))[:nseed]
@@ -304,11 +302,11 @@ class TestToJsonEnvelope(unittest.TestCase):
         self.assertEqual(self.mk(text).to_json(), self.mk(text).to_json(budget=LocalBudget()))
 
 
-# ======================================================================= X1
+# ======================================================================= derivation units
 
 class TestDerivationUnits(unittest.TestCase):
     """The derivation limitation's observed: k-mers read on a result walked from a partial
-    derivation (D3), elapsed ms on a seed whose derivation failed (no graphlet)."""
+    derivation, elapsed ms on a seed whose derivation failed (no graphlet)."""
 
     def test_a_walked_result_states_kmers(self):
         from test_traverse_coordinates import fresh
@@ -352,10 +350,10 @@ def _wide_forbid():
 
 
 class TestChangeCostTable(unittest.TestCase):
-    """The review of the P2 fixes (U15): with labels.change_cost a table, the account of
-    next_request() did not grow with its entries -- neither the copies of the entries
-    (the merged strategy, the request's) nor the switch search's table were charged, and 2
-    lwu per entry were: 39,531 B against a traced peak of 387,409 B at 900 entries."""
+    """With labels.change_cost a table, the account of next_request() grows with its
+    entries: the copies of the entries (the merged strategy, the request's) and the switch
+    search's table are charged, not 2 lwu per entry alone (39,531 B against a traced peak of
+    387,409 B at 900 entries)."""
 
     def setUp(self):
         self.r, self.resp = _wide_forbid()
@@ -410,7 +408,7 @@ class TestChangeCostTable(unittest.TestCase):
                          (cm.exception.stop.resource, cm.exception.stop.op))
 
     def test_the_switch_search_alone(self):
-        # the reviewer's direct probe: 20 sources with an entry to each of n targets
+        # a direct probe: 20 sources with an entry to each of n targets
         from metagraph.traverse import ops
         for n in (50, 500, 2000):
             src = ['S%05d' % i for i in range(n)]

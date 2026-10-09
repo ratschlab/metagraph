@@ -27,15 +27,14 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
-// Patterns longer than k as paths (long_search "paths", increment 4 of
-// docs/DESIGN-pattern-search.md, §4.2, §4.3 "Label consistency for long"; owner decisions #13
-// and #14): the route's path results (sequence, anchor_kmer, nodes, rows; never kmer), the two
-// thresholds (max_anchors admits the extension, max_paths the release), the counts with their
-// relations, and the labels of each path with its per-label support (label_intersection:
-// every k-mer of the path annotated; record_verified: one record holds the whole path) and
-// require_support. Tiny graphs built from explicit records in labelled columns with their
-// coordinates and record mapping. The expectations come from two oracles that never ask the
-// engine:
+// Patterns longer than k as paths (long_search "paths", docs/DESIGN-pattern-search.md §4.2,
+// §4.3 "Label consistency for long"): the route's path results (sequence, anchor_kmer, nodes,
+// rows; never kmer), the two thresholds (max_anchors admits the extension, max_paths the
+// release), the counts with their relations, and the labels of each path with its per-label
+// support (label_intersection: every k-mer of the path annotated; record_verified: one record
+// holds the whole path) and require_support. Tiny graphs built from explicit records in
+// labelled columns with their coordinates and record mapping. The expectations come from two
+// oracles that never ask the engine:
 //  - a GRAPH-WALK oracle over the k-mer set of the records (as deposited on BASIC; with their
 //    reverse complements on CANONICAL and PRIMARY graphs): every string of L bases that
 //    instantiates the oriented pattern (the test's own IUPAC table) and whose every k-window
@@ -747,16 +746,16 @@ TEST(PatternPaths, AnAnchorWithoutAPath) {
         EXPECT_EQ(0u, e["by_label"].size());
         EXPECT_EQ(0u, e["work"]["annotation_rows"].asUInt64());
     }
-    // without the option: anchors counted, paths unknown, as before
+    // without the option: anchors counted, paths unknown
     Json::Value out = run(idx, "{\"patterns\": [{\"dna\": \"ACCAAG\"}]}");
     const Json::Value &e = out["patterns"][0];
     EXPECT_EQ("unknown", e["counts"]["paths"]["relation"].asString());
     EXPECT_EQ("paths_later_increment", e["withheld"]["reason"].asString());
 }
 
-// Owner decision #13: the paths are opt-in; a request without long_search "paths" — or with
-// "anchors", its default — is answered as before, and "paths" changes nothing for a pattern of
-// at most k bases
+// The paths are opt-in; a request without long_search "paths" — or with "anchors", its
+// default — is answered by its anchors, and "paths" changes nothing for a pattern of at most k
+// bases
 TEST(PatternPaths, WithoutTheOptionTheAnswerIsUnchanged) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
     for (const std::string rest : { "", ", \"mode\": \"count\"", ", \"mode\": \"partial\"",
@@ -1325,7 +1324,7 @@ TEST(PatternPaths, TruncatedAndRefusedRows) {
     const Json::Value &q = out["patterns"][0];
     EXPECT_EQ(0u, q["results"][0]["labels"].size());
     // neither label was verified nor refuted: excluded, their number not stated as known
-    // (review of increments 4 and 5: it was 2, as if both had been refuted)
+    // (not 2, as if both had been refuted)
     EXPECT_EQ("complete", q["results"][0]["labels_status"].asString());
     EXPECT_EQ(2u, q["results"][0]["labels_total"].asUInt64());
     EXPECT_TRUE(q["results"][0]["labels_excluded_unverified"].isNull()) << q["results"][0];
@@ -1335,9 +1334,9 @@ TEST(PatternPaths, TruncatedAndRefusedRows) {
 
 // A path's labels_excluded_unverified is an integer only when it is the true number: every row
 // of the path read completely and every label carrying it verified or refuted; null otherwise,
-// as labels_total (review of increments 4 and 5, finding 1: with max_labels_per_anchor below a
-// row's label count the path's truncated rows gave a definite integer over the labels kept,
-// 0 where B, carrying the path unverified, had been cut). The expectations: the record scan.
+// as labels_total (with max_labels_per_anchor below a row's label count the path's truncated
+// rows must not give a definite integer over the labels kept, such as 0 where B, carrying the
+// path unverified, had been cut). The expectations: the record scan.
 TEST(PatternPaths, ExcludedUnverifiedOnlyWhenEveryLabelIsDecided) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
     const std::string p = "ACGTACC";
@@ -1537,16 +1536,16 @@ TEST(PatternPaths, CountMode) {
 }
 
 
-// ------------------------------------------------------------------ repeats (review GPT-3)
+// ------------------------------------------------------------------ repeats
 //
-// GPT review 3, finding 1: the verification of a path binary-searched every coordinate of its
-// first k-mer in every other k-mer's list, made it all again for the output, and read no clock
-// (a 30,000-base homopolymer and a 1,500-base path: 1.5 s past a budget of 500 ms, 503). The
-// chains of a path are now the intersection of its k-mers' coordinate lists shifted (a leapfrog
-// join, consecutive chains kept as runs), made once, under the clock. Records of repeats, where
-// a path's chains form long runs: a homopolymer in two records of one column (its chains run
-// on across the two records' coordinates, which the record bounds must cut), a dinucleotide
-// repeat (no two chains consecutive), and runs of A broken by single C's.
+// The chains of a path are the intersection of its k-mers' coordinate lists shifted (a
+// leapfrog join, consecutive chains kept as runs), made once, under the clock: binary-searching
+// every coordinate of its first k-mer in every other k-mer's list, again for the output, and
+// with no clock would take a 30,000-base homopolymer and a 1,500-base path 1.5 s past a budget
+// of 500 ms (503). Records of repeats, where a path's chains form long runs: a homopolymer in
+// two records of one column (its chains run on across the two records' coordinates, which the
+// record bounds must cut), a dinucleotide repeat (no two chains consecutive), and runs of A
+// broken by single C's.
 
 std::string repeated(const std::string &unit, size_t times) {
     std::string s;
@@ -1692,11 +1691,11 @@ TEST(PatternPaths, AHomopolymersChainsAreOneRun) {
     EXPECT_LE(*readings, 3u);
 }
 
-// The verification reads the clock inside a path (review GPT-3, finding 1): a dinucleotide
-// repeat, whose 1,901 chains of a 200-base path are no run, each sought in 195 lists; the clock
-// passes the work time once the verification began (after the path's own reading): stop
-// {placement, time}, its labels neither verified nor refuted, stated — not finished first and
-// stopped in the output after it (or 503 after the budget)
+// The verification reads the clock inside a path: a dinucleotide repeat, whose 1,901 chains of
+// a 200-base path are no run, each sought in 195 lists; the clock passes the work time once
+// the verification began (after the path's own reading): stop {placement, time}, its labels
+// neither verified nor refuted, stated — not finished first and stopped in the output after
+// it (or 503 after the budget)
 TEST(PatternPaths, TheVerificationReadsTheClock) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, { { "d", "d0", repeated("AC", 2000) } },
                                                      true);
@@ -1851,10 +1850,10 @@ TEST(PatternPaths, TimeSweepOverRepeats) {
 }
 
 
-// The retrieval's counters (review GPT-3, for the route to state), read from PatternRetrieval
-// itself on paths built by hand: the distinct rows read (one for a homopolymer's path, however
-// long), the verification's work (a few units per k-mer for its one run of chains, not one per
-// chain and k-mer), and the request's sums over its patterns
+// The retrieval's counters (for the route to state), read from PatternRetrieval itself on
+// paths built by hand: the distinct rows read (one for a homopolymer's path, however long),
+// the verification's work (a few units per k-mer for its one run of chains, not one per chain
+// and k-mer), and the request's sums over its patterns
 TEST(PatternPaths, TheRetrievalCounters) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRepeats, true);
     const DeBruijnGraph &graph = idx.anno->get_graph();
@@ -1925,16 +1924,15 @@ TEST(PatternPaths, TheRetrievalCounters) {
 }
 
 
-// ------------------------------------------------------------------ peptides (increment 5)
+// ------------------------------------------------------------------ peptides
 //
-// The route's protein kind (owner decision #15 of 2026-10-08, wired by the integration of
-// increments 4 and 5): patterns[i].protein read in the request's genetic_code, the entry's
-// kind, residues and genetic_code, its slot errors, and its contexts (3m <= k) and its paths
-// (3m > k, long_search "paths") with their labels, against oracles that never ask the engine
-// nor its tables:
+// The route's protein kind: patterns[i].protein read in the request's genetic_code, the
+// entry's kind, residues and genetic_code, its slot errors, and its contexts (3m <= k) and its
+// paths (3m > k, long_search "paths") with their labels, against oracles that never ask the
+// engine nor its tables:
 //  - the genetic codes are the test's own copy of NCBI's ncbieaa strings (gc.prt 4.6) for the
 //    tables used here (1, 2, 11; 27 and 31, whose stops code a residue unless in context:
-//    owner decisions #19 and #21);
+//    DESIGN-pattern-search §6);
 //  - a GRAPH-WALK oracle over the k-mers of the records (both orientations on CANONICAL and
 //    PRIMARY graphs): every k-mer window, and every walk of k-mers, whose bases translate to
 //    the peptide (forward), or whose reverse complement does (reverse);
@@ -1978,7 +1976,7 @@ const std::vector<std::string>& all_codons() {
 }
 
 // a residue of a peptide (X, B, Z, J the ambiguity codes) admits the amino acid |aa|; a stop
-// is admitted by the stop '*' only (owner decision #19), and '*' admits nothing else
+// is admitted by the stop '*' only, and '*' admits nothing else
 bool residue_admits(char residue, char aa) {
     if (residue == '*' || aa == '*')
         return residue == aa;
@@ -2489,8 +2487,8 @@ TEST(PatternRoutePeptide, TheEntryItsSlotsAndTheGeneticCode) {
     }
     EXPECT_NE(std::string::npos, out["patterns"][2]["error"]["message"].asString()
                                          .find("'U' at position 2"));
-    // owner decision #19: the stop '*' is a residue (stop_unsupported is gone): M*K is read,
-    // its bits those of M, a stop codon (3 in table 1) and K, below this floor of 16
+    // the stop '*' is a residue: M*K is read, its bits those of M, a stop codon (3 in table 1)
+    // and K, below this floor of 16
     const Json::Value &stop = out["patterns"][1];
     EXPECT_EQ("information_below_floor", stop["error"]["code"].asString()) << stop;
     EXPECT_EQ("M*K", stop["pattern"].asString());
@@ -2519,12 +2517,12 @@ TEST(PatternRoutePeptide, TheEntryItsSlotsAndTheGeneticCode) {
 }
 
 
-// Owner decisions #19 and #21: the stop '*' of a peptide is a stop codon of the request's
-// genetic code at that position (the codons the table translates to '*'), against the
-// graph-walk and six-frame oracles in tables 1, 2 and 11 (whose stops differ: table 2 stops at
-// AGA and AGG and reads TGA as W); X never matches a stop; in tables 27 and 31, whose stop
-// codons code a residue unless in context, those codons match as the residue and '*' matches
-// nothing: the counts are exact 0 and the entry says why (no_stop_codon)
+// The stop '*' of a peptide is a stop codon of the request's genetic code at that position
+// (the codons the table translates to '*'), against the graph-walk and six-frame oracles in
+// tables 1, 2 and 11 (whose stops differ: table 2 stops at AGA and AGG and reads TGA as W); X
+// never matches a stop; in tables 27 and 31, whose stop codons code a residue unless in
+// context, those codons match as the residue and '*' matches nothing: the counts are exact 0
+// and the entry says why (no_stop_codon)
 TEST(PatternRoutePeptide, TheStopIsAStopCodonOfTheTable) {
     const std::vector<Record> records = {
         // ATG TGA AAA: M * K (tables 1, 11), M W K (2, 27, 31)

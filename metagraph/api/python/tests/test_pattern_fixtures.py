@@ -1,13 +1,12 @@
 """The POST /pattern fixture bodies (data/traverse/pattern/, written by
 scripts/traversal/pattern_fixtures.py) against docs/SPEC-pattern-search.md, contract version 1
-(milestone 1, increment 3's output.labels "all", SPEC §14, and increments 4 and 5, SPEC §12.1,
-§12.2, §17: the paths of long_search "paths" with their labels' support, and protein patterns;
-and SPEC §18, the owner's decisions #16, #17, #19 and #24 of 2026-10-08: graphs without their
-dummy-edge mask answered with bounds and an estimate, their tiny blocks checked and exact, and
-the stop '*' in peptides; and the review GPT-3 with the owner's decision P9: the work counters,
-the low-complexity note on completed searches only, the capabilities' references and their byte
-budget; and increment 5b, SPEC §19: a request's predicate, the selection of each pattern of at
-most k bases, its relations, the projection "predicate_only" and the predicate block):
+(with output.labels "all", SPEC §14; the paths of long_search "paths" with their labels'
+support, and protein patterns, SPEC §12.1, §12.2; graphs without their dummy-edge mask
+answered with bounds and an estimate, their tiny blocks checked and exact, and the stop '*' in
+peptides; the work counters, the low-complexity note on completed searches only, the
+capabilities' references and their byte budget; and a request's predicate, SPEC §19: the
+selection of each pattern of at most k bases, its relations, the projection "predicate_only"
+and the predicate block):
 
   - the field lists: every table of the SPEC marked `<!-- schema: NAME -->` names exactly the
     fields SCHEMA[NAME] below knows, so that the SPEC and this check cannot drift apart;
@@ -20,8 +19,7 @@ most k bases, its relations, the projection "predicate_only" and the predicate b
     max_steps or time stop sticky: every later pattern unknown, work zero, the same stop), the
     order of the results and, for a complete list, its agreement with the counts per offset and
     per strand, what withheld, cut and retrieval_complete imply -- checked on the bodies, never
-    by asking a server (review of 2026-10-07, C2-02, C2-03, X-ORACLE-03: the cross-field rules
-    were missing); a flank of a result's k-mer is checked against the graph by
+    by asking a server; a flank of a result's k-mer is checked against the graph by
     `pattern_fixtures.py --check` only;
   - the fixture set: it covers every mode, scope, strand setting, relation (bounds included),
     stop, withheld and cut reason, slot error, refusal code and unavailable reason a service
@@ -65,10 +63,10 @@ UNITS = ('graph_contexts', 'anchors', 'paths', 'placed_occurrences', 'labels')
 GRAPH_MODES = ('basic', 'canonical', 'primary')
 STRAND_SYMBOLS = {'forward': '+', 'reverse': '-', 'palindromic': '='}
 STRAND_KEYS = {'+': '+', '-': '-', '=': 'both'}
-# increment 3 (output.labels "all", SPEC §14) adds the annotation phases and reasons;
-# increment 4 (long_search "paths", SPEC §17) the phase extension and the reason max_paths
-# increment 5b (a predicate, SPEC §19.8) the phase selection, the reasons max_predicate_work and
-# max_predicate_contexts, three withheld reasons and two cut reasons
+# output.labels "all" (SPEC §14) adds the annotation phases and reasons; long_search "paths"
+# (SPEC §12.1) the phase extension and the reason max_paths; a predicate (SPEC §19.8) the phase
+# selection, the reasons max_predicate_work and max_predicate_contexts, three withheld reasons
+# and two cut reasons
 ANNOTATION_PHASES = ('label_discovery', 'placement', 'output')
 STOP_PHASES = ('discovery', 'mask_scan', 'extraction') + ANNOTATION_PHASES + ('extension',
                                                                                'selection')
@@ -81,43 +79,43 @@ WITHHELD = ('count_above_threshold', 'threshold_crossed', 'discovery_budget', 'd
 CUT = ('max_contexts', 'max_steps', 'time', 'max_anchors', 'max_memory', 'max_paths',
        'max_predicate_contexts', 'max_predicate_work')
 # in the order an entry lists them (SPEC §7.9): the engine's, then the route's estimate note
-# (SPEC §18: threshold_upper_bound, no_stop_codon, estimate_sampled_dummy_fraction), then the
+# (SPEC §8.10: threshold_upper_bound, no_stop_codon, estimate_sampled_dummy_fraction), then the
 # annotation's
 NOTES = ('low_complexity_pattern', 'strand_unknown_canonical', 'paths_later_increment',
          'threshold_upper_bound', 'no_stop_codon', 'estimate_sampled_dummy_fraction',
          'annotation_unbudgeted', 'record_bounds_unknown', 'annotation_not_read',
          'label_intersection_only',
-         # increment 5b (SPEC §19.10)
+         # a predicate (SPEC §19.10)
          'predicate_constant', 'projection_not_read')
-# review GPT-3 (round fix3, SPEC §7.8): the bases of a pattern its low-complexity diagnostic always
-# reads (one piece of sdust, 128 + 63, before any clock reading); a longer one's can be cut by
-# the work time, its note then left out
+# SPEC §7.8: the bases of a pattern its low-complexity diagnostic always reads (one piece of
+# sdust, 128 + 63, before any clock reading); a longer one's can be cut by the work time, its
+# note then left out
 LOW_COMPLEXITY_UNCUT = 191
-# (stop_unsupported, a slot code that only 4596bb3b answers, is retired: '*' is a residue since
-# owner decision #19 of 2026-10-08; no source writes it and no fixture holds it)
+# (stop_unsupported is a retired slot code: '*' is a residue; no source writes it and no fixture
+# holds it)
 SLOT_ERRORS = ('bad_alphabet', 'information_below_floor', 'scope_unsupported')
 KINDS = ('dna', 'iupac', 'protein')
-# increment 4: what the extension of a pattern longer than k did (counts.paths.extension)
+# what the extension of a pattern longer than k did (counts.paths.extension)
 EXTENSIONS = ('no_anchors', 'not_started', 'not_admitted', 'stopped', 'completed')
 LONG_SEARCH = ('anchors', 'paths')
-# increment 5b (SPEC §19): the operators of a predicate, predicate_strands, what a pattern's
+# a predicate (SPEC §19): the operators of a predicate, predicate_strands, what a pattern's
 # selection did (selection.pass), how it read the predicate's labels (selection.access), what a
 # label's presence means (selection.support), the scope of the claim, and the projections
 PREDICATE_OPERATORS = ('any', 'all', 'none', 'at_least', 'and', 'or', 'not')
 PREDICATE_STRANDS = ('either', 'context')
 PASSES = ('completed', 'stopped', 'not_admitted', 'not_started', 'constant')
 ACCESS = ('rows', 'columns')
-# a selected result's selection_strands (the owner's answer to P11, SPEC §19.10)
+# a selected result's selection_strands (SPEC §19.10)
 SELECTION_STRANDS = {'context', 'reverse_complement', 'both', 'either'}
 SELECTION_SUPPORTS = ('kmer', 'label_intersection', 'record_verified')
 PREDICATE_SCOPES = ('shard_context',)
 PROJECTIONS = ('none', 'all', 'predicate_only')
 # a path result's support: its listed labels' (null when it lists none)
 PATH_SUPPORTS = ('record_verified', 'label_intersection', 'mixed')
-# increment 5: the residues of a protein pattern (any case), the stop '*' among them since owner
-# decision #19 of 2026-10-08, and NCBI's genetic codes (gc.prt version 4.6,
-# https://ftp.ncbi.nih.gov/entrez/misc/data/gc.prt): each table's ncbieaa string, the residue of
-# each codon in TCAG order (TTT TTC TTA TTG TCT ... GGG), '*' a stop
+# peptides: the residues of a protein pattern (any case), the stop '*' among them, and NCBI's
+# genetic codes (gc.prt version 4.6, https://ftp.ncbi.nih.gov/entrez/misc/data/gc.prt): each
+# table's ncbieaa string, the residue of each codon in TCAG order (TTT TTC TTA TTG TCT ... GGG),
+# '*' a stop
 PROTEIN_RESIDUES = 'ACDEFGHIKLMNPQRSTVWYXBZJ*'
 GENETIC_CODES = {
     1: 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
@@ -149,31 +147,28 @@ GENETIC_CODES = {
     33: 'FFLLSSSSYYY*CCWWLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSSKVVVVAAAADDEEGGGG',
 }
 CODONS_TCAG = [a + b + c for a in 'TCAG' for b in 'TCAG' for c in 'TCAG']
-# mask_invalid and alphabet_untested: the route's own reasons not to serve a graph (85614d30,
-# owner decisions #6 and #4 of 2026-10-07; pattern.cpp route_support), a 400 refusal's code and
-# the capabilities' unavailable_reason alike (review GPT-2 of 2026-10-08, finding 6: missing
-# here, valid answers carrying them were rejected)
-# mask_required is a code of version 1 that no build since owner decision #16 answers (RETIRED)
+# mask_invalid and alphabet_untested: the route's own reasons not to serve a graph (pattern.cpp
+# route_support), a 400 refusal's code and the capabilities' unavailable_reason alike (missing
+# here, valid answers carrying them would be rejected)
+# mask_required is a code of version 1 that no build serving graphs without their mask answers
+# (RETIRED)
 REFUSALS = ('invalid_request', 'later_increment', 'resident_only', 'mask_required',
             'representation_unsupported', 'primary_unwrapped', 'alphabet_unsupported', 'deadline',
             'annotation_unbudgeted', 'mask_invalid', 'alphabet_untested',
-            # increment 4 (require_support "record_verified" on an index that cannot verify),
-            # increment 5 (genetic_code no NCBI table) and increment 5b (a predicate listing more
-            # names than caps.max_predicate_labels)
+            # require_support "record_verified" on an index that cannot verify, genetic_code no
+            # NCBI table, and a predicate listing more names than caps.max_predicate_labels
             'support_unavailable', 'genetic_code_unknown', 'predicate_too_large')
 UNAVAILABLE = ('mask_required', 'representation_unsupported', 'primary_unwrapped',
                'alphabet_unsupported', 'multi_graph_later_increment', 'mask_invalid',
                'alphabet_untested')
 # The refusals and unavailable reasons no server of this build gives, so that no fixture holds
-# them (review of 2026-10-07, C2-01, D1-07, C1-05): primary_unwrapped (server_query and the CLI
-# always wrap a PRIMARY graph in CanonicalDBG; only an embedding reaches it) and
-# alphabet_unsupported (the BOSS alphabet is the build's: a graph of another alphabet does not
-# load).
+# them: primary_unwrapped (server_query and the CLI always wrap a PRIMARY graph in
+# CanonicalDBG; only an embedding reaches it) and alphabet_unsupported (the BOSS alphabet is
+# the build's: a graph of another alphabet does not load).
 UNPRODUCIBLE = ('primary_unwrapped', 'alphabet_unsupported')
 # The ones a server of this build gives but no stored fixture holds, each with the index it
-# needs (review GPT-2 of 2026-10-08, finding 6): named here rather than left out of the
-# expected sets, so that the coverage tests list every code without a fixture. Every other code
-# has a fixture.
+# needs: named here rather than left out of the expected sets, so that the coverage tests list
+# every code without a fixture. Every other code has a fixture.
 NO_FIXTURE = {
     'mask_invalid': 'a graph whose .edgemask marks an edge with W = $ valid: one extended after '
                     'masking by a build older than 85614d30 (metagraph extend on a masked '
@@ -181,9 +176,9 @@ NO_FIXTURE = {
     'alphabet_untested': 'a DNA5 build of metagraph and a $ACGTN graph (a DNA4 build does not '
                          'load one)',
 }
-# The codes of version 1 that no build answers any more (SPEC §18): kept in REFUSALS and
-# UNAVAILABLE, since an older build of version 1 answers them and a client keeps handling them,
-# but written by no source of this build and held by no fixture.
+# The codes of version 1 that no build of this kind answers: kept in REFUSALS and UNAVAILABLE,
+# since an older build of version 1 answers them and a client keeps handling them, but written
+# by no source of this build and held by no fixture.
 RETIRED = {
     'mask_required': 'owner decision #16 of 2026-10-08: a graph without its dummy-edge mask is '
                      'served, its counts upper bounds with an estimate (capabilities counting '
@@ -193,15 +188,14 @@ RETIRED = {
 # reason comes first, mask or none
 SERVED_ALPHABET = '$ACGT'
 MASKS = ('file', 'built_at_load', 'absent')
-# owner decision #16: how the graph counts (capabilities counting, index.counting): exact with
-# its dummy-edge mask, upper_bound without it; the source of the dummy fraction an estimate
-# rests on (SPEC §8.2)
+# how the graph counts (capabilities counting, index.counting): exact with its dummy-edge mask,
+# upper_bound without it; the source of the dummy fraction an estimate rests on (SPEC §8.2)
 COUNTINGS = ('exact', 'upper_bound')
 FRACTION_SOURCES = ('sampled',)
 # the units whose bounds carry an estimate on a graph without its mask (the graph's counts)
 GRAPH_UNITS = ('graph_contexts', 'anchors', 'paths')
 PLACEMENTS = ('record', 'global', 'none', 'none_canonical')
-# an entry's placement (increment 3): the index's, or not_requested (output.occurrences false)
+# an entry's placement: the index's, or not_requested (output.occurrences false)
 ENTRY_PLACEMENTS = PLACEMENTS + ('not_requested',)
 LABELS_STATUS = ('complete', 'truncated', 'refused', 'not_read', 'output_budget')
 SUPPORTS = ('record_verified', 'label_intersection')
@@ -216,7 +210,7 @@ SCHEMA = {
                 'max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb', 'max_labels',
                 'max_occurrences_per_label', 'allow_unbudgeted_annotation',
                 'long_search', 'max_paths', 'require_support', 'genetic_code',
-                # increment 5b (SPEC §19.2)
+                # a predicate (SPEC §19.2)
                 'predicate', 'max_predicate_contexts', 'max_predicate_work', 'predicate_strands'],
     'request_pattern': ['id', 'dna', 'iupac', 'protein'],
     'request_output': ['labels', 'occurrences', 'paths'],
@@ -225,7 +219,7 @@ SCHEMA = {
                'patterns', 'predicate'],
     'index': ['index_ns', 'index_fp', 'release', 'k', 'graph_mode', 'alphabet',
               'strand_stated', 'counting', 'dummy_fraction'],
-    # owner decision #16 (SPEC §8.2): the dummy fraction of a graph without its mask
+    # SPEC §8.2: the dummy fraction of a graph without its mask
     'dummy_fraction': ['value', 'interval', 'samples', 'source'],
     'limits': ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms',
                'finalize_reserve_ms', 'min_information_bits', 'max_patterns',
@@ -236,9 +230,9 @@ SCHEMA = {
                'predicate_strands', 'clamped'],
     'clamped': ['field', 'requested', 'effective'],
     'timing': ['elapsed_ms', 'label_discovery_ms', 'placement_ms', 'extension_ms',
-               # review GPT-3 (round fix3, SPEC §18): the labels of paths
+               # the labels of paths (SPEC §12.1)
                'label_intersection_ms', 'verification_ms',
-               # increment 5b (SPEC §19.10)
+               # a predicate (SPEC §19.10)
                'selection_ms'],
     'entry': ['id', 'kind', 'pattern', 'length', 'residues', 'genetic_code', 'information_bits',
               'anchor_information_bits', 'min_anchor_information_bits', 'error', 'mode', 'scope',
@@ -247,29 +241,29 @@ SCHEMA = {
               'determinism', 'notes', 'timing', 'placement', 'annotation', 'by_label',
               'rows_refused', 'anchors_truncated', 'labels_cut', 'occurrences_cut',
               'labels_excluded_unverified',
-              # increment 5b (SPEC §19.10)
+              # a predicate (SPEC §19.10)
               'selection', 'absence_filter'],
     'counts': ['contexts', 'anchors', 'paths', 'labels', 'occurrences', 'tested', 'selected'],
     'count': ['value', 'relation', 'unit', 'lower', 'upper', 'estimate'],
     'contexts_count': ['suffix', 'by_offset', 'by_strand', 'by_orientation'],
     'anchors_count': ['by_strand', 'by_orientation'],
-    # increment 4 (long_search "paths", SPEC §17)
+    # long_search "paths" (SPEC §12.1)
     'paths_count': ['by_strand', 'by_orientation', 'candidates_examined', 'extension'],
     'labels_count': ['by_support'],
     'by_support': ['record_verified', 'label_intersection'],
     'work': ['ranges_visited', 'mask_scans', 'steps', 'annotation_rows', 'annotation_units',
              'memory_bytes', 'extension_edges',
-             # review GPT-3 (round fix3, SPEC §18): counters beside the steps
+             # counters beside the steps (SPEC §8.7)
              'extension_anchors', 'extension_branches', 'annotation_rows_distinct',
              'verification_steps',
-             # increment 5b (SPEC §19.10)
+             # a predicate (SPEC §19.10)
              'predicate_rows', 'predicate_units', 'predicate_lookups'],
     'stop': ['phase', 'reason'],
     'reason': ['reason'],
     'result': ['kmer', 'instance', 'offset', 'strand', 'orientation', 'node', 'row', 'support',
                'labels_status', 'labels_total', 'labels', 'selection_labels',
                'selection_strands'],
-    # increment 4: a path (a result of a pattern longer than k under long_search "paths")
+    # a path (a result of a pattern longer than k under long_search "paths")
     'path_result': ['sequence', 'anchor_kmer', 'instance', 'offset', 'strand', 'orientation',
                     'nodes', 'rows', 'support', 'labels_status', 'labels_total', 'labels',
                     'labels_excluded_unverified'],
@@ -282,17 +276,17 @@ SCHEMA = {
                      'resident_only', 'caps', 'default_time_budget_ms', 'finalize_reserve_ms',
                      'caps_rule', 'graph_mode', 'k', 'alphabet', 'strand_stated', 'mask',
                      'placement', 'support', 'annotation', 'default_occurrences',
-                     # increments 4 and 5
+                     # paths and peptides
                      'long_search', 'default_long_search', 'protein_residues', 'genetic_codes',
                      'default_genetic_code', 'protein_rule',
-                     # owner decision #16
+                     # a graph without its mask
                      'counting', 'dummy_fraction',
-                     # owner decision P9 (round fix3, SPEC §18)
+                     # the delivery rates and the prose references (SPEC §10.2)
                      'delivery_mbps',
-                     # increment 5b (SPEC §19.12)
+                     # a predicate (SPEC §19.12)
                      'predicate'],
     'delivery_mbps': ['build', 'compress'],
-    # increment 5b (SPEC §19): the predicate's operators (each a one-member object), the
+    # a predicate (SPEC §19): the predicate's operators (each a one-member object), the
     # answer's predicate block, an entry's selection, and the capabilities' predicate object
     'predicate': list(PREDICATE_OPERATORS),
     'predicate_block': ['normal_form', 'names', 'known', 'unknown_labels', 'vacuous', 'scope',
@@ -300,7 +294,7 @@ SCHEMA = {
     'selection': ['pass', 'support', 'access'],
     'capabilities_predicate': ['operators', 'strands', 'access'],
     'capabilities_multi': ['pattern_contract_version', 'available', 'unavailable_reason'],
-    # increment 3 (SPEC §14)
+    # output.labels "all" (SPEC §14)
     'anchor_truncated': ['kmer', 'row', 'cap', 'total'],
     'occurrence': ['seq_id', 'record', 'strand', 'nt_coords', 'nt_length'],
     'occurrence_global': ['kmer_coord', 'offset', 'strand'],
@@ -317,19 +311,19 @@ ENTRY_ANSWERED = ENTRY_DESCRIPTION + ['mode', 'scope', 'strands', 'palindromic',
                                       'work', 'stop', 'retrieval_complete', 'absence_scope',
                                       'determinism', 'notes', 'timing']
 ENTRY_RETRIEVAL = ['withheld', 'returned', 'cut', 'results']
-# output.labels "all" in a retrieval mode (increment 3)
+# output.labels "all" in a retrieval mode
 ENTRY_LABELS = ['placement', 'annotation', 'by_label', 'rows_refused', 'anchors_truncated',
                 'labels_cut', 'occurrences_cut']
 LIMITS_LABELS = ['max_labels_per_anchor', 'max_annotation_work', 'max_memory_mb', 'max_labels',
                  'max_occurrences_per_label']
-# (owner decision #24: max_checked_entries, the server's limit of the unchecked candidates a
-# pattern on a graph without its mask has tested; no request field)
+# (max_checked_entries: the server's limit of the unchecked candidates a pattern on a graph
+# without its mask has tested; no request field)
 CAPS = ['max_contexts', 'max_anchors', 'max_steps', 'time_budget_ms', 'min_information_bits',
         'max_patterns'] + LIMITS_LABELS + ['max_paths', 'max_checked_entries',
-                                           # increment 5b (SPEC §19.12)
+                                           # a predicate (SPEC §19.12)
                                            'max_predicate_contexts', 'max_predicate_work',
                                            'max_predicate_labels']
-# increment 5b: the limits a predicate answer echoes (SPEC §19.10)
+# the limits a predicate answer echoes (SPEC §19.10)
 LIMITS_PREDICATE = ['max_predicate_contexts', 'max_predicate_work', 'max_predicate_labels',
                     'predicate_strands']
 
@@ -354,15 +348,14 @@ def served_bytes(value):
     return len(json.dumps(value, ensure_ascii=True))
 
 
-# The route's sources (src/cli/*.cpp) that the route does not call yet, with the refusal codes
-# they write (increment 5b's predicate language, pattern_predicate.cpp, was one until the route
-# served predicates: its predicate_too_large is in REFUSALS since)
+# The route's sources (src/cli/*.cpp) that the route does not call, with the refusal codes they
+# write (a source moves out of this list once the route calls it, its codes into REFUSALS)
 NOT_SERVED_SOURCES = {}
 
 # The ceiling of the capabilities document the service's MCP tool returns in one piece
 # (api/python/metagraph/traverse/mcp_tools.py, CAPABILITIES_MAX_BYTES; read from its source by
 # test_capabilities_documents_keep_a_kibibyte, no import), and the room every fixture server's
-# document keeps under it since owner decision P9 of 2026-10-08 (SPEC §18)
+# document keeps under it
 MCP_TOOLS = os.path.join(REPO, 'api', 'python', 'metagraph', 'traverse', 'mcp_tools.py')
 CAPABILITIES_MAX_BYTES = 32 * 1024
 CAPABILITIES_ROOM = 1024
@@ -495,9 +488,9 @@ def revcomp(s):
 
 def codons_of(residue, table):
     """The codons of a peptide's residue in an NCBI table (X: every codon that is not a stop,
-    B: D or N, Z: E or Q, J: I or L; '*': the stop codons, owner decision #19 -- none in the
-    tables without an unconditional stop codon, 27, 28 and 31, whose context stops are their
-    residue's, decision #21; a stop codon never matches any other residue)."""
+    B: D or N, Z: E or Q, J: I or L; '*': the stop codons -- none in the tables without an
+    unconditional stop codon, 27, 28 and 31, whose context stops are their residue's; a stop
+    codon never matches any other residue)."""
     if residue == '*':
         return {c for c, a in zip(CODONS_TCAG, GENETIC_CODES[table]) if a == '*'}
     admits = {'X': lambda a: True, 'B': lambda a: a in 'DN', 'Z': lambda a: a in 'EQ',
@@ -512,8 +505,8 @@ def round_half_up(x):
 
 
 def estimate_of(count, fraction):
-    """SPEC §7.4 (owner decision #16): a bounds count's estimate on a graph without its mask,
-    round(upper x f) kept inside [lower, upper]."""
+    """SPEC §7.4: a bounds count's estimate on a graph without its mask, round(upper x f) kept
+    inside [lower, upper]."""
     return max(count['lower'], min(count['upper'], round_half_up(count['upper'] * fraction)))
 
 
@@ -558,7 +551,7 @@ class Kind:
 
     def has_instances(self):
         """False iff no string instantiates the pattern: a peptide holding '*' read in a table
-        without an unconditional stop codon (27, 28, 31; owner decision #19)."""
+        without an unconditional stop codon (27, 28, 31)."""
         return not self.protein or all(self.codons)
 
     def instance(self, s, reverse):
@@ -602,17 +595,17 @@ class Checker:
     def __init__(self, test, name):
         self.t = test
         self.name = name
-        # owner decision #16: the dummy fraction of a graph served without its mask (the
-        # answer's index.dummy_fraction.value), None with the mask; set by answer()
+        # the dummy fraction of a graph served without its mask (the answer's
+        # index.dummy_fraction.value), None with the mask; set by answer()
         self.fraction = None
         # whether a count of the entry being checked states an estimate
         self.estimated = False
-        # owner decision #24: on a graph without its mask whose capabilities are known, the
-        # server's max_checked_entries; and the answer's graph mode. Set by answer()
+        # on a graph without its mask whose capabilities are known, the server's
+        # max_checked_entries; and the answer's graph mode. Set by answer()
         self.checked_limit = None
         self.graph_mode = None
-        # increment 5b: the normal form of the answer's predicate (None without one, or when
-        # its binding stopped), and the capabilities of the fixture's server; set by answer()
+        # the normal form of the answer's predicate (None without one, or when its binding
+        # stopped), and the capabilities of the fixture's server; set by answer()
         self.normal_form = None
         self.capabilities = None
 
@@ -632,9 +625,9 @@ class Checker:
 
     def count(self, c, unit, path, extra=(), graph=True):
         keys = ['value', 'relation', 'unit'] + list(extra)
-        # owner decision #16 (SPEC §7.4): on a graph without its mask every bounds count of the
-        # graph (contexts, anchors, paths) carries its estimate, and no other count does (not
-        # the selection's tested and selected, |graph| false: increment 5b, SPEC §19.7)
+        # SPEC §7.4: on a graph without its mask every bounds count of the graph (contexts,
+        # anchors, paths) carries its estimate, and no other count does (not the selection's
+        # tested and selected, |graph| false: SPEC §19.7)
         estimate = isinstance(c, dict) and c.get('relation') == 'bounds' \
             and self.fraction is not None and unit in GRAPH_UNITS and graph
         if isinstance(c, dict) and c.get('relation') == 'bounds':
@@ -658,9 +651,8 @@ class Checker:
                     and c['value'] == c['lower'], path, 'bounds: value == lower <= upper')
 
     def dummy_fraction(self, f, path):
-        """owner decision #16 (SPEC §8.2): f, the fraction of real k-mers among the entries a
-        pattern can count, with its 95% interval (Wilson's, holding f), the entries drawn and
-        its source."""
+        """SPEC §8.2: f, the fraction of real k-mers among the entries a pattern can count, with
+        its 95% interval (Wilson's, holding f), the entries drawn and its source."""
         self.keys(f, SCHEMA['dummy_fraction'], path)
         self.ok(is_num(f['value']) and 0 <= f['value'] <= 1, path + '.value')
         self.ok(isinstance(f['interval'], list) and len(f['interval']) == 2
@@ -852,8 +844,8 @@ class Checker:
                 path + '.work.predicate_lookups', 'reverse-complement lookups: either on BASIC')
 
     def rows_refused(self, e, path):
-        """The rows the account refused (SPEC §14.4): each with its phase (increment 5b: the
-        selection's, phase selection, first)."""
+        """The rows the account refused (SPEC §14.4): each with its phase (with a predicate:
+        the selection's, phase selection, first)."""
         phases = [x.get('phase') for x in e['rows_refused']]
         for i, x in enumerate(e['rows_refused']):
             xp = f'{path}.rows_refused[{i}]'
@@ -864,13 +856,13 @@ class Checker:
                 'the selection\'s first')
 
     def selection_labels(self, e, path, a=None):
-        """The results' selection_labels (P22): the predicate's labels in the set each context was
+        """The results' selection_labels: the predicate's labels in the set each context was
         evaluated on, names of the normal form, satisfying it, in label order (contexts desc,
-        column asc over the results); beside them selection_strands (the owner's answer to P11):
-        per label the orientation whose row carries it -- "either" on CANONICAL and PRIMARY
-        graphs, "context" for every label under predicate.strands "context", and otherwise
-        "context" or "both" exactly when the label is on the context's own row (its labels, when
-        the projection read them) and "reverse_complement" when it is not."""
+        column asc over the results); beside them selection_strands: per label the orientation
+        whose row carries it -- "either" on CANONICAL and PRIMARY graphs, "context" for every
+        label under predicate.strands "context", and otherwise "context" or "both" exactly when
+        the label is on the context's own row (its labels, when the projection read them) and
+        "reverse_complement" when it is not."""
         names = set(predicate_names(self.normal_form)) \
             if isinstance(self.normal_form, dict) else set()
         basic = a is None or a['index']['graph_mode'] == 'basic'
@@ -928,7 +920,7 @@ class Checker:
         mode = request.get('mode', 'all_or_count')
         self.ok(a['mode'] == mode, 'mode', f'{a["mode"]!r}, the request asks {mode!r}')
         asked = request.get('output', {})
-        # increment 5b: a predicate request, and the projections that read labels ("all", and
+        # a predicate request, and the projections that read labels ("all", and
         # "predicate_only" with a predicate)
         predicate = 'predicate' in request
         labelled = mode != 'count' and asked.get('labels') in ('all', 'predicate_only')
@@ -948,8 +940,8 @@ class Checker:
             self.predicate_block(a['predicate'], request, a['index'], 'predicate')
 
         index = a['index']
-        # owner decision #16 (SPEC §8.2): counting and dummy_fraction only in the answers on a
-        # graph without its mask; an answer on a masked graph is written as before
+        # SPEC §8.2: counting and dummy_fraction only in the answers on a graph without its
+        # mask; an answer on a masked graph has neither
         unmasked = 'counting' in index
         self.keys(index, [f for f in SCHEMA['index']
                           if unmasked or f not in ('counting', 'dummy_fraction')], 'index')
@@ -978,12 +970,12 @@ class Checker:
                     'index.dummy_fraction', 'the capabilities\' dummy_fraction')
 
         limits = a['limits']
-        # the annotation limits only in the answers that read annotation (increment 3); the
-        # path limits only in the answers to long_search "paths" (increment 4, SPEC §12.1),
-        # require_support among them only when labels are read
+        # the annotation limits only in the answers that read annotation; the path limits only
+        # in the answers to long_search "paths" (SPEC §12.1), require_support among them only
+        # when labels are read
         paths = request.get('long_search', 'anchors') == 'paths'
-        # increment 5b: with a predicate the account is used in every mode (the annotation
-        # limits echoed), and the selection's limits are echoed
+        # with a predicate the account is used in every mode (the annotation limits echoed),
+        # and the selection's limits are echoed
         annotated = labelled or predicate
         self.keys(limits, [f for f in SCHEMA['limits']
                            if (annotated
@@ -1163,7 +1155,7 @@ class Checker:
             self.ok(anchors['relation'] == 'exact', path + '.extension',
                     'completed: every anchor discovered and extended')
         if c['extension'] == 'not_admitted':
-            # (owner decision #16: without the mask, the anchors' upper bound above max_anchors)
+            # (without the mask, the anchors' upper bound above max_anchors)
             self.ok(self.above(anchors, limits['max_anchors']), path + '.extension',
                     'not admitted: the exact anchors (or their upper bound) above max_anchors')
         if c['relation'] in ('exact', 'at_least'):
@@ -1173,8 +1165,7 @@ class Checker:
 
     def above(self, c, threshold):
         """A threshold decided against a count with no stop: the exact count above it, or on a
-        graph without its mask (owner decision #16: conservative) a bounds count whose upper
-        bound is above it."""
+        graph without its mask (conservative) a bounds count whose upper bound is above it."""
         if c['relation'] == 'exact':
             return c['value'] > threshold
         return self.fraction is not None and c['relation'] == 'bounds' \
@@ -1200,13 +1191,13 @@ class Checker:
         mode = a['mode']
         labelled = isinstance(a['output'], dict) and a['output']['labels'] in ('all',
                                                                                'predicate_only')
-        # increment 5b: a predicate request (its selection in every answered entry)
+        # a predicate request (its selection in every answered entry)
         predicate = 'predicate' in request
         # the request named the labels (or an annotation field) and this answer reads none
         named = (request.get('output', {}).get('labels') == 'all'
                  or any(f in request for f in LIMITS_LABELS + ['allow_unbudgeted_annotation',
                                                                'require_support']))
-        # increment 5b: a field only a projection reads (SPEC §19.10, projection_not_read)
+        # a field only a projection reads (SPEC §19.10, projection_not_read)
         projection_named = (request.get('output', {}).get('labels') in ('all', 'predicate_only')
                             or any(f in request for f in ('max_labels_per_anchor',
                                                           'max_annotation_work', 'max_labels',
@@ -1218,7 +1209,7 @@ class Checker:
         pk = Kind(asked, request)
         self.ok(e['kind'] == pk.kind, path + '.kind')
         text = pk.text
-        # a peptide's entry states its residues and its genetic code (increment 5)
+        # a peptide's entry states its residues and its genetic code
         description = ENTRY_DESCRIPTION + (['residues', 'genetic_code'] if pk.protein else [])
 
         self.estimated = False
@@ -1228,7 +1219,7 @@ class Checker:
             self.one_of(err['code'], SLOT_ERRORS, path + '.error.code')
             self.ok(isinstance(err['message'], str) and err['message'], path + '.error.message')
             if err['code'] == 'bad_alphabet':
-                # (the stop '*' is a residue since owner decision #19, SPEC §12.2)
+                # (the stop '*' is a residue, SPEC §12.2)
                 self.keys(e, ['id', 'kind', 'error'], path)
                 self.ok(not pk.parsed(), path, 'bad_alphabet for a pattern inside the alphabet')
                 return
@@ -1251,7 +1242,7 @@ class Checker:
 
         self.ok(pk.parsed(), path, 'answered outside the alphabet')
         L = pk.length()
-        # long_search "paths" (increment 4): a pattern longer than k answered by its paths
+        # long_search "paths": a pattern longer than k answered by its paths
         paths = request.get('long_search', 'anchors') == 'paths' and L > k
         verified_only = request.get('require_support') == 'record_verified'
         expected = description + ENTRY_ANSWERED[len(ENTRY_DESCRIPTION):] \
@@ -1262,7 +1253,7 @@ class Checker:
         self.keys(e, expected, path)
         self.description(e, pk, k, path, request)
         # SPEC §7.8: a pattern answered is exempt or at or above the floor (for L > k: every
-        # searched anchor window, review of 2026-10-07, X-GUARANTEES-01)
+        # searched anchor window)
         bits = e['min_anchor_information_bits'] if L > k else e['information_bits']
         self.ok(self.exempt(pk, k, request) or bits >= a['limits']['min_information_bits']
                 or pk.answered_unsearched(k), path, 'answered below the floor')
@@ -1342,14 +1333,14 @@ class Checker:
                   + (['extension_edges', 'extension_anchors', 'extension_branches']
                      if paths else [])
                   + (['verification_steps'] if labelled and paths else [])
-                  # increment 5b: the selection's work, and the account (every mode)
+                  # a predicate: the selection's work, and the account (every mode)
                   + (['predicate_rows', 'predicate_units', 'predicate_lookups']
                      + ([] if labelled else ['memory_bytes']) if predicate else []),
                   path + '.work')
         self.ok(all(is_int(v) and v >= 0 for v in w.values()), path + '.work')
         self.ok(w['steps'] >= w['ranges_visited'] + w.get('extension_edges', 0), path + '.work',
                 'steps >= ranges_visited (+ extension_edges, one step each)')
-        # review GPT-3 (round fix3, SPEC §8.7, §18): the counters beside the steps
+        # SPEC §8.7: the counters beside the steps
         if paths:
             ext = counts['paths']['extension']
             if ext in ('no_anchors', 'not_started', 'not_admitted'):
@@ -1385,7 +1376,7 @@ class Checker:
             self.ok(stop['phase'] not in ANNOTATION_PHASES or labelled
                     or (predicate and stop['phase'] == 'output'), path + '.stop.phase',
                     'an annotation phase without labels "all"')
-            # increment 5b (SPEC §19.8): the selection's phase and reasons with a predicate only
+            # SPEC §19.8: the selection's phase and reasons with a predicate only
             self.ok(stop['phase'] != 'selection' or predicate, path + '.stop.phase',
                     'a selection without a predicate')
             self.ok(stop['reason'] not in ('max_predicate_work', 'max_predicate_contexts')
@@ -1414,8 +1405,8 @@ class Checker:
                         or 'threshold_upper_bound' in e['notes'], path + '.notes',
                         'a threshold stop below the threshold without threshold_upper_bound')
         else:
-            # owner decision #16: without the mask a completed discovery leaves bounds where
-            # source dummies may be among the candidates (SPEC §7.4)
+            # without the mask a completed discovery leaves bounds where source dummies may be
+            # among the candidates (SPEC §7.4)
             self.ok(total['relation'] == 'exact'
                     or (self.fraction is not None and total['relation'] == 'bounds'),
                     path + '.counts', 'a count without a stop is exact (bounds only on a graph '
@@ -1428,18 +1419,18 @@ class Checker:
         # SPEC §7.6/§7.9: time_limited iff the clock touched the entry, in its stop or, in
         # partial, only in its cut (stop keeps the first stop: a pattern stopped by max_steps or
         # its threshold whose release met the work time, or a later pattern after a sticky
-        # max_steps stop whose empty release met it; review of 2026-10-07, C1-03 and
-        # X-DETERMINISM-01). With labels "all", a time stop of the reads after a step stop of the
-        # engine states the engine's stop, so only that direction is checked there.
+        # max_steps stop whose empty release met it). With labels "all", a time stop of the
+        # reads after a step stop of the engine states the engine's stop, so only that
+        # direction is checked there.
         clocked = (stop is not None and stop['reason'] == 'time') \
             or (e.get('cut') or {}).get('reason') == 'time'
         if clocked:
             self.ok(e['determinism'] == 'time_limited', path + '.determinism',
                     'a time stop or a time cut is not deterministic')
         if e['determinism'] == 'time_limited':
-            # (review GPT-3, round fix3, SPEC §7.8: the low-complexity diagnostic of a completed
-            # pattern of more than 191 bases, cut by the work time, leaves its note out and
-            # states time_limited with no stop)
+            # (SPEC §7.8: the low-complexity diagnostic of a completed pattern of more than 191
+            # bases, cut by the work time, leaves its note out and states time_limited with no
+            # stop)
             diagnosis_cut = stop is None and L > LOW_COMPLEXITY_UNCUT \
                 and 'low_complexity_pattern' not in e['notes']
             self.ok(clocked or ((labelled or predicate) and stop is not None) or diagnosis_cut,
@@ -1447,7 +1438,7 @@ class Checker:
         self.ok(isinstance(e['notes'], list) and all(n in NOTES for n in e['notes']),
                 path + '.notes', repr(e['notes']))
         self.ok(e['notes'] == [n for n in NOTES if n in e['notes']], path + '.notes', 'order')
-        # review GPT-3 (round fix3, SPEC §7.8): the diagnostic runs on a completed search only
+        # SPEC §7.8: the diagnostic runs on a completed search only
         self.ok('low_complexity_pattern' not in e['notes'] or stop is None, path + '.notes',
                 'low_complexity_pattern with a stop')
         self.ok(('strand_unknown_canonical' in e['notes']) is (not strand_stated),
@@ -1469,13 +1460,13 @@ class Checker:
                     'predicate_constant exactly for a constant normal form')
         else:
             self.ok('predicate_constant' not in e['notes'], path + '.notes')
-        # SPEC §18 (owner decisions #16 and #19)
+        # graphs without their mask, and the stop '*'
         self.ok(('estimate_sampled_dummy_fraction' in e['notes']) is self.estimated,
                 path + '.notes', 'estimate_sampled_dummy_fraction exactly where a count states an '
                 'estimate')
         self.ok(('no_stop_codon' in e['notes']) is (not pk.has_instances()), path + '.notes',
                 'no_stop_codon exactly for a peptide whose * has no codon in its table')
-        # owner decision #24 (SPEC §7.4): a pattern whose discovery completed with at most
+        # SPEC §7.4: a pattern whose discovery completed with at most
         # caps.max_checked_entries unchecked candidates had each of them tested and is exact,
         # so a bounds total stated without a stop has more of them: on a BASIC or CANONICAL
         # graph they number its upper - lower (a wrapped PRIMARY graph counts an entry in both
@@ -1513,14 +1504,14 @@ class Checker:
                     is (e['annotation'] == 'unbudgeted'), path + '.notes')
             self.ok(('record_bounds_unknown' in e['notes']) is (e['placement'] == 'global'),
                     path + '.notes')
-            # increment 4: the labels of paths where no coordinate is read
+            # the labels of paths where no coordinate is read
             self.ok(('label_intersection_only' in e['notes'])
                     is (paths and e['placement'] in ('none', 'none_canonical', 'not_requested')),
                     path + '.notes', 'label_intersection_only exactly for paths placed nowhere')
         else:
             self.ok(not {'record_bounds_unknown', 'label_intersection_only'} & set(e['notes']),
                     path + '.notes')
-            # increment 5b: a selection that read rows of an unbudgeted annotation says so
+            # a selection that read rows of an unbudgeted annotation says so
             unbudgeted = 'annotation_unbudgeted' in e['notes']
             self.ok(not unbudgeted or (predicate and e['work']['predicate_rows'] > 0),
                     path + '.notes', 'annotation_unbudgeted where nothing was read')
@@ -1553,8 +1544,7 @@ class Checker:
             # anchor_information_bits: the bits of P[0, k), whatever the strands (its meaning in
             # contract version 1); min_anchor_information_bits: the least informative anchor
             # window searched, P[0, k) forward, rc(P)[0, k) reverse, whose bits are
-            # P[L - k, L)'s (review of 2026-10-07, X-GUARANTEES-01, and the owner's decision);
-            # a peptide's windows may cut a codon (exact bits, SPEC §12.2)
+            # P[L - k, L)'s; a peptide's windows may cut a codon (exact bits, SPEC §12.2)
             self.ok(is_num(e['anchor_information_bits'])
                     and abs(e['anchor_information_bits'] - pk.bits(0, k)) < 1e-9,
                     path + '.anchor_information_bits', 'the bits of P[0, k)')
@@ -1640,8 +1630,8 @@ class Checker:
         if mode == 'all_or_count':
             self.ok(e['retrieval_complete'] or e['withheld'] is not None, path,
                     'all_or_count returns all, or withholds')
-        # the admissions (SPEC §7.5; owner decision #16: without the mask they compare the upper
-        # bound, and threshold_upper_bound states a decision its lower bound did not cross)
+        # the admissions (SPEC §7.5; without the mask they compare the upper bound, and
+        # threshold_upper_bound states a decision its lower bound did not cross)
         reason = (e['withheld'] or {}).get('reason')
         noted = 'threshold_upper_bound' in e['notes']
         admission = {'count_above_threshold': 'max_contexts',
@@ -1805,8 +1795,8 @@ class Checker:
         strand_stated = a['index']['strand_stated']
         labelled = isinstance(a['output'], dict) and a['output']['labels'] in ('all',
                                                                                'predicate_only')
-        # increment 5b: the results of a predicate request are its selected contexts, with
-        # their selection_labels when the projection reads labels
+        # the results of a predicate request are its selected contexts, with their
+        # selection_labels when the projection reads labels
         predicate = 'predicate' in a
         L = pk.length()
         results = e['results']
@@ -1836,7 +1826,7 @@ class Checker:
             order.append((r['node'], r['offset'], ORIENTATION_RANK[r[key]]))
         self.ok(order == sorted(order) and len(set(order)) == len(order), path + '.results',
                 'ordered by (node, offset, orientation), each context once')
-        # review of 2026-10-07, X-ORACLE-03: the results and the counts beside them
+        # the results and the counts beside them
         contexts = [(r[key], r['kmer'], r['offset']) for r in results]
         self.ok(len(set(contexts)) == len(contexts), path + '.results',
                 'a context (strand, k-mer, offset) returned once')
@@ -1870,7 +1860,7 @@ class Checker:
                         self.ok(n <= count['value'], f'{path}.counts.contexts.{name}.{part}',
                                 f'{n} results above the exact count {count["value"]}')
                     elif count['relation'] == 'bounds' and self.fraction is not None:
-                        # owner decision #16: a released context is a k-mer among the upper
+                        # without the mask a released context is a k-mer among the upper
                         # bound's candidates, and the release raised the lower bound to it
                         self.ok(n <= count['lower'], f'{path}.counts.contexts.{name}.{part}',
                                 f'{n} results above the lower bound {count["lower"]}')
@@ -1911,10 +1901,10 @@ class Checker:
         # row of it was truncated (SPEC §12.1)
         unknown_total = ('refused', 'not_read', 'truncated') if paths else ('refused', 'not_read')
         if e['by_label'] is None:
-            # partial whose memory account could not hold by_label (SPEC §14.4; outside review
-            # GPT-2 recheck): no label of the pattern is built, every context read answers
-            # output_budget, the answer is incomplete and states a stop (the output's, or an
-            # earlier one: the first stop wins); the counts keep their own relations
+            # partial whose memory account could not hold by_label (SPEC §14.4): no label of
+            # the pattern is built, every context read answers output_budget, the answer is
+            # incomplete and states a stop (the output's, or an earlier one: the first stop
+            # wins); the counts keep their own relations
             self.ok(mode == 'partial', path + '.by_label', 'null only when withheld or in partial')
             self.ok(not e['retrieval_complete'], path + '.retrieval_complete',
                     'by_label null: not complete')
@@ -2005,9 +1995,9 @@ class Checker:
                     self.ok(o['strand'] == strand, op + '.strand', 'the context\'s')
 
     def path_labels(self, e, L, a, path, request, records, placed):
-        """The labels of paths (SPEC §12.1, owner decision #14): by_label per label with its
-        paths, the paths one record verifies and its occurrences; each path's labels, each with
-        its support (record_verified: an occurrence of the whole path in one record, placed;
+        """The labels of paths (SPEC §12.1): by_label per label with its paths, the paths one
+        record verifies and its occurrences; each path's labels, each with its support
+        (record_verified: an occurrence of the whole path in one record, placed;
         label_intersection: on every k-mer of the path, no record holding it whole), the path's
         support theirs; with require_support "record_verified" only the verified ones listed,
         the others counted in labels_excluded_unverified."""
@@ -2156,12 +2146,12 @@ class Checker:
                           ('kinds', KINDS), ('strands', ('both', 'forward', 'reverse')),
                           ('long_search', LONG_SEARCH)):
             self.ok(isinstance(b[f], list) and b[f] and set(b[f]) <= set(values), f'{path}.{f}')
-        # increment 4: the paths are opt-in (owner decision #13): an omitted long_search is
-        # "anchors", and long_patterns keeps describing that answer
+        # the paths are opt-in: an omitted long_search is "anchors", and long_patterns keeps
+        # describing that answer
         self.ok(b['default_long_search'] == 'anchors' and 'anchors' in b['long_search'],
                 path + '.default_long_search', 'version 1: an omitted long_search is "anchors"')
         self.ok(b['long_patterns'] == 'anchors_counted', path + '.long_patterns')
-        # increment 5: the residues, the genetic codes (NCBI ids) and the default
+        # peptides: the residues, the genetic codes (NCBI ids) and the default
         self.ok(isinstance(b['protein_residues'], list)
                 and all(isinstance(r, str) and len(r) == 1 and r in PROTEIN_RESIDUES
                         for r in b['protein_residues']), path + '.protein_residues')
@@ -2169,9 +2159,9 @@ class Checker:
                 and all(c in GENETIC_CODES for c in b['genetic_codes']), path + '.genetic_codes',
                 'NCBI translation table ids')
         self.ok(b['default_genetic_code'] in b['genetic_codes'], path + '.default_genetic_code')
-        # owner decision P9 (SPEC §18): the two prose fields are references to the SPEC, in
-        # printable ASCII (the server escapes any other byte as \uXXXX), and the delivery rates
-        # of the time kept back for the answer (§7.6) are numbers
+        # SPEC §10.2: the two prose fields are references to the SPEC, in printable ASCII (the
+        # server escapes any other byte as \uXXXX), and the delivery rates of the time kept
+        # back for the answer (§7.6) are numbers
         for f in ('protein_rule', 'caps_rule'):
             self.ok(isinstance(b[f], str) and 'SPEC-pattern-search.md sections ' in b[f]
                     and all(' ' <= c <= '~' for c in b[f]), f'{path}.{f}',
@@ -2186,11 +2176,11 @@ class Checker:
         self.ok(b['default_mode'] in b['modes'], path + '.default_mode')
         self.ok(b['default_projection'] in b['projections'], path + '.default_projection')
         # contract version 1: an omitted output.labels means "none" on every server stating
-        # it (review of 2026-10-07, D1-04: a "may become all" would change the meaning of an
-        # unchanged request under the same version)
+        # it (a "may become all" would change the meaning of an unchanged request under the
+        # same version)
         self.ok(b['default_projection'] == 'none', path + '.default_projection',
                 'version 1: an omitted output.labels is "none"')
-        # review of 2026-10-07, R2-04: the rule names every cap
+        # the rule names every cap
         for cap in b['caps']:
             self.ok(cap in b['caps_rule'], path + '.caps_rule', f'{cap} not in the rule')
         self.ok(not set(b['projections']) & set(b['projections_later_increment']),
@@ -2202,8 +2192,8 @@ class Checker:
         self.keys(b['scopes_by_graph_mode'], GRAPH_MODES, path + '.scopes_by_graph_mode')
         self.keys(b['caps'], CAPS, path + '.caps')
         self.ok(all(is_num(v) for v in b['caps'].values()), path + '.caps')
-        # increment 5b (SPEC §19.12): "predicate_only" served with the predicate object (the
-        # operators, the strands, the access: null while the annotation is not described)
+        # SPEC §19.12: "predicate_only" served with the predicate object (the operators, the
+        # strands, the access: null while the annotation is not described)
         self.keys(b['predicate'], SCHEMA['capabilities_predicate'], path + '.predicate')
         self.ok(b['predicate']['operators'] == list(PREDICATE_OPERATORS),
                 path + '.predicate.operators')
@@ -2220,8 +2210,8 @@ class Checker:
                 <= b['caps']['time_budget_ms'], path + '.default_time_budget_ms')
         self.ok(isinstance(b['caps_rule'], str), path + '.caps_rule')
         self.ok(b['resident_only'] is True, path + '.resident_only')
-        # owner decision #16 (SPEC §10.2): how an available graph counts, and the dummy fraction
-        # its estimates rest on; null when the graph is not served (or loading)
+        # SPEC §10.2: how an available graph counts, and the dummy fraction its estimates rest
+        # on; null when the graph is not served (or loading)
         if b['available'] is True:
             self.one_of(b['counting'], COUNTINGS, path + '.counting')
             self.ok(b['counting'] == ('upper_bound' if b['mask'] == 'absent' else 'exact'),
@@ -2242,8 +2232,8 @@ class Checker:
             return
         self.ok(is_int(b['k']), path + '.k')
         if b['graph_mode'] is None:
-            # SPEC §10.2: a graph the engine does not recognise (review of 2026-10-07, C2-01):
-            # not available, and only k is set
+            # SPEC §10.2: a graph the engine does not recognise: not available, and only k is
+            # set
             self.one_of(b['unavailable_reason'],
                         ('representation_unsupported', 'primary_unwrapped'),
                         path + '.unavailable_reason')
@@ -2256,8 +2246,8 @@ class Checker:
         self.ok(b['strand_stated'] is (b['graph_mode'] == 'basic'), path + '.strand_stated')
         self.one_of(b['mask'], MASKS, path + '.mask')
         self.ok(isinstance(b['alphabet'], str) and b['alphabet'], path + '.alphabet')
-        # mask_required is retired (owner decision #16): a block that states counting is
-        # never refused for a missing mask
+        # mask_required is retired: a block that states counting is never refused for a
+        # missing mask
         self.ok(b['unavailable_reason'] not in RETIRED, path + '.unavailable_reason',
                 'a retired reason (mask_required: a graph without its mask is served)')
         # a mask that marks a W = $ edge valid is a mask read from its file (one built at load
@@ -2266,7 +2256,7 @@ class Checker:
             self.ok(b['mask'] == 'file', path + '.mask', 'mask_invalid: a mask file')
         # the alphabet before the mask (pattern.cpp route_support): on another alphabet than the
         # served one the alphabet's reason is given, mask or none -- a DNA5 graph without a mask
-        # is alphabet_untested (review GPT-2 of 2026-10-08, finding 6)
+        # is alphabet_untested
         if b['alphabet'] == SERVED_ALPHABET:
             self.ok(b['unavailable_reason'] not in ('alphabet_untested', 'alphabet_unsupported'),
                     path + '.unavailable_reason', f'{SERVED_ALPHABET} is served')
@@ -2434,9 +2424,9 @@ class TestPatternFixtures(unittest.TestCase):
             if f['method'] != 'POST' or f['status'] != 200:
                 continue
             with self.subTest(fixture=name):
-                # owner decision #16: without the mask the thresholds compare the upper bound
-                # (conservative), and the note threshold_upper_bound says when the lower bound
-                # was within the threshold
+                # without the mask the thresholds compare the upper bound (conservative), and
+                # the note threshold_upper_bound says when the lower bound was within the
+                # threshold
                 unmasked = 'counting' in answer['index']
                 threshold = answer['limits']['max_contexts']
                 for e in answer['patterns']:
@@ -2507,7 +2497,7 @@ class TestPatternFixtures(unittest.TestCase):
                 seen['relation'].add(total['relation'])
         self.assertEqual(set(MODES), seen['mode'])
         self.assertEqual(set(SCOPES), seen['scope'])
-        # increments 4 and 5: every kind; the paths' extension completed, stopped, not
+        # paths and peptides: every kind; the paths' extension completed, stopped, not
         # admitted and without anchors; both supports of a label of a path (none listed: null)
         self.assertEqual(set(KINDS), seen['kind'])
         self.assertLessEqual({'completed', 'stopped', 'not_admitted', 'no_anchors'},
@@ -2522,24 +2512,22 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(set(WITHHELD), seen['withheld'])
         self.assertEqual({'max_contexts', 'max_steps', 'time', 'max_memory', 'max_paths',
                           'max_predicate_contexts', 'max_predicate_work'}, seen['cut'])
-        # increment 5b: the selection's stops and the raw threshold's
+        # a predicate: the selection's stops and the raw threshold's
         self.assertLessEqual({('selection', 'max_predicate_work'), ('selection', 'max_contexts'),
                               ('discovery', 'max_predicate_contexts')}, seen['stop'])
         self.assertEqual(set(SLOT_ERRORS), seen['slot'])
         self.assertEqual({'basic', 'primary'}, seen['graph_mode'])
         self.assertEqual(set(NOTES), seen['note'])
-        # every relation, bounds and the mask_scan stop included (review of 2026-10-07,
-        # X-TESTS-03: no body carried either)
+        # every relation, bounds and the mask_scan stop included
         self.assertEqual(set(RELATIONS), seen['relation'])
         self.assertLessEqual({('discovery', 'max_steps'), ('discovery', 'time'),
                               ('discovery', 'max_contexts'), ('mask_scan', 'max_steps')},
                              seen['stop'])
-        # every refusal code but the unproducible ones (review of 2026-10-07, C2-01: the set was
-        # pinned to the covered ones, so a code without a fixture went unseen) and the ones no
-        # stored fixture holds, listed by name with the index each needs (review GPT-2 of
-        # 2026-10-08, finding 6: derived from REFUSALS alone, the expectation could not notice
-        # REFUSALS missing two codes; test_the_codes_are_the_sources compares it with the code)
-        # mask_required, retired by owner decision #16, has none either (RETIRED)
+        # every refusal code but the unproducible ones (a set pinned to the covered ones would
+        # let a code without a fixture go unseen) and the ones no stored fixture holds, listed
+        # by name with the index each needs (derived from REFUSALS alone, the expectation could
+        # not notice REFUSALS missing codes; test_the_codes_are_the_sources compares it with the
+        # code); the retired mask_required has none either (RETIRED)
         without_fixture = {'mask_invalid', 'alphabet_untested'}
         self.assertEqual(without_fixture, set(NO_FIXTURE))
         self.assertEqual({'mask_required'}, set(RETIRED))
@@ -2548,18 +2536,18 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertEqual(without_fixture | set(UNPRODUCIBLE) | set(RETIRED),
                          set(REFUSALS) - seen['refusal'], 'the refusal codes without a fixture')
         self.assertLessEqual({('label_discovery', 'max_annotation_work')}, seen['stop'])
-        # increment 4: the extension's stops
+        # the extension's stops
         self.assertLessEqual({('extension', 'max_paths'), ('extension', 'max_steps')},
                              seen['stop'])
-        # SPEC §7.6 (the owner's decision of 2026-10-07): stop keeps the first stop; the time
-        # that then cut the release shows only as cut time and time_limited, in the pattern
-        # stopped by max_steps and in the one after it (review of 2026-10-07, C1-03)
+        # SPEC §7.6: stop keeps the first stop; the time that then cut the release shows only
+        # as cut time and time_limited, in the pattern stopped by max_steps and in the one after
+        # it
         self.assertIn(('max_steps', 'time', 'time_limited'), seen['stop_then_cut'])
 
     def test_time_limited_is_the_clocks(self):
         """SPEC §7.6/§7.9, both ways: an entry the clock touched (its stop, or only its cut) is
-        time_limited, and a time_limited entry was touched by the clock (review of 2026-10-07,
-        C1-03: the validator refused the SPEC's stop max_steps + cut time)."""
+        time_limited, and a time_limited entry was touched by the clock (the SPEC's stop
+        max_steps + cut time is accepted)."""
         name = 'max_steps_then_time'
         request, answer = self.bodies[name]
         capabilities = self.capabilities_of(self.fixtures[name]['server'])
@@ -2594,10 +2582,10 @@ class TestPatternFixtures(unittest.TestCase):
 
     def test_every_capability_value_has_a_capabilities_fixture(self):
         """On both capabilities routes: every unavailable reason but the unproducible ones and
-        the ones named as without a fixture (NO_FIXTURE); every counting (owner decision #16:
-        exact with a mask file or built at load, upper_bound without, with its dummy_fraction;
-        the answers of each server state the same, checked in Checker.answer); and every mask
-        value (file, built_at_load and absent, DESIGN §4)."""
+        the ones named as without a fixture (NO_FIXTURE); every counting (exact with a mask file
+        or built at load, upper_bound without, with its dummy_fraction; the answers of each
+        server state the same, checked in Checker.answer); and every mask value (file,
+        built_at_load and absent, DESIGN §4)."""
         seen = {'unavailable': {}, 'counting': {}, 'mask': {}}
         for name, f in self.fixtures.items():
             if f['method'] != 'GET':
@@ -2625,9 +2613,8 @@ class TestPatternFixtures(unittest.TestCase):
                 self.assertEqual({'probe', 'capabilities'}, routes, (kind, value))
 
     def test_the_codes_are_the_sources(self):
-        """REFUSALS and UNAVAILABLE are the codes the server's sources write (review GPT-2 of
-        2026-10-08, finding 6: mask_invalid and alphabet_untested, added to pattern.cpp, were
-        missing here, and the coverage tests, derived from these lists, could not notice):
+        """REFUSALS and UNAVAILABLE are the codes the server's sources write (a code missing
+        here would go unnoticed by the coverage tests, which are derived from these lists):
         every PatternRefusal's literal code, and every reason support_message words (the
         graph-support reasons a refusal and the capabilities' unavailable_reason carry), with
         the multi-graph server's own unavailable reason."""
@@ -2643,9 +2630,9 @@ class TestPatternFixtures(unittest.TestCase):
         for name, text in sources.items():
             codes = set(re.findall(r'PatternRefusal\(\s*\d+\s*,\s*"(\w+)"', text))
             if name in NOT_SERVED_SOURCES:
-                # a later increment's module, built and tested but not called by the route yet
-                # (the request field it reads is refused by name, later_increment): its new
-                # codes are no answer of this build
+                # a module that is built and tested but not called by the route (the
+                # request field it reads is refused by name, later_increment): its codes are
+                # no answer of this build
                 self.assertEqual(set(NOT_SERVED_SOURCES[name]), codes - set(REFUSALS), name)
                 self.assertNotIn(f'#include "{name[:-len(".cpp")]}.hpp"', sources['pattern.cpp'],
                                  f'{name} is served now: its codes belong in REFUSALS')
@@ -2658,9 +2645,8 @@ class TestPatternFixtures(unittest.TestCase):
                                      sources['pattern.cpp']))
         self.assertLessEqual({'mask_invalid', 'alphabet_untested'}, support,
                              'support_message\'s branches not found in pattern.cpp')
-        # the retired codes (owner decision #16: mask_required) are written by no source: a
-        # code is written as a support reason (reason = "..." in the engine and the route) or a
-        # literal refusal
+        # the retired codes (mask_required) are written by no source: a code is written as a
+        # support reason (reason = "..." in the engine and the route) or a literal refusal
         engine = os.path.join(REPO, 'src', 'graph', 'alignment', 'pattern_search.cpp')
         with open(engine, encoding='utf-8') as f:
             engine_text = f.read()
@@ -2669,9 +2655,9 @@ class TestPatternFixtures(unittest.TestCase):
                          'a retired code is still written')
         self.assertEqual(set(REFUSALS), literal | support | set(RETIRED))
         self.assertEqual(set(UNAVAILABLE), support | unavailable | set(RETIRED))
-        # the slot codes: the engine's PatternError code (bad_alphabet; stop_unsupported, a code
-        # only 4596bb3b answers, is retired since owner decision #19) and its refusals of a
-        # parsed pattern (information_below_floor, scope_unsupported)
+        # the slot codes: the engine's PatternError code (bad_alphabet; stop_unsupported is
+        # retired) and its refusals of a parsed pattern (information_below_floor,
+        # scope_unsupported)
         slots = set(re.findall(r'PatternError\(\s*"(\w+)"', engine_text))
         self.assertEqual({'bad_alphabet'}, slots)
         self.assertNotIn('stop_unsupported', engine_text)
@@ -2683,9 +2669,9 @@ class TestPatternFixtures(unittest.TestCase):
     def test_by_label_null_in_partial_is_valid(self):
         """SPEC §14.4: in partial, when the memory account cannot hold by_label, the answer has
         by_label null, every context read output_budget and a stop -- a valid v1 answer the
-        validator refused (outside review GPT-2 recheck). The body is a real CLI answer on a
-        tiny long-label index (data/traverse/pattern_validator/by_label_null_partial); no
-        fixture of the mini index can show it (its label names are short)."""
+        validator must accept. The body is a real CLI answer on a tiny long-label index
+        (data/traverse/pattern_validator/by_label_null_partial); no fixture of the mini index
+        can show it (its label names are short)."""
         d = os.path.join(HERE, 'data', 'traverse', 'pattern_validator', 'by_label_null_partial')
         with open(os.path.join(d, 'request.json')) as f:
             request = json.load(f)
@@ -2714,8 +2700,8 @@ class TestPatternFixtures(unittest.TestCase):
     def test_the_new_codes_are_valid_answers(self):
         """Hand-made bodies of v1 with mask_invalid and alphabet_untested -- a 400 refusal, and
         the capabilities block of such a server (a DNA5 graph without a mask included) -- are
-        accepted (review GPT-2 of 2026-10-08, finding 6: none is stored, see NO_FIXTURE),
-        and the rules they rest on still refuse what v1 never answers."""
+        accepted (none is stored, see NO_FIXTURE), and the rules they rest on still refuse what
+        v1 never answers."""
         def refusal(code, status=400):
             check = Checker(Raising(), f'hand-made {code}')
             self.refusal(check, {'status': status, 'headers': {}},
@@ -2727,7 +2713,7 @@ class TestPatternFixtures(unittest.TestCase):
             self.assertIs(True, b['available'])
             b.update(fields)
             if b['available'] is not True and 'counting' not in fields:
-                # a graph not served states no counting (owner decision #16)
+                # a graph not served states no counting
                 b['counting'] = None
             Checker(Raising(), 'hand-made capabilities').block(b, 'pattern', False)
 
@@ -2750,8 +2736,8 @@ class TestPatternFixtures(unittest.TestCase):
             block(alphabet='$ACGTN')
         with self.assertRaisesRegex(AssertionError, 'unavailable_reason'):
             block(available=False, unavailable_reason='alphabet_untested', alphabet='$ACGU')
-        # owner decision #16: mask_required is retired (an older build's block, which has no
-        # counting, is not this build's); counting and the dummy fraction follow the mask
+        # mask_required is retired (an older build's block, which has no counting, is not this
+        # build's); counting and the dummy fraction follow the mask
         with self.assertRaisesRegex(AssertionError, 'a retired reason'):
             block(available=False, unavailable_reason='mask_required', mask='absent')
         with self.assertRaisesRegex(AssertionError, 'exact with a mask, upper_bound without'):
@@ -2771,7 +2757,7 @@ class TestPatternFixtures(unittest.TestCase):
         refusal('mask_required')
 
     def test_paths_and_peptides_rules_refuse_what_v1_never_answers(self):
-        """Increments 4 and 5 (SPEC §12.1, §12.2): the stored path and peptide answers pass,
+        """Paths and peptides (SPEC §12.1, §12.2): the stored path and peptide answers pass,
         and each rule they rest on refuses an answer that breaks it (so that the rules are not
         vacuous): a path with kmer, a path that does not instantiate the pattern, a label
         stated record_verified without an occurrence, an unverified label listed under
@@ -2812,15 +2798,15 @@ class TestPatternFixtures(unittest.TestCase):
             ('peptide', lambda a: a['patterns'][0]['results'][0].update(
                 instance='ATA' + a['patterns'][0]['results'][0]['instance'][3:]),
              'instance'),
-            # the stop '*' is a residue (owner decision #19): refusing it is not v1's answer
+            # the stop '*' is a residue: refusing it is not v1's answer
             ('peptide_bad_residue',
              lambda a: a['patterns'].__setitem__(1, {
                  'id': 'stop', 'kind': 'protein',
                  'error': {'code': 'bad_alphabet', 'message': 'pattern: *'}}),
              'bad_alphabet for a pattern inside the alphabet'),
-            # a path's labels_excluded_unverified (review of increments 4 and 5, finding 1):
-            # an integer for a path whose rows were truncated, and null for a path read and
-            # verified completely in an answer whose count is exact
+            # a path's labels_excluded_unverified: an integer for a path whose rows were
+            # truncated, and null for a path read and verified completely in an answer whose
+            # count is exact
             ('paths_require_support',
              lambda a: first_path(a).update(labels_status='truncated', labels_total=None),
              'null unless every row of the path was read completely'),
@@ -2858,11 +2844,10 @@ class TestPatternFixtures(unittest.TestCase):
         self.assertIn('"Retry-After", "60"', server_utils)
 
     def test_mask_required_is_retired(self):
-        """Owner decision #16 of 2026-10-08: a graph without its dummy-edge mask is served, so
-        no fixture holds mask_required any more (the fixture of that name became the
-        unmasked_* fixtures), support_message has no branch for it, and the unmasked server's
-        capabilities say available, counting upper_bound (the codes against the sources:
-        test_the_codes_are_the_sources)."""
+        """A graph without its dummy-edge mask is served, so no fixture holds mask_required (the
+        unmasked_* fixtures show such graphs), support_message has no branch for it, and the
+        unmasked server's capabilities say available, counting upper_bound (the codes against
+        the sources: test_the_codes_are_the_sources)."""
         self.assertNotIn('mask_required', self.fixtures)
         for name, (request, answer) in self.bodies.items():
             self.assertNotIn('"mask_required"', json.dumps(answer), name)
@@ -2877,15 +2862,15 @@ class TestPatternFixtures(unittest.TestCase):
                 self.assertNotIn('support.reason == "mask_required"', f.read())
 
     def test_unmasked_and_stop_rules_refuse_what_v1_never_answers(self):
-        """SPEC §18 (owner decisions #16 and #19): the stored answers without the mask and with
-        the stop '*' pass, and each rule they rest on refuses an answer that breaks it: an
+        """Graphs without their mask and the stop '*': the stored answers without the mask and
+        with the stop '*' pass, and each rule they rest on refuses an answer that breaks it: an
         estimate off its formula, a bounds count without its estimate, an estimate on a masked
         graph, the estimate note missing, a bounds count stated without a stop on a masked
         graph, threshold_upper_bound missing or on a masked graph, an index without its dummy
         fraction, a '*' instance that is no stop codon, no_stop_codon missing or a no-instance
         peptide with a context, and the unsearched peptide after a stop stated stopped; and
-        (owner decision #24) bounds left on a pattern with no more unchecked candidates than the
-        server's max_checked_entries."""
+        bounds left on a pattern with no more unchecked candidates than the server's
+        max_checked_entries."""
         def total(a, i=0):
             c = a['patterns'][i]['counts']
             return c.get('contexts') or c['anchors']
@@ -2943,8 +2928,8 @@ class TestPatternFixtures(unittest.TestCase):
             ('peptide_no_stop_codon_after_stop',
              lambda a: a['patterns'][1]['work'].update(mask_scans=1),
              'answered without a search'),
-            # owner decision #24: the island start answered as with the check off (its 30
-            # unchecked candidates in bounds [2, 32]) by the server that checks 50
+            # the island start answered as with the check off (its 30 unchecked candidates in
+            # bounds [2, 32]) by the server that checks 50
             ('unmasked_checked', unchecked_start, 'they are checked, exact'),
         ]
         self.assertRefusesMutations(cases)
@@ -2963,14 +2948,15 @@ class TestPatternFixtures(unittest.TestCase):
             Checker(Raising(), 'count').answer(a, request, self.capabilities_of('masked'))
 
     def test_round_fix3_rules_refuse_what_v1_never_answers(self):
-        """SPEC §18 (review GPT-3, round fix3, and the owner's decision P9): the stored bodies
-        pass, and each new rule refuses an answer that breaks it: a counter missing where its
-        entry has it, or present where it has not; a completed extension that did not begin at
-        every anchor; an extension that did not run with work of its own; more branchings than
-        half the candidates entered; more distinct rows than rows read; verification steps
-        without coordinates; low_complexity_pattern beside a stop; time_limited without a stop
-        on a pattern its diagnostic reads whole; and capabilities whose prose fields are not
-        references in ASCII, or whose delivery rates are not numbers."""
+        """The work counters, the low-complexity note and the capabilities' references: the
+        stored bodies pass, and each rule refuses an answer that breaks it: a counter missing
+        where its entry has it, or present where it has not; a completed extension that did not
+        begin at every anchor; an extension that did not run with work of its own; more
+        branchings than half the candidates entered; more distinct rows than rows read;
+        verification steps without coordinates; low_complexity_pattern beside a stop;
+        time_limited without a stop on a pattern its diagnostic reads whole; and capabilities
+        whose prose fields are not references in ASCII, or whose delivery rates are not
+        numbers."""
         def work(i, **fields):
             return lambda a: a['patterns'][i]['work'].update(fields)
 
@@ -3013,7 +2999,7 @@ class TestPatternFixtures(unittest.TestCase):
              'time_limited without a time stop'),
         ]
         self.assertRefusesMutations(cases)
-        # the capabilities (P9)
+        # the capabilities
         for field, value, says in (('caps_rule', 'max_contexts ... see the SPEC', 'reference'),
                                    ('protein_rule', 'SPEC-pattern-search.md sections §12.2',
                                     'ASCII'),
@@ -3027,19 +3013,19 @@ class TestPatternFixtures(unittest.TestCase):
                     Checker(Raising(), 'capabilities').block(b, 'pattern', False)
 
     def test_predicate_rules_refuse_what_v1_never_answers(self):
-        """SPEC §19 (increment 5b): the stored bodies pass, and each rule refuses an answer that
-        breaks it -- the predicate block missing or where no predicate was asked, a normal form
-        that is not the request folded with its unknown names, a wrong vacuous, strands other
-        than evaluated; a selection pass whose counts break §19.7's relations (completed but not
-        every raw context tested, stopped without the bounds [S, S + R - T], constant tested other
-        than the raw count, a selected count above the tested one); a complete answer whose
-        results are not the selected count; withheld and cut reasons without their cause; a
-        result's selection_labels the normal form does not hold on, or out of label order, its
-        selection_strands missing, of another length, or naming a row its own labels contradict;
-        predicate_only labels outside the predicate; the notes predicate_constant and
-        projection_not_read where they do not apply, annotation_not_read on a predicate answer;
-        the selection's fields in an answer without a predicate; and capabilities whose predicate
-        object is not this build's."""
+        """SPEC §19: the stored bodies pass, and each rule refuses an answer that breaks it --
+        the predicate block missing or where no predicate was asked, a normal form that is not
+        the request folded with its unknown names, a wrong vacuous, strands other than
+        evaluated; a selection pass whose counts break §19.7's relations (completed but not
+        every raw context tested, stopped without the bounds [S, S + R - T], constant tested
+        other than the raw count, a selected count above the tested one); a complete answer
+        whose results are not the selected count; withheld and cut reasons without their cause;
+        a result's selection_labels the normal form does not hold on, or out of label order,
+        its selection_strands missing, of another length, or naming a row its own labels
+        contradict; predicate_only labels outside the predicate; the notes predicate_constant
+        and projection_not_read where they do not apply, annotation_not_read on a predicate
+        answer; the selection's fields in an answer without a predicate; and capabilities whose
+        predicate object is not this build's."""
         def entry(i, **fields):
             return lambda a: a['patterns'][i].update(fields)
 
@@ -3097,7 +3083,7 @@ class TestPatternFixtures(unittest.TestCase):
             ('predicate_only_record', results(0, lambda r: r['labels'][0].update(column='573')),
              'predicate_only|labels of by_label'),
             ('predicate_filter', results(0, lambda r: r.pop('selection_labels')), 'fields'),
-            # the owner's answer to P11: per selected result and label its orientation
+            # per selected result and label its orientation (selection_strands)
             ('predicate_filter', results(0, lambda r: r.pop('selection_strands')), 'fields'),
             ('predicate_selection_strands',
              results(0, lambda r: r.update(selection_strands=['context'] * len(
@@ -3148,8 +3134,7 @@ class TestPatternFixtures(unittest.TestCase):
 
     def test_documents_state_the_built_deadline(self):
         """The route's default deadline and its cap, as the SPEC and the service's request
-        (PROMPT-search-service-pattern.md §1 and §3.2) state them, are the capabilities'
-        (review of milestone 1b: PROMPT §1 still said "default 5 s")."""
+        (PROMPT-search-service-pattern.md §1 and §3.2) state them, are the capabilities'."""
         caps = self.bodies['capabilities'][1]['pattern']
         default_s = caps['default_time_budget_ms'] / 1000
         cap_s = caps['caps']['time_budget_ms'] / 1000
@@ -3174,12 +3159,11 @@ class TestPatternFixtures(unittest.TestCase):
                 self.assertIn(f'| `{flag}` | {value:,} |', spec, flag)
 
     def test_capabilities_documents_keep_a_kibibyte(self):
-        """Owner decision P9 of 2026-10-08 (SPEC §18): every capabilities document of every
-        fixture server -- GET /traverse/capabilities is the one a service's MCP tool returns in
-        one piece, under CAPABILITIES_MAX_BYTES -- keeps CAPABILITIES_ROOM bytes under that
-        ceiling as the server writes it (served_bytes, from above), so that the next
-        increment's additions fit. The paths a multi-graph server names are measured as stored
-        ({work}/...): a host's own paths are its own."""
+        """Every capabilities document of every fixture server -- GET /traverse/capabilities is
+        the one a service's MCP tool returns in one piece, under CAPABILITIES_MAX_BYTES -- keeps
+        CAPABILITIES_ROOM bytes under that ceiling as the server writes it (served_bytes, from
+        above), so that later additions fit. The paths a multi-graph server names are measured
+        as stored ({work}/...): a host's own paths are its own."""
         if os.path.isfile(MCP_TOOLS):
             with open(MCP_TOOLS, encoding='utf-8') as f:
                 m = re.search(r'^CAPABILITIES_MAX_BYTES = (\d+) \* 1024$', f.read(), re.M)

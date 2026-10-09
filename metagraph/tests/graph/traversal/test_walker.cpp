@@ -953,11 +953,11 @@ TYPED_TEST(WalkerTest, MergedLineageKeepsItsRouteAcrossASplit) {
 }
 
 
-// The owner's decision R21 (4): a displayed walk through a merge follows the parent carried by
-// the most labels — the merged segment's first parent, whose chain the paths' segments, spelled
-// bases and continuations follow and against which route_bp states what a label does not carry —
-// whichever parent's head arrived first; ties keep the arrival order. Which labels reach the
-// leaf, with which loss and branches, is the same either way
+// The majority-parent rule at a merge: a displayed walk through a merge follows the parent
+// carried by the most labels — the merged segment's first parent, whose chain the paths'
+// segments, spelled bases and continuations follow and against which route_bp states what a
+// label does not carry — whichever parent's head arrived first; ties keep the arrival order.
+// Which labels reach the leaf, with which loss and branches, is the same either way
 TYPED_TEST(WalkerTest, MergeIsSpelledThroughTheParentWithTheMostLabels) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -1027,13 +1027,13 @@ TYPED_TEST(WalkerTest, MergeIsSpelledThroughTheParentWithTheMostLabels) {
     }
 }
 
-// R21 (4)'s one exception (review of W2): in tree and full detail (the JSON spells each path's
+// The majority-parent rule's one exception: in tree and full detail (the JSON spells each path's
 // segment chain, DeliveryCosts::chain_entry) under a memory budget, every head reserves the
 // delivery of its displayed chain, so the displayed parent decides the account and with it the
 // memory stop; there a merge keeps the arrival order, and the depth the budget certifies is the
-// one before the rule. Without a budget, or without a chain charge (graphlet, summary), the
-// majority is first. The arrival order is the walk's, not the labels': the same route arrives
-// first whichever labels it carries
+// one the arrival order gives. Without a budget, or without a chain charge (graphlet, summary),
+// the majority is first. The arrival order is the walk's, not the labels': the same route
+// arrives first whichever labels it carries
 TYPED_TEST(WalkerTest, MergeKeepsTheArrivalOrderWhereTheBudgetChargesTheChain) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -2844,7 +2844,7 @@ TEST(WalkerDerive, DerivationHonoursTheTimeBudget) {
             kK, f.seqs(), f.labels(), DeBruijnGraph::BASIC);
     Strategy st;
     st.time_budget_ms = 1e-9;    // spent by the time the first seed k-mer is consumed
-    // D3 (the owner's decision of 2026-10-04): one k-mer was read, so the seed is delivered
+    // the partial delivery of a derived seed: one k-mer was read, so the seed is delivered
     // with the set derived from it — here {A, B}, the labels of the cheapest row of the first
     // window — and the walk is the seed itself, stopped by the time budget at depth 0
     const SeedResult partial = run(*anno, f.R, {}, st);
@@ -3066,13 +3066,12 @@ TEST(WalkerCoord, DerivedHeaderMustResolveBackToItsColumn) {
 }
 
 
-// Round 3, finding 3: a derived header that is ALSO the name of an annotation column.
-// Column "ACC" holds an unrelated record (header "decoy"); column B's record carries
-// the seed under the header "ACC". find_header("ACC") gives B's record, so the old
-// round-trip check passed — but an explicit label list resolves "ACC" to the COLUMN
-// first, a label that does not carry the seed. The derivation now round-trips through
-// the resolver the explicit path uses and refuses; the column kind still derives B,
-// and B explicitly still works.
+// A derived header that is ALSO the name of an annotation column. Column "ACC" holds an
+// unrelated record (header "decoy"); column B's record carries the seed under the header
+// "ACC". find_header("ACC") gives B's record, so a round-trip check through it would pass —
+// but an explicit label list resolves "ACC" to the COLUMN first, a label that does not carry
+// the seed. The derivation round-trips through the resolver the explicit path uses and
+// refuses; the column kind still derives B, and B explicitly still works.
 TEST(WalkerCoord, DerivedHeaderMustNotBeAColumnName) {
     auto b = clean_blocks({ 40, 40, 30 }, 941);
     const std::string &D = b[0], &M = b[1], &T = b[2];
@@ -3117,7 +3116,7 @@ TEST(WalkerCoord, DerivedHeaderMustNotBeAColumnName) {
     seed.labels = { "B" };
     auto explicitly = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
     EXPECT_EQ(T.size(), explicitly.arms[kRight].paths[0].length_bp);
-    // and the name the old check would have echoed does not carry the seed explicitly
+    // and the name a find_header round trip would echo does not carry the seed explicitly
     seed.labels = { "ACC" };
     EXPECT_THROW(traverse_seed(oracle, seed, st, LabelChangeCost::forbid()), std::invalid_argument);
 }
@@ -3415,9 +3414,9 @@ TEST(Walker, LabelFreeBeamFollowsTheMostSupportedBranch) {
 }
 
 
-// Round 3, finding 4: the beam ranked heads by the RECORDED label list, which
-// labels.max_labels_per_node cuts — with a cap of 1 a branch carried by one label and
-// one carried by three tied, and the tie went to the head created first. The minority
+// The beam ranks heads by the TRUE label count, not by the RECORDED label list, which
+// labels.max_labels_per_node cuts — with a cap of 1 a branch carried by one label and one
+// carried by three would tie, and the tie would go to the head created first. The minority
 // branch here is the one enumerated first (its first base sorts lower); the TRUE count
 // ranks the three-label branch above it, under a cap of 1 as under none, and under
 // either frontier order, since the beam keeps the most supported heads whatever order
@@ -3464,13 +3463,13 @@ TEST(Walker, LabelFreeBeamRanksByTheTrueCount) {
 }
 
 
-// Review round 4, finding 2: recording the refusals of an ambiguous node is linear in its
-// labels. k = 3, n labels each carrying AAA·C and AAA·G, seed AAA, branch allowance 0:
-// every label is ambiguous and excluded in the first round. Each successor used to be
-// scanned once PER excluded source for that source's entries — n(n + 1) tests for the 2n
-// refused label ids (10 000 labels: 7.5 ms before refusals were recorded, 104 ms after).
-// One scan of each successor's state per round now: 2n entries, so the work doubles with
-// n. Pinned through ArmResult::refusal_scans, not wall time; the refusals are unchanged.
+// Recording the refusals of an ambiguous node is linear in its labels. k = 3, n labels each
+// carrying AAA·C and AAA·G, seed AAA, branch allowance 0: every label is ambiguous and
+// excluded in the first round. Scanning each successor once PER excluded source for that
+// source's entries would be n(n + 1) tests for the 2n refused label ids (10 000 labels:
+// 104 ms against 7.5 ms without recording). Each successor's state is scanned once per round:
+// 2n entries, so the work doubles with n. Pinned through ArmResult::refusal_scans, not wall
+// time; the refusals are the same either way.
 TEST(Walker, RefusalRecordingIsLinearInTheLabels) {
     for (size_t n : { 250, 500 }) {
         std::vector<std::string> seqs, labels, names;
@@ -3510,13 +3509,12 @@ TEST(Walker, RefusalRecordingIsLinearInTheLabels) {
     }
 }
 
-// Review round 4, finding 3: a successor the loss budget refuses to a source is stated
-// whether or not the source goes on along another one. Blocks X, U, P, V, Q: A carries
-// X·U·P, B carries X·V and U's last k - 1 bases + Q, the seed is X under {A, B}. B leaves
-// along V; at the end of U, A goes on along P and could enter Q only by switching to B
-// (constant cost 1). With budget 0 Q is refused to A by the budget alone — recorded only
-// for a source that ENDED at the node until now (has_cont skipped A), so the fork had no
-// branch event and Q's absence no reason. With budget 1, Q is followed through the switch.
+// A successor the loss budget refuses to a source is stated whether or not the source goes on
+// along another one. Blocks X, U, P, V, Q: A carries X·U·P, B carries X·V and U's last k - 1
+// bases + Q, the seed is X under {A, B}. B leaves along V; at the end of U, A goes on along P
+// and could enter Q only by switching to B (constant cost 1). With budget 0 Q is refused to A
+// by the budget alone — recorded only for a source that ENDED at the node, the fork would have
+// no branch event and Q's absence no reason. With budget 1, Q is followed through the switch.
 TEST(Walker, LossBudgetRefusalWhileTheSourceGoesOn) {
     std::vector<std::string> b;
     for (uint32_t seed = 582; ; ++seed) {
@@ -3758,7 +3756,7 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     // scope: merging (constrain's default) closes the bubble once. Every walk of the
     // united-history rule is present, but not every walk per path: a merge that united a
     // history makes the walks partial (conservative outcome, DESIGN-traverse-graphlet.md
-    // §14 v5.2), stated by the limitation and by completeness_scope
+    // §14), stated by the limitation and by completeness_scope
     out = traverse(request(ABC, R"({"direction": "right"})"), none);
     EXPECT_EQ("partial/complete/complete/inline", outcome_of(out["results"][0]));
     right = out["results"][0]["arms"]["right"];
@@ -3797,7 +3795,7 @@ TEST(Walker, LimitationsStateExactlyWhatLimitedTheResult) {
     EXPECT_FALSE(result["limitations"][0].isMember("server_limit"));
     EXPECT_EQ(nothing, kinds_of(result["arms"]["right"]["limitations"]));
     // a carrier the cap left out takes its walks and its evidence with it: both axes say
-    // so (conservative outcome, DESIGN-traverse-graphlet.md §14 v5.2), and the seed_labels
+    // so (conservative outcome, DESIGN-traverse-graphlet.md §14), and the seed_labels
     // entry says which knob brings it back
     EXPECT_EQ("partial/complete/lower_bound/inline", outcome_of(result));
 
@@ -3954,7 +3952,7 @@ TEST(Walker, FailedDerivationIsAStatedOutcome) {
     EXPECT_EQ(2u, refused["limitations"][0]["observed"].asUInt64());
     EXPECT_EQ(1u, refused["limitations"][0]["server_limit"].asUInt64());
 
-    // the time budget runs out during the derivation, after its first k-mer (D3): the seed is
+    // the time budget runs out during the derivation, after its first k-mer: the seed is
     // delivered with the set derived from that k-mer, a superset of the whole seed's carriers
     // (label evidence qualified), stopped at the seed; the server lowered the budget, so the
     // entry carries the server's value as well
@@ -4133,13 +4131,13 @@ TEST(Walker, GreedyLossesAndColumnTracesAreStated) {
     }
 }
 
-// Every counter belongs to the arm whose head was processed (review: Walker::run used to
-// assign ALL pair evaluations to the right arm, so a left-arm greedy re-minimisation read
-// pair_evaluations 0, its greedy_losses was not stated and its label_evidence read
-// complete). The ReminimisationRounds fixture (two rounds under a constant cost and
-// loss_budget 1) on the right, its reverse complement walked to the left, and both at
-// once with a plain block on the right: each re-minimising arm states greedy_losses and
-// lower_bound, and each arm's counters equal its own single-arm run's.
+// Every counter belongs to the arm whose head was processed: assigning ALL pair evaluations to
+// the right arm would make a left-arm greedy re-minimisation read pair_evaluations 0, leave its
+// greedy_losses unstated and its label_evidence complete. The ReminimisationRounds fixture
+// (two rounds under a constant cost and loss_budget 1) on the right, its reverse complement
+// walked to the left, and both at once with a plain block on the right: each re-minimising
+// arm states greedy_losses and lower_bound, and each arm's counters equal its own single-arm
+// run's.
 TEST(Walker, CountersAreAttributedToTheirArm) {
     std::vector<std::string> b;
     for (uint32_t seed = 4; ; ++seed) {
@@ -4208,13 +4206,13 @@ TEST(Walker, CountersAreAttributedToTheirArm) {
 
 
 
-/********** pass 5: the chunked deadlines (spec §6.8; LabelOracle::pacer) **********/
+/********** the chunked deadlines (spec §6.8; LabelOracle::pacer) **********/
 
 namespace {
 
 // A fan: a 40 bp seed, then the 64 trimers (three levels of 4-way forks), each followed by a
 // tail of its own: the level at depth 3 holds 64 heads whose lookahead reads 64 rows each in
-// one call — the read a deadline used to wait for
+// one call — a read a deadline would wait for, unpaced
 struct Fan {
     std::unique_ptr<AnnotatedDBG> anno;
     std::string seed;
@@ -4231,12 +4229,11 @@ struct Fan {
     }
 };
 
-// R9 (the verification of the efficiency pass: these tests failed under load, 5 of ~400
-// runs, on wall-clock bounds and on paced_calls 168 against at most 167): they run on a VIRTUAL
-// clock (DecodePacer::test_clock_ms) that only the slow reads advance, by |us| per row (and the
-// shared cost of a call), so that every deadline, every chunk the pacer sizes and every stop is
-// the same on a loaded machine as on a quiet one, and the bounds below are exact: what a walk
-// does between reads takes no virtual time
+// These tests run on a VIRTUAL clock (DecodePacer::test_clock_ms) that only the slow reads
+// advance, by |us| per row (and the shared cost of a call), so that every deadline, every chunk
+// the pacer sizes and every stop is the same on a loaded machine as on a quiet one, and the
+// bounds below are exact: what a walk does between reads takes no virtual time. On wall-clock
+// bounds they would fail under load (5 of ~400 runs, paced_calls 168 against at most 167)
 struct VirtualClock {
     std::shared_ptr<double> ms = std::make_shared<double>(0);
     std::function<double()> fn() const {
@@ -4332,8 +4329,8 @@ Timed run_fan(const Fan &fan, const Strategy &st, double target_ms, double us_pe
 
 } // namespace
 
-// The level's lookahead read (64 heads x 64 rows at 100 us a row: 410 ms) used to run whole
-// past a 100 ms budget; paced in chunks of 10 ms it is stopped within a chunk and a row of the
+// The level's lookahead read (64 heads x 64 rows at 100 us a row: 410 ms) would run whole past
+// a 100 ms budget; paced in chunks of 10 ms it is stopped within a chunk and a row of the
 // deadline, and the walk is censored where the whole read would have censored it
 TEST(WalkerDeadlineChunks, TimeBudgetHoldsWithinAChunk) {
     Fan fan;
@@ -4447,8 +4444,8 @@ TEST(WalkerDeadlineChunks, AttemptStopsReachLongReads) {
     EXPECT_LE(t.ms, 60 + 10 + 0.1 + 1e-6);
     EXPECT_LT(t.result.arms[kRight].complete_to_bp, 150u);
     EXPECT_EQ("cancelled", t.result.deadline.stopped_by);
-    // with the walk-until far away the read is one piece (no deadline can fall into it), as
-    // before pass 5: the cancel is seen at the checkpoint after it (stated in spec §6.8)
+    // with the walk-until far away the read is one piece (no deadline can fall into it): the
+    // cancel is seen at the checkpoint after it (stated in spec §6.8)
     StopAt far_cancel(VirtualClock(), 60, ExternalStop::CANCELLED, 600'000);
     const Timed f = run_fan(fan, fan_strategy(600'000), 10, 100, &far_cancel);
     ASSERT_TRUE(f.result.resource_stop);
@@ -4457,12 +4454,12 @@ TEST(WalkerDeadlineChunks, AttemptStopsReachLongReads) {
     EXPECT_EQ("read", std::string(f.result.deadline.longest.kind));
 }
 
-// Review of pass 5, F1: far from its deadline a read is one piece, so a paced walk the deadline
-// does not stop costs what the unpaced walk costs where splitting would cost (here 2 ms a call,
-// as a row-diff annotation decodes the paths a call's rows share once per call; chunking the
-// lookahead into rows sized by the slowest per-row time made such walks many times slower, a
-// row_diff walk of 1.8 s took 30 s and was stopped by its budget): the same calls, the same
-// result, the same time
+// Far from its deadline a read is one piece, so a paced walk the deadline does not stop costs
+// what the unpaced walk costs where splitting would cost (here 2 ms a call, as a row-diff
+// annotation decodes the paths a call's rows share once per call; chunking the lookahead into
+// rows sized by the slowest per-row time would make such walks many times slower, a row_diff
+// walk of 1.8 s taking 30 s and stopped by its budget): the same calls, the same result, the
+// same time
 TEST(WalkerDeadlineChunks, FarDeadlineReadsAreOnePiece) {
     Fan fan;
     Strategy st = fan_strategy(600'000);
@@ -4493,10 +4490,10 @@ TEST(WalkerDeadlineChunks, FarDeadlineReadsAreOnePiece) {
     EXPECT_NEAR(whole_max, paced_max, 1e-9);
 }
 
-// Review of pass 5, F2: a split read starts with at most first_rows rows, whatever the rows of
-// earlier reads cost: here the rows before the depth-3 lookahead cost 10 us each and its rows
-// and all after 100 us, and that read's first chunk, sized from the cheap rows (10 ms at 10 us:
-// 1,000 rows, 100 ms at their real rate), was one uninterruptible piece ten times the target
+// A split read starts with at most first_rows rows, whatever the rows of earlier reads cost:
+// here the rows before the depth-3 lookahead cost 10 us each and its rows and all after 100 us;
+// sized from the cheap rows (10 ms at 10 us: 1,000 rows, 100 ms at their real rate), that read's
+// first chunk would be one uninterruptible piece ten times the target
 TEST(WalkerDeadlineChunks, SplitReadsStartSmall) {
     Fan fan;
     Seed seed;
@@ -4561,14 +4558,15 @@ TEST(WalkerDeadlineChunks, DerivationWindowIsPaced) {
         try {
             const SeedResult r = traverse_seed(oracle, seed, st, LabelChangeCost::forbid());
             // read whole, the window's first k-mer was consumed before the clock was read:
-            // the set of that k-mer is delivered (D3), the walk stopped at the seed
+            // the set of that k-mer is delivered (a partial derivation), the walk stopped at
+            // the seed
             EXPECT_EQ(0.0, target) << "a paced window stopped before its first k-mer";
             ASSERT_TRUE(r.derivation_partial);
             EXPECT_EQ(1u, r.derivation_partial->kmers_read);
             EXPECT_EQ(0u, r.arms[kRight].complete_to_bp);
         } catch (const SeedDerivationError &e) {
             // paced, the window was stopped before any k-mer was consumed: nothing was
-            // derived, and the seed fails as before (D3: j = 0)
+            // derived (j = 0), and the seed fails
             EXPECT_GT(target, 0.0) << e.what();
             EXPECT_EQ(SeedDerivationError::TIME_BUDGET, e.cause());
             EXPECT_NE(std::string::npos, std::string(e.what()).find("after 0 of "))
@@ -4585,12 +4583,12 @@ TEST(WalkerDeadlineChunks, DerivationWindowIsPaced) {
 }
 
 
-// ---------------------------------------------------------------- the seed phase (review 6)
+// ---------------------------------------------------------------- the seed phase
 
 namespace {
 
-// The reviewer's request of the review of levels 4-5, finding 3: |n| records of one column "F",
-// each the same sequence, under headers sharing a 1,024-character prefix
+// |n| records of one column "F", each the same sequence, under headers sharing a
+// 1,024-character prefix
 struct ManyHeaders {
     std::string seq = clean_block(20, 6006);
     std::vector<std::string> names;
@@ -4624,16 +4622,15 @@ std::unique_ptr<LabelOracle> slow_resolving(const ManyHeaders &f, const VirtualC
 
 } // namespace
 
-// Review of levels 4-5, finding 3: the deadline record covers the whole seed phase. The
-// reviewer's request named 2,500 headers sharing a 1,024-character prefix: a seed phase of 126
-// ms stated a longest piece of 0.297 ms, since resolving the names (3 ms) and their pairwise
-// duplicate check were no piece, nor anything between the reads and the k-mer mappings before
-// the first head. On a virtual clock that only resolving a name advances (1 ms a name), the
-// spans between the other pieces are "setup" pieces, each exactly its names' time: the seed
-// labels' resolution one, the extra labels' another (the validation's read lies between them,
-// so they are not one piece); seed_phase_ms covers the whole phase; and both are flushed when no
-// checkpoint is reached (radius 0) and when the seed fails (a duplicate name, refused after the
-// names before it were resolved)
+// The deadline record covers the whole seed phase. A request naming 2,500 headers sharing a
+// 1,024-character prefix has a seed phase of 126 ms; were resolving the names (3 ms), their
+// duplicate check and whatever lies between the reads and the k-mer mappings before the first
+// head no piece, it would state a longest piece of 0.297 ms. On a virtual clock that only
+// resolving a name advances (1 ms a name), the spans between the other pieces are "setup"
+// pieces, each exactly its names' time: the seed labels' resolution one, the extra labels'
+// another (the validation's read lies between them, so they are not one piece); seed_phase_ms
+// covers the whole phase; and both are flushed when no checkpoint is reached (radius 0) and
+// when the seed fails (a duplicate name, refused after the names before it were resolved)
 TEST(WalkerSeedPhase, SetupPiecesCoverTheSeedPhase) {
     const size_t n = 2500;
     const ManyHeaders f(n);
@@ -4690,11 +4687,10 @@ TEST(WalkerSeedPhase, SetupPiecesCoverTheSeedPhase) {
     }
 }
 
-// The duplicate checks in hash sets (review of levels 4-5, finding 3) refuse what the pairwise
-// scans refused, the first one in the request's order and after resolving the names before it:
-// a duplicate seed name, an unknown name before a later duplicate, an extra label naming a kept
-// seed label's target or an earlier extra label's; a column and a header of that column are
-// different targets
+// The duplicate checks in hash sets refuse what pairwise scans would refuse, the first one in
+// the request's order and after resolving the names before it: a duplicate seed name, an
+// unknown name before a later duplicate, an extra label naming a kept seed label's target or
+// an earlier extra label's; a column and a header of that column are different targets
 TEST(WalkerSeedPhase, DuplicateChecksRefuseAsBefore) {
     const ManyHeaders f(4);
     LabelOracle oracle(*f.anno, f.cth.get());
@@ -4735,12 +4731,12 @@ TEST(WalkerSeedPhase, DuplicateChecksRefuseAsBefore) {
 
 namespace {
 
-// The occurrences of the record coordinates (DESIGN-traverse-graphlet.md §18, owner decisions
-// C1-C12) are checked by brute force against the records the fixtures index: every occurrence
-// of a run must be the run's own bases in its label's record, every seed occurrence the seed,
-// and the true counts the occurrences of the chain's string in the record(s) — the seed and
-// the walk for a seed-entered run, the k-mer entered by the switch to the last node for a
-// switch-entered one — exactly, or at least where the run is marked a lower bound.
+// The occurrences of the record coordinates (DESIGN-traverse-graphlet.md §18) are checked by
+// brute force against the records the fixtures index: every occurrence of a run must be the
+// run's own bases in its label's record, every seed occurrence the seed, and the true counts
+// the occurrences of the chain's string in the record(s) — the seed and the walk for a
+// seed-entered run, the k-mer entered by the switch to the last node for a switch-entered
+// one — exactly, or at least where the run is marked a lower bound.
 
 // a label's records: (text, coordinate of its first k-mer in the label's coordinate space:
 // 0 for a header label's own record, the record's start in the column for a column label)
@@ -4871,9 +4867,9 @@ CoordCheck check_coordinates(const SeedResult &r, const std::string &seed,
     return c;
 }
 
-// T6 with k-mer coordinates (revision 10 of the coordinates plan): A on W·R·X, B on R·X·Y,
-// seed R; header labels recA, recB (a CoordToHeader, one record per column), or the columns
-// A and B whose records start at |starts| in their column's coordinates
+// T6 with k-mer coordinates: A on W·R·X, B on R·X·Y, seed R; header labels recA, recB (a
+// CoordToHeader, one record per column), or the columns A and B whose records start at
+// |starts| in their column's coordinates
 struct CoordFixture {
     LabelEndFixture f;
     std::unique_ptr<AnnotatedDBG> anno;
@@ -4915,7 +4911,7 @@ Strategy trace_strategy() {
 
 } // namespace
 
-// Revision 10: T6 under trace with coordinates, both arms, header and column labels: every run's
+// T6 under trace with coordinates, both arms, header and column labels: every run's
 // occurrences are exactly its own bases in its record ([c + k - L, c + k) on the right arm,
 // [c, c + L) on the left), the seed's occurrences the seed; the column version reports global
 // column positions (the records start at 1000 and 5000 in their columns)
@@ -5111,9 +5107,9 @@ TEST(WalkerCoordinates, ColumnLabelsAreGlobal) {
 // A column's coordinates number k-mers (record i's k-mer j is offset_i + j, offset_i the k-mers
 // of the records before it), so a column interval numbers base p of record i as offset_i + p:
 // record i's last k - 1 bases share their numbers with record i + 1's first k - 1. The contract
-// states it (review of W1, finding 6): such an interval is attributed to a record only with the
-// record lengths (C10). Two unrelated records in one column; the seed's right arm runs to r1's
-// end, and its interval ends k - 1 numbers into r2's
+// states it: such an interval is attributed to a record only with the record lengths. Two
+// unrelated records in one column; the seed's right arm runs to r1's end, and its interval ends
+// k - 1 numbers into r2's
 TEST(WalkerCoordinates, ColumnIntervalsShareNumbersAtRecordEnds) {
     const auto b = clean_blocks({ 40, 30, 50 }, 67);
     const std::string &S = b[0], &X = b[1], &Z = b[2];
@@ -5144,9 +5140,9 @@ TEST(WalkerCoordinates, ColumnIntervalsShareNumbersAtRecordEnds) {
                                     r.seed_coordinates[0].starts.end()));
 }
 
-// chains_ended (C5, decision C-N1): a copy of the seed that stops before the run's last node
-// (its record ends) while another copy goes on is counted, not listed; a clone made at a later
-// split inherits the count of the prefix it shares
+// chains_ended: a copy of the seed that stops before the run's last node (its record ends)
+// while another copy goes on is counted, not listed; a clone made at a later split inherits
+// the count of the prefix it shares
 TEST(WalkerCoordinates, ChainsEndedCountsCopiesThatStopAndClonesInheritIt) {
     std::vector<std::string> b;
     for (uint32_t seed = 71; ; ++seed) {
@@ -5187,13 +5183,13 @@ TEST(WalkerCoordinates, ChainsEndedCountsCopiesThatStopAndClonesInheritIt) {
     EXPECT_EQ(1u, limited.arms[kRight].run_coordinates[0].chains_ended);
 }
 
-// Switch-entered runs (revision 1, decision C-N2 a). Seed labels X (on S·U) and Y (on S alone),
-// extra B, a table cost Y→B 1, X→B 0.5, default forbid, loss budget 2. Y is lost at the first
-// step and switches into B (cost 1): a switch into a label nobody carried carries B's own chains
-// from the switch node on, exactly. At the end of U, X is lost and switches into B at 0.5 — less
-// than B's loss 1 — while B's own lineage is live: that run carries only B's chains continuing
-// from before, and B's second record holds the switch node's k-mer as a chain of its own start,
-// so the run is a lower bound (its true count is 2, it lists 1), marked; the walk is unchanged
+// Switch-entered runs. Seed labels X (on S·U) and Y (on S alone), extra B, a table cost Y→B 1,
+// X→B 0.5, default forbid, loss budget 2. Y is lost at the first step and switches into B
+// (cost 1): a switch into a label nobody carried carries B's own chains from the switch node
+// on, exactly. At the end of U, X is lost and switches into B at 0.5 — less than B's loss 1 —
+// while B's own lineage is live: that run carries only B's chains continuing from before, and
+// B's second record holds the switch node's k-mer as a chain of its own start, so the run is a
+// lower bound (its true count is 2, it lists 1), marked; the walk is unchanged
 TEST(WalkerCoordinates, SwitchEnteredRunsAndLowerBounds) {
     std::vector<std::string> b;
     for (uint32_t seed = 81; ; ++seed) {
@@ -5447,15 +5443,15 @@ TEST(WalkerCoordinates, DenialAroundSwitchesAndSplitsKeepsTheSideTable) {
     EXPECT_EQ(admissions, denied);
 }
 
-// D3 (the owner's decision of 2026-10-04): a derived seed whose time budget runs out after j of
+// The partial delivery of a derived seed: a derived seed whose time budget runs out after j of
 // its n k-mers delivers the set derived from those j — on a virtual clock, deterministically:
 // at 1 ms a row under a budget of 70 ms, the first window (64 rows, to 64 ms) is consumed, the
-// second (the last 46 rows, to 110 ms) read, and its first k-mer is the last: j = 65 (70 when
-// later windows followed batch_kmers 1, before the review of 2026-10-06, W1: a window is 64
-// k-mers whatever the knob). C carries the seed's first 70 k-mers only: the whole seed derives
-// {A}, the partial derivation {A, C} — a superset, stated — and the walk stops at the seed. Under trace the set is taken as derived (no coordinate continuity checked, no step taken)
-// and reports no coordinates ("partial derivation"); a budget spent before the first k-mer still
-// fails the seed (DerivationWindowIsPaced)
+// second (the last 46 rows, to 110 ms) read, and its first k-mer is the last: j = 65 (a window
+// is 64 k-mers whatever batch_kmers is). C carries the seed's first 70 k-mers only: the whole
+// seed derives {A}, the partial derivation {A, C} — a superset, stated — and the walk stops at
+// the seed. Under trace the set is taken as derived (no coordinate continuity checked, no step
+// taken) and reports no coordinates ("partial derivation"); a budget spent before the first
+// k-mer still fails the seed (DerivationWindowIsPaced)
 TEST(WalkerDerive, PartialDerivationDeliversTheSetOfTheKmersRead) {
     const auto b = clean_blocks({ 120, 30 }, 113);
     const std::string &S = b[0];     // 110 k-mers
@@ -5470,7 +5466,7 @@ TEST(WalkerDerive, PartialDerivationDeliversTheSetOfTheKmersRead) {
         Seed seed;
         seed.sequence = S;
         Strategy st;
-        st.batch_kmers = 1;     // the knob no longer changes the windows (W1)
+        st.batch_kmers = 1;     // the knob does not change the windows
         st.time_budget_ms = 70;
         st.seed_label_kind = LabelKind::COLUMN;
         st.coordinates = true;
@@ -5509,16 +5505,15 @@ TEST(WalkerDerive, PartialDerivationDeliversTheSetOfTheKmersRead) {
     }
 }
 
-// Review of W1, finding 1: the checks after the derivation were written for the whole seed's
-// carriers. Handed the superset of a partial derivation (D3) they stated falsehoods — "2 labels
-// carry the seed" under `exhaustive` with max_seed_labels 1, where 1 does — or refused over a
-// label the whole seed excludes, dropping the time budget's cause the base stated. A partial set
-// is delivered as a walk or not at all: whatever fails the seed after it fails it as before D3,
-// with the time budget (after 70 of 110 k-mers), whatever the check — `exhaustive` over the cap,
-// an extra label the superset duplicates, an ambiguous derived header, a depth-0 state the
-// memory budget does not hold. The same requests with an unhurried budget walk with {A}. (After
-// 65 k-mers since the review of 2026-10-06, W1: the second window is 64 k-mers wide whatever
-// batch_kmers is, so it is read whole before its first k-mer finds the budget spent)
+// The checks after the derivation are written for the whole seed's carriers. Handed the
+// superset of a partial derivation they would state falsehoods — "2 labels carry the seed"
+// under `exhaustive` with max_seed_labels 1, where 1 does — or refuse over a label the whole
+// seed excludes, dropping the time budget's cause. A partial set is delivered as a walk or not
+// at all: whatever fails the seed after it fails it with the time budget (after 65 of 110
+// k-mers: the second window is 64 k-mers wide whatever batch_kmers is, so it is read whole
+// before its first k-mer finds the budget spent), whatever the check — `exhaustive` over the
+// cap, an extra label the superset duplicates, an ambiguous derived header, a depth-0 state the
+// memory budget does not hold. The same requests with an unhurried budget walk with {A}.
 TEST(WalkerDerive, PartialSetThatWouldFailTheSeedFailsAsBefore) {
     const auto b = clean_blocks({ 120, 30 }, 113);
     const std::string &S = b[0];     // 110 k-mers
@@ -5639,9 +5634,9 @@ TEST(WalkerDerive, PartialSetThatWouldFailTheSeedFailsAsBefore) {
     EXPECT_EQ("qualified", j["outcome"]["label_evidence"].asString());
 }
 
-// The same at the request (review of W1, finding 1): a label name no output carries (not UTF-8)
-// in the superset of a partial derivation fails the seed with the time budget, as before D3, not
-// as a name the whole seed's set does not even hold. Unhurried, the whole seed walks with {A}
+// The same at the request: a label name no output carries (not UTF-8) in the superset of a
+// partial derivation fails the seed with the time budget, not as a name the whole seed's set
+// does not even hold. Unhurried, the whole seed walks with {A}
 TEST(Walker, PartialSetWithAnUnrepresentableNameFailsAsBefore) {
     const auto b = clean_blocks({ 120, 30 }, 113);
     const std::string &S = b[0];     // 110 k-mers
@@ -5686,14 +5681,14 @@ void strip_volatile(Json::Value *v) {
     }
 }
 
-// The review of 2026-10-06, W1 (repro U01-01): on a format whose reads are not budget-aware
-// the derivation's later windows were clamp(batch_kmers, 1, 64) k-mers wide, and each window is
-// one charge before its k-mers are consumed, so the work comparisons, `largest_charge`, the
-// outcome and `work_seed` followed the knob — 992 columns, a 195-k-mer derived seed, 100,000
-// work units: walks partial at batch_kmers 1 and 7 (largest charges 129,000 and 124,000),
-// failed at 64; unbudgeted, a no_carrier at k-mer 90 charged 639 units at 1 and 1,152 at 64.
-// Every window is 64 k-mers now: the responses are equal at 1, 7 and 64, the echo of the knob
-// apart, and at 64 (and above) they are what they were
+// On a format whose reads are not budget-aware each derivation window is one charge before its
+// k-mers are consumed, so windows sized by the knob (clamp(batch_kmers, 1, 64) k-mers) would
+// make the work comparisons, `largest_charge`, the outcome and `work_seed` follow the knob —
+// 992 columns, a 195-k-mer derived seed, 100,000 work units: walks partial at batch_kmers 1 and
+// 7 (largest charges 129,000 and 124,000), failed at 64; unbudgeted, a no_carrier at k-mer 90
+// charged 639 units at 1 and 1,152 at 64. Every window is 64 k-mers: the responses are equal at
+// 1, 7 and 64, the echo of the knob apart, and at 64 (and above) they are those of a 64-k-mer
+// window
 TEST(WalkerDerive, WindowIsSixtyFourKmersWhateverBatchKmers) {
     const std::string record = random_seq(400, 7);
     const std::string seed = record.substr(0, 195 + kK - 1);
@@ -5788,17 +5783,16 @@ Strategy trace_derivation(uint64_t max_memory_bytes) {
     return st;
 }
 
-// The review of 2026-10-06, W2: the derivation's coordinate bytes are a running total now, and
-// they must be EXACTLY the sum they replace — they decide what a budget-aware window may read
-// beside the seed (`beside`) and what memory_bound_soft states. A debug build asserts it
-// wherever the state is counted; here the test hook recounts it in this Release build, across
-// the first window, the later ones and two compactions (16 carriers, 8 of them for the first
-// 1,000 bp only, 4 more for the first 2,500: 16 -> 8 and 8 -> 4 both compact). The state is
-// counted only under a request budget: by the soft observation under a memory budget (both
-// formats), and by `beside` before every window's read on a row-diff annotation, whose reads are
-// budget-aware under any request budget (a work budget alone included) — the one place where
-// the total decides a stop. Without a budget nothing counts it, so that case only checks that
-// the hook changes nothing (the review of the P2 fixes: T58 said it recounted there)
+// The derivation's coordinate bytes are a running total, and they must be EXACTLY the sum of
+// the state — they decide what a budget-aware window may read beside the seed (`beside`) and
+// what memory_bound_soft states. A debug build asserts it wherever the state is counted; here
+// the test hook recounts it in this Release build, across the first window, the later ones and
+// two compactions (16 carriers, 8 of them for the first 1,000 bp only, 4 more for the first
+// 2,500: 16 -> 8 and 8 -> 4 both compact). The state is counted only under a request budget:
+// by the soft observation under a memory budget (both formats), and by `beside` before every
+// window's read on a row-diff annotation, whose reads are budget-aware under any request
+// budget (a work budget alone included) — the one place where the total decides a stop.
+// Without a budget nothing counts it, so that case only checks that the hook changes nothing
 TEST(WalkerDerive, CoordinateStateIsTheSumItReplaced) {
     std::vector<size_t> prefixes(8, 1000);
     prefixes.insert(prefixes.end(), 4, 2500);
@@ -5851,12 +5845,12 @@ TEST(WalkerDerive, CoordinateStateIsTheSumItReplaced) {
     }
 }
 
-// The review of 2026-10-06, W2 (repro U01-04): summing the coordinates at every observation made
-// a trace derivation under a memory budget quadratic in the seed — 100 kbp, 4 carriers, a budget
-// that never binds: 51 s against 160 ms without it at batch_kmers 1, 0.45 s against 0.05 s at
-// 64; 200 kbp about four times that. With the running total the budget costs about nothing: the
-// budgeted derivation stays within three times the unbudgeted one (each the best of three runs,
-// with 250 ms for a loaded machine)
+// Summing the coordinates at every observation would make a trace derivation under a memory
+// budget quadratic in the seed — 100 kbp, 4 carriers, a budget that never binds: 51 s against
+// 160 ms without it at batch_kmers 1, 0.45 s against 0.05 s at 64; 200 kbp about four times
+// that. With the running total the budget costs about nothing: the budgeted derivation stays
+// within three times the unbudgeted one (each the best of three runs, with 250 ms for a loaded
+// machine)
 TEST(WalkerDerive, TraceDerivationUnderAMemoryBudgetIsLinear) {
 #ifndef NDEBUG
     // A debug build recounts the whole state wherever it is counted (the assert that the running
@@ -5901,18 +5895,18 @@ struct TickingClock : VirtualClock {
     }
 };
 
-// The review of 2026-10-06, W3 (repro U03-01): the lookahead's chains ran between two
-// checkpoints and read only the seed's own deadline, so a cancel or the attempt's walk-until
-// that fell into a long chain was seen after it — at batch_kmers 60,000 1.5 to 11.8 s late, a
-// walk-until passed by 0.6 to 6 s (HTTP 503 at the bound) — and observed_max_uninterruptible_ms
-// counted reads only (1 ms). Here one unbranched tail of 20,000 k-mers is enumerated in one
-// chain (batch_kmers 20,000) on a clock every reading advances by 10 us, about 200 ms of virtual
+// The lookahead's chains poll the cancel and the attempt's walk-until, not only the seed's own
+// deadline at the checkpoints: otherwise a cancel or a walk-until that fell into a long chain
+// would be seen after it — at batch_kmers 60,000 1.5 to 11.8 s late, a walk-until passed by
+// 0.6 to 6 s (HTTP 503 at the bound) — and observed_max_uninterruptible_ms would count reads
+// only (1 ms). Here one unbranched tail of 20,000 k-mers is enumerated in one chain
+// (batch_kmers 20,000) on a clock every reading advances by 10 us, about 200 ms of virtual
 // time for the chain: a cancel at 50 ms, and a walk-until at 50 ms, are seen within one poll
 // interval of graph steps (kLookaheadPollSteps) — without pacing, and with a paced read's
-// pacing — and the walk stops there, where before it stopped after the chain (>= 200 ms). The
-// head pieces are counted (DecodePacer::max_head_ms, the attempt's
-// observed_max_uninterruptible_ms): between two polls, a fraction of a millisecond, where the
-// unpolled chain was one head piece of >= 200 ms
+// pacing — and the walk stops there, not after the chain (>= 200 ms). The head pieces are
+// counted (DecodePacer::max_head_ms, the attempt's observed_max_uninterruptible_ms): between
+// two polls, a fraction of a millisecond, where an unpolled chain would be one head piece of
+// >= 200 ms
 TEST(WalkerDeadlineChunks, LookaheadChainsReadTheStops) {
     const size_t k = 31;
     const std::string record = random_seq(40 + 20'000 + k, 909);
@@ -6013,14 +6007,14 @@ struct StridedWalkUntil {
     }
 };
 
-// The review of the P2 fixes (W3's unpaced branch): without pacing (--traverse-chunk-target-ms
-// 0) the lookahead stopped on ms_left() <= 0 without the poll that hands the walk-until to the
-// attempt, so nothing recorded the stop, and the next head's checkpoint, whose poll reads the
-// clock only every poll_stride-th time (8 on the server), let the walk run up to 7 more heads
-// past the walk-until — each cutting its own lookahead again. The control here strides as the
-// server's attempt does; a walk-until that falls inside the chain is now taken by the
-// lookahead's poll_now, so no checkpoint after it answers "no stop": the walk stops at the next
-// head, paced or not
+// Without pacing (--traverse-chunk-target-ms 0) the lookahead must stop through the poll that
+// hands the walk-until to the attempt: stopped on ms_left() <= 0 alone, nothing would record
+// the stop, and the next head's checkpoint, whose poll reads the clock only every
+// poll_stride-th time (8 on the server), would let the walk run up to 7 more heads past the
+// walk-until — each cutting its own lookahead again. The control here strides as the server's
+// attempt does; a walk-until that falls inside the chain is taken by the lookahead's
+// poll_now, so no checkpoint after it answers "no stop": the walk stops at the next head,
+// paced or not
 TEST(WalkerDeadlineChunks, LookaheadHandsTheWalkUntilToTheAttempt) {
     const size_t k = 31;
     const std::string record = random_seq(40 + 20'000 + k, 909);

@@ -1,7 +1,6 @@
-"""The search service's code review of 2026-10-05, its part on the vendored library (31
-findings VOP1-*, VOP2-*, VPC-*, VMT-*, VMD-*, reviewed at e7d99e0c): a regression test per
-finding that still held, its offline reproduction restated here (the service's repository
-is not read at test time), and a guard for the ones fixed before.
+"""The search service's items on the vendored library (its code review of the library,
+keys VOP1-*, VOP2-*, VPC-*, VMT-*, VMD-*): a regression test per item, its offline
+reproduction restated here (the service's repository is not read at test time).
 
   VOP2-03  a comparison's cut (annotate) starts from the seed boundary's set
   VOP2-01  a view's walks are ranked, then cut to top
@@ -10,10 +9,10 @@ is not read at test time), and a guard for the ones fixed before.
   VPC-04   the RANGES writer refuses every negative id
   VPC-05   a J line with one empty side reads back as written
   VMT-04   graphlet_sequence(segment=...) takes no with_seed
-  VOP1-01  an infinite or NaN branch allowance is a named ValueError (dcc0cebd)
+  VOP1-01  an infinite or NaN branch allowance is a named ValueError
   VOP1-02  {'id': True} is no label id
-  VOP1-03  walks() builds the claims of its own leaves only (f667d775)
-  VOP1-04  _switch_cost, never called, is gone
+  VOP1-03  walks() builds the claims of its own leaves only
+  VOP1-04  _switch_cost, never called, does not exist
   VOP2-02  compare(arm=X) of a pair where b lacks X answers instead of a KeyError
   VOP2-04  a view's backing digest is computed only when none is given
   VOP2-05  a view's segments in one pass (no chain per hit)
@@ -24,14 +23,13 @@ is not read at test time), and a guard for the ones fixed before.
   VPC-02   from_response and standalone_text share the transport checks
   VPC-03   standalone_text makes no extra copy of the body
   VMD-02   processes sharing a spool: no body deleted under another's entry; free, `in`
-           and list() see the other process's entries (review of these fixes, finding 5)
+           and list() see the other process's entries
   VMD-03   an entry file of another version does not stop the store opening
-  VMD-04   a missing body expires its entry, also on a copy without a parse (review of
-           these fixes, finding 4)
-  VMD-05   to_gfa's context read back as far as needed (f667d775)
+  VMD-04   a missing body expires its entry, also on a copy without a parse
+  VMD-05   to_gfa's context read back as far as needed
   VMD-07   a body that is not UTF-8, or does not decode, is a TraverseError
   VMD-08   one statement of the label changes inside a segment
-  VMT-01   traverse_continue's own arguments are no overrides (f667d775)
+  VMT-01   traverse_continue's own arguments are no overrides
   VMT-02   a page is filled in linear time; max_bytes has a ceiling
 """
 
@@ -444,7 +442,7 @@ class TestReplayOnItsGraph(unittest.TestCase):
         self.assertEqual(self.GRAPH, self.client.requests[-1]['graph'])
         self.assertEqual(self.GRAPH, self.store.get(done['handle']).request['graph'])
         # a graph the overrides name wins, and its capabilities are the ones checked
-        # against the parent's index before it runs (the review of 2026-10-06, O1)
+        # against the parent's index before it runs
         self.tools.traverse_continue(h, 'right', 1, overrides={'graph': 'other'})
         self.assertEqual('other', self.client.requests[-1]['graph'])
         self.assertEqual('other', self.client.caps_asked[-1])
@@ -641,14 +639,14 @@ class TestToolArguments(ToolsCase):
         self.assertTrue(full['with_seed'])
 
     def test_continue_arguments_are_no_overrides(self):
-        # VMT-01 (fixed at f667d775)
+        # VMT-01
         h = self.fetch('switch_chain')
         for ov in ({'reset_branches': True}, {'arm': 'left'}, {'leaves': [0]}):
             out = self.tools.traverse_continue(h, 'right', 1, overrides=ov, execute=False)
             self.assertEqual('bad_argument', out['error'], ov)
 
     def test_an_infinite_branch_allowance(self):
-        # VOP1-01 (fixed at dcc0cebd)
+        # VOP1-01
         h = self.fetch('switch_chain')
         g = self.store.graphlet(h)
         for v in (math.inf, -math.inf, math.nan):
@@ -734,8 +732,8 @@ class TestPaging(ToolsCase):
                                                  'labels': ['a'] * (i % 5)}
                                                 for i in range(3000)]}}
         tools = GraphletTools(self.store, {'mini': Wide()})
-        # the rows kept are those the old trimming (a row off, then the whole answer
-        # measured again) kept, where that is affordable
+        # the rows kept are those a trimming of a row at a time (a row off, then the whole
+        # answer measured again) keeps, where that is affordable
         for limit, mb in ((300, None), (300, 20_000), (10, None), (200, 2_000), (300, 200)):
             out = tools.traverse_resolve(sequence='ACGT', limit=limit, max_bytes=mb)
             self.assertEqual(_resolve_reference(Wide().resolve('ACGT'), limit,
@@ -763,7 +761,7 @@ class TestPaging(ToolsCase):
 
 
 def _resolve_reference(out, limit, lim):
-    """traverse_resolve's answer as it was trimmed before: a row off, then the whole
+    """traverse_resolve's answer trimmed a row at a time: a row off, then the whole
     answer measured again (quadratic: for small limits only)."""
     labels_ = out.get('labels', [])
     res = {'index': 'mini', 'k': out.get('k'), 'num_kmers': out.get('num_kmers'),
@@ -879,9 +877,9 @@ class TestSharedSpool(unittest.TestCase):
             self.assertEqual([], b.list())
 
     def test_free_in_and_list_before_any_get(self):
-        # the review of these fixes, finding 5: free() and `in` read this process's index
-        # only -- free of a live handle another process stored answered unknown_handle and
-        # left its entry and body on disk, though a summary of it answered
+        # free() and `in` read the other processes' entries too: reading this process's
+        # index only, free of a live handle another process stored would answer
+        # unknown_handle and leave its entry and body on disk, though a summary of it answers
         with tempfile.TemporaryDirectory() as d:
             p = _doc_file(d, 'fork')
             spool = os.path.join(d, 'spool')
@@ -965,9 +963,9 @@ class TestStoreFiles(unittest.TestCase):
             self.assertFalse(e.exception.replayable)
 
     def test_a_missing_body_expires_its_entry_on_a_copy(self):
-        # the review of these fixes, finding 4: the copy without a parse (graphlet_save
-        # and graphlet_export(format=mgt) under local limits; body_text, standalone_text
-        # and save_body) answered io_error and left the entry listed
+        # the copy without a parse (graphlet_save and graphlet_export(format=mgt) under local
+        # limits; body_text, standalone_text and save_body) expires the entry, not io_error
+        # with the entry left listed
         with tempfile.TemporaryDirectory() as d:
             calls = [
                 ('save', lambda t, s, h: t.graphlet_save(h, 'x.mgt')),

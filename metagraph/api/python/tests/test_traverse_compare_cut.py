@@ -139,7 +139,7 @@ class TestCompareStopCut(unittest.TestCase):
         self.assertEqual('unknown', full['comparable'])
         self.assertIn('local', full)
         self.assertNotIn('fields_cut', full)
-        # where the answer fitted before (its local block compacted), it is answered as before
+        # where the answer fits (its local block compacted), it is answered unchanged
         for mb in (None, 1500, 1264):
             with _Uncut():
                 before = self.tools.graphlet_compare(self.a, self.b, max_bytes=mb)

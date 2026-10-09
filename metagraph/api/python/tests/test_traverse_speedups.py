@@ -1,20 +1,19 @@
-"""The library speed-ups found by profiling (P1), each checked to give exactly the answers
-of the code it replaced:
+"""The library's speed-ups, each checked to give exactly the answers of a direct scan:
 
   * merge partitions read as sets (derive.partition_sets): membership in an array('I') of
-    up to every label id was a linear scan per merge passed (evidence, routes, the
+    up to every label id would be a linear scan per merge passed (evidence, routes, the
     comparison's route reconstruction); Segment.partition keeps its public type;
-  * runs indexed by label (derive.runs_by_label) for routes() and label_walks(), which
-    scanned every run of the arm per label;
-  * a name/ref -> label index for label() (it scanned every label per lookup);
+  * runs indexed by label (derive.runs_by_label) for routes() and label_walks(), not a
+    scan of every run of the arm per label;
+  * a name/ref -> label index for label() (not a scan of every label per lookup);
   * chains and spellings of many walks built together with their common prefixes shared
     (derive.walk_batch: walks(), to_fasta(), to_json(), to_gfa's paths, the comparison's
     keyers), and to_gfa's k-1 bases of context read back only that far;
   * walks(top=N) builds the claims of the N walks it returns, not of the whole arm.
 
 The gate: the digests of every public operation and of the MCP tools over the committed
-real and review3 retrievals equal those recorded with the library before these changes
-(traverse_golden.py, data/traverse/golden/committed.json.gz).
+real and review3 retrievals equal the reference digests (traverse_golden.py,
+data/traverse/golden/committed.json.gz).
 """
 
 import glob
@@ -50,7 +49,7 @@ GRAPHLETS = _all_graphlets()
 
 class TestGoldenUnchanged(unittest.TestCase):
     """Every public operation, compare() and the tools over the committed real and review3
-    retrievals: the same digests as the library before the speed-ups and stage L."""
+    retrievals: the reference digests."""
 
     @classmethod
     def setUpClass(cls):
@@ -104,7 +103,7 @@ class TestPartitionSets(unittest.TestCase):
 
 
 def _routes_reference(g, sel, arm, spell=False):
-    """routes() as it was: every run of the arm scanned, partitions read as arrays."""
+    """routes() by scanning every run of the arm, partitions read as arrays (the oracle)."""
     a = g.arm(arm)
     lab = ops.label(g, sel)
     out = []

@@ -1,6 +1,6 @@
-// The budget-aware reads of LabelQuery and LabelRecorder (stage 3 of
-// DESIGN-traverse-graphlet.md §14.1): the same answers as the unbudgeted reads, all or
-// nothing, every key admitted against its demand whether it is cached or not.
+// The budget-aware reads of LabelQuery and LabelRecorder (DESIGN-traverse-graphlet.md §14.1):
+// the same answers as the unbudgeted reads, all or nothing, every key admitted against its
+// demand whether it is cached or not.
 #include "gtest/gtest.h"
 
 #include <chrono>
@@ -132,8 +132,8 @@ std::vector<LabelRef> refs(const LabelOracle &oracle, const std::vector<std::str
     return out;
 }
 
-// Q1, Q3: the budget-aware fetch and warm return the unbudgeted hits, and a key's costs are
-// the same whether a fetch decoded it or found it cached
+// The budget-aware fetch and warm return the unbudgeted hits, and a key's costs are the same
+// whether a fetch decoded it or found it cached
 TEST(LabelOracleBudgetedQuery, SameHitsAsTheUnbudgetedFetch) {
     for (bool coordinates : { false, true }) {
         Fixture fx(coordinates);
@@ -207,10 +207,10 @@ std::map<std::string, RowCounts> rows_by_kmer(const Fixture &fx) {
     return out;
 }
 
-// 5b-2 (honest units, DECISIONS P17): KeyCost::entries is the whole row the read decoded —
-// its columns, and for a tuple row its columns plus their coordinates — whatever the query
-// keeps of it (one label, or the recorder's cap), and the same whether the key was decoded by
-// the fetch, found in the cache or decoded by the lookahead
+// Honest units: KeyCost::entries is the whole row the read decoded — its columns, and for a
+// tuple row its columns plus their coordinates — whatever the query keeps of it (one label, or
+// the recorder's cap), and the same whether the key was decoded by the fetch, found in the
+// cache or decoded by the lookahead
 TEST(LabelOracleBudgetedQuery, EntriesAreTheDecodedRow) {
     for (bool coordinates : { false, true }) {
         Fixture fx(coordinates);
@@ -335,11 +335,11 @@ TEST(LabelOracleBudgeted, KeyCostUnitsSaturate) {
     EXPECT_EQ(4'294'967'295u, saturate_units(std::numeric_limits<uint64_t>::max()));
 }
 
-// The trap of Access::AUTO (plan of 5b, finding 10), pinned as it is: AUTO picks DIRECT for at
-// most 16 distinct columns wherever the annotation has direct access, and ROWS above (TUPLES
-// with coordinates or header labels) — while the budget-aware fetch reads whole rows only,
-// so a budgeted caller must ask for ROWS. None of the annotations the budget-aware reads
-// serve (decode_charged()) has direct access, so there AUTO is ROWS.
+// The trap of Access::AUTO, pinned as it is: AUTO picks DIRECT for at most 16 distinct
+// columns wherever the annotation has direct access, and ROWS above (TUPLES with coordinates
+// or header labels) — while the budget-aware fetch reads whole rows only, so a budgeted
+// caller must ask for ROWS. None of the annotations the budget-aware reads serve
+// (decode_charged()) has direct access, so there AUTO is ROWS.
 TEST(LabelOracleAccess, AutoPicksDirectForAtMost16Columns) {
     auto seqs = sequences(17, 40, 23);
     std::vector<std::string> names;
@@ -376,12 +376,11 @@ TEST(LabelOracleAccess, AutoPicksDirectForAtMost16Columns) {
     EXPECT_TRUE(LabelOracle(*row_diff).decode_charged());
 }
 
-// The efficiency pass, the row-diff path cache (LabelOracle::path_cache): the reads of an
-// oracle with the cache answer every fetch, budgeted and not, query and recorder, exactly as
-// an oracle without it — the hits and lists, the costs (each key's whole path), what a
-// budgeted call holds, and every counter (requests, cache hits, rows fetched, mappings) —
-// and the paths stop at cached rows. With a shared bound (make_room), the path cache keeps
-// within what the label cache leaves of it.
+// The row-diff path cache (LabelOracle::path_cache): the reads of an oracle with the cache answer
+// every fetch, budgeted and not, query and recorder, exactly as an oracle without it — the hits
+// and lists, the costs (each key's whole path), what a budgeted call holds, and every counter
+// (requests, cache hits, rows fetched, mappings) — and the paths stop at cached rows. With a
+// shared bound (make_room), the path cache keeps within what the label cache leaves of it.
 TEST(LabelOraclePathCache, SameAnswersAndCounters) {
     auto same_counters = [](const LabelOracle::Counters &a, const LabelOracle::Counters &b) {
         return a.keys_mapped == b.keys_mapped && a.rows_requested == b.rows_requested
@@ -466,8 +465,8 @@ TEST(LabelOraclePathCache, SameAnswersAndCounters) {
     }
 }
 
-// Q2, Q4: a key is admitted exactly when its demand fits what the call has left, cached or
-// not; a refusal returns nothing and leaves the cache and the counters as they were
+// A key is admitted exactly when its demand fits what the call has left, cached or not; a
+// refusal returns nothing and leaves the cache and the counters as they were
 TEST(LabelOracleBudgetedQuery, AdmitsExactlyAndRefusesWhole) {
     Fixture fx(true);
     for (const auto &[names, with_coords] : label_sets(true)) {
@@ -527,7 +526,7 @@ TEST(LabelOracleBudgetedQuery, AdmitsExactlyAndRefusesWhole) {
                         EXPECT_EQ(counters.rows_requested, oracle.counters().rows_requested);
                         EXPECT_EQ(counters.cache_hits, oracle.counters().cache_hits);
                         // the physical counters (timing) count the decoding a refused fetch
-                        // did: they never go back (review of stage 3, F5: the spec now says so)
+                        // did: they never go back (the spec says so)
                         EXPECT_LE(counters.rows_fetched + counters.tuple_rows_fetched,
                                   oracle.counters().rows_fetched + oracle.counters().tuple_rows_fetched);
                         EXPECT_LE(counters.fetch_seconds, oracle.counters().fetch_seconds);
@@ -553,7 +552,7 @@ TEST(LabelOracleBudgetedQuery, AdmitsExactlyAndRefusesWhole) {
     }
 }
 
-// Q1, Q2 for the recorder: the same lists and dictionary as the unbudgeted reads, names
+// The same for the recorder: the same lists and dictionary as the unbudgeted reads, names
 // priced inside the call and given only when the whole call is admitted
 TEST(LabelOracleBudgetedRecorder, SameListsAndNames) {
     Fixture fx(true);
@@ -606,7 +605,7 @@ TEST(LabelOracleBudgetedRecorder, SameListsAndNames) {
                 }
                 EXPECT_EQ(names, budgeted.last_names_bytes());
                 // each new label is charged its provisional naming beside its name, which
-                // bounds what the call's pending labels held (review of stage 3, F1)
+                // bounds what the call's pending labels held
                 const uint64_t named_now = budgeted.labels().size() - named;
                 EXPECT_EQ(named_now * LabelRecorder::kNamingBytes, budgeted.last_naming_bytes());
                 EXPECT_LE(LabelRecorder::pending_bytes(named_now), budgeted.last_naming_bytes());
@@ -626,7 +625,7 @@ TEST(LabelOracleBudgetedRecorder, SameListsAndNames) {
     }
 }
 
-// F2: the recorder says why a key was refused — its demand, or the dictionary labels it would
+// The recorder says why a key was refused — its demand, or the dictionary labels it would
 // name first — so that a stop by labels is not reported as a row that does not fit
 TEST(LabelOracleBudgetedRecorder, RefusalNamesItsCause) {
     Fixture fx(true);
@@ -682,8 +681,8 @@ TEST(LabelOracleBudgetedRecorder, RefusalNamesItsCause) {
     }
 }
 
-// F1: what naming labels provisionally holds is bounded by the per-label charge, for any
-// number of labels (the pending table and list, their growth transients included)
+// What naming labels provisionally holds is bounded by the per-label charge, for any number
+// of labels (the pending table and list, their growth transients included)
 TEST(LabelOracleBudgetedRecorder, NamingIsChargedPerLabel) {
     for (uint64_t m = 1; m < 200000; m = m < 300 ? m + 1 : m * 17 / 16) {
         EXPECT_LE(LabelRecorder::pending_bytes(m), m * LabelRecorder::kNamingBytes) << m;
@@ -691,10 +690,10 @@ TEST(LabelOracleBudgetedRecorder, NamingIsChargedPerLabel) {
     EXPECT_EQ(LabelRecorder::kNamingBytes, LabelRecorder::pending_bytes(1));
 }
 
-// F1: jemalloc's peak of a budget-aware fetch that names many labels stays within what the
-// call charged (with names priced at the walker's model of a dictionary label without its
-// delivery), up to the dictionary map's first bucket array, a constant per recorder: the
-// pending labels were a map per label (~1.5 KB each) held uncharged
+// jemalloc's peak of a budget-aware fetch that names many labels stays within what the call
+// charged (with names priced at the walker's model of a dictionary label without its
+// delivery), up to the dictionary map's first bucket array, a constant per recorder: pending
+// labels kept as a map per label (~1.5 KB each) would be held uncharged
 TEST(LabelOracleBudgetedRecorder, NamingWithinTheAllocatorsPeak) {
 #if USE_JEMALLOC
     for (LabelKind kind : { LabelKind::COLUMN, LabelKind::HEADER }) {
@@ -753,7 +752,7 @@ TEST(LabelOracleBudgetedRecorder, NamingWithinTheAllocatorsPeak) {
 #endif
 }
 
-// Q5: which indexes have the budget-aware reads
+// Which indexes have the budget-aware reads
 TEST(LabelOracleBudgeted, DecodeChargedTruthTable) {
     auto seqs = sequences(3, 60, 9);
     std::vector<std::string> labels { "A", "B", "C" };
@@ -786,9 +785,9 @@ void returns_within(Body body, int seconds, const std::string &what) {
         ADD_FAILURE() << what << " did not return within " << seconds << " s";
 }
 
-// Review of stage 3, F1: a budgeted warm of a cache whose capacity is zero returned never
-// (its runs were at most the capacity long and did not advance); it returns at once, warms
-// nothing and leaves the budget as it was, for the query and the recorder alike
+// A budgeted warm of a cache whose capacity is zero returns at once (runs at most the
+// capacity long would not advance, and it would never return), warms nothing and leaves the
+// budget as it was, for the query and the recorder alike
 TEST(LabelOracleBudgetedQuery, ZeroCacheWarmReturns) {
     for (bool coordinates : { false, true }) {
         auto fx = std::make_shared<Fixture>(coordinates);
@@ -846,10 +845,10 @@ TEST(LabelOracleBudgetedRecorder, ZeroCacheWarmReturns) {
     }
 }
 
-// Review of stage 3, F2: the ordinary and the budget-aware path evict through one helper,
-// rows and costs together. With a cache of one row: budgeted fetch A, ordinary fetch (or
-// warm) B, budgeted fetch (or warm) B — the recorder threw std::out_of_range for B, whose row
-// was cached without its cost beside A's stale cost. Each answer equals the unbudgeted one.
+// The ordinary and the budget-aware path evict through one helper, rows and costs together.
+// With a cache of one row: budgeted fetch A, ordinary fetch (or warm) B, budgeted fetch (or
+// warm) B — a row cached without its cost beside A's stale cost would make the recorder throw
+// std::out_of_range for B. Each answer equals the unbudgeted one.
 TEST(LabelOracleBudgetedQuery, AlternatingFetchPathsKeepCosts) {
     Fixture fx(true);
     LabelOracle oracle(*fx.anno, fx.cth.get());
@@ -932,7 +931,7 @@ TEST(LabelOracleBudgetedRecorder, AlternatingFetchPathsKeepCosts) {
 }
 
 
-/************* pass 5: the chunked deadlines (LabelOracle::pacer, ReadPacing) *************/
+/************* the chunked deadlines (LabelOracle::pacer, ReadPacing) *************/
 
 // the pacer: a read the deadline cannot fall into is one piece (no deadline; predicted at the
 // slowest rate seen to take less than 1/64 of the time left; its rest, at its own previous
@@ -1243,16 +1242,15 @@ TEST(LabelOraclePacing, InterruptedReadsChangeNothing) {
     EXPECT_TRUE(w.interrupted);
 }
 
-// Review of pass 5, finding 5 (the reviewer's pacing_probe.cpp): the budget-aware lookahead
-// (warm) cut its runs from the globally sorted missing keys, which put rows of as many paths
-// as rows into each run. Its runs are taken in the walk's order now, each piece sorted: on 32
-// independent paths of 64 walked rows each, in runs of 8, the decoder's charges are those of
-// decoding the walk-ordered runs (28,736 in the review's measurement) and a third or less of
+// The budget-aware lookahead (warm) takes its runs in the walk's order, each piece sorted:
+// cutting them from the globally sorted missing keys would put rows of as many paths as rows
+// into each run. On 32 independent paths of 64 walked rows each, in runs of 8, the decoder's
+// charges are those of decoding the walk-ordered runs (28,736 measured) and a third or less of
 // those of the sorted runs (161,679). Counted, not timed.
-// Review of 2026-10-06, U05-01: a warm larger than the cache decoded every run and evicted
-// its own earlier runs to cache the next (2,048 keys decoded into a cache of 8, the last 8
-// kept); it now ends at the first run the cache cannot keep beside its own, so a cache of 8
-// keys decodes and keeps the walk's first run, the nearest keys, and nothing after it
+// A warm larger than the cache ends at the first run the cache cannot keep beside its own
+// (otherwise it would decode every run and evict its own earlier runs to cache the next: 2,048
+// keys decoded into a cache of 8, the last 8 kept), so a cache of 8 keys decodes and keeps the
+// walk's first run, the nearest keys, and nothing after it
 TEST(LabelOracleBudgeted, LookaheadRunsFollowTheWalk) {
     std::mt19937 gen(1282);
     std::vector<std::string> seqs, names;

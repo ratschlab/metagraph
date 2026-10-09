@@ -10,7 +10,7 @@ result in it:
               the parser) == A == the JSON summary's counts; max_bp, label_ends and
               leaves_by_reason of the summary == what the body and the full JSON say
   rules       check_rules(reference=full result) reports nothing (star mismatches,
-              non-canonical explicit fields, §4/§9 invariants, the v5.2 outcome rule)
+              non-canonical explicit fields, §4/§9 invariants, the conservative outcome rule)
   to_json     Graphlet.from_response(...).to_json() == the cached detail-full result
               after the §2.5/§9 normalisation (events sorted within equal at_bp,
               needed_budgets sorted, timing removed), written independently of the
@@ -433,7 +433,7 @@ class _ConformanceBase(unittest.TestCase):
                                      (side, 'cap_trigger'))
                     self.assertEqual(sa['branch_events_total'], a.branch_events_total)
                     self.assertLessEqual(len(a.branch_events), a.branch_events_total)
-                    # the conservative rule (v5.2): a limitation of a class never sits
+                    # the conservative rule: a limitation of a class never sits
                     # beside 'complete' in its dimension
                 kinds = {l['kind'] for l in res['limitations']} | {
                     l['kind'] for s in res['arms'].values() for l in s['limitations']}

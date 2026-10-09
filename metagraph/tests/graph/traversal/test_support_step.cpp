@@ -21,9 +21,8 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
 
-// The shared support step of increment 5s (PLAN §3 "5s-1", TESTS §2.2, DECISIONS P28 and the
-// owner's strand rule of P11). Every expectation comes from an oracle that never asks the
-// module:
+// The shared support step (TESTS §2.2, and the strand rule). Every expectation comes from an
+// oracle that never asks the module:
 //  - the WALKER'S RULE, copied from walker.cpp (process_item): a coordinate x of the next
 //    k-mer continues a chain when x - 1 is live (right arm) or x + 1 (left arm), one binary
 //    search per coordinate — the rule the run merges must reproduce;
@@ -609,8 +608,8 @@ TEST(SupportStep, TwoRecordsOfOneLabelK3) {
     EXPECT_EQ((ChainRun { 1, 1, unbounded(Direction::UP) }), *next.chains(0));
 }
 
-// The owner's strand rule: a label holding a walk's first k-mers on + and its last on - does
-// not support it in either orientation, although every k-mer of it is on one of the label's
+// The strand rule: a label holding a walk's first k-mers on + and its last on - does not
+// support it in either orientation, although every k-mer of it is on one of the label's
 // strands (the per-k-mer union of a k-mer's row and its reverse complement's, which the rule
 // forbids, would carry it)
 TEST(SupportStep, FirstKmersOnPlusLastOnMinusSupportNeither) {
@@ -748,8 +747,8 @@ TEST(SupportStep, CombineStatesEachLabelsOwnSupport) {
     }
 }
 
-// GPT-3 finding 1's shape: one record of 30,000 As. Its one k-mer's 29,970 coordinates are one
-// run, built once with the row; every step then compares one label and one run on each side
+// A homopolymer: one record of 30,000 As. Its one k-mer's 29,970 coordinates are one run,
+// built once with the row; every step then compares one label and one run on each side
 TEST(SupportStep, HomopolymerIsOneRunPerStep) {
     const size_t k = 31;
     const Records idx(k, { { std::string(30000, 'A') } });

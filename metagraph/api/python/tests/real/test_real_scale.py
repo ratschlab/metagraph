@@ -28,46 +28,37 @@ blow-up, not a slow machine:
     size is reported too: the body compresses label sets, so W grows faster than it).
 
 Numbers go to <scratch>/scale_report.json (merged per section, so a partial run keeps
-the rest). Product bugs found here are expected failures, each with a comment naming
-the bug (see PRODUCT BUGS below); when one is fixed its test becomes an unexpected
-success.
+the rest).
 
-PRODUCT BUGS (measured on the cached retrievals, 2026-10-02; all three FIXED on
-2026-10-03, their tests are plain tests again -- see the 'Fixed' note after each):
+SCALING HAZARDS the tests pin (measured on the cached retrievals):
 
-  B1 compare(mode='walks'|'prefix_subset') costs the whole trie, whatever the depth it
-     compares: _walk_keys / _route_pairs call support_profile() (every P run of every
+  B1 compare(mode='walks'|'prefix_subset') must not cost the whole trie whatever the
+     depth it compares: building every walk's support_profile() (every P run of every
      segment of every walk's chain, as frozensets and sorted Label lists) and
-     walk_bases() (the whole chain) for every walk before cutting at the common depth.
-     sra_rand50_06__beam20 vs sra_rand50_06__beam1 at depth_used = 1 bp: walks 8.2 s,
-     claims 0.05 s; sra_hub__beam20 vs __beam1 (depth 1): walks 107 s, prefix_subset
-     195 s; time ~ walks^2.1 on the SRA beam ladder. The MCP graphlet_compare blocks as
-     long, and §14's local-library budget (an interrupted comparison returns
-     comparable: unknown) does not exist yet.
-     Fixed: ops._cuts keys every walk by its cut [0, m), computed once per segment
-     holding base m - 1 and reading the chain only up to m (memoized per comparison),
-     and the walks sharing a cut are keyed once: the depth-1 pair now takes walks
-     0.003 s, prefix_subset 0.005 s; on the ladder (mean of cold runs) the exponent
-     is 1.08. The §14 budget is still missing (a design question).
-  B2 GraphletStore(max_ram_mb=...) is not a bound on the heap: the store accounts each
-     resident model by Graphlet.memory_bytes(), which counts 35-67 % of what
-     tracemalloc traces for the model (the per-run frozenset `stars`, the ints/floats
-     of R and T records, T extras tuples, EndLabel caches are not counted). Part of it
-     is waste: parser.py _run_record builds a new frozenset per run (`frozenset()` is
-     no singleton since Python 3.10: 216 B each), 3.3 MB of the 13.2 MB model of
-     sra_hub__exhaustive (15,922 runs). A store with max_ram_mb=8 holds ~2-3x that.
-     Fixed: shared star sets in the parser, memory_bytes() a deduplicating deep
-     sizeof (worst ratio to the traced heap 1.00), and the store re-measures a
-     resident model's caches on access and after every tool call (an 8 MB store
-     now holds 7.8 MB of heap).
-  B3 graphlet_walks recomputes the whole ranked walk list, spelling every walk, on every
-     page (it calls Graphlet.walks(arm) without top): a 2 KB page costs as much as
-     walks() over the whole arm (~0.5 s on the reference case), and the SRA rows (8
-     labels with ~120-byte path names) fill a page with one row, so listing the 10,000
-     walks of one arm would take ~10,000 x 0.5 s: quadratic in the walks.
-     Fixed: graphlet_walks ranks the arm once on cheap keys (ops.rank_walks, cached
-     per handle and arguments) and builds only its page's rows (ops.walks_at): a
-     page costs 0.2 ms against walks() 0.26 s on the reference arm.
+     walk_bases() (the whole chain) before cutting at the common depth takes
+     sra_rand50_06__beam20 vs sra_rand50_06__beam1 at depth_used = 1 bp 8.2 s for walks
+     (claims 0.05 s), sra_hub__beam20 vs __beam1 (depth 1) 107 s for walks and 195 s for
+     prefix_subset, time ~ walks^2.1 on the SRA beam ladder. ops._cuts keys every walk by
+     its cut [0, m), computed once per segment holding base m - 1 and reading the chain
+     only up to m (memoized per comparison), and the walks sharing a cut are keyed once:
+     the depth-1 pair takes walks 0.003 s, prefix_subset 0.005 s; on the ladder (mean of
+     cold runs) the exponent is 1.08.
+  B2 GraphletStore(max_ram_mb=...) bounds the heap: an account by a shallow
+     memory_bytes() would count 35-67 % of what tracemalloc traces for the model (the
+     per-run frozenset `stars`, the ints/floats of R and T records, T extras tuples,
+     EndLabel caches), and a new frozenset per run (`frozenset()` is no singleton since
+     Python 3.10: 216 B each) would be 3.3 MB of the 13.2 MB model of
+     sra_hub__exhaustive (15,922 runs), so a store with max_ram_mb=8 would hold ~2-3x
+     that. The parser shares star sets, memory_bytes() is a deduplicating deep sizeof
+     (worst ratio to the traced heap 1.00), and the store re-measures a resident model's
+     caches on access and after every tool call (an 8 MB store holds 7.8 MB of heap).
+  B3 graphlet_walks must not recompute the whole ranked walk list, spelling every walk,
+     on every page: a 2 KB page would cost as much as walks() over the whole arm (~0.5 s
+     on the reference case), and the SRA rows (8 labels with ~120-byte path names) fill a
+     page with one row, so listing the 10,000 walks of one arm would take ~10,000 x
+     0.5 s: quadratic in the walks. graphlet_walks ranks the arm once on cheap keys
+     (ops.rank_walks, cached per handle and arguments) and builds only its page's rows
+     (ops.walks_at): a page costs 0.2 ms against walks() 0.26 s on the reference arm.
 """
 
 import copy
@@ -569,8 +560,8 @@ class TestLargestRetrievals(unittest.TestCase):
             # heap is what a process pays
             self.assertLess(_MEASURED[ref]['model_retained_bytes'], 128 * MB)
 
-    # B2 (fixed): GraphletStore's RAM budget is enforced with memory_bytes(), which
-    # counted 35-67 % of the traced heap of the model (see the module docstring)
+    # B2: GraphletStore's RAM budget is enforced with memory_bytes(), which must count the
+    # traced heap of the model, not 35-67 % of it (see the module docstring)
     def test_memory_bytes_tracks_the_traced_heap(self):
         worst = None
         for index, cell, what in self._targets():
@@ -779,7 +770,7 @@ class TestCompareAtScale(unittest.TestCase):
                              ('unverifiable', 'unknown'))
         self.assertLess(row['modes']['claims']['s'], 10.0, row)
         self.assertLess(row['modes']['labels']['s'], 10.0, row)
-        # a sanity cap only: B1 makes these minutes on other pairs
+        # a sanity cap only: without B1's cuts these take minutes on other pairs
         self.assertLess(row['modes']['walks']['s'], 300.0, row)
         self.assertLess(row['modes']['prefix_subset']['s'], 300.0, row)
 
@@ -797,9 +788,8 @@ class TestCompareAtScale(unittest.TestCase):
                              (mode, v))
             self.assertLess(v['s'], 10.0, (mode, v))
 
-    # B1 (fixed): compare(mode='walks'|'prefix_subset') built every walk's whole
-    # support profile and spelling before cutting at the common depth (see the module
-    # docstring)
+    # B1: compare(mode='walks'|'prefix_subset') must not build every walk's whole support
+    # profile and spelling before cutting at the common depth (see the module docstring)
     def test_compare_walks_at_depth_1_costs_like_claims(self):
         index, a, b = DEPTH1_PAIR
         ga, gb = _cell(index, a).graphlet(0), _cell(index, b).graphlet(0)
@@ -817,8 +807,8 @@ class TestCompareAtScale(unittest.TestCase):
         self.assertLess(t_walks, bound)
         self.assertLess(t_prefix, bound)
 
-    # B1 again (fixed), as an exponent: compare(mode='walks') time was ~ walks^2 on the
-    # beam ladder (comparison depth <= 190 bp throughout); the work is linear in the walks
+    # B1 as an exponent: compare(mode='walks') time ~ walks^2 on the beam ladder without the
+    # cuts (comparison depth <= 190 bp throughout); the work is linear in the walks
     def test_compare_walks_scales_linearly_in_walks(self):
         xs, ys, rows = [], [], []
         for seed in LADDER_CMP:
@@ -828,8 +818,8 @@ class TestCompareAtScale(unittest.TestCase):
             ga, gb = R.load_cell('sra', a).graphlet(0), R.load_cell('sra', b).graphlet(0)
             colds = (_Cold(ga), _Cold(gb))
             n = sum(len(derive.paths(x)) for g in (ga, gb) for x in g.arms.values())
-            # since the fix a comparison takes about a millisecond: one cold run is below
-            # MIN_FIT_T, so the mean of repeated cold runs is fitted
+            # a comparison takes about a millisecond: one cold run is below MIN_FIT_T, so
+            # the mean of repeated cold runs is fitted
             dt, cmp, reps = _cold_mean(lambda: ga.compare(gb, mode='walks'), colds)
             xs.append(n)
             ys.append(dt)
@@ -1004,8 +994,9 @@ class TestStoreAtScale(unittest.TestCase):
         self.assertLessEqual(st._ram_bytes, budget)
         record('store', 'small_store_%dmb' % budget_mb, rows)
 
-    # B2 (fixed): the store's resident models took 2-3x max_ram_mb of heap, because the
-    # budget was charged with the shallow memory_bytes() (see the module docstring)
+    # B2: the store's resident models must stay within max_ram_mb of heap (a budget
+    # charged with a shallow memory_bytes() would let them take 2-3x; see the module
+    # docstring)
     def test_small_store_heap_stays_within_max_ram_mb(self):
         # the constrain tries (most runs per byte: the worst-accounted models), smallest
         # first, so that the store ends up holding the largest ones that fit
@@ -1197,7 +1188,7 @@ class TestMcpAtScale(unittest.TestCase):
         record('mcp', 'small_store_fetch', {'max_ram_mb': 8, 'max_handles': 4,
                                             'max_graphlet_mb': threshold_mb, 'cells': rows})
 
-    # B3 (fixed): graphlet_walks rebuilt and spelled the whole ranked walk list on every
+    # B3: graphlet_walks must not rebuild and spell the whole ranked walk list on every
     # page (see the module docstring)
     def test_walks_page_costs_a_page_not_the_arm(self):
         index, cell = REFERENCE

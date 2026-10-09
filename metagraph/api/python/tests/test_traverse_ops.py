@@ -104,7 +104,7 @@ class TestWalks(unittest.TestCase):
         self.assertEqual([0], [w.path_id for w in g.walks('right', labels=['b.fa'],
                                                             route_consistent=False)])
         (w,) = g.walks('right')
-        # c.fa and both.fa are on both first parents (the majority's, R21 (4))
+        # c.fa and both.fa are on both first parents (the majority's)
         self.assertEqual(['c:2', 'c:3'], refs(w.labels_full))
         self.assertEqual(4, w.n_alive)
         (w,) = T.body('merge_ties').walks('right')
@@ -128,8 +128,8 @@ class TestWalks(unittest.TestCase):
         (w,) = g.walks('right')
         # no label is in every (cut) recorded list along the displayed walk: it passes the
         # second bubble through the G allele (b.fa, c.fa, both.fa: the parent present in the
-        # most labels, R21 (4)), whose list (cut to b.fa, c.fa) lacks a.fa, and the lists
-        # cut to a.fa, b.fa at the merge nodes lack c.fa
+        # most labels), whose list (cut to b.fa, c.fa) lacks a.fa, and the lists cut to
+        # a.fa, b.fa at the merge nodes lack c.fa
         self.assertEqual([], refs(w.labels_full))
         self.assertEqual(2, w.n_alive)
         (w,) = g.walks('left')
@@ -216,7 +216,7 @@ class TestLabelWalksAndSupport(unittest.TestCase):
         g = T.body('merge')
         lw = g.label_walks('both.fa')
         # the two runs closed by the merges at 62 and 36 and the kept one, each with its
-        # route: the kept lineage is the one through the first (majority) parents (R21 (4))
+        # route: the kept lineage is the one through the first (majority) parents
         self.assertEqual([(3, 0, 62, 'merged', 6), (4, 0, 36, 'merged', 3),
                           (5, 0, 100, 'max_extension_bp', None)],
                          [(x.run, x.from_bp, x.to_bp, x.end, x.merged_into) for x in lw])
@@ -239,7 +239,7 @@ class TestLabelWalksAndSupport(unittest.TestCase):
         g = T.body('merge')
         ch = g.support_changes('right', 0)
         # b.fa leaves at the first bubble and returns at its merge, a.fa at the second (the
-        # displayed walk follows the majority's G allele there, R21 (4))
+        # displayed walk follows the majority's G allele there)
         self.assertEqual([(20, [], ['c:1']), (36, ['c:1'], []), (46, [], ['c:0']),
                           (62, ['c:0'], [])],
                          [(c.at_bp, refs(c.added), refs(c.removed)) for c in ch])
@@ -271,7 +271,7 @@ class TestLabelWalksAndSupport(unittest.TestCase):
         g = T.body('annotate')
         prof = g.support_profile('right', 0)
         # cut lists (cap 2) along the whole displayed walk: it passes the second bubble
-        # through the G allele, present in 3 labels (the majority parent, R21 (4))
+        # through the G allele, present in 3 labels (the majority parent)
         self.assertEqual([(0, 20, False, 4), (20, 35, False, 3), (35, 46, False, 4),
                           (46, 61, False, 3), (61, 70, False, 4)],
                          [(r.from_bp, r.to_bp, r.exact, r.total) for r in prof])
@@ -451,9 +451,9 @@ def _mirrored(text):
 
 
 class TestCompareCli(unittest.TestCase):
-    """compare() on CLI retrievals of one seed (documents/compare/cli_*.mgt): the review's
-    findings on prefix_subset orientation, interior ends and recorded refusals, claims
-    ending at the comparison depth, lower-bound label evidence and an empty window."""
+    """compare() on CLI retrievals of one seed (documents/compare/cli_*.mgt): prefix_subset
+    orientation, interior ends and recorded refusals, claims ending at the comparison depth,
+    lower-bound label evidence and an empty window."""
 
     def g(self, name, left=False):
         t = _with_fp(T.compare_text(name))

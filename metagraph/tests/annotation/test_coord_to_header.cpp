@@ -158,8 +158,8 @@ TEST(CoordToHeader, NumKmersInSequence) {
     EXPECT_THROW(cth.num_kmers_in_sequence(3, 0), std::out_of_range);
 }
 
-// sequence_range (the efficiency pass: one rank/select per sequence for sorted coordinates)
-// agrees with map_single_coord at every coordinate and throws where it throws
+// sequence_range (one rank/select per sequence for sorted coordinates) agrees with
+// map_single_coord at every coordinate and throws where it throws
 TEST(CoordToHeader, SequenceRangeAgreesWithMapSingleCoord) {
     CoordToHeader cth(
         { { "only" }, { "a", "b", "c" }, { "head", "mid", "tail" } },

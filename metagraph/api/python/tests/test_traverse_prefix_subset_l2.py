@@ -1,10 +1,9 @@
-"""prefix_subset's lookups and charges (review of 2026-10-06, L2): a's recorded refusals
-are indexed once per comparison and only those on the segments a walk reaches are tested;
-the best claim of an omission is found by following the walk down a's claim chains; the
-violation scan bisects b's sorted supported prefixes. Every answer is the one the scans
-gave (the scans are kept here as the oracle, as the library had them), and the charges
-follow the work: on the review's comb of 8,001 segments the comparison ran ~70x longer
-than it charged.
+"""prefix_subset's lookups and charges: a's recorded refusals are indexed once per
+comparison and only those on the segments a walk reaches are tested; the best claim of an
+omission is found by following the walk down a's claim chains; the violation scan bisects
+b's sorted supported prefixes. Every answer is the one the scans give (the scans are kept
+here as the oracle), and the charges follow the work: unindexed, a comb of 8,001 segments
+would run ~70x longer than it charges.
 
 The graphlets: the committed fixtures and synthetic ones with refusals injected where the
 oracle's every branch is reached -- V refusals and blocked or skipped successors on
@@ -34,8 +33,8 @@ from metagraph.traverse.parser import parse  # noqa: E402
 # ------------------------------------------------------------------ the scans (oracle)
 
 def old_recorded_refusal(g, arm, seq, ref):
-    """_recorded_refusal() as it scanned every refusal of the arm (6897db99), its chain
-    test spelled out (the chain's bases [0, at) equal seq's)."""
+    """_recorded_refusal() as a scan of every refusal of the arm, its chain test spelled
+    out (the chain's bases [0, at) equal seq's)."""
     ids = ops._label_index(g)[0].get(ref)
     if not ids:
         return None
@@ -83,7 +82,7 @@ def old_best_claim(arm, rows, seq, ref):
 
 def comb_with_refusals(n):
     """comb_annotate(n), label 1 on the spine, with a V refusal of 'C' for label 1 at every
-    split (the review's r3)."""
+    split."""
     a = parse(comb_annotate(n))
     arm = a.arms['right']
     segs = arm.segments
@@ -228,11 +227,11 @@ class TestTheIndexAnswersAsTheScan(unittest.TestCase):
         self.assertGreater(found, 1000)
 
     def test_the_best_claim_of_claims_before_their_segment(self):
-        # The review of the L2 fix: a claim whose to_bp lies before its own segment (the
-        # model does not exclude one) is filed under the ancestor that holds its last base,
-        # found by one walk of the tree now (_chain_anchors()), not a climb per claim. Such
-        # claims are made here by moving a claim down its first-parent chain: its prefix,
-        # the chain's bases [0, to_bp), stays the same, and the oracle spells it
+        # A claim whose to_bp lies before its own segment (the model does not exclude one)
+        # is filed under the ancestor that holds its last base, found by one walk of the tree
+        # (_chain_anchors()), not a climb per claim. Such claims are made here by moving a
+        # claim down its first-parent chain: its prefix, the chain's bases [0, to_bp), stays
+        # the same, and the oracle spells it
         rng = random.Random(23)
         n = moved_n = found = 0
         for name, g in graphlets():
@@ -271,9 +270,9 @@ class TestTheIndexAnswersAsTheScan(unittest.TestCase):
         self.assertGreater(found, 300)
 
     def test_the_anchors_are_those_of_the_climb(self):
-        # _chain_anchors() against the climb it replaced, on every segment and offset of
-        # the chains of a bushy and a deep arm (equal offsets included: a segment of 0
-        # bases starts where its child does)
+        # _chain_anchors() against a climb per claim, on every segment and offset of the
+        # chains of a bushy and a deep arm (equal offsets included: a segment of 0 bases
+        # starts where its child does)
         for g in (parse(_wide(6, 12)), parse(comb_annotate(30)), T.graphlet('switch_chain')):
             for arm in g.arms.values():
                 segs = arm.segments
@@ -295,9 +294,9 @@ class TestTheIndexAnswersAsTheScan(unittest.TestCase):
 # ------------------------------------------------------------------ charges
 
 def only_label0(nl, ns):
-    """The review's r8: a's segments carry label 0 only (its dictionary still names all nl
-    labels), so every (walk, label != 0) of a shallow wide b is an omission without a
-    claim, and each asked a's refusals by scanning every segment."""
+    """a's segments carry label 0 only (its dictionary still names all nl labels), so every
+    (walk, label != 0) of a shallow wide b is an omission without a claim, and each would
+    ask a's refusals by scanning every segment."""
     res = []
     for line in _wide(nl, ns).splitlines():
         p = line.split(' ')
@@ -311,9 +310,9 @@ def only_label0(nl, ns):
 
 class TestCharges(unittest.TestCase):
     def test_a_deep_a_is_not_scanned_per_omission(self):
-        # 32,001 segments and 2,000 labels: 11,994 omissions. The scan visited every segment
-        # per omission (384M visits, uncharged: 47-72x the nominal time of the charge,
-        # 11-17 s; now 0.6x, 0.15 s)
+        # 32,001 segments and 2,000 labels: 11,994 omissions. A scan of every segment per
+        # omission would be 384M visits, uncharged: 47-72x the nominal time of the charge,
+        # 11-17 s; indexed, 0.6x, 0.15 s
         a, b = parse(only_label0(2000, 16000)), parse(_wide(2000, 5))
         visits = [0]
         real = ops._follow
@@ -338,12 +337,12 @@ class TestCharges(unittest.TestCase):
         self.assertLess(cpu, 5 * bud.used_work * 1e-7 + 0.2, (cpu, bud.used_work))
 
     def test_events_before_their_segment_are_not_climbed_per_event(self):
-        # The review of the L2 fix: each refusal whose at_bp lies before its own segment
-        # (the parser does not check it; a crafted or corrupt body) was filed by a climb of
-        # its chain, one uncharged step per ancestor and per event: 8,000 such events on
-        # the deepest segment of a 16,001-segment comb ran 8.8 s against 0.45 s nominal
-        # (19.6x; 16,000 on 32,001 segments 44x, and a 2 s deadline stopped only after
-        # 9.96 s). Now one walk of the tree, charged
+        # Each refusal whose at_bp lies before its own segment (the parser does not check it;
+        # a crafted or corrupt body) is filed by one charged walk of the tree: a climb of its
+        # chain, one uncharged step per ancestor and per event, would take 8,000 such events
+        # on the deepest segment of a 16,001-segment comb 8.8 s against 0.45 s nominal
+        # (19.6x; 16,000 on 32,001 segments 44x, and a 2 s deadline would stop only after
+        # 9.96 s)
         nl, ns, k = 20, 8000, 8000
         a = parse(only_label0(nl, ns))
         segs = a.arms['right'].segments

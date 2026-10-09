@@ -23,7 +23,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
-// output.labels "all" of POST /pattern (src/cli/pattern_retrieval.cpp, increment 3 of
+// output.labels "all" of POST /pattern (src/cli/pattern_retrieval.cpp,
 // docs/DESIGN-pattern-search.md): the labels of every released context (LabelRecorder
 // discovery), their placement (LabelQuery with coordinates, the record mapping first and the
 // offset after), the deduplication of placed occurrences, the modes, and every refusal,
@@ -618,12 +618,12 @@ TEST(PatternRetrieval, DeadlineInTheReads) {
     EXPECT_EQ("time_limited", out["patterns"][0]["determinism"].asString());
 }
 
-// X-EFFICIENCY-04 (review of 2026-10-07), the labelled retrieval: the labels built for the
-// answer are built under the work time, read before each context's (with them counted in the
-// answer's volume). A virtual clock the test moves past the work time when the second
-// context's labels are to be built: stop {output, time}; partial returns the first context
-// with its labels and the others read but not output (output_budget), all_or_count withholds
-// (deadline); the next pattern answers as after any time stop
+// The labelled retrieval under the work time: the labels built for the answer are built under
+// the work time, read before each context's (with them counted in the answer's volume). A
+// virtual clock the test moves past the work time when the second context's labels are to be
+// built: stop {output, time}; partial returns the first context with its labels and the others
+// read but not output (output_budget), all_or_count withholds (deadline); the next pattern
+// answers as after any time stop
 TEST(PatternRetrieval, DeadlineInTheOutput) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
     const Clock::time_point start = Clock::now();
@@ -675,11 +675,11 @@ TEST(PatternRetrieval, DeadlineInTheOutput) {
     EXPECT_TRUE(out["patterns"][0]["retrieval_complete"].asBool());
 }
 
-// X-EFFICIENCY-04 (review of 2026-10-07), the labelled retrieval: the contexts the engine
-// releases are counted in the answer's volume as their objects are built, so the reads after
-// them see the work time shortened by the time to write them. A clock that never moves and a
-// build rate of 1 byte per second: the reads stop by time before the first row (partial: the
-// contexts returned unread; all_or_count: withheld)
+// The labelled retrieval and the answer's volume: the contexts the engine releases are counted
+// in the answer's volume as their objects are built, so the reads after them see the work time
+// shortened by the time to write them. A clock that never moves and a build rate of 1 byte per
+// second: the reads stop by time before the first row (partial: the contexts returned unread;
+// all_or_count: withheld)
 TEST(PatternRetrieval, TheAnswersVolumeStopsTheReads) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
     const Clock::time_point start = Clock::now();
@@ -888,8 +888,8 @@ TEST(PatternRetrieval, ClampsAndRefusals) {
     EXPECT_EQ(256u, clamped[1]["effective"].asUInt64());
     EXPECT_EQ(256u, out["limits"]["max_memory_mb"].asUInt64());
 
-    // increment 5b: "predicate_only" is served with a predicate; without one it is
-    // invalid_request (was later_increment, SPEC §4.4)
+    // "predicate_only" is served with a predicate; without one it is invalid_request (SPEC
+    // §4.4)
     EXPECT_EQ(std::make_pair(400, std::string("invalid_request")),
               refusal(idx, "{\"patterns\": [{\"dna\": \"AC\"}], "
                            "\"output\": {\"labels\": \"predicate_only\"}}"));
@@ -971,7 +971,7 @@ TEST(PatternRetrieval, PrimaryGraphLabels) {
     }
 }
 
-// The answer states why an entry is incomplete (the owner's guarantee rule)
+// The answer states why an entry is incomplete (the guarantee rule)
 void expect_incomplete_stated(const Json::Value &e) {
     if (e.isMember("error") || e["retrieval_complete"].asBool())
         return;
@@ -1051,11 +1051,10 @@ TEST(PatternRetrieval, MemoryAccountBoundsEveryMaximum) {
     }
 }
 
-// Review finding (descriptors): partial filled the whole account with the contexts'
-// descriptors before reading any label, so every row was refused and a memory cut returned
-// contexts without a single label. Now the descriptors take at most half of what the account
-// has left, a context's descriptor is charged before its result object is built (none built
-// past the cut), and the rows have the other half.
+// The contexts' descriptors take at most half of what the account has left: filling the whole
+// account with them before reading any label would refuse every row, and a memory cut would
+// return contexts without a single label. A context's descriptor is charged before its result
+// object is built (none built past the cut), and the rows have the other half.
 TEST(PatternRetrieval, PartialMemoryCutKeepsLabelledContexts) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
     Json::Value full = run(idx, body("{\"dna\": \"AC\"}", "\"mode\": \"partial\""));
@@ -1111,13 +1110,12 @@ std::vector<std::pair<uint64_t, uint64_t>> rows_in_order(const Json::Value &e) {
     return rows;
 }
 
-// Review GPT-2, finding 1: a row decoded and then refused (its label names did not fit the
-// account) was charged no work, and a refused read was repeated for the rows before it
-// uncharged: under max_annotation_work 1 and max_memory_mb 1 the review's request refused
-// all 64 rows at annotation_units 0, with no stop. Now every read is charged what it decoded,
-// whatever its outcome: a refused row costs what reading it costs (its row and its row-diff
-// dependencies), 8 when its read itself did not fit (nothing decoded); and the work is checked
-// before every row.
+// Every read is charged what it decoded, whatever its outcome: a row decoded and then refused
+// (its label names did not fit the account) charged no work, and a refused read repeated for
+// the rows before it uncharged, would let a request under max_annotation_work 1 and
+// max_memory_mb 1 refuse all 64 rows at annotation_units 0, with no stop. A refused row costs
+// what reading it costs (its row and its row-diff dependencies), 8 when its read itself did
+// not fit (nothing decoded); and the work is checked before every row.
 TEST(PatternRetrieval, RefusedReadsChargeTheirWork) {
     // one label with a long name in the five k-mers of GGACGACTTTG, all of which contain AC
     const std::string name = "c" + std::string(20000, 'x');
@@ -1152,8 +1150,8 @@ TEST(PatternRetrieval, RefusedReadsChargeTheirWork) {
     EXPECT_TRUE(e["stop"].isNull());
     expect_incomplete_stated(e);
 
-    // max_annotation_work 1: the first refused read reaches it, no other row is read (before
-    // the fix: five refusals, no stop)
+    // max_annotation_work 1: the first refused read reaches it, no other row is read (not
+    // five refusals and no stop)
     out = run(idx, request(", \"max_annotation_work\": 1"), hooks, false);
     const Json::Value &w = out["patterns"][0];
     EXPECT_EQ(1u, w["rows_refused"].size()) << w;
@@ -1187,9 +1185,9 @@ TEST(PatternRetrieval, RefusedReadsChargeTheirWork) {
     EXPECT_EQ("max_annotation_work", out["patterns"][0]["stop"]["reason"].asString());
 }
 
-// Finding 1 in step 2: every placement read refused (the reads of discovery admitted), each
-// charged 8; under a budget the discovery leaves one unit of, one placement read is refused
-// and the work stops the placement
+// Refused reads in step 2: every placement read refused (the reads of discovery admitted),
+// each charged 8; under a budget the discovery leaves one unit of, one placement read is
+// refused and the work stops the placement
 TEST(PatternRetrieval, RefusedPlacementReadsChargeTheirWork) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
     Json::Value plain = run(idx, "{\"patterns\": [{\"dna\": \"AC\"}], \"mode\": \"partial\", "
@@ -1225,12 +1223,12 @@ TEST(PatternRetrieval, RefusedPlacementReadsChargeTheirWork) {
     EXPECT_EQ(discovery + 8, w["work"]["annotation_units"].asUInt64());
 }
 
-// Review GPT-2, finding 2: a read took as many rows as the work budget had left for rows as
-// wide as the widest read before it, so a read of wider rows passed the budget by many rows (7
-// rows of one label, then 8 of 100: 927 units under 150). Now the rows are read one at a time,
-// the work checked before each: for every budget the reads stop at the first row that reaches
-// it, which passes it by its own units at most. On an unbudgeted backend without coordinates a
-// row costs exactly 8 + its labels, so the expectation is computed from the complete answer.
+// The rows are read one at a time, the work checked before each: a read of as many rows as the
+// work budget had left for rows as wide as the widest read before it would pass the budget by
+// many rows when the rows get wider (7 rows of one label, then 8 of 100: 927 units under 150).
+// For every budget the reads stop at the first row that reaches it, which passes it by its own
+// units at most. On an unbudgeted backend without coordinates a row costs exactly 8 + its
+// labels, so the expectation is computed from the complete answer.
 TEST(PatternRetrieval, TheWorkBudgetIsPassedByOneRowAtMost) {
     // narrow rows (one label) and wide ones (24 labels) carrying AC, in an order of the graph
     std::vector<Record> records;
@@ -1321,12 +1319,11 @@ TEST(PatternRetrieval, TheWorkBudgetIsPassedByOneRowAtMost) {
     }
 }
 
-// Review GPT-2, finding 3: a result's label was priced 256 bytes whatever its name, though it
-// holds a copy of it, and by_label's copies were not priced at all: one label of 512 KiB in
-// 64 contexts built a 34 MB answer under max_memory_mb 2. Now every copy of a name the answer
-// holds is in the account before it is built: over a sweep of maxima, the names an answer
-// holds never pass its memory_bytes, which never passes the maximum, and every incomplete
-// entry says why.
+// Every copy of a name the answer holds is in the account before it is built: a result's label
+// priced 256 bytes whatever its name, though it holds a copy of it, and by_label's copies
+// unpriced, would let one label of 512 KiB in 64 contexts build a 34 MB answer under
+// max_memory_mb 2. Over a sweep of maxima, the names an answer holds never pass its
+// memory_bytes, which never passes the maximum, and every incomplete entry says why.
 TEST(PatternRetrieval, EveryCopyOfALabelNameIsPriced) {
     const std::string name = "c" + std::string(3000, 'x');
     const std::vector<Record> records = { { name, "r0", "GGACGACTTTG" },
@@ -1382,8 +1379,8 @@ TEST(PatternRetrieval, EveryCopyOfALabelNameIsPriced) {
                     }
                 }
                 const uint64_t memory = out["patterns"][1]["work"]["memory_bytes"].asUInt64();
-                // every name the answer holds is priced (before the fix: 6 x 3,001 bytes of
-                // names in an account of about 15,000)
+                // every name the answer holds is priced (not 6 x 3,001 bytes of names in an
+                // account of about 15,000)
                 ASSERT_LE(names, memory) << "max " << max << "\n" << out;
                 ASSERT_LE(memory, max + (idx == &column ? 2 * (192 + 2 * name.size()) : 0))
                         << "max " << max;
@@ -1394,12 +1391,12 @@ TEST(PatternRetrieval, EveryCopyOfALabelNameIsPriced) {
     }
 }
 
-// SPEC §11 (review GPT-2, finding 7): an earlier stop of the pattern followed by a time stop of
-// the output of its labels, on a virtual clock. The work budget stops the discovery after two
-// rows; the clock passes the work time when the second context read is to get its labels: the
-// first stop stays (label_discovery, max_annotation_work), the contexts read after the time
-// stop say output_budget, the determinism time_limited, and the next pattern answers as after
-// any time stop
+// SPEC §11: an earlier stop of the pattern followed by a time stop of the output of its labels,
+// on a virtual clock. The work budget stops the discovery after two rows; the clock passes the
+// work time when the second context read is to get its labels: the first stop stays
+// (label_discovery, max_annotation_work), the contexts read after the time stop say
+// output_budget, the determinism time_limited, and the next pattern answers as after any time
+// stop
 TEST(PatternRetrieval, AWorkStopThenATimeStopOfTheOutput) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kRecords, true);
     const std::string patterns = "{\"dna\": \"AC\"}, {\"dna\": \"GACG\"}";
@@ -1485,13 +1482,12 @@ TEST(PatternRetrieval, AWorkStopThenATimeStopOfTheOutput) {
     EXPECT_EQ("full", out["patterns"][0]["determinism"].asString());
 }
 
-// GPT review 3, finding 4: every occurrence of a context was built for the answer, charged and
-// estimated in the answer's volume, and max_occurrences_per_label applied after (refunding the
-// memory, not the estimate): ten AAA on a 30,000-base homopolymer, cap 1, stopped in the first
-// output after 4 ms of work. Now each occurrence is counted in its label's union, but a list
-// holds (and the account and the volume are charged for) only the first max_occurrences_per_
-// label of its context's, cut to the union's first once it is complete. The record-scan oracle:
-// each label lists exactly the first of its union, its counts exact over all of them
+// Each occurrence is counted in its label's union, but a list holds (and the account and the
+// volume are charged for) only the first max_occurrences_per_label of its context's, cut to the
+// union's first once it is complete: building, charging and estimating every occurrence and
+// applying the cap after (refunding the memory, not the estimate) would stop ten AAA on a
+// 30,000-base homopolymer, cap 1, in the first output after 4 ms of work. The record-scan
+// oracle: each label lists exactly the first of its union, its counts exact over all of them
 TEST(PatternRetrieval, TheCapListsTheFirstOfEachUnion) {
     std::vector<Record> records = kRecords;
     records.push_back({ "h", "h0", std::string(30, 'A') });
@@ -1558,12 +1554,11 @@ TEST(PatternRetrieval, TheCapListsTheFirstOfEachUnion) {
     }
 }
 
-// The answer's volume counts what is listed, not what is counted (GPT review 3, finding 4): a
-// clock that never moves and a build rate of 10 bytes per ms, under which the text of the 1,994
-// occurrences of one context (some 300 KB, 74 s to build and write) stops the output and the
-// cap's one (a few KB with the rest of the answer) does not. Before: stop {output, time}, the
-// labels output_budget, the occurrences at least 0. (Column-compressed, read unbudgeted, as
-// below)
+// The answer's volume counts what is listed, not what is counted: a clock that never moves and
+// a build rate of 10 bytes per ms, under which the text of the 1,994 occurrences of one context
+// (some 300 KB, 74 s to build and write) stops the output and the cap's one (a few KB with the
+// rest of the answer) does not; counted whole, the answer would stop {output, time}, the labels
+// output_budget, the occurrences at least 0. (Column-compressed, read unbudgeted, as below)
 TEST(PatternRetrieval, TheCapEstimatesOnlyWhatIsListed) {
     Index idx = build<annot::ColumnCompressed<>>(kK, { { "h", "h0", std::string(2000, 'A') } },
                                                  true);
@@ -1601,12 +1596,12 @@ TEST(PatternRetrieval, TheCapEstimatesOnlyWhatIsListed) {
     EXPECT_EQ("time", out["patterns"][0]["stop"]["reason"].asString());
 }
 
-// The occurrences of a context are made under the clock (GPT review 3): one context of 19,994
-// coordinates, the clock moved past the work time before they are made: the counting stops
-// within a stride of them, before the context's deduplication (64 bytes an occurrence) is
-// charged — which, made whole and refused after, would have left its 1.3 MB in the peak. (A
-// column-compressed index, read unbudgeted: the row-diff conversion of a row of 20,000
-// coordinates takes the test half a minute)
+// The occurrences of a context are made under the clock: one context of 19,994 coordinates,
+// the clock moved past the work time before they are made: the counting stops within a stride
+// of them, before the context's deduplication (64 bytes an occurrence) is charged — which,
+// made whole and refused after, would have left its 1.3 MB in the peak. (A column-compressed
+// index, read unbudgeted: the row-diff conversion of a row of 20,000 coordinates takes the
+// test half a minute)
 static_assert(pattern::Budget::kClockStride < 19994 / 2, "two strides in the context");
 TEST(PatternRetrieval, TheOccurrencesReadTheClock) {
     Index idx = build<annot::ColumnCompressed<>>(kK, { { "h", "h0", std::string(20000, 'A') } },

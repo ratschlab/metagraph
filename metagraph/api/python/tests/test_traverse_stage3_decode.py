@@ -1,8 +1,9 @@
-"""Stage 3 of DESIGN-traverse-graphlet.md §14.1 as a client sees it: on an annotation whose
-reads are budget-aware (a row-diff annotation over BRWT or ColumnMajor), a read that does
-not fit the memory the request has left stops the walk in phase `annotation_decode`. The
-library reads it exactly as it is: MGT v1 is frozen, and the Q record's phase and actions
-are free `[a-z_]` tokens, the K effects free text, so no record, field or token is new.
+"""The budget-aware annotation reads (DESIGN-traverse-graphlet.md §14.1) as a client sees
+them: on an annotation whose reads are budget-aware (a row-diff annotation over BRWT or
+ColumnMajor), a read that does not fit the memory the request has left stops the walk in
+phase `annotation_decode`. The library reads it exactly as it is: MGT v1 is frozen, and
+the Q record's phase and actions are free `[a-z_]` tokens, the K effects free text, so no
+record, field or token is new.
 
 The document is the CLI fixture documents/budgets/decode_stop (graphlet_fixtures.py
 --from-cli, index `dense`: the row before a k-mer repeated 120,000 times carries one label,

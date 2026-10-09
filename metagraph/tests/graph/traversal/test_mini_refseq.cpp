@@ -221,15 +221,15 @@ TEST_F(MiniRefSeq, DiscoverBlaNDMCarriers) {
     EXPECT_EQ("x783", encode_runs(it->runs, profile.num_kmers));
 }
 
-// R6 (review of pass 5) and finding 7 of the review of its fixes: a /resolve decodes the
-// present rows in batches of at most ResolveOptions::batch_rows rows sized to about
-// batch_bytes (the first kResolveFirstBatchRows, each at most twice the one before), and holds
-// one batch at a time — a discovery accumulates its labels' support while it reads (no profile
-// pass decoding the rows again) and keeps a repeated k-mer's row for its later occurrences
-// within kept_bytes, an explicit profile primes its query with each distinct row once. The
-// profile is the same however the rows are batched or kept, and a discovery's profiles are
-// exactly those of the same labels given explicitly: column and header labels, presence and
-// trace, on the query and on a query repeating most of it (its k-mers occurring twice)
+// Batched /resolve decoding: a /resolve decodes the present rows in batches of at most
+// ResolveOptions::batch_rows rows sized to about batch_bytes (the first kResolveFirstBatchRows,
+// each at most twice the one before), and holds one batch at a time — a discovery accumulates
+// its labels' support while it reads (no profile pass decoding the rows again) and keeps a
+// repeated k-mer's row for its later occurrences within kept_bytes, an explicit profile primes
+// its query with each distinct row once. The profile is the same however the rows are batched
+// or kept, and a discovery's profiles are exactly those of the same labels given explicitly:
+// column and header labels, presence and trace, on the query and on a query repeating most of
+// it (its k-mers occurring twice)
 TEST_F(MiniRefSeq, ResolveDecodesEachRowOnceInBoundedBatches) {
     auto text = [](const SupportProfile &p) {
         std::ostringstream os;
@@ -336,7 +336,7 @@ TEST_F(MiniRefSeq, ResolveDecodesEachRowOnceInBoundedBatches) {
     EXPECT_EQ(2u * 4 * (3 * 2 * (2 + 1)), compared);
 }
 
-// R6 (permitted-range filtering): a query of header labels looks a coordinate up among the
+// Permitted-range filtering: a query of header labels looks a coordinate up among the
 // ranges of its own sequences instead of mapping it to its sequence (rank and select); its
 // hits are those of mapping every coordinate (map_coord) and keeping the requested sequences'
 // — with and without coordinates, by the default and the budget-aware reads
@@ -840,10 +840,11 @@ TEST_F(MiniRefSeq, TrieContractAgainstTheSourceRecords) {
     }
 }
 
-// Stage 3 of DESIGN-traverse-graphlet.md §14.1 on the real index (RowDiff<BRWT> with
-// coordinates, whose reads are budget-aware): budgets swept across their stops — memory
-// stops in both phases (traversal, annotation_decode), work stops — give the same result
-// whatever annotation.batch_kmers is, and every read is charged with its dependency rows
+// The budget-aware annotation reads (DESIGN-traverse-graphlet.md §14.1) on the real index
+// (RowDiff<BRWT> with coordinates, whose reads are budget-aware): budgets swept across their
+// stops — memory stops in both phases (traversal, annotation_decode), work stops — give the
+// same result whatever annotation.batch_kmers is, and every read is charged with its
+// dependency rows
 TEST_F(MiniRefSeq, BudgetAwareReadsDoNotDependOnBatchKmers) {
     ASSERT_TRUE(oracle_->decode_charged());
     const std::string seed = query_.substr(0, 120);
@@ -907,12 +908,13 @@ TEST_F(MiniRefSeq, BudgetAwareReadsDoNotDependOnBatchKmers) {
 }
 
 
-// R8 (staging at feature level 3: a warm tuple walk with a 5,000 ms budget ran 6,136 ms, and
-// nothing said which piece overran): under output.timing every seed states its deadline record
-// — its longest uninterruptible piece (kind, rows, coordinates mapped to headers in it) and,
-// when a stop ended its walk, what stopped it and how long after its deadline — and nowhere
-// else. A read maps its rows' coordinates inside its piece, so its measured rate includes the
-// mapping: with slow reads the longest piece is a read of header rows, with its coordinates
+// The deadline record (a warm tuple walk with a 5,000 ms budget can run 6,136 ms, and the
+// response must say which piece overran): under output.timing every seed states its deadline
+// record — its longest uninterruptible piece (kind, rows, coordinates mapped to headers in it)
+// and, when a stop ended its walk, what stopped it and how long after its deadline — and
+// nowhere else. A read maps its rows' coordinates inside its piece, so its measured rate
+// includes the mapping: with slow reads the longest piece is a read of header rows, with its
+// coordinates
 TEST_F(MiniRefSeq, DeadlineRecordNamesTheLongestPiece) {
     const std::string seed = query_.substr(0, 120);
     // header labels: the reads map coordinates; slow reads (2 ms a row) make them the longest
@@ -983,15 +985,15 @@ TEST_F(MiniRefSeq, DeadlineRecordNamesTheLongestPiece) {
     }
 }
 
-// The efficiency pass, the row-diff path cache, and the chunked deadlines: the rows a request's
-// reads reconstruct are kept so that later reads stop their row-diff paths at them, and every
-// read may be decoded in chunks of one row (with the deadline checked between them). When no
-// deadline is reached the response is byte for byte the one without the cache, in one piece —
-// constrain and annotate, derived labels, no budget, memory budgets near and at their stops (the
-// cache is then each seed's, within what the label cache leaves of its allotment; the
-// budget-aware reads' refusals included), work budgets, batch_kmers 1 and 64, no cache, a cache
-// that keeps everything and one that evicts all the time, reads in one piece and in one-row
-// chunks — and the cache is used (its hits) and emptied after a seed under a memory budget
+// The row-diff path cache and the chunked deadlines: the rows a request's reads reconstruct are
+// kept so that later reads stop their row-diff paths at them, and every read may be decoded in
+// chunks of one row (with the deadline checked between them). When no deadline is reached the
+// response is byte for byte the one without the cache, in one piece — constrain and annotate,
+// derived labels, no budget, memory budgets near and at their stops (the cache is then each
+// seed's, within what the label cache leaves of its allotment; the budget-aware reads' refusals
+// included), work budgets, batch_kmers 1 and 64, no cache, a cache that keeps everything and one
+// that evicts all the time, reads in one piece and in one-row chunks — and the cache is used (its
+// hits) and emptied after a seed under a memory budget
 TEST_F(MiniRefSeq, PathCacheKeepsTheResponse) {
     const std::string seed = query_.substr(0, 120);
     size_t compared = 0, stopped = 0;
@@ -1035,8 +1037,8 @@ TEST_F(MiniRefSeq, PathCacheKeepsTheResponse) {
                         compared++;
                     }
                 }
-                // R10: the retention rule with no row narrow (mini refseq's rows all are), as
-                // on a wide index — checkpoints of 4 and of 16, and only the requested rows
+                // the retention rule with no row narrow (mini refseq's rows all are), as on a
+                // wide index — checkpoints of 4 and of 16, and only the requested rows
                 for (const auto &rule : { std::make_tuple(4u, 1u, uint64_t(0)),
                                           std::make_tuple(16u, 8u, uint64_t(0)),
                                           std::make_tuple(1u << 30, 0u, uint64_t(0)) }) {
@@ -1077,11 +1079,11 @@ TEST_F(MiniRefSeq, PathCacheKeepsTheResponse) {
     }
 }
 
-// R6 (review of pass 5, path reuse): a seed walked with the path cache warm — the rows an
-// earlier seed of the request kept (without a memory budget the cache is the request's) — gives
-// the result it gives cold, alone in its request, and the result without the cache: the same
-// walks, the same stops under memory and work budgets, at batch_kmers 1 and 64, in one piece
-// and in one-row chunks, with a default, a tiny and no cache
+// Path reuse: a seed walked with the path cache warm — the rows an earlier seed of the request
+// kept (without a memory budget the cache is the request's) — gives the result it gives cold,
+// alone in its request, and the result without the cache: the same walks, the same stops under
+// memory and work budgets, at batch_kmers 1 and 64, in one piece and in one-row chunks, with a
+// default, a tiny and no cache
 TEST_F(MiniRefSeq, PathCacheWarmSeedIsTheColdSeed) {
     const std::string seed = query_.substr(0, 120);
     size_t compared = 0;
@@ -1132,14 +1134,14 @@ TEST_F(MiniRefSeq, PathCacheWarmSeedIsTheColdSeed) {
     EXPECT_EQ(48u, compared);
 }
 
-// Review of the efficiency pass, finding 1: under a memory budget the path cache is off until
-// the depth-0 state is admitted. A refused annotate root states whether its read alone was
-// refused (a lower bound) or its standalone demand did not fit; with the cache on while the
-// roots were read, the left root's row-diff path held the right root's row, whose read then
-// completed and was refused by its demand ("the row's standalone demand ... is 28400 bytes")
-// where the seed without the cache states "the row, read alone ..., needs more than the
-// 18850 bytes". The seed_id, charged with the depth-0 state, moves the account across the
-// right root's refusal: every such response is the same with the cache on and off
+// Under a memory budget the path cache is off until the depth-0 state is admitted. A refused
+// annotate root states whether its read alone was refused (a lower bound) or its standalone
+// demand did not fit; with the cache on while the roots are read, the left root's row-diff
+// path would hold the right root's row, whose read would then complete and be refused by its
+// demand ("the row's standalone demand ... is 28400 bytes") where the seed without the cache
+// states "the row, read alone ..., needs more than the 18850 bytes". The seed_id, charged
+// with the depth-0 state, moves the account across the right root's refusal: every such
+// response is the same with the cache on and off
 TEST_F(MiniRefSeq, PathCacheKeepsRootRefusals) {
     // 32 bp of a mini refseq record (mini_batch3): the left root's path holds the right root
     const std::string seed = "AAGCGGGGACATTCTTCTCGGCTGACTCAGTC";
@@ -1347,9 +1349,9 @@ void check_positions(const SeedResult &r, const std::string &seed, const SourceR
     };
     // The bases at [s, e) of every record whose numbering holds the interval: one, except for
     // a column label's interval in a record's last k - 1 bases, whose numbers are the next
-    // record's first k - 1 positions too (review of W1, finding 6; the capabilities' rule says
-    // so): an occurrence holds if one of them is the run's string. |second|: it was not the
-    // first record holding the numbers (the ambiguity occurred)
+    // record's first k - 1 positions too (the capabilities' rule says so): an occurrence holds
+    // if one of them is the run's string. |second|: it was not the first record holding the
+    // numbers (the ambiguity occurred)
     auto matches = [&](LabelId l, uint64_t s, uint64_t e, const std::string &want,
                        bool *second) -> int {
         int found = -1;
@@ -1447,15 +1449,15 @@ void check_positions(const SeedResult &r, const std::string &seed, const SourceR
 
 } // namespace
 
-// The positional oracle on the real index (C2, C4; plan revision 1's switch cells): the whole
-// blaNDM gene to 1,000 bp and a six-copy repeat window of NZ_CP030345.1 (150 bp), under the
-// branch limit 0, 2 and the exhaustive preset, switch cells (a constant cost of 0.5 and 1 within
-// a loss budget of 2, limits 0 and 2, to 3,000 bp as recorded) on these and on the seeds of the
-// recorded switch requests (next/coords-plan/swreq_*: blaNDM reverse-complemented, three 200-bp
-// windows of its carriers, a second repeat), caps 1 and "unlimited" (no list here holds more than
-// 16 chains, asserted, so a cap of 16 is "unlimited"), header labels and column (taxid)
-// labels, the latter also switching (where review of W1's finding 6 shows: an interval in a
-// record's last k - 1 bases has the next record's first numbers)
+// The positional oracle on the real index: the whole blaNDM gene to 1,000 bp and a six-copy
+// repeat window of NZ_CP030345.1 (150 bp), under the branch limit 0, 2 and the exhaustive
+// preset, switch cells (a constant cost of 0.5 and 1 within a loss budget of 2, limits 0 and
+// 2, to 3,000 bp as recorded) on these and on the seeds of the recorded switch requests
+// (next/coords-plan/swreq_*: blaNDM reverse-complemented, three 200-bp windows of its
+// carriers, a second repeat), caps 1 and "unlimited" (no list here holds more than 16 chains,
+// asserted, so a cap of 16 is "unlimited"), header labels and column (taxid) labels, the
+// latter also switching (where it shows: an interval in a record's last k - 1 bases has the
+// next record's first numbers)
 TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
     const SourceRecords src = read_records(31);
     ASSERT_EQ(42u, src.by_accession.size());
@@ -1483,8 +1485,7 @@ TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
             st->max_extension_bp = 600;
         } });
         // the seeds of the recorded switch requests swreq_mini_ndm1_* and swreq_rep0_*: to
-        // their radius of 3,000 bp, like the recorded ones below (review of W2: these four
-        // cells a seed ran to the default 1,000 bp)
+        // their radius of 3,000 bp, like the recorded ones below (not the default 1,000 bp)
         for (double c : { 0.5, 1.0 }) {
             for (size_t limit : { size_t(0), size_t(2) }) {
                 cells.push_back({ name + " switch " + std::to_string(c) + " limit " + std::to_string(limit),
@@ -1533,7 +1534,7 @@ TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
             }
         }
     }
-    // column labels switching (the reviewer's col_sw cells, to the recorded requests' 3,000 bp)
+    // column labels switching (the col_sw cells, to the recorded requests' 3,000 bp)
     for (const auto &[name, seed] : { std::make_pair(std::string("ndm1"), query_),
                                       std::make_pair(std::string("repeat"), repeat),
                                       std::make_pair(std::string("ndm1_rc"), recorded[0].second),
@@ -1550,8 +1551,7 @@ TEST_F(MiniRefSeq, CoordinatesAgainstTheSourceRecords) {
     PositionalCheck total;
     // per seed, the deepest end of a run in its header-label switch cells: past the default
     // radius of 1,000 bp, so that the positions of what the recorded switch requests reach
-    // beyond it are checked too (the review of W2 found the ndm1 and repeat seeds' switch cells
-    // walked to 1,000 bp only); some single cells end sooner (a limit-0 walk from the repeat:
+    // beyond it are checked too; some single cells end sooner (a limit-0 walk from the repeat:
     // 36 bp)
     std::map<std::string, uint64_t> switch_deepest;
     for (const Cell &cell : cells) {
@@ -1663,13 +1663,13 @@ TEST_F(MiniRefSeq, CoordinatesKeepTheResponseUnderThePathCache) {
     EXPECT_GT(stopped, 0u);
 }
 
-// Plan revision 3 on the real index: a seed's opt-in result text less coordinates_text_bytes is
-// its opt-out text — the delivery reserve's ratio sample of a request with coordinates is the
-// one the request without them gives — in every detail, at caps 1 (the repeat's lists cut, a K
-// record in a graphlet) and "unlimited" (16 is "unlimited" here: CoordinatesAgainstTheSourceRecords),
-// for header and column labels, switch cells and the
-// null form (support kmer); unbudgeted, so the walks are the same. compact_json_size is the
-// writer's length of each whole response
+// The coordinates' text share on the real index: a seed's opt-in result text less
+// coordinates_text_bytes is its opt-out text — the delivery reserve's ratio sample of a
+// request with coordinates is the one the request without them gives — in every detail, at
+// caps 1 (the repeat's lists cut, a K record in a graphlet) and "unlimited" (16 is
+// "unlimited" here: CoordinatesAgainstTheSourceRecords), for header and column labels, switch
+// cells and the null form (support kmer); unbudgeted, so the walks are the same.
+// compact_json_size is the writer's length of each whole response
 TEST_F(MiniRefSeq, CoordinateShareIsExact) {
     const std::string repeat = "CAAAGTTAGCGATGAGGCAGCCTTTTGTCTTATTCAAAGGCCTTACATTTCAAAAACTCTGCTTACC"
                                "AGGCGCATTTCGCCCAGGGGATCACCATAATAAAATGCTGAGGCCTGGCCTTTGCGTAGTGCACGCAT"
@@ -1734,15 +1734,16 @@ TEST_F(MiniRefSeq, CoordinateShareIsExact) {
     EXPECT_GT(graphlet_cut, 0u);
 }
 
-// R21 (4) in annotate mode compares the parents by their OWN segment (the fewest labels present
-// at a node of it, true counts; DESIGN §26.6), not by the walks they display. A parent that is
-// itself a merged segment holds the union of its parents' labels, so after nested merges the
-// rule can display a walk carried by fewer labels upstream. Pinned here as the rule stands, so
-// that the library's check of it (derive.carried_labels) follows a known rule: on
-// mini_win200_02 (the real cache's annotate_merge cell, right arm) the merge at 288 bp takes the
-// 5-bp merged segment from 283 (6 labels) before the 32-bp segment from 256 (5 labels), though
-// the walk through the former goes on through a 7-bp segment of 4 labels (276) — its path's
-// continuation is carried by label 3 only, where level 5's (the 256 parent's) was by 0, 1, 2, 4
+// The majority-parent rule in annotate mode compares the parents by their OWN segment (the
+// fewest labels present at a node of it, true counts; DESIGN §26.6), not by the walks they
+// display. A parent that is itself a merged segment holds the union of its parents' labels, so
+// after nested merges the rule can display a walk carried by fewer labels upstream. Pinned here
+// as the rule stands, so that the library's check of it (derive.carried_labels) follows a known
+// rule: on mini_win200_02 (the real cache's annotate_merge cell, right arm) the merge at 288 bp
+// takes the 5-bp merged segment from 283 (6 labels) before the 32-bp segment from 256 (5
+// labels), though the walk through the former goes on through a 7-bp segment of 4 labels (276)
+// — its path's continuation is carried by label 3 only, where level 5's (the 256 parent's) was
+// by 0, 1, 2, 4
 TEST_F(MiniRefSeq, AnnotateMergeRanksParentsByTheirOwnSegment) {
     Json::Value r;
     r["seeds"][0]["sequence"] = "TTAGCTTGGCGTGAGATTACCAATGTGTGACGGTTCGGTAGAGGCTTGCCGATAGACTCAAAGGTCTTTC"
@@ -1801,16 +1802,16 @@ TEST_F(MiniRefSeq, AnnotateMergeRanksParentsByTheirOwnSegment) {
     EXPECT_EQ(1u, through);
 }
 
-// The review of 2026-10-06, U05-01 (W11), at the walker: under a memory budget the budget-aware
-// lookahead decoded every run of a warm larger than its cache and evicted its own earlier runs,
-// and the walk decoded the near rows again. On the review's walk (the first 70 bp of
-// NZ_LPPQ01000025.1 to the right, 10,000 bp, constrain) 16 MiB decoded 31-39% more tuple rows
-// than a work budget alone (whose caches have no byte bound) at batch_kmers 2,048-8,192, the
-// walk the same. The warms stop before evicting their own runs now: +11-20% here, held below
-// +25%. What remains is stated, not fixed (SPEC §6.8): a later warm's first run still evicts the
-// cache wholesale, rows earlier warms read ahead that the walk had not reached among them.
-// Evicting the oldest rows first instead kept the label cache full and starved the row-diff
-// path cache that shares its allotment (2.5 times the stored rows read on mini_refseq)
+// Under a memory budget the budget-aware lookahead stops a warm before it evicts its own
+// earlier runs: decoding every run of a warm larger than its cache would evict them, and the
+// walk would decode the near rows again. On this walk (the first 70 bp of NZ_LPPQ01000025.1 to
+// the right, 10,000 bp, constrain) 16 MiB would decode 31-39% more tuple rows than a work
+// budget alone (whose caches have no byte bound) at batch_kmers 2,048-8,192, the walk the same;
+// with the stop +11-20%, held below +25%. What remains is stated, not fixed (SPEC §6.8): a
+// later warm's first run still evicts the cache wholesale, rows earlier warms read ahead that
+// the walk had not reached among them. Evicting the oldest rows first instead would keep the
+// label cache full and starve the row-diff path cache that shares its allotment (2.5 times the
+// stored rows read on mini_refseq)
 TEST_F(MiniRefSeq, LookaheadKeepsItsRunsUnderAMemoryBudget) {
     const std::string fasta = kIndexDir + "/fasta/1296536.fa";
     std::ifstream in(fasta);
@@ -1867,7 +1868,7 @@ TEST_F(MiniRefSeq, LookaheadKeepsItsRunsUnderAMemoryBudget) {
         ASSERT_GT(work_rows, 20000u) << batch;
         EXPECT_FALSE(memory.isMember("resource_stop")) << batch;
         EXPECT_EQ(10000u, memory["arms"]["right"]["complete_to_bp"].asUInt64()) << batch;
-        // at ea285c2e: 36,275, 36,838 and 38,441 against 27,642 (+31%, +33%, +39%)
+        // evicting its own runs: 36,275, 36,838 and 38,441 against 27,642 (+31%, +33%, +39%)
         EXPECT_LE(memory_rows * 4, work_rows * 5)
             << "batch_kmers " << batch << ": " << memory_rows << " tuple rows under 16 MiB, "
             << work_rows << " under the work budget alone";

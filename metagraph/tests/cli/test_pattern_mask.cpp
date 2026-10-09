@@ -37,9 +37,8 @@
 // builds it in memory at load. Both must give exactly the mask `metagraph build --mask-dummy`
 // writes: each test builds a graph with the real build command (masked), strips the mask from
 // a copy, gives it back the other way and compares the bit vectors (and the files' bytes).
-// Then the capabilities' `mask` and
-// `counting`, and a graph without its mask, served since owner decision #16 of 2026-10-08 (its
-// counts upper bounds with an estimate from its sampled dummy fraction).
+// Then the capabilities' `mask` and `counting`, and a graph without its mask, which is served
+// (its counts upper bounds with an estimate from its sampled dummy fraction).
 
 namespace {
 
@@ -242,10 +241,10 @@ TEST(PatternMask, BuildAtLoadEqualsTheMaskOfBuild) {
     }
 }
 
-// review of 2026-10-07, T3-03: the second graph is constructed at the first one's address by
-// construction, whatever the allocator: one block of storage for both, their control blocks
-// allocated apart (an expired registry entry pins the control block, never the storage). A
-// registry that remembered addresses would take the second graph's mask for one built at load
+// The second graph is constructed at the first one's address by construction, whatever the
+// allocator: one block of storage for both, their control blocks allocated apart (an expired
+// registry entry pins the control block, never the storage). A registry that remembered
+// addresses would take the second graph's mask for one built at load
 TEST(PatternMask, BuiltAtLoadIsNotInheritedAtTheSameAddress) {
     const std::string dir = make_dir("load_address");
     const std::string built = build_masked(dir, "basic", "stat");
@@ -353,7 +352,7 @@ TEST(PatternMask, CapabilitiesAndRefusal) {
         EXPECT_EQ("built_at_load", mask_of(*built_at_load));
         EXPECT_EQ("file", mask_of(*file_and_flag));
         EXPECT_EQ("absent", mask_of(*absent));
-        // owner decision #16: a graph without its mask is served, its counts upper bounds
+        // a graph without its mask is served, its counts upper bounds
         const Json::Value absent_caps = pattern_capabilities_json(absent.get(), limits, false);
         EXPECT_TRUE(absent_caps["available"].asBool());
         EXPECT_TRUE(absent_caps["unavailable_reason"].isNull());
@@ -388,8 +387,8 @@ TEST(PatternMask, CapabilitiesAndRefusal) {
         EXPECT_EQ(a["patterns"][0]["work"], b["patterns"][0]["work"]);
         EXPECT_GT(a["patterns"][0]["counts"]["contexts"]["value"].asUInt64(), 0u);
 
-        // answered without a mask (owner decision #16): an upper bound holding the exact count,
-        // its estimate, and the answer saying so; the masked answers say nothing of it
+        // answered without a mask: an upper bound holding the exact count, its estimate, and
+        // the answer saying so; the masked answers say nothing of it
         const Json::Value c = process_pattern_request(json, *absent, limits, "");
         const Json::Value &exact = a["patterns"][0]["counts"]["contexts"];
         const Json::Value &bound = c["patterns"][0]["counts"]["contexts"];
@@ -407,12 +406,12 @@ TEST(PatternMask, CapabilitiesAndRefusal) {
     }
 }
 
-// Review of 2026-10-07, I17 (E1-02, E3-02), owner decision #6: a mask that marks an edge with
-// W = $ valid, as DBGSuccinct::add_sequence writes on a masked graph (what `metagraph extend`
-// wrote), made the pattern search claim a too-large count exact (CG: exact 3 where the graph
-// holds 2). Such a mask is found once at load (O(W = $ edges)) and refused, mask_invalid, in
-// the capabilities and with a 400 naming the remedy; `metagraph extend` now rebuilds the mask
-// of its output, and removes a mask left beside it that is not its graph's
+// A mask whose W = $ edge is valid is refused (SPEC-pattern-search §10.2): such a mask, as
+// DBGSuccinct::add_sequence writes on a masked graph, would make the pattern search claim a
+// too-large count exact (CG: exact 3 where the graph holds 2). It is found once at load (O(W =
+// $ edges)) and refused, mask_invalid, in the capabilities and with a 400 naming the remedy;
+// `metagraph extend` rebuilds the mask of its output, and removes a mask left beside it that is
+// not its graph's
 TEST(PatternMask, MaskWithAValidSentinelIsRefused) {
     const std::string dir = test_dump_dir() + "/pattern_mask_invalid";
     fs::remove_all(dir);
@@ -541,10 +540,10 @@ TEST(PatternMaskUnmasked, DummyFractionJson) {
     EXPECT_EQ("sampled", v["source"].asString());
 }
 
-// Owner decision #24: --pattern-max-checked-entries, as `metagraph pattern` and the server read
-// it (the same Config): default 50, any integer in [0, 1000], refused at start-up beyond it or
-// when not an integer; through the real loader the capabilities state it (the counts it makes
-// exact: PatternRoute.UnmaskedTinyBlocksAreExact)
+// --pattern-max-checked-entries (unchecked candidates tested one by one), as `metagraph
+// pattern` and the server read it (the same Config): default 50, any integer in [0, 1000],
+// refused at start-up beyond it or when not an integer; through the real loader the
+// capabilities state it (the counts it makes exact: PatternRoute.UnmaskedTinyBlocksAreExact)
 TEST(PatternMaskUnmasked, CheckedEntriesFlag) {
     const std::string dir = make_dir("checked_flag");
     const std::string built = build_masked(dir, "basic", "stat");

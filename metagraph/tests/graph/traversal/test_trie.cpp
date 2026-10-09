@@ -30,7 +30,7 @@
  * representations, the tuned-subset property with its every-omission-has-a-reason
  * clause, the partial-level exclusion of the completeness guarantee, and the cut
  * recorded lists that make the oracle unusable (and are reported as such). Last the
- * checkers' own regressions: results corrupted the way a reviewer did must fail them.
+ * checkers' own regressions: deliberately corrupted results must fail them.
  */
 namespace {
 
@@ -652,12 +652,11 @@ TYPED_TEST(TrieOracle, TunedRunsArePrefixSubsetsAndEveryOmissionHasAReason) {
 
 
 /*
- * Checker regressions (review round 2). The checkers of the tuned-run property had
- * accepted three deliberate corruptions. Each test below corrupts a REAL result the way
- * the reviewer did and asserts that the checker's report is NOT empty — the reports are
- * read directly (tuned_subset_report, routes_subset_report), so the checks that fail
- * on the corrupted result do not fail these tests — after asserting that the genuine
- * result passes with an empty report.
+ * Checker regressions. Each test below corrupts a REAL result deliberately and asserts
+ * that the checker's report is NOT empty — the reports are read directly
+ * (tuned_subset_report, routes_subset_report), so the checks that fail on the corrupted
+ * result do not fail these tests — after asserting that the genuine result passes with
+ * an empty report.
  */
 namespace {
 
@@ -692,15 +691,14 @@ bool any_mentions(const trie::Problems &problems, const std::string &needle) {
 
 } // namespace
 
-// Finding 1 (round 2). The Q subtree is deleted from an (exhaustive, hence
-// tuned-shaped) result and the bubble's ordinary ambiguity event is kept: it says C
-// followed BOTH branches and nothing was dropped. The old branch_recorded() took any
-// branch event listing the missing base as the recorded reason for every omission
-// through it — B's claims among them, which nothing dropped: 5 present, 3 omitted, no
-// failure. Discard evidence is about the label and the successor, and (round 3,
-// finding 1) only what the walker states explicitly: the event has no refusal for Q,
-// so neither B's claim nor C's two claims through Q have a record — the round-2
-// checker still excused C's, inferring "refused" from the deleted child.
+// The Q subtree is deleted from an (exhaustive, hence tuned-shaped) result and the bubble's
+// ordinary ambiguity event is kept: it says C followed BOTH branches and nothing was dropped.
+// A branch_recorded() that took any branch event listing the missing base as the recorded
+// reason for every omission through it would excuse B's claims among them, which nothing
+// dropped (5 present, 3 omitted, no failure). Discard evidence is about the label and the
+// successor, and only what the walker states explicitly: the event has no refusal for Q, so
+// neither B's claim nor C's two claims through Q have a record — inferring "refused" from the
+// deleted child would still excuse C's.
 TEST(Trie, TunedCheckerRejectsASilentlyDeletedBranch) {
     const OracleFixture f(kFixtureSeed);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
@@ -758,13 +756,13 @@ TEST(Trie, TunedCheckerRejectsASilentlyDeletedBranch) {
         << trie::listed(rep.problems);
 }
 
-// Round 3, finding 1: the same deletion where the deleted branch is carried by the
-// ambiguous label ONLY. k = 3, records AAA·C and AAA·G both labelled C, seed AAA: C is
-// ambiguous at the boundary and followed on both, so the event is {ambiguous: C,
-// dropped: none}. Deleting the G child left that event unchanged, and the round-2
-// checker read "C ambiguous, G not followed" as "G refused to C by a quorum": 1
-// present, 1 omitted, no failure. A refusal is now something the walker states
-// (BranchEvent::refused), never something inferred from a missing child.
+// The same deletion where the deleted branch is carried by the ambiguous label ONLY. k = 3,
+// records AAA·C and AAA·G both labelled C, seed AAA: C is ambiguous at the boundary and
+// followed on both, so the event is {ambiguous: C, dropped: none}. Deleting the G child
+// leaves that event unchanged, and a checker reading "C ambiguous, G not followed" as "G
+// refused to C by a quorum" would see 1 present, 1 omitted, no failure. A refusal is
+// something the walker states (BranchEvent::refused), never something inferred from a
+// missing child.
 TEST(Trie, TunedCheckerRejectsADeletedBranchUnderASharedLabel) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             3, { "AAAC", "AAAG" }, { "C", "C" }, DeBruijnGraph::BASIC);
@@ -798,12 +796,11 @@ TEST(Trie, TunedCheckerRejectsADeletedBranchUnderASharedLabel) {
         << trie::listed(rep.problems);
 }
 
-// Round 3, finding 1, second half: a deleted branch excused by a FORGED structural
-// block. The round-2 checker accepted a BLOCKED event on its reason being structural;
-// an edge_reuse at depth 0 of a clean fixture is no reuse (no (k+1)-mer of the seed
-// is the step), and a rejoined_seed there re-enters nothing (no k-mer of the seed is
-// the one stepped into). Both are verified on the seed and the walk now and both
-// forgeries fail; the walker's genuine blocks on the same fixture still verify.
+// A deleted branch excused by a FORGED structural block. A checker accepting a BLOCKED event
+// on its reason being structural would pass it; an edge_reuse at depth 0 of a clean fixture is
+// no reuse (no (k+1)-mer of the seed is the step), and a rejoined_seed there re-enters nothing
+// (no k-mer of the seed is the one stepped into). Both are verified on the seed and the walk
+// and both forgeries fail; the walker's genuine blocks on the same fixture still verify.
 TEST(Trie, TunedCheckerRejectsAForgedStructuralBlock) {
     auto b = fork_blocks(3);
     const std::string &X = b[0], &P = b[1], &Q = b[2];
@@ -859,14 +856,13 @@ TEST(Trie, TunedCheckerRejectsAForgedStructuralBlock) {
     EXPECT_EQ(1u, verified) << "the loop edge's genuine reuse should verify exactly once";
 }
 
-// Finding 2. A label end invented INSIDE a segment of a tuned result: LABEL_END(S,
-// dead_end) one base into the Q branch, where S is not even on the first node. The old
-// clause 1 looked at the leaves' end_labels only and clause 2 walks the exhaustive
-// claims, so the extra claim escaped both (8 present, 0 omitted, no failure). Every
-// claim of the tuned run is checked now: (Q[0], S) is a prefix of no exhaustive walk
-// carrying S. The same end one base into the P branch — where S IS alive, going on to
-// |P| + 10 — is an invented END: semantic, where the exhaustive run continues the
-// label.
+// A label end invented INSIDE a segment of a tuned result: LABEL_END(S, dead_end) one base
+// into the Q branch, where S is not even on the first node. A clause 1 looking at the leaves'
+// end_labels only, with clause 2 walking the exhaustive claims, would let the extra claim
+// escape both (8 present, 0 omitted, no failure). Every claim of the tuned run is checked:
+// (Q[0], S) is a prefix of no exhaustive walk carrying S. The same end one base into the P
+// branch — where S IS alive, going on to |P| + 10 — is an invented END: semantic, where the
+// exhaustive run continues the label.
 TEST(Trie, TunedCheckerRejectsAnInventedInteriorClaim) {
     const OracleFixture f(kFixtureSeed);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
@@ -897,10 +893,10 @@ TEST(Trie, TunedCheckerRejectsAnInventedInteriorClaim) {
     EXPECT_TRUE(any_mentions(rep2.problems, "the two walkers DISAGREE")) << trie::listed(rep2.problems);
 }
 
-// Finding 2, merging on: the same invented end in the merged run's Q segment. The old
-// check_routes_subset() reconstructed routes for the leaves' labels only, so an end
-// inside a segment was never looked at (all 5 leaf labels checked, no failure). Every
-// label end is checked on its own route now, against the exhaustive CLAIMS.
+// Merging on: the same invented end in the merged run's Q segment. Routes reconstructed for
+// the leaves' labels only would never look at an end inside a segment (all 5 leaf labels
+// checked, no failure). Every label end is checked on its own route, against the
+// exhaustive CLAIMS.
 TEST(Trie, MergedCheckerRejectsAnInventedInteriorClaim) {
     const OracleFixture f(kFixtureSeed);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
@@ -926,10 +922,9 @@ TEST(Trie, MergedCheckerRejectsAnInventedInteriorClaim) {
     EXPECT_TRUE(any_mentions(rep.problems, "the route of S to segment")) << trie::listed(rep.problems);
     EXPECT_TRUE(any_mentions(rep.problems, "INVENTED")) << trie::listed(rep.problems);
 
-    // Round 3, the coverage boundary: the checkers read the label end EVENTS, so a
-    // result whose leaves' end_labels were cleared passed while the lists a client
-    // reads were empty. The leaf records are cross-checked against the events now, in
-    // both checkers.
+    // The coverage boundary: the checkers read the label end EVENTS, so a result whose
+    // leaves' end_labels were cleared would pass while the lists a client reads are empty.
+    // The leaf records are cross-checked against the events, in both checkers.
     SeedResult cleared = merged;
     for (PathResult &p : cleared.arms[kRight].paths) {
         p.end_labels.clear();
@@ -949,19 +944,17 @@ TEST(Trie, MergedCheckerRejectsAnInventedInteriorClaim) {
     EXPECT_TRUE(any_mentions(rep3.problems, "end_reasons disagree")) << trie::listed(rep3.problems);
 }
 
-// Round 3, finding 2: a VALID merged result the round-2 checker rejected. k = 3, the
-// one record AAAGTAATAA under C, seed AAA, radius 8 (the graph is node-centric: every
-// pair of k-mers overlapping by k - 1 is an edge, so AAA leads to AAG and to AAT). The
-// walks G·T·A·A·T·A·A and T·A·A·G·T·A·A both reach node TAA at depth 7 and merge there.
-// Each on its own could go on (TAA→AAG for the first, TAA→AAT for the second), but
-// under the united edge history (§6.10) the first has used TAA→AAT and the second
-// TAA→AAG, and TAA→AAA re-enters the seed: every continuation is barred and C ends
-// with rejoined_seed by block precedence. The keep trie continues both walks to the
-// radius, so the old rule — a rejoined_seed end must be where the trie ends the label
-// — called it an invented end. Termination on a joined route is judged under the
-// united history now: the structural block passes on prefix support, and the seed
-// re-entry itself, a fact about the node, is confirmed by the trie's own BLOCKED
-// event there.
+// A VALID merged result the checker must accept. k = 3, the one record AAAGTAATAA under C,
+// seed AAA, radius 8 (the graph is node-centric: every pair of k-mers overlapping by k - 1 is
+// an edge, so AAA leads to AAG and to AAT). The walks G·T·A·A·T·A·A and T·A·A·G·T·A·A both
+// reach node TAA at depth 7 and merge there. Each on its own could go on (TAA→AAG for the
+// first, TAA→AAT for the second), but under the united edge history (§6.10) the first has
+// used TAA→AAT and the second TAA→AAG, and TAA→AAA re-enters the seed: every continuation is
+// barred and C ends with rejoined_seed by block precedence. The keep trie continues both
+// walks to the radius, so a rule that a rejoined_seed end must be where the trie ends the
+// label would call it an invented end. Termination on a joined route is judged under the
+// united history: the structural block passes on prefix support, and the seed re-entry
+// itself, a fact about the node, is confirmed by the trie's own BLOCKED event there.
 TEST(Trie, MergedCheckerAcceptsAUnitedHistoryTermination) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             3, { "AAAGTAATAA" }, { "C" }, DeBruijnGraph::BASIC);
@@ -1031,12 +1024,11 @@ TEST(Trie, MergedCheckerAcceptsAUnitedHistoryTermination) {
     EXPECT_TRUE(any_mentions(rep2.problems, "records no seed-node successor")) << trie::listed(rep2.problems);
 }
 
-// Round 3, finding 2, at scale: on dense random k = 3 graphs (three records of 30
-// random bases after the seed AAA, one label) every genuine merged run passes the
-// route checker against its exhaustive trie. Reconvergences are everywhere at k = 3,
-// so the united-history terminations the checker has to accept and the per-path ends
-// it still compares exactly both occur in numbers — a wrong rule either way would
-// show as false rejections here (the reviewer's valid-merge stress, 250 seeds).
+// Valid merges at scale: on dense random k = 3 graphs (three records of 30 random bases after
+// the seed AAA, one label) every genuine merged run passes the route checker against its
+// exhaustive trie. Reconvergences are everywhere at k = 3, so the united-history terminations
+// the checker has to accept and the per-path ends it still compares exactly both occur in
+// numbers — a wrong rule either way would show as false rejections here (250 seeds).
 TEST(Trie, MergedCheckerAcceptsGenuineDenseMerges) {
     size_t joined_ends = 0, checked = 0;
     for (uint32_t seed = 1; seed <= 25; ++seed) {
@@ -1070,13 +1062,12 @@ TEST(Trie, MergedCheckerAcceptsGenuineDenseMerges) {
     EXPECT_GT(checked, 25u);
 }
 
-// Round 3, minor: a REFERENCE whose own claim ended with a cap establishes prefix
-// support, not where the label stops. k = 3, AAA·CG and AAA·G under C, seed AAA; the
-// reference runs with max_steps 2 and is complete through depth 1, where both of its
-// claims are censored (max_steps). Uncapped tuned and merged runs continue C·G to
-// depth 2 and end G at depth 1 with dead_end; the old checkers rejected the first for
-// outliving the reference and the second for ending at its boundary for another
-// reason. A censored reference end is unknown: prefix support only.
+// A REFERENCE whose own claim ended with a cap establishes prefix support, not where the
+// label stops. k = 3, AAA·CG and AAA·G under C, seed AAA; the reference runs with max_steps 2
+// and is complete through depth 1, where both of its claims are censored (max_steps). Uncapped
+// tuned and merged runs continue C·G to depth 2 and end G at depth 1 with dead_end; neither
+// may be rejected, the first for outliving the reference nor the second for ending at its
+// boundary for another reason. A censored reference end is unknown: prefix support only.
 TEST(Trie, CensoredReferenceBoundaryIsUnknown) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             3, { "AAACG", "AAAG" }, { "C", "C" }, DeBruijnGraph::BASIC);
@@ -1106,16 +1097,16 @@ TEST(Trie, CensoredReferenceBoundaryIsUnknown) {
 }
 
 #if ! _PROTEIN_GRAPH
-// Review round 4, finding 1: a FOLLOWED hairpin excused the deletion of its child.
-// CANONICAL, k = 3, records AAATT and AAATG under C, seed AAA, exhaustive (keep) with
-// hairpins followed: at depth 1 the step AAT → ATT is its own reverse complement, so the
-// walker follows it and flags it HAIRPIN(T, "followed", {C}) on the parent. With that
-// child and its paths deleted, the round-3 checker verified the step to be a hairpin and
-// took the event for the reason the child is missing (1 present, 1 omitted, no problem):
-// it checked the geometry, not the policy. A hairpin is discard evidence only where the
-// strategy skips hairpins, and a followed one never. The genuine skip still verifies:
-// walked with hairpins skipped, the fixture omits the T child for a reason the checker
-// accepts — but not under a context whose strategy follows hairpins.
+// A FOLLOWED hairpin must not excuse the deletion of its child. CANONICAL, k = 3, records
+// AAATT and AAATG under C, seed AAA, exhaustive (keep) with hairpins followed: at depth 1 the
+// step AAT → ATT is its own reverse complement, so the walker follows it and flags it
+// HAIRPIN(T, "followed", {C}) on the parent. With that child and its paths deleted, a checker
+// that verifies the step to be a hairpin and takes the event for the reason the child is
+// missing would see 1 present, 1 omitted, no problem: it would check the geometry, not the
+// policy. A hairpin is discard evidence only where the strategy skips hairpins, and a
+// followed one never. The genuine skip still verifies: walked with hairpins skipped, the
+// fixture omits the T child for a reason the checker accepts — but not under a context whose
+// strategy follows hairpins.
 TEST(Trie, TunedCheckerRejectsADeletedFollowedHairpin) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             3, { "AAATT", "AAATG" }, { "C", "C" }, DeBruijnGraph::CANONICAL);
@@ -1191,15 +1182,15 @@ TEST(Trie, TunedCheckerRejectsADeletedFollowedHairpin) {
 }
 #endif
 
-// Review round 4, the trust boundary: a refusal was taken on its cause string. k = 3,
-// AAA·C and AAA·G under C, seed AAA, the G child deleted from the exhaustive trie: with
-// no refusal the omission is unexplained, but adding {G, "branch", C} — under unlimited
-// branching — or {G, "not_a_cause", C} made the checker pass. A refusal is now checked
-// against the strategy the tuned run was made with (refusal_problem): the cause must
-// name an active knob whose condition holds there. Every cause forged onto the exhaustive
-// run is rejected, the forgery under a finite branch limit too (C goes on along the C
-// child, which a branch-limit exclusion forbids). Genuine refusals of each cause pass,
-// including a quorum stop counted after a branch-limit exclusion on the same successor.
+// The trust boundary: a refusal is not taken on its cause string. k = 3, AAA·C and AAA·G under
+// C, seed AAA, the G child deleted from the exhaustive trie: with no refusal the omission is
+// unexplained, and adding {G, "branch", C} — under unlimited branching — or {G, "not_a_cause",
+// C} must not make the checker pass. A refusal is checked against the strategy the tuned run
+// was made with (refusal_problem): the cause must name an active knob whose condition holds
+// there. Every cause forged onto the exhaustive run is rejected, the forgery under a finite
+// branch limit too (C goes on along the C child, which a branch-limit exclusion forbids).
+// Genuine refusals of each cause pass, including a quorum stop counted after a branch-limit
+// exclusion on the same successor.
 TEST(Trie, TunedCheckerRejectsARefusalItsStrategyDoesNotMake) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             3, { "AAAC", "AAAG" }, { "C", "C" }, DeBruijnGraph::BASIC);
@@ -1283,12 +1274,11 @@ TEST(Trie, TunedCheckerRejectsARefusalItsStrategyDoesNotMake) {
     }
 }
 
-// Review round 4: the stricter checkers must not reject genuine output. On dense random
-// graphs (k = 3, five records after the seed under three labels, every mode, hairpins
-// followed and skipped) every tuned run — each branch, quorum and split knob, all of
-// them at once, a step cap — passes against its exhaustive trie: every refusal it states
-// is one its strategy makes, and a skipped hairpin excuses its omission (the reviewer's
-// dense sweep for finding 1, widened to every refusal cause).
+// The strict checkers must not reject genuine output. On dense random graphs (k = 3, five
+// records after the seed under three labels, every mode, hairpins followed and skipped) every
+// tuned run — each branch, quorum and split knob, all of them at once, a step cap — passes
+// against its exhaustive trie: every refusal it states is one its strategy makes, and a
+// skipped hairpin excuses its omission.
 // The refusals ARE the evidence, and on a graph this dense the default 100 branch events
 // do not hold them all. The cut is stated (branch_events_complete_to_bp, a level
 // boundary), so the sweep runs with the DEFAULT cap: below the boundary every omission
@@ -1437,13 +1427,12 @@ TEST(Trie, CheckersAcceptGenuineTunedRunsOnDenseGraphs) {
     EXPECT_GT(sweep.capped, 0u);
 }
 
-// Finding 3 (the reference model, support: trace). Two occurrences of the seed under
-// one label spell the same walk and stop there for different reasons: the earlier one
-// would re-enter the seed (rejoined_seed, a structural block), the later one reaches
-// its record's end (record_end). The walker keeps one lineage with the coordinates of
-// both and the blocked successor sets the reason; the model used to let the LAST
-// occurrence choose, so with two records its answer flipped with their order. k = 3
-// keeps the records legible: AAA·C·AAA·C·AA holds the seed AAA at 0 and at 4, both
+// The reference model, support: trace. Two occurrences of the seed under one label spell the
+// same walk and stop there for different reasons: the earlier one would re-enter the seed
+// (rejoined_seed, a structural block), the later one reaches its record's end (record_end).
+// The walker keeps one lineage with the coordinates of both and the blocked successor sets the
+// reason; a model letting the LAST occurrence choose would flip its answer with the records'
+// order. k = 3 keeps the records legible: AAA·C·AAA·C·AA holds the seed AAA at 0 and at 4, both
 // continuing C·A·A on the right (and, mirrored, on the left).
 TEST(Trie, TraceReferenceAggregatesTheOccurrencesOfTheSeed) {
     const size_t k = 3;
@@ -1792,7 +1781,7 @@ TEST(Trie, CutEventListsAndTheRootTotalAreReported) {
 
 // Under `exhaustive` a derived permitted set is never cut: more carriers than
 // max_seed_labels is a per-seed refusal naming the knob, not a trie over a subset.
-// Without the preset the cap applies and is reported, as before.
+// Without the preset the cap applies and is reported.
 TEST(Trie, ExhaustiveRefusesACutDerivedSet) {
     const OracleFixture f(kFixtureSeed);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(

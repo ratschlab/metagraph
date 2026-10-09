@@ -1,7 +1,7 @@
 /**
- * The search state of the extension (increment 5s-2; DECISIONS P29 of 2026-10-08): Pattern as
- * the Model, the SupportTracker protocol and the PathSink, on tiny graphs, against a brute-force
- * walk oracle that reads neither the engine's DFS nor its automaton:
+ * The search state of the extension: Pattern as the Model, the SupportTracker protocol and
+ * the PathSink, on tiny graphs, against a brute-force walk oracle that reads neither the
+ * engine's DFS nor its automaton:
  *  - the oracle reads a pattern through this file's own tables: the IUPAC codes as the bases
  *    each admits, and the standard genetic code (NCBI table 1) as a 64-letter string in TCAG
  *    order, with X, B, Z, J and '*' derived from it. An oriented pattern is a predicate on
@@ -18,9 +18,10 @@
  * The test tracker checks the protocol at every call (frame depth and position, the spelled
  * bases against the graph's node sequence, the stored node against a spelling of every stored
  * k-mer and stored_reverse_complement against the stored k-mer's spelling, the Model's state
- * against the oracle's allowed bases, pops matching pushes, frames unwound after a stop). Each test was run against mutants of the engine (see the progress
- * note of 5s-2): a tracker that prunes nothing must leave every answer of increment 4 as it was,
- * and one that prunes must give exactly the oracle's walks less the pruned subtrees.
+ * against the oracle's allowed bases, pops matching pushes, frames unwound after a stop). The
+ * tests catch mutants of the engine: a tracker that prunes nothing must leave every answer of
+ * the extension without a tracker as it is, and one that prunes must give exactly the oracle's
+ * walks less the pruned subtrees.
  */
 #include <gtest/gtest.h>
 
@@ -623,8 +624,8 @@ class ScriptedTracker : public SupportTracker {
             error("the node is not the last k-mer spelled: " + describe(s));
         if (s.base_node != stored_.of(s.node))
             error("base node: " + describe(s));
-        // the stored k-mer is the node's k-mer as spelled, or its reverse complement (review of
-        // 5s-2: what 5s-3's trackers pass support_step as the row's k-mer)
+        // the stored k-mer is the node's k-mer as spelled, or its reverse complement (what
+        // the support trackers pass support_step as the row's k-mer)
         if (s.spelled.size() >= k_) {
             const std::string kmer(s.spelled.substr(s.spelled.size() - k_));
             if (stored_.kmer_of(s.base_node)
@@ -1157,7 +1158,7 @@ TEST(PatternSearchState, PatternIsAModel) {
 
 TEST(PatternSearchState, NullTrackerAndSinkAnswerAsIncrement4) {
     // a request without tracker and sink, and one with a tracker that prunes nothing, give
-    // increment 4's paths, counts and work; the latter adds the supported counts (all walks)
+    // the extension's paths, counts and work; the latter adds the supported counts (all walks)
     std::mt19937 rng(42);
     uint64_t with_paths = 0;
     for (size_t round = 0; round < 120; ++round) {

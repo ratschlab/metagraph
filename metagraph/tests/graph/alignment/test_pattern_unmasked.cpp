@@ -1,8 +1,8 @@
 /**
- * The pattern search on graphs WITHOUT the dummy-edge mask (owner decisions #16 and #17 of
- * 2026-10-08; docs/DESIGN-pattern-search.md §4.4): counts that are true upper bounds U (the
- * BOSS entries of the ranges, source dummies included), exact where the engine can tell,
- * exact lists, and the sampled real fraction f behind the route's estimate U x f.
+ * The pattern search on graphs WITHOUT the dummy-edge mask (docs/DESIGN-pattern-search.md
+ * §4.4): counts that are true upper bounds U (the BOSS entries of the ranges, source dummies
+ * included), exact where the engine can tell, exact lists, and the sampled real fraction f
+ * behind the route's estimate U x f.
  *
  * Every graph is built twice from the same records, the second copy's mask reset (a TWIN):
  * the same BOSS, the same node ids, one served with and one without the mask. The oracles:
@@ -715,7 +715,7 @@ TEST(PatternUnmasked, GraphWithoutMaskIsServed) {
         EXPECT_TRUE(s.reason.empty());
         EXPECT_FALSE(s.mask_present);
         EXPECT_NO_THROW(PatternSearch engine(*twin.unmasked));
-        // the masked twin: as before
+        // the masked twin: supported, with its mask
         s = PatternSearch::support(*twin.masked);
         EXPECT_TRUE(s.supported);
         EXPECT_TRUE(s.mask_present);
@@ -804,7 +804,7 @@ TEST(PatternUnmasked, PrimitivesWithoutTheMask) {
 }
 
 /**
- * GPT review 3, item 3: 100,000 consecutive sink dummies before one k-mer. The records
+ * 100,000 consecutive sink dummies before one k-mer. The records
  * A^18 c TC (c: 11 bases over A, G, T, one per record) are each one k-mer at k = 31, whose
  * target node ends with TC and is continued by no record (none starts with TC), and T^30 CA
  * adds the node T^29 C, the colex-last node ending with C, with an edge A: the nodes ending
@@ -1018,16 +1018,16 @@ TEST(PatternUnmasked, SourceDummiesCountedNeverReleased) {
 }
 
 TEST(PatternUnmasked, LeadingNRunCountsDummiesWithTheirSentinelUnderTheN) {
-    // SPEC §7.4 (review of the mask round, wire finding): U is the masked count plus the
-    // source dummies holding the window after their $ run, PLUS, for a window with a leading
-    // N run (skipped on $ACGT, §7.8), the dummies whose $ run ends inside the skipped run:
-    // those hold '$' under an N, so they do not hold the pattern. k = 5, one record CAGTA:
-    // the dummies $CAGT, $$CAG, $$$CA, $$$$C. NC forward: no real context, no dummy holding
-    // NC on bases, but each dummy has its last '$' under the N at one offset: U = 1 at every
-    // offset, BOUNDS [0, 1], never the EXACT 0 that "masked + dummies holding NC" would give.
-    // GN reverse: the same window (the trailing run leads the reverse complement). NN: a
-    // window of N only, whose last position is searched: U = 2, 3, 4, 5 (masked 1 each,
-    // 0..3 dummies holding NN on bases, one more with '$' under the first N)
+    // SPEC §7.4: U is the masked count plus the source dummies holding the window after their
+    // $ run, PLUS, for a window with a leading N run (skipped on $ACGT, §7.8), the dummies
+    // whose $ run ends inside the skipped run: those hold '$' under an N, so they do not hold
+    // the pattern. k = 5, one record CAGTA: the dummies $CAGT, $$CAG, $$$CA, $$$$C. NC
+    // forward: no real context, no dummy holding NC on bases, but each dummy has its last '$'
+    // under the N at one offset: U = 1 at every offset, BOUNDS [0, 1], never the EXACT 0 that
+    // "masked + dummies holding NC" would give. GN reverse: the same window (the trailing run
+    // leads the reverse complement). NN: a window of N only, whose last position is searched:
+    // U = 2, 3, 4, 5 (masked 1 each, 0..3 dummies holding NN on bases, one more with '$' under
+    // the first N)
 #if _DNA5_GRAPH
     GTEST_SKIP() << "$ACGTN: no N run is skipped";
 #endif
@@ -1292,11 +1292,12 @@ TEST(PatternUnmasked, PeptidesWithoutTheMask) {
 }
 
 
-// ---------------------------------------------------------------- tiny blocks (decision #24)
+// ---------------------------------------------------------------- tiny blocks
 
-// Owner decision #24 of 2026-10-08: on a graph without its mask, a pattern whose unchecked
-// candidates number at most Request::max_checked_entries has each of them tested at query time
-// (k - 1 steps each): every count EXACT. Above the limit nothing changes.
+// Unchecked candidates tested one by one (DESIGN-pattern-search §4.4): on a graph without its
+// mask, a pattern whose unchecked candidates number at most Request::max_checked_entries has
+// each of them tested at query time (k - 1 steps each): every count EXACT. Above the limit
+// nothing changes.
 
 Request with_checked(Request request, uint64_t limit) {
     request.max_checked_entries = limit;
@@ -1392,7 +1393,7 @@ bool palindrome_capable(const Bases &q, size_t p, size_t k) {
 }
 
 /**
- * The unchecked candidates of a pattern (decision #24), from the spelled entries of the
+ * The unchecked candidates of a pattern, from the spelled entries of the
  * unmasked twin, never the engine: the base searches of the plan (each orientation's window
  * and, on a wrapped PRIMARY graph, its reverse complement; identical windows searched once;
  * on an even-k wrapped PRIMARY graph a window counts the palindromes unless its reverse
@@ -1465,7 +1466,7 @@ struct TinyStats {
 };
 
 /**
- * One (twin, pattern, request) under decision #24. E, the unchecked candidates, from the
+ * One (twin, pattern, request) with the candidate check. E, the unchecked candidates, from the
  * oracle above. With the limit at E (or above it): every count EXACT and the masked twin's,
  * k - 1 steps per candidate, the same ranges; with the limit at E - 1 (and 0): the answer
  * without the check, field for field. In every mode: count() and enumerate() agree, the lists

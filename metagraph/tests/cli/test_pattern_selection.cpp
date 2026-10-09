@@ -30,9 +30,9 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
-// A predicate's selection for patterns of L <= k (increments 5b-3 and 5b-4; SPEC-pattern-search.md
-// §19, TESTS §3), driven through THE ROUTE (process_pattern_request, src/cli/pattern.cpp): the
-// request's predicate bound once, each pattern's raw contexts released into the selection pass
+// A predicate's selection for patterns of L <= k (SPEC-pattern-search.md §19, TESTS §3),
+// driven through THE ROUTE (process_pattern_request, src/cli/pattern.cpp): the request's
+// predicate bound once, each pattern's raw contexts released into the selection pass
 // (src/cli/pattern_selection.cpp), its rows read under max_predicate_work, the memory account
 // and the deadline, the relations of §19.7, the selection admission, the results of the
 // selected contexts and their projection (none, predicate_only, all), as the answer states
@@ -540,7 +540,7 @@ struct Outcome {
     std::vector<Ctx> results;
     // per result, when the results carry them
     std::vector<std::vector<std::string>> selection_labels;
-    // beside them, per label the orientation whose row carries it (the owner's answer to P11)
+    // beside them, per label the orientation whose row carries it (selection_strands)
     std::vector<std::vector<std::string>> selection_strands;
     bool has_selection_labels = false;
     bool has_selection_strands = false;
@@ -739,12 +739,12 @@ void check_invariants(const Oracle &oracle, const Json::Value &pred, const Outco
     std::set<std::string> names;
     names_of(o_fold(pred, oracle.columns()), &names);
     ASSERT_EQ(o.results.size(), o.selection_labels.size());
-    // selection_strands (the owner's answer to P11): per label the orientation whose row
-    // carries it, from the records: on a BASIC graph "context" when the context's k-mer x
-    // holds it as deposited, "reverse_complement" when only rc(x) does (with "either"),
-    // "both" when both do (x == rc(x) included); "either" on CANONICAL and PRIMARY graphs (one
-    // row for x and rc(x)). Mutations tried: the flags swapped, every label "context", the
-    // mirror's flag lost in the merge, a palindrome "context": each fails here
+    // selection_strands: per label the orientation whose row carries it, from the records:
+    // on a BASIC graph "context" when the context's k-mer x holds it as deposited,
+    // "reverse_complement" when only rc(x) does (with "either"), "both" when both do (x ==
+    // rc(x) included); "either" on CANONICAL and PRIMARY graphs (one row for x and rc(x)).
+    // Mutations tried: the flags swapped, every label "context", the mirror's flag lost in
+    // the merge, a palindrome "context": each fails here
     ASSERT_EQ(o.results.size(), o.selection_strands.size());
     for (size_t j = 0; j < o.results.size(); ++j) {
         ASSERT_EQ(o.selection_labels[j].size(), o.selection_strands[j].size());
@@ -885,9 +885,9 @@ bool has_note(const Outcome &o, const std::string &note) {
 
 // ---------------------------------------------------------------- tests
 
-// Mutations tried (5b-3 mut/, through the route since 5b-4): "either" ignored, the mirror's
-// labels left out of the evaluated set, the label order by name only, rows not deduplicated by
-// key, the kept rows dropped, selection_labels of the own row only: each fails here.
+// Mutations tried (through the route): "either" ignored, the mirror's labels left out of the
+// evaluated set, the label order by name only, rows not deduplicated by key, the kept rows
+// dropped, selection_labels of the own row only: each fails here.
 TEST(PatternSelection, PerRowAgainstTheOracle) {
     for (const bool records_rowdiff : { true, false }) {
         Index idx = records_rowdiff ? build<annot::RowDiffColumnAnnotator>(kK, kR1, true)
@@ -999,8 +999,8 @@ TEST(PatternSelection, Deterministic) {
     EXPECT_EQ("max_contexts", a["patterns"][0]["cut"]["reason"].asString());
 }
 
-// P11: c5 holds GGACGACTTTG's motif on the - strand only. Mutation tried: the mirror's row
-// not read ("either" as "context"): fails.
+// Both strands: c5 holds GGACGACTTTG's motif on the - strand only. Mutation tried: the
+// mirror's row not read ("either" as "context"): fails.
 TEST(PatternSelection, StrandsEitherAndContextOnBasic) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kR1, true);
     Oracle oracle(idx);
@@ -1025,7 +1025,7 @@ TEST(PatternSelection, StrandsEitherAndContextOnBasic) {
         ASSERT_GT(all, 0u);
         EXPECT_EQ(either ? 0u : all, selected);
     }
-    // the default of predicate_strands is "either" (P11): the same selection, echoed as such
+    // the default of predicate_strands is "either": the same selection, echoed as such
     {
         Ask r;
         r.predicate = "{\"none\": [\"c5\"]}";
@@ -1051,7 +1051,7 @@ TEST(PatternSelection, StrandsEitherAndContextOnBasic) {
             continue;
         seen = true;
         EXPECT_EQ(std::vector<std::string>({ "c5" }), o.selection_labels[j]);
-        // the owner's answer to P11: the answer says which orientation supported it
+        // the answer says which orientation supported it
         EXPECT_EQ(std::vector<std::string>({ "reverse_complement" }), o.selection_strands[j]);
         EXPECT_EQ(0u, o.results[j].json["labels"].size()) << o.results[j].kmer;
     }
@@ -1079,9 +1079,9 @@ TEST(PatternSelection, StrandsEitherAndContextOnBasic) {
 // On CANONICAL and PRIMARY graphs one row serves both orientations: "either" whatever is
 // asked, no lookup; with "predicate_only" each result's labels are the predicate's labels on
 // that shared row (retrieve_given finds every returned context's row among the pass's kept
-// ones: the route's key and the pass's are computed alike; the review of 5b, L4) and its
-// selection_strands are "either". Mutations tried: the lookups run on every graph mode; the
-// pass keying a CANONICAL context by its own node instead of the canonical k-mer's: fail.
+// ones: the route's key and the pass's are computed alike) and its selection_strands are
+// "either". Mutations tried: the lookups run on every graph mode; the pass keying a CANONICAL
+// context by its own node instead of the canonical k-mer's: fail.
 TEST(PatternSelection, CanonicalAndPrimaryShareTheRow) {
     for (const bool primary : { false, true }) {
         Index idx = primary
@@ -1242,7 +1242,7 @@ TEST(PatternSelection, TypoReportedUnknown) {
     check_invariants(oracle, pred, o, true, oracle_truth(oracle, pred, "AC", true), r, &raw);
 }
 
-// P18: a predicate folded to a constant reads nothing (the read hook never called): pass
+// A predicate folded to a constant reads nothing (the read hook never called): pass
 // constant, tested the raw count, selected 0 (false) or the raw count (true, the unfiltered
 // answer); a constant false after a discovery stop still selects exactly 0. select() refuses a
 // constant. Mutation tried: constant true answered selected exact 0: fails.
@@ -1444,10 +1444,11 @@ TEST(PatternSelection, PassStoppedByItsBudget) {
     }
 }
 
-// P17: a read is charged its decoded row's whole size, whatever the predicate restricts it
-// to. Two predicates over the same rows: their units differ by the decisions' only (each
-// context 1 + its present labels, every name in one leaf), computed by the oracle. Mutation
-// tried: charging the hits (8 + hits + dependency units) instead of KeyCost::entries: fails.
+// Honest units: a read is charged its decoded row's whole size, whatever the predicate
+// restricts it to. Two predicates over the same rows: their units differ by the decisions'
+// only (each context 1 + its present labels, every name in one leaf), computed by the oracle.
+// Mutation tried: charging the hits (8 + hits + dependency units) instead of
+// KeyCost::entries: fails.
 TEST(PatternSelection, ReadsChargeTheWholeRow) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kR1, true);
     Oracle oracle(idx);
@@ -2017,7 +2018,7 @@ TEST(PatternSelection, DeadlineAtEveryReading) {
                     EXPECT_EQ(mode == "all_or_count" ? "deadline" : "", o.withheld);
                     // the list cut by the time stop of the search, the pass or the results;
                     // a time stop of the projection's reads or of its labels' output alone
-                    // leaves the list whole (no cut, increment 3)
+                    // leaves the list whole (no cut)
                     if (mode == "partial") {
                         if (o.stop->first == "output" || o.stop->first == "placement") {
                             EXPECT_TRUE(o.cut.empty() || o.cut == "time") << o.cut;
@@ -2140,10 +2141,10 @@ TEST(PatternSelection, UnbudgetedAnnotation) {
     check_invariants(wo, pred, o, true, oracle_truth(wo, pred, "AC", true), r, &wraw);
 }
 
-// A graph without its dummy-edge mask (owner decision #16): the admitted release enumerates
-// the candidates and drops the dummies; the selection is the masked twin's and the oracle's.
-// The compute admission on such a graph compares the raw count's upper bound U (stated by the
-// note threshold_upper_bound when its lower bound fits). Mutation tried: the mirror's labels
+// A graph without its dummy-edge mask: the admitted release enumerates the candidates and
+// drops the dummies; the selection is the masked twin's and the oracle's. The compute
+// admission on such a graph compares the raw count's upper bound U (stated by the note
+// threshold_upper_bound when its lower bound fits). Mutation tried: the mirror's labels
 // dropped: fails.
 TEST(PatternSelection, UnmaskedGraphAsTheMaskedTwin) {
     Index masked = build<annot::ColumnCompressed<>>(kK, kR1, false);
@@ -2213,9 +2214,9 @@ TEST(PatternSelection, UnmaskedGraphAsTheMaskedTwin) {
 
 // The three projections select the same contexts; predicate_only lists the predicate's labels
 // on each context's own row, placed as the record scan says; all lists every label, as the
-// request without a predicate lists them for the same contexts (increment 3); the answer's
-// shape: output, the predicate block, limits (TESTS §3 ProjectionNonePredicateOnlyAll).
-// Mutation tried: retrieve() for predicate_only (every label listed): fails.
+// request without a predicate lists them for the same contexts; the answer's shape: output,
+// the predicate block, limits (TESTS §3 ProjectionNonePredicateOnlyAll). Mutation tried:
+// retrieve() for predicate_only (every label listed): fails.
 TEST(PatternSelection, ProjectionNonePredicateOnlyAll) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kR1, true);
     Oracle oracle(idx);
@@ -2246,7 +2247,7 @@ TEST(PatternSelection, ProjectionNonePredicateOnlyAll) {
     EXPECT_EQ(keys(by["none"].results), keys(by["predicate_only"].results));
     EXPECT_EQ(keys(by["none"].results), keys(by["all"].results));
     ASSERT_GT(by["none"].results.size(), 0u);
-    // all: the labels of increment 3 for the same contexts
+    // all: the labels of a request without a predicate, for the same contexts
     Ask plain;
     plain.predicate.clear();
     plain.labels = "all";
@@ -2349,9 +2350,9 @@ TEST(PatternSelection, PalindromicKmerOnBothStrands) {
 }
 
 // The engine stopped before it released a context (max_steps 1): nothing reached the pass, so
-// every mode says not_started, its counts unknown (§19.7; the review of 5b, L1: partial said
-// stopped with tested exact 0 while all_or_count and count said not_started). Mutation tried:
-// the partial branch removed: fails.
+// every mode says not_started, its counts unknown (§19.7; partial must not say stopped with
+// tested exact 0 while all_or_count and count say not_started). Mutation tried: the partial
+// branch removed: fails.
 TEST(PatternSelection, EngineStopBeforeTheReleaseNotStarted) {
     Index idx = build<annot::RowDiffColumnAnnotator>(kK, kR1, true);
     for (const std::string mode : { "partial", "all_or_count", "count" }) {

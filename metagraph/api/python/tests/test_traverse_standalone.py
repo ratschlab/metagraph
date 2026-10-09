@@ -1,8 +1,8 @@
-"""parser.standalone_text (pass 5, W7, R14): the standalone .mgt text of one seed — H, the J
-envelope and the body — spliced without parsing the body, byte for byte what
-dump(from_response(result, response), envelope=True) writes; the J envelope's usage reduced to
-the totals plus this seed's per_seed entry, the same rule in save(), dump() and the store; the
-envelope names `view` and `derived_from` reserved."""
+"""parser.standalone_text: the standalone .mgt text of one seed — H, the J envelope and the
+body — spliced without parsing the body, byte for byte what dump(from_response(result,
+response), envelope=True) writes; the J envelope's usage reduced to the totals plus this
+seed's per_seed entry, the same rule in save(), dump() and the store; the envelope names
+`view` and `derived_from` reserved."""
 import copy
 import glob
 import gzip
@@ -148,16 +148,16 @@ class TestStandaloneText(unittest.TestCase):
                 standalone_text(broken, nocount, resp)
 
     def test_a_file_saved_before_the_reduced_envelope_still_loads(self):
-        """Review of pass 5: a file the stage-4 library saved kept every seed's per_seed entry
-        in its J line. It still parses and loads; it is not canonical under the reduced rule
-        (dump(parse(text)) differs from it), and save() rewrites it reduced (SPEC §7.5.2)."""
+        """A file whose J line keeps every seed's per_seed entry (as an earlier library saved
+        it) still parses and loads; it is not canonical under the reduced rule (dump(parse(
+        text)) differs from it), and save() rewrites it reduced (SPEC §7.5.2)."""
         from metagraph.traverse.parser import is_canonical, load
         resp = _with_usage()
         r = resp['results'][1]
         new = standalone_text(r['graphlet'], r, resp)
         lines = new.split('\n')
         j = json.loads(lines[1][2:])
-        j['usage'] = copy.deepcopy(resp['usage'])          # as the stage-4 library wrote it
+        j['usage'] = copy.deepcopy(resp['usage'])          # every seed's per_seed entry
         old = '\n'.join([lines[0], 'J ' + json.dumps(j, sort_keys=True, separators=(',', ':'),
                                                        ensure_ascii=False)] + lines[2:])
         self.assertNotEqual(new, old)

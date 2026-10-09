@@ -1,15 +1,15 @@
-"""The reviews of the stage-3 fixes and of the stage-4 backend, Python side:
+"""Continuation notes, the attempt-bound 503 and the capabilities' size, Python side:
 
-  P3 (stage-3 fixes)  next_request()'s note on a label left out searched chains only through
-       the continued label and the labels left out: a chain through a KEPT extra label, which
-       one uninterrupted walk could take, was missed, and the note understated what the
-       continuation may miss;
+  P3   next_request()'s note on a label left out searches chains through every kept label:
+       searching only through the continued label and the labels left out would miss a
+       chain through a KEPT extra label, which one uninterrupted walk could take, and the
+       note would understate what the continuation may miss;
   F4   the attempt-bound 503 (`{error, usage}`, no Retry-After: the attempt ran and its id is
-       refused while the server holds it) was raised as ServerInitializing (a loading index, nothing run), whose
-       documented recovery -- retry -- meets a 409; an error's usage was reachable only
-       through .body;
-  MCP  traverse_capabilities() answered result_too_large at its default ceiling (2048 bytes)
-       once the server described its attempts (2.4 KB);
+       refused while the server holds it) is not ServerInitializing (a loading index,
+       nothing run), whose documented recovery -- retry -- would meet a 409; an error's usage
+       is reachable beside .body;
+  MCP  traverse_capabilities() fits its default ceiling (2048 bytes would not hold the
+       server's description of its attempts, 2.4 KB);
   F6   a cancel the server could not tombstone for its whole retention period is a 429
        answer (tombstone: false), returned like the 404s.
 """
@@ -32,7 +32,7 @@ from metagraph.traverse.mcp_tools import (CAPABILITIES_MAX_BYTES, DEFAULT_MAX_BY
 from test_traverse_mcp import FakeClient  # noqa: E402
 
 
-# ------------------------------------------------------------------ P3 (stage-3 fixes)
+# ------------------------------------------------------------------ P3: the left-out note
 
 class TestTheNoteSearchesEveryChain(unittest.TestCase):
     """switch_chain, walk 1, continued under C (loss 2) and D (loss 0) with loss_budget 3:
@@ -80,7 +80,7 @@ class TestTheNoteSearchesEveryChain(unittest.TestCase):
         self.assertNotIn('uninterrupted walk could still', note)
 
 
-# ------------------------------------------------------------------ F4
+# ------------------------------------------------------------------ F4: the attempt-bound 503
 
 class _Response:
     def __init__(self, status, body, headers=None):
@@ -167,7 +167,7 @@ class TestCapabilitiesFitTheDefaultCeiling(unittest.TestCase):
 
     def test_the_servers_description_is_returned_whole(self):
         # 19,355 B: the level-6 probe on mini_refseq (the coordinates block, DESIGN §26.3),
-        # past the 16 KB the ceiling was before it
+        # past 16 KB
         for size in (2400, 12000, 19355, 30000):
             caps = _capabilities(size)
             with tempfile.TemporaryDirectory() as root:

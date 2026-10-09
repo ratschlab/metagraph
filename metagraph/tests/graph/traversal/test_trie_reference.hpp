@@ -515,9 +515,9 @@ inline SwitchTrie switch_trie(const StringIndex &ix, const std::set<std::string>
 // successor whose coordinates continue sets the block reason, which outranks a trace
 // break — so the reason of a walk is derived from the AGGREGATE of its occurrences
 // with the walker's precedence: any structural block wins (the highest block rank:
-// rejoined_seed > edge_reuse_rc > edge_reuse), otherwise the occurrences agree. (It
-// used to be whichever occurrence came last, which made the reason depend on the
-// order of the records: review round 2, finding 3.)
+// rejoined_seed > edge_reuse_rc > edge_reuse), otherwise the occurrences agree. (Taking
+// whichever occurrence came last would make the reason depend on the order of the
+// records.)
 inline RefTrie trace_trie(const StringIndex &ix, const std::string &label,
                           const std::string &seed, Arm arm, uint64_t radius) {
     struct Outcomes {

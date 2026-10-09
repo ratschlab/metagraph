@@ -1,6 +1,6 @@
-"""scripts/traversal/index_manifest.py, batch mode (pass 5, W2): one manifest per (graph,
-annotation) pair of a multi-graph server's list, each distinct file hashed once by parallel
-streams or taken from precomputed sha256 digests, equal to what single mode writes."""
+"""scripts/traversal/index_manifest.py, batch mode: one manifest per (graph, annotation)
+pair of a multi-graph server's list, each distinct file hashed once by parallel streams or
+taken from precomputed sha256 digests, equal to what single mode writes."""
 import argparse
 import contextlib
 import hashlib
@@ -47,9 +47,9 @@ class TestIndexManifestBatch(unittest.TestCase):
         # two bundles sharing one graph (one graph, two annotations), and a third graph. The
         # coordinate annotation's .seqs is loaded for its own pair; the shared graph's mask and
         # Bloom filter are loaded for both of its pairs but are derived data, not part of any
-        # identity (the owner's decision #17 of 2026-10-08); the files the server never opens
-        # for these pairs (row-diff anchors without a .row_diff annotation, weights, a column's
-        # .coords) are in no bundle either: none of these is ever hashed
+        # identity; the files the server never opens for these pairs (row-diff anchors without
+        # a .row_diff annotation, weights, a column's .coords) are in no bundle either: none of
+        # these is ever hashed
         self.files = {}
         self.unloaded = {'g1.dbg.anchors', 'g1.dbg.weights', 'a2.column.annodbg.coords',
                          'g1.edgemask', 'g1.bloom'}
@@ -203,10 +203,10 @@ class TestIndexManifestBatch(unittest.TestCase):
             im.read_digests([bad])
 
     def test_digests_never_name_another_bundles_file(self):
-        """Review of pass 5: bundles share base names (graph.dbg). A checksum file written in
-        one bundle's directory with relative paths named the other bundle's files by base name,
-        and their manifest took the wrong digests; a line spelling a path exactly also skipped
-        the check for a second, different digest of the same file."""
+        """Bundles share base names (graph.dbg). A checksum file written in one bundle's
+        directory with relative paths must not name the other bundle's files by base name
+        (their manifest would take the wrong digests), and a line spelling a path exactly must
+        not skip the check for a second, different digest of the same file."""
         d = self.root
         for b, content in (('refseq', b'refseq graph'), ('uhgg', b'uhgg graph!!')):
             os.makedirs(os.path.join(d, b))
@@ -261,8 +261,8 @@ class TestIndexManifestBatch(unittest.TestCase):
                 index.find(spelling)
 
     def test_a_pairs_manifest_path_is_kept_on_every_line(self):
-        """Review of pass 5: the manifest path a later line of a pair named was ignored, while
-        --write-csv kept it, and the server refused the list the tool wrote."""
+        """The manifest path a later line of a pair names is kept, as --write-csv keeps it,
+        so that the server accepts the list the tool writes."""
         f = self.files
         csv = os.path.join(self.root, 'in.csv')
         named = os.path.join(self.root, 'b.manifest.json')
@@ -288,10 +288,10 @@ class TestIndexManifestBatch(unittest.TestCase):
 
     def test_sidecars_are_those_the_server_loads(self):
         """The bundle is the loader dependency inventory (load_inventory, the mirror of
-        metagraph's index_load_inventory; review of pass 5, findings 2 and 3): the sidecars
-        the loaders open for the pair, derived from the LISTED spelling, and nothing the
-        server does not open. The integration test compares it with the binary's
-        `traverse --index-inventory` on real bundles; this one pins the rules on stand-ins."""
+        metagraph's index_load_inventory): the sidecars the loaders open for the pair, derived
+        from the LISTED spelling, and nothing the server does not open. The integration test
+        compares it with the binary's `traverse --index-inventory` on real bundles; this one
+        pins the rules on stand-ins."""
         d = self.root
         names = ('G.dbg', 'G.dbg.anchors', 'G.dbg.rd_succ', 'G.edgemask', 'G.bloom',
                  'G.dbg.weights', 'X.column.annodbg', 'X.column.annodbg.coords', 'X.seqs',
@@ -302,9 +302,9 @@ class TestIndexManifestBatch(unittest.TestCase):
                 out.write(name)
         p = lambda n: os.path.join(d, n)
         # a column annotation: no identity sidecar — never the graph's dummy-edge mask or its
-        # Bloom filter (derived data, decision #17: loaded, listed apart by derived_files, in
-        # no manifest), the weights, the column's .coords or a .seqs beside an annotation that
-        # is not a coordinate one
+        # Bloom filter (derived data: loaded, listed apart by derived_files, in no manifest),
+        # the weights, the column's .coords or a .seqs beside an annotation that is not a
+        # coordinate one
         self.assertEqual([], im.sidecars(p('G.dbg'), p('X.column.annodbg')))
         self.assertEqual([(p('G.dbg'), 'graph', True),
                           (p('X.column.annodbg'), 'annotation', True)],
@@ -342,7 +342,7 @@ class TestIndexManifestBatch(unittest.TestCase):
             im.bundle_files(p('H.dbg'), p('Z.row_diff.annodbg'), [], fail=refuse)
         self.assertIn('H.dbg.anchors', str(cm.exception))
         # a symlinked spelling: the sidecars beside the links, not beside their targets
-        # (finding 2: two symlinks to one graph and annotation hid different .seqs files)
+        # (two symlinks to one graph and annotation could hide different .seqs files)
         link = os.path.join(d, 'link')
         os.makedirs(link)
         os.symlink(p('G.dbg'), os.path.join(link, 'G.dbg'))
@@ -366,11 +366,11 @@ class TestIndexManifestBatch(unittest.TestCase):
             self.assertIn(im.DERIVED_RULE, str(cm.exception))
 
     def test_derived_data_is_never_in_a_manifest(self):
-        """The owner's decision #17 of 2026-10-08: the graph's mask and Bloom filter are
-        derived data, not part of index_fp. A manifest written with them beside the graph is
-        the one written without them (the same index_fp: adding a mask to a deployed index
-        leaves its identity unchanged), in single and in batch mode; --verify flags a manifest
-        that lists one (the server refuses it)."""
+        """The graph's mask and Bloom filter are derived data, not part of index_fp. A
+        manifest written with them beside the graph is the one written without them (the
+        same index_fp: adding a mask to a deployed index leaves its identity unchanged), in
+        single and in batch mode; --verify flags a manifest that lists one (the server
+        refuses it)."""
         f = self.files
         g, a = f['g1.dbg'], f['a2.column.annodbg']
         with_derived = self._single(g, a, os.path.join(self.root, 'with.json'))

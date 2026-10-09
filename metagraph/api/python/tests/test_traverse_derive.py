@@ -18,7 +18,7 @@ class TestStructure(unittest.TestCase):
     def test_paths_follow_first_parents_in_leaf_order(self):
         g = T.body('merge')
         a = g.arms['right']
-        # the merge at 62 stores its parents majority first (R21 (4), feature level 6): the
+        # the merge at 62 stores its parents majority first (the majority-parent rule, feature level 6): the
         # G allele (segment 5: b.fa, c.fa, both.fa) arrived second and is the first parent,
         # so the displayed path passes through it; merge_ties keeps the arrival order
         self.assertEqual([(), (0,), (0,), (1, 2), (3,), (3,), (5, 4)],
@@ -201,7 +201,7 @@ class TestLabelSummary(unittest.TestCase):
 
 class TestContinuations(unittest.TestCase):
     """Right: the LAST n of seed + natural(right flank); left: the FIRST n of
-    natural(left flank) + seed (v2) -- contained in the flank and crossing into it."""
+    natural(left flank) + seed -- contained in the flank and crossing into it."""
 
     def check(self, name, side, expected=None):
         """expected None: the server's own continuation sequences (full.json)"""
@@ -274,7 +274,7 @@ class TestEvidence(unittest.TestCase):
         # R keeps the EARLIEST stamp, T and the evidence the latest
         self.assertEqual(36, a.runs[1].route_bp)
         # the merge fixture: a.fa through the second parent at 62, b.fa at 36 only (each
-        # merge's first parent is the majority's, R21 (4))
+        # merge's first parent is the majority's)
         a = T.body('merge').arms['right']
         self.assertEqual([(62, 62), (36, 36), (0, 0), (0, 0), (0, 0), (0, 0)],
                          [derive.evidence(a, r) for r in a.runs])

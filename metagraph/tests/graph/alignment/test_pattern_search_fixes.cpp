@@ -1,14 +1,13 @@
 /**
- * Regression tests of the pattern engine's fixes after the review of 2026-10-07 (milestones
- * 1/1b): one test (or more) per finding, each failing without its fix. The oracle here is
- * its own: the IUPAC table, the reverse complement and the matching are written from the
- * pattern TEXT with this file's tables (never Pattern::positions, is_palindromic or
- * reverse_complement), over the served graph's k-mers (the valid edges of the DBGSuccinct,
- * and on a wrapped PRIMARY graph their reverse complements at CanonicalDBG's ids). What stays
- * shared with the engine: the DBGSuccinct mask (in_graph) and CanonicalDBG's numbering.
- * The findings of GPT review 3 (2026-10-08) close the file: the low-complexity note against
- * sdust run over the whole text (the library the engine runs piece by piece), and the clock
- * readings of the diagnostic and of the extension.
+ * Regression tests of the pattern engine: one test (or more) per hazard, each failing if the
+ * hazard returns. The oracle here is its own: the IUPAC table, the reverse complement and the
+ * matching are written from the pattern TEXT with this file's tables (never
+ * Pattern::positions, is_palindromic or reverse_complement), over the served graph's k-mers
+ * (the valid edges of the DBGSuccinct, and on a wrapped PRIMARY graph their reverse
+ * complements at CanonicalDBG's ids). What stays shared with the engine: the DBGSuccinct mask
+ * (in_graph) and CanonicalDBG's numbering. The file closes with the low-complexity note
+ * against sdust run over the whole text (the library the engine runs piece by piece), and the
+ * clock readings of the diagnostic and of the extension.
  */
 #include <gtest/gtest.h>
 
@@ -250,8 +249,8 @@ struct VirtualClock {
 };
 
 
-// ---------------------------------------------------------------- E4-01, X-EFFICIENCY-03,
-// X-GUARANTEES-02: PARTIAL keeps only what its release can use
+// ---------------------------------------------------------------- PARTIAL keeps only what
+// its release can use
 
 // one graph per mode with many ranges for a one-base pattern
 struct Broad {
@@ -384,8 +383,8 @@ TEST(PatternSearchFixes, ReleaseSetupReadsTheClock) {
 }
 
 
-// ---------------------------------------------------------------- R1-01, X-EFFICIENCY-02,
-// C1-02, D1-06, E4-02, X-GUARANTEES-03, E4-03: the caller's work per context is clocked
+// ---------------------------------------------------------------- the caller's work per
+// context is clocked
 
 std::shared_ptr<DeBruijnGraph> medium_graph() {
     return build(9, random_records(6, 600, 11), DeBruijnGraph::BASIC);
@@ -464,8 +463,8 @@ TEST(PatternSearchFixes, PartialReleaseReadsTheClockPerReleasedContexts) {
 }
 
 
-// ---------------------------------------------------------------- X-CONCURRENCY-01, R2-02:
-// a departed caller stops the work
+// ---------------------------------------------------------------- a departed caller stops
+// the work
 
 TEST(PatternSearchFixes, AbortAtAClockReading) {
     auto graph = build(13, random_records(12, 2500, 101), DeBruijnGraph::BASIC);
@@ -504,8 +503,8 @@ TEST(PatternSearchFixes, AbortAtAClockReading) {
 }
 
 
-// ---------------------------------------------------------------- X-EFFICIENCY-01: a leading
-// pattern-N run is not branched
+// ---------------------------------------------------------------- a leading pattern-N run
+// is not branched
 
 TEST(PatternSearchFixes, LeadingNRunIsNotSearched) {
     for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL,
@@ -516,7 +515,7 @@ TEST(PatternSearchFixes, LeadingNRunIsNotSearched) {
         const auto kmers = served_kmers(*graph);
         // a core taken from the graph, so that it has contexts
         const std::string core = kmers[100].second.substr(3, 6);
-        // (owner decision #8: runs at both ends at once too, L = k and L < k)
+        // (runs at both ends at once too, L = k and L < k)
         for (const std::string &text : { "NNNNNNNN" + core, core + "NNNNNNNN",
                                         "NNNNN" + core, "NNNNNNNNN" + core,
                                         "NNNN" + core + "NNNNN", "NNN" + core + "NNN" }) {
@@ -574,7 +573,7 @@ TEST(PatternSearchFixes, LeadingNRunIsNotSearched) {
 TEST(PatternSearchFixes, CheapOrientationFirst) {
     // GG + N8 + TTGGCGATCT: wide in its forward orientation (the run after two bases), narrow
     // in its reverse one (the run after ten): the reverse search runs first, so a budget that
-    // fits it leaves it exact (it was not started: the forward search spent everything)
+    // fits it leaves it exact (rather than not started, the forward search spending everything)
     const size_t k = 21;
     std::vector<std::string> records = random_records(8, 2500, 31);
     const std::string text = "GGNNNNNNNNTTGGCGATCT";
@@ -614,8 +613,8 @@ TEST(PatternSearchFixes, CheapOrientationFirst) {
 }
 
 
-// ---------------------------------------------------------------- X-GUARANTEES-01: the
-// floor reads every searched orientation's anchor window
+// ---------------------------------------------------------------- the floor reads every
+// searched orientation's anchor window
 
 TEST(PatternSearchFixes, LongFloorPerSearchedWindow) {
     const size_t k = 11;
@@ -641,8 +640,7 @@ TEST(PatternSearchFixes, LongFloorPerSearchedWindow) {
         EXPECT_NE(std::string::npos, r.refusal->message.find("reverse orientation"));
         EXPECT_EQ(0u, r.work.steps);
         // anchor_information_bits keeps its version-1 meaning, P[0, k); the floor's operand,
-        // the least searched window, is min_anchor_information_bits (the owner's decision of
-        // 2026-10-07)
+        // the least searched window, is min_anchor_information_bits
         ASSERT_TRUE(r.anchor_information_bits);
         EXPECT_EQ(22.0, *r.anchor_information_bits);
         ASSERT_TRUE(r.min_anchor_information_bits);
@@ -662,7 +660,7 @@ TEST(PatternSearchFixes, LongFloorPerSearchedWindow) {
     for (Strands strands : { Strands::BOTH, Strands::FORWARD }) {
         Result r = run(n + p, strands);
         ASSERT_TRUE(r.refusal);
-        // the forward window is the least informative: the message as before
+        // the forward window is the least informative: the message names it
         EXPECT_EQ("pattern: 0.0 information bits in the anchor window, below the floor of "
                   "20.0 for scope long", r.refusal->message);
         EXPECT_EQ(0.0, *r.anchor_information_bits);
@@ -686,8 +684,7 @@ TEST(PatternSearchFixes, LongFloorPerSearchedWindow) {
 }
 
 
-// ---------------------------------------------------------------- E2-01, E2-02: even-k
-// wrapped PRIMARY
+// ---------------------------------------------------------------- even-k wrapped PRIMARY
 
 const std::vector<std::string> kPalindromeRich {
     "TTACGCGTAAGGATCCTTA", "GAATATTCCGACGTACGTTG", "CCGGAATTCCATGCATGGC",
@@ -776,8 +773,8 @@ TEST(PatternSearchFixes, EvenPrimaryThresholdStopsOnTime) {
 }
 
 
-// ---------------------------------------------------------------- T1-02, E2-04, E1-02, E3-02:
-// a release that disagrees with its exact count is never published as complete
+// ---------------------------------------------------------------- a release that disagrees
+// with its exact count is never published as complete
 
 TEST(PatternSearchFixes, ReleaseDisagreeingWithTheCountThrows) {
     // a masked graph extended in place: DBGSuccinct::add_sequence marks every inserted edge
@@ -795,8 +792,7 @@ TEST(PatternSearchFixes, ReleaseDisagreeingWithTheCountThrows) {
     Result counted = engine.count(pattern, request, count_budget);
     ASSERT_EQ(Relation::EXACT, counted.contexts->total.relation);
     // partial, its cap above the count, releases fewer than the exact count too: it fails the
-    // same way rather than state the short list as cut at max_contexts (owner decision #9 of
-    // 2026-10-07, also in partial)
+    // same way rather than state the short list as cut at max_contexts
     Request partial = request;
     partial.mode = Mode::PARTIAL;
     Budget partial_budget = budget_of();
@@ -814,14 +810,13 @@ TEST(PatternSearchFixes, ReleaseDisagreeingWithTheCountThrows) {
 
 
 // ---------------------------------------------------------------- pins of stated behaviour
-// (E1-01, C1-03, X-DETERMINISM-01, T1-07)
 
 TEST(PatternSearchFixes, ThresholdIsNotCheckedInTheMaskScans) {
-    // E1-01: the deferred scans do not consult stop_at_threshold; the pattern can answer
-    // EXACT above its threshold with no stop. Records whose last bases are mostly T: the
-    // W-rule leaf of T has as many dummy-source edges as candidates, so discovery's lower
-    // bound stays below the threshold and the scan settles the count
-    // (the review's t2_marked graph, k = 5, built as the CLI builds it)
+    // The deferred scans do not consult stop_at_threshold; the pattern can answer EXACT
+    // above its threshold with no stop. Records whose last bases are mostly T: the W-rule
+    // leaf of T has as many dummy-source edges as candidates, so discovery's lower bound
+    // stays below the threshold and the scan settles the count (k = 5, built as the CLI
+    // builds it)
     std::vector<std::string> records { "AACGT", "CACGT", "GACGT", "TACGT", "AACGTT", "ACCGTT",
                                        "AGCGTT", "ATCGTT", "GACGTT", "GCCGTT", "GGCGTT",
                                        "GTCGTT", "CGTAAC", "GTACGTAC", "TTTTTTT",
@@ -845,9 +840,9 @@ TEST(PatternSearchFixes, ThresholdIsNotCheckedInTheMaskScans) {
 }
 
 TEST(PatternSearchFixes, ReleaseTimeStopAfterAStepStopKeepsTheFirstStop) {
-    // C1-03, X-DETERMINISM-01: PARTIAL, discovery stopped by max_steps, then the work time
-    // passes before the release: stop names the first stop, the time stop shows in cut and
-    // determinism; the next pattern carries the sticky max_steps stop with cut time
+    // PARTIAL, discovery stopped by max_steps, then the work time passes before the release:
+    // stop names the first stop, the time stop shows in cut and determinism; the next pattern
+    // carries the sticky max_steps stop with cut time
     auto graph = medium_graph();
     PatternSearch engine(*graph);
     const Pattern pattern = iupac("AC");
@@ -887,7 +882,7 @@ TEST(PatternSearchFixes, ReleaseTimeStopAfterAStepStopKeepsTheFirstStop) {
 }
 
 TEST(PatternSearchFixes, StrandHaltedAtItsFirstStepIsAtLeastZero) {
-    // T1-07: the stop that refuses the - search's very first step leaves it AT_LEAST 0 (its
+    // The stop that refuses the - search's very first step leaves it AT_LEAST 0 (its
     // discovery was entered); one step earlier it never starts: UNKNOWN
     std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA" };
     auto graph = build(6, records, DeBruijnGraph::BASIC);
@@ -911,7 +906,7 @@ TEST(PatternSearchFixes, StrandHaltedAtItsFirstStepIsAtLeastZero) {
 }
 
 
-// ---------------------------------------------------------------- X-TESTS-04: larger even k
+// ---------------------------------------------------------------- larger even k
 
 TEST(PatternSearchFixes, LargeEvenKPrimaryAgainstTheOracle) {
     for (size_t k : { 32, 64 }) {
@@ -956,8 +951,8 @@ TEST(PatternSearchFixes, LargeEvenKPrimaryAgainstTheOracle) {
 }
 
 
-// ---------------------------------------------------------------- M1-02: the sink pass
-// sets the same bits
+// ---------------------------------------------------------------- the sink pass sets the
+// same bits
 
 TEST(PatternSearchFixes, SinkPassMarksTheSameEdges) {
     for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
@@ -977,8 +972,8 @@ TEST(PatternSearchFixes, SinkPassMarksTheSameEdges) {
 }
 
 
-// ---------------------------------------------------------------- GPT review 3, item 2: the
-// low-complexity note, an optional diagnostic, under the clock and never after a stop
+// ---------------------------------------------------------------- the low-complexity note,
+// an optional diagnostic, under the clock and never after a stop
 
 // the oracle: sdust over the whole text, as the seeder calls it (T = 20, W = 64)
 bool sdust_flags(const std::string &text) {
@@ -1048,9 +1043,9 @@ TEST(PatternSearchFixes, LowComplexityNoteAsSdustOverTheWholePattern) {
 }
 
 TEST(PatternSearchFixes, LowComplexityNoteNotStatedAfterAStop) {
-    // the review's repro: 10,000 Met (ATG x 10,000, 0.7 s of sdust read whole) with
-    // max_steps 1 answered 503 after its 1 ms of work time. After any stop the diagnostic is
-    // not run: no note, and no clock reading for it
+    // 10,000 Met (ATG x 10,000, 0.7 s of sdust read whole) with max_steps 1 must not answer
+    // 503 after its 1 ms of work time. After any stop the diagnostic is not run: no note, and
+    // no clock reading for it
     auto graph = build(31, random_records(2, 300, 5), DeBruijnGraph::BASIC);
     PatternSearch engine(*graph);
     const Pattern met = Pattern::parse(PatternKind::PROTEIN, std::string(10'000, 'M'));
@@ -1143,9 +1138,8 @@ TEST(PatternSearchFixes, LowComplexityDiagnosticReadsTheClock) {
 }
 
 
-// ---------------------------------------------------------------- GPT review 3, item 5: the
-// extension reads the clock before every anchor, every 64 anchors it lists and every 64
-// nodes its DFS expands
+// ---------------------------------------------------------------- the extension reads the
+// clock before every anchor, every 64 anchors it lists and every 64 nodes its DFS expands
 
 TEST(PatternSearchFixes, ExtensionReadsTheClockBeforeEveryAnchor) {
     // staging (refseq33m, count, long_search paths, a 40-base pattern half N): 674 anchors

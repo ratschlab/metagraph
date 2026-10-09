@@ -170,9 +170,9 @@ def expected_evidence(result, envelope, side=None, delivery=None):
     strategy = envelope['strategy']
 
     def arm_exact(s):
-        # PER ARM (GPT review, finding 12): no label-class limitation of this arm or of
-        # the seed, no cut list on it; one whose outcome is not complete with no such
-        # limitation anywhere is exact nowhere
+        # PER ARM: no label-class limitation of this arm or of the seed, no cut list on it;
+        # one whose outcome is not complete with no such limitation anywhere is exact
+        # nowhere
         if ((arms[s].get('labels_per_node') or {}).get('nodes_truncated') or 0) > 0:
             return False
         if any(l['kind'] in LABEL_CLASS for l in result.get('limitations') or []):
@@ -734,7 +734,7 @@ class _Session:
                 consistent, _ = paged(self, lambda cursor, **kw: self.agent.graphlet_claims(
                     h, side, cursor=cursor, **kw))
                 # merge-entered claims (displayed only from evidence_from) and route_only
-                # ones (none at a cut) are counted apart (GPT review, finding 11)
+                # ones (none at a cut) are counted apart
                 filtered = sum((first.get('filtered') or {}).values())
                 self.assertEqual(len(every), len(consistent) + filtered, (role, side))
                 self.assertEqual(bool(filtered), 'hint' in first)
@@ -1241,12 +1241,11 @@ class TestAgentSessionSRA(_Session, unittest.TestCase):
     INDEX = 'sra'
 
     def test_14_continue_request_is_deliverable(self):
-        # fixed BUG-3 (CONTINUE-DRYRUN-TOO-LARGE): on SRA the request carries the 1000 bp
-        # continuation, the continuation's labels (SRA names are ~110-byte paths) and the
-        # full normalized strategy: 2127 bytes, over the 2048 list ceiling it was held to,
-        # with no max_bytes to raise and no export -- unobtainable. Repro of the old answer:
-        # cell sra_rand50_00__limit2, traverse_continue(<handle>, 'right', 2,
-        # execute=False) -> {'error': 'result_too_large', 'bytes': 2127, 'max_bytes': 2048}.
+        # on SRA the request carries the 1000 bp continuation, the continuation's labels (SRA
+        # names are ~110-byte paths) and the full normalized strategy: 2127 bytes, over a
+        # 2048 list ceiling, with no max_bytes to raise and no export -- unobtainable if held
+        # to it (cell sra_rand50_00__limit2, traverse_continue(<handle>, 'right', 2,
+        # execute=False) -> {'error': 'result_too_large', 'bytes': 2127, 'max_bytes': 2048}).
         super().test_14_continue_request_is_deliverable()
 
 
@@ -1518,8 +1517,8 @@ class TestCursorsOnRealRetrievals(unittest.TestCase):
                     # other arguments: rejected
                     for v in variants:
                         self.assertEqual('bad_cursor', call(cur, **v)['error'], (where, v))
-                    # tampering: the body edited under the old MAC, the MAC edited, parts
-                    # missing, garbage, a non-string
+                    # tampering: the body edited under its original MAC, the MAC edited,
+                    # parts missing, garbage, a non-string
                     b64, mac = cur.rsplit('.', 1)
                     raw = base64.urlsafe_b64decode(b64 + '=' * (-len(b64) % 4))
                     body = json.loads(raw)
@@ -1677,10 +1676,10 @@ class TestStructuredErrorsOffline(unittest.TestCase):
                     self.assertIn('max_bytes', out['message'])
 
     def test_every_return_fits_even_a_tiny_max_bytes(self):
-        # fixed BUG-4: "EVERY return is <= max_bytes" did not hold below ~180 bytes: the
-        # result_too_large the wrapper substitutes was itself 180+ bytes and returned
+        # "EVERY return is <= max_bytes" must hold below ~180 bytes too: the
+        # result_too_large the wrapper substitutes is itself 180+ bytes and would return
         # unchecked (graphlet_walks(<mini_ndm1__limit2>, 'left', max_bytes=64) -> 182 B).
-        # Now every return is <= max(max_bytes, MIN_MAX_BYTES); the Agent wrapper asserts it.
+        # Every return is <= max(max_bytes, MIN_MAX_BYTES); the Agent wrapper asserts it.
         for mb in (MIN_MAX_BYTES, 80, 128, 182):
             for out in (self.agent.graphlet_walks(self.h, 'left', max_bytes=mb),
                         self.agent.graphlet_summary(self.h, max_bytes=mb),
@@ -1692,10 +1691,9 @@ class TestStructuredErrorsOffline(unittest.TestCase):
             self.assertEqual('bad_argument', out['error'], out)
 
     def test_continue_request_hint_is_actionable(self):
-        # fixed BUG-3 (the other half): result_too_large told the agent to "raise
-        # max_bytes", but traverse_continue had no max_bytes parameter: passing one raised
-        # TypeError out of the tool. Now it takes one, and an argument a tool does not take
-        # is a bad_argument result.
+        # result_too_large tells the agent to "raise max_bytes", so traverse_continue takes
+        # a max_bytes parameter (without it, passing one would raise TypeError out of the
+        # tool), and an argument a tool does not take is a bad_argument result.
         g = self.store.graphlet(self.h)
         a = g.arms['right']
         pid = next(p.id for p in derive.paths(a)

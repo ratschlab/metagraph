@@ -1,7 +1,7 @@
-"""Feature level 5 in TraverseClient (SPEC §5 and §10.3, the review of pass 5), on answers
-recorded from a level-5 server_query (data/traverse/level5/answers.json: dcc0cebd on
-build/mini_refseq, the level3_* answers from ce949da5; test_traverse_level5_live.py asks a
-live server the same questions):
+"""Feature level 5 in TraverseClient (SPEC §5 and §10.3), on answers recorded from a
+level-5 server_query (data/traverse/level5/answers.json: dcc0cebd on build/mini_refseq, the
+level3_* answers from ce949da5; test_traverse_level5_live.py asks a live server the same
+questions):
 
   - cancel(attempt_id, wait_ms, not_after_ms) sends not_after_ms, and expect_server_instance
     (an explicit one, or 'auto': the server's own) goes out with attempt_id only -- both only
@@ -13,11 +13,11 @@ live server the same questions):
     InstanceMismatch, AttemptExpired's fields;
   - release_verdict() applies the capabilities' release_rule exactly and names the first
     condition an answer does not meet;
-  - the review of that pass: what GET /capabilities stated is kept per server process (an
-    answer naming another server_instance, or a 400 refusing a level-5 field as unknown --
-    an older binary now at the address -- makes the client read it again, and a cancel
-    refused that way goes out again without not_after_ms), traverse() states what it sent
-    on a transport error too, and a `finished` release names the assumptions it rests on.
+  - what GET /capabilities stated is kept per server process (an answer naming another
+    server_instance, or a 400 refusing a level-5 field as unknown -- an older binary now at
+    the address -- makes the client read it again, and a cancel refused that way goes out
+    again without not_after_ms), traverse() states what it sent on a transport error too,
+    and a `finished` release names the assumptions it rests on.
 """
 
 import copy
@@ -318,7 +318,7 @@ class TestTypedAnswers(unittest.TestCase):
     def test_tombstone_answers(self):
         got = self.cancel('cancel_unknown_not_after', 'rec-1', not_after_ms=NAF)
         self.assertIsInstance(got, AttemptAnswer)
-        self.assertIsInstance(got, dict)                 # the answer as before
+        self.assertIsInstance(got, dict)                 # the answer, untyped
         self.assertEqual(A['cancel_unknown_not_after'][1], dict(got))
         self.assertEqual((404, 'cancel', 'unknown', False, True),
                          (got.status, got.route, got.state, got.cancelled, got.tombstone))
@@ -500,7 +500,7 @@ class TestReleaseRule(unittest.TestCase):
         self.check(None, self.SENT, 'clock', True, now_ms=limit + 1, **kw)
         v = self.check(None, self.SENT, 'clock', True, now_ms=limit + 1, **kw)
         # the clock takes the attempt as stopped at its bound apart from one uninterruptible
-        # step, whose length has no stated bound (X2): every clock release says so
+        # step, whose length has no stated bound: every clock release says so
         self.assertEqual(('uninterruptible_overrun',), v.assumptions)
         # an answer saying stopping (or running) past the limit is that step: held by
         # default (LRG-R4), released with the assumption stated only when asked to
@@ -526,7 +526,7 @@ class TestReleaseRule(unittest.TestCase):
             v = self.check(answer, sent, 'finished', True, attempts=attempts)
             self.assertEqual((), v.assumptions)
             # without the attempts block the server's hold is not judged, and the verdict
-            # says so rather than an empty list (O16: () means "held")
+            # says so rather than an empty list (() means "held")
             self.assertEqual(('server_hold_unchecked',),
                              self.check(answer, sent, 'finished', True).assumptions)
             # the whole document works as well as its attempts block

@@ -73,19 +73,18 @@ MUST = ('truncate_lines', 'truncate_bytes', 'drop_line', 'dup_line', 'count_flip
         'huge_range', 'u64_overflow', 'huge_digits', 'bad_utf8', 'lone_surrogate', 'crlf')
 MAY = ('swap_lines', 'field_corrupt')
 FAMILIES = MUST + MAY
-# the families that fail today, each with the product bug it demonstrates. Fixed
-# (2026-10-02), both now must raise GraphletFormatError naming a line:
-#   huge_digits     BUG-1: an integer token of more than 4300 digits raised a bare
+# the families with the product bug each would show; both must raise GraphletFormatError
+# naming a line:
+#   huge_digits     an integer token of more than 4300 digits must not raise a bare
 #                   ValueError (Python's int-string conversion limit) from parse_int /
-#                   decode_ranges; the integer tokens are bounded to 20 digits now, and
-#                   an error message repeats at most 32 characters of a token
-#   lone_surrogate  BUG-2: a lone surrogate in a str body (what JSON "\\udc80" decodes
-#                   to) raised UnicodeEncodeError from front_decode_parts (parse) and from
+#                   decode_ranges: the integer tokens are bounded to 20 digits, and an
+#                   error message repeats at most 32 characters of a token
+#   lone_surrogate  a lone surrogate in a str body (what JSON "\\udc80" decodes to) must
+#                   not raise UnicodeEncodeError from front_decode_parts (parse) or from
 #                   the graphlet_bytes check (from_response)
 PRODUCT_BUGS = {}
 
-# the R-record range checks of parser._resolve_arm (BUG-5, fixed: they name the R
-# record's line and the arm)
+# the R-record range checks of parser._resolve_arm name the R record's line and the arm
 RUN_RANGE_ERROR = re.compile(r'(?:line \d+: )?(?:(?:left|right) arm: )?run \d+ ends ')
 # how long a format error's message may be: a token is echoed cut to 32 characters
 MAX_MESSAGE = 400
@@ -541,10 +540,9 @@ class TestParserFuzz(unittest.TestCase):
 
     def test_run_errors_name_their_line(self):
         """The R-record range checks of parser._resolve_arm name the R record's line and
-        the arm ('run 0' exists on both arms). Fixed product bug BUG-5: they said line
-        0 and no arm. Repro of the old answer: swap two R records of
-        sra_rand50_03__no_sequences (lines 11 and 16) -> 'run 0 ends at 25 outside its
-        anchor 0 [0, 8]'."""
+        the arm ('run 0' exists on both arms), not line 0 and no arm. The case: swap two R
+        records of sra_rand50_03__no_sequences (lines 11 and 16) -> 'run 0 ends at 25
+        outside its anchor 0 [0, 8]'."""
         runs = [r for r in self.results.values() if r['outcome'] == 'format_error'
                 and RUN_RANGE_ERROR.match(r['msg'])]
         self.assertTrue(runs, 'no case reached the R range checks')
@@ -555,8 +553,8 @@ class TestParserFuzz(unittest.TestCase):
     # the former product bugs: the cases are kept and named
 
     def test_huge_integer_tokens_are_a_format_error(self):
-        # fixed BUG-1: parse('Z ' + '9' * 5000 ...) raised ValueError('Exceeds the limit
-        # (4300 digits) ...'), not GraphletFormatError
+        # parse('Z ' + '9' * 5000 ...) must raise GraphletFormatError, not Python's
+        # ValueError('Exceeds the limit (4300 digits) ...')
         cases = self.of('huge_digits')
         self.assertTrue(cases)
         bad = [_fmt(r) for r in cases if r['outcome'] != 'format_error'
@@ -564,8 +562,8 @@ class TestParserFuzz(unittest.TestCase):
         self.assertEqual([], bad[:5], '%d of %d' % (len(bad), len(cases)))
 
     def test_lone_surrogates_are_a_format_error(self):
-        # fixed BUG-2: parse(<str with '\udc80' in an L name>) raised UnicodeEncodeError,
-        # not GraphletFormatError; the error names the line of the surrogate
+        # parse(<str with '\udc80' in an L name>) must raise GraphletFormatError, not
+        # UnicodeEncodeError; the error names the line of the surrogate
         cases = self.of('lone_surrogate')
         self.assertTrue(cases)
         bad = [_fmt(r) for r in cases if r['outcome'] != 'format_error'
@@ -777,20 +775,20 @@ class TestToolLayerFuzz(unittest.TestCase):
         self.assertGreater(n, 5)
 
     def test_fetch_reports_huge_integers_as_format_error(self):
-        # fixed BUG-1 through the tool layer: traverse_fetch answered {'error':
-        # 'bad_argument', 'message': 'Exceeds the limit (4300 digits) ...'} -- it blamed
-        # the agent's arguments for a corrupt server body
+        # the same through the tool layer: traverse_fetch must not answer {'error':
+        # 'bad_argument', 'message': 'Exceeds the limit (4300 digits) ...'} -- that would
+        # blame the agent's arguments for a corrupt server body
         self.check_family(['huge_digits'])
 
     def test_fetch_reports_lone_surrogates_as_format_error(self):
-        # fixed BUG-2 through the tool layer: traverse_fetch answered bad_argument
-        # ("'utf-8' codec can't encode character '\udc80' ...") for a body whose JSON
-        # string carries a lone surrogate escape
+        # the same through the tool layer: not bad_argument ("'utf-8' codec can't encode
+        # character '\udc80' ...") for a body whose JSON string carries a lone surrogate
+        # escape
         self.check_family(['lone_surrogate'])
 
     def test_the_product_bug_bodies_are_still_structured_and_not_stored(self):
-        """The former BUG-1/BUG-2 bodies: format_error (never bad_argument, never a
-        raise, never result_too_large), nothing stored."""
+        """The huge-digit and lone-surrogate bodies: format_error (never bad_argument, never
+        a raise, never result_too_large), nothing stored."""
         n = 0
         for index, cell, i, family, desc, payload in tool_cases(
                 families=('huge_digits', 'lone_surrogate'), per_family=2):

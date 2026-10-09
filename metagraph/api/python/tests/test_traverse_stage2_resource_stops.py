@@ -1,8 +1,8 @@
-"""Stage 2 of DESIGN-traverse-graphlet.md §14.1 as a client sees it: the request budgets
-(bounds.max_memory_mb, bounds.max_work_units), the resource stop they produce (JSON
-`resource_stop`, the MGT `Q` record, `resource_limit` ends) and the memory_bound_soft
-limitation, read by the library exactly as it is (MGT v1 is frozen: the records, fields
-and tokens were all there before any server wrote them).
+"""The request budgets during the walk (DESIGN-traverse-graphlet.md §14.1) as a client sees
+them: the request budgets (bounds.max_memory_mb, bounds.max_work_units), the resource stop
+they produce (JSON `resource_stop`, the MGT `Q` record, `resource_limit` ends) and the
+memory_bound_soft limitation, read by the library exactly as it is (MGT v1 is frozen: the
+records, fields and tokens are all MGT v1's).
 
 The documents are CLI fixtures under documents/budgets/ (graphlet_fixtures.py
 --from-cli; --check keeps them current). A work stop is the same walk in every detail, so
@@ -36,7 +36,7 @@ FIXTURES = {
     'memory_soft': ('full', 'graphlet'),
     'memory_stop': ('graphlet',),
     'memory_stop_full': ('full',),
-    # stage 3 (test_traverse_stage3_decode.py): a stop of a budget-aware annotation read
+    # the budget-aware annotation reads (test_traverse_stage3_decode.py): a stop of a budget-aware annotation read
     'decode_stop': ('graphlet',),
 }
 

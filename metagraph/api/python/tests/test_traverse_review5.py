@@ -1,24 +1,22 @@
-"""The external review of pass 5 (HEAD 5801aea1), the library's part, and the audit of the
-efficiency batch's library speed-ups that the review asked for.
+"""Continuation costs and the library's indexes:
 
-  * finding 7: a continuation's change_cost override is checked whole -- entry shape,
-    string endpoints, finite costs >= 0, the default, a constant's value, the model's
-    type -- before any endpoint enters a set or any cost the arithmetic: an entry such as
-    [["C"], "A", 0.5] raised TypeError from a set membership test in _switch_reach(),
-    which escaped next_request() and traverse_continue(execute=False) instead of their
-    field-qualified ValueError / bounded bad_argument (the reviewer's
-    /tmp/review_pass5_library_probes.py, turned into the tests below, plus a fuzz over
-    malformed shapes); and, from the review of those fixes, an entries field that is not a
-    list under any model (a budgeted call charged len(entries) whatever the model: TypeError
-    from next_request(budget=...) and a ToolLimits tool), and an infinite or NaN
-    branching.max_label_branches override (int(inf) raised OverflowError);
-  * the speed-ups (P8): ambiguity and iteration order kept, the canonical arrays kept for
-    serialisation, the indexes the stage L memory model counts, no cache of every prefix
-    spelling;
-  * the small-call regression (P10): an index built on a graphlet's first single-label
-    call made routes()/label_walks() and small exports on 1,000-label graphlets several
-    times slower than the scan it replaced; the indexes are now built only once they pay
-    off, with outputs identical either way.
+  * a continuation's change_cost override is checked whole -- entry shape, string endpoints,
+    finite costs >= 0, the default, a constant's value, the model's type -- before any
+    endpoint enters a set or any cost the arithmetic: an entry such as [["C"], "A", 0.5]
+    must not raise TypeError from a set membership test in _switch_reach(), escaping
+    next_request() and traverse_continue(execute=False) instead of their field-qualified
+    ValueError / bounded bad_argument (probes turned into the tests below, plus a fuzz over
+    malformed shapes); so is an entries field that is not a list under any model (a budgeted
+    call charges len(entries) whatever the model: TypeError from next_request(budget=...)
+    and a ToolLimits tool), and an infinite or NaN branching.max_label_branches override
+    (int(inf) raises OverflowError);
+  * the speed-ups (TestP8*): ambiguity and iteration order kept, the canonical arrays kept
+    for serialisation, the indexes the local-limits memory model counts, no cache of every
+    prefix spelling;
+  * small calls (TestP10*): an index built on a graphlet's first single-label call would
+    make routes()/label_walks() and small exports on 1,000-label graphlets several times
+    slower than a scan; the indexes are built only once they pay off, with outputs identical
+    either way.
 """
 
 import collections
@@ -45,8 +43,8 @@ from metagraph.traverse.mcp_tools import (MIN_MAX_BYTES, GraphletTools, ToolLimi
 
 
 def _reference_reach(cost, sources, targets, budget, sinks=()):
-    """An independent reachability (Bellman-Ford over every name, the reviewer's) for a
-    valid cost: {target: cheapest chain loss} within |budget|; a sink ends a chain."""
+    """An independent reachability (Bellman-Ford over every name) for a valid cost:
+    {target: cheapest chain loss} within |budget|; a sink ends a chain."""
     names = list(dict.fromkeys(list(sources) + list(targets)))
     model = cost.get('model', 'forbid')
     if model == 'forbid' or not sources:
@@ -79,7 +77,7 @@ def _reference_reach(cost, sources, targets, budget, sinks=()):
 
 # malformed entries: each is refused, whatever else the table holds
 BAD_ENTRIES = [
-    [['C'], 'A', 0.5],                 # the review's: a list as an endpoint
+    [['C'], 'A', 0.5],                 # a list as an endpoint
     ['C', ['A'], 0.5],
     [['C', 'A'], 'B', 1],
     [1, 'A', 0.5],                     # numbers as endpoints
@@ -129,24 +127,24 @@ BAD_COSTS = [
      for e in BAD_ENTRIES]
 
 # entries that are not a list, under every model and none: a budgeted call charges their
-# count whatever the model, and len(5) raised TypeError there (the review of the pass-5
-# fixes: repro_entries_len.py, and its budgeted fuzz's example {'entries': -0.5})
+# count whatever the model, so len(5) would raise TypeError there (a budgeted fuzz's example:
+# {'entries': -0.5})
 NON_LIST_ENTRIES = [5, True, 1.5, -0.5, 'C,A,1', {'C': 'A'}]
 BAD_COSTS += [dict(base, entries=e)
               for base in ({'model': 'constant', 'value': 1}, {'model': 'forbid'}, {},
                            {'model': 'mystery'})
               for e in NON_LIST_ENTRIES]
 
-# branching.max_label_branches overrides that are no count: int(inf) raised OverflowError,
-# which escaped the tools' bad_argument, and int(nan) a ValueError naming no field (the
-# review of the pass-5 fixes: repro_mlb.py; Python's json reads Infinity and 1e999)
+# branching.max_label_branches overrides that are no count: int(inf) raises OverflowError,
+# which would escape the tools' bad_argument, and int(nan) a ValueError naming no field
+# (Python's json reads Infinity and 1e999)
 BAD_MAX_LABEL_BRANCHES = [float('inf'), -float('inf'), float('nan'), 1e999, -1, 1.5, -0.5,
                           True, None, 'x', '2', [2]]
 
 
 class TestFinding7MalformedContinuationCosts(unittest.TestCase):
-    """The reviewer's probe: entries [[["C"], "A", 0.5]] raised TypeError from
-    next_request() and from traverse_continue(execute=False)."""
+    """The probe: entries [[["C"], "A", 0.5]] must not raise TypeError from next_request()
+    and from traverse_continue(execute=False)."""
 
     def setUp(self):
         self.g = T.graphlet('switch_chain')
@@ -260,7 +258,7 @@ class TestFinding7MalformedContinuationCosts(unittest.TestCase):
 class TestFinding7Fuzz(unittest.TestCase):
     """Random tables: one with a malformed entry anywhere is a ValueError (never another
     exception), whatever its valid entries; every valid one prices as the independent
-    reachability (the reviewer's 5,000 valid tables)."""
+    reachability (5,000 valid tables)."""
 
     def test_malformed_entries_anywhere(self):
         rng = random.Random(7105)
@@ -302,11 +300,11 @@ class TestFinding7Fuzz(unittest.TestCase):
 
 
 class TestFinding7UnderLocalBudgets(unittest.TestCase):
-    """The review of the pass-5 fixes: under a local budget (next_request(budget=...), a
-    GraphletTools with local_limits) a malformed cost escaped as TypeError -- the switch
-    search charged len(entries) of a model that is not a table, whose entries were never
-    checked. Every malformed cost is the same field-qualified ValueError / bounded
-    bad_argument with a budget as without one."""
+    """Under a local budget (next_request(budget=...), a GraphletTools with local_limits) a
+    malformed cost must not escape as TypeError -- the switch search charges len(entries) of
+    a model that is not a table, whose entries are then not yet checked. Every malformed
+    cost is the same field-qualified ValueError / bounded bad_argument with a budget as
+    without one."""
 
     def setUp(self):
         self.g = T.graphlet('switch_chain')
@@ -369,10 +367,9 @@ class TestFinding7UnderLocalBudgets(unittest.TestCase):
         # entries are charged by their count before the check reads them (2 lwu per entry
         # in work model 1; 2 W_ELEM, the check and the build, in work model 2). Under a model
         # that does not read them they are refused, as the server's Strict parse refuses
-        # them (L8, the review of 2026-10-06): a constant override deep-merged onto a table's
-        # strategy kept that table's list, which passed here and was refused there; an
-        # override that names another model now replaces the cost whole (TestL8 in
-        # test_traverse_review_p3.py)
+        # them: a constant override deep-merged onto a table's strategy would keep that
+        # table's list, which would pass here and be refused there; an override that names
+        # another model replaces the cost whole (TestL8 in test_traverse_review_p3.py)
         def usage(cost):
             b = LocalBudget()
             try:
@@ -430,8 +427,8 @@ class TestFinding7UnderLocalBudgets(unittest.TestCase):
 
 
 class TestFinding7BudgetedFuzz(unittest.TestCase):
-    """The reviewer's budgeted fuzz (fuzz_p7_budget.py: 65 TypeError escapes in 10,000
-    cases, all from len(entries)), here at a fixed seed: random overrides -- change_cost,
+    """A budgeted fuzz (len(entries) is where TypeError escapes would come from: 65 in
+    10,000 cases unchecked), here at a fixed seed: random overrides -- change_cost,
     loss_budget, extra, max_label_branches -- through next_request / next_requests under a
     LocalBudget and through a ToolLimits tool with execute False and True. Only a
     ValueError, or a bad_argument result, may come of a malformed one."""
@@ -525,7 +522,7 @@ class TestFinding7BudgetedFuzz(unittest.TestCase):
             self.assertGreater(kinds[None], 20)
 
 
-# ------------------------------------------------------------------ P8 / P10
+# ------------------------------------------------------------------ the indexes
 
 def _items():
     """(key, result, response) of every committed retrieval with a graphlet: fresh models
@@ -558,7 +555,7 @@ LAZY_KEYS = ('merge_scanned', 'merge_parts', 'partition_shared', 'run_scans')
 
 class TestP8MergeSetsAndRunIndex(unittest.TestCase):
     """The indexes answer as the arrays and the scans they replace, in the same order,
-    at every stage of their lazy construction (P10), and keep one copy."""
+    at every stage of their lazy construction, and keep one copy."""
 
     def test_merge_parts_answers_as_the_arrays_at_every_stage(self):
         n = 0
@@ -624,10 +621,10 @@ class TestP8MergeSetsAndRunIndex(unittest.TestCase):
                                 for x in g2.arms.values()))
 
     def test_the_store_charges_the_run_index_on_a_single_label_arm(self):
-        # the review of the pass-5 fixes (sig_probe.py, store_probe.py): on an arm with one
-        # label, runs_by_label (one entry) replaced label_runs()'s count (an int) and left
-        # every length equal; cache_signature() did not change, and the store never charged
-        # the index (504 B unaccounted on documents/ambiguous_split). It reads the keys too
+        # on an arm with one label, runs_by_label (one entry) and label_runs()'s count (an
+        # int) both leave every length equal: cache_signature() must still change, and the
+        # store must charge the index (504 B otherwise unaccounted on
+        # documents/ambiguous_split). It reads the keys too
         g = _fresh(ITEMS[0])
         a = next(iter(g.arms.values()))
         a.cache['x'] = 1
@@ -665,9 +662,9 @@ class TestP8MergeSetsAndRunIndex(unittest.TestCase):
         self.assertGreaterEqual(n, 3)       # the committed retrievals' single-label arms
 
     def test_a_budgeted_call_charges_the_same_whatever_the_lazy_state(self):
-        # charges are cold prices (L1): a model whose unbudgeted calls left scans counted
-        # and some merges' sets built charges a budgeted call exactly as a fresh one, and
-        # the call builds the whole priced indexes (the memory the model counts)
+        # charges are cold prices: a model whose unbudgeted calls left scans counted and some
+        # merges' sets built charges a budgeted call exactly as a fresh one, and the call
+        # builds the whole priced indexes (the memory the model counts)
         n = 0
         for it, _ in _with_merges(2)[:6]:
             for side in ('left', 'right'):
@@ -750,7 +747,7 @@ class TestP8NoSpellingCached(unittest.TestCase):
 
 class TestP10WalkStrategies(unittest.TestCase):
     """walk_batch() spells target by target below its bound, as a batch above it and one
-    target directly: the same chains and bases every way (P10)."""
+    target directly: the same chains and bases every way."""
 
     def _all(self, a, targets):
         return {t: (derive.chain(a, t),

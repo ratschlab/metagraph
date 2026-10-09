@@ -1,4 +1,4 @@
-// The budget-aware row-diff decode (DESIGN-traverse-graphlet.md §14, stage 3 of §14.1):
+// The budget-aware row-diff decode (DESIGN-traverse-graphlet.md §14, §14.1):
 // IRowDiff::decode_rows / decode_row_tuples against the default decode, the costs it
 // states per row, its refusals, and its byte model against the allocator.
 #include <fstream>
@@ -74,8 +74,8 @@ T sorted(T v) {
     return v;
 }
 
-// L1: the single-row descents return each row's set bits (and column ranks) as the batched
-// reads do, for random matrices of several arities, including empty and full rows
+// The single-row descents return each row's set bits (and column ranks) as the batched reads
+// do, for random matrices of several arities, including empty and full rows
 TEST(RowDiffBudgetedDecode, DescentEqualsBatchedRead) {
     std::mt19937 rng(42);
     for (size_t arity : { 2, 3, 5 }) {
@@ -261,7 +261,7 @@ std::vector<RowT> reference(const Annotation &a, const std::vector<Row> &rows) {
     }
 }
 
-// L2: with an unlimited budget the decode returns what the default path returns, and holds
+// With an unlimited budget the decode returns what the default path returns, and holds
 // exactly its outputs afterwards
 template <class RowT>
 void check_equivalence(const Annotation &a) {
@@ -295,8 +295,8 @@ TEST(RowDiffBudgetedDecode, EqualsTheDefaultDecode) {
     }
 }
 
-// L3: a row's costs are the same in every batch, decoding it alone stays within the demand
-// it states, and a budget of exactly that peak admits it while one byte less refuses it
+// A row's costs are the same in every batch, decoding it alone stays within the demand it
+// states, and a budget of exactly that peak admits it while one byte less refuses it
 template <class RowT>
 void check_batch_independence(const Annotation &a) {
     std::map<Row, RowCost> alone;
@@ -343,8 +343,8 @@ void check_batch_independence(const Annotation &a) {
     }
     // Batches [p, r] where p is on r's row-diff path: r's path then stops at p, decoded and
     // shared earlier in the call, so r continues from a copy of p's row. With an empty diff
-    // after p the demand once took the copy's exact size instead of p's aggregate (review
-    // F4: a key admitted on a warm cache and refused on a cold one).
+    // after p the demand must take p's aggregate, not the copy's exact size (otherwise a key
+    // is admitted on a warm cache and refused on a cold one).
     size_t pairs = 0;
     const graph::DeBruijnGraph &graph = *a.rd->graph();
     for (size_t vi = 0; vi < valid.size(); vi += 2) {
@@ -384,8 +384,8 @@ TEST(RowDiffBudgetedDecode, CostsAreBatchIndependent) {
     }
 }
 
-// L4: a refusal at any charge returns nothing, restores the budget and never lets the held
-// bytes pass the maximum; the same budget then succeeds
+// A refusal at any charge returns nothing, restores the budget and never lets the held bytes
+// pass the maximum; the same budget then succeeds
 template <class RowT>
 void check_denials(const Annotation &a) {
     std::vector<Row> rows;
@@ -469,11 +469,10 @@ uint64_t copy_bytes_of(const RowTuples &row) {
     return bytes;
 }
 
-// L5 (§14 freeze gate, "a row-diff row whose dependencies are dense but whose result is
-// tiny"): an anchor of 300 columns (or 6,000 coordinates) and a diff on the path that
-// cancels all but one of them. The default decode returns the one-column row; the
-// budget-aware decode states the dependencies, and a budget between the result's bytes
-// and what decoding it holds refuses it whole.
+// "A row-diff row whose dependencies are dense but whose result is tiny": an anchor of 300
+// columns (or 6,000 coordinates) and a diff on the path that cancels all but one of them. The
+// default decode returns the one-column row; the budget-aware decode states the dependencies,
+// and a budget between the result's bytes and what decoding it holds refuses it whole.
 TEST(RowDiffBudgetedDecode, DenseDependenciesTinyResult) {
     graph::DBGSuccinct graph(4);
     graph.add_sequence("ACTAGCTAGCTAGCTAGCTAGC");
@@ -618,8 +617,8 @@ TEST(RowDiffBudgetedDecode, DenseDependenciesTinyResult) {
     }
 }
 
-// L6: the byte model bounds the heap: jemalloc's peak of a decode call never exceeds the
-// peak the budget charged (with jemalloc as the process allocator)
+// The byte model bounds the heap: jemalloc's peak of a decode call never exceeds the peak the
+// budget charged (with jemalloc as the process allocator)
 TEST(RowDiffBudgetedDecode, ModelBoundsTheAllocator) {
 #if USE_JEMALLOC
     size_t measured = 0;
@@ -662,7 +661,7 @@ TEST(RowDiffBudgetedDecode, ModelBoundsTheAllocator) {
 #endif
 }
 
-// ---- The row-diff path cache (row_diff_cache.hpp; the efficiency pass)
+// ---- The row-diff path cache (row_diff_cache.hpp)
 
 template <class RowT>
 std::vector<RowT> cached_rows(const Annotation &a, const std::vector<Row> &rows,
@@ -691,9 +690,9 @@ std::vector<std::vector<Row>> walk_batches(const Annotation &a, uint32_t seed) {
     return out;
 }
 
-// P1: the default decode with the cache returns the rows of the default decode, call after
-// call, under bounds that keep everything, evict often, and keep nothing; the cache stays
-// within its bound (and a shared room) and paths stop at cached rows
+// The default decode with the cache returns the rows of the default decode, call after call,
+// under bounds that keep everything, evict often, and keep nothing; the cache stays within its
+// bound (and a shared room) and paths stop at cached rows
 template <class RowT>
 void check_cached_rows(const Annotation &a) {
     for (uint64_t bound : { uint64_t(64) << 20, uint64_t(24) << 10, uint64_t(1) }) {
@@ -727,12 +726,13 @@ TEST(RowDiffPathCache, CachedDecodeEqualsTheDefaultDecode) {
     }
 }
 
-// P2: the budget-aware decode with the cache returns the same rows with the same costs and
-// held bytes as without it, call after call (the costs of a path cut at a cached row are its
-// whole path's: what is admitted and charged does not depend on the cache) and at most the
-// held bytes; a row decoded alone stays within its demand and its peak without the cache; rows the default decode cached (no path aggregates) are not
-// used by it until it reconstructed them itself; and it refuses as the decode without the
-// cache does when not even its own (smaller) decode fits
+// The budget-aware decode with the cache returns the same rows with the same costs and held
+// bytes as without it, call after call (the costs of a path cut at a cached row are its whole
+// path's: what is admitted and charged does not depend on the cache) and at most the held
+// bytes; a row decoded alone stays within its demand and its peak without the cache; rows the
+// default decode cached (no path aggregates) are not used by it until it reconstructed them
+// itself; and it refuses as the decode without the cache does when not even its own (smaller)
+// decode fits
 template <class RowT>
 void check_budgeted_with_cache(const Annotation &a) {
     for (bool warm_by_default : { false, true }) {
@@ -833,9 +833,9 @@ TEST(RowDiffPathCache, BudgetedCostsDoNotDependOnTheCache) {
     }
 }
 
-// P3: the cache's own bookkeeping: two generations within the bound, a hit in the older one
-// moves the row to the current one, a row larger than half the bound is not kept, the
-// aggregates are added to a row cached without them, trim() and clear()
+// The cache's own bookkeeping: two generations within the bound, a hit in the older one moves
+// the row to the current one, a row larger than half the bound is not kept, the aggregates are
+// added to a row cached without them, trim() and clear()
 TEST(RowDiffPathCache, Generations) {
     using Cache = RowDiffCache<SetBits>;
     Cache cache;
@@ -851,8 +851,8 @@ TEST(RowDiffPathCache, Generations) {
     EXPECT_EQ(4 * entry, cache.bytes());
     cache.insert(4, SetBits{ 1, 2, 3 });     // the current generation is full: rotated
     EXPECT_EQ(5u, cache.size());
-    // the counts move with their tables (review of the fixes: a rotation that dropped the
-    // current generation's count with the older table counted 1 entry of the 5 held)
+    // the counts move with their tables (a rotation that dropped the current generation's
+    // count with the older table would count 1 entry of the 5 held)
     EXPECT_EQ(5 * entry, cache.bytes());
     ASSERT_TRUE(cache.find(0, false));       // moved to the current generation
     EXPECT_EQ(5 * entry, cache.bytes());
@@ -899,11 +899,11 @@ TEST(RowDiffPathCache, Generations) {
     EXPECT_EQ(cache.size() * entry, cache.bytes());
 }
 
-// Review of the efficiency pass, finding 4: a generation dropped releases its table. A cleared
-// hopscotch map keeps its bucket array, sized for the most entries it held, so after many
-// narrow rows a few wide ones held the narrow phase's arrays beside their bound (74.7 MiB of
-// heap for 63.9 MiB accounted at a 64 MiB bound); the tables now hold no more than the share
-// of the entries the bound counts (kEntryBytes), and trim() and clear() free them
+// A generation dropped releases its table. A cleared hopscotch map keeps its bucket array,
+// sized for the most entries it held, so after many narrow rows a few wide ones would hold the
+// narrow phase's arrays beside their bound (74.7 MiB of heap for 63.9 MiB accounted at a
+// 64 MiB bound); the tables hold no more than the share of the entries the bound counts
+// (kEntryBytes), and trim() and clear() free them
 TEST(RowDiffPathCache, DroppedGenerationsReleaseTheirTables) {
     using Cache = RowDiffCache<SetBits>;
     // a bucket: its key and entry, and the neighbourhood bitmap
@@ -935,15 +935,15 @@ TEST(RowDiffPathCache, DroppedGenerationsReleaseTheirTables) {
     EXPECT_EQ(0u, cache.bucket_count());
 }
 
-// Review of the efficiency pass, finding 5: with the cache a budget-aware read holds less (its
-// paths are cut at cached rows), so the lookahead under a memory budget, which reads ahead
-// until a run does not fit, read more with the cache than without it (UHGG 16S, annotate mode,
-// 8 MiB: 75k rows warmed against 52-55k, 13-27% more instructions). Admitted as without the
-// cache (admit_as_uncached), a read also charges, until its stored rows are read, the rows
-// beyond the cached rows of its paths — per anchor its longest cached path's — and their
-// stored rows: a row read alone holds then what decoding it to its anchor held at that point
-// (that decode's peak, less at most its scratch and its reconstruction's peak beyond the
-// stored rows). Its rows, costs and held bytes are those of the read without the mode
+// With the cache a budget-aware read holds less (its paths are cut at cached rows), so the
+// lookahead under a memory budget, which reads ahead until a run does not fit, would read
+// more with the cache than without it (UHGG 16S, annotate mode, 8 MiB: 75k rows warmed
+// against 52-55k, 13-27% more instructions). Admitted as without the cache
+// (admit_as_uncached), a read also charges, until its stored rows are read, the rows beyond
+// the cached rows of its paths — per anchor its longest cached path's — and their stored rows:
+// a row read alone holds then what decoding it to its anchor held at that point (that decode's
+// peak, less at most its scratch and its reconstruction's peak beyond the stored rows). Its
+// rows, costs and held bytes are those of the read without the mode
 template <class RowT>
 void check_admitted_as_uncached(const Annotation &a) {
     RowDiffPathCache cache;
@@ -1022,12 +1022,12 @@ TEST(RowDiffPathCache, LookaheadAdmittedAsWithoutTheCache) {
     }
 }
 
-// R10 (review of feature level 4): the retention rule (RowDiffCache::keeps). Whatever it
-// keeps — every row (checkpoint 1), the requested rows and checkpoints, almost nothing — the
-// default and the budget-aware decodes return the rows of the decode without the cache, and
-// the budget-aware one their costs; a call copies at most n x (successors + 3) + s /
-// checkpoint rows (n rows asked for, s stored rows read) into the cache when no row counts as
-// narrow, where keeping every row copied all s; and the narrow rows are all kept
+// The retention rule (RowDiffCache::keeps). Whatever it keeps — every row (checkpoint 1), the
+// requested rows and checkpoints, almost nothing — the default and the budget-aware decodes
+// return the rows of the decode without the cache, and the budget-aware one their costs; a
+// call copies at most n x (successors + 3) + s / checkpoint rows (n rows asked for, s stored
+// rows read) into the cache when no row counts as narrow, where keeping every row would copy
+// all s; and the narrow rows are all kept
 template <class RowT>
 void check_retention(const Annotation &a) {
     struct Rule { uint32_t checkpoint, successors; uint64_t narrow; };
@@ -1174,13 +1174,12 @@ std::optional<uint64_t> thread_allocated() {
 #endif
 }
 
-// Review of levels 4-5, finding 1: the cache admits a row before it copies it. The reviewer's
-// probe — a cache bounded at 1 KiB, its shared room 1 KiB too, given a row of 1,048,576
-// columns — allocated 4,210,688 bytes for a copy the cache then refused, its bytes, peak and
-// inserted rows all stating 0. Now a refused row is never copied: nothing is allocated (by
-// jemalloc's counters, where it is the allocator, also at the moment the cache reads its room,
-// where the probe measured), and the refusal is counted (rows_refused); the same for a tuple
-// row of 65,536 columns
+// The cache admits a row before it copies it. A cache bounded at 1 KiB, its shared room 1 KiB
+// too, given a row of 1,048,576 columns would otherwise allocate 4,210,688 bytes for a copy it
+// then refuses, its bytes, peak and inserted rows all stating 0. A refused row is never
+// copied: nothing is allocated (by jemalloc's counters, where it is the allocator, also at the
+// moment the cache reads its room), and the refusal is counted (rows_refused); the same for a
+// tuple row of 65,536 columns
 TEST(RowDiffPathCache, ARefusedRowIsNeverCopied) {
     {
         const SetBits full(1u << 20, 42);
@@ -1239,11 +1238,11 @@ TEST(RowDiffPathCache, ARefusedRowIsNeverCopied) {
     }
 }
 
-// ... and a kept row is copied after the evictions that make room for it: a cache holding two
-// rows of 1.5 MiB under a 4 MiB bound copied a third beside them (4.5 MiB held at once) before
-// it dropped the oldest; now the cache's heap never exceeds its bound during an insert (with
-// its tables), measured by jemalloc's peak where it is the allocator, and the peak it states
-// is what it held
+// ... and a kept row is copied after the evictions that make room for it: copied before
+// them, a third row of 1.5 MiB would sit beside two held under a 4 MiB bound (4.5 MiB at
+// once) until the oldest is dropped; the cache's heap never exceeds its bound during an
+// insert (with its tables), measured by jemalloc's peak where it is the allocator, and the
+// peak it states is what it held
 TEST(RowDiffPathCache, AKeptRowIsCopiedWithinTheBound) {
     const uint64_t bound = uint64_t(4) << 20;
     SetBits wide(((uint64_t(3) << 19) - 64) / sizeof(Column));

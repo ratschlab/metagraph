@@ -160,13 +160,13 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"mode\": \"labels\"}", 400, "invalid_request" },
         { "{" + p + ", \"max_steps\": 0}", 400, "invalid_request" },
         { "{" + p + ", \"time_budget_ms\": 250}", 400, "invalid_request" },
-        // labels "all" (increment 3) on a column annotation: no budget-aware decode
+        // labels "all" on a column annotation: no budget-aware decode
         { "{" + p + ", \"output\": {\"labels\": \"all\"}}", 400, "annotation_unbudgeted" },
         { "{" + p + ", \"output\": {\"labels\": \"all\"}, \"allow_unbudgeted_annotation\": "
           "true}", 200, "" },
         // mode count reads no annotation, whatever the projection
         { "{" + p + ", \"mode\": \"count\", \"output\": {\"labels\": \"all\"}}", 200, "" },
-        // increment 5b: the predicate's labels need a predicate (was later_increment)
+        // the predicate's labels need a predicate
         { "{" + p + ", \"mode\": \"count\", \"output\": {\"labels\": \"predicate_only\"}}",
           400, "invalid_request" },
         // occurrences are placed per label: they need labels "all"
@@ -177,8 +177,8 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"max_labels\": -1}", 400, "invalid_request" },
         { "{" + p + ", \"allow_unbudgeted_annotation\": 1}", 400, "invalid_request" },
         { "{" + p + ", \"max_labels\": 0, \"max_occurrences_per_label\": 0}", 200, "" },
-        // increment 5b (SPEC §19): a predicate is served; on this column annotation (no
-        // budget-aware decode) its reads need the opt-in, in every mode
+        // a predicate is served (SPEC §19); on this column annotation (no budget-aware
+        // decode) its reads need the opt-in, in every mode
         { "{" + p + ", \"predicate\": null}", 400, "invalid_request" },
         { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}}", 400, "annotation_unbudgeted" },
         { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"mode\": \"count\"}", 400,
@@ -205,15 +205,15 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"predicate_strands\": \"context\"}", 200, "" },
         { "{" + p + ", \"predicate_strands\": \"both\"}", 400, "invalid_request" },
         { "{" + p + ", \"predicate_strands\": null}", 400, "invalid_request" },
-        // a predicate selects supported paths (P24): long_search "paths" is refused,
-        // "anchors" answers long patterns by their anchors; "supported_paths" is not served yet
+        // a predicate selects supported paths: long_search "paths" is refused, "anchors"
+        // answers long patterns by their anchors; "supported_paths" is not served
         { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": \"paths\", "
           "\"allow_unbudgeted_annotation\": true}", 400, "invalid_request" },
         { "{" + p + ", \"predicate\": {\"any\": [\"r1\"]}, \"long_search\": \"anchors\", "
           "\"allow_unbudgeted_annotation\": true}", 200, "" },
         { "{" + p + ", \"long_search\": \"supported_paths\"}", 400, "invalid_request" },
-        // owner decision #13: long_search, reserved until increment 4, is served (paths
-        // opt-in); its values are "anchors" (the default) and "paths", nothing else
+        // long_search is served (paths opt-in); its values are "anchors" (the default) and
+        // "paths", nothing else
         { "{" + p + ", \"long_search\": \"paths\"}", 200, "" },
         { "{" + p + ", \"long_search\": \"anchors\"}", 200, "" },
         { "{" + p + ", \"long_search\": null}", 400, "invalid_request" },
@@ -224,7 +224,7 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"max_paths\": -1}", 400, "invalid_request" },
         { "{" + p + ", \"max_paths\": 1.5}", 400, "invalid_request" },
         { "{" + p + ", \"max_paths\": null}", 400, "invalid_request" },
-        // require_support (owner decision #14): label_intersection or record_verified
+        // require_support: label_intersection or record_verified
         { "{" + p + ", \"require_support\": \"label_intersection\"}", 200, "" },
         { "{" + p + ", \"require_support\": \"record_verified\"}", 200, "" },
         { "{" + p + ", \"require_support\": \"kmer\"}", 400, "invalid_request" },
@@ -243,8 +243,8 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"require_support\": \"label_intersection\", \"long_search\": "
           "\"paths\", \"output\": {\"labels\": \"all\"}, \"allow_unbudgeted_annotation\": "
           "true}", 200, "" },
-        // increment 5 (owner decision #15): protein is the third kind, genetic_code an NCBI
-        // translation table id (default 1); an unknown id has its own code
+        // protein is the third kind, genetic_code an NCBI translation table id (default 1);
+        // an unknown id has its own code
         { "{\"patterns\": [{\"protein\": \"MK\"}]}", 200, "" },
         { "{\"patterns\": [{\"protein\": \"MK\"}], \"genetic_code\": 2}", 200, "" },
         { "{\"patterns\": [{\"protein\": \"MK\"}], \"genetic_code\": 33.0}", 200, "" },
@@ -269,13 +269,12 @@ TEST(PatternRoute, Refusals) {
         { "{" + p + ", \"genetic_code\": true}", 400, "invalid_request" },
         { "{" + p + ", \"in_ram\": true}", 400, "resident_only" },
         { "{" + p + ", \"output\": {\"labels\": \"none\", \"paths\": false}}", 200, "" },
-        // increment 4: output.paths is accepted with either value and changes nothing (a path
-        // result always carries its node path)
+        // output.paths is accepted with either value and changes nothing (a path result
+        // always carries its node path)
         { "{" + p + ", \"output\": {\"labels\": \"none\", \"paths\": true}}", 200, "" },
         { "{" + p + ", \"output\": {\"paths\": 1}}", 400, "invalid_request" },
-        // review of 2026-10-07, R1-02: one RFC 8259 JSON text with unique member names, nothing
-        // else (each was answered 200 as if it were the leading object, or with the last of a
-        // duplicated member's values)
+        // one RFC 8259 JSON text with unique member names, nothing else (not answered 200 as
+        // if it were the leading object, or with the last of a duplicated member's values)
         { "{" + p + "} GARBAGE", 400, "invalid_request" },
         { "{" + p + ",}", 400, "invalid_request" },
         { "{\"patterns\": [{\"dna\": \"AACG\"},]}", 400, "invalid_request" },
@@ -289,8 +288,8 @@ TEST(PatternRoute, Refusals) {
         { "{\"patterns\": [{\"dna\": \"AACG\", \"dna\": \"ACGT\"}]}", 400, "invalid_request" },
         // trailing white space is not extra
         { "{" + p + "} \n\t ", 200, "" },
-        // review of 2026-10-07, R1-03, R2-01: past jsoncpp's nesting limit (it throws, and
-        // the route answered 400 without a code), at the top level and inside a field
+        // past jsoncpp's nesting limit (it throws; the route answers invalid_request, not a 400
+        // without a code), at the top level and inside a field
         { repeat("[", 1001) + repeat("]", 1001), 400, "invalid_request" },
         { "{" + p + ", \"x\": " + repeat("[", 1500) + repeat("]", 1500) + "}", 400,
           "invalid_request" },
@@ -325,21 +324,21 @@ TEST(PatternRoute, Refusals) {
     EXPECT_NE(std::string::npos, error.find("Duplicate key: 'mode'")) << error;
 }
 
-// SPEC §5: a request is refused by the first check it fails, in order (review of 2026-10-07,
-// R2-03: every other refusal test sends one fault). Each body has two faults; the code and the
-// field named first in the message are the earlier check's
+// SPEC §5: a request is refused by the first check it fails, in order (every other refusal
+// test sends one fault). Each body has two faults; the code and the field named first in the
+// message are the earlier check's
 TEST(PatternRoute, RefusalOrder) {
     auto g = tiny();
     const std::string p = "\"patterns\": [{\"dna\": \"AACG\"}]";
     const std::vector<std::tuple<std::string, std::string, std::string>> cases = {
         // 6 before 7: a later-increment field before the patterns
         { "{\"patterns\": \"x\", \"graphs\": 1}", "later_increment", "request.graphs" },
-        // (predicate is served since increment 5b: checked at the end of step 8)
+        // (predicate is served: checked at the end of step 8)
         { "{\"patterns\": \"x\", \"predicate\": 1}", "invalid_request", "request.patterns" },
         // 6, alphabetical: graphs < in_ram; in_ram < max_paths
         { "{" + p + ", \"in_ram\": true, \"graphs\": []}", "later_increment", "request.graphs" },
         { "{" + p + ", \"in_ram\": true, \"max_paths\": 1}", "resident_only", "request.in_ram" },
-        // (long_search is served since increment 4: checked after the patterns, step 8)
+        // (long_search is served: checked after the patterns, step 8)
         { "{" + p + ", \"in_ram\": true, \"long_search\": \"paths\"}", "resident_only",
           "request.in_ram" },
         { "{\"patterns\": \"x\", \"long_search\": \"x\"}", "invalid_request",
@@ -361,7 +360,7 @@ TEST(PatternRoute, RefusalOrder) {
         { "{\"patterns\": [{\"dna\": \"A\", \"x\": 1}], \"mode\": \"x\"}",
           "invalid_request", "request.patterns[0]: unknown field" },
         // within 8: mode, output, scope, strands, stop_at_threshold, the caps, the time budget,
-        // then increment 3's
+        // then the label fields
         { "{" + p + ", \"mode\": \"x\", \"output\": {\"labels\": \"predicate_only\"}}",
           "invalid_request", "request.mode" },
         { "{" + p + ", \"output\": {\"labels\": \"x\"}, \"scope\": \"x\"}", "invalid_request",
@@ -389,8 +388,8 @@ TEST(PatternRoute, RefusalOrder) {
         { "{" + p + ", \"max_occurrences_per_label\": -1, "
           "\"allow_unbudgeted_annotation\": 1}", "invalid_request",
           "request.max_occurrences_per_label" },
-        // then increment 4's: long_search, max_paths, require_support (and its contradiction
-        // with output.occurrences false)
+        // then the path fields: long_search, max_paths, require_support (and its
+        // contradiction with output.occurrences false)
         { "{" + p + ", \"allow_unbudgeted_annotation\": 1, \"long_search\": \"x\"}",
           "invalid_request", "request.allow_unbudgeted_annotation" },
         { "{" + p + ", \"long_search\": \"x\", \"max_paths\": -1}", "invalid_request",
@@ -402,7 +401,7 @@ TEST(PatternRoute, RefusalOrder) {
         { "{" + p + ", \"require_support\": \"record_verified\", \"output\": {\"labels\": "
           "\"all\", \"occurrences\": false}, \"genetic_code\": 7}", "invalid_request",
           "request.require_support" },
-        // then increment 5's genetic_code (its type, then the table)
+        // then genetic_code (its type, then the table)
         { "{" + p + ", \"genetic_code\": \"x\", \"bogus\": 1}", "invalid_request",
           "request.genetic_code: expected an integer" },
         { "{" + p + ", \"genetic_code\": 7, \"bogus\": 1}", "genetic_code_unknown",
@@ -410,9 +409,9 @@ TEST(PatternRoute, RefusalOrder) {
         // a peptide's slot error is no refusal: the genetic code's comes first
         { "{\"patterns\": [{\"protein\": \"M*U\"}], \"genetic_code\": 8}",
           "genetic_code_unknown", "request.genetic_code" },
-        // then increment 5b's: predicate (its form, then its size), max_predicate_contexts,
-        // max_predicate_work, predicate_strands, then predicate_only without a predicate and a
-        // predicate with long_search "paths"
+        // then the predicate fields: predicate (its form, then its size),
+        // max_predicate_contexts, max_predicate_work, predicate_strands, then predicate_only
+        // without a predicate and a predicate with long_search "paths"
         { "{" + p + ", \"genetic_code\": 7, \"predicate\": 1}", "genetic_code_unknown",
           "request.genetic_code" },
         { "{" + p + ", \"predicate\": {\"any\": [1]}, \"max_predicate_contexts\": -1}",
@@ -496,7 +495,6 @@ TEST(PatternRoute, CountAnswer) {
 }
 
 TEST(PatternRoute, AnchorInformationBitsKeepTheirMeaning) {
-    // review of 2026-10-07, X-GUARANTEES-01 and the owner's decision of the same day:
     // anchor_information_bits stays the bits of P[0, k) (contract version 1);
     // min_anchor_information_bits, an addition, is the least searched anchor window's, the
     // floor's operand for L > k
@@ -533,7 +531,7 @@ TEST(PatternRoute, AnchorInformationBitsKeepTheirMeaning) {
 
 TEST(PatternRoute, RetrievalRows) {
     auto g = tiny();
-    // the projection omitted: "none" in this increment, stated in the answer
+    // the projection omitted: "none", stated in the answer
     Json::Value out = run(*g, "{\"patterns\": [{\"dna\": \"AACG\"}]}");
     EXPECT_EQ("all_or_count", out["mode"].asString());
     EXPECT_EQ("none", out["output"]["labels"].asString());
@@ -614,9 +612,8 @@ TEST(PatternRoute, DeadlineOverrunIs503) {
     }
 }
 
-// X-TESTS-02 (review of 2026-10-07): the work done, its time passing in the finalisation
-// reserve: the answer is the work's (exact counts, determinism full, no stop), written in the
-// reserve; past the deadline, 503
+// The work done, its time passing in the finalisation reserve: the answer is the work's
+// (exact counts, determinism full, no stop), written in the reserve; past the deadline, 503
 TEST(PatternRoute, WorkTimePassingAfterTheWork) {
     auto g = tiny();
     for (double after : { 900.0, 1001.0 }) {
@@ -662,10 +659,9 @@ std::unique_ptr<AnnotatedDBG> stride_graph() {
     return test::build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(15, records, labels);
 }
 
-// X-TESTS-02 (review of 2026-10-07): the answer's assembly reads the deadline every
-// kDeliveryStride objects (two patterns of 10,000 results: once after each), and a deadline
-// passing there is a 503 before the assembly ends — the final check would read a clock not
-// yet past it
+// The answer's assembly reads the deadline every kDeliveryStride objects (two patterns of
+// 10,000 results: once after each), and a deadline passing there is a 503 before the assembly
+// ends — the final check would read a clock not yet past it
 TEST(PatternRoute, DeadlineReadWhileTheAnswerIsAssembled) {
     auto g = stride_graph();
     const std::string body = "{\"patterns\": [{\"dna\": \"AC\"}, {\"dna\": \"GG\"}], "
@@ -705,12 +701,11 @@ TEST(PatternRoute, DeadlineReadWhileTheAnswerIsAssembled) {
     }
 }
 
-// X-EFFICIENCY-04 (review of 2026-10-07): the work stops earlier by the estimated time to
-// write what the answer holds, so that a request whose patterns buffered many results is
-// answered (a time stop, its counts kept) rather than 503. A clock that never moves: only the
-// answer's volume can stop the work. At a build rate of 1 byte per second the first pattern's
-// results alone take longer to write than the default budget: the second pattern is stopped
-// by time where it starts, the answer 200
+// The work stops earlier by the estimated time to write what the answer holds, so that a
+// request whose patterns buffered many results is answered (a time stop, its counts kept)
+// rather than 503. A clock that never moves: only the answer's volume can stop the work. At a
+// build rate of 1 byte per second the first pattern's results alone take longer to write than
+// the default budget: the second pattern is stopped by time where it starts, the answer 200
 TEST(PatternRoute, TheAnswersVolumeStopsTheWork) {
     auto g = tiny();
     const std::string body = "{\"patterns\": [{\"dna\": \"AACG\"}, {\"dna\": \"ACGT\"}], "
@@ -803,8 +798,7 @@ TEST(PatternRoute, CompactJsonBytes) {
     }
 }
 
-// T3-07 (review of 2026-10-07): the 503 states a fractional budget as given (a cast floored
-// 1000.5 to 1000)
+// The 503 states a fractional budget as given (not floored: 1000.5, not 1000)
 // PatternDelivery::check: nothing to miss before the request was parsed, nothing before the
 // deadline; at it, the 503 stating the budget
 TEST(PatternRoute, DeadlineMessageStatesTheBudget) {
@@ -832,9 +826,9 @@ TEST(PatternRoute, DeadlineMessageStatesTheBudget) {
     }
 }
 
-// R1-03, R2-01 (review of 2026-10-07): `metagraph pattern` answers every request file as the
-// server would — a refusal's body, or for any other failure the server's 400 body without a
-// code — and goes on with the next (an exception escaped and aborted the run)
+// `metagraph pattern` answers every request file as the server would — a refusal's body, or
+// for any other failure the server's 400 body without a code — and goes on with the next (an
+// escaping exception would abort the run)
 TEST(PatternRoute, TheCliAnswersEveryRequest) {
     auto g = tiny();
     Json::StreamWriterBuilder b;
@@ -864,9 +858,9 @@ TEST(PatternRoute, TheCliAnswersEveryRequest) {
     EXPECT_EQ("{\"error\":\"a read failed\"}", Json::writeString(b, v));
 }
 
-// X-CONCURRENCY-01, R2-02 (review of 2026-10-07): a caller that left (or a server that stops)
-// is not answered — the work ends at its first clock reading (Budget::set_abort), the writing
-// at its next check — where the route ran to its deadline and wrote into a closed socket
+// A caller that left (or a server that stops) is not answered — the work ends at its first
+// clock reading (Budget::set_abort), the writing at its next check — rather than running to
+// its deadline and writing into a closed socket
 TEST(PatternRoute, AnAbortedRequestIsNotAnswered) {
     auto g = tiny();
     const std::string body = "{\"patterns\": [{\"dna\": \"AACG\"}, {\"dna\": \"ACGT\"}]}";
@@ -887,9 +881,8 @@ TEST(PatternRoute, AnAbortedRequestIsNotAnswered) {
     EXPECT_THROW(live.check(), pattern::Aborted);
 }
 
-// SPEC §5: the body not JSON (3), then the graph (4), then the body not an object (5)
-// (review of 2026-10-07, R2-03), on a graph the engine does not serve (a graph without its
-// mask, which mask_required refused before, is served since owner decision #16)
+// SPEC §5: the body not JSON (3), then the graph (4), then the body not an object (5), on a
+// graph the engine does not serve (a graph without its mask is served: counts are bounds)
 TEST(PatternRoute, TheGraphIsCheckedBetweenTheJsonAndTheObject) {
     auto hash = std::make_shared<DBGHashFast>(kK);
     for (const std::string &r : kRecords) {
@@ -910,10 +903,10 @@ TEST(PatternRoute, TheGraphIsCheckedBetweenTheJsonAndTheObject) {
               refusal(anno_graph, repeat("[", 1001) + repeat("]", 1001)));
 }
 
-// C2-01, C1-05 (review of 2026-10-07): the two graph reasons of a graph the engine does not
-// recognise — a fixture shows representation_unsupported, none can show primary_unwrapped
-// (server_query and the CLI always wrap a PRIMARY graph) — each a 400 with its code and
-// message, and the capabilities block stating only k
+// The two graph reasons of a graph the engine does not recognise — a fixture shows
+// representation_unsupported, none can show primary_unwrapped (server_query and the CLI
+// always wrap a PRIMARY graph) — each a 400 with its code and message, and the capabilities
+// block stating only k
 TEST(PatternRoute, GraphsTheEngineDoesNotServe) {
     auto hash = std::make_shared<DBGHashFast>(kK);
     for (const std::string &r : kRecords) {
@@ -946,11 +939,11 @@ TEST(PatternRoute, GraphsTheEngineDoesNotServe) {
     }
 }
 
-// Owner decision #4 of 2026-10-07 (review I26): /pattern and `metagraph pattern` serve $ACGT
-// graphs only; $ACGTN is refused as alphabet_untested (400, and the capabilities' reason) until
-// a DNA5 build passes the pattern tests, while the engine keeps its DNA5 paths. A DNA4 build
-// cannot load a DNA5 graph, so the decision is pinned as the pure function of the alphabet it
-// is, and through the route on this build's own alphabet (refused on a DNA5 build)
+// /pattern and `metagraph pattern` serve $ACGT graphs only; $ACGTN is refused as
+// alphabet_untested (400, and the capabilities' reason) until a DNA5 build passes the pattern
+// tests, while the engine keeps its DNA5 paths. A DNA4 build cannot load a DNA5 graph, so the
+// rule is pinned as the pure function of the alphabet it is, and through the route on this
+// build's own alphabet (refused on a DNA5 build)
 TEST(PatternRoute, AlphabetRefusal) {
     EXPECT_EQ("", alphabet_refusal("$ACGT"));
     EXPECT_EQ("alphabet_untested", alphabet_refusal("$ACGTN"));
@@ -1020,8 +1013,8 @@ TEST(PatternRoute, Capabilities) {
     other.delivery_build_mbps = 2.5;
     other.delivery_compress_mbps = 12.5;
     EXPECT_EQ(7u, pattern_capabilities_json(g.get(), other, false)["caps"]["max_paths"].asUInt64());
-    // owner decision P9: the prose fields are references to the SPEC, the rates of the time
-    // kept back for the answer numbers (MB/s, the server's flags as configured)
+    // the prose fields are references to the SPEC, the rates of the time kept back for the
+    // answer numbers (MB/s, the server's flags as configured)
     EXPECT_EQ(2.5, pattern_capabilities_json(g.get(), other, false)["delivery_mbps"]["build"]
                            .asDouble());
     EXPECT_EQ(12.5, pattern_capabilities_json(g.get(), other, false)["delivery_mbps"]["compress"]
@@ -1044,14 +1037,14 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ("label_intersection", caps["support"].asString());
     // a column annotation: no budget-aware decode
     EXPECT_EQ("unbudgeted", caps["annotation"].asString());
-    // increment 5 (owner decision #15): the residues, the genetic codes (every NCBI
-    // translation table) and the default, the standard code
+    // the residues, the genetic codes (every NCBI translation table) and the default, the
+    // standard code
     std::string residues;
     for (const Json::Value &r : caps["protein_residues"]) {
         ASSERT_EQ(1u, r.asString().size());
         residues += r.asString();
     }
-    // owner decision #19: the stop '*' is a residue (a stop codon of the genetic code)
+    // the stop '*' is a residue (a stop codon of the genetic code)
     EXPECT_EQ("ACDEFGHIKLMNPQRSTVWYXBZJ*", residues);
     // the list is what the engine parses: each residue alone is a peptide, every other
     // character of the alphabet is not
@@ -1077,7 +1070,7 @@ TEST(PatternRoute, Capabilities) {
     EXPECT_EQ(std::string::npos, caps["protein_rule"].asString().find("stop_unsupported"));
     // §12.2 holds the rule (residues, the stop '*', no_stop_codon), §18 the stop's decisions
     EXPECT_NE(std::string::npos, caps["protein_rule"].asString().find("12.2, 18"));
-    // owner decision #16: a graph with its mask counts exactly, and has no dummy fraction
+    // a graph with its mask counts exactly, and has no dummy fraction
     EXPECT_EQ("exact", caps["counting"].asString());
     EXPECT_TRUE(caps.isMember("dummy_fraction"));
     EXPECT_TRUE(caps["dummy_fraction"].isNull());
@@ -1104,10 +1097,10 @@ TEST(PatternRoute, Capabilities) {
 
 // ---------------------------------------------------------------- without the mask (#16)
 
-// |masked|'s graph without its dummy-edge mask (owner decision #16): the same BOSS written
-// and loaded again without the mask, so the same node ids and rows; a PRIMARY graph wrapped in
-// CanonicalDBG again (the wrapper reads at construction whether its graph has a mask); an
-// annotation of as many rows, without labels (these tests read none)
+// |masked|'s graph without its dummy-edge mask: the same BOSS written and loaded again without
+// the mask, so the same node ids and rows; a PRIMARY graph wrapped in CanonicalDBG again (the
+// wrapper reads at construction whether its graph has a mask); an annotation of as many rows,
+// without labels (these tests read none)
 std::unique_ptr<AnnotatedDBG> unmasked(const AnnotatedDBG &masked, const std::string &name) {
     const DeBruijnGraph &graph = masked.get_graph();
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
@@ -1250,10 +1243,11 @@ const std::vector<std::string> kUnmaskedPatterns = {
     "ACGT", "TTGG", "AACG", "CGTA", "GCTT", "RCGT", "TTNG", "GGGGG", "CCCCC", "ACGTTGC",
 };
 
-// Owner decision #16: a graph without its dummy-edge mask is served. Its counts against the
-// graph-walk oracle over the BOSS's edges: upper the candidates, source dummies included (never
-// a sink: W = $ matches no base), lower <= the real count, exact only as the real count, exact 0
-// where nothing is a candidate; the estimate upper x f; the answer and the capabilities say so
+// A graph without its dummy-edge mask is served (DESIGN-pattern-search §4.4). Its counts
+// against the graph-walk oracle over the BOSS's edges: upper the candidates, source dummies
+// included (never a sink: W = $ matches no base), lower <= the real count, exact only as the
+// real count, exact 0 where nothing is a candidate; the estimate upper x f; the answer and the
+// capabilities say so
 TEST(PatternRoute, UnmaskedCountsAgainstTheEdgeOracle) {
     for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL }) {
         const bool stated = mode == DeBruijnGraph::BASIC;
@@ -1284,8 +1278,8 @@ TEST(PatternRoute, UnmaskedCountsAgainstTheEdgeOracle) {
         }
         EXPECT_EQ(b, a);
 
-        // the counts with the check of decision #24 off (every count of a pattern with
-        // unchecked candidates bounds) and at the default (the few checked: exact)
+        // the counts with the candidate check off (every count of a pattern with unchecked
+        // candidates bounds) and at the default (the few checked: exact)
         for (uint64_t checked : { uint64_t(0), pattern::kDefaultMaxCheckedEntries })
         for (const char *scope : { "any_offset", "suffix" }) {
             SCOPED_TRACE("max_checked_entries " + std::to_string(checked));
@@ -1363,7 +1357,7 @@ TEST(PatternRoute, UnmaskedCountsAgainstTheEdgeOracle) {
                     return n.asString() == "estimate_sampled_dummy_fraction";
                 });
                 EXPECT_EQ(estimated, noted) << e;
-                // the masked answer is written as before: no estimate, no note
+                // the masked answer is written without an estimate or a note
                 Json::Value mc = m["counts"];
                 estimated = false;
                 find(mc);
@@ -1379,7 +1373,7 @@ TEST(PatternRoute, UnmaskedCountsAgainstTheEdgeOracle) {
                     }
                 }
                 EXPECT_EQ(y, x);
-                // labels and occurrences are not read in mode count: unknown as before
+                // labels and occurrences are not read in mode count: unknown
                 EXPECT_EQ(m["counts"]["labels"], e["counts"]["labels"]);
                 EXPECT_EQ(m["counts"]["occurrences"], e["counts"]["occurrences"]);
             }
@@ -1389,9 +1383,9 @@ TEST(PatternRoute, UnmaskedCountsAgainstTheEdgeOracle) {
     }
 }
 
-// Owner decision #16, the retrieval modes without the mask: the lists are exact (every
-// released context a real k-mer: a dummy is dropped), equal to the masked graph's lists; a
-// complete release makes the counts exact; all_or_count admits on the upper bound, stated
+// The retrieval modes without the mask: the lists are exact (every released context a real
+// k-mer: a dummy is dropped), equal to the masked graph's lists; a complete release makes the
+// counts exact; all_or_count admits on the upper bound, stated
 TEST(PatternRoute, UnmaskedRetrievalListsAreExact) {
     for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
         const std::string name = mode == DeBruijnGraph::BASIC ? "basic"
@@ -1460,7 +1454,7 @@ TEST(PatternRoute, UnmaskedRetrievalListsAreExact) {
     // engine says why (threshold_upper_bound). That is the answer of a count whose unchecked
     // candidates are more than max_checked_entries: shown here with the check off (0); with
     // the default its few unchecked candidates (the 3 dummies among them) are checked and the
-    // contexts released (owner decision #24)
+    // contexts released
     auto masked = tiny();
     auto g = unmasked(*masked, "admission");
     PatternLimits unchecked = limits();
@@ -1507,13 +1501,14 @@ Json::Value untimed(Json::Value entry) {
     return entry;
 }
 
-// Owner decision #24: on a graph without its mask, a pattern whose unchecked candidates number
-// at most max_checked_entries (the server's --pattern-max-checked-entries, default 50) has
-// each of them tested: every count exact, the masked graph's, with no estimate and no note,
-// k - 1 steps per candidate; above the limit (and with 0) the answer is the one without the
-// check, field for field but its timing. In every mode, so that count and retrieval agree; a
-// step stop in the check (mask_scan) leaves the bounds as without it; the capabilities state
-// the limit, in caps and in caps_rule, on every graph
+// Unchecked candidates tested one by one: on a graph without its mask, a pattern whose
+// unchecked candidates number at most max_checked_entries (the server's
+// --pattern-max-checked-entries, default 50) has each of them tested: every count exact, the
+// masked graph's, with no estimate and no note, k - 1 steps per candidate; above the limit
+// (and with 0) the answer is the one without the check, field for field but its timing. In
+// every mode, so that count and retrieval agree; a step stop in the check (mask_scan) leaves
+// the bounds as without it; the capabilities state the limit, in caps and in caps_rule, on
+// every graph
 TEST(PatternRoute, UnmaskedTinyBlocksAreExact) {
     PatternLimits off = limits();
     off.max_checked_entries = 0;
@@ -1676,9 +1671,9 @@ TEST(PatternRoute, UnmaskedTinyBlocksAreExact) {
                       ["patterns"][0]["counts"], ok["counts"]);
 }
 
-// Owner decision #16: the dummy fraction is sampled once per graph and kept (the loader samples
-// it in its thread; a graph not loaded that way at its first use), the same for every request
-// and every reader; a graph with its mask has none
+// The dummy fraction of a graph without its mask is sampled once per graph and kept (the
+// loader samples it in its thread; a graph not loaded that way at its first use), the same for
+// every request and every reader; a graph with its mask has none
 TEST(PatternRoute, UnmaskedDummyFractionIsKeptPerGraph) {
     auto masked = tiny();
     auto g = unmasked(*masked, "kept");
@@ -1763,12 +1758,12 @@ ExtensionOracle extension_oracle(const std::string &p) {
     return o;
 }
 
-// Review GPT-3 (round fix3): the counters the route states beside the work. The extension's,
-// in every entry of a path search (with extension_edges): work.extension_anchors (the anchors
-// whose extension began; the anchors when it completed, 0 when it did not run) and
-// work.extension_branches (the walks the extension branched at). The labelled retrieval's, which
-// apply_labels does not merge: work.annotation_rows_distinct in every entry that read labels,
-// and for paths work.verification_steps (0 here: no coordinates, nothing verified),
+// The counters the route states beside the work. The extension's, in every entry of a path
+// search (with extension_edges): work.extension_anchors (the anchors whose extension began;
+// the anchors when it completed, 0 when it did not run) and work.extension_branches (the walks
+// the extension branched at). The labelled retrieval's, which apply_labels does not merge:
+// work.annotation_rows_distinct in every entry that read labels, and for paths
+// work.verification_steps (0 here: no coordinates, nothing verified),
 // timing.label_intersection_ms and timing.verification_ms. Against the brute force over the
 // records; absent from every other entry
 TEST(PatternRoute, TheCountersOfTheExtensionAndOfTheLabels) {

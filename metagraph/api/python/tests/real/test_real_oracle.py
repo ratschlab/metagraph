@@ -29,8 +29,7 @@ Per cached cell and seed result, on a deterministic sample of each arm:
                label-consistent route -- the §5.1 union rule through ANY merge parent,
                computed here independently (with keep it is E) -- and nothing beyond it;
                a claim along its anchor's first-parent chain on a displayed walk (route_bp
-               0) stays within E (GPT review, finding 3: routes through non-first merge
-               parents were dropped).
+               0) stays within E (routes through non-first merge parents included).
   c_routes     a run whose displayed support starts at a merge (evidence_from >
                from_bp): cut at D = evidence_from, claims() reports it route_only (no
                displayed bases), and routes(spell=True) spells the label's own route:
@@ -47,7 +46,8 @@ Per cached cell and seed result, on a deterministic sample of each arm:
                and [0, d)) -- the library's route when it has one, else a route
                reconstructed here through any parent.
   e_library    library only: routes(spell=True) spells a route of length direct_bp for
-               every label with direct_bp > 0 (expected failures: BUG-ANNOT-ROUTES).
+               every label with direct_bp > 0, also one reached through a non-first
+               merge parent.
   f_positions  record coordinates (cells fetched with output.coordinates, DESIGN §18.3),
                against the index's SOURCE records (realdata.oracle_positions, not the
                server): the bases at every seed occurrence are the seed; at every run
@@ -114,21 +114,19 @@ CHUNK_BP = int(os.environ.get('METAGRAPH_REAL_ORACLE_CHUNK_BP', '60000'))
 CHUNK_LABELS = 800
 DISCOVER_MAX = 1000000
 
-# (cell, area) -> reason: a PRODUCT bug this suite found; the test is kept and marked
-# unittest.expectedFailure. When the bug is fixed these become unexpected successes:
-# remove the entries then.
+# (cell, area) -> reason: a PRODUCT bug this suite finds; the test is kept and marked
+# unittest.expectedFailure. When the bug is fixed it becomes an unexpected success: remove
+# the entry then.
 #
-# Fixed (2026-10-02), kept here as the record of what b_maximal and e_library found:
-# BUG-ANNOT-CLAIMS (library, ops._carries): in annotate mode with on_reconverge merge,
-#   a drop at a child's first base was suppressed as "not maximal" when a sibling on NO
-#   displayed walk (its chains end at a non-first merge parent) carried the label, and
-#   that sibling's stretch was never claimed either -- uhgg_rand100_00__annotate_merge,
-#   left, c:846 had no claim; now [0, 202) on walk 93. 19 cells.
-# BUG-ANNOT-ROUTES (library, ops.routes / label_walks in annotate mode): routes() spelled
-#   only the first-parent stretches, so a label whose direct_bp (the §5.1 union rule) is
-#   reached through a non-first merge parent had no route of length direct_bp; now one
-#   witness route per maximal end of the union rule -- same cell, c:846: the 297 bp route
-#   0-2-5-35-40-43-95-101-107-110-...-706. 20 cells.
+# What b_maximal and e_library pin, in annotate mode with on_reconverge merge:
+# claims (ops._carries): a drop at a child's first base is not "not maximal" when a sibling
+#   on NO displayed walk (its chains end at a non-first merge parent) carries the label,
+#   and that sibling's stretch is claimed -- uhgg_rand100_00__annotate_merge, left, c:846:
+#   [0, 202) on walk 93 (19 cells exercise it);
+# routes (ops.routes / label_walks): a label whose direct_bp (the §5.1 union rule) is
+#   reached through a non-first merge parent has a route of length direct_bp, one witness
+#   route per maximal end of the union rule -- same cell, c:846: the 297 bp route
+#   0-2-5-35-40-43-95-101-107-110-...-706 (20 cells).
 KNOWN_BUGS = {}
 
 AREAS = ('a_present', 'b_claims', 'b_lost', 'b_walks', 'b_stretch', 'b_maximal', 'c_routes',

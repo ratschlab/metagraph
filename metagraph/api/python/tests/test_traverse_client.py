@@ -209,8 +209,8 @@ class TestClient(unittest.TestCase):
         self.assertNotIn('limits', out)
 
     def test_resolve_time_budget(self):
-        """Milestone 1b: time_budget_ms= is sent as bounds.time_budget_ms, merged into a
-        bounds given otherwise; the answer is returned as written (limits, stop)."""
+        """The /resolve deadline: time_budget_ms= is sent as bounds.time_budget_ms, merged
+        into a bounds given otherwise; the answer is returned as written (limits, stop)."""
         out = self.client.resolve('ACGTACGT', labels=['acc1'], time_budget_ms=300)
         self.assertEqual({'sequence': 'ACGTACGT', 'labels': ['acc1'],
                           'bounds': {'time_budget_ms': 300}}, self.server.seen[0][3])

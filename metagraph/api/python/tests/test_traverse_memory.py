@@ -1,6 +1,6 @@
-"""The memory of the unbudgeted exports and of compare() (the search service's report on
-comb-shaped graphlets at dcc0cebd: to_fasta() peaking at about 10x its text against 3.2x
-at e7d99e0c, compare() 4-5x higher than at e7d99e0c), with their answers unchanged:
+"""The memory of the unbudgeted exports and of compare() on comb-shaped graphlets (where
+holding every spelling or a copy of the text multiplies the peak: to_fasta() at about 10x
+its text, compare() several times higher than a stream), with their answers unchanged:
 
   * derive.walk_iter() streams walk_batch(): the same targets, chains and bases in the same
     order, a kept prefix dropped after its last dependent, no chain kept without chains=
@@ -10,17 +10,17 @@ at e7d99e0c, compare() 4-5x higher than at e7d99e0c), with their answers unchang
     join their final line feed instead of copying the text once more;
   * compare()'s keys are cut from a stream, and prefix_subset's divergence and recorded
     refusals follow a sequence down the chains' tree instead of keeping every spelling --
-    the same answers as spelling each walk on its own (the e7d99e0c code, restated here);
-  * the stage-L account still bounds the traced peak of each on the combs;
-  * the review of that pass: walk_iter() reads the targets' chains only, never the whole
-    arm, for a missing base (50x the time of 4 shallow walks on an 8,000-segment comb), and
-    save() and the MCP tools' writes stay within their accounts (a buffered file's 128 KiB
-    buffer, uncharged, put save() above its account on bodies of 10-40 KB once dump()'s
-    join was charged at 1x).
+    the same answers as spelling each walk on its own (restated here);
+  * the local-limits account still bounds the traced peak of each on the combs;
+  * walk_iter() reads the targets' chains only, never the whole arm, for a missing base
+    (50x the time of 4 shallow walks on an 8,000-segment comb otherwise), and save() and the
+    MCP tools' writes stay within their accounts (a buffered file's 128 KiB buffer,
+    uncharged, would put save() above its account on bodies of 10-40 KB with dump()'s join
+    charged at 1x).
 
 The digests of every public operation over the committed retrievals are checked by the
-golden gate (test_traverse_speedups.py); these tests add the shapes where the memory was
-lost and the paths no committed comparison reaches.
+golden gate (test_traverse_speedups.py); these tests add the shapes where the memory is
+at stake and the paths no committed comparison reaches.
 """
 
 import gc
@@ -115,7 +115,7 @@ class TestWalkIter(unittest.TestCase):
                     # a few targets raise from the call itself, more from the first next()
                     with self.assertRaises(ValueError):
                         next(derive.walk_iter(a, targets, chains=False))
-                # the targets whose chains have their bases are spelled as before
+                # the targets whose chains have their bases are spelled
                 self.assertEqual(want, list(derive.walk_iter(a, fine, chains=False)))
         finally:
             derive._EACH_STEPS = saved
@@ -150,9 +150,9 @@ class TestWalkIter(unittest.TestCase):
             derive._EACH_STEPS = saved
 
     def test_the_chains_are_read_not_the_arm(self):
-        # the review of the stream: a scan of every segment for a missing base cost 4
-        # shallow walks of an 8,000-segment comb 140-170 us against 2.7 us; only the
-        # targets' chains are read now (the arm is never iterated)
+        # a scan of every segment for a missing base would cost 4 shallow walks of an
+        # 8,000-segment comb 140-170 us against 2.7 us; only the targets' chains are read
+        # (the arm is never iterated)
         class Unread(list):
             def __iter__(self):
                 raise AssertionError('the whole arm was read')
@@ -191,8 +191,8 @@ class TestWalkIter(unittest.TestCase):
 
 class TestExportPeaks(unittest.TestCase):
     """On a comb of 800 splits (0.3 MB of FASTA): each export's peak is about twice its
-    text -- the records and the joined text -- where to_fasta() peaked at 10x (dcc0cebd) and
-    3.1x (e7d99e0c, which added the final line feed by copying the text)."""
+    text -- the records and the joined text -- where holding every walk peaked at 10x and
+    adding the final line feed by copying the text at 3.1x."""
 
     @classmethod
     def setUpClass(cls):
@@ -241,10 +241,9 @@ class TestExportPeaks(unittest.TestCase):
         a = self.g()
         bases = sum(s.end_bp for s in a.arms['right'].segments if s.leaf is not None)
         # claims: the keys' prefixes (each claim's bases, in the keys of both sides) and
-        # the claims behind them -- 4x the leaves' bases here, 4.5x at e7d99e0c, 14x at
-        # dcc0cebd (every spelling held and a chain kept at every spine segment);
-        # prefix_subset: the walks cut and every label's supported prefixes besides --
-        # 8-9x here and at e7d99e0c, 26x at dcc0cebd
+        # the claims behind them -- 4x the leaves' bases here, 14x with every spelling held
+        # and a chain kept at every spine segment; prefix_subset: the walks cut and every
+        # label's supported prefixes besides -- 8-9x here, 26x with every spelling held
         for mode, bound in (('claims', 6), ('prefix_subset', 12)):
             x, y = self.g(), self.g()
             peak, c = _peak(lambda: x.compare(y, mode=mode))
@@ -271,8 +270,7 @@ class TestExportPeaks(unittest.TestCase):
 
 
 # ------------------------------------------------------------------ the comparison's scans
-# restated from the code before the spellings were streamed (e7d99e0c): each walk spelled
-# on its own
+# restated without streaming: each walk spelled on its own
 
 def _divergence_reference(arm, seq, depth):
     best = 0
@@ -394,11 +392,10 @@ class TestComparisonScans(unittest.TestCase):
 
 
 class TestWriteAccounts(unittest.TestCase):
-    """The stage-L account of save() and of the MCP tools' writes at least their traced
-    peak: the files are written without a buffer (one write), and the JSON export's
-    buffered file has a stated size that is charged. Before, every one of them held a
-    buffered file's io.DEFAULT_BUFFER_SIZE (128 KiB from Python 3.14) that no account
-    charged."""
+    """The local-limits account of save() and of the MCP tools' writes is at least their
+    traced peak: the files are written without a buffer (one write), and the JSON export's
+    buffered file has a stated size that is charged. A buffered file's
+    io.DEFAULT_BUFFER_SIZE (128 KiB from Python 3.14) would otherwise be held uncharged."""
 
     def cases(self):
         out = [('comb%d' % n, lambda n=n: MT.from_response(*_comb(n))) for n in (100, 200)]

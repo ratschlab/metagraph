@@ -1,10 +1,10 @@
 """The search service's release-parity cases, ported (its report RELEASE_PARITY_2026-10-05,
 tests/test_traversal_release_parity.py at bbca7869, read-only; nothing of that repository is
 used here): the same bytes, read by this library's own client and judged by
-release_verdict(), with the library's verdict AFTER the release-gap fixes (LRG-G1..G7,
-LRG-R1..R4) and, per case, whether it now agrees with the service's decision or remains a
-documented divergence -- a service contract (the service's own stricter switches and
-history) or a possible service bug the service's report names.
+release_verdict(), with the library's verdict under the release-gap rules the report names
+(LRG-G1..G7, LRG-R1..R4) and, per case, whether it agrees with the service's decision or
+remains a documented divergence -- a service contract (the service's own stricter switches
+and history) or a possible service bug the service's report names.
 
 The bodies are those of the service's level-5 fake (answering as MetaGraph dcc0cebd, and as
 f667d775 for level 4) on its fixed clock -- the server's wall clock half a second after the
@@ -184,7 +184,7 @@ DISPATCH = {  # (reply, sent, caps)
                                  "instance" % INST, 'state': 'instance_mismatch',
                                  'expect_server_instance': INST, 'server_instance': OTHER,
                                  'attempt_id': A, 'not_after_ms': N}), SENT5, 'level5'),
-    # the service's review R3: a request that named no instance
+    # a request that named no instance
     'instance_mismatch_unsent': ((409, {'error': 'expect_server_instance mismatch',
                                         'state': 'instance_mismatch',
                                         'expect_server_instance': INST,
@@ -250,8 +250,8 @@ def _cases():
 
 CASES = _cases()
 
-# The library's verdict after the fixes: (release, early, code). Every case not listed
-# holds (False, False) with the code given in HELD.
+# The library's verdict: (release, early, code). Every case not listed holds (False, False)
+# with the code given in HELD.
 RELEASED = {
     'worker.tomb_covered': (True, True, 'tombstone'),
     'sweep.tomb_covered': (True, True, 'tombstone'),
@@ -303,7 +303,7 @@ HELD = {
     'dispatch.running': 'running',
     'dispatch.finished_other_id': 'answer_for_other_attempt',
     'dispatch.instance_mismatch': 'not_a_release_answer',
-    'dispatch.instance_mismatch_unsent': 'not_a_release_answer',   # LRG-G2 (review R3)
+    'dispatch.instance_mismatch_unsent': 'not_a_release_answer',   # LRG-G2
     'dispatch.tomb_other_id': 'answer_for_other_attempt',
     'dispatch.instance_mismatch.switch_on': 'not_a_release_answer',
     'response.usage_other_attempt': 'answer_for_other_attempt',
@@ -345,7 +345,7 @@ SERVICE_DIVERGES = {
                                      'critique C2: an echo mismatch is a canary; the '
                                      'received response releases'),
 }
-# Divergences at bbca7869 that the fixes closed: the library now decides as the service
+# Divergences of the service's table at bbca7869 on which the library decides as the service
 NOW_AGREE = {
     'worker.flip.suppression_short': 'LRG-R3: suppressed_until_ms >= not_after_ms + skew',
     'sweep.stopping_200.late': 'LRG-R4 / X2: no clock release against running or stopping',
@@ -436,13 +436,13 @@ class TestReleaseParity(unittest.TestCase):
                     self.assertNotEqual(service, mine)
                     self.assertIn(cls, ('service contract', 'possible service bug'))
                 elif case.id in NOW_AGREE:
-                    # the service's decision at bbca7869 is the library's now
+                    # the service's decision at bbca7869 is the library's
                     service = {'worker.flip.suppression_short': (False, False),
                                'sweep.stopping_200.late': (False, False),
                                'dispatch.finished': (True, False),
                                'dispatch.expired': (True, False)}[case.id]
                     self.assertEqual(service, mine)
-        self.assertEqual(16, len(SERVICE_DIVERGES))     # 20 at bbca7869, 4 closed
+        self.assertEqual(16, len(SERVICE_DIVERGES))     # the table's 20 less NOW_AGREE's 4
 
     def test_the_assumptions_the_releases_state(self):
         by_id = {c.id: c for c in CASES}
@@ -490,7 +490,7 @@ class TestReaders(unittest.TestCase):
         expired = DISPATCH['expired'][0][1]
         self.assertIs(type(classify_409(expired)), AttemptExpired)
         mismatch = DISPATCH['instance_mismatch'][0][1]
-        # an instance_mismatch only to a request that named an instance (review R3)
+        # an instance_mismatch only to a request that named an instance
         self.assertIs(type(classify_409(mismatch, SENT5)), InstanceMismatch)
         self.assertIs(type(classify_409(mismatch, _request(SENT5))), InstanceMismatch)
         for sent in (None, NONE, AttemptSent(A, N), {'seeds': []}):
@@ -512,7 +512,7 @@ class TestReaders(unittest.TestCase):
         self.assertEqual(INST, AttemptConflict(409, 'x', body).server_instance)
         body = {'attempt': {'attempt_id': A, 'state': 'unknown'}, 'tombstone': True}
         self.assertTrue(AttemptConflict(409, 'x', body).tombstoned)
-        # C23: a null in the object is absent (the duplicate 409 writes "tombstone": null)
+        # a null in the object is absent (the duplicate 409 writes "tombstone": null)
         body = {'attempt': {'attempt_id': A, 'state': 'unknown', 'tombstone': None,
                             'server_instance': None}, 'tombstone': True,
                 'server_instance': INST}
@@ -574,7 +574,7 @@ class TestReaders(unittest.TestCase):
         got = AttemptAnswer(dict(_state('finished', _usage())), 200, 'attempt')
         self.assertEqual(1000, got.usage['work_units'])
         self.assertIsNone(AttemptAnswer(CANCEL['tomb_level4'][1], 404, 'cancel').usage)
-        # O31: an answer that names no attempt_id holds
+        # an answer that names no attempt_id holds
         anon = AttemptAnswer({k: v for k, v in COVERED[1].items() if k != 'attempt_id'},
                              404, 'cancel')
         v = release_verdict(anon, SENT5, attempts=CAPS['level5'])
@@ -599,7 +599,7 @@ class TestReleaseGrounds(unittest.TestCase):
         v = self.verdict(e, NONE)
         self.assertEqual(('sent_without_not_after_ms', 'sent_without_expect_server_instance'),
                          v.assumptions)
-        # O19: a finish stated by another process than the pinned one, or of another copy
+        # a finish stated by another process than the pinned one, or of another copy
         other = copy.deepcopy(DISPATCH['finished'][0][1])
         other['attempt']['server_instance'] = OTHER
         self.assertEqual(('other_server_instance',),
@@ -651,11 +651,11 @@ class TestReleaseGrounds(unittest.TestCase):
                          self.verdict(e, AttemptSent('b', N, INST)).code)
 
     def test_r2_the_server_clock_step_back(self):
-        # The review of the P2 fixes: later copies are refused only while the server's clock
-        # reads later than not_after_ms (a strict check, no allowance), and the server's
-        # release_rule assumes its clock does not step back below it. Every release assumes
-        # a step back of at most clock_skew_allowance_ms, so the expired release states the
-        # step of its own wherever the 409's margin is within that, or cannot be judged
+        # Later copies are refused only while the server's clock reads later than
+        # not_after_ms (a strict check, no allowance), and the server's release_rule assumes
+        # its clock does not step back below it. Every release assumes a step back of at most
+        # clock_skew_allowance_ms, so the expired release states the step of its own wherever
+        # the 409's margin is within that, or cannot be judged
         body = DISPATCH['expired'][0][1]
 
         def at(margin):
@@ -689,7 +689,7 @@ class TestReleaseGrounds(unittest.TestCase):
         e = classify_409(dict(body, server_time_ms=N + 3), AttemptSent(A, N))
         self.assertEqual(('server_clock_step_back', 'sent_without_expect_server_instance'),
                          self.verdict(e, AttemptSent(A, N)).assumptions)
-        # the reviewer's numbers: a 1 ms margin against a 2,000 ms allowance
+        # a 1 ms margin against a 2,000 ms allowance
         n = 1_800_000_000_000
         sent = {'attempt_id': 'a1', 'not_after_ms': n,
                 'expect_server_instance': 'abcdef0123456789'}
@@ -707,10 +707,10 @@ class TestReleaseGrounds(unittest.TestCase):
         self.assertEqual(('clock', ('uninterruptible_overrun',)), (v.code, v.assumptions))
 
     def test_the_clock_states_the_whole_overrun(self):
-        # The review of the P2 fixes: past its bound an attempt runs on until its next
-        # delivery check -- the rest of its piece, the walk up to a poll that reads the
-        # clock, the stopped seed's finalisation and the building up to that check -- not
-        # "one uninterruptible step"; in the server's words (its bound and release_rule)
+        # Past its bound an attempt runs on until its next delivery check -- the rest of its
+        # piece, the walk up to a poll that reads the clock, the stopped seed's finalisation
+        # and the building up to that check -- not "one uninterruptible step"; in the
+        # server's words (its bound and release_rule)
         v = self.verdict(None, now_ms=N + SKEW + BOUND_MS + 1, bound_ms=BOUND_MS)
         self.assertEqual(('clock', ('uninterruptible_overrun',)), (v.code, v.assumptions))
         for phrase in ("the attempt's run past its bound has ended",

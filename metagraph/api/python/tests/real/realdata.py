@@ -317,8 +317,8 @@ def live_identity(index):
                       manifest; True: one side has one and the other not);
       'different'     index_meta_fp, index_fp (where both state it) or index_ns differ;
       'down'          no recorded entry, or the server does not answer.
-    Every fingerprint both sides state is compared: equal index_meta_fp alone accepted a
-    live server whose manifest digest differs from the recorded one (third review, N3)."""
+    Every fingerprint both sides state is compared: equal index_meta_fp alone would accept a
+    live server whose manifest digest differs from the recorded one."""
     m = load_manifest().get('servers', {}).get(index)
     if not m or not server_up(index):
         return 'down', 'no recorded identity or no live server'

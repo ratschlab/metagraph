@@ -206,7 +206,7 @@ class TestTools(ToolsCase):
     def test_walk_support_labels_splits_claims(self):
         h = self.fetch(SEED['merge'])['handle']
         w = self.tools.graphlet_walk(h, 'right', 0, max_bytes=4096)
-        # the displayed walk passes each merge through its majority parent (R21 (4))
+        # the displayed walk passes each merge through its majority parent
         self.assertEqual([0, 1, 3, 5, 6], [r['segment'] for r in w['rows']])
         self.assertEqual({'length_bp': 38, 'loss_used': 0.0, 'labels': 4}, w['continuation'])
         s = self.tools.graphlet_support(h, 'right', 0, max_bytes=4096)
@@ -396,7 +396,7 @@ class LongNames(FakeClient):
 
 
 class TestReviewFindings(ToolsCase):
-    """The tool-layer findings of the graphlet review, one test each."""
+    """The tool layer's contracts, one test each."""
 
     def handle(self, name, **kw):
         strategy = {'labels': {'mode': 'annotate'}} if name in ('annotate', 'same_name') \
@@ -421,7 +421,7 @@ class TestReviewFindings(ToolsCase):
         rows = self.tools.graphlet_labels(h, arm='right', name={'ref': 'c:3'},
                                           max_bytes=8192)['rows']
         # both.fa's runs in run order: closed at 62 on the minority's C allele, closed at
-        # 36 on the T allele, and kept through the first parents (R21 (4))
+        # 36 on the T allele, and kept through the first parents (the majority-parent rule)
         self.assertEqual([(62, [0, 1, 3, 4]), (36, [0, 2]), (100, [0, 1, 3, 5, 6])],
                          [(r['to_bp'], r['route']) for r in rows])
 
@@ -611,15 +611,14 @@ class TestReviewFindings(ToolsCase):
         h = self.handle('merge')
         # b.fa reaches 100 bp only along its own route through a merge
         w = self.tools.graphlet_walks(h, 'right', label={'ref': 'c:1'})
-        # merge-entered, like the claims below (D5 of the third review): route_only is
-        # a claim's kind at a cut, which no uncut walk is
+        # merge-entered, like the claims below: route_only is a claim's kind at a cut, which
+        # no uncut walk is
         self.assertEqual((0, {'merge_entered': 1}), (w['total'], w['filtered']))
         self.assertIn('route_consistent=false', w['hint'])
         w = self.tools.graphlet_walks(h, 'right', label={'ref': 'c:1'}, route_consistent=False)
         self.assertEqual((1, None), (w['total'], w.get('filtered')))
         c = self.tools.graphlet_claims(h, 'right', max_bytes=8192)
-        # merge-entered claims (displayed from 62), not route_only ones (GPT review,
-        # finding 11)
+        # merge-entered claims (displayed from 62), not route_only ones
         self.assertEqual({'merge_entered': 2}, c['filtered'])
         every = self.tools.graphlet_claims(h, 'right', route_consistent=False, max_bytes=8192)
         self.assertEqual(c['total'] + 2, every['total'])

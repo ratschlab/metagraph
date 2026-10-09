@@ -415,12 +415,12 @@ TYPED_TEST(ResolveCoordTest, TraceRunsAndHeaderDiscovery) {
 #endif
 }
 
-// The review of 2026-10-06, X-EFFICIENCY-04: explicit labels with trace scanned every k-mer's
-// hit list once per label (O(labels x k-mers x hits): 2,000 labels took 5.9 s where the
-// discovery returning the same profiles took 0.2 s). One pass now hands each hit to its label's
-// accumulator, the calls the scan made in the same order: the explicit profiles of a few
-// hundred labels — runs, trace breaks, k-mers supported, under kmer and trace — are the
-// discovery's, and a label absent from the query has none
+// Explicit labels with trace hand each hit to its label's accumulator in one pass, the calls
+// a per-label scan would make in the same order: scanning every k-mer's hit list once per
+// label is O(labels x k-mers x hits) (2,000 labels: 5.9 s where the discovery returning the
+// same profiles takes 0.2 s). The explicit profiles of a few hundred labels — runs, trace
+// breaks, k-mers supported, under kmer and trace — are the discovery's, and a label absent
+// from the query has none
 TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -481,7 +481,7 @@ TYPED_TEST(ResolveCoordTest, ExplicitLabelsGiveTheDiscoverysProfiles) {
 }
 
 
-// ---- milestone 1b: the deadline of a /resolve (ResolveOptions::time_up)
+// ---- the deadline of a /resolve (ResolveOptions::time_up)
 
 // what a client reads of a profile, compared field by field
 void expect_same_profile(const SupportProfile &expected, const SupportProfile &got,
@@ -515,7 +515,7 @@ void expect_same_profile(const SupportProfile &expected, const SupportProfile &g
 // Every stop |opts| can come to, one per poll of the work (the deadline passing at the n-th
 // read, n = 1, 2, ... until the work completes before it; past |dense| polls every tenth part
 // of them, since each check re-runs the whole resolve and a prefix's), each checked against
-// what the decision B7 promises: exactly the resolve of the query's first
+// what the prefix rule promises: exactly the resolve of the query's first
 // stop->resolved_kmers k-mers, resolved_kmers being a k-mer in the graph whose labels were not
 // read, never decreasing in n. Without a stop the profile is the unbudgeted one. Returns the
 // stops seen: (phase, k-mers resolved)
@@ -572,11 +572,11 @@ size_t count_phase(const std::vector<std::pair<ResolveStop::Phase, uint64_t>> &s
                          [phase](const auto &s) { return s.first == phase; });
 }
 
-// Milestone 1b (decision B7, DESIGN-traverse-graphlet.md §21): a resolve its deadline stops is
-// exactly the resolve of a query prefix, wherever the stop falls among the row batches — a
-// discovery with and without truncation and explicit labels (primed from rows or tuple rows),
-// presence and trace, on a query with a stretch absent from the graph and a repeat (rows kept
-// for a later occurrence), its rows read three at a time
+// The prefix rule (DESIGN-traverse-graphlet.md §21): a resolve its deadline stops is exactly
+// the resolve of a query prefix, wherever the stop falls among the row batches — a discovery
+// with and without truncation and explicit labels (primed from rows or tuple rows), presence
+// and trace, on a query with a stretch absent from the graph and a repeat (rows kept for a
+// later occurrence), its rows read three at a time
 TYPED_TEST(ResolveCoordTest, DeadlineStopIsTheResolveOfAPrefix) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -625,13 +625,12 @@ TYPED_TEST(ResolveCoordTest, DeadlineStopIsTheResolveOfAPrefix) {
     EXPECT_GT(stops, 200u);
 }
 
-// Milestone 1b: the explicit labels' hits under a deadline. On the direct path (three labels of
-// a column annotation: no rows primed, the hits are cell reads) they are fetched
-// kResolveCheckKmers k-mers at a time with the deadline read before each piece: a stop there
-// resolves the k-mers before the next one in the graph from the piece on. On the row paths each
-// priming batch's k-mers are scattered as it is primed, so every stop falls between batches and
-// keeps the rows read (review of 2026-10-07, T3-01/V1-01). Without a stop the profile is the one
-// fetch's
+// The explicit labels' hits under a deadline. On the direct path (three labels of a column
+// annotation: no rows primed, the hits are cell reads) they are fetched kResolveCheckKmers
+// k-mers at a time with the deadline read before each piece: a stop there resolves the k-mers
+// before the next one in the graph from the piece on. On the row paths each priming batch's
+// k-mers are scattered as it is primed, so every stop falls between batches and keeps the rows
+// read. Without a stop the profile is the one fetch's
 TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
     using Graph = typename TypeParam::first_type;
     using Annotation = typename TypeParam::second_type;
@@ -685,8 +684,8 @@ TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
         EXPECT_EQ((std::set<uint64_t>{ next_in_graph, 2 * kResolveCheckKmers,
                                        3 * kResolveCheckKmers }), in_hits);
     } else {
-        // no stop in a hits pass, and the late ones keep their rows: before the fix every
-        // priming stop past 4,096 k-mers became (support, about 4,300) at the hits pass's
+        // no stop in a hits pass, and the late ones keep their rows: otherwise every priming
+        // stop past 4,096 k-mers would become (support, about 4,300) at the hits pass's
         // second read of the deadline already passed
         EXPECT_TRUE(in_hits.empty());
         EXPECT_GT(count_phase(seen, ResolveStop::ROWS), 10u);
@@ -700,13 +699,12 @@ TYPED_TEST(ResolveTest, DeadlineStopsTheExplicitHitsPass) {
     EXPECT_GT(count_phase(discovered, ResolveStop::ROWS), 3u);
 }
 
-// Milestone 1b: the loops over the labels after the work read ResolveOptions::finish_check
-// every kResolveCheckLabels labels, and what it throws abandons the request. The reads are
-// counted exactly (review of 2026-10-07, T3-04: a lower bound let two of a discovery's loops
-// lose their check unseen): a loop over n labels reads it at the labels kResolveCheckLabels,
-// 2 kResolveCheckLabels, ... below n; a discovery has four such loops (the ranking, the
-// naming, the profiles, the candidates' grouping), explicit labels two (the profiles, the
-// grouping)
+// The loops over the labels after the work read ResolveOptions::finish_check every
+// kResolveCheckLabels labels, and what it throws abandons the request. The reads are counted
+// exactly (a lower bound would let one of a discovery's loops lose its check unseen): a loop
+// over n labels reads it at the labels kResolveCheckLabels, 2 kResolveCheckLabels, ... below
+// n; a discovery has four such loops (the ranking, the naming, the profiles, the candidates'
+// grouping), explicit labels two (the profiles, the grouping)
 TEST(Resolve, FinishCheckIsReadInTheLoopsOverTheLabels) {
     const std::string q = random_seq(200, 51);
     for (size_t n : { kResolveCheckLabels, kResolveCheckLabels + 1,

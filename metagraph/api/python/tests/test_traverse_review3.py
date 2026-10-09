@@ -1,36 +1,36 @@
-"""The third external review of stage 2 (GPT, HEAD 278a53dd), Python side: one class per
-finding or design decision.
+"""Continuations, comparisons and the tools' contracts, Python side: one class per hazard,
+the key of each in its class name (TestFinding4..., TestN2..., TestD4..., TestRound3A...).
 
-  4   continuing could exceed the original loss budget: next_request() subtracted C's
-      loss_used, the SMALLEST terminal loss of the continued labels;
-  5   a switched continuation built an invalid request: its labels.extra still held the
-      label the continuation now seeds with (backend 400);
-  6   merges beyond the comparison depth caused false differences before it: compare()
-      cut the deeper DAG's displayed walks and claims instead of restricting the DAG;
-  N2  an argument-binding error ignored the max_bytes the caller supplied;
-  N3  the live test oracle accepted a server whose manifest digest differed;
+  4   continuing must not exceed the original loss budget: subtracting C's loss_used, the
+      SMALLEST terminal loss of the continued labels, would allow it;
+  5   a switched continuation is a valid request: its labels.extra must not hold the label
+      the continuation now seeds with (backend 400);
+  6   merges beyond the comparison depth cause no differences before it: compare()
+      restricts the DAG instead of cutting the deeper DAG's displayed walks and claims;
+  N2  an argument-binding error keeps the max_bytes the caller supplied;
+  N3  the live test oracle refuses a server whose manifest digest differs;
   D1  annotate witness routes, D4 one-sided manifests (unverifiable, opt-in), D5 the
       walk filter's key, D6 receipts of operations that make something, D7 the local
-      operations' (missing) budgets.
+      operations' budgets.
 
-And the adversarial review of those fixes (round 3):
+And on the same paths:
 
-  A   compare() still differed when the comparison depth equalled a merge position;
+  A   compare() does not differ when the comparison depth equals a merge position;
   B   a malformed continuation override, an arm that is no string and resolve labels
-      that are no list raised instead of answering a bounded error;
-  C   traverse_continue made the per-label loss list essential, so a walk with many
-      labels was refused at the default ceiling;
-  D   a label alive at the leaf but not among the continuation's labels was dropped from
-      the continuation unstated.
+      that are no list answer a bounded error instead of raising;
+  C   traverse_continue keeps the per-label loss list inessential, so a walk with many
+      labels is not refused at the default ceiling;
+  D   a label alive at the leaf but not among the continuation's labels is stated, not
+      dropped from the continuation.
 
-data/traverse/review3/ holds three responses (detail graphlet, timing off) of the review's
+data/traverse/review3/ holds three responses (detail graphlet, timing off) of the
 reproducers, produced with build_debug/metagraph on the CLI fixture indexes of
 scripts/traversal/graphlet_fixtures.py with an index manifest (so their identity is
 verifiable): bubbles_annotate_r30 / _r100 (the annotate fixture's request, right arm,
 max_labels_per_node 64, radius 30 / 100) and budgetchain_r80 (the switch_chain request on
 the chain index extended by the records E, F, G and H, seed labels A and E, extra
-B C D F G H). Round 3 adds, from the same binary and indexes: merge_constrain_r36 /
-_r100 / _b0_r100 (the 'merge' CLI fixture walked to 36 and 100, and to 100 with no branch
+B C D F G H); and, from the same binary and indexes: merge_constrain_r36 / _r100 /
+_b0_r100 (the 'merge' CLI fixture walked to 36 and 100, and to 100 with no branch
 allowance), bubbles_annotate_r36 / _r62 (the request of bubbles_annotate_r100 walked to the
 merges), budgetchain_ae_r31 (the budgetchain request walked to 31: B switched in at 30) and
 wide_forbid_r40 (30 records with long names on one walk, forbid, radius 40). The classes
@@ -93,7 +93,7 @@ def real_graphlets():
 
 
 def fixture_graphlets():
-    """Every whole-document fixture, the comparison bodies and the review's responses."""
+    """Every whole-document fixture, the comparison bodies and the reproducers' responses."""
     out = [(name, T.graphlet(name)) for name in sorted(T.DOCUMENTS)]
     for name in sorted(os.listdir(T.COMPARE)):
         if name.endswith('.mgt'):
@@ -120,8 +120,8 @@ class _Indexes:
     def G(cls):
         if not hasattr(cls, '_G'):
             cls._G = T.fixture_script()
-            # the review's budgetchain: the chain index with E (S T1 T2 and the first 20 bp
-            # of T3, so it ends inside the walk) and F, G, H chaining 30 bp blocks on
+            # budgetchain: the chain index with E (S T1 T2 and the first 20 bp of T3, so it
+            # ends inside the walk) and F, G, H chaining 30 bp blocks on
             G = cls._G
             G.INDEXES['budgetchain'] = copy.deepcopy(G.INDEXES['chain'])
             spec = G.INDEXES['budgetchain']
@@ -147,7 +147,7 @@ class _Indexes:
                     continue
                 # one graph with one annotation: the column annotation the column_coord one
                 # was transformed from is another annotation, which a manifest must not list
-                # (the server refuses it since the review of pass 5)
+                # (the server refuses it)
                 if p.endswith('dbg') and p not in loaded:
                     continue
                 with open(full, 'rb') as f:
@@ -204,17 +204,17 @@ def cli_requests():
         yield name, fx['index'], r
 
 
-# ------------------------------------------------------------------ finding 4
+# ------------------------------------------------------------------ the loss budget of a continuation
 
 class TestFinding4ContinuationLossBudget(unittest.TestCase):
     """A continuation must never let a route exceed its original loss budget. The C
     record's loss_used is the SMALLEST terminal loss of the labels the walk continues
-    with: the review's budgetchain walk 1 ends with E at loss 0 and C at loss 2 under a
-    budget of 3, so subtracting loss_used left the whole budget 3 to C as well, and the
-    continuation reached 180 bp accepting a cumulative cost of 4 where the uninterrupted
-    walk stops at 150 (loss_budget). The request carries one loss budget and no per-label
-    starting loss, so it is now reduced by the LARGEST terminal loss -- exact for C,
-    conservative for E -- and next_request(), deepen(), the continuation and
+    with: budgetchain walk 1 ends with E at loss 0 and C at loss 2 under a budget of 3, so
+    subtracting loss_used would leave the whole budget 3 to C as well, and the
+    continuation would reach 180 bp accepting a cumulative cost of 4 where the
+    uninterrupted walk stops at 150 (loss_budget). The request carries one loss budget and
+    no per-label starting loss, so it is reduced by the LARGEST terminal loss -- exact for
+    C, conservative for E -- and next_request(), deepen(), the continuation and
     traverse_continue say so."""
 
     def setUp(self):
@@ -317,11 +317,10 @@ class TestFinding4ContinuationLossBudget(unittest.TestCase):
 
 @unittest.skipUnless(_cli(), 'needs build_debug/metagraph')
 class TestFinding4NeverDeeperThanUninterrupted(unittest.TestCase):
-    """CLI: the review's fixture both ways. Uninterrupted (radius 180) walk 1's lineage
+    """CLI: the budgetchain fixture both ways. Uninterrupted (radius 180) walk 1's lineage
     goes E (0) -> C (1, switched at 80) -> F (2) -> G (3) and stops at 150 (loss_budget).
-    Continued from 80 with 100 bp more: was 180 (H entered at a cumulative cost of 4);
-    now 120 -- 30 bp shallower, conservative for E. Walk 0 (D alone, exact) reaches 90 in
-    both."""
+    Continued from 80 with 100 bp more: 120 -- 30 bp shallower, conservative for E (not 180,
+    H entered at a cumulative cost of 4). Walk 0 (D alone, exact) reaches 90 in both."""
 
     def test_both_walks(self):
         req = copy.deepcopy(response3('budgetchain_r80')['strategy'])
@@ -351,7 +350,7 @@ class TestFinding4NeverDeeperThanUninterrupted(unittest.TestCase):
         return graphlet3('budgetchain_r80').seed.sequence
 
 
-# ------------------------------------------------------------------ finding 5
+# ------------------------------------------------------------------ switched continuations
 
 def _constrain_continuations(graphlets):
     for name, g in graphlets:
@@ -364,12 +363,13 @@ def _constrain_continuations(graphlets):
 
 
 class TestFinding5ContinuationRequestsAreValid(unittest.TestCase):
-    """A switched continuation promoted its labels into the seed but kept the original
-    labels.extra: switch_chain walk 1 gave seed ['C'] with extra ['B', 'C', 'D'], a 400
-    ('Extra label C duplicates a seed label'), from next_request(), deepen() and
-    traverse_continue alike. labels.extra is now rebuilt around the new seed labels: the
-    retrieval's permitted labels minus them (A, an original seed label, is a switch target
-    now), each kept that a seed label reaches in one switch within the budget."""
+    """A switched continuation promotes its labels into the seed and rebuilds labels.extra
+    around the new seed labels: keeping the original labels.extra, switch_chain walk 1
+    would give seed ['C'] with extra ['B', 'C', 'D'], a 400 ('Extra label C duplicates a
+    seed label'), from next_request(), deepen() and traverse_continue alike. labels.extra
+    is the retrieval's permitted labels minus the new seed labels (A, an original seed
+    label, is a switch target), each kept that a seed label reaches in one switch within
+    the budget."""
 
     def test_the_reviewers_case(self):
         req = T.graphlet('switch_chain').next_request('right', [1], bp=50)
@@ -413,7 +413,7 @@ class TestFinding5ContinuationRequestsAreValid(unittest.TestCase):
         self.assertEqual([['D'], ['C']], [r['seeds'][0]['labels'] for r in reqs])
         for r in reqs:
             self.assertEqual([], T.request_violations(r))
-        # forbid: no switch target at all, so the walks share one request as before
+        # forbid: no switch target at all, so the walks share one request
         two = T.graphlet('fork').next_request('left', [0, 1])
         self.assertEqual(2, len(two['seeds']))
         self.assertEqual([], two['strategy']['labels']['extra'])
@@ -471,7 +471,7 @@ class TestFinding5TheServerAcceptsThem(unittest.TestCase):
         self.assertGreater(n, 5)
 
 
-# ------------------------------------------------------------------ finding 6
+# ------------------------------------------------------------------ compare at a depth
 
 def truncated(g, depth):
     """|g| as a retrieval walked to |depth| would have recorded it, built from the model
@@ -565,12 +565,12 @@ def _differences(c, mode):
 
 
 class TestFinding6CompareOverTheRestrictedDag(unittest.TestCase):
-    """compare() derived its keys from the deeper DAG's displayed walks and its claims cut
-    at the depth: on the review's bubbles (annotate, radius 30 vs 100, compared at 30) the
-    merges at 36 and 62 made claims, walks and prefix_subset report differences (b.fa,
-    c.fa and both.fa on the branch that enters the merge at 36 through its non-first
-    parent: no displayed walk of the 100 bp retrieval shows it). Both DAGs are now
-    restricted to the depth before anything is keyed."""
+    """compare() restricts both DAGs to the depth before anything is keyed: deriving its
+    keys from the deeper DAG's displayed walks and its claims cut at the depth, on the
+    bubbles (annotate, radius 30 vs 100, compared at 30) the merges at 36 and 62 would make
+    claims, walks and prefix_subset report differences (b.fa, c.fa and both.fa on the
+    branch that enters the merge at 36 through its non-first parent: no displayed walk of
+    the 100 bp retrieval shows it)."""
 
     def test_the_reviewers_case(self):
         small, big = graphlet3('bubbles_annotate_r30'), graphlet3('bubbles_annotate_r100')
@@ -663,7 +663,7 @@ class TestFinding6CompareOverTheRestrictedDag(unittest.TestCase):
 class TestFinding6RealRetrievalsAtRandomRadii(unittest.TestCase):
     """CLI: every CLI fixture's request at a few random smaller radii against the
     fixture's own radius: a retrieval and a deeper one of the same seed never differ at
-    the shallower depth (before the fix: 34 of 512 comparisons did, at seed 7)."""
+    the shallower depth (a keyed cut made 34 of 512 comparisons differ, at seed 7)."""
 
     def test_no_false_difference(self):
         rng = random.Random(11)
@@ -688,7 +688,7 @@ class TestFinding6RealRetrievalsAtRandomRadii(unittest.TestCase):
         self.assertGreater(n, 100)
 
 
-# ------------------------------------------------------------------ N2
+# ------------------------------------------------------------------ binding errors
 
 class TestN2BindingErrorsHoldTheCeiling(unittest.TestCase):
     """graphlet_list(max_bytes=64, foo=1) answered 77 bytes and graphlet_summary(
@@ -724,15 +724,15 @@ class TestN2BindingErrorsHoldTheCeiling(unittest.TestCase):
         self.assertIn('foo', out['message'])
 
 
-# ------------------------------------------------------------------ N3
+# ------------------------------------------------------------------ the live oracle's manifest
 
 class TestN3LiveOracleComparesTheManifest(unittest.TestCase):
-    """realdata.live_matches_cache() compared index_meta_fp only: a live mini_refseq whose
-    index_fp differs from the recorded one was accepted, and the /resolve oracle ran
-    against it. Every fingerprint both sides state is compared now; a digest on one side
-    only cannot be verified; with no manifest on either side equal index_meta_fp is the
-    (negative) check there is, stated as unverifiable. Offline: the capability reads are
-    replaced, no socket is opened."""
+    """realdata.live_matches_cache() compares every fingerprint both sides state:
+    comparing index_meta_fp only, a live mini_refseq whose index_fp differs from the
+    recorded one would be accepted, and the /resolve oracle would run against it. A digest
+    on one side only cannot be verified; with no manifest on either side equal
+    index_meta_fp is the (negative) check there is, stated as unverifiable. Offline: the
+    capability reads are replaced, no socket is opened."""
 
     @classmethod
     def setUpClass(cls):
@@ -783,7 +783,7 @@ class TestN3LiveOracleComparesTheManifest(unittest.TestCase):
         self.assertFalse(self.R.live_matches_cache('sra'))
 
 
-# ------------------------------------------------------------------ D1, D7
+# ------------------------------------------------------------------ the tools' descriptions
 
 class TestToolDescriptionsStateTheirBudgets(unittest.TestCase):
     """The descriptions of the compare and export tools, which an agent reads: without a
@@ -799,7 +799,7 @@ class TestToolDescriptionsStateTheirBudgets(unittest.TestCase):
                              tool.__name__)
 
 
-# ------------------------------------------------------------------ D4
+# ------------------------------------------------------------------ one-sided manifests
 
 class _Caps:
     """A backend double: capabilities with a settable index_fp, and the switch_chain
@@ -829,10 +829,10 @@ class _Caps:
 
 
 class TestD4OneSidedManifestIsUnverifiable(unittest.TestCase):
-    """A manifest digest on one side only proves neither identity nor difference: it was
-    refused as index_mismatch (proven different). It is now index_unverifiable, still
-    refused automatically, and run only when the caller passes allow_unverified_index=
-    true -- the result then states the identity unverified and accepted."""
+    """A manifest digest on one side only proves neither identity nor difference: not
+    index_mismatch (proven different) but index_unverifiable, still refused automatically,
+    and run only when the caller passes allow_unverified_index=true -- the result then
+    states the identity unverified and accepted."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -888,13 +888,13 @@ class TestD4OneSidedManifestIsUnverifiable(unittest.TestCase):
         self.assertEqual('bad_argument', out['error'])
 
 
-# ------------------------------------------------------------------ D5
+# ------------------------------------------------------------------ the walk filter's key
 
 class TestD5WalksCountMergeEnteredWalks(unittest.TestCase):
-    """graphlet_walks counted the walks its route_consistent filter removed as
-    route_only (a claim's kind at a cut) while graphlet_claims counted the same situation
-    as merge_entered. Both say merge_entered now; an annotate walk whose label is recorded
-    at its end but on no route from the seed boundary is not_from_seed."""
+    """graphlet_walks and graphlet_claims both count the walks the route_consistent filter
+    removes as merge_entered (route_only is a claim's kind at a cut); an annotate walk whose
+    label is recorded at its end but on no route from the seed boundary is
+    not_from_seed."""
 
     def tools(self, name):
         tmp = tempfile.TemporaryDirectory()
@@ -935,13 +935,13 @@ class TestD5WalksCountMergeEnteredWalks(unittest.TestCase):
         self.assertTrue(seen, 'the annotate fixture filters some walk')
 
 
-# ------------------------------------------------------------------ D6
+# ------------------------------------------------------------------ receipts
 
 class TestD6ReceiptsAreNeverReplaced(unittest.TestCase):
-    """An operation that made something answered result_too_large when its answer did not
-    fit, and the caller never learned the handle or the path. Its optional fields go
-    first now (named in fields_cut); a receipt that could not fit even then is refused
-    before anything is stored or written."""
+    """An operation that made something tells the caller the handle or the path: when its
+    answer does not fit, its optional fields go first (named in fields_cut), rather than
+    the whole answer becoming result_too_large; a receipt that cannot fit even then is
+    refused before anything is stored or written."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1015,7 +1015,7 @@ class TestD6ReceiptsAreNeverReplaced(unittest.TestCase):
         self.assertEqual(n + 1, len(self.store.list()))    # nothing stored
 
 
-# ------------------------------------------------------------------ round 3 (the fixes' review)
+# ------------------------------------------------------------------ merges, overrides, wide walks
 
 class TestRound3AMergeAtTheComparisonDepth(unittest.TestCase):
     """compare() still reported false differences when the comparison depth equalled a
@@ -1066,11 +1066,11 @@ class TestRound3AMergeAtTheComparisonDepth(unittest.TestCase):
 
 
 class TestRound3BMalformedOverridesAreResults(unittest.TestCase):
-    """The rebuilt next_request() read the merged override sections as objects: an
-    override such as {'labels': 5} raised AttributeError, which the tool wrapper does not
-    catch, where HEAD answered a bounded backend_error. An unhashable arm (graphlet_walks,
-    graphlet_summary, ... traverse_continue) and traverse_resolve(labels=5) raised
-    TypeError. Each is now a bounded bad_argument or bad_arm."""
+    """next_request() checks the merged override sections' types: an override such as
+    {'labels': 5} read as an object would raise AttributeError, which the tool wrapper does
+    not catch; an unhashable arm (graphlet_walks, graphlet_summary, ... traverse_continue)
+    and traverse_resolve(labels=5) would raise TypeError. Each is a bounded bad_argument or
+    bad_arm."""
 
     BAD = ({'labels': 5}, {'labels': {'change_cost': 5}}, {'branching': 5},
            {'labels': {'extra': 'B'}}, {'labels': {'loss_budget': 'x'}},
@@ -1134,13 +1134,12 @@ class _SameIndex(_Caps):
 
 
 class TestRound3CContinueReceiptsFitWideWalks(unittest.TestCase):
-    """traverse_continue made the per-label loss budget an essential part of its receipt,
-    for every constrain request, even without a loss budget (each label at loss 0,
-    remaining 0): a continuation of a walk carrying 30 labels was refused with
-    receipt_too_large at the default 2,048-byte ceiling (3,393 bytes, 3,121 of them the
-    list), where HEAD returned the handle; and the refusal told it to use a shorter file
-    name. The list is now stated only where a loss budget applies, it is the first
-    optional field cut (fields_cut), and each tool names its own lever."""
+    """traverse_continue states the per-label loss list only where a loss budget applies,
+    as the first optional field cut (fields_cut): as an essential part of every constrain
+    receipt, even without a loss budget (each label at loss 0, remaining 0), a
+    continuation of a walk carrying 30 labels would be refused with receipt_too_large at
+    the default 2,048-byte ceiling (3,393 bytes, 3,121 of them the list), its refusal
+    telling it to use a shorter file name. Each tool names its own lever."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

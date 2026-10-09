@@ -257,7 +257,7 @@ TEST(LabelOracle, UnmaskedSuccinctKeys) {
 
 // A batch that mixes cached and uncached keys must survive eviction: the cache is
 // cleared when it would overflow, so every key of the current call has to be refetched,
-// not just the misses. Previously the second call below threw "Couldn't find key".
+// not just the misses (otherwise the second call below throws "Couldn't find key").
 TEST(LabelOracle, EvictionKeepsTheCurrentBatchAnswerable) {
     auto seqs = make_sequences(1, 60, 21);
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
@@ -485,13 +485,13 @@ TYPED_TEST(LabelOracleCoordTest, RecorderMapsOneCoordinatePerSequence) {
     }
 }
 
-// GPT review of stage 2, finding 7: the header index was a process-wide cache keyed by the
-// CoordToHeader's address and checked by a fingerprint of the corner headers, so an object
-// made at a freed address with the same corners but other headers in between was answered
-// from the stale index. The reviewer's probe: [A,X,Y,Z] looked up, destroyed, [A,Y,X,Z] made
-// at the same address, and X resolved to sequence 1, now named Y. The index now belongs to
-// the CoordToHeader, so it dies with it; and a server, whose CoordToHeader lives as long as
-// the process, still builds it once for every oracle and request.
+// The header index belongs to the CoordToHeader, so it dies with it: a process-wide cache
+// keyed by the CoordToHeader's address and checked by a fingerprint of the corner headers
+// would answer an object made at a freed address with the same corners but other headers in
+// between from the stale index. The probe: [A,X,Y,Z] looked up, destroyed, [A,Y,X,Z] made at
+// the same address, and X must resolve to its own sequence, not to sequence 1 (now Y). A
+// server, whose CoordToHeader lives as long as the process, still builds it once for every
+// oracle and request.
 TEST(LabelOracleHeaderIndex, IsBoundToItsCoordToHeader) {
     auto anno = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             5, { "ACGTAGATCGAA", "GTCTAACGTTGA", "TATGCCAGATCA", "AGCGTCTTGCGA" },
@@ -536,9 +536,9 @@ TEST(LabelOracleHeaderIndex, IsBoundToItsCoordToHeader) {
     EXPECT_EQ(1u, cth.num_header_index_builds());
 }
 
-// The efficiency pass, C4: the run mapper (LabelOracle::CoordRuns) gives map_single_coord's
-// (seq_id, local) for every coordinate of a column — sorted and unsorted, runs within one
-// sequence, consecutive sequences, scattered ones, sequence boundaries, the last sequence
+// The run mapper (LabelOracle::CoordRuns) gives map_single_coord's (seq_id, local) for every
+// coordinate of a column — sorted and unsorted, runs within one sequence, consecutive
+// sequences, scattered ones, sequence boundaries, the last sequence
 struct CoordColumn {
     std::vector<uint64_t> lengths;
     std::vector<uint64_t> starts;

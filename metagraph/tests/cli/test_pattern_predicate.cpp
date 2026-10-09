@@ -27,7 +27,7 @@
 #include "graph/traversal/label_oracle.hpp"
 
 
-// The predicate language of POST /pattern (src/cli/pattern_predicate.cpp, increment 5b-1;
+// The predicate language of POST /pattern (src/cli/pattern_predicate.cpp;
 // SPEC-pattern-search.md §19.3, §19.4, §19.9): every refusal of the parser with its path, the
 // cap, the folding of unknown names into the normal form, vacuous and monotone predicates,
 // the two- and three-valued evaluators, their units, the memory model and the echo's text.
@@ -356,7 +356,7 @@ TEST(PatternPredicate, RefusesEveryBrokenRuleWithItsPath) {
         { R"({"none": "562"})", "request.predicate.none: expected a list of column labels" },
         { R"({"all": {"562": true}})",
           "request.predicate.all: expected a list of column labels" },
-        // a number (P7: the message names the fix), another type, an empty string
+        // a number (the message names the fix), another type, an empty string
         { R"({"any": [562]})",
           "request.predicate.any[0]: expected a string (a column label; write a taxid as "
           "\"562\")" },
@@ -479,8 +479,8 @@ TEST(PatternPredicate, TheCapCountsTheListedNames) {
     EXPECT_EQ("invalid_request", refusal(R"({"any": ["a", "b", "c"], "x": 1})", 1).first);
     // a cap of 0 refuses every predicate by its size
     EXPECT_EQ("predicate_too_large", refusal(R"({"any": ["a"]})", 0).first);
-    // past the cap a name's form is still checked, its repetition in one list no longer: the
-    // walk keeps no more than the cap's names
+    // past the cap a name's form is still checked, its repetition in one list not: the walk
+    // keeps no more than the cap's names
     EXPECT_EQ("invalid_request", refusal(R"({"any": ["a", "b", "b"]})", 3).first);
     EXPECT_EQ("predicate_too_large", refusal(R"({"any": ["a", "b", "b"]})", 2).first);
     EXPECT_EQ("predicate_too_large", refusal(R"({"any": ["a", "b", "c", "c"]})", 2).first);
@@ -1149,7 +1149,7 @@ TEST(PatternPredicate, BindingAdmitsItsBytesBeforeItCopies) {
 
 TEST(PatternPredicate, BindsToTheColumnsOfAnIndexNotItsHeaders) {
     // three records, one per column, with a record mapping: a header is a label of
-    // /traverse, never a predicate term (P20)
+    // /traverse, never a predicate term
     const size_t k = 5;
     const std::vector<std::string> seqs = { "ACGTTGCAAGT", "TTGACCATGGA", "GGCATCCATTA" };
     const std::vector<std::string> cols = { "562", "573", "287" };

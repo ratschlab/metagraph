@@ -113,7 +113,7 @@ class TestTraverseBase(TestingBase):
         and sha256, as scripts/traversal/build_mini_refseq.sh writes it; -> index_fp, the
         sha256 over the lines "path\tsize\tsha256\n" in byte order of path. Never the
         graph's derived data (a mask, a Bloom filter): not part of index_fp, and refused in a
-        manifest (the owner's decision #17 of 2026-10-08)."""
+        manifest."""
         files = []
         for name in sorted(os.listdir(directory)):
             full = os.path.join(directory, name)
@@ -837,7 +837,7 @@ class TestTraverseCLI(TestTraverseBase):
         self.assertEqual(2, cut['limit'])
         self.assertEqual(result['seed']['labels_supporting_total'], cut['observed'])
         self.assertEqual([], result['arms']['right']['limitations'])
-        # conservative outcome (DESIGN-traverse-graphlet.md §14, v5.2): the walks and the
+        # conservative outcome (DESIGN-traverse-graphlet.md §14): the walks and the
         # evidence of the carrier the cap left out are missing, and both axes say so
         self.assertEqual(('partial', 'complete', 'lower_bound', 'inline'), self._outcome_axes(result))
 
@@ -938,13 +938,13 @@ class TestTraverseCLI(TestTraverseBase):
         self.assertIn('strategy.output.max_coordinate_occurrences', out['error'])
 
     def test_traverse_partial_derivation_states_its_set(self):
-        """D3 (the owner's decision of 2026-10-04): a derived seed whose time budget runs out
-        after part of its derivation is delivered with the set derived from the k-mers read —
-        a superset of the whole seed's carriers, so its label evidence is qualified — and a
-        `derivation` limitation saying how much was read; the walk stops at the seed. Read in
+        """The partial delivery of a derived seed (SPEC §7.0): a derived seed whose time budget
+        runs out after part of its derivation is delivered with the set derived from the k-mers
+        read — a superset of the whole seed's carriers, so its label evidence is qualified — and
+        a `derivation` limitation saying how much was read; the walk stops at the seed. Read in
         one piece (--traverse-chunk-target-ms 0), the derivation's first window is read whole
         and its first k-mer consumed before the clock is read; paced in chunks (the default),
-        a budget spent before the first chunk reads nothing and fails the seed, as before."""
+        a budget spent before the first chunk reads nothing and fails the seed."""
         request = {'seeds': [{'sequence': self.element}],
                    'strategy': {'direction': 'right',
                                 'bounds': {'max_extension_bp': 10, 'time_budget_ms': 1e-9}}}
@@ -970,10 +970,10 @@ class TestTraverseCLI(TestTraverseBase):
         self.assertEqual(0, result['arms']['right']['complete_to_bp'])
         self.assertEqual('truncated', result['arms']['right']['status'])
 
-        # Review of W1, finding 1: acc1 and acc2 carry the k-mer read first (in left1), acc1
-        # alone the whole seed. Under `exhaustive` with max_seed_labels 1 the superset is not
-        # refused as "2 labels carry the seed": the seed fails with the time budget, as before
-        # D3. Without it the cap cuts the superset, stated as one. Unhurried: acc1, walked
+        # acc1 and acc2 carry the k-mer read first (in left1), acc1 alone the whole seed.
+        # Under `exhaustive` with max_seed_labels 1 the superset is not refused as "2 labels
+        # carry the seed": the seed fails with the time budget. Without it the cap cuts the
+        # superset, stated as one. Unhurried: acc1, walked
         seed = self.left1 + self.element + self.right1
         n = len(seed) - K + 1
         request = {'seeds': [{'sequence': seed}],
@@ -1009,10 +1009,10 @@ class TestTraverseCLI(TestTraverseBase):
 
 class TestTraverseGraphlet(TestTraverseBase):
     """`output.detail: graphlet` through the CLI and the library (DESIGN-traverse-graphlet.md
-    §9 as amended): every body the writer produces parses, dumps back byte for byte, is
-    canonical and reproduces the detail: full result of the same request (T37); spellings,
-    orientation and continuations (T38); the §6.9 oracle and the index identity through
-    the library's comparisons (T39); the protocol (T40)."""
+    §9): every body the writer produces parses, dumps back byte for byte, is canonical and
+    reproduces the detail: full result of the same request (T37); spellings, orientation and
+    continuations (T38); the §6.9 oracle and the index identity through the library's
+    comparisons (T39); the protocol (T40)."""
 
     def _traverse_identified(self, request, manifest=None):
         """The CLI with the index identity (--index-name, --index-manifest)."""
@@ -1140,7 +1140,7 @@ class TestTraverseGraphlet(TestTraverseBase):
         self.assertEqual('failed', out['results'][1]['outcome']['walks'])
 
     def test_t37_cli_fixtures_are_reproduced(self):
-        """T37 on the review's counterexamples (§9): the whole-document fixtures of
+        """T37 on the counterexamples of §9: the whole-document fixtures of
         api/python/tests/data/traverse/documents are what this binary writes for their
         requests, byte for byte, built from their tiny indexes with this CLI. Each also
         still shows its situation (an ambiguous split with disjoint child sets after a
@@ -1276,11 +1276,11 @@ class TestTraverseGraphlet(TestTraverseBase):
 
     def test_t37_names_that_are_not_utf8(self):
         """Label names come from FASTA headers, which need not be UTF-8. No output carries
-        such a name verbatim, and a replaced one (U+FFFD, which servers wrote before) can be
-        another label's name -- a continuation that resubmitted it went on under that label
-        (GPT review, finding 1). So a seed whose labels include one is refused per seed in
-        both modes, as a failed derivation (cause unrepresentable_label_name) that names
-        the column, never the bytes; detail full and graphlet agree (T37)."""
+        such a name verbatim, and a replaced one (U+FFFD) can be another label's name -- a
+        continuation that resubmitted it would go on under that label. So a seed whose
+        labels include one is refused per seed in both modes, as a failed derivation (cause
+        unrepresentable_label_name) that names the column, never the bytes; detail full and
+        graphlet agree (T37)."""
         rng = random.Random(4711)
         block = {b: ''.join(rng.choice('ACGT') for _ in range(30)) for b in 'SABC'}
         headers = [b'\xc0abc', b'\xc0abd', b'caf\xc3\xa9']
@@ -1332,10 +1332,10 @@ class TestTraverseGraphlet(TestTraverseBase):
                 graphlet_lib.from_response(result, out)
 
     def test_t37_a_replaced_name_is_never_another_label(self):
-        """The review's probe (GPT, finding 1): column 'bad\\xff' and column 'bad\\ufffd' --
-        the second is the first's name as replaced. A derived seed carried by both is
-        refused (its dictionary holds the name that is not UTF-8); the valid name, named
-        explicitly, resolves to its own column and walks its own bases."""
+        """Column 'bad\\xff' and column 'bad\\ufffd' -- the second is the first's name as
+        replaced. A derived seed carried by both is refused (its dictionary holds the name
+        that is not UTF-8); the valid name, named explicitly, resolves to its own column and
+        walks its own bases."""
         rng = random.Random(54321)
         seq = ''.join(rng.choice('ACGT') for _ in range(120))
         alt = ('A' if seq[35] != 'A' else 'C') + 'TGCA' * 20
@@ -1379,12 +1379,11 @@ class TestTraverseGraphlet(TestTraverseBase):
     def _resource_case(self, name, records, labels, bounds, detail, seed=None,
                        direction='right', files=None, k=3, anno='column_coord', output=None,
                        **strategy):
-        """The external re-review's resource probes (GPT, stage 2): an index of |records|
-        (k = 3 unless given, header labels via --index-header-coords; |files|: {file name:
-        records} instead, one column each; |anno| column_coord, or row_diff_brwt_coord,
-        whose reads are budget-aware) and one request on |seed| (default {sequence: AAA})
-        along |direction|; -> (the result, the response's bytes). A second call with the
-        same |name| reuses the index."""
+        """Resource probes: an index of |records| (k = 3 unless given, header labels via
+        --index-header-coords; |files|: {file name: records} instead, one column each; |anno|
+        column_coord, or row_diff_brwt_coord, whose reads are budget-aware) and one request on
+        |seed| (default {sequence: AAA}) along |direction|; -> (the result, the response's
+        bytes). A second call with the same |name| reuses the index."""
         d = os.path.join(self.tempdir.name, 'resource_' + name)
         files = files or {'input.fa': records}
         if not os.path.exists(d):
@@ -1428,7 +1427,7 @@ class TestTraverseGraphlet(TestTraverseBase):
         self.assertEqual(0, res.returncode, res.stderr.decode())
         return json.loads(res.stdout.decode('utf-8'))['results'][0], len(res.stdout)
 
-    # ---- stage 3 (DESIGN-traverse-graphlet.md §14.1): the budget-aware annotation reads
+    # ---- the budget-aware annotation reads (DESIGN-traverse-graphlet.md §14.1)
 
     @staticmethod
     def _dense_files():
@@ -1488,13 +1487,12 @@ class TestTraverseGraphlet(TestTraverseBase):
         self.assertNotIn('resource_stop', result)
 
     def test_stage2_escaped_names_stay_within_the_budget(self):
-        """GPT re-review, finding 1: a header of 180,000 control characters (detail full,
-        max_memory_mb 2) gave a memory stop whose compact per-seed JSON alone was 2,163,840
-        bytes, and '%' headers delivered more than the model reserved in a graphlet: a name
-        byte was charged at a fixed four (three) bytes, but JSON writes a control character
-        as six and MGT a '%' as three, escaped once more inside the JSON string. Names are
-        now charged as delivered: each seed either fails at depth 0 (no name delivered) or
-        stays within its budget."""
+        """Names charged as delivered: a name byte charged at a fixed four (three) bytes
+        would let a header of 180,000 control characters (detail full, max_memory_mb 2) give a
+        memory stop whose compact per-seed JSON alone is 2,163,840 bytes, and '%' headers
+        deliver more than the model reserved in a graphlet, since JSON writes a control
+        character as six and MGT a '%' as three, escaped once more inside the JSON string.
+        Each seed either fails at depth 0 (no name delivered) or stays within its budget."""
         for name, header, labels, mb, detail in (
                 ('control', b'\x01' * 180000, {'mode': 'constrain', 'seed_label_kind': 'header',
                                                'max_labels_per_node': 1}, 2, 'full'),
@@ -1716,7 +1714,7 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertGreater(caps[cap], 0, cap)
         # the request budgets, and how far a work stop can exceed one: stated with what
         # bounds it (a fetch call's rows are decoded whole; each stop states the most its
-        # seed charged between two comparisons), not as the fixed interval W (GPT re-review)
+        # seed charged between two comparisons), not as the fixed interval W
         self.assertEqual(['max_memory_mb', 'max_work_units'], caps['budgets'])
         self.assertEqual(65536, caps['work_check_interval'])
         self.assertIn('indivisible charge', caps['work_bound'])
@@ -1738,8 +1736,7 @@ class TestTraverseAPI(TestTraverseBase):
                           co['max_occurrences_default'], co['kinds'], co['limitation'],
                           co['action']))
         self.assertEqual(caps['supports_trace'], co['supported'])
-        # the true bound of the block, and the column record-end numbering (review of W1,
-        # finding 6)
+        # the true bound of the block, and the column record-end numbering
         # (a server maximum is the budget of a request without one: the text names the probe's
         # max_memory_mb, never a value it could contradict)
         self.assertIn("this server's max_memory_mb", co['output_bound'])
@@ -1751,7 +1748,7 @@ class TestTraverseAPI(TestTraverseBase):
                                       'strategy': {'bounds': {'max_extension_bp': 10}}}).json()
         self.assertNotIn('coordinates', out['capabilities'])
         self.assertEqual(caps['feature_level'], out['capabilities']['feature_level'])
-        # max_uninterruptible_ms stays null (decision 3c-N5): no later stage promises a bound
+        # max_uninterruptible_ms stays null: no bound is promised
         self.assertIsNone(caps['deadline_check']['max_uninterruptible_ms'])
         self.assertIn('it stays null', caps['deadline_check']['rule'])
         self.assertNotIn('before stage 3c', caps['deadline_check']['rule'])
@@ -1820,11 +1817,12 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual([], ret.json()['strategy']['clamped'])
 
     def test_api_resolve_deadline(self):
-        """Milestone 1b (SPEC §4.5): bounds.time_budget_ms on /resolve. The `resolve` block on
-        both GET routes; a budget a microsecond above the finalisation reserve stops the work
-        before its first row (200: the stop block, the resolve of the empty prefix); one at the
-        reserve is a 400 naming the field; one above the cap is lowered to it and stated, the
-        answer otherwise the unbudgeted one; the library and the CLI (no cap) alike."""
+        """The /resolve deadline (SPEC §4.5): bounds.time_budget_ms on /resolve. The `resolve`
+        block on both GET routes; a budget a microsecond above the finalisation reserve stops
+        the work before its first row (200: the stop block, the resolve of the empty prefix);
+        one at the reserve is a 400 naming the field; one above the cap is lowered to it and
+        stated, the answer otherwise the unbudgeted one; the library and the CLI (no cap)
+        alike."""
         url = f'http://{self.host}:{self.port}'
         probe = requests.get(url + '/traverse/capabilities').json()
         server = requests.get(url + '/capabilities').json()
@@ -1964,9 +1962,9 @@ class TestTraverseAPI(TestTraverseBase):
     def test_api_accept_encoding_honours_quality_values(self):
         """HTTP transport (RFC 9110 §12.5.3): a coding with q=0 is not acceptable, `*` covers
         the codings not listed, tokens are case-insensitive and the higher weight wins
-        (gzip on a tie). A substring test used to answer gzip to the first two headers
-        below (review round 4, finding 4). It is the shared process_request() path, so
-        the capabilities route stands for every route."""
+        (gzip on a tie). A substring test would answer gzip to the first two headers below.
+        It is the shared process_request() path, so the capabilities route stands for every
+        route."""
         url = f'http://{self.host}:{self.port}/traverse/capabilities'
         plain = requests.get(url=url, headers={'Accept-Encoding': 'identity'})
         self.assertEqual(200, plain.status_code, plain.text)
@@ -2018,8 +2016,8 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertIn(key, result['timing'])
 
     def test_api_not_after_ms(self):
-        """Pass 5, W1: a request whose not_after_ms has passed on the server's clock is refused
-        at handler start, 409 {error, state: expired, not_after_ms, server_time_ms, ids,
+        """A request whose not_after_ms has passed on the server's clock is refused at handler
+        start, 409 {error, state: expired, not_after_ms, server_time_ms, ids,
         server_instance}, runs nothing and registers nothing (GET answers 404), with or
         without attempt_id; one not passed runs and echoes it in usage; a malformed one is a
         400 without usage. The probe states the clock skew a ledger adds."""
@@ -2099,10 +2097,10 @@ class TestTraverseAPI(TestTraverseBase):
                          (cli['state'], cli['not_after_ms'], cli['attempt_id']))
 
     def test_api_bodies_are_the_cli_output_at_every_encoding(self):
-        """Pass 5, W6: the traversal routes compress at level 1 (the probe says so) and write
-        each seed's result as text once built; the gzip, deflate and identity bodies all
-        decompress to the same bytes, which are those of `metagraph traverse --json` for the
-        same request (with several seeds, a failed one among them, in two details)."""
+        """The traversal routes compress at level 1 (the probe says so) and write each seed's
+        result as text once built; the gzip, deflate and identity bodies all decompress to the
+        same bytes, which are those of `metagraph traverse --json` for the same request (with
+        several seeds, a failed one among them, in two details)."""
         url = f'http://{self.host}:{self.port}'
         self.assertEqual(1, requests.get(url + '/traverse/capabilities').json()['compression_level'])
         for detail in ('full', 'graphlet'):
@@ -2167,7 +2165,7 @@ class TestTraverseAPI(TestTraverseBase):
                                       'strategy': {'output': {'max_coordinate_occurrences': 3}}})
         self.assertEqual(400, ret.status_code)
         self.assertIn('max_coordinate_occurrences', ret.json()['error'])
-        # 0 and a number above the maximum state the whole range (review of W1, finding 4)
+        # 0 and a number above the maximum state the whole range
         for cap in (0, 18446744073709551615):
             ret = self._post('traverse', {'seeds': [{'sequence': self.element}],
                                           'strategy': {'output': {'coordinates': True,
@@ -2176,7 +2174,7 @@ class TestTraverseAPI(TestTraverseBase):
             self.assertIn('strategy.output.max_coordinate_occurrences: out of range '
                           '[1, 18446744073709551614] (or "unlimited")', ret.json()['error'])
         # a memory stop, with and without coordinates: offered wherever they were asked for,
-        # also where only their null form is (support kmer; review of W1, finding 2)
+        # also where only their null form is (support kmer)
         offered = {}
         for support in ('trace', 'kmer'):
             for coordinates in (True, False):
@@ -2199,8 +2197,8 @@ class TestTraverseAPI(TestTraverseBase):
                           ('kmer', True): True, ('kmer', False): False}, offered)
 
     def test_api_spec_resolve_example_is_accepted(self):
-        """Review of pass 5: SPEC §4.1's resolve request example set both labels and discover,
-        which the server refuses (exactly one); copied with a real sequence, it is answered."""
+        """SPEC §4.1's resolve request example sets exactly one of labels and discover (the
+        server refuses both); copied with a real sequence, it is answered."""
         with open(os.path.join(REPO, 'docs', 'SPEC-labeled-traversal-core.md'),
                   encoding='utf-8') as f:
             spec = f.read()
@@ -2217,10 +2215,10 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(200, ret.status_code, ret.text)
 
     def test_api_server_capabilities(self):
-        """Pass 5, W3/W4: GET /capabilities, the server-wide document: routes and features,
-        feature_level 6 (5 at the review of pass 5, 4 at the efficiency pass, 3 in pass 5), algorithm_version (as every response's), mode single, no graph list,
-        the attempts block (as the probe's) and how deadlines are checked; the number types
-        a ledger compares are integers."""
+        """GET /capabilities, the server-wide document: routes and features, feature_level 6,
+        algorithm_version (as every response's), mode single, no graph list, the attempts
+        block (as the probe's) and how deadlines are checked; the number types a ledger
+        compares are integers."""
         url = f'http://{self.host}:{self.port}'
         ret = requests.get(url + '/capabilities', headers={'Accept-Encoding': 'gzip'})
         self.assertEqual(200, ret.status_code, ret.text)
@@ -2274,8 +2272,8 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertIs(type(reserve['coordinate_account_per_text_byte']), int)
         self.assertEqual(12, reserve['coordinate_account_per_text_byte'])
         self.assertIn('ceil(C / coordinate_account_per_text_byte)', reserve['rule'])
-        # the reserve's margin and the walk's stop time (review of pass 5, F3), calibrated in
-        # the efficiency pass (feature level 4): + 950 ms (+ 200 before), ratios 30 / 50
+        # the reserve's margin and the walk's stop time, calibrated (feature level 4):
+        # + 950 ms, ratios 30 / 50
         self.assertEqual(1.25, reserve['margin'])
         self.assertIs(type(reserve['stop_ms']), int)
         self.assertEqual(c['deadline_check']['chunk_target_ms'] + 950, reserve['stop_ms'])
@@ -2298,11 +2296,11 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(probe['index_meta_fp'], client.capabilities()['index_meta_fp'])
 
     def test_api_attempts(self):
-        """Stage 4, backend half: a request with attempt_id (budget_id and locus_id echoed)
-        states its usage in every response — successful, partial, with a failed seed, or a
-        400 after the request was read — and is otherwise the response without it; an id
-        runs once (409, no usage), a malformed one is a 400 without usage, and a cancel or a
-        state query of a finished or unknown id is a 404 (an unknown id is tombstoned)."""
+        """Attempts: a request with attempt_id (budget_id and locus_id echoed) states its
+        usage in every response — successful, partial, with a failed seed, or a 400 after the
+        request was read — and is otherwise the response without it; an id runs once (409, no
+        usage), a malformed one is a 400 without usage, and a cancel or a state query of a
+        finished or unknown id is a 404 (an unknown id is tombstoned)."""
         url = f'http://{self.host}:{self.port}'
         caps = requests.get(url=url + '/traverse/capabilities').json()
         att = caps['attempts']
@@ -2367,7 +2365,7 @@ class TestTraverseAPI(TestTraverseBase):
         self.assertEqual(409, dup.status_code, dup.text)
         self.assertNotIn('usage', dup.json())
         self.assertEqual('finished', dup.json()['attempt']['state'])
-        # nothing to cancel any more
+        # nothing left to cancel
         cancel = self._post('traverse/cancel', {'attempt_id': 'api-ok'})
         self.assertEqual(404, cancel.status_code, cancel.text)
         self.assertEqual((False, 'finished'), (cancel.json()['cancelled'], cancel.json()['state']))
@@ -2484,10 +2482,10 @@ RESOLVE_BASE_BINARY = os.environ.get('METAGRAPH_BASE_BINARY', '')
 @unittest.skipUnless(RESOLVE_BASE_BINARY and os.path.isfile(RESOLVE_BASE_BINARY),
                      "$METAGRAPH_BASE_BINARY (a binary before /resolve's deadline) is not set")
 class TestTraverseResolveRegression(TestTraverseBase):
-    """Milestone 1b (SPEC §4.5): a /resolve without bounds.time_budget_ms is answered byte for
-    byte as by the binary before the deadline ($METAGRAPH_BASE_BINARY, e.g. the build of
-    804731aa), apart from timing.elapsed_ms: the resolve requests of this file and their
-    refusals, on the server (with and without gzip) and on the CLI."""
+    """The /resolve deadline is opt-in (SPEC §4.5): a /resolve without bounds.time_budget_ms is
+    answered byte for byte as by a binary without the deadline ($METAGRAPH_BASE_BINARY),
+    apart from timing.elapsed_ms: the resolve requests of this file and their refusals, on
+    the server (with and without gzip) and on the CLI."""
 
     @classmethod
     def setUpClass(cls):
@@ -2595,10 +2593,10 @@ class TestTraverseResolveRegression(TestTraverseBase):
 @unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 class TestTraverseMultiGraph(TestTraverseBase):
-    """Pass 5, W2: per-graph identity on a multi-graph server. The graph list gains two
-    optional columns, manifest_path and index_ns, each manifest checked at start-up against
-    the files its pair loads (a mismatch refuses to start); every /resolve and /traverse
-    response, and every graphlet's H record, states its pair's identity; GET
+    """Per-graph identity on a multi-graph server. The graph list has two optional columns,
+    manifest_path and index_ns, each manifest checked at start-up against the files its pair
+    loads (a mismatch refuses to start); every /resolve and /traverse response, and every
+    graphlet's H record, states its pair's identity; GET
     /traverse/capabilities?graph=<name>[&graph_path=<path>] describes one pair; a graph_path
     naming one graph with several annotations is refused (it cannot choose one). The manifests
     of the list are written by scripts/traversal/index_manifest.py --server-csv."""
@@ -2763,7 +2761,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
                          (ret.json()['graph_path'], ret.json()['index_ns'],
                           ret.json()['index_fp']))
         # one graph with two annotations cannot be addressed by graph_path, and a name listing
-        # only that is refused as such, not told to pass graph_path (review of pass 5)
+        # only that is refused as such, not told to pass graph_path
         quoted = requests.utils.quote(self.graph, safe='')
         ret = self._caps(f'?graph=C&graph_path={quoted}')
         self.assertEqual(400, ret.status_code, ret.text)
@@ -2882,7 +2880,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         finally:
             server.close()
 
-    # ---- review of pass 5, findings 2 and 3: one loader dependency inventory
+    # ---- one loader dependency inventory
 
     def _run_ok(self, cmd, cwd):
         res = subprocess.run(shlex.split(cmd), cwd=cwd, stdout=subprocess.PIPE,
@@ -2937,10 +2935,10 @@ class TestTraverseMultiGraph(TestTraverseBase):
         beside the graph), coordinate annotations with and without their .seqs, a column
         annotation with its .coords (not loaded), --no-coord-mapping, a symlinked spelling —
         both list the same files in the same roles, and their annotation tables are equal.
-        The graph's derived data (the owner's decision #17 of 2026-10-08: its mask and Bloom
-        filter, not part of index_fp) is in neither's identity files; both list it apart
-        (index_derived_files, derived_files) with whether the loader reads it, and state the
-        same rule; `index_manifest.py --inventory` prints what the binary prints."""
+        The graph's derived data (its mask and Bloom filter, not part of index_fp) is in
+        neither's identity files; both list it apart (index_derived_files, derived_files)
+        with whether the loader reads it, and state the same rule; `index_manifest.py
+        --inventory` prints what the binary prints."""
         sys.path.insert(0, os.path.join(REPO, 'scripts', 'traversal'))
         import index_manifest as im
         d = os.path.join(self.tempdir.name, 'inventory')
@@ -3014,18 +3012,17 @@ class TestTraverseMultiGraph(TestTraverseBase):
                           for k in cli['annotation_kinds']], im.ANNOTATION_KINDS)
 
     def test_symlinked_main_files_do_not_hide_their_sidecars(self):
-        """Review of pass 5, finding 2 (the reviewer's /tmp/metagraph-pass5-identity probe):
-        two pairs whose graph and annotation are symlinks to the same files, each with its own
-        .seqs beside the symlinks (sampleA, sampleBBBB), both naming A's manifest. Grouped by
-        the main files, B's .seqs was never checked and both stated one index_fp; now each
-        pair's whole inventory is checked, so the server refuses to start, naming B's .seqs.
-        With a manifest per pair (index_manifest.py --server-csv) it starts, and the two state
-        different index_fp and their own headers."""
+        """Two pairs whose graph and annotation are symlinks to the same files, each with its
+        own .seqs beside the symlinks (sampleA, sampleBBBB), both naming A's manifest. Grouped
+        by the main files, B's .seqs would never be checked and both would state one index_fp;
+        each pair's whole inventory is checked, so the server refuses to start, naming B's
+        .seqs. With a manifest per pair (index_manifest.py --server-csv) it starts, and the two
+        state different index_fp and their own headers."""
         d = os.path.join(self.tempdir.name, 'symlinks')
         seq = self._symlinked_bundles(d, (('A', 'sampleA'), ('B', 'sampleBBBB')))
         sizes = [os.path.getsize(f'{d}/{side}/annotation.seqs') for side in 'AB']
         self.assertNotEqual(sizes[0], sizes[1])
-        # A's manifest (as the reviewer's shared-manifest.json): A's files, A's .seqs
+        # A's manifest (a shared manifest): A's files, A's .seqs
         files = []
         for name in ('graph.dbg', 'annotation.column_coord.annodbg', 'annotation.seqs'):
             with open(f'{d}/A/{name}', 'rb') as f:
@@ -3071,14 +3068,14 @@ class TestTraverseMultiGraph(TestTraverseBase):
             server.close()
 
     def test_a_manifest_names_one_bundle_and_its_loaded_files(self):
-        """Review of the pass-5 fixes (the reviewer's p7/review-identity dup and mask probes): a
-        manifest written for a directory of bundles whose files share base names (A/graph.dbg,
-        B/graph.dbg, A/annotation.seqs, B/annotation.seqs) passed for every one of them, since
-        loaded files are matched by base name: two single-index servers stated one index_fp
-        with different headers. Such a manifest is refused by the server, the CLI and
-        index_manifest.py --verify, naming the shared base name. And a manifest that lists an
-        optional sidecar the pair does not load (a .seqs missing beside the symlinks of C, or
-        --no-coord-mapping) is refused too, so that index_fp identifies the loaded files."""
+        """A manifest written for a directory of bundles whose files share base names
+        (A/graph.dbg, B/graph.dbg, A/annotation.seqs, B/annotation.seqs) would pass for every
+        one of them, since loaded files are matched by base name: two single-index servers
+        would state one index_fp with different headers. Such a manifest is refused by the
+        server, the CLI and index_manifest.py --verify, naming the shared base name. And a
+        manifest that lists an optional sidecar the pair does not load (a .seqs missing beside
+        the symlinks of C, or --no-coord-mapping) is refused too, so that index_fp identifies
+        the loaded files."""
         d = os.path.join(self.tempdir.name, 'dupnames')
         seq = self._symlinked_bundles(d, (('A', 'sampleA'), ('B', 'sampleBBBB'), ('C', None)))
         # the directory's manifest: both bundles, by their paths under it
@@ -3142,15 +3139,14 @@ class TestTraverseMultiGraph(TestTraverseBase):
                 self.assertIn('annotation.seqs, which the server does not load', log)
 
     def test_derived_data_is_not_part_of_the_identity(self):
-        """The owner's decision #17 of 2026-10-08 (until then: review of pass 5, finding 3, a
-        loaded Bloom filter was part of the identity): the graph's dummy-edge mask and Bloom
-        filter are derived data, not part of index_fp. A manifest written before they exist is
-        valid after `transform --mask-dummy` and `--initialize-bloom`, its index_fp unchanged,
-        on a multi-graph server and on the CLI; index_manifest.py writes the same manifest
-        with or without them (it never lists them) and refuses them with --extra. A manifest
-        that lists one (the reviewer's graph, mask and annotation) is refused, by the server
-        and the CLI naming the rule, and flagged by --verify. And the server names the derived
-        data it loads beside a manifest (operators see what is loaded)."""
+        """The graph's dummy-edge mask and Bloom filter are derived data, not part of
+        index_fp. A manifest written before they exist is valid after `transform --mask-dummy`
+        and `--initialize-bloom`, its index_fp unchanged, on a multi-graph server and on the
+        CLI; index_manifest.py writes the same manifest with or without them (it never lists
+        them) and refuses them with --extra. A manifest that lists one (graph, mask and
+        annotation) is refused, by the server and the CLI naming the rule, and flagged by
+        --verify. And the server names the derived data it loads beside a manifest (operators
+        see what is loaded)."""
         d = os.path.join(self.tempdir.name, 'bloom')
         os.makedirs(d, exist_ok=True)
         seq = 'ACCGTATGCATAGGCTCCAGTTCAGGATCTCACATCGATGCTTACG'
@@ -3181,7 +3177,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertEqual([('graph_mask', True), ('graph_bloom', True)],
                          [(e['role'], e['loaded']) for e in self._cli_inventory(
                              f'{d}/graph.dbg', f'{d}/annotation.column.annodbg')['derived']])
-        # index_manifest.py writes the same manifest now (it never lists them) ...
+        # index_manifest.py writes the same manifest with them (it never lists them) ...
         self.assertEqual(0, manifest('after.manifest.json')[0])
         with open(f'{d}/after.manifest.json') as f:
             after = json.load(f)
@@ -3194,7 +3190,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
             self.assertIn('derived data of the graph, not part of index_fp', text)
             self.assertFalse(os.path.exists(f'{d}/extra.manifest.json'))
         # the manifest written before the mask: the server starts, states its index_fp, and
-        # names the derived data it loaded; /resolve answers as on the reviewer's index
+        # names the derived data it loaded; /resolve answers as on the unmasked index
         csv = f'{d}/before.csv'
         with open(csv, 'w') as f:
             f.write(f'A,{d}/graph.dbg,{d}/annotation.column.annodbg,{d}/before.manifest.json\n')
@@ -3220,7 +3216,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(0, res.returncode, res.stderr.decode()[-2000:])
         self.assertEqual(before['index_fp'], json.loads(res.stdout)['capabilities']['index_fp'])
-        # the reviewer's manifest: graph, mask and annotation — refused, naming the rule
+        # a manifest of graph, mask and annotation — refused, naming the rule
         files = []
         for name in ('annotation.column.annodbg', 'graph.dbg', 'graph.edgemask'):
             with open(f'{d}/{name}', 'rb') as f:
@@ -3253,7 +3249,7 @@ class TestTraverseMultiGraph(TestTraverseBase):
         self.assertEqual(0, res.returncode, res.stdout.decode())
 
     def test_multi_three_column_list_states_nulls(self):
-        """A list of three columns is read as it always was: null name and fingerprint."""
+        """A list of three columns is read with a null name and fingerprint."""
         d = self.tempdir.name
         csv = f'{d}/plain.csv'
         with open(csv, 'w') as f:
@@ -3285,16 +3281,16 @@ _MINI_GUARD = (_MINI_PRESENT or os.environ.get('METAGRAPH_REQUIRE_GUARDS', '') =
 @unittest.skipUnless(_MINI_GUARD, "the mini index is not built (scripts/traversal/"
                                   "build_mini_refseq.sh)")
 class TestTraverseDerivedDataMini(TestingBase):
-    """The owner's decision #17 of 2026-10-08 on a copy of build/mini_refseq (unmasked, as
-    built, like refseq33m): the dummy-edge mask is derived data of the graph, not part of
-    index_fp. A manifest made for the graph without a mask (index_manifest.py, the same
-    index_fp as the build's own manifest) serves a single-index server_query --index-manifest;
-    the mask is added beside the graph with `transform --mask-dummy` (the staging step) and
-    the server restarted with the SAME manifest: it starts, states the same index_fp (and
-    index_meta_fp), and stored /traverse retrievals and /resolve answers replay identically
-    (apart from timing): the graphlets stored before compare as the same index, equal. GET
-    /stats graph.nodes changes (the k-mers instead of the edges), as documented. A manifest
-    that lists the mask is refused. build/mini_refseq itself is never written to."""
+    """On a copy of build/mini_refseq (unmasked, as built, like refseq33m): the dummy-edge
+    mask is derived data of the graph, not part of index_fp. A manifest made for the graph
+    without a mask (index_manifest.py, the same index_fp as the build's own manifest) serves a
+    single-index server_query --index-manifest; the mask is added beside the graph with
+    `transform --mask-dummy` (the staging step) and the server restarted with the SAME
+    manifest: it starts, states the same index_fp (and index_meta_fp), and stored /traverse
+    retrievals and /resolve answers replay identically (apart from timing): the graphlets
+    stored before compare as the same index, equal. GET /stats graph.nodes changes (the
+    k-mers instead of the edges), as documented. A manifest that lists the mask is refused.
+    build/mini_refseq itself is never written to."""
 
     @classmethod
     def setUpClass(cls):
@@ -3537,11 +3533,11 @@ class TestTraverseDerivedDataMini(TestingBase):
 @unittest.skipIf(PROTEIN_MODE, "traversal fixtures are DNA")
 @unittest.skipUnless(_supports_traverse(), "`metagraph traverse` is not available in this build")
 class TestTraverseWideIndex(TestingBase):
-    """Pass 5, W5 (the chunked deadlines): a fan-out index — a 61 bp seed, then all 1024
-    five-base continuations, each with a 400 bp tail of its own, one header label each — where
-    one level's lookahead reads about 66,000 annotation rows in one call. A time budget of 50 to
-    200 ms used to be overrun to about half a second by that call (measured 507-534 ms); the
-    reads are now decoded in chunks of chunk_target_ms with the deadline between them, so the
+    """The chunked deadlines: a fan-out index — a 61 bp seed, then all 1024 five-base
+    continuations, each with a 400 bp tail of its own, one header label each — where one
+    level's lookahead reads about 66,000 annotation rows in one call. Read whole, that call
+    would overrun a time budget of 50 to 200 ms to about half a second (507-534 ms measured);
+    the reads are decoded in chunks of chunk_target_ms with the deadline between them, so the
     walk stops within about a chunk of its budget, where the whole read would have stopped it.
     With --traverse-chunk-target-ms 0 the read is one piece again (the test bites)."""
 
@@ -3564,9 +3560,9 @@ class TestTraverseWideIndex(TestingBase):
         cls._build_graph(fasta, cls.graph, K, 'succinct', mode='basic')
         cls._annotate_graph(fasta, cls.graph, f'{d}/fan', 'column', anno_type='header')
         cls.anno = f'{d}/fan.column.annodbg'
-        # Review of pass 5, F1/F2: the same index on row-diff annotations, whose rows share the
-        # decoding of their row-diff paths within a call (a graph copy each: the transforms write
-        # sidecars beside the graph)
+        # the same index on row-diff annotations, whose rows share the decoding of their
+        # row-diff paths within a call (a graph copy each: the transforms write sidecars
+        # beside the graph)
         cls.variants = {}
         for anno_type in ('row_diff', 'row_diff_brwt'):
             graph = f'{d}/fan_{anno_type}.dbg'
@@ -3594,12 +3590,12 @@ class TestTraverseWideIndex(TestingBase):
         return TestTraverseAttempts._Server(index or self, *flags)
 
     def test_row_diff_walks_no_deadline_stops_keep_their_bytes_and_time(self):
-        """Review of pass 5, F1: on a row-diff annotation the rows of one call share the
-        decoding of their paths, and chunks of sorted rows decoded them again per chunk — a walk
-        of about 1.8 s took 30 s on row_diff, ran into its budget and came back partial (its
-        bytes changed), and row_diff_brwt walks were 1.4-2.9 times slower. A read the deadline
-        cannot fall into is one piece now: the same bytes as unchunked, in about its time.
-        Checked on the production format, row_diff_brwt
+        """On a row-diff annotation the rows of one call share the decoding of their paths, so
+        chunks of sorted rows would decode them again per chunk — a walk of about 1.8 s would
+        take 30 s on row_diff, run into its budget and come back partial (its bytes changed),
+        and row_diff_brwt walks would be 1.4-2.9 times slower. A read the deadline cannot fall
+        into is one piece: the same bytes as unchunked, in about its time. Checked on the
+        production format, row_diff_brwt
         (WalkerDeadlineChunks.FarDeadlineReadsAreOnePiece holds the rule on a virtual clock)."""
         for anno_type, ext in (('row_diff_brwt', 400),):
             index = self.variants[anno_type]
@@ -3628,11 +3624,11 @@ class TestTraverseWideIndex(TestingBase):
                                          (anno_type, mode, times))
 
     def test_row_diff_path_cache_keeps_the_bytes(self):
-        """The efficiency pass, the row-diff path cache: the rows a request's reads reconstruct
-        are kept, so that a later read's row-diff path stops at a cached row instead of decoding
-        to its anchor again (feature level 4: the probe's decode_cache). The responses are byte
-        for byte those without the cache (--traverse-path-cache-mb 0) — constrain and annotate,
-        no budget and a memory budget that stops the walk — on the production format
+        """The row-diff path cache: the rows a request's reads reconstruct are kept, so that a
+        later read's row-diff path stops at a cached row instead of decoding to its anchor
+        again (feature level 4: the probe's decode_cache). The responses are byte for byte
+        those without the cache (--traverse-path-cache-mb 0) — constrain and annotate, no
+        budget and a memory budget that stops the walk — on the production format
         (RowDiffPathCache.* show cached decodes equal to the default ones, and budgeted costs
         independent of the cache, on every format)."""
         for anno_type, ext in (('row_diff_brwt', 100),):
@@ -3660,12 +3656,13 @@ class TestTraverseWideIndex(TestingBase):
                 self.assertGreater(stops, 0, anno_type)
 
     def test_server_budget_maxima(self):
-        """R16 (the owner's decision; feature level 4): --traverse-max-memory-mb and
-        --traverse-max-work-units, off (0) by default. Set, a request's larger budget is
-        lowered to the maximum and an omitted one set to it, echoed in strategy.clamped (an
-        omitted one as requested "unlimited") and strategy.bounds; a smaller one is kept. A
-        seed the clamped budget stopped states a server_clamp limitation, and its stop what the
-        request asked for; the graphlet holds both. The probe states the maxima."""
+        """The server's maxima of the budgets (SPEC §10.3; feature level 4):
+        --traverse-max-memory-mb and --traverse-max-work-units, off (0) by default. Set, a
+        request's larger budget is lowered to the maximum and an omitted one set to it, echoed
+        in strategy.clamped (an omitted one as requested "unlimited") and strategy.bounds; a
+        smaller one is kept. A seed the clamped budget stopped states a server_clamp
+        limitation, and its stop what the request asked for; the graphlet holds both. The probe
+        states the maxima."""
         with self._server('--traverse-max-memory-mb', '4096',
                           '--traverse-max-work-units', '5000') as server:
             caps = requests.get(server.url + '/traverse/capabilities').json()
@@ -3692,7 +3689,7 @@ class TestTraverseWideIndex(TestingBase):
                              [(l['knob'], l['limit'], l['observed']) for l in clamps])
             self.assertIn('gave no budget', clamps[0]['effect'])
             # a request cannot raise it: no action raising it, and the arm's walk_domain states
-            # the maximum (review of the efficiency pass, finding 2)
+            # the maximum
             self.assertNotIn('raise_work_budget', result['resource_stop']['actions'])
             domains = [l for arm in result['arms'].values() for l in arm.get('limitations', [])
                        if l['kind'] == 'walk_domain' and l['knob'] == 'bounds.max_work_units']
@@ -3722,12 +3719,12 @@ class TestTraverseWideIndex(TestingBase):
                                                     'bounds.max_work_units')])
             self.assertEqual((100, 4000), (out['strategy']['bounds']['max_memory_mb'],
                                            out['strategy']['bounds']['max_work_units']))
-        # Review of the efficiency pass, finding 2: a seed the server's maximum fails before any
-        # walk states it as a walked one does — the server_clamp, the stop's `requested`, no
-        # action raising the budget, and a walk_domain with server_limit saying that a request
-        # cannot raise it: here at its depth-0 state (1,024 derived labels under 1 MiB; a seed
-        # phase that runs out of work units is MiniRefSeq.ServerBudgetMaxima's: this seed's
-        # 31,992 units stay below the interval at which the seed phase is compared)
+        # a seed the server's maximum fails before any walk states it as a walked one does —
+        # the server_clamp, the stop's `requested`, no action raising the budget, and a
+        # walk_domain with server_limit saying that a request cannot raise it: here at its
+        # depth-0 state (1,024 derived labels under 1 MiB; a seed phase that runs out of work
+        # units is MiniRefSeq.ServerBudgetMaxima's: this seed's 31,992 units stay below the
+        # interval at which the seed phase is compared)
         for flags, resource, field, maximum in (
                 (('--traverse-max-memory-mb', '1'), 'memory', 'bounds.max_memory_mb', 1),):
             with self._server(*flags) as server:
@@ -3762,9 +3759,9 @@ class TestTraverseWideIndex(TestingBase):
             self.assertIn(flag, res.stdout.decode(), (flag, value))
 
     def test_flags_stated_as_integers_are_validated(self):
-        """Review of pass 5: --traverse-clock-skew-ms and --traverse-chunk-target-ms were read
-        with atoll, so -1 wrapped to 2^64 - 1 and the capabilities stated it (a JSON client
-        cannot represent it, a ledger adding to it overflows). Integers in [0, 2^53 - 1] only."""
+        """--traverse-clock-skew-ms and --traverse-chunk-target-ms are integers in
+        [0, 2^53 - 1] only: read with atoll, -1 would wrap to 2^64 - 1 and the capabilities
+        would state it (a JSON client cannot represent it, a ledger adding to it overflows)."""
         for flag in ('--traverse-clock-skew-ms', '--traverse-chunk-target-ms',
                      '--traverse-attempt-allowance-ms'):
             for value in ('-1', '1.5', '9007199254740992', '5x'):
@@ -3777,12 +3774,11 @@ class TestTraverseWideIndex(TestingBase):
                               res.stdout.decode(), (flag, value))
 
     def test_row_diff_budgets_are_kept_within_a_chunk(self):
-        """Review of pass 5, F2: the first chunk of a read was sized from other reads' rows (a
-        level's cheap shared rows) and took 650-880 ms against chunk_target_ms 50, so 50-500
-        ms budgets overran as before on row_diff; a split read starts with at most 8 rows now,
-        and a read is one piece only when predicted at the slowest per-row time seen to end
-        well before the deadline. With and without a memory budget (its reads are budget-aware
-        on these annotations)."""
+        """A split read starts with at most 8 rows: a first chunk sized from other reads' rows
+        (a level's cheap shared rows) would take 650-880 ms against chunk_target_ms 50, and
+        50-500 ms budgets would overrun on row_diff. A read is one piece only when predicted at
+        the slowest per-row time seen to end well before the deadline. With and without a
+        memory budget (its reads are budget-aware on these annotations)."""
         for anno_type in ('row_diff', 'row_diff_brwt'):
             with self._server(index=self.variants[anno_type]) as server:
                 for extra in ({}, {'max_memory_mb': 4096}):
@@ -3830,14 +3826,13 @@ class TestTraverseWideIndex(TestingBase):
             self.assertGreater(dc['observed_max_uninterruptible_ms'], 0)
 
     def test_wide_index_delivery_reserve_stops_the_walk(self):
-        """Pass 5, W6: the delivery reserve keeps back from the walk the time to build and
-        compress what it will deliver, from the walked seed's modelled account. Under rates
-        far below this machine's (0.001 MB/s) the reserve exceeds the whole bound at the first
-        level: the attempt answers 200 at once, the first seed partial (attempt_deadline), the
-        others not started, and usage states the moved walk-until. In both label modes the
-        not-started seeds state labels_from_seed as the walked one: true for these derived
-        seeds, false in annotate mode, which derives no set (review of 2026-10-06, X-DUP-01:
-        a not-started annotate seed stated true)."""
+        """The delivery reserve keeps back from the walk the time to build and compress what
+        it will deliver, from the walked seed's modelled account. Under rates far below this
+        machine's (0.001 MB/s) the reserve exceeds the whole bound at the first level: the
+        attempt answers 200 at once, the first seed partial (attempt_deadline), the others not
+        started, and usage states the moved walk-until. In both label modes the not-started
+        seeds state labels_from_seed as the walked one: true for these derived seeds, false in
+        annotate mode, which derives no set."""
         with self._server('--traverse-delivery-compress-mbps', '0.001',
                           '--traverse-delivery-build-mbps', '0.001') as server:
             caps = requests.get(server.url + '/traverse/capabilities').json()
@@ -3873,13 +3868,13 @@ class TestTraverseWideIndex(TestingBase):
 
 
 class TestTraverseAttempts(TestingBase):
-    """Stage 4, backend half (DESIGN-traverse-graphlet.md §14 v5.1), against a walk slow
-    enough to be stopped in its middle: two haplotypes of 200 kbp with a SNP every 64 bp
-    (k = 31), walked in annotate mode with every route kept and a beam of 64, so that a seed
-    takes seconds. Each test starts its own short-lived server: a cancel by id with the client
-    still connected, a client that goes away (with and without attempt_id), the server's
-    duration bound, the registry's tombstones, retention and restart, and concurrent attempts
-    with mixed cancels."""
+    """An attempt stopped from outside the walk (DESIGN-traverse-graphlet.md §14), against a
+    walk slow enough to be stopped in its middle: two haplotypes of 200 kbp with a SNP every
+    64 bp (k = 31), walked in annotate mode with every route kept and a beam of 64, so that a
+    seed takes seconds. Each test starts its own short-lived server: a cancel by id with the
+    client still connected, a client that goes away (with and without attempt_id), the
+    server's duration bound, the registry's tombstones, retention and restart, and concurrent
+    attempts with mixed cancels."""
 
     @classmethod
     def setUpClass(cls):
@@ -4003,8 +3998,7 @@ class TestTraverseAttempts(TestingBase):
                                  (unstarted['resource_stop']['phase'],
                                   unstarted['resource_stop']['resource'],
                                   unstarted['resource_stop']['actions']))
-                # annotate mode derives no set: false, as the walked seed states it (review of
-                # 2026-10-06, X-DUP-01)
+                # annotate mode derives no set: false, as the walked seed states it
                 self.assertIs(False, unstarted['seed']['labels_from_seed'])
             self.assertIs(False, first['seed']['labels_from_seed'])
             usage = out['usage']
@@ -4116,10 +4110,10 @@ class TestTraverseAttempts(TestingBase):
 
     def test_sigterm_while_the_index_loads(self):
         """A single-index server listens at once and answers 503 (GET /capabilities: ready
-        false) while its index loads; SIGTERM then stops it within seconds too (review of W2:
-        returning through run_server joined the load in progress, 19 s on SRA, on a cold
-        staging disk the whole docker-stop timeout). The load here never ends: the graph is a
-        FIFO nobody writes to, so its loader blocks in open() for good."""
+        false) while its index loads; SIGTERM then stops it within seconds too (returning
+        through run_server would join the load in progress: 19 s on SRA, on a cold staging
+        disk the whole docker-stop timeout). The load here never ends: the graph is a FIFO
+        nobody writes to, so its loader blocks in open() for good."""
         fifo = f'{self.tempdir.name}/never_loads.dbg'
         if not os.path.exists(fifo):
             os.mkfifo(fifo)
@@ -4237,8 +4231,8 @@ class TestTraverseAttempts(TestingBase):
             usage = ret.json()['usage']
             self.assertEqual('deadline', usage['reason'])
             self.assertEqual(1202, usage['bound_ms'])
-            # at most the bound less half the allowance; the delivery reserve (pass 5) moves it
-            # earlier when the walked seeds' estimated text needs more time than that to build
+            # at most the bound less half the allowance; the delivery reserve moves it earlier
+            # when the walked seeds' estimated text needs more time than that to build
             self.assertLessEqual(usage['bound']['walk_until_ms'], 1201)
             # stopped at the next checkpoint: one head, plus building the response
             self.assertLess(usage['elapsed_ms'], usage['bound_ms'] + 1000)
@@ -4287,11 +4281,10 @@ class TestTraverseAttempts(TestingBase):
                 self.assertLess(_instant(state['stopped_at']) - closed, 2.0, name)
 
     def test_retention_settings_are_validated_at_start_up(self):
-        """Review of pass 5, finding 4: --traverse-attempt-retention-s -1 started and advertised
-        2^64 - 1 seconds while every tombstone expired at once. The retention settings are
-        bounded integers: a negative, non-numeric or too large value refuses to start, naming
-        the option and its own range (the review of the pass-5 fixes: a negative or non-numeric
-        value named [0, 2^53 - 1] instead)."""
+        """The retention settings are bounded integers: --traverse-attempt-retention-s -1 must
+        not start and advertise 2^64 - 1 seconds while every tombstone expires at once. A
+        negative, non-numeric or too large value refuses to start, naming the option and its
+        own range (not [0, 2^53 - 1])."""
         ranges = {'--traverse-attempt-retention-s': '[0, 31536000]',
                   '--traverse-attempt-retention': '[0, 10000000]',
                   '--traverse-attempt-tombstone-max-s': '[0, 31536000]'}
@@ -4349,14 +4342,14 @@ class TestTraverseAttempts(TestingBase):
         return response.status, out
 
     def test_a_cancel_naming_not_after_ms_covers_a_half_uploaded_request(self):
-        """Review of pass 5, finding 1, the reviewer's timeline with retention 1 s: a request
-        with not_after_ms = now + 60 s is half uploaded, then cancelled (404, tombstone). With
-        the cancel naming that not_after_ms, the tombstone is held to not_after_ms + the skew
-        allowance (suppressed_until_ms, covers_admission true), a repeat cancel at 0.76 s states
-        the same expiry, and the upload completed at 1.2 s is refused (409, the tombstone) and
-        never runs. Without not_after_ms in the cancel (and no repeat), covers_admission is
-        false (a ledger may not release on it) and the upload completed at 1.2 s runs, as the
-        retention period alone allows."""
+        """A timeline with retention 1 s: a request with not_after_ms = now + 60 s is half
+        uploaded, then cancelled (404, tombstone). With the cancel naming that not_after_ms,
+        the tombstone is held to not_after_ms + the skew allowance (suppressed_until_ms,
+        covers_admission true), a repeat cancel at 0.76 s states the same expiry, and the
+        upload completed at 1.2 s is refused (409, the tombstone) and never runs. Without
+        not_after_ms in the cancel (and no repeat), covers_admission is false (a ledger may not
+        release on it) and the upload completed at 1.2 s runs, as the retention period alone
+        allows."""
         with self._Server(self, '--traverse-attempt-retention-s', '1') as server:
             skew = requests.get(server.url + '/capabilities').json()['attempts'][
                 'clock_skew_allowance_ms']
@@ -4405,10 +4398,10 @@ class TestTraverseAttempts(TestingBase):
                     self.assertEqual('completed', out['usage']['reason'])
 
     def test_expect_server_instance_refuses_another_process(self):
-        """The restart hole of finding 1: tombstones live in memory, so a copy reaching a
-        restarted process would run. A request naming another server_instance is refused before
-        anything runs (409 instance_mismatch, nothing registered); naming this one, it runs. The
-        CLI, whose instance is its own, refuses one too."""
+        """The restart hole: tombstones live in memory, so a copy reaching a restarted process
+        would run. A request naming another server_instance is refused before anything runs
+        (409 instance_mismatch, nothing registered); naming this one, it runs. The CLI, whose
+        instance is its own, refuses one too."""
         with self._Server(self) as server:
             mine = requests.get(server.url + '/capabilities').json()['attempts'][
                 'server_instance']
@@ -4477,16 +4470,16 @@ class TestTraverseAttempts(TestingBase):
 
 
 class TestTraverseSeedPhase(TestingBase):
-    """Review of levels 4-5, finding 3 (the reviewer's deadline probe): a request naming
-    2,500 header labels that share a 1,024-character prefix, all on one 11-mer (k = 11), with
-    timing. The longest uninterruptible piece stated 0.297 ms on a warm server for a seed phase
-    of 126 ms: the pairwise duplicate check of the names (about 120 ms) and the resolution of
-    the names were no piece, nor anything else between the reads and k-mer mappings before the
-    first head. The seed phase is now cut into pieces at its reads and k-mer mappings, the spans
-    between them "setup" pieces, and the pieces cover seed_phase_ms: here (one 11-mer: two k-mer
-    mappings and a read or two of one row) fewer than 16 of them, so the longest is at least a
-    sixteenth of it (before: 0.297 ms of 126 ms, a 425th), and at least the names' resolution,
-    which runs inside one setup span. The duplicate check is a hash set."""
+    """The deadline record covers the seed phase: a request naming 2,500 header labels that
+    share a 1,024-character prefix, all on one 11-mer (k = 11), with timing. With the
+    pairwise duplicate check of the names (about 120 ms), the resolution of the names and
+    whatever else lies between the reads and k-mer mappings before the first head no piece,
+    the longest uninterruptible piece would state 0.297 ms on a warm server for a seed phase
+    of 126 ms. The seed phase is cut into pieces at its reads and k-mer mappings, the spans
+    between them "setup" pieces, and the pieces cover seed_phase_ms: here (one 11-mer: two
+    k-mer mappings and a read or two of one row) fewer than 16 of them, so the longest is at
+    least a sixteenth of it (not a 425th), and at least the names' resolution, which runs
+    inside one setup span. The duplicate check is a hash set."""
 
     N = 2500
 
@@ -4555,7 +4548,7 @@ class TestTraverseSeedPhase(TestingBase):
                 except requests.exceptions.RequestException:
                     pass
                 time.sleep(0.1)
-            # warm (one name, the reviewer's first request), then every name
+            # warm (one name), then every name
             warm = requests.post(url + '/traverse', data=json.dumps(self._request(self.names[-1:])))
             self.assertEqual(200, warm.status_code, warm.text)
             ret = requests.post(url + '/traverse', data=json.dumps(self._request(self.names)))
@@ -4565,8 +4558,8 @@ class TestTraverseSeedPhase(TestingBase):
             server.kill()
             server.wait()
             log.close()
-        # stated for the record (the reviewer's warm server: seed phase 126.37 ms, longest piece
-        # 0.297 ms)
+        # stated for the record (a warm server: seed phase 126.37 ms, longest piece 0.297 ms
+        # without the setup pieces)
         for where, t in (('CLI', cli), ('server', served)):
             print(f"{where}: seed_phase_ms {t['seed_phase_ms']:.3f}, label_resolve_ms "
                   f"{t['label_resolve_ms']:.3f}, longest_piece {t['deadline']['longest_piece']}",

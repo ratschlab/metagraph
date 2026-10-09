@@ -2,13 +2,13 @@
 itself): every public operation, with a fixed set of arguments, reduced to a stable digest
 per (graphlet, operation), and the MCP tools over a store of the same graphlets.
 
-The speed-ups and the stage-L charge points must leave every unbudgeted output byte for byte
-as it was (DESIGN §21, L2): test_traverse_speedups.py compares the digests of the committed
-real and review3 fixtures with data/traverse/golden/committed.json.gz, recorded with the
-library of ce949da5 (before those changes), and test_traverse_stage_l.py takes the same
-digests with an unlimited LocalBudget (stage L must not change an answer either). The
-command line records digests with any library version; an intended output change, or new
-real/review3 fixtures, means recording them again (and saying why in the commit):
+The speed-ups and the local-limits charge points must leave every unbudgeted output byte
+for byte the same (DESIGN §21): test_traverse_speedups.py compares the digests of the
+committed real and review3 fixtures with data/traverse/golden/committed.json.gz, the
+reference digests, and test_traverse_stage_l.py takes the same digests with an unlimited
+LocalBudget (local limits must not change an answer either). The command line records
+digests with any library version; an intended output change, or new real/review3
+fixtures, means recording them again (and saying why in the commit):
 
     python3 traverse_golden.py --lib /path/to/api/python --out digests.json[.gz] [INPUT ...]
     python3 traverse_golden.py --diff a.json b.json
@@ -77,8 +77,8 @@ def canonical(x, depth=0):
                 'segments': canonical(x.segments, depth + 1),
                 'path_ids': canonical(x.path_ids, depth + 1)}
     if dataclasses.is_dataclass(x) and not isinstance(x, type):
-        # Comparison.local_stop (stage L) is additive: None on every answer that did not
-        # stop, so the digests of the library before it stay comparable
+        # Comparison.local_stop (local limits) is additive: None on every answer that did not
+        # stop, so the digests of a library without it stay comparable
         return {'_t': t, 'v': {f.name: canonical(getattr(x, f.name, None), depth + 1)
                                for f in dataclasses.fields(x)
                                if f.compare is not False and f.name not in ('cache', 'arm')
@@ -160,7 +160,7 @@ def _call(out, name, fn):
 def op_digests(T, g, budget=None):
     """{op: digest} of every public operation on |g| (the library module |T| =
     metagraph.traverse). |budget|: None, or a callable returning the keyword arguments
-    each call gets (stage L: {'budget': LocalBudget()})."""
+    each call gets (local limits: {'budget': LocalBudget()})."""
     kw = budget or (lambda: {})
     out = {}
     from importlib import import_module

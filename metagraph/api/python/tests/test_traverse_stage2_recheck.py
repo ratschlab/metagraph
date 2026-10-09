@@ -1,17 +1,17 @@
-"""The external recheck of the stage-2 fixes (GPT, 278a53dd..d8d3ef86), Python side, with
-the design answers adopted from it:
+"""Receipts, continuations and extra labels, Python side:
 
-  P3a  a spooled fetch stored its entry and answered result_too_large without the handle:
-       the receipt was checked with delivery 'inline', one byte shorter than 'spooled';
-  P3b  next_request() over several walks took left_out from the first walk only, naming a
-       label another walk seeded as unreachable;
-  D1   the continuation's branch allowance restarted at the seed (a continuation from 40
-       reached 100 where one uninterrupted walk stopped at 46): next_request() reduces
-       branching.max_label_branches by the largest terminal branch count, keeps
+  P3a  a spooled fetch returns the handle of the entry it stored: its receipt is checked
+       with delivery 'spooled', not 'inline' (one byte shorter), which could answer
+       result_too_large without the handle;
+  P3b  next_request() over several walks takes left_out per walk: from the first walk only
+       it would name a label another walk seeded as unreachable;
+  D1   the continuation's branch allowance does not restart at the seed (a continuation
+       from 40 would reach 100 where one uninterrupted walk stops at 46): next_request()
+       reduces branching.max_label_branches by the largest terminal branch count, keeps
        "unlimited", states it (branch_budget, notes) and offers reset_branches;
-  D2   labels.extra kept only the labels one switch from a seed label reaches: a chain of
-       switches within the loss budget is enough (the walk enforces the cumulative loss),
-       as the server now accepts.
+  D2   labels.extra keeps the labels a chain of switches within the loss budget reaches,
+       not only those one switch from a seed label reaches (the walk enforces the
+       cumulative loss), as the server accepts.
 
 The CLI classes run build_debug/metagraph on the review3 indexes and skip without it.
 """
@@ -36,7 +36,7 @@ def tearDownModule():
     R.tearDownModule()
 
 
-# ------------------------------------------------------------------ P3a
+# ------------------------------------------------------------------ P3a: spooled receipts
 
 class TestSpooledReceiptIsCheckedAsStored(unittest.TestCase):
     """The receipt of a spooled fetch says delivery 'spooled': checked as it will be
@@ -65,7 +65,7 @@ class TestSpooledReceiptIsCheckedAsStored(unittest.TestCase):
         self.assertEqual([(out['handle'], 'spooled')], stored)
 
 
-# ------------------------------------------------------------------ P3b
+# ------------------------------------------------------------------ P3b: left_out per walk
 
 class TestLeftOutIsPerWalk(unittest.TestCase):
     """fork, left arm: walk 0 continues under acc1 and acc2, walk 1 under acc3, and forbid
@@ -100,7 +100,7 @@ class TestLeftOutIsPerWalk(unittest.TestCase):
         self.assertEqual({1}, {x['walk'] for x in req.left_out})
 
 
-# ------------------------------------------------------------------ D1
+# ------------------------------------------------------------------ D1: the branch allowance
 
 class TestBranchAllowanceIsReduced(unittest.TestCase):
     """switch_chain, walk 1: its lineage used one branch of max_label_branches 1."""
@@ -169,9 +169,9 @@ class TestBranchAllowanceIsReduced(unittest.TestCase):
 
 @unittest.skipUnless(R._cli(), 'needs build_debug/metagraph')
 class TestBranchAllowanceAgainstOneWalk(unittest.TestCase):
-    """The recheck's case: bubbles, the 'merge' request with max_label_branches 1. One
-    uninterrupted walk to 100 ends both.fa at 46 (branch); the continuation of walk 0 from
-    40 reached 100 when the allowance restarted, and now ends it where the walk did."""
+    """Bubbles, the 'merge' request with max_label_branches 1. One uninterrupted walk to
+    100 ends both.fa at 46 (branch); the continuation of walk 0 from 40 ends it where the
+    walk did (a restarted allowance would reach 100)."""
 
     def test_the_continuation_stops_where_one_walk_does(self):
         G = R._Indexes.G()
@@ -197,7 +197,7 @@ class TestBranchAllowanceAgainstOneWalk(unittest.TestCase):
         self.assertLessEqual(reached, 46)
 
 
-# ------------------------------------------------------------------ D2
+# ------------------------------------------------------------------ D2: extra labels by chains
 
 class TestExtraLabelsByChains(unittest.TestCase):
     """switch_chain walk 1 continues under C, with loss_budget 1 left: C -> D 0.5 and
@@ -252,9 +252,8 @@ class TestExtraLabelsByChains(unittest.TestCase):
 
 @unittest.skipUnless(R._cli(), 'needs build_debug/metagraph')
 class TestTheServerAcceptsAChain(unittest.TestCase):
-    """The recheck's case on the chain index: extra B and C, A -> B 1, B -> C 1, loss
-    budget 2 — refused before (C is two switches away), accepted now; within 1.5 C is
-    refused, by name."""
+    """The chain index: extra B and C, A -> B 1, B -> C 1, loss budget 2 — accepted (C is
+    two switches away); within 1.5 C is refused, by name."""
 
     def request(self, budget):
         req = T.doc_json('switch_chain', 'request')

@@ -1,9 +1,9 @@
-"""Stage 4 of DESIGN-traverse-graphlet.md §14, backend half: the library's side of a
-ledger-managed attempt.
+"""An attempt stopped from outside the walk (DESIGN-traverse-graphlet.md §14): the library's
+side of a ledger-managed attempt.
 
   - TraverseClient sends `attempt_id`, `budget_id` and `locus_id` (the frozen wire contract's
     request fields, §14.1) and nothing when they are not given, so a request without them is
-    the one it always was;
+    unchanged;
   - TraverseResponse.usage reads the response-level usage block (None without attempt_id);
   - cancel() and attempt() return the server's answer, a 404 included (nothing runs under the
     id: finished, unknown or tombstoned), and raise on the other errors;

@@ -1,5 +1,5 @@
 """The benchmark scripts' comparisons (scripts/traversal/bench_traverse.py, bench_library.py),
-as the external review of pass 5 asked for them: a deadline-limited request is compared by
+a deadline-limited request is compared by
 its CERTIFIED REACH (complete_to_bp, steps, complete walks, the stop) and its CONSUMED
 WORK (work units, else the annotation rows requested), not by its elapsed time, which is
 about the budget on both sides; a completed request's latency only on IDENTICAL COMPLETED

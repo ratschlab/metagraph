@@ -1,6 +1,6 @@
 /**
- * The oracle suite of the pattern search (docs/DESIGN-pattern-search.md §13, increments 0-2
- * and the engine half of increment 4): tiny graphs built from explicit records, checked
+ * The oracle suite of the pattern search (docs/DESIGN-pattern-search.md, the counts and lists
+ * and the engine half of the extension): tiny graphs built from explicit records, checked
  * against two brute-force oracles:
  *  - the graph-walk oracle enumerates the built graph's k-mers (every valid edge of the
  *    DBGSuccinct; on a wrapped PRIMARY graph also the wrapper's reverse complements, numbered
@@ -26,8 +26,8 @@
  *
  * Alphabet: the file runs on the DNA (DNA4) and DNA5 builds. Every DNA5-specific
  * expectation is under #if _DNA5_GRAPH. CI builds DNA and Protein only; the DNA5 branches
- * were run once, by hand, on a DNA5 build of the engine and these tests (fix1-integrator,
- * 2026-10-07: every PatternSearch and PatternSearchFixes test passed), not in CI.
+ * were run by hand on a DNA5 build of the engine and these tests (every PatternSearch and
+ * PatternSearchFixes test passed), not in CI.
  */
 #include <gtest/gtest.h>
 
@@ -286,7 +286,7 @@ Bases window(const Bases &q, size_t k) {
 }
 
 /**
- * The stored node of every node of the served graph, found by spelling (T1-03): on a wrapped
+ * The stored node of every node of the served graph, found by spelling: on a wrapped
  * PRIMARY graph the stored k-mer whose sequence is the node's k-mer or its reverse complement
  * (every stored k-mer of the unwrapped DBGSuccinct is spelled once); on BASIC and CANONICAL
  * the node itself. Never the engine's base_node() or CanonicalDBG's id arithmetic.
@@ -410,7 +410,7 @@ std::vector<Ctx> run_enumerate(const PatternSearch &engine, const StoredNodes &s
     std::vector<Ctx> contexts;
     *result = engine.enumerate(pattern, request, budget, [&](const Context &c) {
         // the node of the annotation row (the route's row is graph_to_anno_index(base_node)):
-        // the stored k-mer of the context, found by spelling (T1-03)
+        // the stored k-mer of the context, found by spelling
         EXPECT_EQ(stored.of(c.node), c.base_node) << "node " << c.node;
         EXPECT_TRUE(c.path.empty());
         EXPECT_TRUE(c.sequence.empty());
@@ -480,7 +480,7 @@ void check_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
         }
         EXPECT_EQ(by_offset[k - L], counted.contexts->suffix.value);
     } else {
-        // paths are a later increment: unknown, unless no anchor exists
+        // paths need extend_paths: unknown, unless no anchor exists
         EXPECT_EQ(expected.empty() ? Relation::EXACT : Relation::UNKNOWN,
                   counted.anchors->paths.relation);
     }
@@ -494,7 +494,7 @@ void check_against_oracles(const DeBruijnGraph &graph, const Pattern &pattern,
     EXPECT_EQ(counted.work.ranges_visited, enumerated.work.ranges_visited);
     ASSERT_TRUE(enumerated.extraction);
     if (L > k && !request.release_anchors) {
-        // the results of a long pattern are its paths (a later increment): withheld
+        // the results of a long pattern are its paths (extend_paths): withheld
         EXPECT_TRUE(released.empty());
         if (expected.empty()) {
             EXPECT_TRUE(enumerated.extraction->complete);
@@ -653,7 +653,7 @@ void expect_true_relations(const Result &r, const Truth &truth, size_t k, size_t
 }
 
 /**
- * Every step budget below the complete run's (T1-01): count() stopped at max_steps = s for
+ * Every step budget below the complete run's: count() stopped at max_steps = s for
  * every s in [0, steps of the complete run) states a true relation in every count against
  * the graph-walk oracle; the total is AT_LEAST after a stop in discovery (s below the
  * complete run's ranges_visited) and BOUNDS after a stop in a mask scan, never EXACT; the
@@ -770,7 +770,7 @@ uint64_t check_halts_against_oracles(const DeBruijnGraph &graph, const Pattern &
 
 /**
  * stop_at_threshold and the thresholds of the release at every cap from 0 to one past the
- * truth (T1-01; sampled above 64): a threshold stop implies cap < value <= truth, AT_LEAST
+ * truth (sampled above 64): a threshold stop implies cap < value <= truth, AT_LEAST
  * in discovery with the reason max_contexts (max_anchors for L > k), and in ALL_OR_COUNT
  * nothing (threshold_crossed); no stop implies EXACT and right (the stop is not promised
  * whenever the truth exceeds the cap: the running lower bound may stay below it). Without
@@ -924,9 +924,9 @@ std::string spelled_set(BaseSet set) {
 }
 
 TEST(PatternSearch, IUPACTableAgainstTheOracles) {
-    // X-ORACLE-01: the engine's IUPAC table, code by code, against the oracles' own; a
-    // consistent swap of two codes in both of the engine's tables (K/M, B/V, D/H) passes
-    // every pin of ParsePatterns but not this
+    // the engine's IUPAC table, code by code, against the oracles' own; a consistent swap of
+    // two codes in both of the engine's tables (K/M, B/V, D/H) passes every pin of
+    // ParsePatterns but not this
     for (const char *c = kIUPACCodes; *c; ++c) {
         SCOPED_TRACE(std::string("code ") + *c);
         const std::string bases = iupac_bases(*c);
@@ -1127,8 +1127,8 @@ TEST(PatternSearch, MainDummySourceIsInvalid) {
 
 // ---------------------------------------------------------------- the range DFS
 
-// the loop of suffix_to_prefix as it was before its symbol set became a parameter (copied
-// from aligner_seeder_methods.cpp at 804731aa): the default must reproduce it exactly
+// the loop of suffix_to_prefix with its fixed symbol set (copied from
+// aligner_seeder_methods.cpp): the default symbol set must reproduce it exactly
 template <class BOSSEdgeRange>
 void suffix_to_prefix_804731aa(const DBGSuccinct &dbg_succ,
                                const BOSSEdgeRange &index_range,
@@ -1253,9 +1253,9 @@ TEST(PatternSearch, FlankSymbolsAreTheBuildAlphabet) {
     // §4.1: the flank of any_offset tries every symbol of the graph's alphabet but the
     // sentinel, the seeder's NonSentinelSymbols (pattern_search.cpp, expand()): A, C, G, T on
     // a DNA4 build, and N as well on DNA5. On DNA4 that set equals the pattern alphabet, so
-    // no DNA4 run can tell a flank restricted to A, C, G, T from the right one (X-TESTS-01,
-    // T1-08); only the _DNA5_GRAPH cases (DNA5Flank, NCentredSelfComplementOddK) can, on a
-    // DNA5 build (run by hand once, not in CI). What DNA4 can check is the symbol set itself
+    // no DNA4 run can tell a flank restricted to A, C, G, T from the right one; only the
+    // _DNA5_GRAPH cases (DNA5Flank, NCentredSelfComplementOddK) can, on a DNA5 build (run by
+    // hand, not in CI). What DNA4 can check is the symbol set itself
     auto graph = build(4, { "ACGTACGT" }, DeBruijnGraph::BASIC);
     const boss::BOSS &boss = base_dbg(*graph).get_boss();
     std::string symbols;
@@ -1306,7 +1306,7 @@ TEST(PatternSearch, PrunedDummyRecordStart) {
         auto graph = build(4, records, DeBruijnGraph::BASIC, batch);
         Pattern ac = Pattern::parse(PatternKind::DNA, "AC");
 
-        // the premise, checked (T1-11): no dummy chain $$$A, $$AC, $ACG of ACGA; TACGAT's
+        // the premise, checked: no dummy chain $$$A, $$AC, $ACG of ACGA; TACGAT's
         // chain $$$T, $$TA, $TAC is there, and $TAC is the one dummy in the leaf of AC
         // (nodes ending with A, W = C), which only a scan can tell from a k-mer
         const DBGSuccinct &dbg_succ = base_dbg(*graph);
@@ -1443,7 +1443,7 @@ TEST(PatternSearch, InterruptedMaskScanBounds) {
     EXPECT_EQ(Relation::BOUNDS, none.contexts->by_offset.at(2).relation);
 
     // one edge scanned ($$AC, matching): bounds [3 - 1 - 1, 3 - 1] = [1, 2], exactly
-    // (T1-11: [1, 3] and [2, 2] would be wrong here)
+    // ([1, 3] and [2, 2] would be wrong here)
     Result half = count_of(*graph, ac, request, discovery + 1);
     EXPECT_EQ(StopPhase::MASK_SCAN, half.stop->phase);
     EXPECT_EQ(Relation::BOUNDS, half.contexts->total.relation);
@@ -1459,8 +1459,8 @@ TEST(PatternSearch, InterruptedMaskScanBounds) {
 }
 
 TEST(PatternSearch, SentinelTighteningPinned) {
-    // T1-11: the bound of a W-rule leaf counts only the invalid edges whose W is not $ (J),
-    // since a dummy sink (W = $) never carries the symbol c: the design's bound I tightened
+    // The bound of a W-rule leaf counts only the invalid edges whose W is not $ (J), since
+    // a dummy sink (W = $) never carries the symbol c: the design's bound I tightened
     // (Item::lower). k = 3, GCA and TAC: the leaf of AC (nodes ending with A) holds the sink
     // CA$ and the k-mer TAC: one candidate (TAC), one invalid edge, none of it non-sentinel.
     // So AC has exactly one suffix context known by ranks alone: no scan, no scan step, and
@@ -1496,7 +1496,7 @@ TEST(PatternSearch, DNA5Flank) {
     // §4.1: the flank admits every symbol of the build's alphabet. On a DNA5 build ACNTA is a
     // k-mer at k = 5 and contains AC at offset 0; on a DNA4 build the record splits into the
     // islands AC and TA, both shorter than k, so nothing is indexed and nothing is claimed.
-    // The DNA5 branch is not in CI (no DNA5 build there; run by hand once; X-TESTS-01, T1-08)
+    // The DNA5 branch is not in CI (no DNA5 build there; run by hand)
     std::vector<std::string> records { "ACNTA" };
     auto graph = build(5, records, DeBruijnGraph::BASIC);
     Pattern ac = Pattern::parse(PatternKind::DNA, "AC");
@@ -1535,16 +1535,15 @@ TEST(PatternSearch, DNA5Flank) {
 
 #if _DNA5_GRAPH
 TEST(PatternSearch, NCentredSelfComplementOddK) {
-    // X-TESTS-01, E2-05. On DNA5 N complements to N, so at odd k = 5 the k-mer ACNGT is its
-    // own reverse complement, which no DNA4 k-mer of odd length can be. On BASIC and
-    // CANONICAL one k-mer is one context per (offset, orientation) (§3, SPEC §7.1): AC at
-    // offset 0 (forward) and GT, rc(AC), at offset 3 (reverse), once each. On a wrapped
-    // PRIMARY graph this is the KNOWN DNA5 LIMITATION the engine header, SPEC §8.2 and DESIGN
-    // §15 state (E2-05, code deferred): CanonicalDBG serves the stored ACNGT at two wrapper
-    // ids (y and y + offset, the same spelling), the engine unites palindromes for even k
-    // only, so each orientation counts and releases it twice: 2 + 2, the same two spellings at
-    // four node ids. First run on a DNA5 build by fix1-integrator (2026-10-07), which is
-    // where this expectation was taken from.
+    // On DNA5 N complements to N, so at odd k = 5 the k-mer ACNGT is its own reverse
+    // complement, which no DNA4 k-mer of odd length can be. On BASIC and CANONICAL one k-mer
+    // is one context per (offset, orientation) (§3, SPEC §7.1): AC at offset 0 (forward) and
+    // GT, rc(AC), at offset 3 (reverse), once each. On a wrapped PRIMARY graph this is the
+    // KNOWN DNA5 LIMITATION the engine header, SPEC §8.2 and DESIGN §15 state: CanonicalDBG
+    // serves the stored ACNGT at two wrapper ids (y and y + offset, the same spelling), the
+    // engine unites palindromes for even k only, so each orientation counts and releases it
+    // twice: 2 + 2, the same two spellings at four node ids. The expectation was taken from a
+    // run on a DNA5 build.
     std::vector<std::string> records { "ACNGT" };
     Pattern ac = Pattern::parse(PatternKind::DNA, "AC");
     for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
@@ -1576,8 +1575,8 @@ TEST(PatternSearch, NCentredSelfComplementOddK) {
 
 TEST(PatternSearch, IslandShorterThanK) {
     // k = 5, DNA4: AAAAANACNCCCCC keeps AAAAA and CCCCC; AC sits in a two-base island. On
-    // DNA5 the N k-mers are kept, and AC lies in four of them (X-ORACLE-02): AANAC at 3,
-    // ANACN at 2, NACNC at 1, ACNCC at 0 (a branch not in CI: no DNA5 build there)
+    // DNA5 the N k-mers are kept, and AC lies in four of them: AANAC at 3, ANACN at 2, NACNC
+    // at 1, ACNCC at 0 (a branch not in CI: no DNA5 build there)
     std::vector<std::string> records { "AAAAANACNCCCCC" };
     for (bool batch : { false, true }) {
         auto graph = build(5, records, DeBruijnGraph::BASIC, batch);
@@ -1689,7 +1688,7 @@ TEST(PatternSearch, IUPACBothOrientationsOneOffset) {
 
 TEST(PatternSearch, SuffixOnWrappedPrimary) {
     // the wrapped PRIMARY graph of ACGA exposes ACGA and TCGT, one stored and one virtual
-    // (which one is the builder's choice: TCGT is stored in this build, T1-06). The last
+    // (which one is the builder's choice: TCGT is stored in this build). The last
     // three bases of the virtual k-mer form a pattern that is a suffix of no stored k-mer,
     // nor is its reverse complement: it lies at the prefix of the stored k-mer, read on the
     // other strand. A stored-suffix lookup cannot find it, so suffix is refused on a wrapped
@@ -1968,13 +1967,13 @@ const std::vector<HaltCase>& halt_cases() {
     static const std::vector<HaltCase> cases {
         // even k, wrapped PRIMARY, palindromic 4-mers (AATT, CGCG, GCGC, AGCT, ...): the
         // union of a completed and a stopped probe may share palindromes, so its lower bound
-        // is the larger part, not the sum (the review's case: T, strands forward, max_steps
-        // 28, offset 2 is at_least 7 of 9; the sum of the parts would claim 10)
+        // is the larger part, not the sum (T, strands forward, max_steps 28, offset 2 is
+        // at_least 7 of 9; the sum of the parts would claim 10)
         { 4, DeBruijnGraph::PRIMARY, { "ACGAAATTATG", "AGCTGTCTCGCGCGC" },
           { "T", "A", "G", "C", "N", "AT", "CG", "TA", "W", "ACGT", "AATT", "NNNN", "CGCGC" } },
         { 6, DeBruijnGraph::PRIMARY, { "TTACGCGTAA", "GAATATTCCG", "ACGCGTACGT", "CCGGAATTCC" },
           { "G", "N", "CG", "AT", "GCG", "AATT", "ACGCGT", "TTACGC", "ACGCGTA" } },
-        // the review's L = 1 case (offset k - 1 of a stopped search is open, not exact)
+        // L = 1 (offset k - 1 of a stopped search is open, not exact)
         { 6, DeBruijnGraph::PRIMARY, { "TTA", "NGAGGTCGTGATCTCTAGCGCNTCCGGG", "CCTAGCCGCTCAAG" },
           { "G", "C", "T", "CG", "GTCGTG" } },
         // odd k, wrapped PRIMARY: no palindromic k-mer, the parts are disjoint
@@ -1988,12 +1987,11 @@ const std::vector<HaltCase>& halt_cases() {
 }
 
 TEST(PatternSearch, HaltsAgainstOraclesInEveryMode) {
-    // T1-01: a step stop at every budget below the complete run's, in every graph mode
-    // (BASIC, native CANONICAL, wrapped PRIMARY at odd k and at even k with palindromic
-    // k-mers), both builders, both scopes where served, every strand choice, patterns of
-    // length 1, 2, k and k + 1: every count states a true relation to the graph-walk oracle
-    // (check_halts_against_oracles). Before this, every step stop of the suite was on a BASIC
-    // graph with L >= 2
+    // A step stop at every budget below the complete run's, in every graph mode (BASIC,
+    // native CANONICAL, wrapped PRIMARY at odd k and at even k with palindromic k-mers), both
+    // builders, both scopes where served, every strand choice, patterns of length 1, 2, k and
+    // k + 1: every count states a true relation to the graph-walk oracle
+    // (check_halts_against_oracles), not only on BASIC graphs with L >= 2
     uint64_t runs = 0;
     for (const HaltCase &c : halt_cases()) {
         for (bool batch : { false, true }) {
@@ -2024,9 +2022,9 @@ TEST(PatternSearch, HaltsAgainstOraclesInEveryMode) {
 }
 
 TEST(PatternSearch, ThresholdsAgainstOraclesInEveryMode) {
-    // T1-01: stop_at_threshold and the release thresholds at every cap up to one past the
-    // truth, in every graph mode, the even-k wrapped PRIMARY union with palindromic k-mers
-    // included (its running lower bound is the larger part, never the sum)
+    // stop_at_threshold and the release thresholds at every cap up to one past the truth, in
+    // every graph mode, the even-k wrapped PRIMARY union with palindromic k-mers included (its
+    // running lower bound is the larger part, never the sum)
     for (const HaltCase &c : halt_cases()) {
         auto graph = build(c.k, c.records, c.mode);
         for (const std::string &p : c.patterns) {
@@ -2042,9 +2040,9 @@ TEST(PatternSearch, ThresholdsAgainstOraclesInEveryMode) {
 }
 
 TEST(PatternSearch, RandomGraphsHaltsAgainstOracles) {
-    // T1-01: step stops on random graphs of every mode (the mode rotates with the seed),
-    // three patterns each: one of length 1, one of length k, one of a random length up to
-    // k + 1; sampled sweeps (check_halts_against_oracles with max_sweep 300)
+    // Step stops on random graphs of every mode (the mode rotates with the seed), three
+    // patterns each: one of length 1, one of length k, one of a random length up to k + 1;
+    // sampled sweeps (check_halts_against_oracles with max_sweep 300)
     const char *iupac = "ACGTRYSWKMBDHVN";
     uint64_t runs = 0;
     for (uint32_t seed = 1; seed <= 24; ++seed) {
@@ -2089,11 +2087,11 @@ TEST(PatternSearch, RandomGraphsHaltsAgainstOracles) {
 }
 
 TEST(PatternSearch, Kmer31BothStrandsMultiLocus) {
-    // T2-02 (the engine's half; the integration suite's patterns are test_pattern.py's): at
-    // k = 31 on a BASIC graph, an exact pattern with several loci on each strand, so that
-    // the - strand, several k-mers per (strand, offset) and the answer order across strands
-    // are compared with the oracles, and an IUPAC pattern whose reverse complement matches
-    // the same instances, so that one (node, offset) carries both orientations
+    // The engine's half (the integration suite's patterns are test_pattern.py's): at k = 31
+    // on a BASIC graph, an exact pattern with several loci on each strand, so that the -
+    // strand, several k-mers per (strand, offset) and the answer order across strands are
+    // compared with the oracles, and an IUPAC pattern whose reverse complement matches the
+    // same instances, so that one (node, offset) carries both orientations
     std::mt19937 rng(31);
     auto random_bases = [&](size_t n) {
         std::string s;
@@ -2223,11 +2221,11 @@ TEST(PatternSearch, RandomGraphsAgainstOracles) {
 }
 
 
-// ---------------------------------------------------------------- increment 4: extension
+// ---------------------------------------------------------------- extension
 
 /*
- * Phase 2 (§4.2, §13 increment 4): a pattern longer than k with Request::extend_paths. Two
- * oracles, sharing no code with the engine's DFS:
+ * Phase 2 (§4.2): a pattern longer than k with Request::extend_paths. Two oracles, sharing
+ * no code with the engine's DFS:
  *  - the graph-walk oracle extends strings over the served graph's k-mers (graph_kmers, a
  *    map from each k-mer to its node id): every walk of L - k + 1 k-mers spelling an
  *    instance of an oriented pattern, never through call_outgoing_kmers; it also counts the
@@ -2394,7 +2392,7 @@ std::vector<PathCtx> run_paths(const PatternSearch &engine, const StoredNodes &s
             EXPECT_EQ(c.node, c.path.front());
         }
         // the anchor's stored node, and the one the route maps every node of the path to
-        // (PatternSearch::base_node), against the stored k-mers spelled (T1-03)
+        // (PatternSearch::base_node), against the stored k-mers spelled
         EXPECT_EQ(stored.of(c.node), c.base_node);
         for (node_index n : c.path) {
             EXPECT_EQ(stored.of(n), engine.base_node(n)) << n;
@@ -2495,8 +2493,8 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
     EXPECT_EQ(expected.size(), a.paths.value) << pattern.text();
     EXPECT_EQ(oracle.candidates, a.candidates_examined) << pattern.text();
     EXPECT_LE(expected.size(), a.candidates_examined);
-    // the extension's counters beside its steps (GPT review 3): every anchor spelled and
-    // extended, and the walks the DFS branched at
+    // the extension's counters beside its steps: every anchor spelled and extended, and the
+    // walks the DFS branched at
     EXPECT_EQ(num_anchors, counted.work.extension_anchors) << pattern.text();
     EXPECT_EQ(oracle.branchings, counted.work.extension_branches) << pattern.text();
     std::map<Orientation, uint64_t> by_orientation;
@@ -2587,7 +2585,7 @@ void check_paths_against_oracles(const DeBruijnGraph &graph, const Pattern &patt
 
 
 TEST(PatternSearch, ExtensionNotRequestedUnchanged) {
-    // without extend_paths a long pattern is answered as in increments 1-2, step for step
+    // without extend_paths a long pattern is answered by its anchors, step for step
     std::vector<std::string> records { "TTACGTACCA", "GGACGTTT" };
     auto graph = build(4, records, DeBruijnGraph::BASIC);
     Pattern acgta = Pattern::parse(PatternKind::DNA, "ACGTA");
@@ -3010,8 +3008,8 @@ TEST(PatternSearch, ExtensionMaxStepsAtLeast) {
     // every step budget: a stop in discovery leaves the anchors a true lower bound and the
     // paths unknown (nothing extended); a stop in the extension leaves the anchors exact and
     // the paths at_least, PARTIAL a prefix of the answer, ALL_OR_COUNT nothing. In every
-    // graph mode, the even-k wrapped PRIMARY graph (palindromic anchors) included (T1-01),
-    // with the truth from the oracles (E1-03, T1-09)
+    // graph mode, the even-k wrapped PRIMARY graph (palindromic anchors) included, with the
+    // truth from the oracles
     std::vector<std::string> records { "ACGTTGCAAGGCTTACGATCGATCGGGATTACA", "GGGCCCAATTGCA" };
     const std::vector<std::pair<size_t, DeBruijnGraph::Mode>> graphs {
         { 5, DeBruijnGraph::BASIC }, { 5, DeBruijnGraph::PRIMARY },
@@ -3095,8 +3093,8 @@ TEST(PatternSearch, ExtensionDeadline) {
     const auto start = Deadline::Clock::now();
 
     // the clock reads late from its |on_time|+1-th reading on: the pattern's start reads it
-    // first, the listing of the anchors second, then the extension before each anchor (GPT
-    // review 3, item 5; one anchor here, GATCG), the release of the paths after them
+    // first, the listing of the anchors second, then the extension before each anchor (one
+    // anchor here, GATCG), the release of the paths after them
     auto run = [&](int on_time, Mode mode, std::vector<PathCtx> *released) {
         auto readings = std::make_shared<int>(0);
         auto clock = [start, readings, on_time]() {
@@ -3273,7 +3271,7 @@ TEST(PatternSearch, ExtensionRandomGraphsAgainstOracles) {
 // ---------------------------------------------------------------- time stops inside a phase
 
 TEST(PatternSearch, TimeStopMidDiscovery) {
-    // T2-03: a time stop inside discovery, not only before the pattern starts. An injected
+    // A time stop inside discovery, not only before the pattern starts. An injected
     // clock is on time for its first n readings and late from then on, for every n below the
     // number of readings a complete run takes (whatever the engine's reading points are: the
     // pattern's start, the stride crossings of Budget::kClockStride steps, the release).
@@ -3375,9 +3373,8 @@ TEST(PatternSearch, TimeStopMidDiscovery) {
     EXPECT_FALSE(cut.extraction->complete);
     EXPECT_TRUE(cut.time_limited);
 
-    // increment 4: a long pattern stopped by time inside its extension's DFS: the anchors
-    // exact, the paths at_least and a lower bound of the oracle's, nothing released in
-    // ALL_OR_COUNT
+    // a long pattern stopped by time inside its extension's DFS: the anchors exact, the
+    // paths at_least and a lower bound of the oracle's, nothing released in ALL_OR_COUNT
     Pattern long_pattern = Pattern::parse(PatternKind::IUPAC, "AC" + std::string(12, 'N'));
     auto graph7 = build(7, records, DeBruijnGraph::BASIC);
     PatternSearch extender(*graph7);

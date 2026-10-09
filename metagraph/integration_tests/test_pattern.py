@@ -1,3 +1,53 @@
+"""
+End-to-end tests of POST /pattern and `metagraph pattern` (docs/DESIGN-pattern-search.md): the
+counts of the graph contexts of exact DNA and IUPAC patterns, their label-free extraction
+(output.labels "none": k-mer, instance, offset, strand, node and row ids, no annotation read),
+and their labels (output.labels "all": the columns carrying each context and, on the mini index
+with its .seqs, every placed occurrence: record, seq_id, 1-based position, strand), checked
+against PYTHON ORACLES over the very records each index was built from — never against the
+engine itself.
+
+A graph context is (strand, k-mer, offset): a k-mer of the graph that contains the oriented
+pattern at that offset (§3). On a BASIC graph the k-mers are those of the records as deposited
+(each record split at every symbol a DNA4 build does not keep); P is searched on '+', rc(P) on
+'-', a palindromic P once as '='. On a CANONICAL graph, and on a PRIMARY one wrapped in
+CanonicalDBG, they are those k-mers and their reverse complements, with orientations instead of
+strands. The oracle finds every occurrence of the oriented pattern in those sequences (an
+overlapping regex) and adds every k-mer that contains it, at each offset.
+
+Fixtures:
+  - TestPatternMini: the mini index (build/mini_refseq, scripts/traversal/build_mini_refseq.sh;
+    or $METAGRAPH_MINI_REFSEQ), a BASIC succinct graph at k = 31 with a row_diff_brwt_coord
+    annotation and its .seqs. It was built without the dummy-edge mask, so a COPY of its graph
+    in a temporary directory is given the mask by `metagraph transform --mask-dummy` (the
+    one-time step for staging) and served with the original annotation, which the mask leaves
+    valid, for exact counts; build/mini_refseq itself is never written to. The masks made the
+    other ways are checked against it: a rebuild with --mask-dummy (the same .edgemask, the same
+    answers) and a server started with --pattern-build-mask on the unmasked graph (the same
+    answers, mask: built_at_load). The graph as built is served too: its counts upper bounds
+    with estimates, checked against the masked copy's exact counts and an oracle of the source
+    dummies, lists exact; once with the server's default --pattern-max-checked-entries (a
+    pattern with at most 50 unchecked candidates has each tested, its counts exact) and once
+    with 0 (bounds for every pattern with unchecked candidates). Skipped when the mini index
+    is not built.
+  - TestPatternSynthetic: random records, BASIC, CANONICAL and PRIMARY graphs at k = 15 (and a
+    multi-graph server), always run.
+  - TestPatternFixtureBodies: the frozen fixture bodies (api/python/tests/data/traverse/pattern)
+    against the SPEC (api/python/tests/test_pattern_fixtures.py), and the blanking of
+    pattern_fixtures.py --check; no server, no index: always run.
+  - TestPatternFixtures: pattern_fixtures.py --check, the fixture bodies against what this
+    binary answers on the mini index; skipped without the mini index.
+  - TestPatternRegression: /search and /align answer byte for byte as the base binary's
+    ($METAGRAPH_BASE_BINARY, an older build) on test_api.py's fixture and requests; skipped
+    without it.
+
+Without the mini index or a base binary TestPatternMini, TestPatternFixtures and
+TestPatternRegression are skipped, which unittest counts as passed. With
+$METAGRAPH_REQUIRE_GUARDS=1 a missing input fails those classes instead of skipping them, so
+that a run meant to check the guarantees cannot pass without them: CI's mini-index job builds
+the index and runs TestPatternMini and TestPatternFixtures so (it has no base binary).
+"""
+
 import filecmp
 import glob
 import itertools
@@ -19,55 +69,6 @@ import requests
 
 from base import PROTEIN_MODE, TestingBase, METAGRAPH, TEST_DATA_DIR
 
-"""
-End-to-end tests of POST /pattern and `metagraph pattern` (docs/DESIGN-pattern-search.md,
-increments 0-3): the counts of the graph contexts of exact DNA and IUPAC patterns, their
-label-free extraction (output.labels "none": k-mer, instance, offset, strand, node and row ids,
-no annotation read), and their labels (output.labels "all", increment 3: the columns carrying
-each context and, on the mini index with its .seqs, every placed occurrence: record, seq_id,
-1-based position, strand), checked against PYTHON ORACLES over the very records each index was
-built from — never against the engine itself.
-
-A graph context is (strand, k-mer, offset): a k-mer of the graph that contains the oriented
-pattern at that offset (§3). On a BASIC graph the k-mers are those of the records as deposited
-(each record split at every symbol a DNA4 build does not keep); P is searched on '+', rc(P) on
-'-', a palindromic P once as '='. On a CANONICAL graph, and on a PRIMARY one wrapped in
-CanonicalDBG, they are those k-mers and their reverse complements, with orientations instead of
-strands. The oracle finds every occurrence of the oriented pattern in those sequences (an
-overlapping regex) and adds every k-mer that contains it, at each offset.
-
-Fixtures:
-  - TestPatternMini: the mini index (build/mini_refseq, scripts/traversal/build_mini_refseq.sh;
-    or $METAGRAPH_MINI_REFSEQ), a BASIC succinct graph at k = 31 with a row_diff_brwt_coord
-    annotation and its .seqs. It was built without the dummy-edge mask, so a COPY of its graph
-    in a temporary directory is given the mask by `metagraph transform --mask-dummy` (the
-    one-time step for staging) and served with the original annotation, which the mask leaves
-    valid, for exact counts; build/mini_refseq itself is never written to. The masks made the
-    other ways are checked against it: a rebuild with --mask-dummy (the same .edgemask, the same
-    answers) and a server started with --pattern-build-mask on the unmasked graph (the same
-    answers, mask: built_at_load). The graph as built is served too (owner decision #16 of
-    2026-10-08): counts upper bounds with estimates, checked against the masked copy's exact
-    counts and an oracle of the source dummies, lists exact; once with the server's default
-    --pattern-max-checked-entries (owner decision #24: a pattern with at most 50 unchecked
-    candidates has each tested, its counts exact) and once with 0 (the bounds of #16 for every
-    pattern with unchecked candidates). Skipped when the mini index is not built.
-  - TestPatternSynthetic: random records, BASIC, CANONICAL and PRIMARY graphs at k = 15 (and a
-    multi-graph server), always run.
-  - TestPatternFixtureBodies: the frozen fixture bodies (api/python/tests/data/traverse/pattern)
-    against the SPEC (api/python/tests/test_pattern_fixtures.py), and the blanking of
-    pattern_fixtures.py --check; no server, no index: always run.
-  - TestPatternFixtures: pattern_fixtures.py --check, the fixture bodies against what this
-    binary answers on the mini index; skipped without the mini index.
-  - TestPatternRegression: /search and /align answer byte for byte as the base binary's
-    ($METAGRAPH_BASE_BINARY, e.g. the build of 804731aa) on test_api.py's fixture and requests;
-    skipped without it.
-
-Without the mini index or a base binary TestPatternMini, TestPatternFixtures and
-TestPatternRegression are skipped, which unittest counts as passed. With
-$METAGRAPH_REQUIRE_GUARDS=1 a missing input fails those classes instead of skipping them, so
-that a run meant to check the guarantees cannot pass without them: CI's mini-index job builds
-the index and runs TestPatternMini and TestPatternFixtures so (it has no base binary).
-"""
 
 MINI_DIR = os.environ.get('METAGRAPH_MINI_REFSEQ', os.path.join(os.getcwd(), 'mini_refseq'))
 # $METAGRAPH_REQUIRE_GUARDS=1: an input a guard class needs (the mini index, the base binary)
@@ -84,20 +85,20 @@ BASE_BINARY = os.environ.get('METAGRAPH_BASE_BINARY', '')
 FIXTURES_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts',
                                'traversal', 'pattern_fixtures.py')
 
-# the server's defaults (--pattern-* flags; §5.3, the owner's budgets of 2026-10-07): each cap
-# is its field's maximum and default, but time_budget_ms defaults to 60 s under a 600 s cap
+# the server's defaults (--pattern-* flags; §5.3): each cap is its field's maximum and default,
+# but time_budget_ms defaults to 60 s under a 600 s cap
 DEFAULT_CAPS = {'max_contexts': 10000, 'max_anchors': 1000, 'max_steps': 100000000,
                 'time_budget_ms': 600000, 'min_information_bits': 24, 'max_patterns': 16,
-                # output.labels "all" (increment 3)
+                # output.labels "all"
                 'max_labels_per_anchor': 64, 'max_annotation_work': 100000000,
                 'max_memory_mb': 256, 'max_labels': 1000, 'max_occurrences_per_label': 16,
-                # long_search "paths" (increment 4)
+                # long_search "paths"
                 'max_paths': 1000,
-                # owner decision #24: no request field, the unchecked candidates a pattern on a
-                # graph without its mask may have for each to be tested
+                # no request field: the unchecked candidates a pattern on a graph without its
+                # mask may have for each to be tested
                 'max_checked_entries': 50,
-                # increment 5b (a predicate, SPEC §19): the raw contexts a selection may test, its
-                # work per request, and the names a predicate may list (no request field)
+                # a predicate (SPEC §19): the raw contexts a selection may test, its work per
+                # request, and the names a predicate may list (no request field)
                 'max_predicate_contexts': 100000, 'max_predicate_work': 100000000,
                 'max_predicate_labels': 10000}
 DEFAULT_TIME_MS = 60000
@@ -121,8 +122,8 @@ def pattern_regex(pattern):
     return re.compile('(?=(' + ''.join('[' + IUPAC[c] + ']' for c in pattern.upper()) + '))')
 
 
-# increment 5 (peptides): the test's own copy of NCBI's genetic codes used here (gc.prt 4.6,
-# ncbieaa: the residue of each codon in TCAG order), never the server's tables
+# peptides: the test's own copy of NCBI's genetic codes used here (gc.prt 4.6, ncbieaa: the
+# residue of each codon in TCAG order), never the server's tables
 GENETIC_CODES = {
     1: 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG',
     2: 'FFLLSSSSYY**CCWWLLLLPPPPHHQQRRRRIIMMTTTTNNKKSS**VVVVAAAADDEEGGGG',
@@ -144,7 +145,7 @@ def translate(seq, table):
 
 def residue_admits(residue, aa):
     """A peptide's residue (X, B, Z, J the ambiguity codes) admits the amino acid |aa|; a stop
-    is admitted by the stop '*' only (owner decision #19), which admits nothing else."""
+    is admitted by the stop '*' only, which admits nothing else."""
     if aa == '?':
         return False
     if residue == '*' or aa == '*':
@@ -365,7 +366,7 @@ class Records:
     def branchings(self, pattern, k, strands='both', canonical=False):
         """The walks of k to L - 1 bases of the graph-walk oracle of paths (anchors included)
         that two or more k-mers of the graph extend at the next position: where the extension
-        branches (work.extension_branches, review GPT-3)."""
+        branches (work.extension_branches)."""
         assert len(pattern) > k
         count = 0
         for _, q in self.oriented(pattern, strands, not canonical):
@@ -387,13 +388,13 @@ class Records:
         return count
 
     def source_dummies(self, k, canonical=False):
-        """The source dummy k-mers of the BOSS graph of these records (owner decision #16:
-        what a graph without its dummy-edge mask counts besides its k-mers): '$' * j + x[:k - j]
-        for 1 <= j < k and every node x (a (k - 1)-mer) that starts a k-mer and that no k-mer
-        enters, i.e. the first k - 1 bases of a sequence (island, or its reverse complement on
-        a graph holding both orientations) holding a k-mer, found at no later position of any
-        sequence. The main dummy edge ($ * k: its W is $) and the sink dummies (W = $) are not
-        among them: no pattern base matches $."""
+        """The source dummy k-mers of the BOSS graph of these records (what a graph without its
+        dummy-edge mask counts besides its k-mers): '$' * j + x[:k - j] for 1 <= j < k and
+        every node x (a (k - 1)-mer) that starts a k-mer and that no k-mer enters, i.e. the
+        first k - 1 bases of a sequence (island, or its reverse complement on a graph holding
+        both orientations) holding a k-mer, found at no later position of any sequence. The
+        main dummy edge ($ * k: its W is $) and the sink dummies (W = $) are not among them: no
+        pattern base matches $."""
         key = ('dummies', k, canonical)
         if key not in self._cache:
             seqs = [s for s in self.sequences(canonical)]
@@ -426,21 +427,20 @@ class Records:
 
 # a 10-mer whose suffix-scope count on the mini needs a mask scan (it starts a record's first
 # k-mer): discovery takes 20 range steps, the scan one more, so max_steps 20 stops in the scan
-# with bounds (review of 2026-10-07, X-TESTS-03)
+# with bounds
 SCAN_10 = 'ATGCCGGTGA'
 SCAN_STEPS = 20
 # a 31-mer of 12 bases around a run of 19 Ns (24 bits): about 2.5e7 range steps on the mini, a
 # discovery a work deadline of a second stops
 HEAVY31 = 'GG' + 'N' * 19 + 'TTGGCGATCT'
 
-# owner decision #16: the note of an entry whose counts carry an estimate (a graph without its
-# dummy-edge mask)
+# the note of an entry whose counts carry an estimate (a graph without its dummy-edge mask)
 NOTE_ESTIMATE = 'estimate_sampled_dummy_fraction'
 
 
 def guard(condition, reason):
     """unittest.skipUnless(condition, reason); with $METAGRAPH_REQUIRE_GUARDS=1 a class whose
-    input is missing fails instead (review of 2026-10-07, T2-01)."""
+    input is missing fails instead."""
     if condition or not REQUIRE_GUARDS:
         return unittest.skipUnless(condition, reason)
 
@@ -471,10 +471,10 @@ def free_port():
 def half_closed_request(port, route, body, timeout=60):
     """The bytes a server sends for a complete POST /route (body: a dict, sent as JSON, or the
     raw text) whose client then half-closed its connection: shutdown(SHUT_WR) right after the
-    request, as in the reviewer's repro (review GPT-2 of 2026-10-08, finding 4). The client
-    still reads until the server closes. The request is held back until the FIN goes with it
-    where the platform can do so (TCP_CORK on Linux, TCP_NOPUSH on macOS), so that the server
-    sees the FIN as soon as it has read the request, not after a race."""
+    request. The client still reads until the server closes. The request is held back until
+    the FIN goes with it where the platform can do so (TCP_CORK on Linux, TCP_NOPUSH on
+    macOS), so that the server sees the FIN as soon as it has read the request, not after a
+    race."""
     payload = (body if isinstance(body, str) else json.dumps(body)).encode()
     head = (f'POST /{route} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n'
             f'Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n').encode()
@@ -648,13 +648,13 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         cls.server = Server(METAGRAPH, ['-i', cls.graph, '-a', cls.anno],
                             os.path.join(d, 'server.log'))
         cls.stats = cls.server.get('stats').json()
-        # the mini graph as built, without its mask (owner decision #16): served, its counts
-        # upper bounds with estimates, its lists exact
+        # the mini graph as built, without its mask: served, its counts upper bounds with
+        # estimates, its lists exact
         cls.unmasked_server = Server(METAGRAPH, ['-i', cls.unmasked_graph,
                                                  '-a', cls.unmasked_anno],
                                      os.path.join(d, 'server_unmasked.log'))
-        # the same with the check of owner decision #24 off: every count with unchecked
-        # candidates is bounds, as any count above the limit (the tests of decision #16)
+        # the same with the candidate check off: every count with unchecked candidates is
+        # bounds, as any count above the limit (the tests of a graph without its mask)
         cls.unchecked_server = Server(METAGRAPH, ['-i', cls.unmasked_graph,
                                                   '-a', cls.unmasked_anno,
                                                   '--pattern-max-checked-entries', '0'],
@@ -886,7 +886,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                    key=lambda x: x['field']),
             sorted(limits['clamped'], key=lambda x: x['field']))
         self.assertEqual('exact', out['patterns'][0]['counts']['contexts']['relation'])
-        # a budget under the cap is kept as asked
+        # a budget under the cap is kept as requested
         out = self.pattern(self.server, {'patterns': [{'dna': self.p16}], 'mode': 'count',
                                          'time_budget_ms': 1234.5})
         self.assertEqual(1234.5, out['limits']['time_budget_ms'])
@@ -903,28 +903,27 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             'projections': ['none', 'all', 'predicate_only'], 'default_projection': 'none',
             'projections_later_increment': [], 'default_occurrences': True,
             'kinds': ['dna', 'iupac', 'protein'], 'kinds_later_increment': [],
-            # increment 5: the residues (the stop '*' since owner decision #19), the genetic
-            # codes and the default
+            # peptides: the residues (the stop '*' among them), the genetic codes and the
+            # default
             'protein_residues': list('ACDEFGHIKLMNPQRSTVWYXBZJ*'),
             'genetic_codes': [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25,
                               26, 27, 28, 29, 30, 31, 32, 33],
             'default_genetic_code': 1,
             'scopes': ['suffix', 'any_offset'],
             'default_scope': 'any_offset', 'long_patterns': 'anchors_counted',
-            # increment 4: the paths of long patterns, opt-in
+            # the paths of long patterns, opt-in
             'long_search': ['anchors', 'paths'], 'default_long_search': 'anchors',
             'strands': ['both', 'forward', 'reverse'], 'graph_mode': 'basic', 'k': self.k,
             'alphabet': '$ACGT', 'strand_stated': True, 'mask': 'file',
-            # owner decision #16: the masked graph counts exactly, no dummy fraction
+            # the masked graph counts exactly, no dummy fraction
             'counting': 'exact', 'dummy_fraction': None,
             'graph_cleaned': 'unknown', 'records_shorter_than_k': 'not_indexed',
             'resident_only': True, 'caps': DEFAULT_CAPS,
             'default_time_budget_ms': DEFAULT_TIME_MS,
             'finalize_reserve_ms': DEFAULT_FINALIZE_MS,
-            # owner decision P9: the delivery rates as numbers (MB/s), the prose rules SPEC
-            # references
+            # the delivery rates as numbers (MB/s), the prose rules SPEC references
             'delivery_mbps': {'build': 10, 'compress': 50},
-            # increment 5b: the operators, the strands and the access of a budget-aware index
+            # predicates: the operators, the strands and the access of a budget-aware index
             'predicate': {'operators': ['any', 'all', 'none', 'at_least', 'and', 'or', 'not'],
                           'strands': ['either', 'context'], 'access': 'rows'},
         }
@@ -946,7 +945,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
 
     def test_retrieval_all_or_count(self):
         patterns = [self.p16, self.iupac16, self.pal12, self.absent16]
-        # mode and projection omitted: all_or_count with labels "none" in this increment
+        # mode and projection omitted: all_or_count with labels "none"
         request = {'patterns': [{'iupac' if 'N' in p else 'dna': p} for p in patterns]}
         out = self.pattern(self.server, request)
         self.assertEqual('all_or_count', out['mode'])
@@ -1078,10 +1077,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertLessEqual(len(got), entry['counts']['contexts']['value'])
 
     def test_bounds_in_a_mask_scan(self):
-        """max_steps reached in a mask scan (review of 2026-10-07, X-TESTS-03: no test answer
-        had relation bounds or phase mask_scan): the count is bounds, value = lower <= the
-        oracle's count <= upper, the parts summed as SPEC §7.4 says, and the stop names the
-        scan."""
+        """max_steps reached in a mask scan: the count is bounds, value = lower <= the oracle's
+        count <= upper, the parts summed as SPEC §7.4 says, and the stop names the scan."""
         truth = self.contexts(SCAN_10, scope='suffix')
         full = self.pattern(self.server, {'patterns': [{'dna': SCAN_10}], 'mode': 'count',
                                           'scope': 'suffix'})['patterns'][0]
@@ -1115,14 +1112,13 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                 self.assertEqual([], e['results'])
 
     def test_a_stopped_request_answers_what_it_buffered(self):
-        """Review of 2026-10-07, X-EFFICIENCY-04: the work stops earlier by the estimated time
-        to write what the answer holds, so that a request whose earlier patterns buffered
-        many results and whose last one runs to the work deadline still answers within its
-        budget, with its counts and a time stop, instead of 503 with all of its work lost.
-        Fifteen patterns of 19,283 results each (a server whose max_contexts admits them all)
-        and a last one whose discovery outlasts the budget: with the 250 ms reserve alone the
-        work ran to 1,750 ms and the ~33 MB of results could not be written by 2,000 ms (503 in
-        every run, measured on the binary before the fix)."""
+        """The work stops earlier by the estimated time to write what the answer holds, so
+        that a request whose earlier patterns buffered many results and whose last one runs to
+        the work deadline still answers within its budget, with its counts and a time stop,
+        instead of 503 with all of its work lost. Fifteen patterns of 19,283 results each (a
+        server whose max_contexts admits them all) and a last one whose discovery outlasts the
+        budget: with the 250 ms reserve alone the work would run to 1,750 ms and the ~33 MB of
+        results could not be written by 2,000 ms (503 in every run)."""
         server = Server(METAGRAPH, ['-i', self.graph, '-a', self.anno,
                                     '--pattern-max-contexts', '20000'],
                         os.path.join(self.tempdir.name, 'server_volume.log'))
@@ -1196,8 +1192,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual('long', entry['absence_scope'])
         self.assertEqual(80.0, entry['information_bits'])
         self.assertEqual(62.0, entry['anchor_information_bits'])
-        # both windows of this 40-mer carry 62 bits (an addition of the review of 2026-10-07,
-        # X-GUARANTEES-01: the least searched window, the floor's operand)
+        # both windows of this 40-mer carry 62 bits (min_anchor_information_bits: the least
+        # searched window, the floor's operand)
         self.assertEqual(62.0, entry['min_anchor_information_bits'])
         self.assertIn('paths_later_increment', entry['notes'])
         self.assertNotIn('contexts', entry['counts'])
@@ -1221,7 +1217,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertTrue(absent['retrieval_complete'])
         self.assertIsNone(absent['withheld'])
 
-    # ------------------------------------------------------------ paths (increment 4)
+    # ------------------------------------------------------------ paths
 
     def long_patterns(self):
         """Patterns of 35-50 bases taken from the mini's records (so present): the blaNDM-1
@@ -1279,8 +1275,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             self.assertGreaterEqual(c['candidates_examined'], max(len(expected), n - 1))
         self.assertIn('extension_edges', entry['work'])
         self.assertIn('extension_ms', entry['timing'])
-        # review GPT-3 (round fix3): the anchors whose extension began (every anchor: it
-        # completed) and the walks where it branched, against the graph-walk oracle
+        # the anchors whose extension began (every anchor: it completed) and the walks where
+        # it branched, against the graph-walk oracle
         self.assertEqual((len(anchors), self.records.branchings(pattern, k)),
                          (entry['work']['extension_anchors'],
                           entry['work']['extension_branches']))
@@ -1379,9 +1375,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                   for p in patterns], 'long_search': 'paths'}, **kw)
 
     def test_long_paths_against_the_fasta(self):
-        """Patterns of 35-50 bases (long_search "paths", increment 4): every path with every
-        column carrying it and, where one record of the column holds the whole path, its
-        support record_verified and its occurrences; the occurrences the FASTA scan's."""
+        """Patterns of 35-50 bases (long_search "paths"): every path with every column carrying
+        it and, where one record of the column holds the whole path, its support
+        record_verified and its occurrences; the occurrences the FASTA scan's."""
         patterns = self.long_patterns()
         out = self.pattern(self.server, self.paths_request(patterns, output={'labels': 'all'}))
         self.assertEqual(('paths', 1000, 'label_intersection'),
@@ -1426,7 +1422,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                 self.assertEqual(e['counts'], c['counts'])
                 self.assertEqual(e['results'], q['results'])
                 self.assertUnknownLabels(e)
-        # the option is opt-in: without it, or with "anchors", the answer of increments 1-3
+        # the option is opt-in: without it, or with "anchors", the answer by anchors
         plain = self.pattern(self.server, {'patterns': [{'dna': self.p40}]})
         anchors = self.pattern(self.server, {'patterns': [{'dna': self.p40}],
                                              'long_search': 'anchors'})
@@ -1501,7 +1497,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                 self.assertLessEqual({(i, a - 1) for i, a in verified.get(label['column'], ())},
                                      chains)
 
-    # ------------------------------------------------------------ peptides (increment 5)
+    # ------------------------------------------------------------ peptides
 
     def peptide_contexts(self, residues, table):
         """{(strand, k-mer, offset)}: the graph contexts of a peptide of at most k bases from the
@@ -1587,10 +1583,10 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertFalse(entry['palindromic'])
 
     def test_peptides_against_the_six_frames(self):
-        """Peptides within one k-mer (increment 5): their contexts the six-frame translation's
-        (every k-mer of a record holding a match), each with the columns whose records hold its
-        k-mer, and the placed occurrences every match of the translation; in count mode the
-        same counts."""
+        """Peptides within one k-mer: their contexts the six-frame translation's (every k-mer
+        of a record holding a match), each with the columns whose records hold its k-mer, and
+        the placed occurrences every match of the translation; in count mode the same
+        counts."""
         peptides = self.peptides()
         for residues, table in peptides:
             with self.subTest(peptide=residues, table=table):
@@ -1672,10 +1668,9 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                 self.assertEqual('unknown', plain['counts']['paths']['relation'])
 
     def test_peptide_slots_and_genetic_codes(self):
-        """The slot error of a peptide (bad_alphabet; the stop '*' is a residue since owner
-        decision #19), an unknown genetic code refused, and the genetic code read: a peptide in
-        the vertebrate mitochondrial code (2) answered as the six-frame translation in that code
-        finds it."""
+        """The slot error of a peptide (bad_alphabet; the stop '*' is a residue), an unknown
+        genetic code refused, and the genetic code read: a peptide in the vertebrate
+        mitochondrial code (2) answered as the six-frame translation in that code finds it."""
         out = self.pattern(self.server, {'patterns': [{'protein': 'MELPUIMHPV'},
                                                       {'protein': 'MELPNIMHPV*'},
                                                       {'protein': 'melpnimhpv'}],
@@ -1719,11 +1714,11 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         return out
 
     def test_peptide_stops_against_the_six_frames(self):
-        """Owner decisions #19 and #21: the stop '*' is a stop codon of the request's table at
-        that position, against the six-frame oracle in tables 1, 2 and 11 (contexts, labels and
-        placed occurrences); X never a stop; in table 27 or 31, whose stop codons code a residue
-        unless in context, '*' matches nothing (exact 0, the note no_stop_codon) and those
-        codons match as their residue (Q at TAA and TAG in 27, E in 31)."""
+        """The stop '*' is a stop codon of the request's table at that position, against the
+        six-frame oracle in tables 1, 2 and 11 (contexts, labels and placed occurrences); X
+        never a stop; in table 27 or 31, whose stop codons code a residue unless in context,
+        '*' matches nothing (exact 0, the note no_stop_codon) and those codons match as their
+        residue (Q at TAA and TAG in 27, E in 31)."""
         for residues, table in self.stop_peptides():
             with self.subTest(peptide=residues, table=table):
                 request = {'patterns': [{'protein': residues}], 'genetic_code': table,
@@ -1774,7 +1769,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                          entry['counts']['contexts']['value'], (r, other))
                         self.assertNotIn('no_stop_codon', entry['notes'])
 
-    # ------------------------------------------------------------ labels (increment 3)
+    # ------------------------------------------------------------ labels
 
     NDM_F = 'GGTTTGGCGATCTGGTTTTC'   # blaNDM-1 forward primer: its k-mers carry 7 to 9 taxa
 
@@ -1805,8 +1800,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(('record', 'budgeted'), (entry['placement'], entry['annotation']))
         self.assertEqual(([], []), (entry['rows_refused'], entry['anchors_truncated']))
         self.assertEqual(len(expected), len(entry['results']))
-        # review GPT-3 (round fix3): the rows read, each distinct k-mer once (BASIC: a k-mer is
-        # its row); the paths' counters are not a context's
+        # the rows read, each distinct k-mer once (BASIC: a k-mer is its row); the paths'
+        # counters are not a context's
         self.assertEqual(len({kmer for _, kmer, _ in expected}),
                          entry['work']['annotation_rows_distinct'])
         self.assertNotIn('verification_steps', entry['work'])
@@ -1990,7 +1985,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
 
     # ------------------------------------------------------------ the CLI
 
-    # ------------------------------------------------------------ predicates (increment 5b)
+    # ------------------------------------------------------------ predicates
 
     PREDICATE_PATTERNS = [('dna', 'GGTTTGGCGATCTGGTTTTC'), ('dna', 'CGGAATGGCTCATCACGATC'),
                           ('dna', 'GCGGCGGCGGCG'), ('iupac', 'GTGYCAGCMGCCGCGGTAA'),
@@ -2056,8 +2051,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         reverse complement's) satisfy the predicate, all of them returned, counted exactly;
         with "predicate_only" every result lists the predicate's columns of its own k-mer, its
         selection_labels the set it was evaluated on, and per label in selection_strands the
-        orientation whose records carry it (the owner's answer to P11): "context" (its k-mer
-        only), "reverse_complement" (with "either", its reverse complement only) or "both"."""
+        orientation whose records carry it: "context" (its k-mer only), "reverse_complement"
+        (with "either", its reverse complement only) or "both"."""
         rng = random.Random(5)
         names = sorted(self.columns)
         contexts = {p: self.contexts(p) for _, p in self.PREDICATE_PATTERNS}
@@ -2119,10 +2114,10 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         return set().union(*(TestPatternMini.holds_names(q) for q in v))
 
     def test_predicate_strands_on_the_ndm_primer(self):
-        """P11 on the mini (SPEC §19.5): none(546) on the blaNDM-1 forward primer selects no
-        context with "either" and its 12 - contexts with "context"; a typo is reported unknown
-        and folded to a constant (no row read); the compute admission and the work budget stop
-        as stated; the CLI answers as the server."""
+        """Strands on the mini (SPEC §19.5): none(546) on the blaNDM-1 forward primer selects
+        no context with "either" and its 12 - contexts with "context"; a typo is reported
+        unknown and folded to a constant (no row read); the compute admission and the work
+        budget stop as stated; the CLI answers as the server."""
         p = [{'dna': self.NDM_F}]
         out = self.pattern(self.server, {'patterns': p, 'mode': 'count',
                                          'predicate': {'none': ['546']}})
@@ -2172,8 +2167,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         """`metagraph pattern` answers each request file as the server: one process over a panel
         (counts and a partial retrieval, paths with labels and record verification, peptides,
         labels "all" with caps), a refusal's body with exit status 1, and every file answered,
-        the later ones after a refused one (review of 2026-10-07, R1-03, R2-01: a body nested
-        too deep aborted the run, exit 134, and left the later files unanswered)."""
+        the later ones after a refused one (a body nested too deep must not abort the run and
+        leave the later files unanswered)."""
         panel = [
             {'patterns': [{'id': 'a', 'dna': self.p16}, {'iupac': self.iupac16},
                           {'dna': self.p11}, {'dna': self.p40}],
@@ -2219,11 +2214,11 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                  self.k, 16, 'any_offset')
 
     def test_cli_unmasked(self):
-        """The mini index as built (no .edgemask) is served by the CLI too (owner decision #16):
-        its answer states the counting and the dummy fraction, as the server's on the same
-        graph (the fraction sampled in another process: the same draws); the start-up note
-        names the remedies for exact counts; with --pattern-build-mask the CLI answers as the
-        server on the transformed copy."""
+        """The mini index as built (no .edgemask) is served by the CLI too: its answer states
+        the counting and the dummy fraction, as the server's on the same graph (the fraction
+        sampled in another process: the same draws); the start-up note names the remedies for
+        exact counts; with --pattern-build-mask the CLI answers as the server on the
+        transformed copy."""
         request = {'patterns': [{'dna': self.p16}, {'iupac': self.iupac16},
                                 {'dna': self.start16}], 'mode': 'count'}
         path = os.path.join(self.tempdir.name, 'request_mask.json')
@@ -2238,7 +2233,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         caps = self.unmasked_server.get('capabilities').json()['pattern']
         self.assertEqual(caps['dummy_fraction'], out['index']['dummy_fraction'])
         self.assertEqual(untimed(self.pattern(self.unmasked_server, request)), untimed(out))
-        # the check of decision #24 off: as the server started so
+        # the candidate check off: as the server started so
         res0 = subprocess.run(cli + ['--pattern-max-checked-entries', '0'] + args,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(0, res0.returncode, res0.stderr.decode())
@@ -2257,8 +2252,8 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
 
     def test_cli_unreadable_mask(self):
         """A .edgemask that is there but cannot be opened (permissions): the graph loads without
-        it, as it always did, and the messages say so rather than "no mask", whose remedy
-        `transform --mask-dummy` would refuse (review of 2026-10-07, M1-03)."""
+        it, and the messages say so rather than "no mask", whose remedy `transform
+        --mask-dummy` would refuse."""
         d = os.path.join(self.tempdir.name, 'unreadable')
         os.makedirs(d)
         graph = os.path.join(d, MINI_GRAPH)
@@ -2280,7 +2275,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
                                                            path],
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             err = res.stderr.decode()
-            # served without it (owner decision #16): upper bounds, as on the unmasked graph
+            # served without it: upper bounds, as on the unmasked graph
             self.assertEqual(0, res.returncode, err)
             out = json.loads(res.stdout)
             self.assertEqual('upper_bound', out['index']['counting'])
@@ -2297,8 +2292,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
     def mask_panel(self):
         """/pattern requests whose answers depend on every masked edge: counts in both scopes,
         both retrievals, IUPAC, a palindrome, a pattern longer than k, absent ones, a stop in
-        discovery, and a stop inside a mask scan (its bounds count the scanned edges; review of
-        2026-10-07, X-TESTS-03: the panel's only stop was in discovery)."""
+        discovery, and a stop inside a mask scan (its bounds count the scanned edges)."""
         patterns = [{'dna': self.p16}, {'dna': self.p14}, {'iupac': self.iupac16},
                     {'dna': self.pal12}, {'dna': self.p40}, {'dna': self.absent16},
                     {'dna': self.absent40}]
@@ -2369,10 +2363,10 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         return real / (edges - sink - 1)
 
     def test_unmasked_capabilities(self):
-        """Without the mask (owner decision #16): served, mask absent, counting upper_bound, and
-        the dummy fraction sampled from 10,000 entries, its 95% interval holding the exact
-        fraction (stats --count-dummy); the rest of the block as on the masked graph, which
-        counts exactly and has no fraction."""
+        """Without the mask: served, mask absent, counting upper_bound, and the dummy fraction
+        sampled from 10,000 entries, its 95% interval holding the exact fraction (stats
+        --count-dummy); the rest of the block as on the masked graph, which counts exactly and
+        has no fraction."""
         f = self.exact_dummy_fraction()
         for route in ('capabilities', 'traverse/capabilities'):
             p = self.unmasked_server.get(route).json()['pattern']
@@ -2426,14 +2420,14 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
         self.assertEqual(e, count['estimate'], msg)
 
     def test_unmasked_against_the_masked(self):
-        """Owner decision #16 on the mini index, whose rules the unit tests check on small graphs
-        in every graph mode (PatternRoute.Unmasked*, PatternUnmasked.*): served without its mask,
-        a count is the bounds [lower, U], U the oracle's (the contexts of the k-mers and of the
-        source dummies) and the estimate U x f rounded into them, an absent pattern exact 0;
-        the lists, labels and placed occurrences included, are the masked graph's. At the
-        server's default --pattern-max-checked-entries (decision #24) a pattern with few
-        unchecked candidates has each tested: its counts the masked graph's, k - 1 steps per
-        candidate."""
+        """A graph without its dummy-edge mask, on the mini index, whose rules the unit tests
+        check on small graphs in every graph mode (PatternRoute.Unmasked*, PatternUnmasked.*):
+        served without its mask, a count is the bounds [lower, U], U the oracle's (the contexts
+        of the k-mers and of the source dummies) and the estimate U x f rounded into them, an
+        absent pattern exact 0; the lists, labels and placed occurrences included, are the
+        masked graph's. At the server's default --pattern-max-checked-entries a pattern with
+        few unchecked candidates has each tested: its counts the masked graph's, k - 1 steps
+        per candidate."""
         fraction = self.unchecked_server.get('capabilities').json()['pattern'][
             'dummy_fraction']['value']
         patterns = [self.p16, self.iupac16, self.absent16, self.start16]
@@ -2460,7 +2454,7 @@ class TestPatternMini(PatternChecks, unittest.TestCase):
             for field in ('results', 'returned', 'withheld', 'cut', 'by_label',
                           'retrieval_complete'):
                 self.assertEqual(m.get(field), e.get(field), (m['pattern'], field))
-        # decision #24 at the default limit: start16's few unchecked candidates are tested
+        # the candidate check at the default limit: start16's few unchecked candidates are tested
         count = {'patterns': [{'dna': self.start16}], 'mode': 'count'}
         c0 = start['counts']['contexts']
         width = c0['upper'] - c0['lower']
@@ -2518,8 +2512,8 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                                                    '--pattern-min-information-bits',
                                                    str(cls.FLOOR)],
                                        os.path.join(d, f'server_{mode}.log'))
-            # the same graph without its mask (owner decision #16): the .dbg alone in a
-            # directory of its own (the loader reads a mask beside the path it is given)
+            # the same graph without its mask: the .dbg alone in a directory of its own (the
+            # loader reads a mask beside the path it is given)
             u = os.path.join(d, f'unmasked_{mode}')
             os.makedirs(u)
             os.symlink(graph, os.path.join(u, os.path.basename(graph)))
@@ -2611,11 +2605,11 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                                 self.assertEqual(by['forward'], by['reverse'])
 
     def test_paths_in_every_graph_mode(self):
-        """long_search "paths" (increment 4) on BASIC, CANONICAL and PRIMARY graphs: exactly
-        the graph-walk oracle's paths (over both orientations of every k-mer on the last two),
-        and with labels (a column per record, unbudgeted) each path's columns the records
-        holding every k-mer of it (either orientation there), support label_intersection: no
-        coordinates, nothing verified."""
+        """long_search "paths" on BASIC, CANONICAL and PRIMARY graphs: exactly the graph-walk
+        oracle's paths (over both orientations of every k-mer on the last two), and with labels
+        (a column per record, unbudgeted) each path's columns the records holding every k-mer
+        of it (either orientation there), support label_intersection: no coordinates, nothing
+        verified."""
         rng = random.Random(23)
         islands = [island for _, _, island in self.records.islands if len(island) > 100]
         patterns = []
@@ -2662,12 +2656,12 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
                             self.assertEqual('label_intersection', label['support'])
 
     def test_unmasked_in_every_graph_mode(self):
-        """Owner decision #16 on BASIC, CANONICAL and PRIMARY graphs without their mask: the
-        counts of short motifs (many of them in source dummies at k = 15) against the record
-        oracle and, on BASIC and CANONICAL, the source-dummy oracle (the upper bound exactly the
-        contexts of the k-mers and of the dummies); on PRIMARY, whose wrapper searches the
-        stored graph twice, an upper bound at least the exact count; every list the masked
-        graph's, every complete release exact; the paths of long patterns the masked graph's."""
+        """Graphs without their mask on BASIC, CANONICAL and PRIMARY: the counts of short
+        motifs (many of them in source dummies at k = 15) against the record oracle and, on
+        BASIC and CANONICAL, the source-dummy oracle (the upper bound exactly the contexts of
+        the k-mers and of the dummies); on PRIMARY, whose wrapper searches the stored graph
+        twice, an upper bound at least the exact count; every list the masked graph's, every
+        complete release exact; the paths of long patterns the masked graph's."""
         for mode in ('basic', 'canonical', 'primary'):
             stated = mode == 'basic'
             caps = self.unmasked_servers[mode].get('capabilities').json()['pattern']
@@ -2808,10 +2802,10 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
 
     def test_a_client_that_left_is_not_answered(self):
         """SPEC §3: a request whose client has left is not answered, a half-close counted as
-        gone -- its errors no more than its answer (review GPT-2 of 2026-10-08, finding 4:
-        after a complete request and shutdown(SHUT_WR), a valid count request got 0 bytes, but
-        `{` got 194 (400) and {"patterns":[]} 177 (400): the error path wrote without asking).
-        The same requests from a client that is still there are answered as before."""
+        gone -- its errors no more than its answer (after a complete request and
+        shutdown(SHUT_WR), a valid count request gets 0 bytes, and so do `{` and
+        {"patterns":[]}, which must not get their 400). The same requests from a client that is
+        still there are answered."""
         server = self.servers['basic']
         cases = [
             ('a count', {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'}, 200, None),
@@ -2846,7 +2840,7 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             self.assertEqual(400, ret.status_code)
             self.assertEqual({'error': 'pattern: multi-graph servers in a later increment',
                               'code': 'later_increment'}, ret.json())
-            # nor is this refusal written to a client that left (review GPT-2, finding 4)
+            # nor is this refusal written to a client that left
             self.assertEqual(b'', half_closed_request(
                 server.port, 'pattern', {'patterns': [{'dna': 'ACGAC'}], 'mode': 'count'}))
             caps = server.get('capabilities').json()
@@ -2862,9 +2856,9 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
 
     def test_deadline_caps_under_the_content_timeout(self):
         """A route deadline past the server's 900 s content timeout would be accepted and the
-        connection closed before any answer or 503 (review of 2026-10-07, R1-05): server_query
-        refuses a /pattern cap above 899,000 ms, and /resolve's opt-in deadline is capped
-        there when --traverse-max-time-ms is 0 (uncapped) or above it."""
+        connection closed before any answer or 503: server_query refuses a /pattern cap above
+        899,000 ms, and /resolve's opt-in deadline is capped there when --traverse-max-time-ms
+        is 0 (uncapped) or above it."""
         cmd = shlex.split(METAGRAPH) + ['server_query', '-i', self.graph_basic, '-a',
                                         self.anno_basic, '--pattern-max-time-ms', '900000',
                                         '--port', str(free_port()), '--address', '127.0.0.1']
@@ -2895,10 +2889,11 @@ class TestPatternSynthetic(PatternChecks, TestingBase):
             server.stop()
 
     def test_predicate_caps_at_start_up(self):
-        """Increment 5b (SPEC §4.5, §19.3): --pattern-max-predicate-labels is at most 1,000,000
-        and --pattern-max-predicate-work at least 1, refused at start-up otherwise, on the server
-        and the CLI alike; the CLI applies the caps as the server does (a predicate of more names
-        than the cap: predicate_too_large; the caps in its limits); both usages name the flags."""
+        """Predicate caps (SPEC §4.5, §19.3): --pattern-max-predicate-labels is at most
+        1,000,000 and --pattern-max-predicate-work at least 1, refused at start-up otherwise, on
+        the server and the CLI alike; the CLI applies the caps as the server does (a predicate
+        of more names than the cap: predicate_too_large; the caps in its limits); both usages
+        name the flags."""
         for command in ('server_query', 'pattern'):
             for flag, value, says in (('--pattern-max-predicate-labels', '1000001',
                                        'must be an integer in [0, 1000000]'),
@@ -2986,8 +2981,7 @@ class TestPeptideOracle(unittest.TestCase):
 
 class TestPatternFixtureBodies(unittest.TestCase):
     """The frozen fixture bodies against the SPEC, with no server and no index, so that CI runs
-    it (review of 2026-10-07, T2-01: api/python/tests/test_pattern_fixtures.py ran in no
-    workflow); and the blanking of pattern_fixtures.py --check (C2-02)."""
+    it; and the blanking of pattern_fixtures.py --check."""
 
     @staticmethod
     def load(path, name):
@@ -3116,8 +3110,9 @@ class TestPatternFixtures(unittest.TestCase):
 @guard(bool(BASE_BINARY) and os.path.isfile(BASE_BINARY),
        "$METAGRAPH_BASE_BINARY (the binary before the pattern search) is not set (not in CI)")
 class TestPatternRegression(TestingBase):
-    """/search and /align answer byte for byte as before the pattern search (§11), on
-    test_api.py's fixture (transcripts_100.fa, k = 6) and requests; /capabilities only gains."""
+    """/search and /align answer byte for byte as a build without the pattern search does
+    (§11; $METAGRAPH_BASE_BINARY), on test_api.py's fixture (transcripts_100.fa, k = 6) and
+    requests; /capabilities only gains."""
 
     SEQ = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
     SEQ2 = 'AATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA'
@@ -3168,9 +3163,9 @@ class TestPatternRegression(TestingBase):
             self.assertEqual((a.status_code, a.content), (b.status_code, b.content), route)
 
     def test_a_half_closed_client_is_answered_as_before(self):
-        """Only /pattern withholds its answers from a client that half-closed (review GPT-2 of
-        2026-10-08, finding 4): /search and /align answer such a client byte for byte as
-        before, their errors included."""
+        """Only /pattern withholds its answers from a client that half-closed: /search and
+        /align answer such a client byte for byte as the base binary does, their errors
+        included."""
         panel = [
             ('search', {'FASTA': f'>query\n{self.SEQ}', 'top_labels': 5,
                         'min_exact_match': 0.1}),
@@ -3203,8 +3198,8 @@ class TestPatternRegression(TestingBase):
             if key not in ('features', 'routes'):
                 self.assertEqual(a[key], b[key], key)
         # the two stated gains: `pattern` (this route) and `resolve`, the block of /resolve's
-        # opt-in bounds.time_budget_ms (milestone 1b, SPEC-labeled-traversal-core.md §4.5): a
-        # capabilities block, not a feature, since /resolve is listed already
+        # opt-in bounds.time_budget_ms (SPEC-labeled-traversal-core.md §4.5): a capabilities
+        # block, not a feature, since /resolve is listed already
         self.assertEqual(set(a) | {'pattern', 'resolve'}, set(b))
         self.assertTrue(b['resolve']['time_budget']['accepted'])
         self.assertIsNone(b['resolve']['time_budget']['default'])

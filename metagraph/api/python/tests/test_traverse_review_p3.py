@@ -1,37 +1,38 @@
-"""The P3/P4 library items of the review of 2026-10-06 (metagraph.traverse):
+"""Library hazards of the store, the client, the tools and the derivations
+(metagraph.traverse):
 
-  * O21 (X-CONCURRENCY-01, U20-08): the spool's body lifecycle is serialized across the
-    processes sharing it (an fcntl.flock of spool/.lock) -- a free in one process deleted
-    the body of an entry another was storing, so a put returned a handle whose body was
-    gone -- and a free no longer keeps a body for an in-memory entry whose file another
-    process removed (a leak with no orphan sweep); sweep() deletes old orphans, and no
-    body while an entry file is there but cannot be read;
-  * O23 (X-CONCURRENCY-05, X-EFFICIENCY-08): body GC reads each entry file of another
-    process once (cached by name and inode), and a sweep collects all its expired bodies in
-    one scan -- it re-parsed every foreign entry per expired entry (M x N);
-  * O17 (U20-03): a damaged body file is repaired, not reused -- a put checks an existing
-    body against its digest, a read checks what it read, and a damaged body expires its
-    entry (replayable) and is deleted, so the next put writes it again;
-  * O11 (U19-01): to_fasta(leaves=<one-shot iterator>) answers as it did before the
-    regression (a TypeError from len()), byte for byte, per arm;
-  * O35 (U20-10): a response cut in transfer raises the client's ConnectionError (an
-    OSError), which the tools answer as backend_unreachable -- not a bare IncompleteRead --
-    saying that the server was reached and may have run the request;
-  * G15 (GAP-05-05): graphlet_export without local limits writes atomically: a failed
-    re-export leaves the earlier file and no temporary file;
-  * L8 (U15-02): a change_cost override that names another model replaces the cost whole
-    (a deep merge kept the old model's fields, which the server's strict parse refuses);
-    a field the model does not read, and None for an object section, are ValueErrors --
-    in annotate mode too, where any model but forbid is one (the server refuses it);
-  * L7 (U15-06, X-EFFICIENCY-06): the left-out note's switch searches are confined to the
-    names the change_cost table names plus one stand-in -- the same note -- and its
-    "could still have entered" clause is a boolean, not a substring test of label names;
-  * L3 (U15-05): support_changes' split check bisects the sorted label sets once per
-    change, and its charge covers it (it scanned the arrays per removed label, uncharged);
-  * L5 (U14-02): annotate walks with claims read an index of each leaf's route ends,
-    built once (a pass over every route end per chunk of 32 walks, and its charge);
-  * L12 (U16-03, X-EFFICIENCY-05): compare's cuts are made in one parents-first pass over
-    their chains (each chain was re-read per cut), charged per segment once.
+  * the spool's body lifecycle is serialized across the processes sharing it (an fcntl.flock
+    of spool/.lock) -- otherwise a free in one process could delete the body of an entry
+    another is storing, and a put would return a handle whose body is gone -- and a free
+    keeps no body for an in-memory entry whose file another process removed (a leak with no
+    orphan sweep); sweep() deletes old orphans, and no body while an entry file is there but
+    cannot be read;
+  * body GC reads each entry file of another process once (cached by name and inode), and a
+    sweep collects all its expired bodies in one scan, rather than re-parsing every foreign
+    entry per expired entry (M x N);
+  * spool bodies are verified before reuse: a damaged body file is repaired, not reused -- a
+    put checks an existing body against its digest, a read checks what it read, and a damaged
+    body expires its entry (replayable) and is deleted, so the next put writes it again;
+  * to_fasta(leaves=<one-shot iterator>) answers byte for byte as with a list, per arm (not a
+    TypeError from len());
+  * a response cut in transfer raises the client's ConnectionError (an OSError), which the
+    tools answer as backend_unreachable -- not a bare IncompleteRead -- saying that the server
+    was reached and may have run the request;
+  * graphlet_export without local limits writes atomically: a failed re-export leaves the
+    earlier file and no temporary file;
+  * a change_cost override that names another model replaces the cost whole (a deep merge
+    would keep the old model's fields, which the server's strict parse refuses); a field the
+    model does not read, and None for an object section, are ValueErrors -- in annotate mode
+    too, where any model but forbid is one (the server refuses it);
+  * the left-out note's switch searches are confined to the names the change_cost table names
+    plus one stand-in -- the same note -- and its "could still have entered" clause is a
+    boolean, not a substring test of label names;
+  * support_changes' split check bisects the sorted label sets once per change, and its charge
+    covers it (not a scan of the arrays per removed label, uncharged);
+  * annotate walks with claims read an index of each leaf's route ends, built once (not a pass
+    over every route end per chunk of 32 walks, and its charge);
+  * compare's cuts are made in one parents-first pass over their chains (not each chain
+    re-read per cut), charged per segment once.
 """
 
 import copy
@@ -101,7 +102,7 @@ class _mode_0:
         os.chmod(self.path, self.mode)
 
 
-# ======================================================================= O21
+# ======================================================================= the spool lock
 
 class _Interleave:
     """Run |other| in a thread from inside |store|'s next entry write -- a put between
@@ -197,8 +198,8 @@ class TestO21SpoolLock(unittest.TestCase):
         self.assertEqual([], self.a.list())
 
     def test_a_stale_entry_keeps_no_body(self):
-        # U20-08: A frees its entry of a body whose other entry B removed; A's in-memory
-        # copy of that entry kept the body for good
+        # A frees its entry of a body whose other entry B removed; A's in-memory copy of that
+        # entry must not keep the body for good
         doc = os.path.join(T.DOCS, 'fork.mgt')
         h1, h2 = self.a.load(doc), self.a.load(doc)
         self.b.free(self.hb)
@@ -229,8 +230,8 @@ class TestO21SpoolLock(unittest.TestCase):
         self.assert_usable(self.b, self.hb)
 
     def test_processes(self):
-        # three real processes storing, reading and freeing one body in a loop: before the
-        # lock about half of the handles a put had just returned answered as expired (no
+        # three real processes storing, reading and freeing one body in a loop: without the
+        # lock about half of the handles a put had just returned would answer as expired (no
         # other entry may name the body: B's would keep it)
         self.b.free(self.hb)
         script = '''if 1:
@@ -270,8 +271,8 @@ class TestO21SpoolLock(unittest.TestCase):
         self.assertEqual([], _bodies(self.d))
 
     def test_a_file_system_without_flock(self):
-        # some network file systems refuse flock: the store goes on with the threads' lock,
-        # as before the spool lock, and says why (the module text states the limit)
+        # some network file systems refuse flock: the store goes on with the threads' lock
+        # alone and says why (the module text states the limit)
         import errno
         if S.fcntl is None:
             self.skipTest('no fcntl on this platform')
@@ -298,10 +299,10 @@ class TestO21SpoolLock(unittest.TestCase):
         return mock.patch.object(S, 'open', fake, create=True)
 
     def test_an_unreadable_entry_file_stops_the_gc(self):
-        # the review of the P3 fixes: an entry file that is there but cannot be read was
-        # read as naming no body, so the orphan pass deleted every old body such a live
-        # entry named (its handle then answered as expired), and a free the body it shared.
-        # No body is deleted by a scan that cannot read an entry file
+        # an entry file that is there but cannot be read, read as naming no body, would let
+        # the orphan pass delete every old body such a live entry named (its handle then
+        # answered as expired), and a free the body it shared. No body is deleted by a scan
+        # that cannot read an entry file
         import errno
         body = self.b._body_path(self.b.get(self.hb).digest)
         entry = self.b._entry_path(self.hb)
@@ -372,7 +373,7 @@ class TestO21SpoolLock(unittest.TestCase):
         self.assertEqual([None], done)
 
 
-# ======================================================================= O23
+# ======================================================================= body GC
 
 class _Clock:
     def __init__(self, t=1_000_000.0):
@@ -444,7 +445,7 @@ class TestO23BodyGcCost(unittest.TestCase):
         self.assertLessEqual(calls['n'], 2)
 
 
-# ======================================================================= O17
+# ======================================================================= damaged bodies
 
 class TestO17DamagedBody(unittest.TestCase):
     def setUp(self):
@@ -472,7 +473,7 @@ class TestO17DamagedBody(unittest.TestCase):
                 with open(self.path, 'rb') as f:
                     self.assertEqual(self.good, f.read())
                 self.assertIsNotNone(s2.graphlet(h2))
-                self.assertIsNotNone(self.s.graphlet(self.h1))   # the old entry too
+                self.assertIsNotNone(self.s.graphlet(self.h1))   # the first entry too
 
     def test_a_read_expires_a_damaged_body(self):
         for how, read in (('empty', 'graphlet'), ('torn', 'body_text'),
@@ -512,7 +513,7 @@ class TestO17DamagedBody(unittest.TestCase):
         self.assertEqual(1, len(hashed))
 
 
-# ======================================================================= O11
+# ======================================================================= one-shot leaves
 
 class TestO11ToFastaIterators(unittest.TestCase):
     def test_one_shot_iterators(self):
@@ -533,7 +534,7 @@ class TestO11ToFastaIterators(unittest.TestCase):
         self.assertGreater(b.usage()['memory_bytes'], b2.usage()['memory_bytes'])
 
     def test_both_arms_read_the_iterator_in_turn(self):
-        # as before the regression: a one-shot iterator is exhausted by the left arm
+        # the same as a list: a one-shot iterator is exhausted by the left arm
         g = T.graphlet('fork')
         self.assertEqual(['left', 'right'], sorted(g.arms))
         by_list = g.to_fasta(None, [0])
@@ -543,7 +544,7 @@ class TestO11ToFastaIterators(unittest.TestCase):
         self.assertTrue(by_gen.startswith('>left_0 '))
 
 
-# ======================================================================= O35
+# ======================================================================= cut responses
 
 class _CuttingServer:
     """Announces Content-Length 100000, sends 37 bytes and closes cleanly (a FIN): what a
@@ -606,8 +607,7 @@ class TestO35CutResponse(unittest.TestCase):
                 self.assertIsInstance(e.exception.__cause__, http.client.IncompleteRead)
                 self.assertIn('cut in transfer', str(e.exception))
                 self.assertIn('HTTP %d' % status, str(e.exception))
-                # the server was reached: never "unreachable", and what a retry does (the
-                # review of the P3 fixes)
+                # the server was reached: never "unreachable", and what a retry does
                 self.assertIn('the server was reached and may have run the request (a retry '
                               'sends it again)', str(e.exception))
         # an attempt: cancel it and judge it, as the docstring says
@@ -644,7 +644,7 @@ class TestO35CutResponse(unittest.TestCase):
         self.assertIn('traverse_fetch', usage)
 
 
-# ======================================================================= G15
+# ======================================================================= atomic export
 
 class TestG15AtomicExport(unittest.TestCase):
     def test_a_failed_re_export_leaves_the_earlier_file(self):
@@ -694,7 +694,7 @@ class TestG15AtomicExport(unittest.TestCase):
         self.assertEqual(0o640, os.stat(path).st_mode & 0o777)
 
 
-# ======================================================================= L8
+# ======================================================================= change_cost overrides
 
 def _strict_cost(cc, path='strategy.labels.change_cost'):
     """A mirror of traverse.cpp parse_cost (a Strict object): -> None, or the server's
@@ -801,8 +801,8 @@ class TestL8Overrides(unittest.TestCase):
                 self.assertIn('labels.change_cost.%s is not a field of model' % field,
                               str(e.exception))
 
-    # annotate mode has no rebuild, so its merged cost went out unchecked and the server
-    # refused it (the review of the P3 fixes): -> the field the ValueError names
+    # annotate mode has no rebuild, so a merged cost would go out unchecked and the server
+    # would refuse it: -> the field the ValueError names
     ANNOTATE_REFUSED = (
         ({'model': 'forbid', 'value': 1}, 'labels.change_cost.value is not a field of model'),
         ({'model': 'constant', 'value': 1}, "labels.change_cost.model 'constant' does not "
@@ -828,7 +828,7 @@ class TestL8Overrides(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         g.next_requests('right', [0], labels={'change_cost': copy.deepcopy(cc)},
                                         **kw)
-        # what the server accepts is still built, as before
+        # what the server accepts is still built
         plain = g.next_request('right', [0])
         for ov in ({}, {'labels': {'change_cost': {'model': 'forbid'}}},
                    {'labels': {'change_cost': {}}}):
@@ -899,7 +899,7 @@ class TestL8Overrides(unittest.TestCase):
                 self.assertIn('change_cost', p.stderr.decode())
 
 
-# ======================================================================= L7
+# ======================================================================= the left-out note
 
 def _reference_note_reach(g, cost, mine, budget, dropped):
     """The note's reach as it was computed: one switch search of the whole pool per
@@ -993,7 +993,7 @@ class TestL7LeftOutNote(unittest.TestCase):
                     dt = time.process_time() - t
                 self.assertEqual(1000, len([x for x in req.left_out if x['why'] == 'unreachable']))
                 # 1.39 s and 18,027,203 lwu (table) with a search of the whole pool per
-                # continued label; well under a second and 1 M lwu now
+                # continued label; confined, well under a second and 1 M lwu
                 self.assertLess(dt, 2.0)
                 self.assertLess(b.usage()['work_units'], 1_000_000)
                 # the account bounds the traced peak
@@ -1004,11 +1004,11 @@ class TestL7LeftOutNote(unittest.TestCase):
                 self.assertLessEqual(peak, b.peak_bytes)
 
 
-# ======================================================================= L3
+# ======================================================================= the split check
 
 def _wide_split(w):
     """Annotate: a root with labels 0..w-1 split into a 1-label leaf 'C' {0} and a
-    w-label sibling 'G' (repro U15-05)."""
+    w-label sibling 'G'."""
     steps = 3
     out = ['H mgt 1 5 basic $ACGT a k k %d 10 0 walk * * 0123456789abcdef' % max(w, 1000),
            'S aaaaaaaaaaaaaaaa 10 6 0 ACGTACGTAC']
@@ -1024,7 +1024,7 @@ def _wide_split(w):
 
 
 def _reference_reasons(g, a, chain, at, removed):
-    """The split check as it was: membership scans of the arrays per removed label."""
+    """The split check by membership scans of the arrays per removed label (the oracle)."""
     segs = a.segments
     out = {}
     for l in sorted(removed):
@@ -1062,13 +1062,13 @@ class TestL3SupportChanges(unittest.TestCase):
         t = time.process_time()
         un = ops.support_changes(g, 'right', 0)
         dt = time.process_time() - t
-        self.assertLess(dt, 2.0)          # 3.9 s here (6.3 s in the review) before
+        self.assertLess(dt, 2.0)          # 3.9 s here with a scan per removed label
         b = LocalBudget()
         self.assertEqual([c.reasons for c in un],
                          [c.reasons for c in ops.support_changes(g, 'right', 0, budget=b)])
         self.assertEqual(w - 1, sum(len(c.removed) for c in un))
         # the label ids the split check reads (one bisection of each set per removed
-        # label) are charged: at least the ids / 32 the review asked for
+        # label) are charged: at least the ids / 32
         self.assertGreaterEqual(b.usage()['work_units'], 2 * w // 32 + w)
         g = parse(_wide_split(2000))
         b = LocalBudget()
@@ -1076,11 +1076,11 @@ class TestL3SupportChanges(unittest.TestCase):
         self.assertLessEqual(peak, b.peak_bytes)
 
 
-# ======================================================================= L5
+# ======================================================================= route-end index
 
 def _comb_wide(n, width):
     """comb_annotate(n) with |width| labels: every spine segment carries all of them,
-    every leaf all but one (repro X-EFFICIENCY-05)."""
+    every leaf all but one."""
     steps = 1 + 2 * n
     out = ['H mgt 1 5 basic $ACGT a k k 1000 10 0 walk * * 0123456789abcdef',
            'S aaaaaaaaaaaaaaaa 10 6 0 ACGTACGTAC']
@@ -1142,7 +1142,7 @@ class TestL5AnnotateWalkClaims(unittest.TestCase):
         self.assertGreater((chunks - 1) * e, w2 - w1)
 
 
-# ======================================================================= L12
+# ======================================================================= compare's cuts
 
 class TestL12Cuts(unittest.TestCase):
     def graphlets(self):
@@ -1191,7 +1191,7 @@ class TestL12Cuts(unittest.TestCase):
             t = time.process_time()
             ops.compare(a, b, mode='walks')
             dt = time.process_time() - t
-            self.assertLess(dt, 2.5)     # 3.1 s / 12.9 s at 2,000 / 4,000 in the review
+            self.assertLess(dt, 2.5)     # 3.1 s / 12.9 s at 2,000 / 4,000 re-reading per cut
         a, b = parse(comb_annotate(4000)), parse(comb_annotate(4000))
         bud = LocalBudget()
         c = ops.compare(a, b, mode='walks', budget=bud)

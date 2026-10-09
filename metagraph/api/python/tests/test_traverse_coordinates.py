@@ -1,26 +1,26 @@
-"""Record coordinates in the library (feature level 6; DESIGN §18 and §26, the owner's
-decisions C1-C12, C-N1..C-N9 and X-C8), on real mini_refseq responses committed under
-data/traverse/coords/ (scripts/traversal/traverse_coords_snapshots.py):
+"""Record coordinates in the library (feature level 6; DESIGN §18 and §26), on real
+mini_refseq responses committed under data/traverse/coords/
+(scripts/traversal/traverse_coords_snapshots.py):
 
-  * parsing: the block is validated eagerly against the body (C9) by from_response(), a
-    saved file's J line and the store's first parse of an unparsed entry; the parsed index
-    lives in the graphlet's cache, never in a slot (C-N3), and survives every round trip;
+  * parsing: the block is validated eagerly against the body by from_response(), a saved
+    file's J line and the store's first parse of an unparsed entry; the parsed index lives
+    in the graphlet's cache, never in a slot, and survives every round trip;
   * every inconsistency is a GraphletFormatError 'coordinates: ...' (one test per rule);
   * claims (clipped to the cut), walks and label walks carry them -- CoordClaim, CoordWalk,
     CoordLabelWalk, only for graphlets with a block; compare() never clips them and says
-    it does not compare them (C-N9); to_json() equals the full result; FASTA headers state
-    them 1-based closed (C-N8: none in GFA);
+    it does not compare them (coordinates beside the claims, never in their keys);
+    to_json() equals the full result; FASTA headers state them 1-based closed (none in GFA);
   * requests: next_request() carries the setting and strips the cap when coordinates are
-    dropped (revision 2, C-N6); build_request(), supports_coordinates() and the automatic
-    rule of traverse() (C8, the depth gate);
-  * the MCP rows (C7), the stage-L charges (W_COORD) and the traced peak, also of blocks of
+    dropped (the cap needs coordinates: true); build_request(), supports_coordinates() and
+    the automatic rule of traverse() (the depth gate);
+  * the MCP rows, the local-limits charges (W_COORD) and the traced peak, also of blocks of
     10^4 occurrences (widened()), and one charge for the index whether cached or not;
-  * D3 (R21 (3)): a walked result with a derivation limitation is qualified, check_rules
-    agrees, the summary names it; R21 (4): from feature level 6 a merge's first parent
-    carries the most labels (check_rules), and compare() qualifies a comparison across the
-    rule change against the level-5 documents of data/traverse/r21; R21 (5) the docs;
-    b2fc7816's open items (an ambient budget under tools without local limits, a list
-    stopped between rows included; GraphletView.walks' set).
+  * the partial delivery of a derived seed: a walked result with a derivation limitation is
+    qualified, check_rules agrees, the summary names it; the majority-parent rule: from
+    feature level 6 a merge's first parent carries the most labels (check_rules), and
+    compare() qualifies a comparison across the rule change against the level-5 documents
+    of data/traverse/r21; and an ambient budget under tools without local limits, a list
+    stopped between rows included (GraphletView.walks' set).
 """
 
 import copy
@@ -48,8 +48,8 @@ from metagraph.traverse.model import (Claim, CoordClaim, CoordLabelWalk, CoordWa
 from metagraph.traverse.store import GraphletStore
 
 COORDS = os.path.join(T.DATA, 'coords')
-# the cells whose graphlet and full fetches stop at the same place (the D3 cells state an
-# elapsed time, and the memory stop is priced per detail)
+# the cells whose graphlet and full fetches stop at the same place (the partial-derivation
+# cells state an elapsed time, and the memory stop is priced per detail)
 DETERMINISTIC = ('rep0_cut1', 'rep0_unlimited_left', 'rep0_lower_bound', 'rep0_column',
                  'rep0_mixed', 'rep0_kmer_null')
 BLOCKS = ('rep0_cut1', 'rep0_unlimited_left', 'rep0_lower_bound', 'rep0_column',
@@ -73,7 +73,7 @@ def fresh(name, mutate=None):
 def stripped(name):
     """The snapshot as it would be without coordinates: the block, the reason, the echo
     and the coordinates limitation (summary and K record) removed -- what an opt-out
-    request returns (W1's stripped-equals-opt-out harness)."""
+    request returns (the stripped-equals-opt-out harness)."""
     j = resp(name)
     r = j['results'][0]
     r.pop('coordinates', None)
@@ -95,9 +95,9 @@ def stripped(name):
 def widened(name, n, labels=None):
     """The snapshot's response with |n| occurrences in every list of |labels| (None: all
     seed labels) and the cap "unlimited": a block of 10^4 occurrences and more, as the
-    wide fixture of DESIGN §26 (M2) gives, consistent with the body -- each seed-entered
-    run continues every seed occurrence of its label, a switch-entered run has its own
-    starts -- so from_response() accepts it (C9). The lists of the other labels stay."""
+    wide fixture of DESIGN §26 gives, consistent with the body -- each seed-entered run
+    continues every seed occurrence of its label, a switch-entered run has its own starts --
+    so from_response() accepts it. The lists of the other labels stay."""
     j = resp(name)
     r = j['results'][0]
     c = r['coordinates']
@@ -126,7 +126,7 @@ def widened(name, n, labels=None):
                                     for i in range(n)]
     c['max_occurrences'] = 'unlimited'
     j['strategy']['output']['max_coordinate_occurrences'] = 'unlimited'
-    # no list cut any more: complete unless a run is a lower bound, and no K record
+    # no list cut: complete unless a run is a lower bound, and no K record
     c['complete'] = not c.get('runs_lower_bound')
     r['limitations'] = [l for l in r['limitations'] if l['kind'] != 'coordinates']
     lines = r['graphlet'].split('\n')
@@ -247,7 +247,7 @@ class TestParse(unittest.TestCase):
             g.to_fasta(coordinates=True)
 
 
-# ======================================================================= the rules (C9)
+# ============================================================ the rules (eager validation)
 
 def _edit(fn):
     def mutate(r, j):
@@ -377,7 +377,7 @@ class TestRejects(unittest.TestCase):
     def test_the_seed_continuity(self):
         def shift(c, r, j):
             # every occurrence of one seed-entered run moved by one record base (lengths
-            # still right): it no longer continues a seed occurrence
+            # still right): it does not continue a seed occurrence
             for e in c['arms']['left']:
                 if e['occurrences'] and e['from_bp'] == 0:
                     e['occurrences'] = [[s - 1, t - 1] for s, t in e['occurrences']]
@@ -613,7 +613,7 @@ class TestFasta(unittest.TestCase):
         g = fresh('rep0_cut1')
         hs = self.headers(g.to_fasta())
         self.assertTrue(any(' coords_cut=1' in h for h in hs))
-        # column labels are never stated (global positions, C10)
+        # column labels are never stated (global positions)
         self.assertFalse(any('coords=' in h for h in self.headers(
             fresh('rep0_column').to_fasta())))
 
@@ -631,8 +631,8 @@ class TestFasta(unittest.TestCase):
             fresh('d3_kmer').to_fasta(coordinates=True)
         with self.assertRaises(ValueError):
             fresh('rep0_cut1').to_fasta(coordinates='yes')
-        # 0 equals False but was dispatched as None: it wrote the coords= it was to drop
-        # (finding 5)
+        # 0 equals False and must not be dispatched as None, which would write the coords= it
+        # is to drop
         for bad in (0, 1):
             with self.assertRaises(ValueError, msg=repr(bad)):
                 fresh('rep0_cut1').to_fasta(coordinates=bad)
@@ -645,7 +645,7 @@ class TestFasta(unittest.TestCase):
         self.assertEqual(g.to_fasta(), g.to_fasta(budget=LocalBudget()))
 
     def test_no_coordinates_in_gfa(self):
-        # C-N8: GFA has no field for them in v1
+        # GFA has no field for them in v1
         self.assertEqual(stripped('rep0_cut1').to_gfa(), fresh('rep0_cut1').to_gfa())
 
 
@@ -739,16 +739,15 @@ class TestClient(unittest.TestCase):
         out = c.build_request(['A'], st, coordinates=False)['strategy']['output']
         self.assertNotIn('coordinates', out)
         self.assertNotIn('max_coordinate_occurrences', out)
-        # the cap is never sent alone (the server's 400, C-N6)
+        # the cap is never sent alone (the server's 400: the cap needs coordinates: true)
         out = c.build_request(['A'], TRACE, max_coordinate_occurrences=3)['strategy']['output']
         self.assertNotIn('max_coordinate_occurrences', out)
         self.assertEqual({'output': {'coordinates': True, 'max_coordinate_occurrences': 3}},
                          st)                          # pure
         with self.assertRaises(ValueError):
             c.build_request(['A'], TRACE, coordinates='auto')
-        # 0 and 1 equal False and True but were dispatched by identity: taken for None,
-        # 0 kept coordinates and 1 dropped an explicit cap (the review of W2's library
-        # part, finding 5) -- refused by type
+        # 0 and 1 equal False and True; dispatched by identity they would be taken for None,
+        # 0 keeping coordinates and 1 dropping an explicit cap -- refused by type
         for bad in (0, 1, 0.0, 1.0):
             with self.assertRaises(ValueError, msg=repr(bad)):
                 c.build_request(['A'], st, coordinates=bad)
@@ -978,7 +977,7 @@ class TestTools(unittest.TestCase):
             'output'])
         self.assertEqual('bad_argument', self.tools.traverse_fetch(
             seed={'sequence': 'A'}, coordinates='yes')['error'])
-        # strict, as every other flag (_bool): 0 and 1 were a silent no-op (finding 5)
+        # strict, as every other flag (_bool): 0 and 1 are no silent no-op
         sent = len(self.client.sent)
         for bad in (0, 1):
             self.assertEqual('bad_argument', self.tools.traverse_fetch(
@@ -997,7 +996,7 @@ class TestTools(unittest.TestCase):
             self.assertEqual(a['rows'], b['rows'])
 
 
-# ======================================================================= stage L
+# ======================================================================= local limits
 
 class TestStageL(unittest.TestCase):
     OPS = {
@@ -1045,14 +1044,14 @@ class TestStageL(unittest.TestCase):
             self.assertGreaterEqual(b.peak_bytes, peak, (name, 'from_response'))
 
     def test_the_account_bounds_the_traced_peak_of_a_wide_block(self):
-        # the review of W2's library part (finding 1): on the mini_refseq cells a few
-        # occurrences hide behind the fixed overheads; over a block of 15,000 the check of
-        # the seed continuity built a set of the seed starts per run (never charged) and
-        # to_json's deepcopy kept a memo entry per copied list (never charged): 1.22x and
-        # 1.34x the account on the wide fixture of M2. Two shapes: every label at 300
-        # occurrences (14,100 in all; to_json was 1.35x), and one seed label at 5,000 with
-        # its one run (the wide fixture's shape, one big seed list checked against its run:
-        # validate() was 1.14x the index price, from_response() 1.05x the account)
+        # on the mini_refseq cells a few occurrences hide behind the fixed overheads; over a
+        # block of 15,000, a set of the seed starts per run built by the check of the seed
+        # continuity, and a memo entry per copied list kept by to_json's deepcopy, would go
+        # uncharged: 1.22x and 1.34x the account on the wide fixture. Two shapes: every label
+        # at 300 occurrences (14,100 in all; to_json at 1.35x uncharged), and one seed label
+        # at 5,000 with its one run (the wide fixture's shape, one big seed list checked
+        # against its run: validate() at 1.14x the index price, from_response() 1.05x the
+        # account, uncharged)
         cases = [('rep0_column', widened('rep0_column', 300), self.OPS),
                  ('rep0_unlimited_left/label 3',
                   widened('rep0_unlimited_left', 5000, labels={3}),
@@ -1100,9 +1099,9 @@ class TestStageL(unittest.TestCase):
         self.assertFalse(shared(out))
 
     def test_a_cold_index_is_charged_as_a_warm_one(self):
-        # L1 (finding 2): the index is charged once per call at its cold price, whether
-        # the cache holds it or not; a cold build charged it unkeyed, and the other arm's
-        # use charged it again
+        # the index is charged once per call at its cold price, whether the cache holds it or
+        # not: a cold build charging it unkeyed, and the other arm's use charging it again,
+        # would count it twice
         for name in BLOCKS:
             for op in ('claims', 'claims_cut', 'walks', 'label_walks', 'to_fasta'):
                 if op == 'walks' and 'right' not in fresh(name).arms:
@@ -1150,7 +1149,7 @@ class TestStageL(unittest.TestCase):
 
     def test_a_validation_stop_keeps_the_body_unparsed(self):
         # the block is charged before it is built: a parse budget that admits the body but
-        # not the index stops in it, and the store keeps the entry unparsed (L3)
+        # not the index stops in it, and the store keeps the entry unparsed
         j = resp('rep0_unlimited_left')
         r = j['results'][0]
         b = LocalBudget()
@@ -1186,7 +1185,7 @@ class TestStageL(unittest.TestCase):
         self.assertEqual(want, got)
 
 
-# ======================================================================= D3 (R21 (3))
+# ======================================================================= partial derivation
 
 class TestPartialDerivation(unittest.TestCase):
     def test_check_rules_accepts_the_qualified_walked_result(self):
@@ -1228,7 +1227,7 @@ class TestPartialDerivation(unittest.TestCase):
                          fresh('d3_trace_coordinates').summary()['coordinates'])
 
 
-# ======================================================================= R21 (4)
+# ======================================================================= the majority-parent rule
 
 class TestDisplayedParentAtMerges(unittest.TestCase):
     """From feature level 6 the server makes a merge's first parent -- the one the
@@ -1297,8 +1296,8 @@ class TestDisplayedParentAtMerges(unittest.TestCase):
         self.assertFalse([f for f in g.check_rules() if f.get('field') == 'parents'])
 
     def level5(self, name):
-        """The level-5 document of the same locus (data/traverse/r21: the CLI fixture as
-        the walker wrote it before R21 (4), its 62 merge in arrival order)."""
+        """The level-5 document of the same locus (data/traverse/r21: the CLI fixture as a
+        level-5 walker writes it, its 62 merge in arrival order)."""
         with open(os.path.join(T.DATA, 'r21', name + '_level5.graphlet.json'),
                   encoding='utf-8') as f:
             j = json.load(f)
@@ -1332,9 +1331,9 @@ class TestDisplayedParentAtMerges(unittest.TestCase):
     def test_compare_across_the_rule_change_is_qualified(self):
         # the same locus walked by a level-5 and a level-6 server: the walks through the 62
         # merge are spelled through different parents, so claims and walks differ where
-        # the retrieval does not -- never a definite difference (the review of W2's
-        # library part, finding 3: a level-6 body without its envelope against the
-        # level-5 retrieval was comparable True with definite differences)
+        # the retrieval does not -- never a definite difference (a level-6 body without its
+        # envelope against the level-5 retrieval must not be comparable True with definite
+        # differences)
         for name in ('merge', 'annotate'):
             def pair(new_env, old_env):
                 new, old = T.graphlet(name), self.level5(name)
@@ -1436,14 +1435,12 @@ class TestDisplayedParentAtMerges(unittest.TestCase):
                             self.assertEqual(p.walk, w.sequence[p.from_bp:p.end_bp])
 
 
-# ======================================================================= R21 (5)
-
-# ======================================================================= open items
+# ======================================================================= ambient budgets
 
 class TestAmbientBudgetUnderToolsWithoutLimits(unittest.TestCase):
-    """b2fc7816's open items: under a caller's ambient budget, tools without local limits
-    stored an entry and lost its handle when the summary after it stopped, and a fetch
-    whose parse stopped raised AttributeError (no call to state the stop on)."""
+    """Under a caller's ambient budget, tools without local limits must not store an entry
+    and lose its handle when the summary after it stops, and a fetch whose parse stops must
+    not raise AttributeError (no call to state the stop on)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1496,10 +1493,9 @@ class TestAmbientBudgetUnderToolsWithoutLimits(unittest.TestCase):
             self.assertIsNone(out['summary'])
 
     def test_graphlet_walks_stops_between_rows(self):
-        # the review of W2's library part (finding 4): a lazy row stopped by the ambient
-        # budget after the first one wrote the stop to the absent local call
-        # (AttributeError). The page now states it, its rows whole, within max_bytes, and
-        # its cursor goes on where it stopped
+        # a lazy row stopped by the ambient budget after the first one must not write the
+        # stop to the absent local call (AttributeError): the page states it, its rows whole,
+        # within max_bytes, and its cursor goes on where it stopped
         h = self.store.put(resp('rep0_cut1'), {'seeds': []})
         for max_bytes in (60000, 3000):
             tools = GraphletTools(self.store, {}, max_bytes=max_bytes)

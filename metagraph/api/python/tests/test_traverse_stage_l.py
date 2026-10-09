@@ -1,5 +1,5 @@
-"""Stage L (DESIGN §21, owner decisions L1-L9): work and allocation budgets for the
-library's local operations, the store's parses and the MCP tools.
+"""Local limits (DESIGN §21): work and allocation budgets for the library's local
+operations, the store's parses and the MCP tools. The tests, by the property each covers:
 
   T-L1/L20  off by default: no budget, no change -- and an unlimited budget changes no
             answer either (the golden digests of every operation)
@@ -116,7 +116,7 @@ def applicable(g, name):
 # ======================================================================= the library
 
 class TestOffByDefault(unittest.TestCase):
-    """T-L1: no budget anywhere is the old library (the golden digests in
+    """T-L1: no budget anywhere is the unbudgeted library (the golden digests in
     test_traverse_speedups.py); an unlimited budget changes no answer either."""
 
     def test_an_unlimited_budget_changes_no_answer(self):
@@ -138,9 +138,9 @@ class TestOffByDefault(unittest.TestCase):
 
 
 class TestColdPrice(unittest.TestCase):
-    """T-L2 / L1: a derivation is charged at its structural price whether a cache holds it
-    or not, so the same call charges the same units cold, warm, and after other calls
-    built other caches."""
+    """T-L2, cold price: a derivation is charged at its structural price whether a cache
+    holds it or not, so the same call charges the same units cold, warm, and after other
+    calls built other caches."""
 
     def test_the_same_units_cold_warm_and_after_other_calls(self):
         for item in SAMPLE:
@@ -239,10 +239,10 @@ print(json.dumps(out, sort_keys=True))
         self.assertEqual(got[0], got[2])
 
     def test_switch_reach_under_other_hash_seeds(self):
-        # T-L3 for next_request() with a change_cost table (L1): _switch_reach walked the
-        # names owed the default in a set's order, so labels at equal loss were pushed, popped
-        # and charged in an order PYTHONHASHSEED chose -- the review's call completed under 5
-        # of 12 seeds and stopped under 7. The answer and every charge must be the same
+        # T-L3 for next_request() with a change_cost table: walking the names owed the
+        # default in a set's order would push, pop and charge labels at equal loss in an order
+        # PYTHONHASHSEED chose -- the call would complete under 5 of 12 seeds and stop under 7.
+        # The answer and every charge must be the same
         script = r'''
 import json, sys
 sys.path.insert(0, %r); sys.path.insert(0, %r)
@@ -281,10 +281,10 @@ print(json.dumps(out, sort_keys=True))
             got.append(json.loads(p.stdout))
         for other in got[1:]:
             self.assertEqual(got[0], other)
-        # the charge the sorted order gives (the review's fixed copy: 587 under every seed,
-        # and 360 more for the 72-entry table in work model 2 -- the check and the build at
-        # W_ELEM per entry, the count of its pairs at W_STEP, its 72 edges at W_ELEM: the
-        # review of the P2 fixes found the table's memory and most of its work uncharged)
+        # the charge the sorted order gives (587 under every seed, and 360 more for the
+        # 72-entry table in work model 2 -- the check and the build at W_ELEM per entry, the
+        # count of its pairs at W_STEP, its 72 edges at W_ELEM: the table's memory and its work
+        # are charged)
         self.assertEqual(587 + 360, got[0]['reach'][1])
         self.assertEqual(['built', got[0]['request'][2]],
                          got[0][str(got[0]['request'][2])])
@@ -458,7 +458,7 @@ class TestCompare(unittest.TestCase):
         self.assertTrue({'keys:a', 'keys:b'} <= phases, phases)
 
 class TestExports(unittest.TestCase):
-    """T-L10 / L4: a stopped export returns no text, a stopped save writes no file."""
+    """T-L10: a stopped export returns no text, a stopped save writes no file."""
 
     def test_no_text_and_no_file(self):
         for item in ITEMS[::2]:
@@ -729,8 +729,8 @@ class TestChargeDensity(unittest.TestCase):
 
 
 class TestMemoryModel(unittest.TestCase):
-    """T-L12 / L9: the account is a model; on the committed retrievals it is at least the
-    heap tracemalloc sees each operation take (cold, a fresh model)."""
+    """T-L12: the account is a model; on the committed retrievals it is at least the heap
+    tracemalloc sees each operation take (cold, a fresh model)."""
 
     def test_the_account_is_at_least_the_traced_peak(self):
         low = []
@@ -784,8 +784,8 @@ def _read_bytes(path):
 
 
 class TestStoreParseLimits(unittest.TestCase):
-    """T-L16 / L3: a parse that stops keeps the body, checked without a parse, as an
-    unparsed entry; it can always be copied out without one."""
+    """T-L16: a parse that stops keeps the body, checked without a parse, as an unparsed
+    entry; it can always be copied out without one."""
 
     def test_unparsed_entries(self):
         key, r, resp = _real('sra_hub__strict')
@@ -900,7 +900,7 @@ class TestTools(unittest.TestCase):
             loc = out['local']
             self.assertTrue(loc['complete'], (name, loc))
             self.assertGreater(loc['usage']['work_units'], 0, name)
-            # work model 2 (the review of 2026-10-06: L1, L2, O2, O3 moved charges)
+            # work model 2
             self.assertEqual((2, 'model'), (loc['work_model'], loc['memory_bound']))
             cls = TOOL_CLASS[name]
             self.assertEqual(getattr(ToolLimits(), cls).as_dict(), loc['limits'])

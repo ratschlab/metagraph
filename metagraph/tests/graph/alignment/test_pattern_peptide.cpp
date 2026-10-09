@@ -1,7 +1,7 @@
 /**
- * The oracle suite of peptide patterns (docs/DESIGN-pattern-search.md §6, §13 increment 5;
- * owner decision #15 of 2026-10-08): the genetic codes, the codon automaton, and the engine
- * on tiny graphs against two brute-force oracles that never read the engine's automaton:
+ * The oracle suite of peptide patterns (docs/DESIGN-pattern-search.md §6): the genetic codes,
+ * the codon automaton, and the engine on tiny graphs against two brute-force oracles that
+ * never read the engine's automaton:
  *  - the record-scan oracle translates every record in all six frames (the three frames of
  *    the record and of its reverse complement) with this file's own genetic code and lists
  *    the peptide's occurrences on both strands: an occurrence of P in the reverse complement
@@ -217,8 +217,8 @@ const OracleCode& oracle_code(int id) {
 }
 
 // a peptide letter admits a coded residue: X any, B D or N, Z E or Q, J I or L; never a
-// stop, which only the letter '*' admits (owner decision #19 of 2026-10-08: a stop of the
-// table, the codons this file's table codes '*')
+// stop, which only the letter '*' admits (a stop of the table, the codons this file's table
+// codes '*')
 bool admits(char letter, char coded) {
     if (letter == '*')
         return coded == '*';
@@ -1037,8 +1037,8 @@ TEST(PatternPeptide, ParsePeptides) {
     EXPECT_TRUE(Pattern::parse(PatternKind::PROTEIN, "MWMW").is_exact());
     EXPECT_FALSE(Pattern::parse(PatternKind::PROTEIN, "MWMW", GeneticCode::get(2)).is_exact());
 
-    // the stop '*' is a residue (owner decision #19 of 2026-10-08; the refusal
-    // stop_unsupported of 4596bb3b is gone): the table's stop codons at that position
+    // the stop '*' is a residue (no stop_unsupported refusal): the table's stop codons at
+    // that position
     for (const char *text : { "M*K", "*", "MK**w*" }) {
         const Pattern p = Pattern::parse(PatternKind::PROTEIN, text);
         EXPECT_EQ(3 * std::string(text).size(), p.length()) << text;
@@ -1621,9 +1621,9 @@ TEST(PatternPeptide, PrunedMiddleKmer) {
 // ---------------------------------------------------------------- the stop '*'
 
 TEST(PatternPeptide, StopResidue) {
-    // owner decisions #19 and #21 of 2026-10-08: '*' is a stop codon of the table at that
-    // position, X never one; in tables 27, 28 and 31 the codons that stop only in context
-    // code their residue (Q, W, E) and '*' matches nothing
+    // '*' is a stop codon of the table at that position, X never one; in tables 27, 28 and 31
+    // the codons that stop only in context code their residue (Q, W, E) and '*' matches
+    // nothing
     const std::vector<std::string> records {
         "CC" "ATGTAA" "GG",       // M then TAA: a stop in 1, 2, 11; Q in 27 and 28, E in 31
         "AA" "ATGAGA" "TGGCC",    // M then AGA: R in 1 and 11, a stop in 2

@@ -1,41 +1,37 @@
-"""The external review of levels 4-5 (pinned at dcc0cebd), the library's part, and the open
-items of the level-5 library batch (bf8dcee4):
+"""Budgeted operations of the library: admission, cost bounds, receipts and the account.
 
-  * finding 2: a budgeted operation is admitted before the derived caches it reads are
-    built -- spell(), support_profile(), support_changes(), walks_at(), continuation
-    and the ranking resolved a walk (building the arm's paths, a Path per walk) before
-    their budget was charged, so a refused zero-budget call on comb_annotate(20000)
-    left 20,001 Path objects (2.7 MB) behind and reported 0 work / 0 memory (the
-    reviewer's /tmp/review_l5_admission_probe.py). Stated more widely: stopped at ANY
-    charge point, a call leaves only derivations it charged (an audit of every operation
-    also found path_of_leaf built uncharged under annotate routes, segment_ops under a
-    constrain comparison's cuts, and the name index under prefix_subset);
-  * finding 4: compare_cost()'s at_least is never above what the completed comparison
-    charges -- annotate claims were priced from the whole DAG's ends, not the ends of
-    the DAG restricted to the common certified depth (comb 1 vs comb 100: 9,197 lwu
-    advertised, 7,963 charged; /tmp/review_l5_cost_probe.py), and labels mode charged
-    its keys at their upper bound into at_least (above a comparison with labels=);
-  * finding 5: graphlet_load returns the handle of the entry it stored -- it parsed the
-    stored entry again under the store's parse limits, which refused it, and answered
+  * a budgeted operation is admitted before the derived caches it reads are built --
+    spell(), support_profile(), support_changes(), walks_at(), continuation and the
+    ranking would otherwise resolve a walk (building the arm's paths, a Path per walk)
+    before their budget was charged, so a refused zero-budget call on comb_annotate(20000)
+    would leave 20,001 Path objects (2.7 MB) behind and report 0 work / 0 memory. Stated
+    more widely: stopped at ANY charge point, a call leaves only derivations it charged
+    (path_of_leaf under annotate routes, segment_ops under a constrain comparison's cuts,
+    and the name index under prefix_subset included);
+  * compare_cost()'s at_least is never above what the completed comparison charges --
+    annotate claims are priced from the ends of the DAG restricted to the common certified
+    depth, not the whole DAG's ends (comb 1 vs comb 100: 9,197 lwu advertised against
+    7,963 charged otherwise), and labels mode keeps its keys' upper bound out of at_least
+    (it would be above a comparison with labels=);
+  * graphlet_load returns the handle of the entry it stored -- parsing the stored entry
+    again under the store's parse limits would refuse it and answer
     local_budget_exceeded without the handle (GraphletStore(max_ram_mb=0,
-    parse_limits=LocalLimits(work_units=1)), /tmp/review_l5_load_receipt_probe.py); a
-    stop on the store's parse limits offers no raise_local_budget (no call's budget
-    raises them);
-  * the batch's memory gaps: the stage-L account of compare() is at least its traced
-    peak on every pair of retrievals of one seed, both orders, every mode (it was 0.82x
-    on a cross pair under prefix_subset: the name index uncharged, the index itself
-    2.5-2.9x the price it was charged at, the cut's segment pieces read whole).
+    parse_limits=LocalLimits(work_units=1))); a stop on the store's parse limits offers
+    no raise_local_budget (no call's budget raises them);
+  * the local-limits account of compare() is at least its traced peak on every pair of
+    retrievals of one seed, both orders, every mode (0.82x on a cross pair under
+    prefix_subset with the name index uncharged, the index itself 2.5-2.9x its price, the
+    cut's segment pieces read whole).
 
-The review of these fixes (the working tree on bf8dcee4), findings 1-3 (4 and 5 are in
-test_traverse_vendored_review.py, beside VMD-04 and VMD-02):
+And on the same paths (the store's receipts are also in test_traverse_vendored_review.py):
 
-  * finding 1: the J-line charge of standalone_text() (graphlet_export(format=mgt),
-    graphlet_save) is the same on every run -- it was sized by the entry file, whose
-    created and accessed times print to a length that follows the clock;
-  * finding 2: to_fasta(leaves=[]) resolves no walk, so a refused call builds no paths;
-  * finding 3: graphlet_load states a stop of the caller's ambient budget as that
-    budget's (raise_local_budget offered), not as one on the store's parse limits; the
-    same classification for graphlet_save, which parses the stored body on demand.
+  * the J-line charge of standalone_text() (graphlet_export(format=mgt), graphlet_save)
+    is the same on every run -- sized by the entry file, whose created and accessed times
+    print to a length that follows the clock, it would not be;
+  * to_fasta(leaves=[]) resolves no walk, so a refused call builds no paths;
+  * graphlet_load states a stop of the caller's ambient budget as that budget's
+    (raise_local_budget offered), not as one on the store's parse limits; the same
+    classification for graphlet_save, which parses the stored body on demand.
 """
 
 import collections
@@ -156,7 +152,7 @@ def _uncharged(made, b):
 
 
 class TestAdmissionBeforeDerivedCaches(unittest.TestCase):
-    """Finding 2."""
+    """A budgeted operation is admitted before the derived caches it reads are built."""
 
     def test_the_reviewers_probe(self):
         text = comb_annotate(5000)
@@ -348,8 +344,9 @@ def _comb_pairs():
 
 
 class TestCompareCostIsALowerBound(unittest.TestCase):
-    """Finding 4: at_least <= what the completed comparison charges, every mode; at most
-    the estimate, under the library's work model, and all it charges where it is exact."""
+    """compare_cost(): at_least <= what the completed comparison charges, every mode; at
+    most the estimate, under the library's work model, and all it charges where it is
+    exact."""
 
     def test_the_reviewers_probe(self):
         a, b = parse(comb_annotate(1)), parse(comb_annotate(100))
@@ -398,7 +395,7 @@ class TestCompareCostIsALowerBound(unittest.TestCase):
 
 
 class TestLoadKeepsItsReceipt(unittest.TestCase):
-    """Finding 5."""
+    """graphlet_load returns the handle of the entry it stored."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -510,7 +507,7 @@ class TestCompareAccountBoundsThePeak(unittest.TestCase):
         self.assertEqual([], low)
 
     def test_the_reported_cross_pair(self):
-        # 1,354,074 charged against a traced 1,645,185 (0.82x) at bf8dcee4
+        # 1,354,074 charged against a traced 1,645,185 (0.82x) without the name index charged
         a, b = _real('sra_hairpin__left_only_follow'), _real('sra_hairpin__left_only')
         for mode in ('prefix_subset', 'walks'):
             bud = LocalBudget()
@@ -552,7 +549,7 @@ class TestCompareAccountBoundsThePeak(unittest.TestCase):
 
 
 # =========================================================================================
-# The review of these fixes (the working tree on bf8dcee4): findings 1-3 on the library.
+# The J-line charge, an empty selection, a load stopped by the caller's budget.
 
 class _Clock:
     def __init__(self, t):
@@ -568,11 +565,10 @@ def _j_line_bytes(text):
 
 
 class TestTheJLineChargeIsDeterministic(unittest.TestCase):
-    """Review finding 1: standalone_text() sized its J-line charge by the entry file,
-    which holds the created and accessed times -- their printed length follows the clock,
-    so the same export of the same entry was charged differently from run to run (the
-    reviewer's det_probe.py: 52,493 against 52,541 bytes, and a memory limit of 52,493
-    stopped one run while the other answered)."""
+    """standalone_text() sizes its J-line charge without the entry file, which holds the
+    created and accessed times -- their printed length follows the clock, so the same
+    export of the same entry would be charged differently from run to run (52,493 against
+    52,541 bytes, and a memory limit of 52,493 stopping one run while the other answers)."""
 
     CLOCKS = (1791204329.5, 1791204329.1234567)
 
@@ -671,10 +667,9 @@ class TestTheJLineChargeIsDeterministic(unittest.TestCase):
 
 
 class TestAnEmptySelectionResolvesNoWalk(unittest.TestCase):
-    """Review finding 2: to_fasta(leaves=[]) built the arm's paths (a Path per walk)
-    without charging them, and a refused zero-budget call (stopped at its join) left them
-    behind -- 20,001 Paths, usage 0/0 (the reviewer's fasta_empty.py and
-    fasta_empty_tool.py)."""
+    """to_fasta(leaves=[]) builds no paths: building the arm's paths (a Path per walk)
+    without charging them, a refused zero-budget call (stopped at its join) would leave
+    them behind -- 20,001 Paths, usage 0/0."""
 
     def setUp(self):
         # the first call imports the export module: its code objects are no allocation
@@ -738,10 +733,10 @@ def _comb_response(n):
 
 
 class TestALoadStoppedByTheCallersBudget(unittest.TestCase):
-    """Review finding 3: graphlet_load (tools without local limits) stated every stop as
-    one on the store's parse limits -- also the stop of the caller's ambient budget on
-    the dump that stores the loaded graphlet: raise_local_budget dropped and a store's
-    limits named that need not exist (the reviewer's amb_load.py)."""
+    """graphlet_load (tools without local limits) states the stop of the caller's ambient
+    budget on the dump that stores the loaded graphlet as that budget's, not as one on the
+    store's parse limits: raise_local_budget kept, and no store's limits named that need not
+    exist."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

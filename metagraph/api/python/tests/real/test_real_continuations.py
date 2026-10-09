@@ -278,9 +278,9 @@ def _request_violations(req):
 
 
 def _largest_loss(cs):
-    """The largest terminal loss of the continued labels (third review, finding 4: C's
-    loss_used is the SMALLEST, and subtracting it let a label at a higher loss go on with
-    more than its original budget left)."""
+    """The largest terminal loss of the continued labels (C's loss_used is the SMALLEST, and
+    subtracting it would let a label at a higher loss go on with more than its original
+    budget left)."""
     return max((x for c in cs for x in c.losses), default=0.0)
 
 
@@ -357,7 +357,7 @@ class TestNextRequestShape(unittest.TestCase):
                             want['labels']['extra'] = got
                         if req.branch_budget is not None:
                             # the branch allowance reduced by the largest terminal branch
-                            # count (v5.4, DESIGN §19.3): its derivation is checked in
+                            # count (DESIGN §19.3): its derivation is checked in
                             # branch_budget, its value is what the request carries
                             want.setdefault('branching', {})['max_label_branches'] = \
                                 req.branch_budget['effective']
@@ -751,14 +751,14 @@ class TestContinuationLabelsAgainstTheOracle(unittest.TestCase):
         self.assertGreater(n, 0)
 
     def test_annotate_continuation_names_every_label_covering_the_tail(self):
-        """Spec §7.1: a continuation names 'the labels covering that whole tail'.
-        Fixed SRV-ANNOT-CONT-LABELS (walker.cpp, make_continuation): in annotate mode the
-        walker intersected the labels of the tail's last n STEPS, whose first k-1 nodes
-        begin before the tail, so a label carried by every k-mer of the tail but not by
-        those k-1 straddling nodes was left out. Old repro: sra_16s_PZ326290__annotate_exh,
-        left arm, continuation(left, 6): 45 bp, labels [] -- /resolve on that 45 bp
-        sequence reports .../SRR14483890.fasta.gz on all 15 k-mers (it is recorded on
-        steps 23-44 of the walk only). Needs the cache filled from the fixed server."""
+        """Spec §7.1: a continuation names 'the labels covering that whole tail'. In annotate
+        mode the walker (walker.cpp, make_continuation) must not intersect the labels of the
+        tail's last n STEPS, whose first k-1 nodes begin before the tail: a label carried by
+        every k-mer of the tail but not by those k-1 straddling nodes would be left out. The
+        case: sra_16s_PZ326290__annotate_exh, left arm, continuation(left, 6): 45 bp, whose
+        /resolve reports .../SRR14483890.fasta.gz on all 15 k-mers (it is recorded on steps
+        23-44 of the walk only), so the label must be named. Needs the cache filled from a
+        server with this rule."""
         missing = []
         for c, i, g, side, pid, leaf, cont in self._tails('annotate'):
             if g.arms[side].labels_per_node.nodes_truncated:
@@ -821,13 +821,12 @@ class TestTraverseContinueSession(unittest.TestCase):
 
     def test_traverse_continue_dry_run_returns_the_request(self):
         """execute=False returns the request (design §6) under the 16 KB sequence ceiling
-        it states. Fixed CONTINUE-DRYRUN-TOO-LARGE (mcp_tools.traverse_continue): the
-        request of a default continuation (1000 bp of sequence, its label names and the
-        full normalized strategy, ~2.1 KB) was held to the 2048-byte list-tool ceiling
-        and came back as result_too_large, with no max_bytes to raise it. Old repro:
-        traverse_fetch('mini_refseq', {sequence: mini_win200_00}, strict) then
-        traverse_continue(handle, 'left', 0, {'bounds': {'max_extension_bp': 150}},
-        execute=False) -> {'error': 'result_too_large', 'bytes': 2130, 'max_bytes': 2048}."""
+        it states (mcp_tools.traverse_continue): the request of a default continuation (1000
+        bp of sequence, its label names and the full normalized strategy, ~2.1 KB) held to
+        the 2048-byte list-tool ceiling would come back as result_too_large, with no
+        max_bytes to raise it. The case: traverse_fetch('mini_refseq', {sequence:
+        mini_win200_00}, strict) then traverse_continue(handle, 'left', 0, {'bounds':
+        {'max_extension_bp': 150}}, execute=False), 2130 bytes."""
         bad = []
         n = 0
         for tools, handle, g, seed, strat, side, pid in self._sessions():

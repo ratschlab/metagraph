@@ -1,13 +1,13 @@
-"""Stage L, the review's confirmed findings (one regression test each; the stage-L tests
-themselves are test_traverse_stage_l.py):
+"""Local limits, one regression test per hazard, its key in the class name (TestR1...; the
+local-limits tests themselves are test_traverse_stage_l.py):
 
-  R1  graphlet_walks charges a cached ranking as the ranking itself charges (L1: the same
-      call charges the same units cold and warm, and a later page as on a fresh server);
-      every budgeted tool charges the same twice in a row
+  R1  graphlet_walks charges a cached ranking as the ranking itself charges (cold price:
+      the same call charges the same units cold and warm, and a later page as on a fresh
+      server); every budgeted tool charges the same twice in a row
   R2  graphlet_sequence keeps room for the local block: a long walk is a truncated slice
       with next_from under local limits too, never result_too_large
-  R3  next_request(budget={...}) is the keyword override it was before stage L, also
-      through traverse_continue; overrides of the tool's own arguments are bad_argument
+  R3  next_request(budget={...}) is the keyword override of the bounds, also through
+      traverse_continue; overrides of the tool's own arguments are bad_argument
   R4  a resume token binds the graphlet's body: refused on another body that shares the
       seed and the counts, accepted on the same body parsed again
   R5  graphlet_export(format=json) under local limits never makes the whole text
@@ -17,8 +17,8 @@ themselves are test_traverse_stage_l.py):
   R8  label_walks resolves the label before the arm (UnknownLabel with a bad arm too)
   R9  the first label lookups on a fresh model scan the labels (ops._LABEL_SCANS of
       them); the index is built only after them, and both answer as a scan
-  R10 (found auditing R2's other ceiling-fitted results) a budgeted receipt is checked
-      with its local block before the operation runs: never a handle made and the answer
+  R10 like R2's other ceiling-fitted results, a budgeted receipt is checked with its local
+      block before the operation runs: never a handle made and the answer
       result_too_large
 """
 
@@ -252,7 +252,7 @@ class TestR3BudgetOverride(unittest.TestCase):
 # ======================================================================= R4
 
 def _old_fingerprint(g):
-    """What a resume token was bound to before: the seed's first bases and the counts."""
+    """A weaker binding of a resume token: the seed's first bases and the counts only."""
     return json.dumps([g.seed.sequence[:64], len(g.labels),
                        [(s, a.counts.segments, a.counts.runs) for s, a in g.arms.items()]])
 
@@ -278,7 +278,7 @@ class TestR4TokenBinding(unittest.TestCase):
             groups[_old_fingerprint(g)].append((item[0], g))
         pairs = [(a, b) for xs in groups.values() for a, b in itertools.combinations(xs, 2)
                  if a[1].dump(envelope=False) != b[1].dump(envelope=False)]
-        # the review found five pairs, two of them among the committed real and review3
+        # five such pairs exist, two of them among the committed real and review3
         # fixtures (which no generator rewrites)
         self.assertGreaterEqual(len(pairs), 2)
         tried = 0

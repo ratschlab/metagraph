@@ -51,23 +51,22 @@
  * of each (tuned_subset_report, routes_subset_report) returns the report, the EXPECT
  * wrapper (check_tuned_subset, check_routes_subset) asserts that it is empty, and a
  * test can corrupt a result on purpose and assert that the report is NOT empty — the
- * checkers are themselves under test (review round 2: three accepted corruptions;
- * round 3: two more, and one valid result rejected).
+ * checkers are themselves under test (corruptions they must reject, and valid results
+ * they must accept).
  *
- * Three rules the checkers follow since round 3. (1) Evidence for an omission is only
- * what the walker states explicitly about that label and that successor
- * (BranchEvent::refused) or what the checker can verify itself from the seed and the
- * walk (a reused (k+1)-mer, a seed k-mer re-entered, a hairpin); the absence of a child
- * never establishes why it is absent. Since round 4 the statement must also be one the
- * tuned run's strategy makes: a refusal's cause is checked against the knob it names,
- * and a hairpin excuses an omission only when hairpins are skipped (SeedContext,
- * refusal_problem). (2) Route support and termination are verified
- * separately: every claim must be a prefix of an exhaustive claim under its label, and
- * an end is compared with the exhaustive run's only when both runs decide it on the
- * same facts — a structural block on a route that passed a reconvergence is decided on
- * the united edge history (§6.10), which the per-path trie does not have. (3) A reference
- * claim that ended with a cap or at the radius establishes prefix support only, not
- * where the label stops.
+ * Three rules the checkers follow. (1) Evidence for an omission is only what the walker
+ * states explicitly about that label and that successor (BranchEvent::refused) or what
+ * the checker can verify itself from the seed and the walk (a reused (k+1)-mer, a seed
+ * k-mer re-entered, a hairpin); the absence of a child never establishes why it is
+ * absent. The statement must also be one the tuned run's strategy makes: a refusal's
+ * cause is checked against the knob it names, and a hairpin excuses an omission only
+ * when hairpins are skipped (SeedContext, refusal_problem). (2) Route support and
+ * termination are verified separately: every claim must be a prefix of an exhaustive
+ * claim under its label, and an end is compared with the exhaustive run's only when both
+ * runs decide it on the same facts — a structural block on a route that passed a
+ * reconvergence is decided on the united edge history (§6.10), which the per-path trie
+ * does not have. (3) A reference claim that ended with a cap or at the radius
+ * establishes prefix support only, not where the label stops.
  */
 namespace mtg {
 namespace test {
@@ -160,8 +159,8 @@ inline bool is_block(EndReason reason) {
 // an end that says nothing about where the label stops: a censoring cap, the beam, or
 // the radius — the run did not look further. A REFERENCE claim ending so establishes
 // prefix support up to there and nothing beyond: neither that the label goes on nor
-// that it stops (review round 3: a reference capped at max_steps 2 rejected valid
-// uncapped results for "outliving" it or for ending at its boundary with dead_end).
+// that it stops (a reference capped at max_steps 2 must not reject valid uncapped
+// results for "outliving" it or for ending at its boundary with dead_end).
 inline bool is_unknown_end(EndReason reason) {
     return is_censored(reason) || reason == EndReason::MAX_EXTENSION;
 }
@@ -172,10 +171,10 @@ inline bool is_unknown_end(EndReason reason) {
 // cost the TUNED run was made with. A refusal is valid only where the knob its cause
 // names is active and its condition holds, and a hairpin excuses an omission only where
 // the strategy skips hairpins: an event states what the walker did, the strategy says
-// whether that was a decision to prune (review round 4: a FOLLOWED hairpin and a refusal
-// with a cause no knob supports both excused a deleted child). The constructor makes
-// every caller name the strategy. k is read off the result: a seed of n bases has
-// n - k + 1 k-mers.
+// whether that was a decision to prune (otherwise a FOLLOWED hairpin, or a refusal with a
+// cause no knob supports, would excuse a deleted child). The constructor makes every
+// caller name the strategy. k is read off the result: a seed of n bases has n - k + 1
+// k-mers.
 struct SeedContext {
     SeedContext(std::string seed, bool stranded, Strategy strategy,
                 LabelChangeCost cost = LabelChangeCost::forbid())
@@ -460,7 +459,7 @@ inline const PathResult* leaf_path(const ArmResult &arm, size_t segment) {
 // Whether the checker can see, from the seed and the outward |walk| alone, the
 // structural fact that a BLOCKED or HAIRPIN event for base |ch| at the end of |walk|
 // asserts — the walker's reason is not taken on trust, since a forged event would
-// otherwise excuse any deletion (review round 3, finding 1):
+// otherwise excuse any deletion:
 //  - edge_reuse / edge_reuse_rc: the step's (k+1)-mer (on a stranded graph: or its
 //    reverse complement) occurs on the seed-plus-walk already;
 //  - rejoined_seed: the k-mer stepped into (either strand when stranded) is a seed k-mer;
@@ -522,11 +521,11 @@ inline std::set<LabelId> alive_ids(const Segment &seg, uint64_t d) {
 }
 
 // Why refusal |rf| of branch event |be| of the constrain run |r| is NOT one the walker
-// makes under the tuned run's strategy and cost (ctx); empty when it is. A refusal used
-// to be trusted on its cause string, so a deleted child passed with cause "branch" under
-// unlimited branching or with a cause no walker emits (review round 4, the trust
-// boundary). Now the cause has to name an active knob, and the knob's condition has to
-// hold at that node as far as the result shows it:
+// makes under the tuned run's strategy and cost (ctx); empty when it is. A refusal trusted
+// on its cause string would let a deleted child pass with cause "branch" under unlimited
+// branching or with a cause no walker emits (the trust boundary). So the cause has to name
+// an active knob, and the knob's condition has to hold at that node as far as the result
+// shows it:
 //  - "branch": a finite max_label_branches, and every label named ambiguous there (in
 //    |ambiguous|, or its lineage on two or more successors: the children carrying it and
 //    the successors refused to it) and ended there with branch — the limit removes the
@@ -652,15 +651,14 @@ inline std::string refusal_problem(const SeedResult &r, const ArmResult &arm,
 //    walk (block_verified);
 //  - a HAIRPIN event there for |ch| naming the label, the step verified to be one, where
 //    the strategy SKIPS hairpins: a hairpin event marked "followed" records a child that
-//    must be present (review round 4, finding 1: one excused its child's deletion — the
-//    geometry was checked, not the policy).
+//    must be present (checking the geometry and not the policy would let one excuse its
+//    child's deletion).
 // Nothing else counts; in particular the absence of a child proves nothing about why
-// it is absent. A branch event whose |ambiguous| names the label used to pass for a
-// refusal when the trie did not follow |ch| — but a result from which a FOLLOWED
-// branch was deleted looks exactly like that (review round 3, finding 1); and a
-// BLOCKED event counts on its reason being TRUE here, not on its reason being
-// structural (a forged edge_reuse at depth 0 is no reuse). |dropped| is no evidence
-// either: a dropped label has a label end, which the caller sees first.
+// it is absent. A branch event whose |ambiguous| names the label is no refusal when the
+// trie did not follow |ch| — a result from which a FOLLOWED branch was deleted looks
+// exactly like that; and a BLOCKED event counts on its reason being TRUE here, not on its
+// reason being structural (a forged edge_reuse at depth 0 is no reuse). |dropped| is no
+// evidence either: a dropped label has a label end, which the caller sees first.
 inline bool branch_recorded(const SeedResult &r, const ArmResult &arm, const SeedContext &ctx,
                             const std::string &walk, size_t segment, uint64_t at, char ch,
                             const std::string &name) {
@@ -718,9 +716,9 @@ struct SubsetReport {
 
 // A leaf's redundant records agree with the events (constrain mode): its end_labels
 // are exactly the labels with a LABEL_END at its depth on its last segment, and its
-// end_reasons count those events' reasons. The checkers read the events, so a result
-// whose leaf lists were cleared or rewritten used to pass them while the output a
-// client reads was wrong (review round 3: the coverage boundary).
+// end_reasons count those events' reasons. The checkers read the events, so without this
+// check a result whose leaf lists were cleared or rewritten would pass them while the
+// output a client reads is wrong (the coverage boundary).
 inline void check_leaf_records(const SeedResult &r, const ArmResult &arm,
                                const std::string &what, Problems *problems) {
     for (const PathResult &p : arm.paths) {
@@ -789,7 +787,7 @@ label_claims(const SeedResult &r, size_t a, uint64_t depth) {
 //     prefix of an exhaustive walk on which that label is alive at that depth; and a
 //     claim ended for a SEMANTIC reason (not a cut) is one the exhaustive run makes
 //     too, i.e. it ends the label at exactly that position (the leaves alone would
-//     miss a label end inserted inside a segment: review round 2, finding 2);
+//     miss a label end inserted inside a segment);
 //  2. every omission has a reason: for every claim (walk prefix, label) of A, following
 //     the prefix through the tuned trie either reaches its end with the label alive
 //     and ended there too (present, for the same reason unless the tuned run ran into
@@ -1112,9 +1110,9 @@ inline bool blocked_in_trie(const SeedResult &r, const ArmResult &arm, const std
 // Merging on: a leaf's spelled walk is not evidence for a label merged in at a join
 // (LabelEnd::route_bp > 0) — the label's own route is. EVERY label end of the merged
 // run is checked on its own route: the leaves' labels and every LABEL_END inside a
-// segment (a leaf-only check would miss an end inserted inside a segment: review round
-// 2, finding 2). A merge closes a duplicate lineage without a label end, so every
-// LABEL_END event is a real end. Two things are verified separately for each:
+// segment (a leaf-only check would miss an end inserted inside a segment). A merge
+// closes a duplicate lineage without a label end, so every LABEL_END event is a real
+// end. Two things are verified separately for each:
 //  1. route support, always: the route must be a prefix of an exhaustive CLAIM under
 //     that label (a claim, not a leaf: the exhaustive run may end the label inside a
 //     walk other labels go on with);
@@ -1132,9 +1130,9 @@ inline bool blocked_in_trie(const SeedResult &r, const ArmResult &arm, const std
 //     (dead_end, label_lost, record_end, the radius) must still be exactly where the
 //     exhaustive run ends the label, joined or not; where the exhaustive claim itself
 //     ended with a cap or at the radius, its reason is unknown and not compared.
-// Review round 3, finding 2: a valid merged result (two routes reconverging at a node
-// whose every continuation one of them had used) was rejected for ending with
-// rejoined_seed where the per-path trie continues.
+// A valid merged result (two routes reconverging at a node whose every continuation one
+// of them had used) ends with rejoined_seed where the per-path trie continues: it must be
+// accepted.
 // The report lists every violation; check_routes_subset() asserts that it is empty.
 inline RouteReport routes_subset_report(const SeedResult &A, const SeedResult &merged,
                                         size_t a, const std::string &what) {

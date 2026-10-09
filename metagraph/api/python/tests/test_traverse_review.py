@@ -1,10 +1,9 @@
-"""Regression tests for the external (GPT) implementation review of the graphlet library
-(commit cb9eac2d), each reproduced offline: the review's reproducers turned into tests on
-hand-made documents, CLI fixtures or the CLI documents the reproducers produced (embedded
-below), and a stand-in backend. One class per finding, named by its number in the review.
-Finding 6 (per-arm attribution of pair evaluations) was fixed by stage 2 and is covered
-there; findings 1 (the server side), 8 and 9 are C++ (tests/cli/test_graphlet_codec.cpp,
-integration_tests/test_traverse.py)."""
+"""Regression tests of the graphlet library, each reproduced offline: reproducers turned
+into tests on hand-made documents, CLI fixtures or the CLI documents the reproducers
+produced (embedded below), and a stand-in backend. One class per hazard, its key in the
+class name (TestFinding1...). The per-arm attribution of pair evaluations is covered by
+the walker's tests; the server side of the label names and the codec's top-of-range
+ranges are C++ (tests/cli/test_graphlet_codec.cpp, integration_tests/test_traverse.py)."""
 
 import ast
 import copy
@@ -30,10 +29,9 @@ from metagraph.traverse.model import (  # noqa: E402
 from test_traverse_mcp import CONTINUATION, SEED, FakeClient  # noqa: E402
 
 
-# ------------------------------------------------------------------ the reviewer's documents
+# ------------------------------------------------------------------ the reproducers' documents
 #
-# /tmp/graphlet-evidence-review/repro.py, re-run with build_debug/metagraph (the same bytes
-# as the reviewer's): the CLI fixture indexes 'chain' and 'bubbles' of
+# produced with build_debug/metagraph: the CLI fixture indexes 'chain' and 'bubbles' of
 # scripts/traversal/graphlet_fixtures.py, with an index manifest.
 
 # 'chain', annotate, keep, radius 10: only A is recorded within [0, 10)
@@ -126,15 +124,15 @@ def claim_rows(claims):
                    c.end_class) for c in claims)
 
 
-# ------------------------------------------------------------------ finding 1 (library)
+# ------------------------------------------------------------------ label names (library)
 
 class TestFinding1NamesAreNotResolvedUnverified(unittest.TestCase):
-    """/traverse resolves label NAMES. A replaced name ('bad\\ufffd', what servers wrote
-    for 'bad\\xff') was another label's name in the review's probe, and the continuation
-    went on under that label. The server now refuses such a seed (C++ and integration
-    tests); the library refuses to build a continuation or next_request naming labels it
-    cannot verify -- a name shared by two labels of the retrieval, or one with U+FFFD --
-    and never resolves one silently."""
+    """/traverse resolves label NAMES. A replaced name ('bad\\ufffd', what a server would
+    write for 'bad\\xff') can be another label's name, and a continuation would go on under
+    that label. The server refuses such a seed (C++ and integration tests); the library
+    refuses to build a continuation or next_request naming labels it cannot verify -- a
+    name shared by two labels of the retrieval, or one with U+FFFD -- and never resolves one
+    silently."""
 
     def renamed(self, name, i, to):
         g = T.graphlet(name)
@@ -196,7 +194,7 @@ class TestFinding1NamesAreNotResolvedUnverified(unittest.TestCase):
         self.assertIsNotNone(GraphletStore.request_of(T.graphlet('switch_chain')))
 
 
-# ------------------------------------------------------------------ finding 2
+# ------------------------------------------------------------------ the store's charge
 
 def _traced(text, queries=False):
     """(memory_bytes, the heap tracemalloc sees the parse -- and the queries -- retain)."""
@@ -220,9 +218,9 @@ def _traced(text, queries=False):
 
 
 def growth_bins_document(n=20000):
-    """The review's case: a model whose retained size is its growth bins (one bin per
-    base of a 20,000 bp walk there; here 20,000 empty bins added to a fixture, which
-    keeps every B sum the body is checked against)."""
+    """A model whose retained size is its growth bins (one bin per base of a 20,000 bp
+    walk; here 20,000 empty bins added to a fixture, which keeps every B sum the body is
+    checked against)."""
     g = parse(T.doc_text('linear'))
     a = g.arms['right']
     for i in range(n):
@@ -231,10 +229,10 @@ def growth_bins_document(n=20000):
 
 
 class TestFinding2TheStoreChargesWhatIsRetained(unittest.TestCase):
-    """memory_bytes() omitted growth bins (and every other non-segment structure): a
-    one-segment retrieval with 20,001 bins retained 4.9 MB but reported 21 KB and stayed
-    resident under a 0.1 MB store. It is now a deep, deduplicating count of the model and
-    its caches (shared interned sets once), without the program's own constants."""
+    """memory_bytes() is a deep, deduplicating count of the model and its caches (shared
+    interned sets once), without the program's own constants: omitting growth bins (and
+    every other non-segment structure), a one-segment retrieval with 20,001 bins retaining
+    4.9 MB would report 21 KB and stay resident under a 0.1 MB store."""
 
     def test_the_growth_bin_case_is_not_kept_under_the_budget(self):
         text = growth_bins_document()
@@ -265,14 +263,14 @@ class TestFinding2TheStoreChargesWhatIsRetained(unittest.TestCase):
                     self.assertLess(abs(m - held), 0.25 * held)
 
 
-# ------------------------------------------------------------------ finding 3
+# ------------------------------------------------------------------ annotate routes through merges
 
 class TestFinding3AnnotateRoutesThroughMerges(unittest.TestCase):
-    """Annotate + merge: claims() and routes() followed first parents only, so b.fa and
-    c.fa (direct_bp = reach_bp = 100) had no claim or route beyond the first bubble. ROUTE
-    evidence is now derived through every supported parent (the union pass of the
-    normative annotate label_summary) and kept apart from DISPLAYED evidence: the claim
-    has route support [0, 100) and displayed support from the merge at 62."""
+    """Annotate + merge: following first parents only, claims() and routes() would give b.fa
+    and c.fa (direct_bp = reach_bp = 100) no claim or route beyond the first bubble. ROUTE
+    evidence is derived through every supported parent (the union pass of the normative
+    annotate label_summary) and kept apart from DISPLAYED evidence: the claim has route
+    support [0, 100) and displayed support from the merge at 62."""
 
     def setUp(self):
         self.g = parse(BUBBLES_ANNOTATE_MERGE)
@@ -300,8 +298,8 @@ class TestFinding3AnnotateRoutesThroughMerges(unittest.TestCase):
                                  in claim_rows(self.g.claims('right'))])
         # ... and the same displayed support once both display the same parent at each
         # merge: the fixture (feature level 6) stores the parent carried by the most labels
-        # first (R21 (4)) -- at 62 the G allele (b.fa, c.fa, both.fa), which arrived second
-        # and comes second in this older document
+        # first (the majority-parent rule) -- at 62 the G allele (b.fa, c.fa, both.fa), which
+        # arrived second and comes second in this level-5 document
         self.assertNotEqual(want, claim_rows(self.g.claims('right')))
         level6 = parse(BUBBLES_ANNOTATE_MERGE.replace('G 4,5 62 38 !', 'G 5,4 62 38 !'))
         self.assertEqual(want, claim_rows(level6.claims('right')))
@@ -362,13 +360,13 @@ class TestFinding3AnnotateRoutesThroughMerges(unittest.TestCase):
                     self.assertIn(c.evidence_from, (0, None))
 
 
-# ------------------------------------------------------------------ finding 4
+# ------------------------------------------------------------------ label comparisons
 
 class TestFinding4LabelComparisonsAreClippedFirst(unittest.TestCase):
-    """Comparing the chain locus at radii 10 and 80 used depth 10 but reported B, C and D
-    (first recorded at 24 and 54) in the deeper retrieval only: the completed summaries
-    were clamped. Presence intervals and runs are now clipped to the depth BEFORE the
-    summaries are derived."""
+    """Comparing the chain locus at radii 10 and 80 uses depth 10, so B, C and D (first
+    recorded at 24 and 54) are in neither retrieval's summaries at that depth: presence
+    intervals and runs are clipped to the depth BEFORE the summaries are derived, not the
+    completed summaries clamped."""
 
     def test_the_reviewers_case(self):
         shallow, deep = parse(CHAIN_10), parse(CHAIN_80)
@@ -407,7 +405,7 @@ class TestFinding4LabelComparisonsAreClippedFirst(unittest.TestCase):
                          ops._label_keys(sw, ['right'], 45, None))
 
 
-# ------------------------------------------------------------------ finding 7
+# ------------------------------------------------------------------ continuations check the index
 
 class Caps(FakeClient):
     """The stand-in backend with an index identity of its own."""
@@ -422,11 +420,11 @@ class Caps(FakeClient):
 
 
 class TestFinding7ContinuationChecksTheIndex(unittest.TestCase):
-    """traverse_continue() called the backend without checking the parent's identity:
-    after the backend's fingerprint changed, replay returned index_mismatch but the
-    continuation succeeded and recorded a new-index result as derived from the old-index
-    parent. The parent's identity is now checked against the capabilities before the
-    request is sent and against the returned graphlet before the link is stored."""
+    """traverse_continue() checks the parent's identity: unchecked, after the backend's
+    fingerprint changed, replay would return index_mismatch but the continuation would
+    succeed and record a new-index result as derived from the old-index parent. The
+    parent's identity is checked against the capabilities before the request is sent and
+    against the returned graphlet before the link is stored."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -500,12 +498,11 @@ class TestFinding7ContinuationChecksTheIndex(unittest.TestCase):
                          tools.traverse_continue(parent, 'right', 1)['error'])
 
 
-# ------------------------------------------------------------------ finding 8 (parity)
+# ------------------------------------------------------------------ the codec's ranges (parity)
 
 class TestFinding8RangesAtTheTopOfTheIdSpace(unittest.TestCase):
-    """The C++ codec accepted '18446744073709551615,1' and encoded {MAX, 0} as 'MAX-0'
-    (tests/cli: GraphletCodec.RangesAtTheTopOfTheIdSpace); the Python codec, which the
-    review found right, keeps rejecting both."""
+    """A codec must reject '18446744073709551615,1' and must not encode {MAX, 0} as 'MAX-0'
+    (tests/cli: GraphletCodec.RangesAtTheTopOfTheIdSpace); the Python codec rejects both."""
 
     def test_python_rejects_what_cpp_now_rejects(self):
         mx = 2 ** 64 - 1
@@ -521,7 +518,7 @@ class TestFinding8RangesAtTheTopOfTheIdSpace(unittest.TestCase):
         self.assertEqual('%d-%d' % (mx - 1, mx), _codec.encode_ranges([mx - 1, mx]))
 
 
-# ------------------------------------------------------------------ finding 10
+# ------------------------------------------------------------------ walks compared under labels
 
 class TestFinding10WalksComparedUnderLabels(unittest.TestCase):
     """compare(mode='walks', labels=...) kept the walks the filter emptied (with no
@@ -544,7 +541,7 @@ class TestFinding10WalksComparedUnderLabels(unittest.TestCase):
         self.assertTrue(all(v for v in keys.values()))
 
 
-# ------------------------------------------------------------------ finding 12
+# ------------------------------------------------------------------ exact is per arm
 
 def with_arm_limitation(name, side, kind='greedy_losses', knob='branching.max_label_branches'):
     """A two-arm fixture with a label-class limitation stated for one arm only, written
@@ -559,9 +556,9 @@ def with_arm_limitation(name, side, kind='greedy_losses', knob='branching.max_la
 
 
 class TestFinding12ExactIsPerArm(unittest.TestCase):
-    """evidence_block's exact was the seed's (outcome.label_evidence), so an arm read with
-    the other arm's limitation, and with none of its own. It is per arm now (and so is
-    Claim.exact); the outcome beside it stays the seed's."""
+    """evidence_block's exact is per arm (and so is Claim.exact): taken from the seed
+    (outcome.label_evidence), an arm would read with the other arm's limitation, and with
+    none of its own. The outcome beside it stays the seed's."""
 
     def test_one_arm_limited(self):
         g = with_arm_limitation('fork', 'left')
@@ -591,7 +588,7 @@ class TestFinding12ExactIsPerArm(unittest.TestCase):
         self.assertEqual({False}, {c.exact for c in g.claims('right', strict=False)})
 
 
-# ------------------------------------------------------------------ finding 13
+# ------------------------------------------------------------------ splits
 
 class TestFinding13Splits(unittest.TestCase):
     """Graphlet.splits(): the split records of an arm, oriented like the other accessors
@@ -647,7 +644,7 @@ class TestFinding13Splits(unittest.TestCase):
                                      [l.ref for l in b.labels])
 
 
-# ------------------------------------------------------------------ finding 14
+# ------------------------------------------------------------------ package metadata
 
 class TestFinding14PackageMetadata(unittest.TestCase):
     def test_python_requires(self):

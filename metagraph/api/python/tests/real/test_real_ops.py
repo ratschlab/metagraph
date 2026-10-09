@@ -430,9 +430,9 @@ class TestWalksRankingsAndFilters(unittest.TestCase):
                                                  cl.evidence_from, lid)
                         else:
                             # annotate: the maximal route ends at the leaf's end (the §5.1
-                            # union rule, GPT review finding 3): those displayed from 0 are
-                            # labels_full; the others entered the displayed chain through a
-                            # non-first merge parent and are displayed from route_bp on
+                            # union rule): those displayed from 0 are labels_full; the others
+                            # entered the displayed chain through a non-first merge parent and
+                            # are displayed from route_bp on
                             self.assertLessEqual(set(by_label), alive)
                             shown = {lid for lid, cl in by_label.items() if not cl.route_bp}
                             self.assertEqual(set(full_ids), shown)
@@ -634,14 +634,13 @@ class TestLabelWalksAndRoutes(unittest.TestCase):
     def test_a_run_with_route_bp_0_supports_its_displayed_path(self):
         """Spec §7.1 counts runs with entered_by seed, from_bp 0 and route_bp 0 as sharing
         the displayed flank: no such run's displayed chain may pass a merge its lineage
-        entered through a non-first parent. Fixed SRV-ROUTE-BP-CLONE (walker.cpp,
-        commit_entries): a run cloned at a split AFTER such a merge did not inherit the
-        merge's route stamp (the library derives evidence from the partitions and was
-        right; the R / runs[].route_bp field was not). Old repro:
-        sra_16s_PZ326290__limit1, left arm, runs[7] (label 0, [0, 53), route_bp 0,
-        segment 5): chain 0-1-3-5, merge 3 labels_via_parent [[3], [0,1,2,4,5]] -> label
-        0 came via parent 2 (see test_the_split_clone_keeps_the_merge_route_stamp). Needs
-        the cache filled from the fixed server.
+        entered through a non-first parent. A run cloned at a split AFTER such a merge
+        inherits the merge's route stamp (walker.cpp, commit_entries; the library derives
+        evidence from the partitions, the R / runs[].route_bp field must agree). The case:
+        sra_16s_PZ326290__limit1, left arm, runs[7] (label 0, [0, 53), segment 5): chain
+        0-1-3-5, merge 3 labels_via_parent [[3], [0,1,2,4,5]] -> label 0 came via parent 2,
+        so its route_bp is not 0 (see test_the_split_clone_keeps_the_merge_route_stamp).
+        Needs the cache filled from a server with this rule.
         """
         bad = []
         for row, c, i, g, full in results(self.rows, 'labels.route_bp', mode='constrain'):
@@ -722,12 +721,11 @@ class TestRoutesAgainstTheOracle(unittest.TestCase):
                          % (checked, deviating))
 
     def test_the_split_clone_keeps_the_merge_route_stamp(self):
-        """The minimal reproduction of the route_bp clone bug (fixed SRV-ROUTE-BP-CLONE,
-        see TestLabelWalksAndRoutes): the run is a clone made at a split after the merge
-        (segment 3, from 50) its lineage entered through a non-first parent. Its R and
-        runs[].route_bp now carry the merge's stamp (50; the old server wrote 0), equal to
-        the library's partition-derived evidence; /resolve: its own route is covered,
-        the displayed chain is not."""
+        """The minimal reproduction of the route_bp of a clone (see TestLabelWalksAndRoutes):
+        the run is a clone made at a split after the merge (segment 3, from 50) its lineage
+        entered through a non-first parent. Its R and runs[].route_bp carry the merge's stamp
+        (50, not 0), equal to the library's partition-derived evidence; /resolve: its own
+        route is covered, the displayed chain is not."""
         R.require_cache('sra', 'sra_16s_PZ326290__limit1')
         c = R.load_cell('sra', 'sra_16s_PZ326290__limit1')
         g, full = c.graphlet(0), c.full_result(0)
@@ -903,11 +901,10 @@ class TestSupportProfilesAndChanges(unittest.TestCase):
     def test_annotate_split_reasons_name_the_branch_that_took_the_label(self):
         """A label recorded on the parent's last node and on NO child's first node is on
         no successor: 'absent', never {'why': 'split', 'took': []} -- a split that no
-        branch took (fixed product bug SPLIT-REASON-EMPTY, ops._change_reasons; it was
-        13 % of the annotate split reasons). Repro of the old answer:
-        sra_16s_PZ326290__annotate_exh, left arm, support_changes('left', 16): at 16 label
-        c:142 removed as split with took [] although none of segment 1's children 3, 4, 5
-        records it (nodes_truncated 0)."""
+        branch took (ops._change_reasons; it would be 13 % of the annotate split reasons).
+        The case: sra_16s_PZ326290__annotate_exh, left arm, support_changes('left', 16): at 16
+        label c:142 removed although none of segment 1's children 3, 4, 5 records it
+        (nodes_truncated 0)."""
         bad = []
         rows = op_rows(tag='annotate', tier='core', strategy=('annotate_exh',))
         for row, c, i, g, full in results(rows, 'support.annotate_split', full=False):
@@ -1654,7 +1651,7 @@ class TestCompare(unittest.TestCase):
                     if not has_bases(g) and mode != 'labels':
                         # claims and walks are keyed by their displayed bases: without
                         # them they cannot be matched (unknown, the reason naming
-                        # output.sequences; GPT review, finding 5) -- stated, never guessed
+                        # output.sequences) -- stated, never guessed
                         want = max(want, 'unknown', key=_rank)
                         self.assertIn('output.sequences', cmp.reason)
                     self.assertEqual(want, cmp.comparable, cmp.notes)
@@ -1664,15 +1661,15 @@ class TestCompare(unittest.TestCase):
 
 
     def test_a_ref_known_to_one_side_only_is_compared(self):
-        """A label selector resolves against |a|, then |b| (fixed product bug
-        COMPARE-SELECTORS-A-ONLY): a {'ref': ...} that |b| recorded and |a| did not (a
-        cut list, a label absent from one retrieval) is compared -- b's claims of it are
-        only_in_b -- instead of raising UnknownLabel; comparisons are keyed by LabelRef
-        (§5), and a lower-bound side missing a label is exactly what a comparison must
-        show. Was: a = mini_ndm1__cut_lists, b = mini_ndm1__exhaustive, a.compare(b,
-        labels=[{'ref': r} for r in b's 19 seed-label refs]) -> UnknownLabel 'no label
-        with ref h:1:1' (14 of the 19 are not in a's dictionary). Both directions must
-        now give the same rows with the sides swapped."""
+        """A label selector resolves against |a|, then |b|: a {'ref': ...} that |b| recorded
+        and |a| did not (a cut list, a label absent from one retrieval) is compared -- b's
+        claims of it are only_in_b -- instead of raising UnknownLabel; comparisons are keyed
+        by LabelRef (§5), and a lower-bound side missing a label is exactly what a
+        comparison must show. The case: a = mini_ndm1__cut_lists, b = mini_ndm1__exhaustive,
+        a.compare(b, labels=[{'ref': r} for r in b's 19 seed-label refs]) (14 of the 19 are
+        not in a's dictionary; resolving against |a| alone would raise UnknownLabel 'no
+        label with ref h:1:1'). Both directions give the same rows with the sides
+        swapped."""
         n = 0
         for idx, seed, a, b in self._pairs('cut_lists', 'exhaustive'):
             refs = [{'ref': l.ref} for l in b.labels[:b.seed.num_seed_labels]]
@@ -1703,13 +1700,12 @@ class TestCompare(unittest.TestCase):
 
     def test_a_retrieval_without_bases_compares_to_the_same_one_with_bases(self):
         """Claims and walks are keyed by their displayed bases; a retrieval made with
-        output.sequences false has none (fixed product bug COMPARE-NO-BASES; GPT review,
-        finding 5). Against the SAME traversal made with bases, claims, walks and
-        prefix_subset are 'unknown' (equal None, no rows, the reason naming
+        output.sequences false has none. Against the SAME traversal made with bases, claims,
+        walks and prefix_subset are 'unknown' (equal None, no rows, the reason naming
         output.sequences), never spurious one-sided rows with comparable True and equal
-        False; labels mode needs no bases. Was: mini_ndm1__limit1 vs
-        mini_ndm1__no_sequences, mode claims -> (True, False, 53 only_in_a, 48
-        only_in_b); prefix_subset raised ValueError."""
+        False; labels mode needs no bases. The case: mini_ndm1__limit1 vs
+        mini_ndm1__no_sequences (matched blindly, mode claims would give (True, False, 53
+        only_in_a, 48 only_in_b), and prefix_subset a ValueError)."""
         n = 0
         for idx, seed, a, b in self._pairs('limit1', 'no_sequences'):
             self.assertEqual(a.compare(b, mode='labels').only_in_a, [])
