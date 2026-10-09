@@ -1317,6 +1317,10 @@ class PatternRun {
         }
     }
 
+    // the candidates counted so far (no mask: the source dummies among them unchecked), as the
+    // thresholds compare them without the mask
+    uint64_t candidates_counted() const { return running_upper(); }
+
     // the levels counted: Request::max_mismatches + 1
     uint8_t levels() const { return levels_; }
 
@@ -3662,8 +3666,14 @@ class SegmentRun {
 
         if (const auto &stopped = window.stop()) {
             if (stopped->reason == StopReason::MAX_ANCHORS) {
-                // the per-window cap: more than max_anchors counted
+                // the per-window cap: more than max_anchors counted. Without the mask it compared
+                // the candidates, source dummies unchecked among them: stated apart, the anchors
+                // keeping what the discovery proved
                 w.state = WindowState::NOT_ADMITTED;
+                if (!support_.mask_present) {
+                    w.candidates = Count::at_least(Unit::ANCHORS, window.candidates_counted());
+                    assert(w.candidates->value > request_.max_anchors);
+                }
             } else {
                 record_stop(stopped->phase, stopped->reason);
                 w.state = WindowState::STOPPED;

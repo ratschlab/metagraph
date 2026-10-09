@@ -1554,7 +1554,9 @@ class PathSink {
  *  NOT_REACHED   a stop came before it
  *  BELOW_FLOOR   its anchored k bases are below the information floor: not discovered
  *  NOT_ADMITTED  more anchors than max_anchors (its discovery stopped at max_anchors + 1:
- *                AT_LEAST; or EXACT above; without the mask an upper bound above): not extended
+ *                AT_LEAST; or EXACT above; without the mask an upper bound above, BOUNDS, or
+ *                the candidates counted when the cap stopped the discovery, WindowCount::
+ *                candidates): not extended
  *  EXTENDED      admitted and every anchor processed (also with 0 anchors)
  *  STOPPED       a stop came during its discovery, listing or extension
  */
@@ -1574,6 +1576,12 @@ struct WindowCount {
     // its anchors extended (roots) and those an earlier window's right arm reached (owned)
     uint64_t roots = 0;
     uint64_t owned = 0;
+    // a graph without the mask, the window NOT_ADMITTED by its per-window cap: the candidates its
+    // discovery counted before the cap stopped it (its k-mers and the source dummies among them,
+    // which nothing told apart), AT_LEAST and above max_anchors, which is what the cap compared.
+    // |anchors| then states only what the discovery proved (AT_LEAST, often 0): its true count
+    // has no upper bound, the discovery having stopped. Unset otherwise
+    std::optional<Count> candidates;
 };
 
 /**

@@ -818,7 +818,10 @@ TEST(PatternSegments, GuaranteeAndItsTightness) {
 TEST(PatternSegments, WindowsNotAdmitted) {
     // the middle windows ambiguous (an R that two records instantiate) and max_anchors 1: not
     // admitted; the segments through them found from their neighbours, the left arm passing
-    // them; the first window ambiguous: counts.anchors AT_LEAST, the prefix found from the next
+    // them; the first window ambiguous: counts.anchors AT_LEAST, the prefix found from the next.
+    // Without the mask the cap compares the candidates counted (source dummies unchecked among
+    // them): a window it stopped states them apart, AT_LEAST above max_anchors, its anchors only
+    // what its discovery proved
     std::mt19937 rng(13);
     const std::string gene = random_dna(rng, 90);
     for (size_t at : { 3, 40 }) {
@@ -827,14 +830,15 @@ TEST(PatternSegments, WindowsNotAdmitted) {
                     : variant[at] == 'C' ? 'T' : 'C';
         std::string text = gene;
         text[at] = variant[at] == 'A' || variant[at] == 'G' ? 'R' : 'Y';
-        auto graph = build_graph<DBGSuccinct>(11, { gene, variant.substr(at > 10 ? at - 10 : 0,
-                                                                         21) },
-                                              DeBruijnGraph::BASIC);
+        const std::vector<std::string> records { gene,
+                                                 variant.substr(at > 10 ? at - 10 : 0, 21) };
+        auto graph = build_graph<DBGSuccinct>(11, records, DeBruijnGraph::BASIC);
         const SegmentRunResult run = check_against_oracle(*graph, PatternKind::IUPAC, text, Strands::FORWARD,
                                              plan_of(11, 10), 1, "R at " + std::to_string(at));
         const auto &windows = run.result.segments->windows.at(Orientation::FORWARD);
         size_t not_admitted = 0;
         for (const WindowCount &w : windows) {
+            EXPECT_FALSE(w.candidates);
             if (w.state == WindowState::NOT_ADMITTED) {
                 ++not_admitted;
                 EXPECT_LE(w.offset, at);
@@ -842,6 +846,37 @@ TEST(PatternSegments, WindowsNotAdmitted) {
             }
         }
         EXPECT_GT(not_admitted, 0u);
+
+        auto unmasked = build_graph<DBGSuccinct>(11, records, DeBruijnGraph::BASIC);
+        const_cast<DBGSuccinct&>(oracle_base_dbg(*unmasked)).reset_mask();
+        ASSERT_FALSE(oracle_base_dbg(*unmasked).get_mask());
+        const SegmentRunResult twin = run_segments(*unmasked, Pattern::parse(PatternKind::IUPAC,
+                                                                             text),
+                                                   segment_request(plan_of(11, 10),
+                                                                   Strands::FORWARD, 1));
+        ASSERT_TRUE(twin.result.segments);
+        const auto &twin_windows = twin.result.segments->windows.at(Orientation::FORWARD);
+        ASSERT_EQ(windows.size(), twin_windows.size());
+        size_t capped = 0;
+        for (size_t i = 0; i < windows.size(); ++i) {
+            const WindowCount &w = twin_windows[i];
+            // the masked twin's count is the truth: EXACT, or 2 for a window over the R
+            const uint64_t truth = windows[i].anchors.relation == Relation::EXACT
+                    ? windows[i].anchors.value : 2;
+            if (w.state != WindowState::NOT_ADMITTED) {
+                EXPECT_FALSE(w.candidates) << w.offset;
+                continue;
+            }
+            ++capped;
+            EXPECT_EQ(Relation::AT_LEAST, w.anchors.relation) << w.offset;
+            EXPECT_GE(truth, w.anchors.value) << w.offset;
+            ASSERT_TRUE(w.candidates) << w.offset;
+            EXPECT_EQ(Unit::ANCHORS, w.candidates->unit);
+            EXPECT_EQ(Relation::AT_LEAST, w.candidates->relation) << w.offset;
+            EXPECT_LT(1u, w.candidates->value) << w.offset;
+        }
+        // at least the windows over the R
+        EXPECT_LE(not_admitted, capped);
         // the whole gene is still one segment, from the first admitted window on
         EXPECT_EQ(1u, run.segments.count({ Orientation::FORWARD, 0, 90 }))
             << describe_segments(run.segments);
