@@ -13,6 +13,7 @@
 #include <sstream>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 
 #include <sdust.h>
 
@@ -473,6 +474,138 @@ std::vector<ResidueSubstitution> residue_substitutions(const Pattern &pattern,
                                                code.translate(c), std::move(codon) });
     }
     return result;
+}
+
+
+// ---------------------------------------------------------------- the arms of the segment search
+
+Model::State Model::start_at(uint32_t offset, std::string_view anchor_kmer) const {
+    if (!offset)
+        return start(anchor_kmer);
+    throw std::logic_error("pattern: this model has no start inside the pattern");
+}
+
+Model::State Model::start_left(uint32_t, std::string_view) const {
+    throw std::logic_error("pattern: this model has no left arm");
+}
+
+BaseSet Model::bases_left(State, uint32_t) const {
+    throw std::logic_error("pattern: this model has no left arm");
+}
+
+Model::State Model::prev(State, uint32_t, char) const {
+    throw std::logic_error("pattern: this model has no left arm");
+}
+
+namespace {
+
+/**
+ * The codons with base b at codon position i (bit c of a CodonSet, c = 16 b0 + 4 b1 + b2):
+ * kCodonsWith[i][b]. A residue's codons agreeing with known bases are its set intersected with
+ * these, so that the left arm's codon test is a few ANDs.
+ */
+constexpr std::array<std::array<CodonSet, 4>, 3> codons_with_table() {
+    std::array<std::array<CodonSet, 4>, 3> table {};
+    for (size_t c = 0; c < 64; ++c) {
+        for (size_t i = 0; i < 3; ++i) {
+            table[i][(c >> (2 * (2 - i))) & 3] |= CodonSet(1) << c;
+        }
+    }
+    return table;
+}
+constexpr std::array<std::array<CodonSet, 4>, 3> kCodonsWith = codons_with_table();
+
+/**
+ * A peptide's left state (Pattern::start_left, prev): the bases known at the later positions of
+ * the codon of the next position to the left, codon position i (1 or 2; position 0 is never
+ * known, since the next position to the left is then in the codon before) in bits
+ * [3 (i - 1), 3 i) as its base index + 1 (0: not known), and kCodonDead for a base other than
+ * A, C, G, T among them
+ */
+int left_codon_base(Model::State s, size_t i) {
+    assert(i == 1 || i == 2);
+    return static_cast<int>((s >> (3 * (i - 1))) & 7) - 1;
+}
+
+Model::State with_left_codon_base(Model::State s, size_t i, int b) {
+    assert((i == 1 || i == 2) && b >= 0 && b < 4);
+    return (s & ~(Model::State(7) << (3 * (i - 1)))) | Model::State(b + 1) << (3 * (i - 1));
+}
+
+} // namespace
+
+Model::State Pattern::start_at(uint32_t offset, std::string_view anchor_kmer) const {
+    if (kind_ != PatternKind::PROTEIN)
+        return 0;
+
+    // the codon prefix at position offset + |anchor_kmer|: its last j bases, as start() reads
+    // them for offset 0
+    const size_t j = (offset + anchor_kmer.size()) % 3;
+    State s = 0;
+    for (size_t i = 0; i < j && i < anchor_kmer.size(); ++i) {
+        const int b = base_index(anchor_kmer[anchor_kmer.size() - 1 - i]);
+        if (b < 0)
+            return kCodonDead;
+        s |= State(b + 1) << (3 * (j - 1 - i));
+    }
+    return s;
+}
+
+Model::State Pattern::start_left(uint32_t offset, std::string_view anchor_kmer) const {
+    if (kind_ != PatternKind::PROTEIN)
+        return 0;
+
+    // the codon of position offset - 1 starts before it: its positions offset % 3 .. 2 lie at
+    // the anchor's first bases. At a codon start nothing of the next codon to the left is known
+    const size_t first = offset % 3;
+    State s = 0;
+    for (size_t i = first; first && i < 3 && i - first < anchor_kmer.size(); ++i) {
+        const int b = base_index(anchor_kmer[i - first]);
+        if (b < 0)
+            return kCodonDead;
+        s = with_left_codon_base(s, i, b);
+    }
+    return s;
+}
+
+BaseSet Pattern::bases_left(State s, uint32_t position) const {
+    assert(position < positions_.size());
+    if (kind_ != PatternKind::PROTEIN)
+        return positions_[position];
+    if (s & kCodonDead)
+        return 0;
+
+    // the residue's codons agreeing with the bases known at the codon's later positions
+    const size_t j = position % 3;
+    CodonSet set = codons_[position / 3];
+    for (size_t i = j + 1; i < 3; ++i) {
+        const int b = left_codon_base(s, i);
+        if (b >= 0)
+            set &= kCodonsWith[i][b];
+    }
+    BaseSet bases = 0;
+    for (size_t b = 0; b < 4; ++b) {
+        if (set & kCodonsWith[j][b])
+            bases |= BaseSet(1) << b;
+    }
+    return bases;
+}
+
+Model::State Pattern::prev(State s, uint32_t position, char base) const {
+    assert(position < positions_.size());
+    // |base| is one the state admits (the precondition of Model::prev)
+    assert(bases_left(s, position) & iupac_set(base));
+    if (kind_ != PatternKind::PROTEIN)
+        return 0;
+
+    const size_t j = position % 3;
+    // the codon's first base: the next position to the left ends the codon before
+    if (!j)
+        return 0;
+    const int b = base_index(base);
+    if (b < 0)
+        return kCodonDead;
+    return with_left_codon_base(s, j, b);
 }
 
 
@@ -1116,9 +1249,18 @@ std::string format_bits(double bits) {
     return out.str();
 }
 
+// a window of the segment search: the k-mers instantiating Q[offset, offset + k) of one
+// orientation's oriented pattern Q, searched as a long pattern's anchors (PatternRun::plan)
+struct WindowSpec {
+    Orientation orientation;
+    uint32_t offset;
+};
+
 /**
  * Counts, and for enumerate() retains and releases, the contexts of one pattern.
  * One object per call; all state is its own, so calls run concurrently.
+ * With |window| (a long pattern only): the anchors of that one window instead of every searched
+ * orientation's first.
  */
 class PatternRun {
   public:
@@ -1129,7 +1271,8 @@ class PatternRun {
                const Pattern &pattern,
                const Request &request,
                Budget &budget,
-               bool retain)
+               bool retain,
+               const WindowSpec *window = nullptr)
           : graph_(graph),
             canonical_(dynamic_cast<const CanonicalDBG*>(&graph)),
             dbg_succ_(dbg_succ),
@@ -1150,7 +1293,9 @@ class PatternRun {
             masked_(support.mask_present),
             // the check of a few unchecked candidates: never with the mask
             check_limit_(support.mask_present ? 0 : request.max_checked_entries),
-            checkable_(check_limit_ > 0) {
+            checkable_(check_limit_ > 0),
+            window_(window ? std::optional<WindowSpec>(*window) : std::nullopt) {
+        assert(!window || long_);
         for (char base : { 'A', 'C', 'G', 'T' }) {
             codes_.push_back(boss_.encode(base));
         }
@@ -1524,6 +1669,8 @@ class PatternRun {
     uint64_t supported_total_ = 0;
     uint64_t pruned_ = 0;
     std::map<Orientation, bool> pruned_early_;
+    // a segment window: the one orientation and offset planned instead of the anchor windows
+    const std::optional<WindowSpec> window_;
 
     // the first stop is the pattern's; a later one only adds whether time touched it
     void record_stop(StopPhase phase, StopReason reason) {
@@ -1585,9 +1732,14 @@ class PatternRun {
      * rc(P)[0, k) is rc(P[L - k, L)). A peptide's windows carry their codon automaton (§6):
      * Q[0, m) of the oriented pattern, and on a wrapped PRIMARY graph rc(Q[0, m)), the window
      * [L - m, L) of the other orientation's automaton.
+     * A segment window (window_) plans its one orientation's Q[s, s + k) the same way: REVERSE's
+     * is rc(P[L - s - k, L - s)), a peptide's automaton at the phase s mod 3, and on a wrapped
+     * PRIMARY graph its reverse complement, the window [L - s - k, L - s) of the other
+     * orientation's automaton.
      */
     void plan() {
-        searched_ = searched_orientations(pattern_, request_.strands);
+        searched_ = window_ ? std::vector<Orientation> { window_->orientation }
+                            : searched_orientations(pattern_, request_.strands);
 
         const bool primary = support_.mode == GraphMode::PRIMARY;
         const bool even_primary = primary && !(k_ % 2);
@@ -1595,20 +1747,23 @@ class PatternRun {
         const size_t L = positions.size();
         const size_t m = std::min(L, k_);
         const bool protein = pattern_.kind() == PatternKind::PROTEIN;
+        // the window's start in Q: 0 but for a segment window
+        const size_t s = window_ ? window_->offset : 0;
+        assert(s + m <= L);
 
         for (Orientation orientation : searched_) {
             std::vector<BaseSet> window = orientation == Orientation::REVERSE
-                ? reverse_complement_sets(std::vector<BaseSet>(positions.end() - m,
-                                                               positions.end()))
-                : std::vector<BaseSet>(positions.begin(), positions.begin() + m);
+                ? reverse_complement_sets(std::vector<BaseSet>(positions.end() - s - m,
+                                                               positions.end() - s))
+                : std::vector<BaseSet>(positions.begin() + s, positions.begin() + s + m);
             const bool reverse = orientation == Orientation::REVERSE;
             std::optional<CodonWindow> automaton;
             if (protein)
-                automaton = CodonWindow::of(pattern_.codon_sets(), reverse, 0, m);
+                automaton = CodonWindow::of(pattern_.codon_sets(), reverse, s, s + m);
             // with mismatches the window carries its substitutes too (two windows are then one
             // search only when their substitutions agree as well)
             if (protein && request_.max_mismatches)
-                automaton->add_substitutes(pattern_.substitute_sets(), reverse, 0, m);
+                automaton->add_substitutes(pattern_.substitute_sets(), reverse, s, s + m);
 
             OrientationPlan o { orientation, 0, std::nullopt, std::nullopt, false };
             if (!primary) {
@@ -1622,9 +1777,10 @@ class PatternRun {
             // rc(Q[0, m)): the positions [L - m, L) of the other orientation's automaton
             std::optional<CodonWindow> automaton_rc;
             if (protein)
-                automaton_rc = CodonWindow::of(pattern_.codon_sets(), !reverse, L - m, L);
+                automaton_rc = CodonWindow::of(pattern_.codon_sets(), !reverse, L - s - m, L - s);
             if (protein && request_.max_mismatches)
-                automaton_rc->add_substitutes(pattern_.substitute_sets(), !reverse, L - m, L);
+                automaton_rc->add_substitutes(pattern_.substitute_sets(), !reverse, L - s - m,
+                                              L - s);
             // the palindromic k-mers at offset p of the window's search are those at the
             // mirrored offset of its reverse complement's: count them on one of the two
             bool mirrored = false;
@@ -3315,6 +3471,639 @@ Extraction extract_paths(const AnchorCounts &anchors, const Count &released,
     return extraction;
 }
 
+
+// ---------------------------------------------------------------- segments
+
+// a (k-mer, offset) state of the segment search's arms: a node of the served graph and the
+// start of its k-mer in the oriented pattern Q
+struct StateKey {
+    node_index node;
+    uint32_t offset;
+
+    bool operator==(const StateKey &other) const {
+        return node == other.node && offset == other.offset;
+    }
+};
+
+struct StateKeyHash {
+    size_t operator()(const StateKey &key) const {
+        return std::hash<uint64_t>()(key.node * 0x9E3779B97F4A7C15ull + key.offset);
+    }
+};
+
+// the states an arm expanded with their extent (the right arm's greatest end, the left arm's
+// least start) and the bytes the sink's account holds for them
+struct Memo {
+    std::unordered_map<StateKey, uint32_t, StateKeyHash> extents;
+    uint64_t bytes = 0;
+};
+
+// (bwd(e), bwd^(K-1)(e)) of a BOSS edge e, K the BOSS node length: the first base of e's k-mer is
+// the last symbol of the second's node; the first is where its incoming edges are called from
+typedef std::pair<edge_index, edge_index> BwdPair;
+
+// up to four children in symbol order (A < C < G < T), by an insertion sort: std::sort's path
+// for more than 16 elements makes GCC 13 -O3 report -Warray-bounds on such arrays
+template <class Child, size_t N>
+void sort_by_base(std::array<Child, N> &children, uint8_t size) {
+    for (uint8_t i = 1; i < size; ++i) {
+        for (uint8_t j = i; j && children[j].base < children[j - 1].base; --j) {
+            std::swap(children[j], children[j - 1]);
+        }
+    }
+}
+
+/**
+ * The segment search of one pattern (PatternSearch::count, "Segments"), its windows planned with
+ * their floor states by the caller. One object per call; its memoised states are released
+ * through the sink before it is destroyed. The two steps of a window are separate
+ * (discover_window, extend_window) so that a choice of windows by their anchor counts can
+ * discover several before extending one.
+ */
+class SegmentRun {
+  public:
+    SegmentRun(const DeBruijnGraph &graph,
+               const DBGSuccinct &dbg_succ,
+               const GraphSupport &support,
+               uint64_t wrapper_offset,
+               const Pattern &pattern,
+               const Request &request,
+               Budget &budget,
+               SegmentCounts counts)
+          : graph_(graph),
+            canonical_(dynamic_cast<const CanonicalDBG*>(&graph)),
+            dbg_succ_(dbg_succ),
+            boss_(dbg_succ.get_boss()),
+            support_(support),
+            k_(support.k),
+            wrapper_offset_(wrapper_offset),
+            pattern_(pattern),
+            rc_(pattern.reverse_complement()),
+            request_(request),
+            budget_(budget),
+            sink_(*request.segment_sink),
+            counts_(std::move(counts)),
+            node_length_(boss_.get_k()),
+            first_cost_(node_length_ >= 2 ? node_length_ - 1 : 1) {
+        assert(request.segment_sink);
+        for (const auto &[orientation, windows] : counts_.windows) {
+            horizon_[orientation] = 0;
+            max_windows_ = std::max(max_windows_, windows.size());
+        }
+    }
+
+    ~SegmentRun() {
+        for (auto &[orientation, memo] : right_) {
+            release(memo);
+        }
+    }
+
+    /**
+     * The windows of every orientation, window-major (the first of each orientation in plan
+     * order, then the second, ...), each discovered and, when admitted, extended; a stop ends
+     * the search (the window it touched STOPPED, the later ones NOT_REACHED).
+     */
+    void run() {
+        const uint64_t steps_before = budget_.steps_used();
+        if (budget_.stopped() || !budget_.check_time()) {
+            // a request-wide stop before this pattern: no window is reached
+            record_stop(StopPhase::DISCOVERY, *budget_.stopped());
+        }
+        for (size_t i = 0; i < max_windows_ && !stop_; ++i) {
+            for (auto &[orientation, windows] : counts_.windows) {
+                if (stop_)
+                    break;
+                if (i >= windows.size() || windows[i].state == WindowState::BELOW_FLOOR)
+                    continue;
+                std::vector<Context> anchors;
+                if (discover_window(orientation, i, &anchors))
+                    extend_window(orientation, i, anchors);
+            }
+        }
+        for (auto &[orientation, memo] : right_) {
+            release(memo);
+        }
+        work_.steps = budget_.steps_used() - steps_before;
+
+        bool extended = false;
+        bool not_admitted = false;
+        for (const auto &[orientation, windows] : counts_.windows) {
+            for (const WindowCount &w : windows) {
+                extended |= w.state == WindowState::EXTENDED;
+                not_admitted |= w.state == WindowState::NOT_ADMITTED;
+            }
+        }
+        if (stop_) {
+            counts_.search = work_.segment_windows ? Extension::STOPPED : Extension::NOT_STARTED;
+        } else {
+            counts_.search = !extended && not_admitted ? Extension::NOT_ADMITTED
+                                                       : Extension::COMPLETED;
+        }
+    }
+
+    /**
+     * Discovery and admission of window |index| of |orientation|: its k-mers counted as a long
+     * pattern's anchors (PatternRun with the window; its discovery stopped once more than
+     * max_anchors are counted, which is not a stop of the pattern), then, when admitted, listed
+     * in answer order into |anchors| (without the mask the listing drops the source dummies and
+     * its size is the exact count). True when the window is admitted; its WindowCount states
+     * what happened otherwise. The window's discovery is freed before it returns.
+     */
+    bool discover_window(Orientation orientation, size_t index, std::vector<Context> *anchors) {
+        WindowCount &w = counts_.windows[orientation][index];
+        ++work_.segment_windows;
+        // the window's anchors as an extending long pattern's: retained through the admission,
+        // and with stop_at_threshold the per-window cap at max_anchors + 1
+        Request request = request_;
+        request.extend_paths = true;
+        request.stop_at_threshold = true;
+        request.release_anchors = false;
+        request.support = nullptr;
+        request.sink = nullptr;
+        request.segments.enabled = false;
+        request.segment_sink = nullptr;
+        const WindowSpec spec { orientation, w.offset };
+        PatternRun window(graph_, dbg_succ_, support_, wrapper_offset_, pattern_, request,
+                          budget_, true, &spec);
+        window.run();
+        w.anchors = window.count(window.plans().front(), 0, Unit::ANCHORS);
+        add_discovery_work(window.work());
+        upper_bound_decision_ |= window.upper_bound_decision();
+        time_limited_ |= window.time_limited();
+
+        if (const auto &stopped = window.stop()) {
+            if (stopped->reason == StopReason::MAX_ANCHORS) {
+                // the per-window cap: more than max_anchors counted
+                w.state = WindowState::NOT_ADMITTED;
+            } else {
+                record_stop(stopped->phase, stopped->reason);
+                w.state = WindowState::STOPPED;
+            }
+            return false;
+        }
+
+        const Count &count = w.anchors;
+        const uint64_t max_anchors = request_.max_anchors;
+        if (count.relation == Relation::BOUNDS) {
+            // no mask: the admission compares the upper bound; the listing makes it exact
+            if (count.upper > max_anchors) {
+                w.state = WindowState::NOT_ADMITTED;
+                upper_bound_decision_ |= count.lower <= max_anchors;
+                return false;
+            }
+            if (!window.retained_all())
+                throw std::logic_error("pattern: window anchors dropped for an admitted window");
+        } else if (count.relation != Relation::EXACT) {
+            throw std::logic_error("pattern: a window discovered without a stop is not exact");
+        } else if (count.value > max_anchors) {
+            w.state = WindowState::NOT_ADMITTED;
+            return false;
+        }
+
+        if (!window.list_anchors(anchors)) {
+            // the deadline during the listing ({EXTENSION, TIME} recorded by the window)
+            time_limited_ |= window.time_limited();
+            record_stop(StopPhase::EXTENSION, StopReason::TIME);
+            w.state = WindowState::STOPPED;
+            return false;
+        }
+        if (count.relation == Relation::EXACT && anchors->size() != count.value) {
+            throw std::logic_error("pattern: " + std::to_string(anchors->size())
+                                   + " window anchors listed of "
+                                   + std::to_string(count.value) + " counted");
+        }
+        w.anchors = Count::exact(Unit::ANCHORS, anchors->size());
+        return true;
+    }
+
+    /**
+     * The extension of an admitted window's |anchors| (in answer order): per anchor the clock,
+     * then ownership (its k-mer reached at the window's start by an earlier window's right arm
+     * of this orientation), and for a root both arms; an extent holding the window whole goes to
+     * the sink. The window's left states are freed after it; the horizon of the orientation's
+     * next window is its start + 1.
+     */
+    void extend_window(Orientation orientation, size_t index, const std::vector<Context> &anchors) {
+        WindowCount &w = counts_.windows[orientation][index];
+        const uint32_t s = w.offset;
+        const Pattern &model = orientation == Orientation::REVERSE ? rc_ : pattern_;
+        Memo &right = right_[orientation];
+        Memo left;
+        w.state = WindowState::EXTENDED;
+        for (const Context &anchor : anchors) {
+            if (!budget_.check_time()) {
+                record_stop(StopPhase::EXTENSION, StopReason::TIME);
+                w.state = WindowState::STOPPED;
+                break;
+            }
+            if (right.extents.count(StateKey { anchor.node, s })) {
+                ++w.owned;
+                ++work_.segment_anchors_owned;
+                continue;
+            }
+            ++w.roots;
+            ++work_.segment_anchors_extended;
+            uint32_t from = s;
+            uint32_t to = s;
+            auto left_start = std::chrono::steady_clock::now();
+            const bool left_done = left_arm(anchor, s, horizon_[orientation], model, left, &from);
+            auto right_start = std::chrono::steady_clock::now();
+            left_ms_ += std::chrono::duration<double, std::milli>(right_start - left_start).count();
+            const bool right_done = left_done && right_arm(anchor, s, model, right, &to);
+            right_ms_ += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - right_start).count();
+            if (!right_done) {
+                w.state = WindowState::STOPPED;
+                break;
+            }
+            // a root's extent can hold no earlier extended window (its left walks would have met
+            // that window's anchors, whose right arms would have reached the root), and holding
+            // a later one implies holding its own
+            if (to < s + counts_.window) {
+                ++work_.segment_occurrences_below_window;
+                continue;
+            }
+            ++counts_.reported;
+            if (!sink_.extent(SegmentExtent { orientation, s, anchor, from, to })) {
+                external_stop();
+                w.state = WindowState::STOPPED;
+                break;
+            }
+        }
+        release(left);
+        if (w.state == WindowState::EXTENDED)
+            horizon_[orientation] = s + 1;
+    }
+
+    SegmentCounts& counts() { return counts_; }
+    const Work& work() const { return work_; }
+    const std::optional<Stop>& stop() const { return stop_; }
+    bool time_limited() const { return time_limited_; }
+    bool upper_bound_decision() const { return upper_bound_decision_; }
+    double left_ms() const { return left_ms_; }
+    double right_ms() const { return right_ms_; }
+
+  private:
+    const DeBruijnGraph &graph_;
+    const CanonicalDBG *canonical_;
+    const DBGSuccinct &dbg_succ_;
+    const BOSS &boss_;
+    const GraphSupport &support_;
+    const size_t k_;
+    const uint64_t wrapper_offset_;
+    const Pattern &pattern_;
+    const Pattern rc_;
+    const Request &request_;
+    Budget &budget_;
+    SegmentSink &sink_;
+    SegmentCounts counts_;
+    // K, the BOSS node length (k - 1), and the bwd steps of a first base not reached through
+    // the parent's bwd: K - 1 (1 when K is 1)
+    const size_t node_length_;
+    const uint64_t first_cost_;
+    size_t max_windows_ = 0;
+    // per orientation: the right arms' states (ownership and reuse, kept until the search
+    // ends) and the start + 1 of the last extended window
+    std::map<Orientation, Memo> right_;
+    std::map<Orientation, uint32_t> horizon_;
+    // the nodes both arms expanded, for the clock stride
+    uint64_t expanded_ = 0;
+    Work work_;
+    std::optional<Stop> stop_;
+    bool time_limited_ = false;
+    bool upper_bound_decision_ = false;
+    double left_ms_ = 0;
+    double right_ms_ = 0;
+
+    // the first stop is the pattern's; a later one only adds whether time touched it
+    void record_stop(StopPhase phase, StopReason reason) {
+        if (!stop_)
+            stop_ = Stop { phase, reason };
+        time_limited_ |= reason == StopReason::TIME;
+    }
+
+    // a refusal of the sink: TIME when the work time had passed at the budget, else EXTERNAL,
+    // whose reason the route reads from the sink
+    void external_stop() {
+        record_stop(StopPhase::EXTENSION, budget_.stopped().value_or(StopReason::EXTERNAL));
+    }
+
+    void add_discovery_work(const Work &w) {
+        work_.ranges_visited += w.ranges_visited;
+        work_.mask_scans += w.mask_scans;
+        work_.spans_retained_peak = std::max(work_.spans_retained_peak, w.spans_retained_peak);
+    }
+
+    // holds a finished state's extent, its memory admitted by the sink first
+    bool memoise(Memo &memo, node_index node, uint32_t offset, uint32_t extent) {
+        if (!sink_.admit(kSegmentStateBytes)) {
+            external_stop();
+            return false;
+        }
+        memo.bytes += kSegmentStateBytes;
+        memo.extents.emplace(StateKey { node, offset }, extent);
+        ++work_.segment_states_memoised;
+        return true;
+    }
+
+    void release(Memo &memo) {
+        sink_.release(memo.bytes);
+        memo.bytes = 0;
+        std::unordered_map<StateKey, uint32_t, StateKeyHash>().swap(memo.extents);
+    }
+
+    // the clock before every kReleaseClockStride-th node either arm expands: a node's edges cost
+    // a few BOSS steps each (more on the wrapper of a PRIMARY graph), and a stride of steps can
+    // take long on a cold index
+    bool tick() {
+        if (++expanded_ % Budget::kReleaseClockStride || budget_.check_time())
+            return true;
+        record_stop(StopPhase::EXTENSION, StopReason::TIME);
+        return false;
+    }
+
+    // one outgoing edge examined by the right arm: one step
+    bool charge_edge() {
+        if (!budget_.charge(1)) {
+            record_stop(StopPhase::EXTENSION, *budget_.stopped());
+            return false;
+        }
+        ++work_.extension_edges;
+        return true;
+    }
+
+    // |edges| incoming edges examined by the left arm and the |bwds| BOSS bwd steps of first
+    // bases: a step each
+    bool charge_left(uint64_t edges, uint64_t bwds) {
+        if (!budget_.charge(edges + bwds)) {
+            record_stop(StopPhase::EXTENSION, *budget_.stopped());
+            return false;
+        }
+        work_.left_edges += edges;
+        work_.left_backward_steps += bwds;
+        return true;
+    }
+
+    // (bwd(e), bwd^(K-1)(e)) by first_cost_ bwd steps
+    BwdPair bwd_pair(edge_index e) const {
+        const edge_index first = boss_.bwd(e);
+        if (node_length_ < 2)
+            return { first, e };
+        edge_index last = first;
+        for (size_t i = 2; i < node_length_; ++i) {
+            last = boss_.bwd(last);
+        }
+        return { first, last };
+    }
+
+    // the outgoing k-mers of |node|, whose k-mer is the last k bases of |spelled| (the spelling
+    // hint on the wrapper of a PRIMARY graph)
+    void call_outgoing(node_index node, const std::string &spelled,
+                       const DeBruijnGraph::OutgoingEdgeCallback &callback) const {
+        if (canonical_) {
+            canonical_->call_outgoing_kmers(node, spelled.substr(spelled.size() - k_), callback);
+        } else {
+            graph_.call_outgoing_kmers(node, callback);
+        }
+    }
+
+    /**
+     * The right arm of root |anchor| at Q-offset |s|: a depth-first search along outgoing edges,
+     * at each position the k-mers whose base the |model| allows (start_at, bases, next), in
+     * symbol order, until no allowed k-mer follows or L. A state (k-mer, offset) found in |memo|
+     * is not expanded again: its greatest end is read. Every other state is memoised with its
+     * greatest end when its subtree is done (post-order; the root is not: no later search asks
+     * for it). One step per outgoing edge examined; the clock as tick(). |end|: the root's
+     * greatest end. False when a stop ended it.
+     */
+    template <class M>
+    bool right_arm(const Context &anchor, uint32_t s, const M &model, Memo &memo,
+                   uint32_t *end) {
+        const size_t L = model.length();
+        std::string spelled = graph_.get_node_sequence(anchor.node);
+        assert(spelled.size() == k_);
+
+        struct Child {
+            char base;
+            node_index node;
+        };
+        struct Level {
+            node_index node;
+            Model::State state;
+            // the greatest end of the walks through this state found so far
+            uint32_t reach;
+            std::array<Child, 4> children = {};
+            uint8_t size = 0;
+            uint8_t next = 0;
+        };
+        std::vector<Level> levels;
+
+        // the allowed outgoing k-mers of the deepest level's node at the next position
+        auto expand = [&]() {
+            Level &level = levels.back();
+            const size_t position = s + spelled.size();
+            if (position == L)
+                return true;
+            if (!tick())
+                return false;
+            const BaseSet allowed = model.bases(level.state, static_cast<uint32_t>(position));
+            bool charged = true;
+            call_outgoing(level.node, spelled, [&](node_index next, char c) {
+                if (!charged || !(charged = charge_edge()))
+                    return;
+                if (!(allowed & base_of_char(c)))
+                    return;
+                assert(level.size < level.children.size());
+                if (level.size < level.children.size())
+                    level.children[level.size++] = Child { c, next };
+            });
+            if (!charged)
+                return false;
+            if (level.size > 1)
+                ++work_.extension_branches;
+            sort_by_base(level.children, level.size);
+            return true;
+        };
+
+        ++work_.extension_anchors;
+        levels.push_back(Level { anchor.node, model.start_at(s, spelled),
+                                 static_cast<uint32_t>(s + k_) });
+        if (!expand())
+            return false;
+
+        while (true) {
+            Level &top = levels.back();
+            if (top.next == top.size) {
+                const node_index node = top.node;
+                const uint32_t reach = top.reach;
+                levels.pop_back();
+                if (levels.empty()) {
+                    *end = reach;
+                    return true;
+                }
+                // the finished state's offset: its depth (levels.size() now) past s
+                if (!memoise(memo, node, s + static_cast<uint32_t>(levels.size()), reach))
+                    return false;
+                levels.back().reach = std::max(levels.back().reach, reach);
+                spelled.pop_back();
+                continue;
+            }
+            const Child child = top.children[top.next++];
+            const uint32_t offset = s + static_cast<uint32_t>(levels.size());
+            const auto it = memo.extents.find(StateKey { child.node, offset });
+            if (it != memo.extents.end()) {
+                top.reach = std::max(top.reach, it->second);
+                continue;
+            }
+            const Model::State state = model.next(top.state,
+                                                  static_cast<uint32_t>(s + spelled.size()),
+                                                  child.base);
+            spelled.push_back(child.base);
+            levels.push_back(Level { child.node, state, offset + static_cast<uint32_t>(k_) });
+            if (!expand())
+                return false;
+        }
+    }
+
+    /**
+     * The left arm of root |anchor| at Q-offset |s| > 0: a depth-first search along incoming
+     * edges, at each position the k-mers whose first base the |model| allows (start_left,
+     * bases_left, prev), in symbol order, until no allowed k-mer precedes or position 0; a
+     * k-mer that would start before |horizon| is not entered (Work::left_horizon_cuts). Memoised
+     * as the right arm, with each state's least start. On a DBGSuccinct the incoming edges of a
+     * node are called from its bwd and each one's first base read through bwd steps, the node's
+     * (bwd, bwd^(K-1)) pair making the one its bwd names cost 2 (first_cost_ for any other, and
+     * for the root's own pair); on the wrapper of a PRIMARY graph through
+     * CanonicalDBG::call_incoming_kmers with the node's k-mer as the hint, k - 2 bwd steps per
+     * edge (what DBGSuccinct's own first base costs). |begin|: the root's least start. False
+     * when a stop ended it.
+     */
+    template <class M>
+    bool left_arm(const Context &anchor, uint32_t s, uint32_t horizon, const M &model,
+                  Memo &memo, uint32_t *begin) {
+        assert(horizon <= s);
+        if (!s) {
+            // the anchor starts Q: nothing lies to its left
+            *begin = 0;
+            return true;
+        }
+        // the bases of Q[horizon, s + k) the walk spells, indexed by position - horizon: the
+        // anchor's k-mer at its end, a base before it per level (the wrapper's spelling hints)
+        std::string spelled(s + k_ - horizon, '\0');
+        {
+            const std::string kmer = graph_.get_node_sequence(anchor.node);
+            assert(kmer.size() == k_);
+            std::copy(kmer.begin(), kmer.end(), spelled.begin() + (s - horizon));
+        }
+
+        struct Child {
+            char base;
+            node_index node;
+            BwdPair pair;
+        };
+        struct Level {
+            node_index node;
+            BwdPair pair;
+            Model::State state;
+            // the least start of the walks through this state found so far
+            uint32_t reach;
+            std::array<Child, 4> children = {};
+            uint8_t size = 0;
+            uint8_t next = 0;
+        };
+        std::vector<Level> levels;
+
+        // the allowed incoming k-mers of the deepest level's node, whose k-mer starts at |t|
+        auto expand = [&](uint32_t t) {
+            Level &level = levels.back();
+            if (!t)
+                return true;
+            if (!tick())
+                return false;
+            const BaseSet allowed = model.bases_left(level.state, t - 1);
+            auto add = [&](char c, node_index prev, BwdPair pair) {
+                if (!(allowed & base_of_char(c)))
+                    return;
+                if (t - 1 < horizon) {
+                    ++work_.left_horizon_cuts;
+                    return;
+                }
+                assert(level.size < level.children.size());
+                if (level.size < level.children.size())
+                    level.children[level.size++] = Child { c, prev, pair };
+            };
+            bool charged = true;
+            if (canonical_) {
+                const std::string kmer = spelled.substr(t - horizon, k_);
+                canonical_->call_incoming_kmers(level.node, kmer, [&](node_index prev, char c) {
+                    if (!charged || !(charged = charge_left(1, k_ - 2)))
+                        return;
+                    add(c, prev, BwdPair());
+                });
+            } else {
+                const edge_index first = level.pair.first;
+                const edge_index last = level.pair.second;
+                boss_.call_incoming_to_target(first, boss_.get_node_last_value(level.node),
+                                              [&](edge_index prev) {
+                    if (!charged || !dbg_succ_.in_graph(prev))
+                        return;
+                    // the edge the node's bwd names: its pair from the node's in two steps
+                    const bool named = prev == first && node_length_ >= 2;
+                    if (!(charged = charge_left(1, named ? 2 : first_cost_)))
+                        return;
+                    const BwdPair pair = named ? BwdPair(boss_.bwd(prev), boss_.bwd(last))
+                                               : bwd_pair(prev);
+                    add(boss_.decode(boss_.get_node_last_value(pair.second)), prev, pair);
+                });
+            }
+            if (!charged)
+                return false;
+            sort_by_base(level.children, level.size);
+            return true;
+        };
+
+        Level root { anchor.node, BwdPair(), model.start_left(s, spelled.substr(s - horizon)), s };
+        if (!canonical_) {
+            if (!charge_left(0, first_cost_))
+                return false;
+            root.pair = bwd_pair(anchor.node);
+        }
+        levels.push_back(root);
+        if (!expand(s))
+            return false;
+
+        while (true) {
+            Level &top = levels.back();
+            const uint32_t t = s - static_cast<uint32_t>(levels.size() - 1);
+            if (top.next == top.size) {
+                const node_index node = top.node;
+                const uint32_t reach = top.reach;
+                levels.pop_back();
+                if (levels.empty()) {
+                    *begin = reach;
+                    return true;
+                }
+                if (!memoise(memo, node, t, reach))
+                    return false;
+                levels.back().reach = std::min(levels.back().reach, reach);
+                continue;
+            }
+            const Child child = top.children[top.next++];
+            const uint32_t offset = t - 1;
+            const auto it = memo.extents.find(StateKey { child.node, offset });
+            if (it != memo.extents.end()) {
+                top.reach = std::min(top.reach, it->second);
+                continue;
+            }
+            const Model::State state = model.prev(top.state, offset, child.base);
+            spelled[offset - horizon] = child.base;
+            levels.push_back(Level { child.node, child.pair, state, offset });
+            if (!expand(offset))
+                return false;
+        }
+    }
+};
+
 } // namespace
 
 
@@ -3447,6 +4236,8 @@ PatternSearch::PatternSearch(const DeBruijnGraph &graph)
 
 Result PatternSearch::count(const Pattern &pattern, const Request &request,
                             Budget &budget) const {
+    if (request.segments.enabled && pattern.length() > support_.k)
+        return segments(pattern, request, budget);
     return run(pattern, request, budget, nullptr);
 }
 
@@ -3462,6 +4253,10 @@ Result PatternSearch::enumerate(const Pattern &pattern, const Request &request,
     if (request.sink && request.extend_paths && pattern.length() > support_.k) {
         throw std::invalid_argument("pattern: the paths of the extension go to the path sink, "
                                     "which is their release: use count()");
+    }
+    if (request.segments.enabled && pattern.length() > support_.k) {
+        throw std::invalid_argument("pattern: the segments go to the segment sink, which is "
+                                    "their release: use count()");
     }
 
     return run(pattern, request, budget, &callback);
@@ -4120,6 +4915,257 @@ void PatternSearch::answer_no_instance(const Pattern &pattern, const Request &re
     if (support_.mode != GraphMode::BASIC)
         result->notes.push_back(kNoteStrandUnknown);
     result->notes.push_back(kNoteNoStopCodon);
+}
+
+
+// ---------------------------------------------------------------- segments
+
+namespace {
+
+// the number of windows segment_window_offsets lists, without listing them
+uint64_t segment_window_count(uint32_t length, uint32_t window, uint32_t step,
+                              WindowChoice choice) {
+    assert(window >= 1 && window <= length);
+    const uint64_t last = length - window;
+    switch (choice) {
+        case WindowChoice::FIRST:
+            return 1;
+        case WindowChoice::ENDS:
+            return last ? 2 : 1;
+        case WindowChoice::STEPS:
+            assert(step);
+            return last / step + 1 + (last % step ? 1 : 0);
+    }
+    return 1;
+}
+
+} // namespace
+
+std::vector<uint32_t> segment_window_offsets(uint32_t length, uint32_t window, uint32_t step,
+                                             WindowChoice choice) {
+    if (!window || window > length)
+        throw std::invalid_argument("pattern: a segment window outside [1, length]");
+    if (choice == WindowChoice::STEPS && !step)
+        throw std::invalid_argument("pattern: a segment step of 0 bases");
+    const uint32_t last = length - window;
+    switch (choice) {
+        case WindowChoice::FIRST:
+            return { 0 };
+        case WindowChoice::ENDS:
+            return last ? std::vector<uint32_t> { 0, last } : std::vector<uint32_t> { 0 };
+        case WindowChoice::STEPS: {
+            std::vector<uint32_t> offsets;
+            offsets.reserve(segment_window_count(length, window, step, choice));
+            for (uint64_t s = 0; s <= last; s += step) {
+                offsets.push_back(static_cast<uint32_t>(s));
+            }
+            if (offsets.back() != last)
+                offsets.push_back(last);
+            return offsets;
+        }
+    }
+    return { 0 };
+}
+
+bool GraphSegmentStore::admit(uint64_t bytes) {
+    if (bytes > max_bytes_ - held_) {
+        if (!reason_)
+            reason_ = "max_memory";
+        return false;
+    }
+    held_ += bytes;
+    peak_ = std::max(peak_, held_);
+    return true;
+}
+
+void GraphSegmentStore::release(uint64_t bytes) {
+    assert(bytes <= held_);
+    held_ -= std::min(bytes, held_);
+}
+
+bool GraphSegmentStore::extent(const SegmentExtent &extent) {
+    ++extents_;
+    const auto [from, to] = pattern_interval(extent.orientation, length_, extent.from, extent.to);
+    const Key key { extent.orientation, from, length_ - to };
+    auto it = segments_.find(key);
+    if (it != segments_.end()) {
+        ++it->second.roots;
+        return true;
+    }
+    if (!admit(kGraphSegmentBytes))
+        return false;
+    segments_.emplace(key, Value { 1, extent.window, extent.root.node });
+    if (stop_at_threshold_ && segments_.size() > max_segments_) {
+        reason_ = "max_segments";
+        return false;
+    }
+    return true;
+}
+
+void GraphSegmentStore::for_each(const std::function<void(const GraphSegment&)> &f) const {
+    for (const auto &[key, value] : segments_) {
+        const auto &[orientation, from, to_from_end] = key;
+        f(GraphSegment { orientation, from, length_ - to_from_end, value.roots, value.window,
+                         value.first_root });
+    }
+}
+
+Result PatternSearch::segments(const Pattern &pattern, const Request &request,
+                               Budget &budget) const {
+    auto start = std::chrono::steady_clock::now();
+
+    const size_t k = support_.k;
+    const uint32_t L = static_cast<uint32_t>(pattern.length());
+    assert(L > k);
+    const SegmentPlan &plan = request.segments;
+    // what the route refuses first (400): never answered as another request
+    if (!request.segment_sink)
+        throw std::invalid_argument("pattern: the segment search needs a segment sink");
+    if (request.support || request.sink) {
+        throw std::invalid_argument("pattern: the segment search is served at the graph level "
+                                    "only (no support tracker, no path sink)");
+    }
+    if (plan.window && plan.window < k) {
+        throw std::invalid_argument("pattern: a segment window of "
+                                    + std::to_string(plan.window) + " bases, below k = "
+                                    + std::to_string(k));
+    }
+    if (plan.choice == WindowChoice::STEPS && !plan.step)
+        throw std::invalid_argument("pattern: a segment step of 0 bases");
+    const uint32_t window = static_cast<uint32_t>(
+            std::min<uint64_t>(plan.window ? plan.window : k, L));
+
+    Result result;
+    result.scope = Scope::LONG;
+    result.palindromic = pattern.is_palindromic();
+    result.information_bits = pattern.information_bits();
+    const std::vector<Orientation> searched = searched_orientations(pattern, request.strands);
+    // the first windows' bits, as a long pattern states them
+    for (Orientation o : searched) {
+        const double bits = o == Orientation::REVERSE ? pattern.information_bits(L - k, L)
+                                                      : pattern.information_bits(0, k);
+        result.anchor_window_bits[o] = bits;
+        if (!result.min_anchor_information_bits || bits < *result.min_anchor_information_bits)
+            result.min_anchor_information_bits = bits;
+    }
+    result.anchor_information_bits = pattern.information_bits(0, k);
+    auto finish = [&]() {
+        result.elapsed_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count();
+        return result;
+    };
+
+    SegmentCounts counts;
+    counts.window = window;
+    counts.choice = plan.choice;
+    if (plan.choice == WindowChoice::STEPS) {
+        counts.step = plan.step;
+        counts.complete_for_length = window + plan.step - 1;
+    }
+
+    // per-pattern refusals, before anything is charged: more windows than the policy allows
+    // (counted, not listed), every window below the information floor
+    const uint64_t num_windows = segment_window_count(L, window, plan.step, plan.choice);
+    if (num_windows > plan.max_windows) {
+        std::string fits;
+        if (plan.max_windows >= 2) {
+            const uint64_t step = (L - window + plan.max_windows - 2) / (plan.max_windows - 1);
+            fits = "; a step of " + std::to_string(std::max<uint64_t>(step, 1))
+                    + " bases or more fits";
+        }
+        result.refusal = Refusal {
+            "too_many_windows",
+            "pattern: " + std::to_string(num_windows) + " windows of "
+                + std::to_string(window) + " bases per orientation (segment_windows "
+                + to_string(plan.choice) + "), more than the limit of "
+                + std::to_string(plan.max_windows) + fits
+        };
+        return finish();
+    }
+    const std::vector<uint32_t> offsets = segment_window_offsets(L, window, plan.step,
+                                                                 plan.choice);
+    bool any_above = false;
+    double best_bits = 0;
+    for (Orientation o : searched) {
+        std::vector<WindowCount> &windows = counts.windows[o];
+        for (uint32_t s : offsets) {
+            WindowCount w;
+            w.offset = s;
+            // REVERSE's Q[s, s + k) is rc(P[L - s - k, L - s)), whose bits are P's there
+            w.information_bits = o == Orientation::REVERSE
+                ? pattern.information_bits(L - s - k, L - s)
+                : pattern.information_bits(s, s + k);
+            best_bits = std::max(best_bits, w.information_bits);
+            if (w.information_bits < request.min_information_bits) {
+                w.state = WindowState::BELOW_FLOOR;
+            } else {
+                any_above = true;
+            }
+            windows.push_back(w);
+        }
+    }
+    if (!any_above) {
+        result.refusal = Refusal {
+            "information_below_floor",
+            "pattern: " + format_bits(best_bits) + " information bits in the anchored k bases "
+                + "of its most informative segment window, below the floor of "
+                + format_bits(request.min_information_bits) + " for scope long"
+        };
+        return finish();
+    }
+
+    SegmentRun run(graph_, *dbg_succ_, support_, wrapper_offset_, pattern, request, budget,
+                   std::move(counts));
+    run.run();
+    result.searched = searched;
+
+    // counts.anchors keeps its meaning: each orientation's first window, Q[0, k)
+    AnchorCounts anchors;
+    std::optional<Count> total;
+    bool no_anchor = true;
+    for (const auto &[orientation, windows] : run.counts().windows) {
+        const Count &first = windows.front().anchors;
+        anchors.by_orientation.emplace(orientation, first);
+        if (total) {
+            *total += first;
+        } else {
+            total = first;
+        }
+        no_anchor &= first.relation == Relation::EXACT && !first.value;
+    }
+    assert(total);
+    anchors.total = *total;
+    if (no_anchor)
+        anchors.paths = Count::exact(Unit::PATHS, 0);
+    result.anchors = std::move(anchors);
+    result.segments = std::move(run.counts());
+    result.work = run.work();
+    result.stop = run.stop();
+    result.time_limited = run.time_limited();
+    result.segments_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    result.left_extension_ms = run.left_ms();
+    result.extension_ms = run.right_ms();
+
+    // the low-complexity diagnostic as for every exact pattern, never after a stop
+    bool low_complexity = false;
+    if (pattern.is_exact() && !result.stop) {
+        const std::optional<bool> flagged = is_low_complexity(
+                pattern.kind() == PatternKind::PROTEIN ? exact_bases(pattern) : pattern.text(),
+                budget);
+        low_complexity = flagged.value_or(false);
+        result.time_limited |= !flagged;
+    }
+    if (low_complexity)
+        result.notes.push_back(kNoteLowComplexity);
+    if (support_.mode != GraphMode::BASIC)
+        result.notes.push_back(kNoteStrandUnknown);
+    if (run.upper_bound_decision())
+        result.notes.push_back(kNoteThresholdUpperBound);
+    if (!pattern.has_instances())
+        result.notes.push_back(kNoteNoStopCodon);
+
+    return finish();
 }
 
 } // namespace pattern
