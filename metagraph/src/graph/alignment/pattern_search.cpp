@@ -5025,6 +5025,11 @@ Result PatternSearch::segments(const Pattern &pattern, const Request &request,
         throw std::invalid_argument("pattern: the segment search is served at the graph level "
                                     "only (no support tracker, no path sink)");
     }
+    // a segment holds no substitution: its windows and arms read the pattern as it is
+    if (request.max_mismatches) {
+        throw std::invalid_argument("pattern: mismatches in the segment search are not served "
+                                    "(a segment holds no substitution)");
+    }
     if (plan.window && plan.window < k) {
         throw std::invalid_argument("pattern: a segment window of "
                                     + std::to_string(plan.window) + " bases, below k = "

@@ -782,7 +782,8 @@ struct Request {
      * substitutions, a window that cuts a codon counting it as substituted only when its
      * bases inside the window agree with none of its own codons) and released on
      * release_anchors, while the extension is not served yet. Above kMaxMismatches, or for
-     * L > k with extend_paths, count() and enumerate() throw std::invalid_argument.
+     * L > k with extend_paths or with segments, count() and enumerate() throw
+     * std::invalid_argument.
      */
     uint8_t max_mismatches = 0;
     /**
@@ -790,8 +791,9 @@ struct Request {
      * ignores), count() only (enumerate() refuses it: std::invalid_argument). |segment_sink|
      * receives the extents and holds the search's memory (SegmentSink); it must be set when
      * segments.enabled and outlive the call. The graph level only: a request with
-     * |support| or |sink| set is refused (std::invalid_argument). A pattern of at most k bases
-     * is answered as without them.
+     * |support| or |sink| set is refused (std::invalid_argument), as is one with
+     * max_mismatches (a segment holds no substitution). A pattern of at most k bases is
+     * answered as without them.
      */
     SegmentPlan segments;
     SegmentSink *segment_sink = nullptr;
@@ -2020,7 +2022,8 @@ class PatternSearch {
      * Memory: one window's discovery at a time (as a long pattern's anchors), the arms' stacks,
      * and the memoised states admitted through the sink (kSegmentStateBytes each), all released
      * before count() returns. Throws std::invalid_argument for a plan the route must refuse
-     * first (window below k, step 0 with STEPS, no segment_sink, a tracker or a path sink set).
+     * first (window below k, step 0 with STEPS, no segment_sink, a tracker or a path sink set,
+     * max_mismatches above 0).
      */
 
     /**

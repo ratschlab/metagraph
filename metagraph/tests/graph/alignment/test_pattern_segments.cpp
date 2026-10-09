@@ -943,6 +943,18 @@ TEST(PatternSegments, RequestsTheRouteMustRefuseFirst) {
     request.segments.step = 0;
     EXPECT_THROW(search.count(pattern, request, budget), std::invalid_argument);
     request.segments.step = 15;
+    // mismatches: a segment holds no substitution (the route refuses the combination first)
+    request.max_mismatches = 1;
+    EXPECT_THROW(search.count(pattern, request, budget), std::invalid_argument);
+    EXPECT_EQ(0u, budget.steps_used());
+    // a pattern of at most k bases is answered as without segments, its mismatches served
+    const Result short_pattern = search.count(Pattern::parse(PatternKind::DNA,
+                                                             g.gene.substr(0, 9)),
+                                              request, budget);
+    EXPECT_FALSE(short_pattern.segments);
+    ASSERT_TRUE(short_pattern.contexts);
+    EXPECT_EQ(2u, short_pattern.contexts->by_mismatches.size());
+    request.max_mismatches = 0;
     // enumerate() does not serve them
     request.mode = Mode::PARTIAL;
     EXPECT_THROW(search.enumerate(pattern, request, budget, [](const Context&) {}),
