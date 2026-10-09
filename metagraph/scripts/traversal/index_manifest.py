@@ -50,13 +50,13 @@ and every identity sidecar the server loads for them, its path derived from the 
 as the loaders derive it (next to a symlink, not next to its target) -- <graph>.anchors and
 <graph>.rd_succ for a .row_diff.annodbg (required), and <annotation without
 .<type>.annodbg>.seqs for a coordinate annotation unless --no-coord-mapping. The graph's DERIVED
-data is not part of it (the owner's decision #17 of 2026-10-08; derived_files mirrors
-metagraph's index_derived_files): <graph without .dbg>.edgemask, loaded when it opens, and
-<graph without .dbg>.bloom, loaded when it exists and the mask was loaded, are computed from the
-graph alone and decide which counts are exact and how fast k-mers are looked up, never what an
-exact answer is; adding, removing or rebuilding them leaves index_fp unchanged. A manifest never
-lists them: this tool leaves them out, refuses them with --extra, --verify flags a manifest that
-lists one (any entry named *.edgemask or *.bloom), and the server refuses such a manifest.
+data is not part of it (derived_files mirrors metagraph's index_derived_files):
+<graph without .dbg>.edgemask, loaded when it opens, and <graph without .dbg>.bloom, loaded when
+it exists and the mask was loaded, are computed from the graph alone and decide which counts are
+exact and how fast k-mers are looked up, never what an exact answer is; adding, removing or
+rebuilding them leaves index_fp unchanged. A manifest never lists them: this tool leaves them out,
+refuses them with --extra, --verify flags a manifest that lists one (any entry named *.edgemask or
+*.bloom), and the server refuses such a manifest.
 --inventory prints both, the identity files and the derived ones (with whether the loader reads
 them). Files the server does not open are not part of the bundle (a column annotation's .coords,
 the graph's .weights): add them with --extra if wanted, except a further graph (*dbg) or

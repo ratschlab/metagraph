@@ -16,10 +16,10 @@ Stdlib only. pandas is imported lazily by frames.frames() alone, so
 release_verdict` loads the HTTP client and the attempt readers (attempts.py) only, not the
 parser, the model or the local operations.
 
-Every local operation takes budget= (stage L, metagraph.traverse.budget): a LocalBudget of
-work units and a modelled memory account under which a call completes or stops and says
+Every local operation takes budget= (local limits, metagraph.traverse.budget): a LocalBudget
+of work units and a modelled memory account under which a call completes or stops and says
 so (LocalBudgetExceeded; compare() answers comparable 'unknown'). Without one -- the
-default -- nothing is budgeted and every answer is what it always was.
+default -- nothing is budgeted and nothing is charged.
 
     from metagraph.traverse import TraverseClient, Graphlet
     resp = TraverseClient('localhost', 5555).traverse([{'sequence': seq}], strategy)
@@ -32,9 +32,9 @@ import importlib
 
 # name -> the module that defines it. Loaded on first use (PEP 562): `from metagraph.traverse
 # import release_verdict` (or TraverseClient) loads the light modules attempts.py and client.py
-# only -- no parser, model or operation (LRG-G7: the search service's API side dispatches and
-# releases attempts and must not pay for the library's local processing) -- while every name
-# below keeps working as an attribute, in `from ... import`, and in `import *`.
+# only -- no parser, model or operation (a caller that only dispatches and releases attempts
+# must not pay for the library's local processing) -- while every name below works as an
+# attribute, in `from ... import`, and in `import *`.
 _NAMES = {
     '_codec': ('CodecError', 'GraphletFormatError', 'UNLIMITED'),
     'model': ('AmbiguousLabel', 'Arm', 'BadSelector', 'Change', 'Claim', 'Comparison',
@@ -57,7 +57,7 @@ _NAMES = {
 }
 _HOME = {name: mod for mod, names in _NAMES.items() for name in names}
 # the package's modules, also reachable as attributes before anything imported them
-# (metagraph.traverse.ops after `import metagraph.traverse`, as when this file imported them)
+# (metagraph.traverse.ops right after `import metagraph.traverse`)
 _MODULES = frozenset(('_codec', 'attempts', 'budget', 'client', 'coords', 'derive', 'export',
                       'frames', 'mcp_tools', 'model', 'ops', 'parser', 'store'))
 

@@ -4,7 +4,7 @@
 It re-measures, with as few requests as possible, the effects found on the refseq33m staging
 server (decode dominates; first touch vs warm; row width; the row-diff path re-decoded per fetch
 call; time-budget overruns in the derivation / depth 0 / lookahead; /resolve discover costs), so
-that a run before an efficiency fix and a run after it can be compared request by request.
+that a run before a change and a run after it can be compared request by request.
 Stdlib only, Python >= 3.10.
 
 USAGE
@@ -13,7 +13,7 @@ USAGE
   # a full run (54 requests on the refseq33m panel; hard cap 70)
   bench_traverse.py --base https://metagraph.ethz.ch:8080/api/refseq33m-experimental \\
       --panel bench_panel_refseq33m.json --label before-pathreuse --window-offset 0
-  # after the fix: the SAME windows as the baseline (same K), hours later so they are cold again
+  # after the change: the SAME windows as the baseline (same K), hours later so they are cold again
   bench_traverse.py ... --label after-pathreuse --window-offset 2500
   # optional extra: a true first touch on fresh windows (timings confounded by locus width, see WINDOW OFFSET)
   bench_traverse.py ... --label after-pathreuse-fresh --window-offset auto --avoid OUT_BEFORE/results.json
@@ -79,8 +79,8 @@ WINDOW OFFSET
   ~20 min once other loci were read), so the same K hours later is usually cold too, but not guaranteed.
   COMPARE BEFORE/AFTER AT THE SAME K: moving the windows moves them onto loci of another width (the ndm1
   window is narrow at K=0 but 65-column wide at K=2500), which confounds every timing; a fresh K is only
-  for an extra first-touch run. The refseq33m staging baseline (2026-10-04, release refseq97-8a98759a)
-  used K=2500; it is kept in ~/.cache/metagraph-traverse-bench/staging-baseline. If a first-touch time
+  for an extra first-touch run. The refseq33m staging baseline (release refseq97-8a98759a) used
+  K=2500; it is kept in ~/.cache/metagraph-traverse-bench/staging-baseline. If a first-touch time
   comes out close to its warm repeat, the window was not cold.
 
 OUTPUT (--out DIR, default bench_out/<label>_<timestamp>)
@@ -155,11 +155,11 @@ COORDINATES ESTIMATE (--coordinates-estimate RUN_DIR ...; offline, no server)
   coordinates_estimate.json beside each run's results.json.
 
 COMPATIBILITY
-  Works with servers without feature_level / attempts (8a98759a) and with newer ones (0a880475+): every field
-  is optional; unknown timing fields are recorded as they come. The path cache's statistics
-  (timing.path_cache, and timing.seed_phase_ms / seed_fetch_ms / label_resolve_ms beside it) come with the review
-  fixes of pass 5; a renamed reuse or peak field is still found by name (path_cache|dependency ... hits|reuse,
-  ... peak ... bytes). Results of script version 1 are read by --compare (see COMPARE).
+  Works with servers with and without feature_level / attempts: every field is optional; unknown timing fields
+  are recorded as they come. The path cache's statistics (timing.path_cache, and timing.seed_phase_ms /
+  seed_fetch_ms / label_resolve_ms beside it) are read where a server writes them; a renamed reuse or peak
+  field is still found by name (path_cache|dependency ... hits|reuse, ... peak ... bytes). Results of script
+  version 1 are read by --compare (see COMPARE).
 """
 
 import argparse
@@ -190,7 +190,7 @@ except ImportError:  # pragma: no cover (non-POSIX)
 # results.json of version 2 is read as it is (no coordinates facts)
 SCRIPT_VERSION = 3
 PLAN_VERSION = 1
-# the coordinates block of a trace walk with --coordinates (None: opt-out, the requests as they were)
+# the coordinates block of a trace walk with --coordinates (None: opt-out, requests without coordinates)
 COORDINATES_CAP_DEFAULT = 16
 ALL_SUITES = ['caps', 'budgets', 'walks', 'callsize', 'resolve', 'annotate', 'lookahead', 'batch']
 EXTRA_SUITES = ['smoke']

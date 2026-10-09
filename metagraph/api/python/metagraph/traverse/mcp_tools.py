@@ -36,8 +36,8 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
   * max_bytes bounds the bytes a tool returns, not the work behind them. Without
     local_limits (the default) the local tools (graphlet_compare, graphlet_export, the
     route listings) run with no work or allocation budget, and their time and peak memory
-    follow the graphlet's size -- a service must set local_limits=ToolLimits(...) (stage
-    L, DESIGN §21): then every local tool runs under a budget of its class (view, heavy,
+    follow the graphlet's size -- a service must set local_limits=ToolLimits(...) (local
+    limits, DESIGN §21): then every local tool runs under a budget of its class (view, heavy,
     parse), which the agent may raise up to the class ceiling with budget={work_units,
     memory_mb, deadline_s}; every result carries `local` {complete, usage, limits,
     work_model, memory_bound "model", clamped?, parsed?, stop?}; a stop is the error
@@ -77,7 +77,7 @@ each public method is one tool and returns a JSON-serialisable dict. The MCP ser
   * record coordinates (feature level 6, DESIGN §18): traverse_fetch asks for them by the
     client's rule (coordinates='auto': a support: trace strategy that does not set
     output.coordinates, on an index that reports them; under a request memory budget only
-    while the D4 gate passes, X-C8 -- a decision not to ask is stated in coordinates_note,
+    while the depth gate passes -- a decision not to ask is stated in coordinates_note,
     and so is how to drop coordinates asked for under a memory budget where the seed
     stopped on it);
     graphlet_claims rows of a retrieval with them always carry them (coordinates: the
@@ -127,31 +127,31 @@ SEQUENCE_MAX_BYTES = 16 * 1024
 # traverse_capabilities' default ceiling: the server's capabilities in one piece. It grows
 # with what the server offers: 15.9 KB compact at feature level 5, 19.4 KB at level 6 (the
 # coordinates block and the reserve's coordinate rule, DESIGN §26.3) on mini_refseq -- past
-# the 16 KB this was, so an agent's first discovery call failed by default (result_too_large);
-# 32 KB leaves room for the stages planned after it
+# 16 KB, where an agent's first discovery call would fail by default (result_too_large);
+# 32 KB leaves room for what later feature levels add
 CAPABILITIES_MAX_BYTES = 32 * 1024
 # the smallest max_bytes a tool accepts: below it not even the shortest error fits
 # ({"error":"result_too_large","max_bytes":63,"message":""} is 57 bytes)
 MIN_MAX_BYTES = 64
 # the largest max_bytes a tool accepts: a page is built row by row in linear time, but its
-# bytes are the answer an agent reads, and an unbounded ceiling let one call build an
-# answer of any size (VMT-02)
+# bytes are the answer an agent reads, and an unbounded ceiling would let one call build an
+# answer of any size
 MAX_MAX_BYTES = 16 * 1024 * 1024
 # ranked walk lists kept for paging (graphlet_walks): (handle, arm, arguments) -> ids
 _RANKED_CACHE = 16
-# record coordinates in a row: at most this many [start, end] pairs (C7; the total says how
+# record coordinates in a row: at most this many [start, end] pairs (the total says how
 # many there are)
 _COORDS_IN_ROW = 4
 # the parameters of Graphlet.next_request() / ops.next_request() that traverse_continue
 # sets itself: an override of one of them would be a second value for it (bp and
-# reduce_budget are not set by the tool and pass as overrides did before)
+# reduce_budget are not set by the tool and pass as overrides)
 _CONTINUE_OWN = frozenset({'self', 'g', 'arm', 'leaves', 'reset_branches'})
 _LABELS_IN_ROW = 8
 # graphlet_compare's optional fields, in the order its page cuts them (fields_cut): the two
 # evidence blocks repeat what each handle's own answers state and grow with what the
-# retrievals record (two time-budgeted walks of one seed on refseq33m filled most of the
-# 2 KB default with them, and the page answered result_too_large); the export hint names a
-# tool. Everything else qualifies what equal or a difference means and is never cut
+# retrievals record (two time-budgeted walks of one seed on refseq33m fill most of the 2 KB
+# default with them, and the page would be answered result_too_large); the export hint names
+# a tool. Everything else qualifies what equal or a difference means and is never cut
 _COMPARE_OPTIONAL = ('evidence', 'export')
 _WALKS_HINT = {
     'merge_entered': 'walks whose selected label is alive at the end only along its own '
@@ -170,7 +170,7 @@ def _size(obj):
     return len(json.dumps(obj, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))
 
 
-# ------------------------------------------------------------------ stage L limits
+# ------------------------------------------------------------------ local limits
 
 # the budget class of each budgeted tool (DESIGN §21.8); the others are not budgeted
 TOOL_CLASS = {
@@ -186,10 +186,10 @@ _GIB = 1024
 
 @dataclass(frozen=True)
 class ToolLimits:
-    """The local budgets of the tools (stage L, owner decision L7): per class a default
+    """The local budgets of the tools (local limits): per class a default
     (view 30 M lwu / 1 GiB, heavy 300 M / 2 GiB, parse 200 M / 2 GiB; 1 lwu is about
     0.1 us of reference CPU, so 30 M is about 3 s nominal) and a ceiling (10x each) up to
-    which an agent may raise its call's budget with the tools' budget argument (L5);
+    which an agent may raise its call's budget with the tools' budget argument;
     per_tool overrides a tool's default. budget_for(tool, request) -> LocalBudget lets a
     service supply the budget object itself (its tiers, its ledger's reservation);
     request is {'limits': LocalLimits (the defaults with the agent's request, clamped),
@@ -372,7 +372,7 @@ def _check_receipt(receipt, limit, lever='raise max_bytes'):
         else:
             # a completed one's is the first optional field: cut, it is named in
             # fields_cut too (checked without it, a receipt within those bytes of the
-            # ceiling made its handle and answered result_too_large)
+            # ceiling would make its handle and answer result_too_large)
             receipt.declared.insert(0, 'local')
     n = _size(receipt.minimal())
     if n > limit:
@@ -521,9 +521,8 @@ def _tool(fn):
         if name == 'graphlet_sequence' or (name == 'traverse_continue' and execute is False):
             return self.sequence_max_bytes
         if name == 'traverse_capabilities':
-            # the server's description of itself, which grows with what it offers (2.4 KB once
-            # the attempts were described): an agent's first discovery call must not fail by
-            # default (review of the stage-4 backend: result_too_large at 2048)
+            # the server's description of itself grows with what it offers (past the 2 KB
+            # default ceiling): an agent's first discovery call must not fail by default
             return max(self.max_bytes, CAPABILITIES_MAX_BYTES)
         return self.max_bytes
 
@@ -534,8 +533,8 @@ def _tool(fn):
             bound = sig.bind(self, *args, **kw)
         except TypeError as e:
             # an argument the tool does not take is the caller's error, not a bug. The
-            # ceiling the caller supplied still holds for this error (the review's
-            # graphlet_list(max_bytes=64, foo=1) answered 77 bytes under the default):
+            # ceiling the caller supplied still holds for this error (graphlet_list(
+            # max_bytes=64, foo=1) must not answer 77 bytes under the default):
             # a valid max_bytes, by keyword or by position, is honoured even though the
             # call as a whole cannot be bound
             supplied = kw.get('max_bytes')
@@ -620,7 +619,7 @@ def _tool(fn):
         if isinstance(out, _Receipt):
             # a completed operation (a file written, a handle created) keeps its
             # receipt: its optional fields go first, and the essential ones were checked
-            # to fit before the operation ran (D6)
+            # to fit before the operation ran
             out = out.fit(limit)
         n = _size(out)
         if n > limit:
@@ -664,8 +663,8 @@ class GraphletTools:
                  secret=None, export_dir=None, local_limits=None):
         if local_limits is not None and not isinstance(local_limits, ToolLimits):
             raise TypeError('local_limits is a ToolLimits, not %r' % (local_limits,))
-        # stage L: None (the default) runs the local tools without budgets, every result
-        # as before; a service sets ToolLimits()
+        # local limits: None (the default) runs the local tools without budgets; a service
+        # sets ToolLimits()
         self.local_limits = local_limits
         self.store = store
         self.clients = dict(clients or {})
@@ -682,7 +681,7 @@ class GraphletTools:
         # its own rows (path ids, not model objects: a re-parsed graphlet stays valid)
         self._ranked = collections.OrderedDict()
 
-    # ================================================================ stage L
+    # ================================================================ local limits
 
     def _local_call(self, tool, arg):
         """The budget of one budgeted call: the class (or per-tool) default, raised or
@@ -764,9 +763,8 @@ class GraphletTools:
         """A stop in a store operation of a tool without local limits -> the exception
         to raise. The caller's ambient budget's stop is returned as it is (raising that
         budget helps); any other is the store's parse limits' (_parse_stop(): no call's
-        budget raises them). graphlet_load stated every stop as the store's, also the
-        ambient budget's stop of the dump that stores the loaded graphlet (the review of
-        the level 4-5 fixes, finding 3)."""
+        budget raises them), graphlet_load's too: the ambient budget's stop of the dump that
+        stores the loaded graphlet is stated as the ambient budget's."""
         amb = _B.current()
         if amb is not None and any(x is e.stop for x in amb.stops):
             return e
@@ -785,7 +783,7 @@ class GraphletTools:
                 _mark_interrupted(out, stop)
         receipt = isinstance(out, _Receipt)
         if receipt and call.stop is None:
-            # a completed receipt's local block is optional: cut first (T-L21)
+            # a completed receipt's local block is optional: cut first
             out['local'] = _local_block(call)
             out.optional.insert(0, 'local')
             out.declared.insert(0, 'local')
@@ -846,8 +844,8 @@ class GraphletTools:
             raise ToolError('backend_error', str(e.message), status=e.status) from None
         except _ResponseCut as e:
             # the code of a transport failure (no whole answer), not its words: the server
-            # WAS reached and may have run the request, which "could not be reached" denied,
-            # so that a retry looked free (the review of the P3 fixes). The tools send no
+            # WAS reached and may have run the request, which "could not be reached" would
+            # deny, so that a retry would look free. The tools send no
             # attempt_id, so there is no attempt to cancel; the message says what a retry does
             raise ToolError('backend_unreachable', e.reason) from None
         except OSError as e:
@@ -886,8 +884,7 @@ class GraphletTools:
 
     def _arm(self, g, arm, view=None):
         # an arm is named by a string: anything else (an object, a list) is the caller's
-        # error, answered as one -- never a TypeError from using it as a key (round 3,
-        # finding B)
+        # error, answered as one -- never a TypeError from using it as a key
         if arm is not None and not isinstance(arm, str):
             raise ToolError('bad_arm', 'arm is "left" or "right" ("l", "r"), not %r' % (arm,))
         try:
@@ -926,7 +923,7 @@ class GraphletTools:
     def _cursor(self, tool, handle, args, offset, resume=None, before=0):
         j = {'h': handle, 't': tool, 'a': self._digest(tool, handle, args), 'o': offset}
         if resume is not None:
-            # stage L: where a list stopped by its budget goes on (the library's resume
+            # local limits: where a list stopped by its budget goes on (the library's resume
             # token, or the tool's position), and the rows the earlier pages held
             j['r'] = list(resume)
             j['b'] = before
@@ -1004,8 +1001,8 @@ class GraphletTools:
             return out
         # the page's size kept as rows are added: a row adds its own JSON and a comma
         # after the first (compact separators, so a list is '[' + ','.join(rows) + ']').
-        # Measuring the whole page again for every row was quadratic in max_bytes
-        # (VMT-02: an 8 MB page took hours); the rows chosen are the same
+        # Measuring the whole page again for every row would be quadratic in max_bytes (an
+        # 8 MB page would take hours); the rows chosen are the same
         size = _size(out)
         try:
             while i < len(rows) and (n is None or len(out['rows']) < n):
@@ -1026,8 +1023,8 @@ class GraphletTools:
                 call.partial = True
             else:
                 # tools without local limits, under the caller's own ambient budget: no
-                # local block to state the stop in (writing it to the absent call was an
-                # AttributeError, the review of W2's library part, finding 4). The page
+                # local block to state the stop in (writing it to the absent call would be
+                # an AttributeError). The page
                 # states it, giving back rows from its end until it fits beside them: a
                 # page stays within max_bytes, and a row given back opens the next page
                 out['stop'] = e.stop.as_dict()
@@ -1065,15 +1062,15 @@ class GraphletTools:
         """_page() whose |base| gives way before its rows do: its |optional| fields are cut
         in that order (_cuts, named in fields_cut) only as far as THIS page needs to carry
         its first row whole. _page() fits rows to what the base leaves, so a base that
-        fills the ceiling left no room for a row: the row was cut to nothing or the page
-        answered result_too_large, although the base held fields that can be cut.
+        fills the ceiling would leave no room for a row: the row would be cut to nothing or
+        the page answered result_too_large, although the base holds fields that can be cut.
 
           * the page with the whole base, when it fits and its first row is whole (or it
-            has no row to carry), is answered as it was -- byte for byte;
+            has no row to carry), is answered with nothing cut;
           * else the first cut with which the page fits and carries its first row whole;
           * else (a row larger than the page whatever is cut) the least cut with which
-            the page fits, its row cut and named as before (row_truncated);
-          * else the page with the whole base, which the wrapper refuses as before
+            the page fits, its row cut and named (row_truncated);
+          * else the page with the whole base, which the wrapper refuses
             (result_too_large): nothing is cut where cutting cannot make it fit.
 
         Each page, a resumed one too, decides for itself by this rule and names its own
@@ -1168,7 +1165,7 @@ class GraphletTools:
             # long names: fewer rows -- the seeds' last first, then the labels' -- and the
             # cut stated (labels_total stays). Each row measured once and the rows kept
             # read off running sums: re-encoding the whole result after every row taken
-            # off was quadratic in limit (VMT-02: limit 5,000 took 46 s)
+            # off would be quadratic in limit (46 s at limit 5,000)
             res['labels_cut_to_fit'] = True
             seeds = res.get('seeds') or []
             labs = res['labels']
@@ -1201,14 +1198,14 @@ class GraphletTools:
         always returned: over the ceiling its summary, evidence and graphlet_bytes are
         cut first (fields_cut). coordinates: 'auto' (the client's rule: record coordinates
         for a support: trace strategy on an index that reports them; under a request memory
-        budget while the D4 gate passes, otherwise not and coordinates_note says how to ask,
+        budget while the depth gate passes, otherwise not and coordinates_note says how to ask,
         and coordinates_note says how to drop coordinates it asked for under one that share
         a memory stop), true or false; a replay sends its stored request as it was."""
         _bool('keep', keep)
         _bool('allow_unverified_index', allow_unverified_index)
         if coordinates != 'auto' and not isinstance(coordinates, bool):
             # strict, as _bool() is for every other flag: 0 and 1 equal false and true but
-            # were dispatched by identity, so they asked for nothing (a silent no-op)
+            # would be dispatched by identity, so they would ask for nothing (a silent no-op)
             raise ToolError('bad_argument', 'coordinates is "auto", true or false, not %r'
                             % (coordinates,))
         limit = max_bytes or self.max_bytes
@@ -1239,7 +1236,7 @@ class GraphletTools:
         else:
             # a stored request without a graph (a loaded file, an older entry) runs on the
             # client's graph -- the one its capabilities, checked next, describe -- as
-            # deepen() and build_request() send it (VMD-06: it was posted without one)
+            # deepen() and build_request() send it (never posted without one)
             req = _with_graph(req, client)
             identity = self._check_same_index(client, ident, allow_unverified_index, req)
         response = self._backend(client.traverse_raw, req)
@@ -1264,12 +1261,12 @@ class GraphletTools:
         try:
             g = from_response(result, response)       # the whole body validated
         except LocalBudgetExceeded as e:
-            # stage L (L3): the parse stopped on its budget -- the body is kept, after
+            # local limits: the parse stopped on its budget -- the body is kept, after
             # the checks that need no parse, as an unparsed entry (never a graphlet until
             # a parse completes); it can always be exported as it is (format mgt). A
             # replay's identity is checked against what answered first, as a parsed one
-            # is: the H record states it without a parse (O1: the budget decided whether
-            # an index_mismatch was seen)
+            # is: the H record states it without a parse (so the budget does not decide
+            # whether an index_mismatch is seen)
             if identity is not None:
                 identity = _weakest(identity, _same_index(
                     ident, unparsed_identity(result, response), 'the replay',
@@ -1281,9 +1278,9 @@ class GraphletTools:
             identity = _weakest(identity, _same_index(ident, self._identity_of(g),
                                                       'the replay', allow_unverified_index))
         # the delivery the receipt will state: a spooled body's is 'spooled', one byte longer
-        # than 'inline', so the receipt is checked with it (the stage-2 recheck, P3: checked
-        # with 'inline', a receipt one byte over the ceiling stored its entry and returned
-        # result_too_large without the handle)
+        # than 'inline', so the receipt is checked with it (checked with 'inline', a receipt
+        # one byte over the ceiling would store its entry and return result_too_large
+        # without the handle)
         delivery = 'spooled' if spooled else g.outcome.delivery
         if spooled or keep:
             # checked before the entry is stored: a handle the caller cannot be told
@@ -1346,7 +1343,7 @@ class GraphletTools:
         """out['summary'] = the fitted summary. A stop there leaves the answer without it
         -- a receipt's handle is made already and must reach the caller: under local limits
         `local` states the stop; under the caller's own ambient budget (tools without local
-        limits) summary_stop does (it raised, and the stored entry's handle was lost)."""
+        limits) summary_stop does (raising would lose the stored entry's handle)."""
         call = _CALL.get()
         try:
             out['summary'] = self._fit_summary(g, out, side, max_bytes)
@@ -1378,8 +1375,8 @@ class GraphletTools:
                        'raise the budget')
         if call is None:
             # tools without local limits, under the caller's own ambient budget: no local
-            # block to state the stop in (it was read off the call that is not there, an
-            # AttributeError, before the review of b2fc7816's open items)
+            # block to state the stop in (reading it off the absent call would be an
+            # AttributeError)
             out['stop'] = stop
         if coord_note is not None:
             out['coordinates_note'] = coord_note
@@ -1407,9 +1404,10 @@ class GraphletTools:
         """A replay or a continuation runs against the same index as its entry: the
         backend's capabilities must state the entry's identity (_same_index) before
         anything is submitted. -> the identity statement for the result. |req|: the request
-        about to be sent -- the capabilities read are those of the graph it names (O1: a
-        continuation with overrides={'graph': ...} was checked against the client's own
-        graph and run on another); a request on the client's own graph asks as before."""
+        about to be sent -- the capabilities read are those of the graph it names (a
+        continuation with overrides={'graph': ...} is never checked against the client's
+        own graph and run on another); a request on the client's own graph reads the
+        client's capabilities."""
         graph = (req or {}).get('graph') or None
         graph_path = (req or {}).get('graph_path') or None
         if graph_path is not None or (graph is not None
@@ -1474,8 +1472,8 @@ class GraphletTools:
         # The notes and the budget's derivation are essential: they state how the
         # continuation differs from one uninterrupted walk. Each label's own loss and
         # remaining budget is detail the notes already summarise, so it is the first
-        # field cut (and named) when the receipt would not fit: a continuation of a walk
-        # with many labels was refused under the default ceiling (round 3, finding C)
+        # field cut (and named) when the receipt would not fit: otherwise a continuation of
+        # a walk with many labels would be refused under the default ceiling
         stated = {'notes': list(req.notes)}
         per_label = None
         if req.loss_budget is not None:
@@ -1493,7 +1491,7 @@ class GraphletTools:
         ident = self.store.get(handle).index
         name, client = self._client(ident.get('source'))
         # on the client's graph unless the overrides name one: posted and stored with it
-        # (VMD-06: a continuation entry's request replayed without a graph)
+        # (so that a continuation entry's request is never replayed without a graph)
         req = _with_graph(req, client)
         # a continuation is derived from its parent only on the parent's index: checked
         # against the capabilities before submitting, and against what answered before
@@ -1515,9 +1513,9 @@ class GraphletTools:
             if nbytes is None:
                 nbytes = len(utf8_bytes(result['graphlet']))
             # the parent link is stored only when what answered is the parent's index, as
-            # for a parsed continuation: its H record says so without a parse (O1: a
-            # continuation answered from another index was stored with verified true and
-            # its parent link, which a later export wrote into the J record)
+            # for a parsed continuation: its H record says so without a parse (otherwise a
+            # continuation answered from another index would be stored with verified true
+            # and its parent link, which a later export writes into the J record)
             identity = _weakest(identity, _same_index(
                 ident, unparsed_identity(result, response), 'the continuation',
                 allow_unverified_index))
@@ -1631,7 +1629,7 @@ class GraphletTools:
         args = dict(arm=a.side, rank=rank, min_bp=min_bp, label=label, spell=spell,
                     tail_bp=tail_bp, route_consistent=route_consistent, cursor=cursor)
         if coordinates:
-            # only when asked: a cursor of a call without it is what it always was
+            # only when asked: a cursor of a call without it does not carry the key
             args['coordinates'] = True
         base = {'handle': handle, 'arm': a.side,
                 'evidence': ops.evidence_block(g, a.side, view)}
@@ -1647,8 +1645,8 @@ class GraphletTools:
     def _ranked_ids(self, handle, g, a, rank, labels, min_bp, route_consistent, keep):
         """(the ranked path ids of graphlet_walks, {why: count} of the walks the
         route_consistent filter removed), cached per handle and arguments: paging an arm
-        ranks it once (B3). Under a budget a cached ranking is charged as the ranking
-        itself charges (its cold price, L1): the same page pays the same units and stops
+        ranks it once. Under a budget a cached ranking is charged as the ranking itself
+        charges (its cold price): the same page pays the same units and stops
         at the same place whether an earlier call ranked the arm or not."""
         key = (handle, a.side, rank, json.dumps(labels, sort_keys=True, default=str),
                min_bp, route_consistent)
@@ -1726,7 +1724,7 @@ class GraphletTools:
     def _walk_rows(g, a, p, cut=_LABELS_IN_ROW, out=None, start=0, b=None, chain=None):
         """One row per segment of walk |p|: labels in and out with their TRUE totals (a
         recorded list may be cut: entry_total, the last P total), merges, label ends.
-        |b| (stage L): each row charged before it is built, appended to |out| from chain
+        |b| (local limits): each row charged before it is built, appended to |out| from chain
         position |start|."""
         rows = [] if out is None else out
         lee = derive.label_end_events(a) if b is not None else None
@@ -2079,7 +2077,7 @@ class GraphletTools:
             d = c.as_dict()
             d.pop('arm')
             if c.coordinates is not None:
-                # C7: claims rows always carry them (the row's form, not the claim's list)
+                # claims rows always carry them (the row's form, not the claim's list)
                 d.pop('coordinates', None)
                 _coords_row(c.coordinates, _coords_kind(g, c.label.id), d)
             rows.append(d)
@@ -2119,8 +2117,8 @@ class GraphletTools:
             self._in_view(view, a.side, walk=ops.path_id(a, walk))
         else:
             if with_seed:
-                # a segment's slice is segment-local: no seed is added to it, and the answer
-                # said with_seed true over the flank alone (VMT-04)
+                # a segment's slice is segment-local: no seed is added to it, and an answer
+                # would say with_seed true over the flank alone
                 raise ToolError('bad_argument', 'with_seed applies to a walk; a segment\'s '
                                 'bases are segment-local (use walk=... with with_seed)')
             segment = _int('segment', segment)
@@ -2151,8 +2149,8 @@ class GraphletTools:
         room = self.sequence_max_bytes
         if _CALL.get() is not None:
             # and, under local limits, the local block beside it (as a page keeps room
-            # for it): a slice fitted to the whole ceiling was answered result_too_large
-            # once the block was added
+            # for it): a slice fitted to the whole ceiling would be answered
+            # result_too_large once the block is added
             room -= _LOCAL_RESERVE
         if _size(out) > room:
             # the ceiling holds for the whole result, the continuation keys included
@@ -2172,8 +2170,8 @@ class GraphletTools:
         file name (default: <handle>.<ext>). The receipt is always returned: records,
         then bytes, are cut first (fields_cut). Without local limits the export has no
         work or allocation budget: the file is as large as the graphlet makes it. Under
-        local limits (stage L) an export either completes or writes no file (L4:
-        local_budget_exceeded, never a partial file), and format mgt copies the stored
+        local limits an export either completes or writes no file (local_budget_exceeded,
+        never a partial file), and format mgt copies the stored
         body without a parse -- also of an entry no parse could afford. Either way the
         file is written aside and renamed over |path| once complete: a failed write
         (io_error) leaves an earlier file at |path| as it was, never a truncated one."""
@@ -2226,7 +2224,7 @@ class GraphletTools:
                 self._no_view(vb, 'graphlet_export(what=compare)', other)
                 cmp = g.compare(gb, arm=side)
                 if cmp.local_stop is not None:
-                    # an interrupted comparison has no lists to write: no partial file (L4)
+                    # an interrupted comparison has no lists to write: no partial file
                     raise LocalBudgetExceeded(_stop_of(cmp.local_stop))
                 obj = cmp.as_dict()
                 records = len(cmp.only_in_a) + len(cmp.only_in_b) + len(cmp.differ)
@@ -2273,10 +2271,10 @@ class GraphletTools:
             return _Receipt({'path': path, 'bytes': n, 'records': records},
                             ('records', 'bytes'))
         # through a temporary file renamed over the path once complete, as under local
-        # limits: open(path, 'wb') emptied an earlier export at the same path (the default
-        # <handle>.<ext> is the same for every export of a handle) before a byte was
-        # written, and a failed write (a full disk, a quota) left a truncated file there --
-        # a FASTA or GFA cut at a line still reads as complete (G15, the review of 2026-10-06)
+        # limits: open(path, 'wb') would empty an earlier export at the same path (the
+        # default <handle>.<ext> is the same for every export of a handle) before a byte is
+        # written, and a failed write (a full disk, a quota) would leave a truncated file
+        # there -- a FASTA or GFA cut at a line still reads as complete
         n = _write_export(path, text.encode('utf-8'))
         return _Receipt({'path': path, 'bytes': n, 'records': records},
                         ('records', 'bytes'))
@@ -2303,12 +2301,12 @@ class GraphletTools:
         """Graphlet.compare() of two handles over their DAGs restricted to the common
         certified depth, paged. max_bytes bounds the page returned, not the comparison:
         without local limits it runs with no work or allocation budget (its cost follows
-        both DAGs up to the depth). Under local limits (stage L) a comparison its budget
-        stops answers comparable "unknown", equal null, counts null and no rows -- never
+        both DAGs up to the depth). Under local limits a comparison its budget stops
+        answers comparable "unknown", equal null, counts null and no rows -- never
         a difference from a half-keyed side -- with local.stop. A page whose base would
         leave no room for its first whole row cuts the two evidence blocks, then the export
         hint (_COMPARE_OPTIONAL, named in fields_cut); what qualifies the comparison is
-        never cut, and a base that fits is answered as before."""
+        never cut, and a base that fits is answered whole."""
         ga, va = self._resolve(a)
         gb, vb = self._resolve(b)
         self._no_view(va, 'graphlet_compare', a)
@@ -2325,8 +2323,8 @@ class GraphletTools:
         evidence = {}
         for tag, g in (('a', ga), ('b', gb)):
             # the compared arm's, where the graphlet has it: b may lack an arm a names (the
-            # comparison then answers comparable false; its evidence block raised a
-            # KeyError, VOP2-02)
+            # comparison then answers comparable false; its evidence block would raise a
+            # KeyError)
             one = len(sides) == 1 and sides[0] in g.arms
             evidence[tag] = ops.evidence_block(g, sides[0] if one else None)
         base = {'a': a, 'b': b, 'mode': mode, 'comparable': cmp.comparable,
@@ -2344,11 +2342,11 @@ class GraphletTools:
             base['rows'] = []
             # no page, so the same cut is made here: the least with which the answer fits
             # beside the local block that states the stop; none fitting, the whole answer,
-            # refused by the wrapper as before. Measured beside the local block's smallest
-            # form, the one _finish_local falls back to: an answer that fitted before keeps
-            # its evidence (the wrapper compacts its local block instead). The evidence is
-            # measured as it will be answered: marked interrupted now, as _finish_local
-            # marks it (again, the same)
+            # refused by the wrapper. Measured beside the local block's smallest form, the
+            # one _finish_local falls back to: an answer that fits beside it keeps its
+            # evidence (the wrapper compacts its local block instead). The evidence is
+            # measured as it will be answered: marked interrupted here, as _finish_local
+            # marks it (marking it twice gives the same)
             limit = _opt_int('max_bytes', max_bytes, 1) or self.max_bytes
             local = None
             if call is not None:
@@ -2375,7 +2373,7 @@ class GraphletTools:
         _choice('mode', mode, ('any', 'all'))
         side = None if arm is None else self._arm(g, arm).side
         # the view of the entry: its `of` is the handle (dumping and hashing the whole body
-        # for a digest that is overwritten with the handle below was pure cost)
+        # for a digest that is overwritten with the handle below would be pure cost)
         v = ops.GraphletView(g, sel, side, mode, of=handle)
         e = self.store.get(handle)
         optional = ('summary', 'evidence', 'view')
@@ -2408,7 +2406,7 @@ class GraphletTools:
     @_tool
     def graphlet_save(self, handle, path, budget=None):
         """The standalone .mgt file of an entry, written to the export directory. Under
-        local limits (stage L) it is copied from the stored body without a parse."""
+        local limits it is copied from the stored body without a parse."""
         path = self._confined(path, [self._export_root()])
         _check_receipt(_Receipt({'path': path}, ('bytes',)), self.max_bytes,
                        'use a shorter file name')
@@ -2461,12 +2459,11 @@ class GraphletTools:
             # the store's parse limits: _store_stop() tells them apart
             raise self._store_stop(e, 'The file is parsed') from None
         # the model the load parsed, also when the store does not keep it in RAM: parsing
-        # the stored entry again ran under the store's parse limits, which could refuse
-        # it after the entry was made, and the answer lost the new handle (the review of
-        # levels 4-5, max_ram_mb=0 with parse_limits of 1 lwu)
+        # the stored entry again would run under the store's parse limits, which could
+        # refuse it after the entry is made, and the answer would lose the new handle
         # under local limits a stop of the summary is stated in local; under the caller's
         # ambient budget in summary_stop: the entry is stored, so its handle is returned
-        # either way (it raised, and the handle was lost: b2fc7816's open item)
+        # either way
         out = {'handle': h, 'summary': None}
         if g.has_envelope:
             self._summary_into(g, out, None)
@@ -2475,8 +2472,8 @@ class GraphletTools:
 
 def _admit_paths(call, g, a):
     """Charge a budgeted call the arm's paths before a walk argument is resolved: a path
-    id resolves through them, and a call refused afterwards left them built, uncharged
-    (finding 2 of the review of levels 4-5, in the tools). Charged once per call: the
+    id resolves through them, and a call refused afterwards would leave them built,
+    uncharged. Charged once per call: the
     operation that reads them next charges nothing more for them."""
     if call is not None:
         derive.uses(call.budget, g, a, 'leaves', 'paths')
@@ -2550,7 +2547,7 @@ def _weakest(first, second):
 
 
 def _coords_row(rc, kind=None, out=None):
-    """The record coordinates of a row (C7): the first _COORDS_IN_ROW [start, end] pairs
+    """The record coordinates of a row: the first _COORDS_IN_ROW [start, end] pairs
     (0-based, half-open, forward strand), the true total, whether the row shows fewer than
     the total (the row's own cut or the server's cap), the label's kind when the block
     mixes kinds, and lower_bound when the run's occurrences may be understated."""
@@ -2573,7 +2570,7 @@ _COORDS_ROW_EXTRA = (_B.W_ELEM + _COORDS_IN_ROW * _B.W_COORD,
 
 
 def _coords_kind(g, label_id):
-    """The label's coordinate kind for a row: only when the block mixes kinds (C3)."""
+    """The label's coordinate kind for a row: only when the block mixes kinds."""
     c = _C.of(g)
     if c is None or c.kind != 'mixed':
         return None
@@ -2595,7 +2592,7 @@ def _row(x):
 
 
 # the receipt of a body-level copy (export mgt, save under local limits) of an entry whose
-# parse stopped (L3): the file holds a body checked for its frame only, which no parse has
+# parse stopped: the file holds a body checked for its frame only, which no parse has
 # validated -- an essential field, so that the receipt never reads like that of a graphlet
 _UNVALIDATED_OPTIONAL = ('validation',)
 _UNVALIDATED_NOTE = ('the body was stored unparsed (its parse stopped on the local budget): '
@@ -2663,7 +2660,7 @@ def _write_export(path, data):
 
 def _write_text_charged(path, text, b):
     """Write |text| to |path| through a temporary file renamed on completion, charged
-    (its encoding and its bytes) before it is written: a stop writes no file (L4). Written
+    (its encoding and its bytes) before it is written: a stop writes no file. Written
     without a buffer (parser._write_all()), which the charge leaves out."""
     b.charge(len(text) >> 8, 2 * (len(text) + 49))
     data = text.encode('utf-8')

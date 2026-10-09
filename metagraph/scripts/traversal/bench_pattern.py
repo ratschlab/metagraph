@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bench_pattern.py -- a repeatable, paced benchmark of a MetaGraph /pattern server.
 
-Two suites, first run against refseq33m-experimental on 2026-10-08 (4596bb3b):
+Two suites:
   degenerate  how pattern search scales with increasingly degenerate periodic patterns: every p-th base is N
               (XXXXN, XXXN, XXN, XN), at growing lengths up to 50 bp (lengths > k as paths). Per cell, patterns
               cut from real RefSeq records (the mini index's FASTA, so at least one hit) and random ones.
@@ -195,8 +195,8 @@ def degenerate(seq, p):
 
 def suite_degenerate(cl, log, a, k, retrieve_max):
     rnd = random.Random(SEED)
-    # the windows are cut from each FASTA file's records concatenated, as in the first run (2026-10-08), so that
-    # the same seed gives the same patterns and runs compare pattern by pattern
+    # the windows are cut from each FASTA file's records concatenated, so that the same seed gives the same
+    # patterns and runs compare pattern by pattern
     files = {}
     for f, name, s in read_fasta(a.fasta):
         files.setdefault(f, []).append(s)

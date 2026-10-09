@@ -11,9 +11,9 @@ The traversal routes write compact JSON and compress it on request; the client a
 explicitly for `Accept-Encoding: gzip, deflate` (gzip preferred by the server) and
 decodes either itself, so the transport does not depend on the HTTP library.
 
-A request may be an ATTEMPT of a ledger that reserved an allowance for it (DESIGN §14,
-stage 4): `attempt_id` (unique per server process while it runs or is retained), with
-`budget_id` and `locus_id` echoed. Every response to it carries a `usage` block
+A request may be an ATTEMPT of a ledger that reserved an allowance for it (DESIGN §14):
+`attempt_id` (unique per server process while it runs or is retained), with `budget_id`
+and `locus_id` echoed. Every response to it carries a `usage` block
 (TraverseResponse.usage), the server enforces a duration bound on it (usage.bound), and it
 can be cancelled (cancel()) and its state read (attempt()) by id, also from another client.
 
@@ -34,14 +34,14 @@ Feature level 6 (DESIGN §18, §26): record coordinates. traverse() asks for the
 them, where GET /traverse/capabilities states the coordinates block for the index with
 supported true (supports_coordinates()) -- never on an index that cannot report them,
 where the null form would only cost depth. Under a request memory budget
-(bounds.max_memory_mb) only while the D4 gate passes (decision X-C8,
-AUTO_COORDINATES_UNDER_MEMORY_BUDGET): a run's coordinate account is charged with the
+(bounds.max_memory_mb) only while the depth gate passes
+(AUTO_COORDINATES_UNDER_MEMORY_BUDGET): a run's coordinate account is charged with the
 walk, so a budgeted walk stops a little shallower with them; when it does not pass the
 response says so (coordinates_auto, notes) and coordinates=True asks for them, and when
 coordinates asked for that way share a memory stop the notes say how to drop them. It never
 retries silently without them: an older server's 400 is raised as it is. A request whose
 output.coordinates is not true never carries output.max_coordinate_occurrences, which the
-server refuses without it (C-N6).
+server refuses without it.
 
 What GET /capabilities states is kept per server PROCESS: it is forgotten when an answer
 names another server_instance than the one read (a restart at the same address), on a 409
@@ -64,8 +64,8 @@ import urllib.parse
 import urllib.request
 import zlib
 
-# the answers' readers and the release rule live in the light module attempts.py (LRG-G7):
-# re-exported here, where they always were, as the same objects
+# the answers' readers and the release rule live in the light module attempts.py (importing
+# it loads no model): re-exported here as the same objects
 from .attempts import (AttemptAnswer, AttemptAtBound, AttemptConflict, AttemptExpired,
                        AttemptSent, InstanceMismatch, ReleaseVerdict, ServerInitializing,
                        Suppression, TraverseError, TraverseResponse, classify_409,
@@ -85,7 +85,7 @@ SUPPRESSION_LEVEL = 5
 # the feature level whose GET /traverse/capabilities states the coordinates block (SPEC
 # §10.3): supports_coordinates() reads the block itself, not the level
 COORDINATES_LEVEL = 6
-# The D4 gate (decision X-C8): under a request memory budget the library asks for
+# The depth gate: under a request memory budget the library asks for
 # coordinates automatically only if the median depth at the budget's stop with them stays
 # within 10% of the depth without -- each run's coordinate entry and occurrences are
 # charged when the run is created, so a budgeted walk with them stops shallower. Measured
@@ -99,9 +99,8 @@ COORDINATES_LEVEL = 6
 AUTO_COORDINATES_UNDER_MEMORY_BUDGET = False
 _MEMORY_BUDGET_NOTE = (
     'record coordinates were not requested automatically: the request has a memory budget '
-    '(bounds.max_memory_mb), under which their account makes the walk stop shallower (the '
-    'D4 gate, decision X-C8); pass coordinates=True to ask for them (output.coordinates), or '
-    'drop the memory budget')
+    '(bounds.max_memory_mb), under which their account makes the walk stop shallower; '
+    'pass coordinates=True to ask for them (output.coordinates), or drop the memory budget')
 # where coordinates requested automatically under a memory budget share a memory stop
 # (DESIGN §26.5: the single-lineage switch cells are the outliers; at 50% of their peak two
 # of them fail at depth 0 with coordinates and not without)
@@ -123,12 +122,11 @@ _MAX_CAP = (1 << 64) - 2
 
 def strip_coordinate_cap(strategy):
     """|strategy| (in place) without output.max_coordinate_occurrences unless its
-    output.coordinates is true: the server refuses the cap without coordinates (400,
-    decision C-N6), so the library never sends it alone -- build_request(), next_request()
-    (whose request carries the retrieval's echo, cap included) and the tools' requests
-    (revision 2: dropping coordinates through a continuation keeps working). Defined here,
-    not in coords.py (which re-exports it), so that importing the client loads no model
-    (LRG-G7)."""
+    output.coordinates is true: the server refuses the cap without coordinates (400), so
+    the library never sends it alone -- build_request(), next_request() (whose request
+    carries the retrieval's echo, cap included) and the tools' requests (so that dropping
+    coordinates through a continuation works). Defined here, not in coords.py (which
+    re-exports it), so that importing the client loads no model."""
     out = strategy.get('output') if isinstance(strategy, dict) else None
     if isinstance(out, dict) and out.get('coordinates') is not True:
         out.pop('max_coordinate_occurrences', None)
@@ -147,11 +145,11 @@ def _memory_budget(strategy):
 
 
 def auto_coordinates(client, strategy, graph=None, graph_path=None):
-    """The automatic rule for record coordinates (decision C8, X-C8) -> (value, statement):
+    """The automatic rule for record coordinates -> (value, statement):
     value True (ask), or None (leave the strategy as given); statement None when the rule
     does not apply (the strategy sets output.coordinates, or is not support: trace in
     constrain mode), else {requested, reason[, memory_budget][, note]} -- reason
-    'supported' (asked; memory_budget true when under a request memory budget, the D4 gate
+    'supported' (asked; memory_budget true when under a request memory budget, the depth gate
     passing), 'unsupported' (the index states no coordinates block, or supported false) or
     'memory_budget' (a request memory budget with the gate not passing: not asked, |note|
     says how to ask). |client|: anything with supports_coordinates() (a TraverseClient);
@@ -224,13 +222,13 @@ class _ResponseCut(ConnectionError):
     closed before its Content-Length (http.client.IncompleteRead: a server drops a
     connection at its content timeout, a process dies with its buffers unsent, a proxy cuts
     it) -- or its status line or a header could not be read (another
-    http.client.HTTPException). A ConnectionError, so an OSError like every other
-    transport failure: callers that map those (the tools' backend_unreachable) map this one
-    too, never a bare HTTPException that no handler expects (O35, the review of
-    2026-10-06). Not a TraverseError of the status, even when one was read: a cut 2xx is
-    no server answer, and a cut 409 or 503 body no longer tells its cases apart -- for an
-    attempt the conservative reading is "unanswered" (cancel it, then judge it with
-    release_verdict()). |reason| is the message (what the tools report)."""
+    http.client.HTTPException). A ConnectionError, so an OSError like every other transport
+    failure: callers that map those (the tools' backend_unreachable) map this one too, never
+    a bare HTTPException that no handler expects. Not a TraverseError of the status, even
+    when one was read: a cut 2xx is no server answer, and a cut 409 or 503 body no longer
+    tells its cases apart -- for an attempt the conservative reading is "unanswered" (cancel
+    it, then judge it with release_verdict()). |reason| is the message (what the tools
+    report)."""
 
     def __init__(self, message, status=None):
         super().__init__(message)
@@ -243,7 +241,7 @@ def _cut(method, path, e, status=None, attempt_id=None):
     answered (|status|: the HTTP status, when its line was read; |attempt_id|: the
     request's, when it carried one). The message says the server was reached and may have
     run the request: the request went out before any answer was read, so a reader of
-    "unreachable" alone would take a retry for free (the review of the P3 fixes)."""
+    "unreachable" alone would take a retry for free."""
     what = 'the response to %s %s' % (method, path) if status is None else \
         'the HTTP %d answer to %s %s' % (status, method, path)
     if isinstance(e, http.client.IncompleteRead):
@@ -288,7 +286,7 @@ class TraverseClient:
                  scheme='http', graph=None, feature_level=None):
         """|feature_level|: the server's, when the caller knows it; else it is read from GET
         /capabilities the first time a feature-level-5 field is to be sent (and never for a
-        request without one, so the requests of earlier levels go out as they always did).
+        request without one, so a request without level-5 fields reads no capabilities).
         Once GET /capabilities has been read (expect_server_instance='auto' reads it for the
         instance) the level it states wins over the given one, and a given level of 5 or
         more is dropped when the server refuses a level-5 field as unknown: either is the
@@ -347,8 +345,8 @@ class TraverseClient:
                     data = _decoded(raw, hdrs.get('content-encoding'), status)
             except http.client.HTTPException as e:
                 # a body cut short (IncompleteRead) or an unreadable status line or header:
-                # neither a TraverseError nor an OSError, so it escaped every caller's
-                # mapping (O35). The session= path needs no such case: requests raises its
+                # neither a TraverseError nor an OSError, so it would escape every caller's
+                # mapping. The session= path needs no such case: requests raises its
                 # ChunkedEncodingError (an OSError) for the same cut
                 raise _cut(method, path, e, status,
                            payload.get('attempt_id') if isinstance(payload, dict) else None) \
@@ -360,7 +358,7 @@ class TraverseClient:
             except UnicodeDecodeError:
                 # not UTF-8, so no JSON answer: an error page is still classified by its
                 # status below, a 2xx is 'not JSON' -- never a bare UnicodeDecodeError, which
-                # no caller expects from a server's answer (VMD-07)
+                # no caller expects from a server's answer
                 text = data.decode('utf-8', 'replace')
                 data = None
         else:
@@ -394,7 +392,7 @@ class TraverseClient:
                 # usage: nothing registered) and an attempt stopped at its bound (usage, no
                 # Retry-After: registered and consumed -- a retry under its id is refused
                 # while the server holds the id, and runs again after). Told apart by the body,
-                # not by the status alone (review of the stage-4 backend, F4)
+                # not by the status alone
                 retry = hdrs.get('retry-after')
                 if isinstance(out, dict) and 'usage' in out and not retry:
                     raise AttemptAtBound(status, message, out)
@@ -547,7 +545,7 @@ class TraverseClient:
         sequence's first resolved_kmers k-mers -- resolve sequence[remainder_from_bp:] for the
         rest. An answer that could not be built within the budget raises ResolveDeadline (503).
         A server without the field (no `resolve` block in its capabilities) refuses it: a
-        TraverseError 400 naming it. None (the default): sent exactly as before."""
+        TraverseError 400 naming it. None (the default): no bounds.time_budget_ms is sent."""
         req = {'sequence': sequence}
         if labels is not None:
             req['labels'] = list(labels)
@@ -636,13 +634,13 @@ class TraverseClient:
         the field), None leaves the strategy as given (pure: no capabilities are read here;
         traverse() applies the automatic rule). |max_coordinate_occurrences|: the cap per
         occurrence list (an int >= 1 or "unlimited"). The cap is removed whenever the
-        resulting output.coordinates is not true: the server refuses it alone (C-N6)."""
+        resulting output.coordinates is not true: the server refuses it alone."""
         if expect_server_instance is not None and attempt_id is None:
             raise ValueError('expect_server_instance is sent with attempt_id only')
         if coordinates is not None and not isinstance(coordinates, bool):
             # by type, not by ==: 0 and 1 equal False and True, but the dispatch below is
-            # by identity, so they were taken for None (coordinates=0 kept coordinates,
-            # coordinates=1 dropped an explicit cap)
+            # by identity, so they would be taken for None (coordinates=0 would keep
+            # coordinates, coordinates=1 would drop an explicit cap)
             raise ValueError('coordinates is True, False or None, not %r' % (coordinates,))
         if max_coordinate_occurrences is not None and not _valid_cap(max_coordinate_occurrences):
             # refused here, before anything is sent: the server's 400 would come after it
@@ -710,7 +708,7 @@ class TraverseClient:
         |coordinates| (feature level 6): 'auto' (the default) asks for record coordinates
         for a support: trace strategy that does not set output.coordinates, where the index
         reports them (supports_coordinates()) -- under a request memory budget only while
-        the D4 gate passes (X-C8, AUTO_COORDINATES_UNDER_MEMORY_BUDGET); what it decided is
+        the depth gate passes (AUTO_COORDINATES_UNDER_MEMORY_BUDGET); what it decided is
         .coordinates_auto, and .notes states a decision not to ask under a memory budget,
         or, where coordinates it asked for under one share a memory stop, how to drop them
         (drop_coordinates_note()). True / False / None as in build_request(). A server that

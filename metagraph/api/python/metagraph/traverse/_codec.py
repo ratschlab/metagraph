@@ -121,7 +121,7 @@ def parse_bool(t):
 # --------------------------------------------------------------------------- floats
 
 def fmt_num(x):
-    """§2.1 (v3): the shortest round-trip significant digits of the double, expanded
+    """§2.1: the shortest round-trip significant digits of the double, expanded
     positionally. repr() gives the unique shortest digits (nearest on ties), the same
     digits as C++ std::to_chars(..., scientific); Decimal 'f' expands them exactly, so
     1e23 is '100000000000000000000000', not to_chars(fixed)'s exact binary value."""
@@ -162,8 +162,8 @@ def encode_ranges(ids):
         if prev is not None and i <= prev:
             raise CodecError('RANGES ids not strictly ascending: %s after %s' % (tok(i), tok(prev)))
         if i < 0 or i > MAX_U64:
-            # every id, not only the last run's start: a list mixing negative and other
-            # ids was written ('-5,3') and refused by decode_ranges() (VPC-04)
+            # every id, not only the last run's start: otherwise a list mixing negative and
+            # other ids would be written ('-5,3') and then refused by decode_ranges()
             raise CodecError('RANGES id %s outside [0, 2^64)' % tok(i))
         if start is None:
             start = i
@@ -348,7 +348,7 @@ def _s_raw(byte):
 
 
 def encode_kvalue(v):
-    """Typed VALUE (§2.2 v5.1): int -> 'i:', float -> 'f:', str -> 's:' (every byte
+    """Typed VALUE (§2.2): int -> 'i:', float -> 'f:', str -> 's:' (every byte
     outside 0x21..0x7E, '%' and ',' as uppercase %XX), UNLIMITED -> 'u'."""
     if v is UNLIMITED:
         return 'u'
@@ -424,7 +424,7 @@ def decode_pairs(t):
 
 # ------------------------------------------------------------------ end-reason codes
 
-# traversal_types.cpp:37-55, plus (v4) resource_limit
+# traversal_types.cpp:37-55, plus resource_limit
 REASON = {
     'D': 'dead_end', 'L': 'label_lost', 'B': 'loss_budget', 'R': 'branch',
     'U': 'edge_reuse', 'V': 'edge_reuse_rc', 'J': 'rejoined_seed', 'T': 'trace_break',

@@ -1727,7 +1727,7 @@ and never on an index that cannot report them. What it decided is
 ``coordinates_auto``. Under a request memory budget (``bounds.max_memory_mb``) each
 run's coordinates are charged with the walk, so it stops a little shallower: the library
 asks there only while the measured depth at the stop stays within 10% of the depth
-without (the D4 gate). At level 6 the gate does not pass: the median drop on mini_refseq
+without (the depth gate). At level 6 the gate does not pass: the median drop on mini_refseq
 is 3-4%, but column labels with 16 or more chains per run (refseq33m's taxid columns) and
 seeds with many header labels need 2-4 times the memory, so under a memory budget the
 library does not ask. Where a seed then
@@ -2143,7 +2143,7 @@ index names to ``TraverseClient`` objects for the backend tools.
   and handle are returned (``delivery: spooled``). ``traverse_fetch(coordinates='auto')``
   asks for record coordinates by the client's rule (`Record coordinates`_; true or false
   to choose); ``coordinates_note`` says how to walk further without them where it asked
-  under a memory budget and the seed stopped on it (or, with the D4 gate off, that it did
+  under a memory budget and the seed stopped on it (or, with the depth gate off, that it did
   not ask and how to). A replay sends its stored request as it was.
 * **Local tools over a handle:** ``graphlet_summary``, ``graphlet_walks``,
   ``graphlet_walk``, ``graphlet_support``, ``graphlet_labels``, ``graphlet_splits``,

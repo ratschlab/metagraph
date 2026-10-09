@@ -39,7 +39,7 @@ def _union(sets):
 # ------------------------------------------------------------------ the §2.3 rules
 
 def entry_base(segments, seg):
-    """The SETEXPR base of G.entry (§2.1, v2): none for the root, the union of the
+    """The SETEXPR base of G.entry (§2.1): none for the root, the union of the
     parents' end sets for a merge, parent[0]'s end set otherwise."""
     if not seg.parents:
         return None
@@ -63,7 +63,7 @@ def rule_entry(mode, num_seed_labels, seg):
 
 def rule_partition(parents):
     """G.partition '*': no merge, or one empty list per parent (annotate merges, where
-    labels_via_parent is empty: v3 states the arity)."""
+    labels_via_parent is empty: the format states the arity)."""
     if len(parents) <= 1:
         return []
     return [array('I') for _ in parents]
@@ -75,8 +75,7 @@ def label_changes(seg, runs_here, runs):
     switch-ins): every run anchored here (|runs_here|, ids into |runs|) ending before the
     segment's last node, and every switch event. A run ending at to_bp is absent from base
     to_bp on; a switch-in is present from at_bp. The one statement of the normative
-    tie-break: rule_end() and the displayed support (ops) both read it (VMD-08: two
-    verbatim copies)."""
+    tie-break: rule_end() and the displayed support (ops) both read it."""
     end_bp = seg.from_bp + seg.length_bp
     ops = []
     for r in runs_here:
@@ -91,11 +90,11 @@ def label_changes(seg, runs_here, runs):
 
 
 def rule_end(mode, seg, entry, presence, runs_here, runs):
-    """G.end '*' (v2, chronological). Constrain: from the entry set apply, in increasing
+    """G.end '*' (chronological). Constrain: from the entry set apply, in increasing
     position (ties: ends before switch-ins), every run end anchored here with
     to_bp < from_bp + length_bp (remove its label) and every switch event here (add its
     target). Runs ending at the segment's last node are still alive there
-    (walker.cpp:2580). v1's set formula lost a label that re-entered after ending
+    (walker.cpp:2580). A set formula would lose a label that re-enters after ending
     (A -> B -> A inside one segment). Annotate: the last P set, or the entry set."""
     if mode != 'constrain':
         return list(presence[-1].labels) if presence else list(entry)
@@ -134,16 +133,16 @@ def runs_by_label(arm):
         for r in arm.runs:
             got.setdefault(r.label, []).append(r.id)
         arm.cache['runs_by_label'] = got
-        # label_runs()'s count, no longer read; on a single-label arm the swap leaves every
-        # length equal, which is why ops.cache_signature() reads the keys too
+        # label_runs()'s count, which nothing reads; on a single-label arm the swap leaves
+        # every length equal, which is why ops.cache_signature() reads the keys too
         arm.cache.pop('run_scans', None)
     return got
 
 
 # Building runs_by_label costs about six scans of the runs (58-70 us against 10-12 us on
-# the 900-1,000-label retrievals), and built on a fresh model's first single-label call it
-# made routes() and label_walks() for one label 2-5x slower than the scan it replaced (the
-# review of the efficiency batch, P10). The first lookups of an arm scan; the index is
+# the 900-1,000-label retrievals), so building it on a fresh model's first single-label
+# call would make routes() and label_walks() for one label 2-5x slower than a scan. The
+# first lookups of an arm therefore scan; the index is
 # built by the lookup after them, so a listing over every label pays about one index more
 # than building it first, and a caller that asks for a few labels pays no more than the
 # scans did (the rule of ops._LABEL_SCANS for label names).
@@ -204,8 +203,8 @@ def partition_sets(arm):
 # boxes each element it compares: about 16 us per 1,000 ids). One label's routes() and
 # label_walks() test a merge on its runs' routes at most twice (the route, then the
 # evidence walk: measured over every label of the 900-1,000-label retrievals), and
-# building at the second test made label_walks() of one label 1.7x slower than the scans
-# of ce949da5 (P10). A merge is scanned for its first _MERGE_SCANS tests and its sets are
+# building at the second test would make label_walks() of one label 1.7x slower than
+# scanning. A merge is scanned for its first _MERGE_SCANS tests and its sets are
 # built at the next: a loop over many labels or runs pays at most two scans more per
 # merge than building first.
 _MERGE_SCANS = 2
@@ -227,7 +226,7 @@ def merge_parts(arm, seg_id):
     got = c.get('partition_sets')
     if got is not None:
         return got[seg_id]
-    # the scans touch one dict only (a call on a fresh model costs what ce949da5's did)
+    # the scans touch one dict only (a call on a fresh model costs no more than a scan)
     scanned = c.get('merge_scanned')
     if scanned is None:
         c['merge_scanned'] = {seg_id: 1}
@@ -293,7 +292,7 @@ def path_of_leaf(arm):
 def splits(arm, mode):
     """splits[]: the single-parent children grouped by parent (a split always has >= 2
     children; nf == 1 continues the segment), ordered by (at_bp, first child id) -- the
-    walker's processing order. kind ambiguous <=> the parent's stored G.split (v2)."""
+    walker's processing order. kind ambiguous <=> the parent's stored G.split."""
     key = 'splits'
     got = arm.cache.get(key)
     if got is None:
@@ -353,7 +352,7 @@ def reconverge_events(arm):
 
 
 def end_labels(arm, leaf):
-    """The labels alive at a leaf, ascending (v2): the runs anchored at the leaf with
+    """The labels alive at a leaf, ascending: the runs anchored at the leaf with
     to_bp at its end (every label alive at the leaf has an ended run there, and every
     run ending at its last node is such a label), with T's (loss, branches, route_bp)."""
     cache = arm.cache.setdefault('end_labels', {})
@@ -518,10 +517,10 @@ def walk_iter(arm, targets, spell=True, chains=True, *, check_first=True):
     still to come is spelled from are held: a kept prefix is dropped once the last of the
     chains parting at its segment has been spelled from it, so on a comb (the walker's
     segment ids put each spine segment just before its two children) a few prefixes are
-    held at a time, not one per spine segment -- the batch's prefixes and the dict of
-    every spelling made to_fasta() peak at 10x its text on a comb of 1-bp segments,
-    against 3.1x when each walk was spelled on its own (the search service's report at
-    dcc0cebd). A consumer that keeps no spelling holds O(depth) of them.
+    held at a time, not one per spine segment -- the batch's prefixes and the dict of every
+    spelling would make to_fasta() peak at 10x its text on a comb of 1-bp segments, against
+    3.1x when each walk is spelled on its own. A consumer that keeps no spelling holds
+    O(depth) of them.
 
     A model with bases on some segments only raises its ValueError before the first
     target is yielded (for a few targets: from this call), as walk_batch() does, so a
@@ -534,12 +533,12 @@ def walk_iter(arm, targets, spell=True, chains=True, *, check_first=True):
     segs = arm.segments
     if isinstance(targets, (list, tuple, set, frozenset)) and len(targets) <= _FEW_WALKS:
         # a few walks (a small export, walks(top=2)): chain() and walk_bases() in one loop
-        # each, without the bound and the batch's set and dict, which made small exports
-        # 25-60 % slower than walk_bases() had (P10). Target by target costs at most k times
+        # each, without the bound and the batch's set and dict, which would make small
+        # exports 25-60 % slower than walk_bases(). Target by target costs at most k times
         # the deepest chain, the batch at least three Python steps per segment of it, so for
         # k <= 3 targets it is never the slower choice. Built here and handed out as an
-        # iterator over them, not by a generator: its frame cost a one-walk to_fasta() a
-        # tenth of its time (0.4 of 4 us). A missing base raises before any target is given
+        # iterator over them, not by a generator: its frame would cost a one-walk to_fasta()
+        # a tenth of its time (0.4 of 4 us). A missing base raises before any target is given
         if not targets:
             return iter(())
         has_bases = spell and segs[0].walk is not None
@@ -559,16 +558,16 @@ def _walk_stream(segs, targets, spell, chains, check_first):
     has_bases = spell and bool(segs) and segs[0].walk is not None
     # target by target while that costs less -- each target's chain walked on its own --,
     # else as a batch, where finding the shared prefixes pays off. Finding them (a set and
-    # a dict over the chains' union, a sort) made a few short walks 2-4x slower to spell
-    # than walk_bases() had (to_fasta(), to_gfa() and walks(top=5) on the small and the
-    # 1,000-label fixtures, P10). The total is read from the segments' depths before any
+    # a dict over the chains' union, a sort) would make a few short walks 2-4x slower to
+    # spell than walk_bases() (to_fasta(), to_gfa() and walks(top=5) on the small and the
+    # 1,000-label fixtures). The total is read from the segments' depths before any
     # walk (no work is spent on a walk that is then redone); a depth the model does not
     # keep (a hand-built model's 0) only changes the choice, never the answer: with chains
     # the walk itself is counted by the chains' lengths (without chains by the depths),
     # and past _EACH_STEPS times the arm's segments the targets not yet given are spelled
     # as a batch. Written out here rather than in a generator of its own: a generator
-    # level per target cost what a small export's own work does (to_gfa() of a 6-walk
-    # retrieval 10 % slower)
+    # level per target would cost what a small export's own work does (to_gfa() of a
+    # 6-walk retrieval 10 % slower)
     budget = _EACH_STEPS * len(segs)
     if sum([segs[t].depth for t in tset]) + len(tset) > budget:
         yield from _batch_stream(segs, tset, has_bases, chains)
@@ -576,8 +575,8 @@ def _walk_stream(segs, targets, spell, chains, check_first):
     if has_bases and check_first:
         # bases on some segments only (a hand-built model; a parsed one has them on all or
         # none) raise before the first target: the targets' chains are read once for it,
-        # never the whole arm (reading every segment cost a few shallow walks of an
-        # 8,000-segment arm 50x their own time, the review of the streamed spelling)
+        # never the whole arm (reading every segment would cost a few shallow walks of an
+        # 8,000-segment arm 50x their own time)
         _check_bases(segs, tset)
     order = sorted(tset)
     for i, t in enumerate(order):
@@ -590,7 +589,7 @@ def _walk_stream(segs, targets, spell, chains, check_first):
 
 
 def walk_iter_bytes(n_targets, bp, union, big=0, chain_steps=0):
-    """The stage-L memory account of walk_iter() (a bound of what it holds at once) for
+    """The local-limits memory account of walk_iter() (a bound of what it holds at once) for
     |n_targets| targets with |bp| bases in all, |big| the longest, over a union of |union|
     chain segments: the union's set and children counts; the kept prefixes -- at most |bp|,
     since the prefixes held at once wait each for its own pending segment, and no two of
@@ -665,7 +664,7 @@ def _batch_stream(segs, tset, has_bases, chains=True):
             parts = [segs[i].walk for i in ids]
             bases = ''.join(parts) if base is None else base[1] + ''.join(parts)
         # the chain only for a caller that reads it: kept at every parting it is 8 bytes
-        # per segment, which on a comb of 1-bp segments was 8x the spelling it came with
+        # per segment, which on a comb of 1-bp segments is 8x the spelling it comes with
         chain_ = None if not chains else ids if base is None else base[0] + ids
         if base is not None:
             base[2] -= 1
@@ -747,7 +746,7 @@ def natural_flank(arm, leaf):
 
 
 def continuation_sequence(g, arm, leaf, walk=None):
-    """The C record's spelling (v2, both arms stated): right arm: the LAST n bases of
+    """The C record's spelling (both arms stated): right arm: the LAST n bases of
     seed + natural(right flank); left arm: the FIRST n bases of natural(left flank) +
     seed (n <= |seed| + flank; a continuation may cross into the seed). |walk|: the
     leaf's bases in walking order when the caller has spelled them already."""
@@ -800,7 +799,7 @@ def merge_above(arm):
 
 
 def evidence(arm, run):
-    """-> (route_from, evidence_from) of a run (§5.1, v3 normative).
+    """-> (route_from, evidence_from) of a run (§5.1).
 
     Provenance is derived at the run's ANCHORED endpoint (also for merge-closed 'm'
     runs) and never by evaluating the walk at a cut depth: with p = the first-parent
@@ -831,12 +830,12 @@ def evidence(arm, run):
     return got
 
 
-# ------------------------------------------------------------------ stage L prices
+# ------------------------------------------------------------------ local-limits prices
 
 def arm_sizes(arm):
-    """The structural sizes of an arm that the derivations' prices are made of (stage L,
-    DESIGN §21.3): facts of the model, cached once computed. Callers charge the pass at
-    its price first (sizes_price)."""
+    """The structural sizes of an arm that the derivations' prices are made of (local
+    limits, DESIGN §21.3): facts of the model, cached once computed. Callers charge the pass
+    at its price first (sizes_price)."""
     got = arm.cache.get('sizes')
     if got is None:
         segs = arm.segments
@@ -1054,7 +1053,7 @@ def price_list(b, g, arm, name, fn, per=1):
 
 def uses(b, g, arm, *names):
     """Charge budget |b| the derivations of |arm| a call uses, each at its cold price and
-    once per call (L1: whether a cache holds it or not); the sizes they are priced from
+    once per call (whether a cache holds it or not); the sizes they are priced from
     first. No-op without a budget."""
     if b is None:
         return
@@ -1090,21 +1089,22 @@ _BUILT_WHEN_CHARGED = {'runs_by_label': runs_by_label, 'partition_sets': partiti
 
 # From this feature level the server orders a merge's parents so that the first -- the one
 # the displayed walk follows (paths, spellings, continuations, route_bp) -- is the head
-# carrying the most labels, ties in arrival order (the owner's decision R21 (4)). Earlier
-# retrievals keep arrival order, and the library displays what the body stores either way.
+# carrying the most labels, ties in arrival order (the majority-parent rule, SPEC §7.1).
+# Retrievals of a lower feature level keep arrival order, and the library displays what
+# the body stores either way.
 DISPLAYED_PARENT_LEVEL = 6
 
 
 def carried_labels(g, a, s, i):
-    """How many labels carry parent |i| of merge segment |s| (arm |a|) into the merge, by the
-    server's rule of R21 (4) (Walker::merge_level): constrain -- the labels whose lineages the
-    parent's head brings into the merge node: the ones the merge kept from it (its
-    partition entry) and the ones it closed there (an 'm' run ending at the parent's last
-    node, a label that came through another parent too); annotate -- the fewest labels
-    present at a node of the parent segment, true counts (every head at the merge node holds
-    the node's own labels, so the parent's own bases tell the routes apart: as many labels
-    as carry it whole). A label lost on the step into the merge node is in neither, as it
-    is in no head the server compares."""
+    """How many labels carry parent |i| of merge segment |s| (arm |a|) into the merge, by
+    the server's majority-parent rule (SPEC §7.1, Walker::merge_level): constrain -- the
+    labels whose lineages the parent's head brings into the merge node: the ones the merge
+    kept from it (its partition entry) and the ones it closed there (an 'm' run ending at
+    the parent's last node, a label that came through another parent too); annotate -- the
+    fewest labels present at a node of the parent segment, true counts (every head at the
+    merge node holds the node's own labels, so the parent's own bases tell the routes apart:
+    as many labels as carry it whole). A label lost on the step into the merge node is in
+    neither, as it is in no head the server compares."""
     pid = s.parents[i]
     parent = a.segments[pid]
     if g.mode == 'constrain':
@@ -1123,7 +1123,8 @@ def feature_level(g):
 
 
 def displayed_parent_rule(g):
-    """Which rule chose the parent g's merges display (R21 (4)): 'majority' (the envelope
+    """Which rule chose the parent g's merges display (the majority-parent rule, SPEC §7.1):
+    'majority' (the envelope
     states feature level 6 or more), 'arrival' (it states a lower level, or its
     capabilities state none: a server from before the levels were stated -- every server
     of level 5 or more states its level), or None, not known (a body without its
@@ -1139,10 +1140,10 @@ def majority_first(g, side, depth=None):
     """Whether every merge of arm |side| (those starting before |depth|, when given)
     displays a parent carried by the most labels -- no later parent carries more than the
     first (carried_labels(); ties keep the arrival order) -- so that its display is the one
-    the rule of feature level 6 makes, whichever rule made it: True; False when a merge
-    shows a parent the level-6 rule would not (a lower level's arrival order); None when
-    a merge cannot be judged (constrain mode with recorded lists cut, whose partitions are
-    lower bounds, or a merge without its partition). An arm without merges is True."""
+    the majority-parent rule of feature level 6 makes, whichever rule made it: True; False
+    when a merge shows a parent that rule would not (a lower level's arrival order); None
+    when a merge cannot be judged (constrain mode with recorded lists cut, whose partitions
+    are lower bounds, or a merge without its partition). An arm without merges is True."""
     a = g.arms[side]
     out = True
     for s in a.segments:
@@ -1169,7 +1170,8 @@ def check_rules(g, reference=None):
       'noncanonical'   an explicit field equal to its rule's value (the canonical form
                        writes '*'): valid, but not what a conforming writer emits;
       'invariant'      a structural invariant of §4/§9 that does not hold (and, for a
-                       retrieval whose envelope states feature level 6 or more, R21 (4): at
+                       retrieval whose envelope states feature level 6 or more, the
+                       majority-parent rule: at
                        every merge the first parent is carried by the most labels -- the
                        displayed walk follows it; carried_labels()).
     """
@@ -1210,12 +1212,12 @@ def check_rules(g, reference=None):
                                     'reference': theirs})
         if level >= DISPLAYED_PARENT_LEVEL and not (
                 g.mode == 'constrain' and arm.labels_per_node.nodes_truncated):
-            # R21 (4): from feature level 6 the displayed walk passes a merge through the
-            # parent carried by the most labels, ties in arrival order (which the body does
-            # not record: only a later parent carrying MORE is a violation). In constrain
-            # mode not decidable where recorded lists were cut (label_lists): the partitions
-            # are then lower bounds, and the server compares whole lineage states; annotate
-            # mode compares the true counts the body states
+            # the majority-parent rule: from feature level 6 the displayed walk passes a
+            # merge through the parent carried by the most labels, ties in arrival order
+            # (which the body does not record: only a later parent carrying MORE is a
+            # violation). In constrain mode not decidable where recorded lists were cut
+            # (label_lists): the partitions are then lower bounds, and the server compares
+            # whole lineage states; annotate mode compares the true counts the body states
             for s in segs:
                 if len(s.parents) > 1 and len(s.partition) == len(s.parents):
                     first = carried_labels(g, arm, s, 0)
@@ -1271,23 +1273,23 @@ def check_rules(g, reference=None):
     return out
 
 
-# (v5.2) each outcome dimension is complete only when no limitation of its class applies
+# each outcome dimension is complete only when no limitation of its class applies
 WALK_CLASS = ('walk_domain', 'seed_labels')
 LABEL_LOWER_CLASS = ('label_lists', 'inexact_counts', 'seed_labels', 'switch_sources',
                      'greedy_losses')
 LABEL_QUALIFIED_CLASS = ('trace_record_boundaries',)
-# (D3, owner decision R21 (3)) a WALKED result's derivation limitation is in the qualified
-# class too: its permitted set was derived from part of the seed, a superset of the labels
-# carrying the whole seed, so a label it reports may be one the whole seed excludes. A
-# failed seed's derivation limitation says why there is no result and qualifies nothing
-# (the server's outcome_of, traverse.cpp)
+# a WALKED result's derivation limitation (SPEC §7.0) is in the qualified class too: its
+# permitted set was derived from part of the seed, a superset of the labels carrying the
+# whole seed, so a label it reports may be one the whole seed excludes. A failed seed's
+# derivation limitation says why there is no result and qualifies nothing (the server's
+# outcome_of, traverse.cpp)
 WALKED_QUALIFIED_CLASS = ('derivation',)
 
 
 def qualifies(g, lim):
     """Whether limitation |lim| of graphlet |g| puts its label evidence in the qualified
     class (something reported may be overstated): trace_record_boundaries, and a walked
-    result's derivation (D3: a permitted set derived from part of the seed)."""
+    result's derivation (a permitted set derived from part of the seed)."""
     if lim.kind in LABEL_QUALIFIED_CLASS:
         return True
     return lim.kind in WALKED_QUALIFIED_CLASS and g.outcome is not None \
@@ -1295,9 +1297,9 @@ def qualifies(g, lim):
 
 
 def partial_derivation(g):
-    """The seed-level derivation limitation of a walked result (D3: the time budget ran
-    out while the permitted set was derived, after observed of the seed's k-mers; the walk
-    stopped at the seed), or None."""
+    """The seed-level derivation limitation of a walked result (SPEC §7.0: the time budget
+    ran out while the permitted set was derived, after observed of the seed's k-mers; the
+    walk stopped at the seed), or None."""
     if g.outcome is None or g.outcome.walks == 'failed':
         return None
     return next((l for l in g.limitations if l.kind == 'derivation' and l.arm is None),
@@ -1305,7 +1307,7 @@ def partial_derivation(g):
 
 
 def _outcome_findings(g):
-    """The owner's conservative rule (§14, v5.2): a reader can never find a limitation
+    """The conservative rule (§14): a reader can never find a limitation
     whose dimension still reads complete -- and, since each other value is defined by
     the limitations that apply, none that is not complete without one (a K record lost
     from the body shows here)."""

@@ -30,7 +30,7 @@ ARM_SIDES = ('left', 'right')
 
 class MissingEnvelope(LookupError):
     """An operation that needs the response envelope (seed_id, the normalized strategy,
-    annotation counters) on a graphlet parsed from a body alone (§5, v2): raised instead
+    annotation counters) on a graphlet parsed from a body alone (§5): raised instead
     of inventing defaults."""
 
 
@@ -401,13 +401,13 @@ class Graphlet:
     has_j: bool = field(default=False, compare=False, repr=False)
     cache: Dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
     # the sha-256 of the parsed text's records without its J line and Z record (parse()):
-    # what a resume token of a stopped list binds (stage L), so that a token is refused on
+    # what a resume token of a stopped list binds (local limits), so that a token is refused on
     # any other graphlet and accepted on the same body parsed again or saved and loaded
     body_digest: Optional[str] = field(default=None, compare=False, repr=False)
 
     # ---------------------------------------------------------------- text
 
-    # every operation takes budget= (stage L, metagraph.traverse.budget): keyword-only,
+    # every operation takes budget= (local limits, metagraph.traverse.budget): keyword-only,
     # None (the default) for no work or allocation budget; the lists whose order allows
     # it also take resume= (the token of a stopped call's Partial)
 
@@ -468,9 +468,9 @@ class Graphlet:
     def coordinates(self):
         """The record coordinates of the retrieval (coords.Coordinates: where each run's
         own bases lie in the indexed records, DESIGN §18), or None -- coordinates_reason
-        says why. Parsed from the per-seed summary and validated against the body (C9;
-        GraphletFormatError when inconsistent), kept in the graphlet's cache: a property,
-        not a slot, so the model of a graphlet without coordinates is what it always was."""
+        says why. Parsed from the per-seed summary and validated eagerly against the body
+        (GraphletFormatError when inconsistent), kept in the graphlet's cache: a property,
+        not a slot, so a graphlet without coordinates carries no extra field."""
         from . import coords
         return coords.of(self)
 
@@ -549,8 +549,8 @@ class Graphlet:
         """A NextRequest continuing |leaves| (see ops.next_request): .notes states what
         the request cannot carry exactly (a conservative loss budget or branch allowance,
         a switch target left out, an allowance the caller restarted). budget= is a
-        LocalBudget (stage L), not the request's loss budget; any other value of it is,
-        as before stage L, a keyword override like the others (passed on with them)."""
+        LocalBudget (local limits), not the request's loss budget; any other value of it
+        is a keyword override like the others (passed on with them)."""
         from . import ops
         return ops.next_request(self, arm, leaves, bp, reduce_budget, reset_branches,
                                 **overrides)
@@ -710,8 +710,8 @@ class Claim:
         }
 
     # a claim of a retrieval without record coordinates has none: a class attribute, not
-    # a slot, so a Claim's size (the stage-L account of every claims call) and its fields
-    # (the golden digests) are unchanged; CoordClaim carries them (decision C-N3)
+    # a slot, so a Claim's size (the local-limits account of every claims call) and its
+    # fields (the golden digests) do not depend on coordinates; CoordClaim carries them
     coordinates = None
 
 
@@ -872,7 +872,7 @@ class Comparison:
     support: Tuple[str, str] = ('kmer', 'kmer')
     scopes: Tuple[str, str] = ('per_path', 'per_path')
     strategies: Tuple[Any, Any] = (None, None)
-    # stage L: the stop of a comparison its local budget interrupted (comparable 'unknown')
+    # local limits: the stop of a comparison its local budget interrupted (comparable 'unknown')
     local_stop: Optional[dict] = None
 
     def as_dict(self):

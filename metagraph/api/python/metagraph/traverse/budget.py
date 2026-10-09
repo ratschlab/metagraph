@@ -1,21 +1,21 @@
-"""Stage L: work and allocation budgets for the library's local operations (DESIGN §21).
+"""Local limits: work and allocation budgets for the library's local operations (DESIGN §21).
 
-Off by default (L2): an operation called without a budget -- no `budget=` argument and no
-ambient budget (local_budget()) -- runs exactly as before, its output byte for byte the
-same, and nothing below is consulted beyond one `is None` test per charge point.
+Off by default: an operation called without a budget -- no `budget=` argument and no
+ambient budget (local_budget()) -- charges nothing, its output does not depend on this
+module, and nothing below is consulted beyond one `is None` test per charge point.
 
 With a budget, a local call either completes or stops and says so (§21.1):
 
   * WORK is counted in local work units (lwu): a deterministic, weighted count of the
     model elements an operation's algorithm visits and of the rows and text it produces
     (work model 2, WORK_MODEL; 1 lwu is about 0.1 us of CPython 3.11 on the reference
-    machine). It is not CPU time. Units are charged at the COLD PRICE (L1): a derivation an
+    machine). It is not CPU time. Units are charged at the COLD PRICE: a derivation an
     operation uses (paths, splits, merge maps, evidence, label summaries, ...) is charged at
     its structural price on every call, whether a cache holds it or not, so the same call
     on the same graphlet with the same budget charges the same units and stops at the same
     row in any process and whatever earlier calls cached. Warm calls pay more than they
     spend.
-  * MEMORY is a modelled account (L9, `memory_bound: "model"`): the bytes of the result
+  * MEMORY is a modelled account (`memory_bound: "model"`): the bytes of the result
     objects, rows, spelled sequences, output text and derived caches the call builds or
     uses, each charged at a size modelled on CPython (ASCII text at one byte per character
     plus its header, lists, sets, dicts and the slotted records at their measured sizes,
@@ -69,69 +69,53 @@ __all__ = ['LocalLimits', 'LocalBudget', 'LocalStop', 'LocalBudgetExceeded', 'Pa
            'local_budget', 'unbudgeted', 'current', 'WORK_MODEL', 'DEADLINE_POLL',
            'MEMORY_BOUND']
 
-# Work model 2 (the review of 2026-10-06, P2 items L1, L2, O2, O3; library only, folded
-# into feature level 6). What a call charges moved from work model 1 where it was not
-# deterministic or not conservative -- a stop point of model 1 is not one of model 2 for:
-#   * next_request()/next_requests() with a change_cost table (L1): the labels owed the
-#     default switch cost are walked in name order, as walker.cpp does, so the pops and
-#     their charge are the same in every process (model 1 charged what the hash seed's set
-#     order gave: 587 to 643 lwu on the review's 8 x 8 table); and the table is charged
-#     (the review of these fixes: the account stayed at the 0-entry figure, 9.8x short of
-#     the traced peak at 900 entries, and the work 3-10x short): each copy of its entries
-#     (the merged strategy, the request's, next_requests()' per walk: 3 W_ELEM and their
-#     bytes per entry, the copy's memo while it is built), each check of them (W_ELEM per
-#     entry), and per switch search the check and the build (W_ELEM each per entry), the
-#     count of its pairs (W_STEP per entry), its edges (W_ELEM each), and the bytes of its
-#     table, edges and heap entries and of the reached labels' losses (the review's 8 x 8
-#     table: 587 + 360 lwu);
-#   * compare(mode='prefix_subset') (L2): b's supported prefixes are sorted once per arm
-#     and label and bisected per walk (one unit per supported prefix before); a's claims
-#     are filed in the tree of their chains (spelled as prefixes before); an omission is
-#     charged W_ROW, each segment its walk is followed through (W_ELEM + 1 per 512 bases),
-#     each anchor or bisection of its label (W_ELEM) and each recorded refusal tested
-#     there (W_ELEM + 1 per 32 label ids), after a's refusals were indexed once per
-#     comparison (W_ELEM each) -- model 1 charged 2 per event of the arm per omission and
-#     scanned every segment uncharged (32,001 segments: 72x the work charged); the
-#     divergence of a's walks is charged only where it is computed; a refusal or claim
-#     whose position lies before its own segment (a body the server never writes) is
-#     filed under its ancestor by one walk of the chains' tree (W_STEP per segment, a
-#     bisection per refusal or claim, and the sort of the lists they join), not by an
-#     uncharged climb per refusal (16,000 such events on a 16,000-deep comb: 44x);
-#   * GraphletStore.standalone_text() and save_body() (O2): a call of their own, so their
-#     base (W_CALL, CALL_BASE) is charged once like every other call's;
-#   * to_json() (O3): the seed block (W_NODE per dropped label, W_PAIR per [from, to] run
-#     of one), the seed-level and arm-level limitations and label_dict (W_NODE each), and
-#     their bytes, before they are built (model 1 built them uncharged).
-# The P3 items of the same review (library, folded into feature level 6 too) moved more:
-#   * support_changes() (L3): each label that changed is charged its reason's whole scan
-#     of the walk's chain (segments, runs, events) -- model 1 charged half, "on average" --
-#     and, once per change, the split it may have taken (W_STEP per chain segment, W_ELEM
-#     per sibling) and per removed label a bisection of each sibling's entry set and the
-#     parent's end set (W_ELEM and a unit per halving): model 1 charged nothing for the
-#     sets, which were scanned per label (100x under at 20,000 labels, 1000x at 40,000);
-#     its bytes are 729 per changed label (465 in model 1: 0.84-0.93 of the traced peak);
-#   * walks() and walks_at(with_claims=True) in annotate mode (L5): the index of each
-#     leaf's route ends is built once (W_ELEM per route end, the sorts, its bytes) where
-#     every chunk of 32 walks was charged a pass over all of the arm's route ends (W/32 x
-#     E: a 30 M lwu view-class budget stopped at 8,544 of 9,000 walks it now completes);
-#   * next_request()'s left-out note (L7): its switch searches run over the names the
-#     change_cost table names plus one stand-in (the same answer, smaller searches,
-#     charged as such), and the note's reach tests (W_ELEM each) and text are charged --
-#     model 1 charged a search of the whole pool per continued label (18 M lwu at 2,000
-#     labels, 99 k now) and none of the tests or the text;
-#   * compare(mode='walks' / 'prefix_subset') and compare_cost() (L12): each segment of the
-#     cuts' chains is charged its own part of cut_cost once per comparison, and each cut its
+# Work model 2 (WORK_MODEL). Where an operation's charges are not obvious from its code:
+#   * next_request()/next_requests() with a change_cost table: the labels owed the default
+#     switch cost are walked in name order, as walker.cpp does, so the pops and their
+#     charge are the same in every process (a set's hash-seeded order would make them
+#     vary); and the table is charged: each copy of its entries (the merged strategy, the
+#     request's, next_requests()' per walk: 3 W_ELEM and their bytes per entry, the copy's
+#     memo while it is built), each check of them (W_ELEM per entry), and per switch search
+#     the check and the build (W_ELEM each per entry), the count of its pairs (W_STEP per
+#     entry), its edges (W_ELEM each), and the bytes of its table, edges and heap entries
+#     and of the reached labels' losses;
+#   * compare(mode='prefix_subset'): b's supported prefixes are sorted once per arm and
+#     label and bisected per walk; a's claims are filed in the tree of their chains; an
+#     omission is charged W_ROW, each segment its walk is followed through (W_ELEM + 1 per
+#     512 bases), each anchor or bisection of its label (W_ELEM) and each recorded refusal
+#     tested there (W_ELEM + 1 per 32 label ids), after a's refusals are indexed once per
+#     comparison (W_ELEM each); the divergence of a's walks is charged only where it is
+#     computed; a refusal or claim whose position lies before its own segment (a body the
+#     server never writes) is filed under its ancestor by one walk of the chains' tree
+#     (W_STEP per segment, a bisection per refusal or claim, and the sort of the lists they
+#     join), not by a climb per refusal (quadratic on a deep comb);
+#   * GraphletStore.standalone_text() and save_body(): a call of their own, so their base
+#     (W_CALL, CALL_BASE) is charged once like every other call's, and the body's digest
+#     check is one more lwu per 256 bytes;
+#   * to_json(): the seed block (W_NODE per dropped label, W_PAIR per [from, to] run of
+#     one), the seed-level and arm-level limitations and label_dict (W_NODE each), and
+#     their bytes, before they are built;
+#   * support_changes(): each label that changed is charged its reason's whole scan of the
+#     walk's chain (segments, runs, events) and, once per change, the split it may have
+#     taken (W_STEP per chain segment, W_ELEM per sibling) and per removed label a
+#     bisection of each sibling's entry set and the parent's end set (W_ELEM and a unit per
+#     halving); its bytes are 729 per changed label;
+#   * walks() and walks_at(with_claims=True) in annotate mode: the index of each leaf's
+#     route ends is built once (W_ELEM per route end, the sorts, its bytes), not a pass over
+#     all of the arm's route ends per chunk of 32 walks;
+#   * next_request()'s left-out note: its switch searches run over the names the
+#     change_cost table names plus one stand-in (the same answer as a search of the whole
+#     pool, with smaller searches, charged as such), and the note's reach tests (W_ELEM
+#     each) and text are charged;
+#   * compare(mode='walks' / 'prefix_subset') and compare_cost(): each segment of the cuts'
+#     chains is charged its own part of cut_cost once per comparison, and each cut its
 #     anchor's part, its prefix's join and its labels (and the pass's running state, held
-#     for the pass) -- model 1 charged every cut its whole chain's cut_cost (a comb of
-#     4,000 walks: quadratic); the scan of the restricted leaves and the marking of their
-#     chains is W_ELEM + W_STEP per segment (W_ELEM in model 1); a cut's bytes count its
-#     label set and its {label: j} at their bound (in constrain mode the root's entry and
-#     the first piece's labels, where model 1 counted the root's entry for both);
-#   * to_fasta(leaves=<one-shot iterator>) (O11): the copy of the walks it gives (refused
-#     with a TypeError before, so no stop point moved);
-#   * GraphletStore.standalone_text() and save_body() (O17): the body's digest check, one
-#     more lwu per 256 bytes.
-# Every other charge is model 1's; the work model changes no unbudgeted answer.
+#     for the pass), not its whole chain's cut_cost (quadratic on a comb); the scan of the
+#     restricted leaves and the marking of their chains is W_ELEM + W_STEP per segment; a
+#     cut's bytes count its label set and its {label: j} at their bound (in constrain mode
+#     the root's entry and the first piece's labels);
+#   * to_fasta(leaves=<one-shot iterator>): the copy of the walks it gives.
+# The work model changes no unbudgeted answer.
 WORK_MODEL = 2
 MEMORY_BOUND = 'model'
 # a deadline is read from the clock at most this many lwu apart (about 6.5 ms nominal)

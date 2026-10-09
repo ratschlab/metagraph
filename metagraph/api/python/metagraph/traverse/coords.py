@@ -1,4 +1,4 @@
-"""Record coordinates (DESIGN §18 and §26; the owner's decisions C1-C12, C-N1..C-N9).
+"""Record coordinates (DESIGN §18 and §26).
 
 A request with `strategy.output.coordinates: true` gets, per seed result in every detail
 level, either a `coordinates` block -- where each run's own bases lie in the indexed
@@ -6,11 +6,11 @@ records -- or `coordinates: null` with `coordinates_reason`. MGT v1 is frozen, s
 is not in the body: it rides in the per-seed JSON summary (Graphlet.seed_summary), which
 the J line of a saved file, the store's entries and every view keep with the body.
 
-This module parses and validates the block (C9: an inconsistent block is rejected eagerly,
+This module parses and validates the block (eagerly: an inconsistent block is rejected,
 GraphletFormatError 'coordinates: ...'), keeps the parsed index in the graphlet's cache
 (never a slot of the model: Graphlet, Claim, Walk and LabelWalk keep their layout, so the
-stage-L account and the golden digests of graphlets without coordinates are unchanged,
-decision C-N3) and clips a run's occurrences to a claim's cut.
+local-limits account and the golden digests of graphlets without coordinates do not
+depend on them) and clips a run's occurrences to a claim's cut.
 
 The intervals (the frozen wire contract of level 6):
   * 0-based, half-open, on the record's forward strand. With c the chain's k-mer coordinate
@@ -21,15 +21,16 @@ The intervals (the frozen wire contract of level 6):
     the column's k-mer index space -- record i's k-mer j is offset_i + j, offset_{i+1} =
     offset_i + len_i - k + 1 -- so the last k-1 bases of a record share their numbers with
     the next record's first positions: a column interval cannot be attributed to one record
-    without the record lengths (deferred, C10), and two records' intervals are not
-    necessarily disjoint. Kind mixed: each label's own kind says how to read its positions.
+    without the record lengths, which the block does not carry, and two records' intervals
+    are not necessarily disjoint. Kind mixed: each label's own kind says how to read its
+    positions.
   * Each list keeps the first max_occurrences occurrences by start; a cut list states its
     true count (total), and the seed-level limitation `coordinates` counts the cut lists.
   * chains_ended: chains that continued on no followed path of the run's lineage (chains
     split among the children of a split are not counted; clones inherit the prefix's).
   * lower_bound: the run was entered by a switch into a label whose own lineage was live
     there; that label's chains starting at the switch node are left out, so the run's
-    occurrences are a lower bound (decision C-N2, X-18.2).
+    occurrences are a lower bound.
 
 Stdlib only.
 """
@@ -41,7 +42,7 @@ from . import budget as _B
 from . import derive
 from ._codec import MAX_U64, UNLIMITED, GraphletFormatError, tok as _tok
 from .budget import DICT, DICT_KEY, INT, TUPLE, W_ELEM, record_bytes
-# defined in the light client (LRG-G7: importing the client loads no model), named here too
+# defined in the light client (importing the client loads no model), named here too
 from .client import strip_coordinate_cap  # noqa: F401
 
 __all__ = ['Coordinates', 'RunCoordinates', 'SeedOccurrences', 'KINDS', 'REASONS',
@@ -56,7 +57,7 @@ LIMITATION_KIND = 'coordinates'
 CAP_KNOB = 'output.max_coordinate_occurrences'
 # the cache key of the parsed index (Graphlet.cache): set only for a graphlet that carries a
 # block, so that a graphlet without one keeps its caches -- and its memory_bytes(),
-# cache_signature() and every stage-L charge -- exactly as before
+# cache_signature() and every local-limits charge -- unaffected by coordinates
 CACHE_KEY = 'coordinates'
 
 
@@ -179,15 +180,16 @@ def reason(g):
 def of(g, b=None):
     """The graphlet's parsed Coordinates, or None (no block). Built and validated from the
     summary the first time (GraphletFormatError when inconsistent) and kept in g.cache.
-    |b| (stage L): the index is a derivation of the summary, charged at its cold price
-    once per call (uses()) whether the cache holds it or not (L1), and before it is built
+    |b| (local limits): the index is a derivation of the summary, charged at its cold
+    price once per call (uses()) whether the cache holds it or not, and before it is built
     (a stop leaves nothing in the cache)."""
     if not present(g):
         return None
     if b is not None:
         # keyed, before the build: a cold build charged through validate(g, b) is unkeyed,
-        # so the call's next use (the other arm's claims) charged it a second time, and a
-        # call cost more after the store re-parsed the model than while it was resident
+        # so the call's next use (the other arm's claims) would charge it a second time,
+        # and a call would cost more after the store re-parsed the model than while it was
+        # resident
         uses(b, g)
     got = g.cache.get(CACHE_KEY)
     if got is None:
@@ -202,7 +204,7 @@ def label_kind(g, label):
     return 'record' if g.labels[label].kind == 'header' else 'column'
 
 
-# ------------------------------------------------------------------ stage L
+# ------------------------------------------------------------------ local limits
 
 # the parsed index's modelled size: a record per entry with its interval tuple and three
 # ints, and per occurrence a (start, end) tuple of two ints (positions are above 256, so
@@ -245,7 +247,7 @@ def index_price(entries, occ):
 
 def uses(b, g):
     """Charge budget |b| the graphlet's coordinate index at its cold price, once per call
-    (L1: a derivation is charged on every use, whether the cache holds it or not)."""
+    (a derivation is charged on every use, whether the cache holds it or not)."""
     if b is None or not present(g):
         return
     got = g.cache.get(CACHE_KEY)
@@ -341,18 +343,18 @@ def _check_null(g, s):
 
 
 def validate(g, b=None):
-    """The summary's coordinates checked against the body (C9) -> Coordinates, or None for
+    """The summary's coordinates checked against the body -> Coordinates, or None for
     the null form (its reason checked). Raises GraphletFormatError('coordinates: ...') when
     anything is inconsistent: the block's presence against the request's echo; kind
-    against the L records (C3) and k against H; one seed entry per seed label, ascending;
+    against the L records and k against H; one seed entry per seed label, ascending;
     one entry per run of every requested arm, in R order, with the R record's run, label,
     from_bp and to_bp; intervals of the right length, ascending; occurrences_total exactly
     on the lists cut at the cap; chains_ended > 0 and lower_bound true where stated (and
     lower_bound only on a switch-entered run); complete, runs_lower_bound and the
     seed-level K record `coordinates` (lists_cut, observed, limit) agreeing with the lists;
     and every seed-entered run's occurrences continuing a seed occurrence of its label
-    where the seed list was not cut. |b| (stage L): the index is charged before it is
-    built (a stop leaves nothing in the cache)."""
+    where the seed list was not cut. |b| (local limits): the index is charged before it
+    is built (a stop leaves nothing in the cache)."""
     s = g.seed_summary
     if not isinstance(s, dict):
         return None
@@ -474,8 +476,8 @@ def validate(g, b=None):
     # Both lists ascend by start and the seed start a run occurrence implies grows with it
     # (right: s - from_bp - n, left: e + from_bp), so one merge pass over the two tuples
     # checks them: no set of the seed starts per run, which the index price never paid for
-    # (two sets of 5,000 starts alive at once were 1.3 MB over a block the price put at
-    # 1.8 MB, and the traced peak passed the account)
+    # (two sets of 5,000 starts alive at once would be 1.3 MB over a block the price puts
+    # at 1.8 MB, and the traced peak would pass the account)
     n = g.seed.length_bp
     for side, runs in arms.items():
         r_of = g.arms[side].runs
@@ -527,7 +529,7 @@ def validate(g, b=None):
 
 
 def attach(g, b=None):
-    """Validate the summary's coordinates eagerly (C9) and keep the parsed index in
+    """Validate the summary's coordinates eagerly and keep the parsed index in
     g.cache: what from_response(), a parse of a saved file's J line and the store's first
     parse of an unparsed entry do. Nothing is cached for a graphlet without a block."""
     got = validate(g, b)

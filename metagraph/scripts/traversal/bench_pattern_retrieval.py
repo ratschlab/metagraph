@@ -5,30 +5,29 @@ engine's budget cases (CLI).
 Runs `metagraph pattern --json` of two binaries (a baseline and a candidate) on the same requests and indexes,
 several times each, and reports per case: the wall time, the answer's elapsed_ms, its stops and counts, the
 runs refused (a 503 `deadline` exits 1), and whether the two answers are identical once their timings are
-removed (`timing` objects and the top-level elapsed). Written for GPT review 3 (2026-10-08: findings 1 and 4,
-the verification of long paths and the occurrence cap; findings 2, 3 and 5, the low-complexity diagnostic, the
-sink-edge skip and the extension's clock), first run on 7b8354f2 (baseline bin_8f49cc88) against round fix3.
+removed (`timing` objects and the top-level elapsed). The cases exercise the verification of long paths, the
+occurrence cap, the low-complexity diagnostic, the sink-edge skip and the extension's clock.
 
 CASES
   repeat (built here, cached in OUT/indexes): one record of 30,000 A, k = 3, row_diff_coord with coordinates and
-    its record mapping -- the GPT repros:
+    its record mapping -- the repros:
       homopolymer-path   a 1,500-base IUPAC path (A..A W A, long_search paths), occurrences, cap 1, 500 ms
       cap-volume-10      ten AAA (one context of 29,998 placed occurrences each), cap 1, 1,500 ms
   dinucleotide (built here): one record of (AC)^15,000, k = 3 -- no run of consecutive coordinates, the join's
     worst case: (AC)^750 as a path (14,000+ chains through 1,498 k-mers), cap 1, 500 ms
   sinks (built here): 100,000 records A^18 + an 11-base code over AGT + TC and one T^30 CA, k = 31, no mask --
     100,000 consecutive sink edges before the k-mer T^29 CA (the graph of the unit test
-    PatternUnmasked.LongSinkRunSkippedByRankAndSelect); finding 3:
+    PatternUnmasked.LongSinkRunSkippedByRankAndSelect):
       sinks-c-251ms      C, partial, max_contexts 1, forward, time_budget_ms 251 (1 ms of work time)
       sinks-c            the same without a budget
   mini_refseq (build/mini_refseq, scripts/traversal/build_mini_refseq.sh), as built (no mask), the engine's
     repros:
-      atg-10000          (ATG)^10,000 as paths, mode count, max_steps 1, 251 ms (finding 2: the low-complexity
+      atg-10000          (ATG)^10,000 as paths, mode count, max_steps 1, 251 ms (the low-complexity
                          diagnostic of a 30,000-base pattern)
       protein-10000      M^10,000 likewise
       half-n-<B>ms       GNNNC NNNT NNNA ... (40 bases, every other base N) as paths, mode count, budgets B of
-                         130-180 ms, --pattern-finalize-ms 1 --pattern-min-information-bits 0 (finding 5: the
-                         extension of 331 anchors without a clock reading). Kind 'sweep': whether a run is late
+                         130-180 ms, --pattern-finalize-ms 1 --pattern-min-information-bits 0 (an
+                         extension of 331 anchors between clock readings). Kind 'sweep': whether a run is late
                          depends on the machine's speed and load; compare the refused runs per binary, and run
                          it with --runs 10 or more
   mini_refseq, the normal cases (with --pattern-build-mask): blaNDM-1's first 40 bases and the 51-base chimera
@@ -172,7 +171,7 @@ def cases(out, mg_for_build, mini):
     if not os.path.exists(graph) or not os.path.exists(anno):
         print('no mini_refseq at %s: its cases are skipped' % mini, file=sys.stderr)
         return out_cases
-    # the engine's repros run on the mini as built, without its mask (as GPT review 3 ran them)
+    # the engine's repros run on the mini as built, without its mask
     for name, pattern in (('atg-10000', {'dna': 'ATG' * 10000}), ('protein-10000', {'protein': 'M' * 10000})):
         out_cases.append((name, 'repro', graph, anno, {
             'patterns': [pattern], 'long_search': 'paths', 'mode': 'count', 'max_steps': 1,

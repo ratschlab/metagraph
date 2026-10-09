@@ -15,12 +15,11 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
              .edgemask by `metagraph transform --mask-dummy` (DESIGN-pattern-search.md §4, the
              one-time step for a host; the .dbg is unchanged, checked, so the mini's annotation
              and .seqs serve it as they are), as integration_tests/test_pattern.py makes it
-  unmasked   the mini index as built (no .edgemask): served all the same since owner decision
-             #16 of 2026-10-08 (capabilities counting upper_bound): a count the search could not
-             resolve is the bounds [lower, U], U the graph's candidate entries (its source dummies
-             among them), with the additive estimate U x f (f the dummy fraction sampled at
-             load, index.dummy_fraction); the lists stay exact (it answered mask_required before).
-             Owner decision #24: a pattern with at most --pattern-max-checked-entries (default
+  unmasked   the mini index as built (no .edgemask), served all the same (capabilities counting
+             upper_bound): a count the search could not resolve is the bounds [lower, U], U the
+             graph's candidate entries (its source dummies among them), with the additive
+             estimate U x f (f the dummy fraction sampled at load, index.dummy_fraction); the
+             lists stay exact. A pattern with at most --pattern-max-checked-entries (default
              50) unchecked candidates has each tested at query time, its counts then exact
   unmasked_unchecked
              the same with --pattern-max-checked-entries 0: no candidate is tested, so every
@@ -38,10 +37,9 @@ Servers (each a server_query on 127.0.0.1, started and stopped by this script):
              mapping (output.labels "all" places nothing: placement global)
   masked_small_predicate_cap
              the masked copy served with --pattern-max-predicate-labels 4: a predicate of more
-             names is refused (predicate_too_large; increment 5b)
+             names is refused (predicate_too_large)
   hash       a hash graph (build --graph hash) of one mini record (1296536.fa) with a column
-             annotation: a graph the engine does not recognise (representation_unsupported;
-             review of 2026-10-07, C2-01)
+             annotation: a graph the engine does not recognise (representation_unsupported)
 
 Two fixtures are HAND-MADE (index.json "hand_made": true): the 503 bodies a server cannot be
 made to produce on demand (an answer that overran its finalisation reserve; a request during
@@ -58,7 +56,7 @@ how far it got; when the clock cut its release, also its `returned` and `results
 run; --check blanks them on both sides, and a regeneration keeps
 a file whose blanked content did not change (so that rerunning does not churn the files). The
 patterns after it are stopped by the same budget (SPEC §7.6: unknown counts, work zero), the
-same in every run, and compared as they are (review of 2026-10-07, C2-02). Paths
+same in every run, and compared as they are. Paths
 under the work directory are written as {work}/... (they would otherwise name a temporary
 directory). Each fixture also asserts the situation it exists to show (`expect` below), so a
 server change cannot silently turn a fixture into a different case.
@@ -123,48 +121,49 @@ LOW = 'GCCGCCGCCGCCGCCGCCGC'         # a repeat sdust flags (low_complexity_patt
 ABSENT_20 = 'CTAGGAGATGGGCCAGCTAC'
 ABSENT_40 = 'GATAGAGAACTCGAGAGAGGTTCCACCTTCATATTGAATT'
 # 12 bases of NDM-F's first 13 around a run of 19 Ns: 24 bits, admitted, but ~2.5e7 range
-# steps on the mini (about 1.5 s): stopped by any budget of a few milliseconds. (It was 12 Ns
-# then NDM-F's first 12 bases, until the engine learnt to skip a pattern's leading and
-# trailing N runs (review of 2026-10-07, X-EFFICIENCY-01): that one now takes 125 steps)
+# steps on the mini (about 1.5 s): stopped by any budget of a few milliseconds. (Not 12 Ns then
+# NDM-F's first 12 bases: the engine skips a pattern's leading and trailing N runs, so that one
+# takes 125 steps)
 HEAVY = NDM_F[:2] + 'N' * 19 + NDM_F[3:13]
 # a 10-mer whose suffix-scope count needs a mask scan (the prefix of a record's first k-mer):
 # discovery takes 20 range steps, its scan one more, so max_steps 20 stops in the scan with
-# bounds [lower, upper] (review of 2026-10-07, X-TESTS-03: no body carried bounds or mask_scan)
+# bounds [lower, upper] (a body that carries bounds and mask_scan)
 SCAN_10 = 'ATGCCGGTGA'
 SCAN_STEPS = 20
 # the record the hash graph is built from (a graph the engine does not recognise)
 HASH_RECORD = '1296536.fa'
-# owner decision #16 (graphs without the dummy-edge mask): the first 16 bases of an E. coli
-# record (562.fa, NZ_CP021206.1) whose first k-mer no k-mer enters, so that the graph's source
-# dummies ($^j and its first k - j bases, 1 <= j <= 15) hold it at offsets 1 to 15: 17 contexts
-# on the masked graph (1 on +, 16 on -), an upper bound of 32 without the mask (15 source
-# dummies more), its estimate 32 -- the estimate is not a bound
+# graphs without the dummy-edge mask (DESIGN-pattern-search.md §4.4): the first 16 bases of an
+# E. coli record (562.fa, NZ_CP021206.1) whose first k-mer no k-mer enters, so that the graph's
+# source dummies ($^j and its first k - j bases, 1 <= j <= 15) hold it at offsets 1 to 15: 17
+# contexts on the masked graph (1 on +, 16 on -), an upper bound of 32 without the mask (15
+# source dummies more), its estimate 32 -- the estimate is not a bound
 START16 = 'GATGCCGGTGAACAAC'
 START16_EXACT = 17
 START16_UPPER = 32
-# owner decision #24 (few unchecked candidates are tested): the first 14 bases of the same record,
-# [4, 72] without the check: 68 unchecked candidates, more than the default limit of 50, so it
-# stays bounds on the default server too
+# a few unchecked candidates are tested one by one (max_checked_entries,
+# DESIGN-pattern-search.md §4.4): the first 14 bases of the same record, [4, 72] without the
+# check: 68 unchecked candidates, more than the default limit of 50, so it stays bounds on the
+# default server too
 START14 = START16[:14]
 START14_LOWER = 4
 START14_UPPER = 72
-# increment 4 (paths, long_search "paths"): a 51-mer of two copies of a repeated 31-mer of the
+# paths (long_search "paths"): a 51-mer of two copies of a repeated 31-mer of the
 # E. coli records (562): 10 bases before one copy, the 31-mer, 10 bases after another. Every
 # k-mer of it is in the index (each window lies in one copy), so it is a path of the graph, but
 # no record holds it whole: its labels are carried (label_intersection), none record_verified
 CHIMERA = 'CGGCCTCCAGAGCACTTTGTCGTTTTTGGACGGAAAATCCCTAGAACCCCT'
-# increment 5 (peptides): the first residues of the NDM-1 protein (blaNDM-1's first codons,
+# peptides: the first residues of the NDM-1 protein (blaNDM-1's first codons,
 # ATG GAA TTG CCC AAT ATT ATG CAC CCG GTC GCG AAG CTG AGC): 10 residues are 30 bases, within
 # one k-mer; 14 residues are 42 bases, a pattern longer than k
 NDM_PEP = 'MELPNIMHPV'
 NDM_PEP_LONG = 'MELPNIMHPVAKLS'
-# owner decision #19: '*' is a stop codon of the request's genetic code. NDM-1's last 9 residues
+# '*' is a stop codon of the request's genetic code. NDM-1's last 9 residues
 # and its stop (... ACG GCC CGC ATG GCC GAC AAG CTG CGC TGA): 30 bases, within one k-mer
 NDM_PEP_STOP = 'TARMADKLR*'
 # the same with X (any residue, never a stop) in place of the stop: no instance on the mini
 NDM_PEP_STOP_X = 'TARMADKLRX'
 
-# increment 5b (predicates, SPEC §19): a GCG repeat with 1,828 contexts on the mini, 1,760 of
+# predicates (SPEC §19): a GCG repeat with 1,828 contexts on the mini, 1,760 of
 # them carrying 287 (Pseudomonas aeruginosa) only; the nine columns of the mini (taxids as
 # strings); a selective predicate (an E. coli column, not P. aeruginosa's) that keeps 60 of them;
 # a typo; and the server variant's cap on a predicate's names (masked_small_predicate_cap)
@@ -179,7 +178,7 @@ SMALL_PREDICATE_CAP = 4
 # 503 and the expectations
 FINALIZE_MS = 250
 TINY_BUDGET_MS = FINALIZE_MS + 1
-# a step stop whose release then meets the work time (review of 2026-10-07, C1-03): ACG in
+# a step stop whose release then meets the work time: ACG in
 # suffix scope (an exact pattern of L <= k there: exempt from the floor) has ~1.2e5 contexts
 # on the mini, 3 range steps stop its discovery, and 150 ms of work time are always spent in
 # its release before max_contexts (10,000) are out: the estimated time to write the results
@@ -196,7 +195,7 @@ def counts_of(entry):
 
 
 def paths_count(relation, value=None, extension=None):
-    """counts.paths (long_search "paths", increment 4) with |relation|, |value| and what the
+    """counts.paths (long_search "paths") with |relation|, |value| and what the
     extension did, when given."""
     def run(entry):
         c = entry['counts']['paths']
@@ -332,7 +331,7 @@ def entries(*per_entry):
 
 
 def selection(pass_, tested=None, selected=None, access='rows'):
-    """increment 5b (SPEC §19.7): selection.pass, counts.tested and counts.selected (each a
+    """SPEC §19.7: selection.pass, counts.tested and counts.selected (each a
     (relation, value) pair, or for selected bounds (lower, upper)), and the access."""
     def run(entry):
         check(entry['selection']['pass'] == pass_ and entry['selection']['access'] == access,
@@ -350,7 +349,7 @@ def selection(pass_, tested=None, selected=None, access='rows'):
 
 
 def selection_labels_are(*names):
-    """Every result's selection_labels (increment 5b, P22) is one of the lists |names|."""
+    """Every result's selection_labels is one of the lists |names|."""
     def run(entry):
         lists = {tuple(r['selection_labels']) for r in entry['results']}
         check(lists <= {tuple(n) for n in names} and entry['results'], lists)
@@ -358,8 +357,8 @@ def selection_labels_are(*names):
 
 
 def selection_strands_are(*strands):
-    """Every result's selection_strands (increment 5b, the owner's answer to P11: per label the
-    orientation whose row carries it) is one of the lists |strands|, one per selection label."""
+    """Every result's selection_strands (per label the orientation whose row carries it) is one
+    of the lists |strands|, one per selection label."""
     def run(entry):
         lists = {tuple(r['selection_strands']) for r in entry['results']}
         check(lists <= {tuple(n) for n in strands} and entry['results'], lists)
@@ -369,7 +368,7 @@ def selection_strands_are(*strands):
 
 
 def predicate_block(normal_form=None, unknown=None, vacuous=None, strands=None):
-    """The answer's predicate block (increment 5b, SPEC §19.10)."""
+    """The answer's predicate block (SPEC §19.10)."""
     def run(answer):
         b = answer['predicate']
         if normal_form is not None:
@@ -391,7 +390,7 @@ def caps_block(available, reason=None, mask=None, counting=None):
         if mask is not None:
             check(b['mask'] == mask, b)
         if counting is not None:
-            # owner decision #16: exact with the mask, upper_bound (and the dummy fraction the
+            # exact with the mask, upper_bound (and the dummy fraction the
             # estimates rest on) without it
             check(b['counting'] == counting, b)
             check((b['dummy_fraction'] is not None) is (counting == 'upper_bound'), b)
@@ -399,7 +398,7 @@ def caps_block(available, reason=None, mask=None, counting=None):
 
 
 def estimated(lower, upper, estimate):
-    """A graph without its mask (owner decision #16): counts.contexts (or anchors) is the bounds
+    """A graph without its mask: counts.contexts (or anchors) is the bounds
     [lower, upper] with this estimate, and the entry says so (estimate_sampled_dummy_fraction)."""
     def run(entry):
         c = counts_of(entry)
@@ -694,7 +693,7 @@ FIXTURES = [
          'stored prefix); any_offset is complete there',
          entries(slot_error('scope_unsupported'))),
 
-    # ---------------------------------------------------------------- labels (increment 3)
+    # ---------------------------------------------------------------- labels
     post('labels_all', 'masked',
          {'patterns': [p(NDM_F, ident='NDM-F'), p(ABSENT_20, ident='absent')],
           'output': {'labels': 'all'}}, 200,
@@ -772,7 +771,7 @@ FIXTURES = [
          entries(expect_all(exact(24), complete, field('placement', 'global'),
                             field('notes', ['record_bounds_unknown']),
                             counted('occurrences', 'unknown')))),
-    # GPT review 1 of the SPEC (2026-10-07), #11: the cases no fixture showed
+    # more cases of output.labels "all"
     post('labels_all_partial_exact_cut', 'masked',
          {'patterns': [p(NDM_F)], 'mode': 'partial', 'max_labels': 2,
           'max_occurrences_per_label': 1, 'output': {'labels': 'all'}}, 200,
@@ -838,7 +837,7 @@ FIXTURES = [
          entries(expect_all(exact(24), complete, field('annotation', 'unbudgeted'),
                             field('placement', 'none_canonical')))),
 
-    # ---------------------------------------------------------------- paths (increment 4)
+    # ---------------------------------------------------------------- paths
     post('paths', 'masked',
          {'patterns': [p(NDM_40, ident='NDM-40'), p(ABSENT_40, ident='absent')],
           'long_search': 'paths', 'output': {'labels': 'none'}}, 200,
@@ -944,7 +943,7 @@ FIXTURES = [
          'verify (no record mapping: its best support is label_intersection)',
          refused('support_unavailable')),
 
-    # ---------------------------------------------------------------- peptides (increment 5)
+    # ---------------------------------------------------------------- peptides
     post('peptide', 'masked',
          {'patterns': [p(NDM_PEP, 'protein', 'NDM-1 1-10'), p('MELPNJMHPV', 'protein', 'J'),
                        p(NDM_PEP_LONG, 'protein', 'NDM-1 1-14')],
@@ -1108,7 +1107,7 @@ FIXTURES = [
          entries(expect_all(exact(2), paths_count('exact', 2, 'completed'), complete),
                  expect_all(paths_count('exact', 0, 'no_anchors'), complete))),
 
-    # ---------------------------------------------------------------- predicates (increment 5b)
+    # ---------------------------------------------------------------- predicates
     post('predicate_filter', 'masked',
          {'patterns': [p(GCG12, ident='GCG12')], 'max_contexts': 100, 'predicate': SELECTIVE,
           'output': {'labels': 'predicate_only', 'occurrences': False}}, 200,
@@ -1666,15 +1665,14 @@ def blanked(answer):
             if e.get('determinism') == 'time_limited' and not clocked:
                 # where the clock stopped the search: how far it got. Only the first such
                 # pattern: the later ones are stopped by the same budget before they start,
-                # the same in every run (review of 2026-10-07, C2-02)
+                # the same in every run
                 clocked = True
                 e['counts'] = blank_count(e['counts'])
                 e['work'] = {k: BLANK for k in e['work']}
                 if e.get('cut') == {'reason': 'time'} \
                         and e.get('stop') != {'phase': 'discovery', 'reason': 'time'}:
                     # the clock cut its release: how many contexts got out (a time stop in
-                    # discovery releases nothing, returned 0, compared; review of 2026-10-07,
-                    # C1-03)
+                    # discovery releases nothing, returned 0, compared)
                     e['returned'] = BLANK
                     e['results'] = BLANK
     return a

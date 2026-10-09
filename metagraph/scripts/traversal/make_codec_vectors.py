@@ -52,7 +52,7 @@ def float_to_bits(x):
 
 
 def fmt_float(x):
-    """§2.1 (v3): shortest round-trip digits, expanded positionally."""
+    """§2.1: shortest round-trip digits, expanded positionally."""
     if math.isnan(x) or x < 0:   # -0 < 0 is false: -0 is in the domain
         raise ValueError('outside the MGT float domain: %r' % x)
     if x == math.inf:
@@ -284,7 +284,7 @@ def xorshift64_bits(seed, n):
 
 
 def named_floats():
-    """The named edge cases of §2.7 (v3), plus a few that pin the Python reference's
+    """The named edge cases of §2.7, plus a few that pin the Python reference's
     two repr() styles (positional below 1e16, scientific from 1e16 / below 1e-4)."""
     v = [
         (0.0, '0'), (-0.0, '-0 (written 0; decodes to +0)'), (1.0, '1'), (0.5, '0.5'),

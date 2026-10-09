@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
 # make_wide_coord_fixture.sh -- the wide record-coordinates fixture of measurement M2
-# (PLAN-traverse-next-stages.md §2.1, revision 5; DESIGN-traverse-graphlet.md §26): the same
+# (DESIGN-traverse-graphlet.md §26): the same
 # few-kb sequence in many records under ONE column, so that every run of a trace walk carries
 # thousands of coordinate chains (column labels), and the same records as header labels
 # through a CoordToHeader (many labels with one chain each). mini_refseq has at most 6 chains
-# a run with header labels and 14 with column labels, and R10's many-label fixture one chain
+# a run with header labels and 14 with column labels, and the many-label fixture one chain
 # per label: neither reaches the regime where the coordinates dominate a seed's account and
 # text, which is what the delivery reserve's coordinate share (coordinate_account_per_text_byte)
 # has to bound.
@@ -64,8 +64,8 @@ PYEOF
         --mem-cap-gb 2 -o "$OUT/graph_k31" "$OUT/wide.fa"
     # Both annotate calls run inside OUT on the relative name wide.fa: --anno-filename makes
     # the file name the column's label, and an absolute path would make the label, and with it
-    # the text and account of M2's column rows, depend on where the fixture was built (review
-    # of W2: the column row's text was 14,916 B in one directory and 14,738 B in another)
+    # the text and account of M2's column rows, depend on where the fixture was built (the
+    # column row's text would be 14,916 B in one directory and 14,738 B in another)
     echo "== annotation with coordinates (one column, labelled wide.fa)"
     (cd "$OUT" && "$MG" annotate -v -p 1 -i graph_k31.dbg --anno-filename --coordinates \
         --mem-cap-gb 2 -o wide wide.fa)

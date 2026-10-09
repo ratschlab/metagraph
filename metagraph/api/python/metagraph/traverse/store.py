@@ -1,6 +1,6 @@
 """GraphletStore: handles, an LRU of parsed graphlets in RAM and a disk spool (§5, §6).
 
-ENTRY identity and BODY identity are separate (v2): an entry handle is opaque
+ENTRY identity and BODY identity are separate: an entry handle is opaque
 ('g_' + 12 random hex) and owns (normalized request, index identity, envelope, body
 digest); bodies are deduplicated by sha256 in the spool. Two requests with different
 loss budgets can produce byte-identical bodies (no switch happened) but continue
@@ -14,7 +14,7 @@ Layout under spool_dir:
                               valid across a restart for as long as their handles do
 
 A body is validated (parsed in full) before it is stored: a truncated MGT document is
-never stored or returned as a graphlet. Stage L (DESIGN §21, L3): with parse limits
+never stored or returned as a graphlet. Local limits (DESIGN §21): with parse limits
 (parse_limits, or an explicit parse budget) a parse that stops keeps the body -- stored
 after the checks that need no parse (graphlet_bytes, graphlet_lines, the H record and the
 Z line count) as an entry marked parsed: false, which no local answer is derived from until
@@ -29,43 +29,43 @@ entry for ttl_disk_s after its last use, and a tombstone for ttl_tomb_s after it
 expiry. The clock is injectable.
 
 Processes sharing a spool each keep their own RAM and index of the entries; the spool
-stays consistent between them (the code review of 2026-10-05, VMD-02): a body is deleted
+stays consistent between them: a body is deleted
 only when no entry file names it any more, a handle another process stored is read from
 its entry file on first use (get, free, `in`; list() lists the spool's entries), one
 another process freed or expired answers as unknown (as an expired, replayable one where
 its tombstone keeps a request), and an expiry re-reads the entry file's last use first. A
 body missing from the spool expires its entry, on a parse and on a copy without one.
 
-The body's lifecycle is serialized across the processes (and the threads of one store) by
-an exclusive lock of the spool (an fcntl.flock of spool/.lock, the review of 2026-10-06,
-O21): a put holds it from the check of its body to the write of its entry file, a free or
-an expiry from its scan of the entry files to the unlink of the body. Without it a free in
-one process could delete a body between another's check of it and the entry naming it --
-the put returned a handle whose body was gone (about half of the handles of three processes
-storing one body in a loop). Limits: a platform without fcntl (Windows), a spool whose
-file system refuses the lock file or flock (read-only; some network file systems: the
-store's _lock.unlocked names the error) has the threads' lock only, and a process of an
-earlier library version sharing the spool takes none, so the race remains against it (and
-the orphan pass below spares a body only by its age).
+The body's lifecycle is serialized across the processes (and the threads of one store) by an
+exclusive lock of the spool (an fcntl.flock of spool/.lock): a put holds it from the check
+of its body to the write of its entry file, a free or an expiry from its scan of the entry
+files to the unlink of the body. Without it a free in one process could delete a body
+between another's check of it and the entry naming it -- the put would return a handle whose
+body is gone (about half of the handles of three processes storing one body in a loop).
+Limits: a platform without fcntl (Windows), a spool whose file system refuses the lock file
+or flock (read-only; some network file systems: the store's _lock.unlocked names the error)
+has the threads' lock only, and a process of an earlier library version sharing the spool
+takes none, so the race remains against it (and the orphan pass below spares a body only by
+its age).
 A body that no entry file names any more is deleted by sweep() once it is older than
 _ORPHAN_GRACE_S (a free that kept it for an entry another process had already removed, or a
-process killed between a body and its entry, left it for good). Body GC reads each entry
-file of another process once (its digest is cached by name and inode; a free or a sweep
-listed and parsed every such file again, a sweep once per expired entry: O23). Body GC
+process killed between a body and its entry, would otherwise leave it for good). Body GC
+reads each entry file of another process once (its digest is cached by name and inode, so a
+free or a sweep does not list and parse every such file again). Body GC
 deletes nothing while it cannot tell which bodies the entries name: when the entry files
 cannot be listed, or one of them is there but cannot be read (EACCES, EMFILE, EIO) -- a
 free then keeps its body and a sweep its orphans, until the file can be read or is
 removed. An entry file that is no JSON (damaged; no store can read it either) names no
 body.
 
-Damage (O17): a body or entry file is written to a temporary name, flushed to the device
+Damage: a body or entry file is written to a temporary name, flushed to the device
 (fsync) and renamed, so a crash leaves the old file or the new one, never a new name on an
 empty or torn file -- on Linux; macOS's fsync does not flush the drive's own cache
 (F_FULLFSYNC is not used), so a power loss there can still lose the latest writes. A
 stored body is checked against its digest (its name) when it is read -- a parse on demand
 and a copy without one -- and before a put reuses it (once per process and file); a body
 that fails is deleted and its entry expires (replayable when it kept a request), so the
-next put of the same body writes it again. A damaged entry file is skipped as before.
+next put of the same body writes it again. A damaged entry file is skipped.
 """
 
 import collections
@@ -143,7 +143,7 @@ class Entry:
     # a continuation's parent walk {handle, arm, walk, overlap_bp}: kept with the entry,
     # so the link survives the one-shot return value
     parent: Optional[dict] = None
-    # stage L: False when the body was stored after a parse that stopped (its integrity
+    # local limits: False when the body was stored after a parse that stopped (its integrity
     # checked without one); True once a parse of it completed
     parsed: bool = True
     store: Any = field(default=None, repr=False, compare=False)
@@ -167,8 +167,8 @@ class Entry:
 
 
 # the fields an entry file may carry (the Entry dataclass without its store); a file of
-# another version keeps what this one knows (VMD-03: an unknown key, such as 'parsed' read
-# by an older library, made the whole store fail to open)
+# another version keeps what this one knows (an unknown key, such as 'parsed' read by an
+# older library, must not make the whole store fail to open)
 _ENTRY_FIELDS = frozenset(f.name for f in dataclasses.fields(Entry)) - {'store', 'j_bound'}
 _ENTRY_REQUIRED = frozenset(f.name for f in dataclasses.fields(Entry)
                             if f.default is dataclasses.MISSING
@@ -184,11 +184,10 @@ def _j_bound(e):
     (0 when it writes none): the line's sources -- the envelope, the seed summary, the
     view and derived_from -- as JSON with the spaces the line leaves out, plus the keys
     it puts them under. A function of what the entry holds only, so that the same export
-    of the same entry is charged the same on every run (budgets are deterministic). The
-    bound was the entry file's size, which also holds the created and accessed times:
-    their printed length follows the clock (1791204329.5 against 1791204329.6234567),
-    and a memory limit stopped one run of an export while an identical run answered
-    (the review of the level 4-5 fixes, finding 1)."""
+    of the same entry is charged the same on every run (budgets are deterministic). Not
+    the entry file's size, which also holds the created and accessed times: their printed
+    length follows the clock (1791204329.5 against 1791204329.6234567), so a memory limit
+    could stop one run of an export while an identical run answers."""
     if not (e.envelope or e.seed_summary or e.view is not None
             or e.derived_from is not None):
         return 0
@@ -235,7 +234,7 @@ def _unparsed_head(result, response):
     results[i], read WITHOUT a parse -- after the checks that need none (graphlet_bytes and
     graphlet_lines against the body, the H record, the Z line counting its lines): what
     put_unparsed() stores, and what an unparsed replay or continuation checks against the
-    entry it derives from before storing anything (O1)."""
+    entry it derives from before storing anything."""
     body = result.get('graphlet')
     if body is None:
         raise ValueError('this result carries no graphlet')
@@ -393,7 +392,7 @@ class GraphletStore:
         self.spool_dir = spool_dir
         if parse_limits is not None and not isinstance(parse_limits, LocalLimits):
             raise TypeError('parse_limits is a LocalLimits, not %r' % (parse_limits,))
-        # stage L: every parse the store performs (validation in put, a parse on demand,
+        # local limits: every parse the store performs (validation in put, a parse on demand,
         # load) runs under a fresh budget of these limits; None: unbudgeted
         self.parse_limits = parse_limits
         # the usage of the last parse the store ran under a budget ({work_units,
@@ -408,18 +407,18 @@ class GraphletStore:
         self.max_body_bytes = None if max_body_mb is None else int(max_body_mb * (1 << 20))
         for sub in ('bodies', 'entries', 'tombstones'):
             os.makedirs(os.path.join(spool_dir, sub), exist_ok=True)
-        # the body lifecycle across the processes sharing the spool (O21)
+        # the body lifecycle across the processes sharing the spool
         self._lock = _SpoolLock(spool_dir)
         self._entries = {}
         # digest -> the handles of this index whose entries name it: the body GC's own test
-        # (an any() over every entry per freed body before, O23)
+        # (not an any() over every entry per freed body)
         self._by_digest = {}
         # entry file name -> (its inode, the digest it names), for the entry files of other
         # processes: an entry's digest never changes, and a file is only ever replaced
-        # whole (a new inode), so each is read once (O23: read again per freed body)
+        # whole (a new inode), so each is read once (not again per freed body)
         self._foreign = {}
-        # digest -> (inode, mtime_ns, size) of the body file last checked against it (O17:
-        # a put reuses a body once its content is known to be the digest's)
+        # digest -> (inode, mtime_ns, size) of the body file last checked against it (a
+        # put reuses a body once its content is known to be the digest's)
         self._verified = {}
         self._ram = collections.OrderedDict()     # handle -> (graphlet, bytes, last use)
         self._ram_bytes = 0
@@ -434,8 +433,8 @@ class GraphletStore:
                     continue
                 self._index(e)
                 # the accessed time the entry file holds: the disk TTL's staleness test
-                # reads it (VMD-01: unseeded, a handle used more often than every tenth
-                # of the TTL never had its use written, and expired after a restart)
+                # reads it (unseeded, a handle used more often than every tenth of the TTL
+                # would never have its use written, and would expire after a restart)
                 self._persisted[e.handle] = e.accessed
 
     # ---------------------------------------------------------------- paths
@@ -506,7 +505,7 @@ class GraphletStore:
 
     def _store_body(self, body):
         """Make the spool hold |body| -> (digest, bytes). Called under the spool lock, with
-        the entry that names the body written before the lock is let go (O21)."""
+        the entry that names the body written before the lock is let go."""
         data = utf8_bytes(body)
         if self.max_body_bytes is not None and len(data) > self.max_body_bytes:
             raise StoreLimitExceeded('the graphlet body has %d bytes, over the store limit of '
@@ -514,9 +513,9 @@ class GraphletStore:
                                      % (len(data), self.max_body_bytes))
         digest = hashlib.sha256(data).hexdigest()
         path = self._body_path(digest)
-        # an existing file is reused only once its content is the digest's: a crash could
+        # an existing file is reused only once its content is the digest's: a crash can
         # leave it empty or torn, and every later put of the same body -- a re-fetch that
-        # had just validated it -- pointed its new entry at the damaged file (O17)
+        # had just validated it -- would point its new entry at the damaged file
         if not self._body_intact(path, digest, len(data)):
             _write_atomic(path, data)
             self._note_verified(path, digest)
@@ -592,7 +591,7 @@ class GraphletStore:
 
     def put_unparsed(self, result, response, request, *, source=None, delivery=None,
                      parent=None, derived_from=None):
-        """Store results[i] WITHOUT parsing its body (stage L, L3: a parse stopped on its
+        """Store results[i] WITHOUT parsing its body (local limits: a parse stopped on its
         budget): only after the checks that need no parse -- graphlet_bytes and
         graphlet_lines against the body, its H record, and its Z line counting its lines
         -- so a body cut in transport is still refused. The entry is marked parsed:
@@ -606,7 +605,7 @@ class GraphletStore:
         summary = {k: v for k, v in result.items() if k != 'graphlet'}
         if delivery is not None and isinstance(summary.get('outcome'), dict):
             summary['outcome'] = dict(summary['outcome'], delivery=delivery)
-        with self._lock:              # from the body's check to its entry's write (O21)
+        with self._lock:              # from the body's check to its entry's write
             digest, nbytes = self._store_body(body)
             now = self.clock()
             h = self._new_handle()
@@ -646,12 +645,12 @@ class GraphletStore:
         """Store the view |g| (a copy of the graphlet of entry |backing| with its view
         spec) WITHOUT dumping its body: the view entry shares the backing entry's stored
         body, which is what dump(g, envelope=False) writes for every body the store holds
-        (stage L: a view costs no copy of the body). The backing body must still be in
+        (local limits: a view costs no copy of the body). The backing body must still be in
         the spool: when it is gone, the backing entry expires (UnknownHandle)."""
         with self._lock:
             # the backing entry read, its body checked and the view's entry written under
             # one hold of the spool lock: a free of the backing entry in another process
-            # deleted the body before the view's entry named it (O21)
+            # could delete the body before the view's entry names it
             e = self.get(backing)
             if not os.path.exists(self._body_path(e.digest)):
                 self._expire(backing)
@@ -680,7 +679,7 @@ class GraphletStore:
         # the envelope of THIS seed: usage reduced to the totals and its per_seed entry, the
         # rule of a saved file's J line (parser.seed_envelope)
         envelope = seed_envelope(g.envelope, g.seed_index) if g.envelope else {}
-        with self._lock:              # from the body's check to its entry's write (O21)
+        with self._lock:              # from the body's check to its entry's write
             digest, nbytes = self._store_body(body)
             now = self.clock()
             h = self._new_handle()
@@ -723,10 +722,9 @@ class GraphletStore:
         knows whose file is still there, else one another process sharing the spool
         stored after this store was opened (_adopt()). One this store knows whose file is
         gone -- freed or expired by another process -- is dropped: its tombstone (if any)
-        answers, never a listed handle whose body may be gone (VMD-02). get(), free(),
-        `in` and list() all see the spool so (free() and `in` read only this process's
-        index before: a handle another process stored was unknown to them until a get()
-        adopted it -- the review of the level 4-5 fixes, finding 5)."""
+        answers, never a listed handle whose body may be gone. get(), free(), `in` and
+        list() all see the spool so (a handle another process stored is known to them
+        before a get() adopts it)."""
         e = self._entries.get(handle) if isinstance(handle, str) else None
         if e is None:
             return self._adopt(handle)
@@ -759,7 +757,7 @@ class GraphletStore:
     def _fresher_on_disk(self, e, now):
         """Whether the entry file records a use within the disk TTL that this process
         has not seen (another process sharing the spool used the handle): then its time
-        is taken, and the entry is not expired on this process's stale view (VMD-02)."""
+        is taken, and the entry is not expired on this process's stale view."""
         try:
             on_disk = self._read_entry(self._entry_path(e.handle)).accessed
         except (OSError, ValueError, TypeError):
@@ -781,7 +779,7 @@ class GraphletStore:
         if not isinstance(tomb, dict):
             return UnknownHandle(handle)          # not a tombstone this store wrote
         # replayable only with a request to replay (an entry loaded from a file without
-        # one has none: the hint would offer a replay that is then refused, VMD-04)
+        # one has none: the hint would offer a replay that is then refused)
         request = tomb.get('request')
         return UnknownHandle(handle, bool(request), request, tomb.get('index'))
 
@@ -800,16 +798,16 @@ class GraphletStore:
             return got[0]
         if got is not None:
             self._drop_ram(handle)
-        # the stored body, checked against its digest (O17): decoded as the text file read
+        # the stored body, checked against its digest: decoded as the text file read
         # it (newline='': the same text)
         body = self._read_body(handle, e).decode('utf-8')
         # an entry stores {} for none: a graphlet had an envelope when either side holds
-        # something (the rule of a J line, parser._attach_j: VPC-05)
+        # something (the rule of a J line, parser._attach_j)
         has_env = bool(e.envelope) or bool(e.seed_summary)
         # a summary with a coordinates block: every parse of the entry attaches the parsed
         # index, a re-parse of a parsed entry (its resident model expired or was evicted)
         # too -- so the model is the one from_response() made, with the same
-        # memory_bytes() and cache_signature(); an entry without a block parses as before
+        # memory_bytes() and cache_signature(); an entry without a block is parsed alone
         block = has_env and isinstance(e.seed_summary, dict) \
             and isinstance(e.seed_summary.get('coordinates'), dict)
         check = has_env and (not e.parsed or block)
@@ -818,8 +816,8 @@ class GraphletStore:
             if not check:
                 return parse(body, budget=b)
             # the first whole parse of an entry stored unparsed (its parse stopped on a
-            # budget, L3), or any parse of one with a block: its record coordinates are
-            # validated with it (C9), as from_response() would have -- one parse call, so
+            # budget), or any parse of one with a block: its record coordinates are
+            # validated with it, as from_response() would have -- one parse call, so
             # a stop in either keeps the entry as it was (unparsed, or parsed and not
             # resident)
             if b is None:
@@ -851,7 +849,7 @@ class GraphletStore:
         g = self.graphlet(handle, parse_budget=parse_budget)
         if g.view is not None:
             # the same restoration and the same presence test as parser.load(): the model
-            # is the shared resident one, so its view stays set (VOP2-09)
+            # is the shared resident one, so its view stays set
             from .ops import view_from_spec
             return view_from_spec(g, g.view)
         return g
@@ -923,9 +921,9 @@ class GraphletStore:
     def _held_here(self, digest):
         """Whether an entry of this process's index whose file is still there names body
         |digest|. One whose file another process removed (freed or expired) is dropped from
-        the index here: it kept the body for good -- a free deleted its body only when no
-        entry of the index named it, stale ones included, and nothing collected it after
-        (U20-08)."""
+        the index here: otherwise it would keep the body for good -- a free deletes its body
+        only when no entry of the index names it, stale ones included, and nothing would
+        collect it after."""
         for h in sorted(self._by_digest.get(digest, ())):
             if os.path.exists(self._entry_path(h)):
                 return True
@@ -964,9 +962,9 @@ class GraphletStore:
                 except OSError:
                     # an entry that is there but cannot be read now (EACCES, EMFILE, EIO):
                     # which body it names is unknown, so this scan deletes none -- read as
-                    # naming nothing, the orphan pass deleted every old body such a live
-                    # entry named (its handle then answered as expired; the review of the
-                    # P3 fixes). The rule of a listing that fails, per file
+                    # naming nothing, the orphan pass would delete every old body such a
+                    # live entry names (its handle then answered as expired). The rule of a
+                    # listing that fails, per file
                     return None
                 except ValueError:
                     continue              # no entry (not JSON, not UTF-8): no store reads it
@@ -987,7 +985,7 @@ class GraphletStore:
         process's index or of another process's, read from the spool -- and with |orphans|
         every body no entry file names that is older than _ORPHAN_GRACE_S (and every
         temporary file left there as long). Under the spool lock: the scan of the entry
-        files and the unlinks happen with no put between a body and its entry (O21)."""
+        files and the unlinks happen with no put between a body and its entry."""
         with self._lock:
             left = [d for d in dict.fromkeys(digests) if not self._held_here(d)]
             if not left and not orphans:
@@ -1033,24 +1031,24 @@ class GraphletStore:
 
     def _read_body(self, handle, e):
         """The bytes of entry |e|'s stored body, checked against its digest: a body that is
-        gone, or whose content is not the digest's (a crash left it empty or torn, O17),
+        gone, or whose content is not the digest's (a crash left it empty or torn),
         expires the entry -- UnknownHandle, replayable when it kept a request -- and a
-        damaged one is deleted, so that the next put of the same body writes it again. A
-        damaged body raised a format error on every use, the entry stayed listed, and a
-        replay or a fresh fetch pointed its new entry at the same file."""
+        damaged one is deleted, so that the next put of the same body writes it again
+        (kept, a damaged body would raise a format error on every use, the entry would stay
+        listed, and a replay or a fresh fetch would point its new entry at the same
+        file)."""
         path = self._body_path(e.digest)
         try:
             # read at once without a buffer: a buffered file holds io.DEFAULT_BUFFER_SIZE
             # (128 KiB from Python 3.14) beside the bytes, which no account of
-            # standalone_text() charged (graphlet_export(format=mgt) peaked above its
+            # standalone_text() charges (graphlet_export(format=mgt) would peak above its
             # account on 27 of 34 retrievals)
             with open(path, 'rb', buffering=0) as f:
                 raw = f.read()
         except FileNotFoundError:
             # the body is gone (removed outside this store): the entry is expired, so the
             # handle answers as an expired one -- replayable from its request -- instead
-            # of failing on every use while it stays listed (VMD-04; a copy without a
-            # parse too: the review of the level 4-5 fixes, finding 4)
+            # of failing on every use while it stays listed (a copy without a parse too)
             self._expire(handle)
             raise self._unknown(handle) from None
         if hashlib.sha256(raw).hexdigest() == e.digest:
@@ -1093,8 +1091,8 @@ class GraphletStore:
         (an expired entry's request, for replay) goes ttl_tomb_s after the expiry, so the
         spool does not grow without bound. The bodies the expired entries named go when no
         entry file names them any more -- one scan of the entry files for all of them, not
-        one per expired entry (O23) -- and so does every body no entry file names that is
-        older than _ORPHAN_GRACE_S (U20-08: such a body was kept for good)."""
+        one per expired entry -- and so does every body no entry file names that is older
+        than _ORPHAN_GRACE_S (otherwise such a body would be kept for good)."""
         now = self.clock()
         ram = [h for h, (_, _, used) in self._ram.items() if now - used > self.ttl_ram_s]
         for h in ram:
@@ -1186,7 +1184,7 @@ class GraphletStore:
 
     def standalone_text(self, handle, *, budget=None):
         """The entry's standalone .mgt text -- H, the entry's J line, the body -- built
-        WITHOUT a parse (stage L: the escape hatch of an entry no parse can afford): byte
+        WITHOUT a parse (local limits: the escape hatch of an entry no parse can afford): byte
         for byte what save() writes for a canonical body (every body the store holds
         from a server, a save or a view is one), the delivery the entry records written
         into the O record as a parsed model would. The text of an unparsed entry
@@ -1204,10 +1202,8 @@ class GraphletStore:
         has_env = bool(e.seed_summary) or bool(e.envelope)
         if b is not None:
             # the body read, the slices of it the text is joined from, and the text: three
-            # bodies at once (O2: the text was built through a copy of the body after its H
-            # line and one more for the O record's delivery, four held where three were
-            # charged -- 30% over the account on an 84 KB body), and the body's digest check
-            # (O17: sha256 at about 0.8 lwu per 256 bytes on the reference machine)
+            # bodies at once, and the body's digest check (sha256 at about 0.8 lwu per 256
+            # bytes on the reference machine)
             b.charge(2 * (e.bytes >> 8), 3 * (e.bytes + 49))
             if has_env or e.view is not None or e.derived_from is not None:
                 # the J line, not in e.bytes: its text, its copy in the answer and the JSON
@@ -1260,8 +1256,8 @@ class GraphletStore:
         with b.scope('save_body'):
             text = self._standalone_text(handle, b)
             # its UTF-8 bytes, made beside it, as graphlet_export(format=mgt) charges them
-            # (mcp_tools._write_text_charged()): left out, graphlet_save peaked above its
-            # account on 28 of 34 retrievals even once the buffers were gone
+            # (mcp_tools._write_text_charged()): left out, graphlet_save would peak above
+            # its account on 28 of 34 retrievals
             b.charge(0, 2 * (len(text) + 49))
             data = text.encode('utf-8')
             _write_atomic(os.path.abspath(path), data)
@@ -1282,8 +1278,8 @@ class GraphletStore:
         a resident entry holds; returned also when the store does not keep it in RAM
         (max_ram_mb), so that a caller needs no second parse of what it just loaded -- a
         parse on demand runs under the store's parse limits, which may refuse what the
-        load's own budget admitted (the review of levels 4-5: graphlet_load lost the
-        handle of an entry it had stored)."""
+        load's own budget admitted (graphlet_load would lose the handle of an entry it had
+        stored)."""
         with open(path, 'r', encoding='utf-8', newline='') as f:
             text = f.read()
         g = self._parsing(lambda b: parse(text, budget=b), self._parse_budget(parse_budget))
@@ -1300,8 +1296,8 @@ class GraphletStore:
 
         |graph|, |graph_path| (else the envelope's, where the server echoed them): the
         graph a multi-graph server ran it on, kept so that a replay runs on that graph
-        (VMD-06: the request carried neither, and a multi-graph server refuses it or a
-        client's other graph answers). A request without them is valid on a
+        (without them a multi-graph server refuses the replay, or a client's other graph
+        answers). A request without them is valid on a
         single-graph server only."""
         if not g.has_envelope:
             return None

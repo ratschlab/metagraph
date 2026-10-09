@@ -1,4 +1,4 @@
-"""Exports of a graphlet: to_json() (today's detail: full results[i], the conformance
+"""Exports of a graphlet: to_json() (the detail "full": results[i], the conformance
 oracle of T37), FASTA and GFA.
 
 to_json() rebuilds every field from the body. The envelope supplies only what the
@@ -19,8 +19,8 @@ allocation; graphlet_export(format="mgt") is linear (the body as it is). Their p
 about twice their text: the walks are spelled as a stream (derive.walk_iter()), each
 dropped once its record is written, and the final line feed is joined with the records
 rather than added to the joined text (a copy of all of it). With budget=
-(stage L, budget.py) an export either completes or raises LocalBudgetExceeded: never a
-partial text (L4), and save() writes no file; the stop says how many records were done.
+(local limits, budget.py) an export either completes or raises LocalBudgetExceeded: never
+a partial text, and save() writes no file; the stop says how many records were done.
 """
 
 import json
@@ -73,8 +73,8 @@ def _envelope_price(g):
     limitations and its header dicts (frontier, labels per node, evidence, cap trigger):
     -> (lwu, bytes, {side: (lwu, bytes)}). A structural derivation of the graphlet, cached;
     to_json() charges it at its cold price (one pass over the dropped labels, limitations
-    and labels) on every call. O3: these were built before the first charge, so 10,000
-    dropped labels of 40 runs each (a traced peak of 34.5 MB) completed under memory_mb=1."""
+    and labels) on every call, before they are built: otherwise 10,000 dropped labels of 40
+    runs each (a traced peak of 34.5 MB) would complete under memory_mb=1."""
     got = g.cache.get('json_envelope_price')
     if got is None:
         nsl = g.seed.num_seed_labels
@@ -204,7 +204,7 @@ def _arm_json(g, arm, bud=None, done=None):
         derive.uses(bud, g, arm, 'leaves', 'paths', 'splits', 'end_labels', 'label_end_events')
         bud.phase = 'records'
         ends = derive.label_end_events(arm)
-        # the arm's header dicts and its limitations, before they are built (O3)
+        # the arm's header dicts and its limitations, before they are built
         bud.charge(*_uses_envelope_price(bud, g)[2].get(arm.side, (0, 0)))
     j = {'status': arm.status,
          'frontier_remaining': {'live_paths': arm.frontier.live_paths,
@@ -384,9 +384,9 @@ def _json_copy(x):
 
 
 def to_json(g, *, budget=None):
-    """Today's detail: full results[i] (natural orientation) -- the conformance oracle:
+    """The detail "full": results[i] (natural orientation) -- the conformance oracle:
     from_response(r, out).to_json() equals the full result after normalize_result().
-    budget= (stage L): every node is charged before it is built; a stop raises
+    budget= (local limits): every node is charged before it is built; a stop raises
     LocalBudgetExceeded and no result is returned (done: the nodes built)."""
     bud = _B.resolve(budget)
     if bud is None:
@@ -403,8 +403,8 @@ def _to_json(g, bud, done=None):
     g.require_envelope('to_json()')
     if bud is not None:
         # the seed block, the seed-level limitations, the outcome and label_dict, charged
-        # before they are built (O3: their account was missing however many labels were
-        # dropped -- the server lists every explicit request label it could not use)
+        # before they are built (their account grows with the dropped labels -- the server
+        # lists every explicit request label it could not use)
         w, m, _ = _uses_envelope_price(bud, g)
         bud.charge(w, m)
     meta = g.seed_summary.get('seed', {})
@@ -537,15 +537,15 @@ def to_fasta(g, arm=None, leaves=None, with_seed=True, orientation='natural', wi
     (accessions) alive at the walk's leaf whose run was entered by the seed and covers the
     whole walk: at most 8 (label, occurrence) pairs, ordered by label id then start, then '
     coords_more=N' for the rest, and ' coords_cut=1' when such a run's list was cut at the
-    server's cap. Column labels are left out (their positions are global, C10). A
-    retrieval without them gives exactly the records it always did. False: never;
+    server's cap. Column labels are left out (their positions are global). A
+    retrieval without them gives the records without coords=. False: never;
     True: required (MissingEnvelope on a body alone, ValueError when the retrieval has
     none). The JSON block is 0-based half-open; FASTA headers are 1-based closed.
 
-    budget= (stage L): the spellings and every record are charged before they are
+    budget= (local limits): the spellings and every record are charged before they are
     built; a stop raises LocalBudgetExceeded and no text is returned."""
     if coordinates is not None and not isinstance(coordinates, bool):
-        # by type: 0 equals False, yet the dispatch is by identity (it wrote coords=)
+        # by type: 0 equals False, yet the dispatch is by identity (0 would write coords=)
         raise ValueError('coordinates is None (when present), True or False, not %r'
                          % (coordinates,))
     if coordinates is True:
@@ -699,19 +699,17 @@ def _to_fasta(g, arm, leaves, with_seed, orientation, width, bud, done=None,
         a = g.arms[side]
         rcs = _fasta_rcs(g, side, coordinates)
         # the walks chosen on THIS arm, read once: a one-shot iterator (a generator, map(),
-        # iter()) has no len(), and the test below raised TypeError on it where the
-        # unbudgeted export had always iterated it (O11, the review of 2026-10-06: an
-        # unbudgeted answer changed). Read per arm, as the selection always was: with
-        # arm=None a one-shot iterator is exhausted by the first arm, the next reads none
+        # iter()) has no len(), and the test below would raise TypeError on it where the
+        # unbudgeted export iterates it. Read per arm, as the selection is: with arm=None a
+        # one-shot iterator is exhausted by the first arm, the next reads none
         lv = leaves if leaves is None or isinstance(leaves, Sized) else list(leaves)
         if bud is not None and lv is not leaves:
             # the copy of the caller's iterator, charged once it is read: its length is
             # known only then (budget.py's stated exception for sizes known when built)
             bud.charge(len(lv) >> ID_SHIFT_PY, list_bytes(len(lv)))
         if lv is not None and not len(lv):
-            # no walk chosen: nothing to resolve, so the arm's paths are not built -- they
-            # were, uncharged, and a refused export (stopped at its join) left them behind
-            # (the review of the level 4-5 fixes, finding 2)
+            # no walk chosen: nothing to resolve, so the arm's paths are not built (built
+            # uncharged, they would be left behind by a refused export stopped at its join)
             continue
         if bud is not None and a.segments:
             # admitted before the walks are resolved: the arm's paths (a Path per walk)
@@ -840,7 +838,7 @@ def to_gfa(g, with_seed=True, *, budget=None):
     segments with k-1 bases of context, so every L line overlaps by k-1 (de Bruijn
     style): a right-arm segment carries the k-1 bases before it, a left-arm segment the
     k-1 bases after it. P per walk (seed included when with_seed); LB (end labels as
-    refs) and ER (end reason) tags on P lines. Requires the bases. budget= (stage L):
+    refs) and ER (end reason) tags on P lines. Requires the bases. budget= (local limits):
     every line is charged before it is built; a stop raises LocalBudgetExceeded and no
     text is returned."""
     bud = _B.resolve(budget)
@@ -882,8 +880,8 @@ def _to_gfa(g, with_seed, bud, done=None):
                 raise ValueError('to_gfa() needs the bases (output.sequences: true)')
             # the walking-order context: seed (outward) + the bases before s on its
             # first-parent chain -- only their last k-1 are used, so the chain is read
-            # back only that far (spelling the whole chain per segment was quadratic in
-            # the depth)
+            # back only that far (spelling the whole chain per segment would be quadratic
+            # in the depth)
             before = _chain_tail(segs, s.parents[0], k1) if s.parents and k1 > 0 else ''
             outward_seed = seed if side == 'right' else seed[::-1]
             ctx = (outward_seed + before)[-k1:] if k1 > 0 else ''

@@ -30,8 +30,8 @@ allocation budget -- compare(), routes() and the exports included. Their time an
 allocation follow the graphlet's size (a comparison reads both DAGs up to the comparison
 depth, routes() walks one route per run, an export spells every chosen walk), and
 nothing interrupts them; an MCP tool's max_bytes bounds the bytes it RETURNS, not the
-computation behind them. Every public operation takes budget= (stage L, budget.py: work
-units at the cold price and a modelled memory account): it then completes or stops and
+computation behind them. Every public operation takes budget= (local limits, budget.py:
+work units at the cold price and a modelled memory account): it then completes or stops and
 says so -- a list whose order allows it with its whole rows and a resume token, compare()
 with comparable 'unknown', everything else with no partial answer.
 """
@@ -63,15 +63,15 @@ from .model import (
 )
 
 
-# ------------------------------------------------------------------ stage L plumbing
+# ------------------------------------------------------------------ local-limits plumbing
 # (budget.py has the contract; these are the operations' charge points)
 
 def _graphlet_key(g):
     """What a resume token binds besides the call's arguments: the graphlet's text, by
     the digest of its records (Graphlet.body_digest, made by the parse). A fingerprint of
-    the seed and the counts was shared by graphlets with different bodies (five pairs of
-    the fixtures), so a token of one was accepted on the other and resumed a list it did
-    not belong to; the digest is the same for the same body parsed again (a store's
+    the seed and the counts can be shared by graphlets with different bodies (five pairs of
+    the fixtures share one), so a token of one would be accepted on the other and resume a
+    list it does not belong to; the digest is the same for the same body parsed again (a store's
     re-parse) or saved and loaded."""
     d = g.body_digest
     if d is None:
@@ -118,8 +118,8 @@ def _uses_g(b, g, *names):
         if name == 'label_index':
             # two dicts at CPython's fill (up to 48 bytes a key after a resize), a 1-tuple
             # per key and the ref string Label.ref makes for each (measured: 200-260 bytes
-            # a label; dict_bytes() models a dict at 16 bytes a key and left the index at
-            # 0.7x its size)
+            # a label; dict_bytes() models a dict at 16 bytes a key and would leave the index
+            # at 0.7x its size)
             b.uses((id(g), name), 4 * n,
                    2 * (DICT + 48 * n) + n * (2 * (TUPLE + 8) + STR + 24))
         elif name == 'name_counts':
@@ -235,7 +235,7 @@ __all__ = [
 # ------------------------------------------------------------------ labels
 
 def label(g, selector):
-    """Tagged selectors (v3): {'ref': 'h:<column>:<seq_id>' | 'c:<column>'} |
+    """Tagged selectors: {'ref': 'h:<column>:<seq_id>' | 'c:<column>'} |
     {'name': str} | {'id': int}. A bare string resolves only when exactly one label
     matches it as a ref OR as a name (a column may be NAMED 'c:0'; annotate mode can
     record two headers 'ACC1' from different columns); a bare int is an id."""
@@ -271,8 +271,8 @@ def label(g, selector):
     (key, value), = selector.items()
     if key == 'id':
         if isinstance(value, bool):
-            # a bool is an int to Python: {'id': True} selected label 1, where a bare bool
-            # is refused (VOP1-02)
+            # a bool is an int to Python: {'id': True} would select label 1, where a bare
+            # bool is refused
             raise BadSelector('a label id is an int, not %r' % (value,))
         if not isinstance(value, int) or not 0 <= value < len(g.labels):
             raise UnknownLabel('no label id %r' % (value,))
@@ -301,7 +301,8 @@ def label(g, selector):
 # built: building it costs about as much as four or five scans (measured on the real
 # fixtures), so a caller that looks up a few labels on a fresh model pays no more than the
 # scans did, and one that looks up many pays at most about twice what the index alone would
-# have cost (one lookup that built the index was 2x a scan, up to 5.7x on large tables)
+# have cost (building the index on the first lookup would make it 2x a scan, up to 5.7x on
+# large tables)
 _LABEL_SCANS = 4
 
 
@@ -319,9 +320,9 @@ def _label_index_after_scans(g):
 
 
 def _label_index(g):
-    """(ref -> label ids, name -> label ids), ids ascending. A lookup by name or ref
-    scanned every label (a table over all labels by name was quadratic in the labels);
-    names may repeat (annotate mode: two headers of one name), so each maps to a tuple."""
+    """(ref -> label ids, name -> label ids), ids ascending, so that a lookup by name or ref
+    does not scan every label; names may repeat (annotate mode: two headers of one name),
+    so each maps to a tuple."""
     got = g.cache.get('label_index')
     if got is None:
         got = g.cache['label_index'] = (_ids_by((l.ref, l.id) for l in g.labels),
@@ -332,9 +333,8 @@ def _label_index(g):
 def _ids_by(pairs):
     """{key: (ids in order)} of (key, id) pairs, keys in first-seen order. Built as the
     final tuples (a list per key only for a key seen twice): a list per key turned into
-    tuples in a second dict held both dicts, every list and every tuple at once -- 2.5-2.9x
-    the index, what a lookup by name charged for it (the review of the level-5 batch: a
-    prefix_subset comparison peaked above its account)."""
+    tuples in a second dict would hold both dicts, every list and every tuple at once --
+    2.5-2.9x the index, more than a lookup by name charges for it."""
     out = {}
     dup = None
     for k, i in pairs:
@@ -390,7 +390,7 @@ def spell(g, arm, leaf, orientation='natural', with_seed=False, *, budget=None):
     """The walk's bases. natural (§2.4): right = seed + flank, left = flank + seed
     (seed only with with_seed). walk: walking order (outward index i is [i]); with the
     seed, the seed is read in the walking direction too (reversed on the left arm),
-    so position |seed| + i holds outward base i on both arms. budget= (stage L): the
+    so position |seed| + i holds outward base i on both arms. budget= (local limits): the
     spelling is charged as one step at its price (the walk's chain and bases)."""
     arm = g.arm(arm)
     b = _B.resolve(budget)
@@ -592,7 +592,7 @@ def _run_claim(g, arm, run, cut, exact=True, coords=None):
     RunCoordinates (_arm_coords) -- a CoordClaim then carries the run's occurrences clipped
     to the cut. None (the default) makes a plain Claim: only the public paths that price
     coordinates pass them (claims(), walks()); compare() never does, so it never clips
-    coordinates it would not charge (revision 6, decision C-N9)."""
+    coordinates it would not charge."""
     route_from, ev_from = derive.evidence(arm, run)
     seg = arm.segments[run.segment]
     zero = run.from_bp == run.to_bp
@@ -652,7 +652,7 @@ def _displayed_presence(arm):
     """Annotate mode, one pass parents-first along the displayed (first-parent) chains:
     seg -> (labels recorded on every node from the seed boundary to the segment's end,
     [(label, j)] dropped inside the segment at base j). O(recorded runs), where walking
-    every walk's chain was quadratic on a comb-shaped trie."""
+    every walk's chain would be quadratic on a comb-shaped trie."""
     got = arm.cache.get('displayed_presence')
     if got is None:
         segs = arm.segments
@@ -879,7 +879,7 @@ def claims(g, arm=None, labels=None, at_most_bp=None, strict=True, *, budget=Non
     where the run's own bases [from_bp, to_bp) lie in its record -- a route_only claim's
     route too; 0-based half-open on the forward strand, DESIGN §18).
 
-    budget= (stage L, budget.py): a stop raises LocalBudgetExceeded whose .partial holds
+    budget= (local limits, budget.py): a stop raises LocalBudgetExceeded whose .partial holds
     the whole claims made so far, in this order, and a resume token (resume=) that goes on
     after the last row; without a budget (the default) no work or allocation budget
     applies."""
@@ -893,8 +893,8 @@ def claims(g, arm=None, labels=None, at_most_bp=None, strict=True, *, budget=Non
 
 
 def _claims_plain(g, arm, labels, at_most_bp, strict):
-    """claims() without a budget or a resume token: its loop as it always was (no
-    position kept, no charge point tested per run)."""
+    """claims() without a budget or a resume token: the plain loop (no position kept, no
+    charge point tested per run)."""
     sides = [g.arm(arm).side] if arm is not None else [s for s in ARM_SIDES if s in g.arms]
     wanted = _label_ids(g, labels)
     out = []
@@ -1067,7 +1067,7 @@ def walks(g, arm, *, top=None, by='support', labels=None, route_consistent=True,
     CoordWalks: .coordinates maps each label alive at the leaf (its ref) to the
     RunCoordinates of its run reaching the leaf, and the claims are CoordClaims.
 
-    budget= (stage L): a stop raises LocalBudgetExceeded. With by='id' its .partial holds
+    budget= (local limits): a stop raises LocalBudgetExceeded. With by='id' its .partial holds
     the whole walks made so far and a resume token (resume=); a ranked list never returns
     a partial (a ranking of part of the arm would be another answer)."""
     b = _B.resolve(budget)
@@ -1221,9 +1221,9 @@ def _rank_walks_replay(g, arm, by, labels, min_bp, n, b):
     """Charge |b| what rank_walks(g, arm, by=by, labels=labels, min_bp=min_bp) charges
     when it returns |n| ids -- at the same charge points, with the same derivations marked
     used -- without ranking: a pager that keeps a ranking (graphlet_walks) pays its cold
-    price on every page (L1). A lump of the units a ranking once charged would add the
-    call's base a second time and leave its derivations unmarked, so that the walks a
-    page then builds would pay for them again (the review's 1.4-1.8x on cached pages)."""
+    price on every page. A lump of the units a ranking once charged would add the call's
+    base a second time and leave its derivations unmarked, so that the walks a page then
+    builds would pay for them again (1.4-1.8x on cached pages)."""
     a = g.arm(arm)
     with b.scope('rank_walks', _RANK_LEVERS):
         _label_ids_b(g, labels, b)
@@ -1331,7 +1331,7 @@ def _leaf_claims(g, a, leaves_, rcs=None):
     # annotate: _annotate_ends() orders by (first walk through the anchor, label, j,
     # anchor); within one anchor that is (label, j) -- each leaf's own ends, read from the
     # arm's index of them (_annotate_leaf_ends), not from a pass over every route end of
-    # the arm per call (L5: a budgeted walks() made that pass per chunk of 32 walks)
+    # the arm per call (a budgeted walks() would make that pass per chunk of 32 walks)
     ends = _annotate_leaf_ends(a)
     for s in sorted(leaves_):
         for l, j in ends.get(s, ()):
@@ -1400,8 +1400,7 @@ def _walk_objects(g, a, ranked, with_claims, b=None, out=None):
             else:
                 _annotate_ends_price(b, g, a)
                 # the index of each leaf's route ends, built once: each chunk reads its own
-                # leaves' (a pass over every route end of the arm per chunk of 32 walks, and
-                # its charge, before: L5, the review of 2026-10-06)
+                # leaves' (not a pass over every route end of the arm per chunk of 32 walks)
                 _annotate_leaf_ends_price(b, g, a)
                 ends_n = _leaf_end_counts(a)
         b.phase = 'rows'
@@ -1504,7 +1503,7 @@ def routes(g, sel, arm, spell=False, *, budget=None, resume=None):
     say each node carries the label, not that one indexed sequence spells the route).
 
     One route per run or end, each as long as the DAG makes it. Without a budget (the
-    default) no work or allocation budget applies; budget= (stage L): a stop raises
+    default) no work or allocation budget applies; budget= (local limits): a stop raises
     LocalBudgetExceeded whose .partial holds the whole routes made so far, in this order,
     and a resume token (resume=)."""
     b = _B.resolve(budget)
@@ -1605,7 +1604,7 @@ def _annotate_routes_price(b, g, a, l):
     """Charge _annotate_routes() of label |l| (every witness route of its ends, the sort
     by displayed walk); -> the route depths. The ends are read from the union-rule
     derivation, charged first."""
-    # first_paths is built from path_of_leaf: charged with it (it was built uncharged)
+    # first_paths is built from path_of_leaf: charged with it
     derive.uses(b, g, a, 'annotate_route_ends', 'first_paths', 'leaves', 'paths',
                 'path_of_leaf', 'route_depth')
     rd = derive.route_depth(a)
@@ -1644,7 +1643,7 @@ def label_walks(g, sel, arm=None, *, budget=None, resume=None):
     A retrieval with record coordinates gives CoordLabelWalks: .coordinates is the run's
     RunCoordinates (where its own bases lie in its record).
 
-    budget= (stage L): a stop raises LocalBudgetExceeded whose .partial holds the whole
+    budget= (local limits): a stop raises LocalBudgetExceeded whose .partial holds the whole
     label walks made so far, in this order, and a resume token (resume=)."""
     b = _B.resolve(budget)
     if b is None:
@@ -1663,8 +1662,7 @@ def _label_walks(g, sel, arm, b, resume, with_routes=False):
     try:
         if b is not None and not isinstance(sel, (int, Label)):
             _uses_g(b, g, 'label_index')
-        # the label before the arm: an unknown label with a bad arm is UnknownLabel, as it
-        # always was
+        # the label before the arm: an unknown label with a bad arm is UnknownLabel
         lab = label(g, sel)
         sides = [g.arm(arm).side] if arm is not None else \
             [s for s in ARM_SIDES if s in g.arms]
@@ -1760,7 +1758,7 @@ def support_profile(g, arm, leaf, kind='displayed', *, budget=None):
     anchored on the walk over its own [from_bp, to_bp) (route support, scope-free).
     Annotate mode records one set per node: both kinds are the recorded sets.
 
-    budget= (stage L): a stop raises LocalBudgetExceeded with no partial -- the last
+    budget= (local limits): a stop raises LocalBudgetExceeded with no partial -- the last
     maximal run of a cut profile might go on past the cut, so no prefix of runs is whole."""
     b = _B.resolve(budget)
     if b is None:
@@ -1836,7 +1834,7 @@ def support_changes(g, arm, leaf, *, budget=None):
     qualifier text included), a switch (Lw away / a switch-in), a split (labels that
     took another branch), a merge (a lineage joining through another parent).
 
-    budget= (stage L): a stop raises LocalBudgetExceeded with no partial (the changes are
+    budget= (local limits): a stop raises LocalBudgetExceeded with no partial (the changes are
     read off the whole profile)."""
     b = _B.resolve(budget)
     if b is None:
@@ -1848,8 +1846,7 @@ def support_changes(g, arm, leaf, *, budget=None):
 _CHANGE_BYTES = record_bytes(Change) + 2 * LIST + 200
 # per label that changed: its reason dict and its label's dict (with the ref's text), its
 # slot in the added or removed set, the sorted list and the Change's list -- measured 521
-# bytes kept and 636-695 at the peak per label on a split of 2,000-20,000 labels (L3: the
-# account was 465 per label, 0.84-0.93 of the traced peak)
+# bytes kept and 636-695 at the peak per label on a split of 2,000-20,000 labels
 _REASON_BYTES = 2 * dict_bytes(4) + SET_ITEM + 2 * LIST_ITEM + STR + 16
 
 
@@ -1872,8 +1869,7 @@ def _support_changes(g, arm, leaf, b):
         b.phase = 'changes'
         # a reason scans the walk's chain -- its segments, their runs and events -- per label
         # that changed, until it finds the label's: charged at that bound (the added-label
-        # scan never stops early; work model 1 charged half of it, "on average": L3, the
-        # review of 2026-10-06)
+        # scan never stops early)
         per_label = len(chain) + sum(len(rbs[x]) + len(segs[x].events) for x in chain)
     for run in prof:
         if b is not None:
@@ -1905,7 +1901,7 @@ def _split_point(segs, chain, at, b):
     """The split a label removed at |at| may have taken: the first segment of the walk's
     chain that starts there with one parent -> (the parent's end set, [(each other child's
     entry set, its first base)], the price of testing one label against them); False when
-    there is none. One per Change: the sets were scanned again per removed label (L3)."""
+    there is none. One per Change, so the sets are not scanned again per removed label."""
     if b is not None:
         b.charge(W_STEP * len(chain))
     for sid in chain:
@@ -1989,7 +1985,7 @@ def splits(g, arm, min_labels_before=0, *, budget=None, resume=None):
     whose displayed chain takes it. A branch's label count is not a share of
     labels_before: a label may follow several branches (kind 'ambiguous').
 
-    budget= (stage L): a stop raises LocalBudgetExceeded whose .partial holds the whole
+    budget= (local limits): a stop raises LocalBudgetExceeded whose .partial holds the whole
     split points made so far, in this order, and a resume token (resume=)."""
     b = _B.resolve(budget)
     if b is None:
@@ -2058,7 +2054,7 @@ def _split_prices(b, g, a, sps):
 def label_summary(g, *, budget=None):
     """{ref: {name, ref, <arm>: {direct_bp, reach_bp, reentries, runs}}} (both modes,
     §5.1). direct_bp is label-consistent ROUTE support, not a contiguous occurrence.
-    budget= (stage L): a stop raises, with no partial (a summary of some labels is not
+    budget= (local limits): a stop raises, with no partial (a summary of some labels is not
     the table)."""
     b = _B.resolve(budget)
     if b is None:
@@ -2112,7 +2108,7 @@ def continuation(g, arm, leaf, *, budget=None):
     seed_coord is the half-open whole-molecule interval in seed coordinates (seed =
     [0, |seed|)). loss_used is C's: the SMALLEST terminal loss of the labels; losses
     holds each label's own (T), and note says when one loss budget cannot serve them
-    exactly (labels that ended the walk at different losses). budget= (stage L): charged
+    exactly (labels that ended the walk at different losses). budget= (local limits): charged
     as one step at its price; a stop raises."""
     b = _B.resolve(budget)
     if b is None:
@@ -2187,9 +2183,9 @@ def _strategy_budget(g):
 def _terminal_losses(g, a, leaf_seg, labels):
     """Constrain: each label's terminal loss at the leaf, from its T extras (a label
     alive at the leaf with no extra has loss 0, the §2.3 rule). The C record's loss_used
-    is the SMALLEST of them: subtracting it from the budget let a continued label at a
-    higher loss go on with more than its original budget left (the review's
-    budgetchain: E at 0 and C at 2 kept the whole budget 3). () in annotate mode."""
+    is the SMALLEST of them: subtracting it from the budget would let a continued label at
+    a higher loss go on with more than its original budget left (E at 0 and C at 2 would
+    keep the whole budget 3). () in annotate mode."""
     if g.mode != 'constrain':
         return ()
     ends = {e.label: e.loss for e in derive.end_labels(a, leaf_seg)}
@@ -2226,13 +2222,13 @@ def _check_change_cost(change_cost):
     entries' type (a list, under every model), a constant's value, a table's default and
     every entry of a table: [from, to, cost] with two label names (strings) and a finite
     cost >= 0, the server's rule (traverse.cpp parse_cost) --
-    BEFORE any of them is used as a dict key, in a set or in arithmetic: an entry such as
-    [["C"], "A", 0.5] raised TypeError from a set membership test, which escaped the tool
-    layer's bad_argument (review of pass 5, finding 7), and a malformed entry was skipped
-    silently where the server refuses the request. A field that fails is a ValueError
-    naming it, and so is a field the named model does not read (forbid reads model only,
-    constant model and value, table model, default and entries): the server's Strict
-    parse refuses it as an unknown field (L8, the review of 2026-10-06). A model the
+    BEFORE any of them is used as a dict key, in a set or in arithmetic: otherwise an entry
+    such as [["C"], "A", 0.5] would raise TypeError from a set membership test, which
+    escapes the tool layer's bad_argument, and a malformed entry would be skipped silently
+    where the server refuses the request. A field that fails is a ValueError naming it,
+    and so is a field the named model does not read (forbid reads model only, constant
+    model and value, table model, default and entries): the server's Strict parse refuses
+    it as an unknown field. A model the
     library does not know passes: its callers answer for it. None (no change_cost) is
     forbid. -> change_cost."""
     if change_cost is None:
@@ -2249,14 +2245,13 @@ def _check_change_cost(change_cost):
         if foreign:
             # a field of another model: what a deep merge of a model change kept (a
             # constant's value under a table, a table's entries under a constant), which
-            # the server refused while the library called the request valid (L8)
+            # the server refuses: the library must not call the request valid
             raise ValueError('labels.change_cost.%s is not a field of model %r (it reads %s): '
                              'the server refuses it as an unknown field'
                              % (foreign[0], model, ', '.join(sorted(fields))))
     # entries under every model the library does not know too: a budgeted call charges
     # their count whatever the model (_switch_reach), and {'model': 'forbid', 'entries':
-    # True} raised TypeError from len() there (review of the pass-5 fixes); None reads as
-    # none
+    # True} would raise TypeError from len() there; None reads as none
     entries = change_cost.get('entries')
     if entries is not None and not isinstance(entries, (list, tuple)):
         raise ValueError('labels.change_cost.entries is a list of [from, to, cost], not %r'
@@ -2311,8 +2306,8 @@ def _section(strategy, *path):
     """The strategy section at |path| as a dict ({} when absent). The rebuild of a
     continuation reads the merged sections as objects; one that a caller's override made
     something else is refused with a ValueError naming it (the tool layer answers
-    bad_argument), as the server would refuse it (round 3, finding B: an AttributeError
-    escaped the tool contract)."""
+    bad_argument), as the server would refuse it (never an AttributeError, which would
+    escape the tool contract)."""
     d = strategy
     for i, k in enumerate(path):
         v = d.get(k)
@@ -2324,9 +2319,9 @@ def _section(strategy, *path):
     return d
 
 
-# What a change_cost table costs a budgeted next_request() (work model 2; the review of the
-# P2 fixes: with 900 entries the account stayed at the 0-entry figure while the traced peak
-# was 9.8x it, and only 2 lwu per entry were charged). Sizes as CPython makes them:
+# What a change_cost table costs a budgeted next_request() (work model 2: the entries'
+# copies are charged, or a table of 900 entries would leave the account at the 0-entry
+# figure while the traced peak is 9.8x it). Sizes as CPython makes them:
 # an entry copied by copy.deepcopy() -- its list of three, built by appends (four slots),
 # and its slot in the copied list: 97 B traced per entry -- and the memo's record of it
 # while the copy is built (an int key, its dict slot, both of the dict's tables while it
@@ -2380,28 +2375,26 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     """{name: loss} for every name of |targets| that a chain of switches from a name of
     |sources| enters within |budget|, at the cheapest such chain's loss (summed left to
     right, as the walk sums a lineage's loss) -- the server's rule for an extra label
-    (walker.cpp, switch_reach): the walk enforces the cumulative loss switch by switch, so
-    a label is a valid switch target when SOME chain reaches it, not only one switch from a
-    seed label (the stage-2 recheck's design answer: A -> B = 1, B -> C = 1 under a budget
-    of 2 left C out). A chain passes only through names of |sources| and |targets|: the
-    labels the request names; a name of |sinks| (also a target) ends a chain but never
-    continues one. Prices a switch as the server does (forbid: none reachable; constant:
-    its value; table: a table's last entry for a pair wins, else its default, 'forbid'
-    none; a label to itself costs 0; the one pricing of the library -- a second copy for one
-    pair, _switch_cost, was never called: VOP1-04); None for a model the library does
-    not know. A malformed field of a model it knows is a ValueError naming it, raised
-    before any entry is used (_check_change_cost)."""
+    (walker.cpp, switch_reach): the walk enforces the cumulative loss switch by switch, so a
+    label is a valid switch target when SOME chain reaches it, not only one switch from a
+    seed label (A -> B = 1, B -> C = 1 under a budget of 2 reaches C). A chain passes only
+    through names of |sources| and |targets|: the labels the request names; a name of
+    |sinks| (also a target) ends a chain but never continues one. Prices a switch as the
+    server does (forbid: none reachable; constant: its value; table: a table's last entry
+    for a pair wins, else its default, 'forbid' none; a label to itself costs 0; the one
+    pricing of the library); None for a model the library does not know. A malformed field
+    of a model it knows is a ValueError naming it, raised before any entry is used
+    (_check_change_cost)."""
     if lb is not None:
-        # admitted before the check reads the entries (work model 1 charged 2 per entry
-        # after it, for the check and the table's build together: 1.45x short)
+        # admitted before the check reads the entries
         n = len(sources) + len(targets)
         k = len(_entries_of(change_cost))
         lb.charge(4 * n + 2 * W_ELEM * k, 4 * set_bytes(n) + dict_bytes(n) + n * FLOAT_BYTES)
     # every field is checked before an endpoint enters a set or a cost the arithmetic
     _check_change_cost(change_cost)
     sources = list(dict.fromkeys(sources))
-    # the set once (L6: it was rebuilt per target, sources x targets steps uncharged -- 0.11 s
-    # of 0.14 s at 3,000 x 3,000 names, 1.8x the charge)
+    # the set once (rebuilt per target it would cost sources x targets steps uncharged --
+    # 0.11 s of 0.14 s at 3,000 x 3,000 names)
     src = set(sources)
     targets = [t for t in dict.fromkeys(targets) if t not in src]
     model = (change_cost or {}).get('model', 'forbid')
@@ -2442,8 +2435,8 @@ def _switch_reach(change_cost, sources, targets, budget, sinks=(), lb=None):
     # the default yet; a popped name gives it to each of them it has no explicit entry to.
     # A list in name order, compacted per pop as walker.cpp's `kept` loop does: a set's
     # order followed PYTHONHASHSEED, and with it the push order of labels at equal loss,
-    # the pop sequence and so the charges below (L1: one call completed under 5 of 12 hash
-    # seeds and stopped under 7; budget.py promises the same units in any process)
+    # the pop sequence and so the charges below (a set's order depends on the hash seed;
+    # budget.py promises the same units in any process)
     pending = sorted(names) if fallback <= budget else []
     dist = {x: 0.0 for x in sources}
     heap = [(0.0, i, x) for i, x in enumerate(sorted(sources))]
@@ -2500,7 +2493,7 @@ def _rebuilt_extra(g, seed_labels, budget, strategy, lb=None):
     """labels.extra around a continuation's seed labels: the retrieval's permitted pool
     (its seed labels and its extra labels: every label of a constrain retrieval) minus the
     new seed labels -- the server refuses an extra label that duplicates a seed label
-    (the review: seed ['C'] with extra ['B', 'C', 'D'] was a 400) -- keeping each
+    (seed ['C'] with extra ['B', 'C', 'D'] is a 400) -- keeping each
     remaining label that the server accepts as a switch target: some chain of switches
     from a new seed label enters it within |budget| (_switch_reach; an unreachable extra
     label is refused, and under forbid, or a constant above the budget, any extra label
@@ -2509,7 +2502,7 @@ def _rebuilt_extra(g, seed_labels, budget, strategy, lb=None):
     labels become switch targets too: they were in the original pool."""
     lab = strategy.get('labels') or {}
     if lb is not None:
-        # the check below reads every entry (work model 2: it was not charged)
+        # the check below reads every entry
         lb.charge(W_ELEM * len(_entries_of(lab.get('change_cost') if isinstance(lab, dict)
                                            else None)))
     cost = _check_change_cost(lab.get('change_cost')) or {'model': 'forbid'}
@@ -2566,17 +2559,16 @@ def _left_out_reach(g, cost, mine, budget, dropped, lb=None):
     (budget - loss), and whether any label of |dropped| is so reached. -> ([the reaching
     labels of each shown one, in |mine| order], any).
 
-    Exactly the note of one _switch_reach() per continued label over the whole pool (L7, the
-    review of 2026-10-06: S searches of the pool, all S results held at once, a membership
-    test per dropped label and continued label; 1.26 s for one walk at 1,000 labels), with
-    the searches confined to the names the change_cost table names (its pairs between
-    labels of the pool) plus ONE name it does not: a name no entry names is reached from the
-    source by the default switch alone -- the first pop (the source, at loss 0) gives it
-    0 + default, and every other chain into it ends with a default switch too, so costs at
-    least as much -- and as an intermediate it gives every other name the default, as each
-    such name does; so one stands for all, and the names the table names get the same
-    smallest chain sums, added in the same order. Under a constant model no name is named:
-    each search is one switch."""
+    Exactly the note of one _switch_reach() per continued label over the whole pool (S
+    searches of the pool, all S results held at once, a membership test per dropped label
+    and continued label: 1.26 s for one walk at 1,000 labels), with the searches confined to
+    the names the change_cost table names (its pairs between labels of the pool) plus ONE
+    name it does not: a name no entry names is reached from the source by the default switch
+    alone -- the first pop (the source, at loss 0) gives it 0 + default, and every other
+    chain into it ends with a default switch too, so costs at least as much -- and as an
+    intermediate it gives every other name the default, as each such name does; so one
+    stands for all, and the names the table names get the same smallest chain sums, added in
+    the same order. Under a constant model no name is named: each search is one switch."""
     model = (cost or {}).get('model', 'forbid')
     pool = list(dict.fromkeys(l.name for l in g.labels))
     named = set()
@@ -2655,11 +2647,10 @@ _NO_BUDGET_ARG = object()
 
 
 def _local_or_override(budget, overrides):
-    """The LocalBudget a next_request() runs under (or None). Before stage L gave every
-    operation a budget=, `budget` was a keyword override like any other, deep-merged into
-    the strategy under that key, and a request built with one must be built as before
-    (the tools pass an agent's overrides on as given): a LocalBudget charges the call, any
-    other value (None included) is that override; a LocalLimits is refused as everywhere
+    """The LocalBudget a next_request() runs under (or None). `budget` is also a keyword
+    override like any other, deep-merged into the strategy under that key (the tools pass
+    an agent's overrides on as given): a LocalBudget charges the call, any other value
+    (None included) is that override; a LocalLimits is refused as everywhere
     else (it is meant as a local limit, never a strategy field)."""
     if budget is _NO_BUDGET_ARG:
         return _B.resolve(None)
@@ -2721,11 +2712,10 @@ def next_request(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fal
     next_requests(), one request per walk. Keyword overrides deep-merge into the
     strategy (labels.change_cost as described above); release, graph and graph_path are
     request-level. Raises MissingEnvelope on
-    a body-only graphlet. budget= (stage L) a LocalBudget, not the request's loss budget:
-    the continuations, the rebuilt labels.extra and the switch searches are charged; a
-    stop raises, with no partial. Any other value of budget= is, as before stage L, a
-    keyword override like the others (strategy['budget']); a local budget then comes from
-    local_budget() only."""
+    a body-only graphlet. budget= (local limits) a LocalBudget, not the request's loss
+    budget: the continuations, the rebuilt labels.extra and the switch searches are charged;
+    a stop raises, with no partial. Any other value of budget= is a keyword override like
+    the others (strategy['budget']); a local budget then comes from local_budget() only."""
     lb = _local_or_override(budget, overrides)
     if lb is None:
         return _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, None,
@@ -2747,9 +2737,9 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         else _continuation_seeds(g, a, leaves, lb)
     # A change_cost table is the one part of the strategy whose size the caller sets: its
     # entries are copied with the strategy (the request's copy, and the merged one the
-    # labels.extra rebuild reads), and work model 1 charged none of them -- with 900
-    # entries the account stayed at the 0-entry figure while the traced peak was 9.8x it
-    # (the review of the P2 fixes). The rest of the strategy is a fixed handful of fields
+    # labels.extra rebuild reads), so each copy is charged -- uncharged, 900 entries would
+    # leave the account at the 0-entry figure while the traced peak is 9.8x it. The rest of
+    # the strategy is a fixed handful of fields
     k_env = len(_override_entries(g.envelope.get('strategy'))) if lb is not None else 0
     k_ov = len(_override_entries(overrides)) if lb is not None else 0
     if lb is not None:
@@ -2846,8 +2836,8 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
             extra = pools[0][0] if pools else []
             # what each walk leaves out, from ITS seed labels: the walks share labels.extra,
             # not their seed labels, so a label one walk leaves out may be another's seed
-            # label (the stage-2 recheck, P3: the first walk's omissions were reported for all,
-            # naming a label another walk seeded as unreachable)
+            # label (the first walk's omissions reported for all would name a label another
+            # walk seeded as unreachable)
             per_walk = [(c, p[1], p[2]) for c, p in zip(conts, pools)]
         labels_['extra'] = extra
         for c, dropped, unverifiable in per_walk:
@@ -2859,7 +2849,7 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         # label of the continuation: it can come back only as a switch target from a seed
         # label (under switch_on: loss, only where one is lost), and the continuation may
         # lack the lineage one uninterrupted walk keeps. Conservative -- no route above the
-        # budget is accepted -- but never silent (round 3, finding D).
+        # budget is accepted -- but never silent.
         alive_not_seeded = []
         for c in conts:
             seeded = {l.id for l in c.labels}
@@ -2897,8 +2887,8 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
             # a continued label at a lower loss, whose own remaining budget is larger -- by a
             # chain through ANY label of the retrieval's pool, the kept extra labels and the
             # other continued labels included, as that walk could switch through every one
-            # (the review of the stage-3 fixes, P3: a chain through a kept extra label was
-            # not searched, and the note understated what the continuation may miss)
+            # (otherwise a chain through a kept extra label would not be searched, and the
+            # note would understate what the continuation may miss)
             mine = _unique_pairs([(l, x) for l, x in zip(c.labels, c.losses) if x != math.inf])
             via, any_reach = _left_out_reach(g, cost, mine, budget, dropped, lb)
             lost = ['%s%s' % (_shown(l.name), ' (reachable for %s within its own remaining '
@@ -2918,8 +2908,8 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
                    if any_reach else ''))
         # Each continued label's own branches at the leaf (T), not C's smallest. The server
         # resets branch state for a new seed, so the allowance is reduced as the loss budget
-        # is: by the largest count, conservative for the labels that used fewer (the stage-2
-        # recheck's design answer 3); reset_branches keeps it, and the note says so
+        # is: by the largest count, conservative for the labels that used fewer;
+        # reset_branches keeps it, and the note says so
         branches = 0
         per_label = []
         for c in conts:
@@ -2930,8 +2920,8 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
         original = _section(strategy, 'branching').get('max_label_branches')
         given_b = overrides.get('branching') or {}
         mlb = _section(final, 'branching').get('max_label_branches')
-        # integral without int(): int(inf) raised OverflowError, which escaped the tool
-        # layer's bad_argument, and int(nan) a ValueError that named no field (Python's
+        # integral without int(): int(inf) raises OverflowError, which escapes the tool
+        # layer's bad_argument, and int(nan) a ValueError that names no field (Python's
         # json reads Infinity and 1e999); is_integer() is False for both
         if 'max_label_branches' in given_b and not (
                 mlb == 'unlimited' or (_is_number(mlb) and mlb >= 0 and (
@@ -2980,8 +2970,8 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
                                                             if len(shown) > 8 else '')))
         if not (budget_info['original'] > 0 or budget_info['effective'] > 0):
             # no loss budget to spend (forbid, or a budget of 0): each label's remaining
-            # budget would be 0 and say nothing, and a long list of them cost a receipt its
-            # room (round 3, finding C)
+            # budget would be 0 and say nothing, and a long list of them would cost a
+            # receipt its room
             budget_info = None
     request = NextRequest({'seeds': seeds}, notes, budget_info, left_out, branch_info)
     release = g.envelope.get('release')
@@ -2997,13 +2987,13 @@ def _next_request(g, arm, leaves, bp, reduce_budget, reset_branches, lb, overrid
     _merge_overrides(strategy, overrides)
     if g.mode == 'annotate':
         # constrain mode checks the merged cost before its rebuild reads it (|final|);
-        # annotate mode has no rebuild, so its request was built unchecked and the server
-        # refused it (the review of the P3 fixes)
+        # annotate mode has no rebuild, so its request is checked here: unchecked, the
+        # server would refuse it
         labs = strategy.get('labels')
         _check_annotate_cost(labs.get('change_cost') if isinstance(labs, dict) else None)
     # the echo carries the retrieval's cap: an override output.coordinates false (the
     # resource stop's drop_coordinates) would otherwise make every continuation, deepen()
-    # and traverse_continue a 400 (revision 2, C-N6)
+    # and traverse_continue a 400
     _C.strip_coordinate_cap(strategy)
     request['strategy'] = strategy
     if lb is not None and g.mode == 'constrain':
@@ -3017,7 +3007,7 @@ def next_requests(g, arm, leaves, bp=None, reduce_budget=True, reset_branches=Fa
     """One next_request() per walk, in |leaves| order: each with its own seed labels, its
     own rebuilt labels.extra and its budgets reduced by ITS labels' largest terminal loss
     and branch count (never less conservative than one request over all the walks).
-    budget= (stage L): one LocalBudget for all of them; a stop raises, with no partial.
+    budget= (local limits): one LocalBudget for all of them; a stop raises, with no partial.
     Any other value of budget= is a keyword override, as in next_request()."""
     if isinstance(leaves, (int, Path, Walk)):
         leaves = [leaves]
@@ -3059,8 +3049,8 @@ def _unverifiable_names(g, labels):
     holds only when each name is exactly one label's: not shared by two labels of the
     retrieval, and not a name the library cannot know to be the index's own -- one with
     U+FFFD, which servers that replaced the bytes of names that are not UTF-8 wrote, so
-    that the index may hold another label of exactly that name (a server now refuses
-    such a seed instead). The library has only the retrieval to go by."""
+    that the index may hold another label of exactly that name (a server that refuses such
+    a seed writes none). The library has only the retrieval to go by."""
     if not labels:
         return None
     counts = g.cache.get('name_counts')
@@ -3108,16 +3098,18 @@ def resubmittable_names(g, labels):
 
 def _merge_overrides(strategy, overrides, path='strategy'):
     """Deep-merge the keyword overrides of next_request() into |strategy| as the server will
-    read the result (L8, the review of 2026-10-06):
+    read the result:
       * labels.change_cost is one unit: an override that names another model replaces the
-        retrieval's whole (a field-by-field merge kept the old model's fields -- a constant's
-        value under a table, a table's default and entries under a constant -- which the
-        server's Strict parse refuses, so no continuation could change its cost model);
+        retrieval's whole (a field-by-field merge would keep the old model's fields -- a
+        constant's value under a table, a table's default and entries under a constant --
+        which the server's Strict parse refuses, so no continuation could change its cost
+        model);
         one that names the same model, or none, updates its fields;
       * None for a section the strategy holds as an object (labels, labels.change_cost,
-        branching, bounds, ...) is a ValueError naming it: it was read as {} or as forbid
-        by the rebuild and then sent as JSON null, which the server refuses ("expected an
-        object"), dropping the rebuilt labels.extra, loss_budget or max_label_branches."""
+        branching, bounds, ...) is a ValueError naming it: it would be read as {} or as
+        forbid by the rebuild and then sent as JSON null, which the server refuses
+        ("expected an object"), dropping the rebuilt labels.extra, loss_budget or
+        max_label_branches."""
     for k, v in overrides.items():
         here = '%s.%s' % (path, k)
         cur = strategy.get(k)
@@ -3137,7 +3129,7 @@ def _merge_overrides(strategy, overrides, path='strategy'):
 # ------------------------------------------------------------------ views
 
 class GraphletView:
-    """A view over a backing graphlet (§5, v3): every id is the backing graphlet's
+    """A view over a backing graphlet (§5): every id is the backing graphlet's
     original id (no remapping, no new record type). save() writes the UNCHANGED
     backing body plus, in J, {view: {selectors, mode, arm, of}}; load() restores the
     view. Its completeness is the backing complete_to_bp, qualified 'for the selected
@@ -3147,9 +3139,9 @@ class GraphletView:
                  'path_ids', 'of')
 
     def __init__(self, backing, selectors, arm=None, mode='any', of=None, *, budget=None):
-        """budget= (stage L): building the view is charged (the selected segments' chains,
-        and without |of| the dump and digest of the whole body); a stop raises, with no
-        partial."""
+        """budget= (local limits): building the view is charged (the selected segments'
+        chains, and without |of| the dump and digest of the whole body); a stop raises, with
+        no partial."""
         b = _B.resolve(budget)
         if b is None:
             self._build(backing, selectors, arm, mode, of, None)
@@ -3166,8 +3158,8 @@ class GraphletView:
             _label_ids_b(backing, selectors, b)
         labs = labels_matching(backing, selectors)
         if not labs:
-            # a view of no labels: None crashed with a TypeError, and [] in mode 'all'
-            # selected every segment (an empty set is a subset of every one) -- VOP2-07
+            # a view of no labels: None would crash with a TypeError, and [] in mode 'all'
+            # would select every segment (an empty set is a subset of every one)
             raise BadSelector('a view needs at least one label selector, not %r'
                               % (selectors,))
         self.selectors = [{'ref': l.ref} for l in labs]
@@ -3210,14 +3202,14 @@ class GraphletView:
                     b.release(set_bytes(n))
                 if (mode == 'any' and hit) or (mode == 'all' and hit == ids):
                     if b is not None:
-                        # (the price of the hit's chain, as when each was walked: the pass
-                        # below is cheaper, the account unchanged)
+                        # (priced as a walk of the hit's chain: the pass below is cheaper,
+                        # the work model charges the walk)
                         b.charge(2 * W_STEP * (s.depth + 1), list_bytes(s.depth + 1))
                         b.release(list_bytes(s.depth + 1))
                     hits.append(s.id)
             # the union of the hits' first-parent chains in one pass from the last segment
             # (a parent's id is below its child's): walking each hit's chain to the root
-            # was quadratic on a comb (VOP2-05)
+            # would be quadratic on a comb
             keep = set(hits)
             for s in reversed(a.segments):
                 if s.id in keep and s.parents:
@@ -3246,8 +3238,8 @@ class GraphletView:
               min_bp=0, budget=None, resume=None):
         """walks() of the backing graphlet restricted to the view's walks, in the same
         order: the view's walks are ranked, then cut to |top| -- cutting the backing arm's
-        ranking to |top| first returned the view's walks among the arm's top ones, fewer
-        than the view has, or none (VOP2-01). Only the walks returned are built. budget=:
+        ranking to |top| first would return the view's walks among the arm's top ones, fewer
+        than the view has, or none. Only the walks returned are built. budget=:
         as walks() -- by='id' stops with the whole walks made so far and a resume token,
         a ranked list with no partial."""
         a = self.backing.arm(arm)
@@ -3255,8 +3247,8 @@ class GraphletView:
             raise ValueError("resume= continues walks(by='id') only: a ranked list is never "
                              "partial")
         # the view's walks, ascending path ids (built in path order), tested by bisection:
-        # a set of them, built before the call's first charge, was an allocation no budget
-        # admitted (b2fc7816's open item) -- the membership test needs none
+        # a set of them, built before the call's first charge, would be an allocation no
+        # budget admits -- the membership test needs none
         keep = self.path_ids.get(a.side, ())
         b = _B.resolve(budget)
         if b is None:
@@ -3334,7 +3326,7 @@ class GraphletView:
 
     def dump(self, envelope=True, *, budget=None):
         """The backing body, unchanged; the view lives in J only (envelope=False: the
-        body alone, which no longer says it is a view)."""
+        body alone, which does not say it is a view)."""
         return self._with_view().dump(envelope=envelope, budget=budget)
 
     def save(self, path, *, budget=None):
@@ -3345,14 +3337,14 @@ class GraphletView:
 def subgraph(g, selectors, arm=None, mode='any', *, budget=None, of=None):
     """GraphletView(g, selectors, arm, mode). |of|: the view's backing identity when the
     caller has one (a store handle): without it the backing body is dumped and hashed
-    for its digest (VOP2-04)."""
+    for its digest."""
     return GraphletView(g, selectors, arm, mode, of, budget=budget)
 
 
 def view_from_spec(backing, spec, *, budget=None):
     """The GraphletView a saved J `view` spec (or a store entry's) describes over
-    |backing|: the one restoration of a spec (parser.load() and GraphletStore.view() had
-    a copy each, already apart: VOP2-09). A spec that is no object, or names no label,
+    |backing|: the one restoration of a spec (parser.load() and GraphletStore.view() both
+    call it). A spec that is no object, or names no label,
     is a GraphletFormatError -- never a view of every label or of none."""
     if not isinstance(spec, dict) or not spec.get('selectors'):
         raise GraphletFormatError(2, 'J: a saved view names no label selectors: %r'
@@ -3412,11 +3404,12 @@ _COMPARABLE_RANK = {True: 0, 'qualified': 1, 'unverifiable': 2, 'unknown': 3, Fa
 # understated (lower bound) or overstated (qualified)
 LOWER_BOUND_KINDS = ('label_lists', 'inexact_counts', 'seed_labels', 'switch_sources',
                      'greedy_losses')
-# (and a walked result's derivation limitation, D3: derive.qualifies())
+# (and the derivation limitation of a walked result whose permitted set was derived from
+# part of the seed, SPEC §7.0: derive.qualifies())
 OVERSTATED_KINDS = ('trace_record_boundaries',)
 
 
-# compare() of retrievals with record coordinates (decision C-N9)
+# compare() of retrievals with record coordinates
 COORDINATES_NOTE = 'coordinates are not compared (v1)'
 
 
@@ -3448,12 +3441,13 @@ def _displayed_parent_price(a, b, sides, depth, rules=None):
 def _displayed_parent_rules(a, b, sides, depth, cb=None):
     """The note of a comparison whose sides may display a merge through different parents,
     or None. From feature level 6 a merge displays the parent carried by the most labels,
-    before it the first to arrive (R21 (4); derive.displayed_parent_rule(): a side's rule,
-    or not known for a body without its envelope). The displays can differ only where a
-    side that may follow arrival order shows, at a merge within [0, depth) of a compared
-    arm, a parent the level-6 rule would not (derive.majority_first() not True: a later
-    parent carries more labels than the first, or the counts cannot be judged) while the
-    other side may follow the level-6 rule. A side whose merges all show their majority
+    before it the first to arrive (the majority-parent rule, SPEC §7.1;
+    derive.displayed_parent_rule(): a side's rule, or not known for a body without its
+    envelope). The displays can differ only where a side that may follow arrival order
+    shows, at a merge within [0, depth) of a compared arm, a parent the majority-parent
+    rule would not (derive.majority_first() not True: a later parent carries more labels
+    than the first, or the counts cannot be judged) while the other side may follow the
+    majority-parent rule. A side whose merges all show their majority
     parent displays what either rule would, so two retrievals of one rule, or of any rules
     whose merges agree with the majority, are not qualified. |cb|: compare()'s budget,
     charged the carried counts where they are read (an element per merge parent and per
@@ -3466,7 +3460,8 @@ def _displayed_parent_rules(a, b, sides, depth, cb=None):
         cb.charge(work)
 
     def shows_arrival_minority(g):
-        # the side's display differs from the level-6 rule's somewhere (or may: None)
+        # the side's display differs from the majority-parent rule's somewhere (or may:
+        # None)
         return any(derive.majority_first(g, s, depth) is not True for s in sides)
 
     hit = None
@@ -3541,17 +3536,17 @@ def compare(a, b, *, arm=None, labels=None, mode='claims', budget=None):
     Both sides are compared over their DAGs RESTRICTED to [0, depth): the walks are the
     restricted DAG's leaves (restricted_leaves) and a claim reaching past the depth is
     anchored on its own route at the depth. Cutting the deeper DAG's displayed walks and
-    claims instead let merges beyond the depth decide what lies before it: a branch that
-    enters such a merge through a non-first parent is shown by no walk of the deeper DAG,
-    and its lineage was route_only on the other branch's bases, so a retrieval and a
-    deeper one of the same seed differed (the review's bubbles, radius 30 vs 100 at depth
-    30, merges at 36 and 62). A merge AT the depth lies outside the restricted DAG too: a
+    claims instead would let merges beyond the depth decide what lies before it: a branch
+    that enters such a merge through a non-first parent is shown by no walk of the deeper
+    DAG, and its lineage would be route_only on the other branch's bases, so a retrieval and
+    a deeper one of the same seed would differ (bubbles of radius 30 vs 100 at depth 30,
+    merges at 36 and 62). A merge AT the depth lies outside the restricted DAG too: a
     retrieval walked to a merge position records it as a zero-length segment, and the runs
-    it closes are open claims at the depth, not merged ones (round 3, finding A). Where a
+    it closes are open claims at the depth, not merged ones. Where a
     route cannot be reconstructed through a merge (its lineage in no partition) the
     comparison is 'qualified', never a difference.
 
-    Label evidence and the per-node label limit (R21 (5)): 'qualified' can come from
+    Label evidence and the per-node label limit: 'qualified' can come from
     labels.max_labels_per_node alone. A retrieval whose label lists were cut at a node (more
     labels than the limit, 64 by default: a seed carried by many labels, or a conserved
     region) states label_evidence lower_bound, and a comparison with it is qualified, never
@@ -3559,28 +3554,28 @@ def compare(a, b, *, arm=None, labels=None, mode='claims', budget=None):
     for you: fetch both sides again with a larger labels.max_labels_per_node (or name fewer
     labels) when equality must be decided.
 
-    Record coordinates (decision C-N9) are not compared: two retrievals with them compare
+    Record coordinates are not compared: two retrievals with them compare
     exactly as without them, and the answer notes it ('coordinates are not compared (v1)').
 
-    Displayed parents (R21 (4)): from feature level 6 a merge displays the parent carried
-    by the most labels, before it the first to arrive. Claims, walks and prefix_subset are
-    keyed by the displayed bases, so a comparison is 'qualified', and a note says why, when
-    one side may follow the older rule (it states a level below 6, its capabilities state
-    none, or it is a body without its envelope) and shows, at a merge before the depth, a
-    parent carried by fewer labels than another, while the other side may follow the
-    level-6 rule (states 6 or more, or is a body without its envelope); mode labels is not
-    affected. A side whose merges all show their majority parent displays what either rule
-    would.
+    Displayed parents (the majority-parent rule, SPEC §7.1): from feature level 6 a merge
+    displays the parent carried by the most labels, before it the first to arrive. Claims,
+    walks and prefix_subset are keyed by the displayed bases, so a comparison is
+    'qualified', and a note says why, when one side may follow the arrival-order rule (it
+    states a level below 6, its capabilities state none, or it is a body without its
+    envelope) and shows, at a merge before the depth, a parent carried by fewer labels than
+    another, while the other side may follow the majority-parent rule (states 6 or more, or
+    is a body without its envelope); mode labels is not affected. A side whose merges all
+    show their majority parent displays what either rule would.
 
-    The cost follows both DAGs up to the depth -- each segment read once per side (L12: in
-    modes walks and prefix_subset each walk's chain was read again per walk, quadratic on
-    a comb) -- and, in those modes, the walks' spellings to it, which on a deep comb grow
+    The cost follows both DAGs up to the depth -- each segment read once per side (in modes
+    walks and prefix_subset too: reading each walk's chain again per walk would be quadratic
+    on a comb) -- and, in those modes, the walks' spellings to it, which on a deep comb grow
     as the square of the depth, as an export of its walks does. Without a budget (the
-    default) no work or
-    allocation budget applies; budget= (stage L) never raises for the budget: a stopped
-    comparison RETURNS comparable 'unknown', equal None, no difference lists and
-    local_stop (the stop: resource, phase, how far keying got) -- a one-sided list from a
-    half-keyed side would be a false difference. compare_cost() estimates the charge."""
+    default) no work or allocation budget applies; budget= (local limits) never raises for
+    the budget: a stopped comparison RETURNS comparable 'unknown', equal None, no difference
+    lists and local_stop (the stop: resource, phase, how far keying got) -- a one-sided list
+    from a half-keyed side would be a false difference. compare_cost() estimates the
+    charge."""
     cb = _B.resolve(budget)
     if cb is None:
         return _compare(a, b, arm, labels, mode, None, {})
@@ -3614,8 +3609,8 @@ def _stopped_comparison(a, b, mode, state, e):
 
 def _compare_sides(a, b, arm):
     """The arms a comparison reads -> (sides, the reason there are none). An explicit arm
-    is resolved on |a| and must be one |b| retrieved too: it was looked up on |b| as a
-    KeyError (VOP2-02)."""
+    is resolved on |a| and must be one |b| retrieved too (looked up on |b| it would raise a
+    KeyError)."""
     if arm is not None:
         side = a.arm(arm).side
         if side not in b.arms:
@@ -3629,8 +3624,8 @@ _COMPARE_MODES = ('claims', 'walks', 'labels', 'prefix_subset')
 
 
 def _compare(a, b, arm, labels, mode, cb, state):
-    # the mode before anything is answered: an incomparable pair echoed a mode that a
-    # comparable one refused (VOP2-08)
+    # the mode before anything is answered: otherwise an incomparable pair would echo a mode
+    # that a comparable one refuses
     if mode not in _COMPARE_MODES:
         raise ValueError("mode is 'claims', 'walks', 'labels' or 'prefix_subset'")
     if cb is not None:
@@ -3645,7 +3640,7 @@ def _compare(a, b, arm, labels, mode, cb, state):
     sides, none = _compare_sides(a, b, arm)
     if not sides:
         # the support kinds and strategies of both sides, as every other answer states
-        # them (VOP2-08: the defaults, ('kmer', 'kmer'), were stated for any pair)
+        # them (not the defaults, ('kmer', 'kmer'), for any pair)
         return Comparison(False, none, None, None, [], [], notes, mode=mode,
                           support=(a.support, b.support), strategies=strategies)
     scopes = (a.arms[sides[0]].scope, b.arms[sides[0]].scope)
@@ -3674,17 +3669,17 @@ def _compare(a, b, arm, labels, mode, cb, state):
     if a.support != b.support:
         notes.append('support kinds differ (%s vs %s)' % (a.support, b.support))
     if _C.present(a) or _C.present(b):
-        # decision C-N9: the record coordinates ride beside the claims, never in their keys,
-        # and are neither clipped nor charged here (revision 6)
+        # the record coordinates ride beside the claims, never in their keys, and are
+        # neither clipped nor charged here
         notes.append(COORDINATES_NOTE)
     if mode in ('claims', 'walks', 'prefix_subset'):
         shown = _displayed_parent_rules(a, b, sides, depth, cb)
         if shown is not None:
-            # R21 (4): which parent a merge displays is the server's choice, and it changed
-            # at feature level 6; claims and walks are keyed by the displayed bases, so the
-            # same trie can spell a walk through a merge differently on the two sides. A
-            # difference there may be the display's, not the retrieval's: qualified, as when
-            # the completeness scopes differ
+            # which parent a merge displays is the server's choice, and it differs below and
+            # from feature level 6 (the majority-parent rule); claims and walks are keyed by
+            # the displayed bases, so the same trie can spell a walk through a merge
+            # differently on the two sides. A difference there may be the display's, not the
+            # retrieval's: qualified, as when the completeness scopes differ
             comparable = _weaker(comparable, 'qualified')
             notes.append(shown)
     if cb is not None and labels is not None:
@@ -3836,7 +3831,7 @@ class _Tally:
 
 def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     """An estimate, before running it, of what compare(a, b, arm=, labels=, mode=) charges
-    a budget (stage L, the current WORK_MODEL): {mode, work_model, work_units: {at_least,
+    a budget (local limits, the current WORK_MODEL): {mode, work_model, work_units: {at_least,
     estimate}, memory_bytes: {at_least, estimate}, exact, phases, unpriced}.
 
     at_least is what compare() certainly charges once it keys the two sides: the checks,
@@ -3872,7 +3867,8 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
     depth = min(min(a.arms[s].complete_to_bp, b.arms[s].complete_to_bp) for s in sides)
     t.charge(W_ELEM * sum(len(g.arms[s].segments) for g in (a, b) for s in sides))
     if mode in ('claims', 'walks', 'prefix_subset'):
-        # the carried counts of the merges across the display rule change (R21 (4))
+        # the carried counts of the merges, where the two sides' display rules may differ
+        # (the majority-parent rule)
         w = _displayed_parent_price(a, b, sides, depth)
         if w:
             t.charge(w)
@@ -3898,7 +3894,7 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                     if g.mode == 'constrain' else n_rows * 4
                 if mode == 'prefix_subset':
                     # the tree of the claims' chains and the claims filed under their
-                    # anchors (_claim_index(): no prefix is spelled, L2)
+                    # anchors (_claim_index(): no prefix is spelled)
                     est_w += 2 * W_STEP * steps + (bp >> 8) + 3 * W_ELEM * n_rows \
                         + sort_work(n_rows)
                     est_m += min(steps, len(segs)) * (SET_ITEM + 2 * DICT_KEY + INT
@@ -3958,9 +3954,8 @@ def _price_restricted_claims(t, g, side, depth):
     w, m = derive.price(a, 'annotate_route_ends', len(g.labels), g.mode)
     t.uses((id(a), 'route_ends_at', depth), w, m)
     # the ends of the DAG restricted to the depth, as compare() keys them: the whole DAG's
-    # ends stood in for them and priced every end beyond the depth too, so at_least
-    # exceeded what the comparison charged (the review of levels 4-5: comb 1 vs comb 100,
-    # 9,197 lwu advertised against 7,963 charged)
+    # ends would price every end beyond the depth too, and at_least would exceed what the
+    # comparison charges
     ends = _annotate_route_ends_at(a, depth)
     md = derive.merge_depth(a)
     n = sum(len(v) for v in ends.values())
@@ -4127,10 +4122,7 @@ def _claim_prefixes(arm, rows, strict=False, natural=False):
 
 def _charge_spellings(cb, arm, segs):
     """Charge derive.walk_iter() of |segs|, its bases streamed to a consumer that keeps
-    none of them: the chains' steps (work) and derive.walk_iter_bytes(). Before the
-    spellings were streamed this charged every target's chain and bases and the kept
-    prefixes (2x the bases and 2 list slots per chain step), which was what walk_batch()
-    held."""
+    none of them: the chains' steps (work) and derive.walk_iter_bytes()."""
     sg = arm.segments
     cb.charge(len(segs))
     steps = sum(sg[x].depth + 1 for x in segs)
@@ -4142,9 +4134,8 @@ def _charge_spellings(cb, arm, segs):
 
 def _charge_chain_tree(cb, arm, segs):
     """Charge a tree of the chains of |segs| (_refusal_tree(), _restricted_tree()): the
-    chains' steps, priced as their spelling was (the work model is unchanged), and per
-    segment of their union its children slot, its offset and the set that collects it --
-    no bases (the spellings these trees replaced were charged as _charge_spellings())."""
+    chains' steps, priced as their spelling is (_charge_spellings()), and per segment of
+    their union its children slot, its offset and the set that collects it -- no bases."""
     sg = arm.segments
     cb.charge(len(segs))
     steps = sum(sg[x].depth + 1 for x in segs)
@@ -4203,8 +4194,8 @@ def _cut_info(g, arm, anchor, m):
     # annotate: the P runs cover the nodes entered by steps from_bp + 1.. only, so the
     # seed boundary's set (the root's entry) is intersected in first, as every other
     # annotate reading does (_displayed_presence, the route ends, label_summary): from
-    # the first P run on, a label absent at the boundary counted as supporting [0, m)
-    # (VOP2-03). Constrain: the first piece is the root's entry with the switch-ins at
+    # the first P run on, a label absent at the boundary would count as supporting [0, m).
+    # Constrain: the first piece is the root's entry with the switch-ins at
     # its first base applied already -- seeding it would drop those.
     inter = None if g.mode == 'constrain' else frozenset(entry)
     for sid in derive.chain(arm, anchor):
@@ -4229,9 +4220,9 @@ def restricted_leaves(arm, depth):
     leaves above the depth and every segment reaching or crossing it. Among the latter is
     a segment whose only child is a merge at or beyond the depth that it enters through a
     NON-first parent: no displayed walk of the deeper DAG passes through it, yet at the
-    depth it is a walk of its own (the review's bubbles, merged at 36 and 62, compared at
-    30: comparing the deeper DAG's displayed walks cut at 30 reported differences that
-    the merges beyond 30 caused)."""
+    depth it is a walk of its own (bubbles merged at 36 and 62, compared at 30: comparing
+    the deeper DAG's displayed walks cut at 30 would report differences that the merges
+    beyond 30 cause)."""
     return [s.id for s in arm.segments
             if s.from_bp < depth and (s.leaf is not None or s.end_bp >= depth)]
 
@@ -4285,7 +4276,7 @@ def _cut_plan(a, depth):
 
 
 def _cut_prices(g, a, plan, cost, held):
-    """What _cuts() charges for |plan| (work model 2: L12, the review of 2026-10-06): each
+    """What _cuts() charges for |plan| (work model 2): each
     segment the pass reads whole once -- its own part of derive.cut_cost (its pieces of
     displayed support, their sets, the labels supporting it, its bases), with the
     transient of reading it (held, released) -- and per cut: its anchor's own part when it
@@ -4293,8 +4284,8 @@ def _cut_prices(g, a, plan, cost, held):
     8 pieces, and per 256 bases), its label set and its {label: j} built from the running
     state (a unit per 2 labels), the cut kept (its tuple, prefix, set and dict) -- and the
     pass's running state (the intersection, the dropped labels and their undo lists, the
-    pieces and the stack), held for the pass. Work model 1 charged every cut its whole
-    chain's cut_cost: the chains were re-read per cut (quadratic on a comb)."""
+    pieces and the stack), held for the pass -- not every cut its whole chain's cut_cost,
+    which would re-read the chains per cut (quadratic on a comb)."""
     segs = a.segments
     n0 = len(segs[0].entry) if segs else 0
     nodes = list(plan['dep'])
@@ -4328,11 +4319,10 @@ def _cut_prices(g, a, plan, cost, held):
 def _cuts(g, side, depth, memo, cb=None):
     """[(leaf, m, cut info)] for every leaf of the arm's DAG restricted to [0, depth)
     (restricted_leaves), m = min(its end, depth). Leaves sharing the segment that holds
-    base m - 1 share one cut (B1), and all cuts are made in ONE parents-first pass over
-    their chains (_cut_pass()): each segment's pieces are read once, not once per cut
-    whose chain passes through it (L12, the review of 2026-10-06: a comb of 4,000 walks
-    re-read 16 M segment pieces, and rewrote {label: j} for every supporting label at every
-    piece: 7.9 s for a compare of _wide(500, 400) whose FASTA takes 1 ms). The cut infos are
+    base m - 1 share one cut, and all cuts are made in ONE parents-first pass over their
+    chains (_cut_pass()): each segment's pieces are read once, not once per cut whose chain
+    passes through it (on a comb of 4,000 walks that would re-read 16 M segment pieces and
+    rewrite {label: j} for every supporting label at every piece). The cut infos are
     _cut_info()'s, value for value. Memoized per comparison in |memo|."""
     key = (id(g), side, depth)
     got = memo.get(key)
@@ -4342,7 +4332,7 @@ def _cuts(g, side, depth, memo, cb=None):
     segs = a.segments
     out = []
     if cb is not None:
-        # cut_cost reads segment_ops (constrain): charged with it (it was built uncharged)
+        # cut_cost reads segment_ops (constrain): charged with it
         derive.uses(cb, g, a, 'leaves', 'paths', 'cut_cost',
                     *(('segment_ops',) if g.mode == 'constrain' else ()))
         cost = derive.cut_cost(a, g.mode)
@@ -4582,8 +4572,8 @@ def _restricted_run_claim(g, a, run, depth, exact, inexact):
     merge through another parent), with displayed support evaluated there. Everything at
     or beyond the depth is outside the restricted DAG: a merge at the depth is one a
     retrieval walked to the depth never makes, so a run it closes is an open claim there
-    and a run anchored on it is anchored on its own route (round 3, finding A: a radius
-    equal to a merge position compared unequal with a deeper retrieval). Any other run
+    and a run anchored on it is anchored on its own route (otherwise a radius equal to a
+    merge position would compare unequal with a deeper retrieval). Any other run
     ending within the depth is its uncut claim (its anchor and every merge on its chain lie
     below the depth)."""
     zero = run.from_bp == run.to_bp
@@ -4623,7 +4613,7 @@ def _annotate_route_ends_at(arm, depth):
     a segment reaching it). -> {label: [(seg, j)]}."""
     segs = arm.segments
     # the whole DAG is the restricted one only when nothing starts at or beyond the depth:
-    # a merge AT the depth (zero length, ending there) is outside it (round 3, finding A)
+    # a merge AT the depth (zero length, ending there) is outside it
     if all(s.end_bp <= depth and (s.from_bp < depth or not s.parents) for s in segs):
         return _annotate_route_ends(arm)[1]
     alive_end = [None] * len(segs)
@@ -4923,16 +4913,15 @@ def _recorded_refusal(g, arm, seq, ref, memo=None, cb=None):
     blocked successor or a skipped hairpin, on a segment whose chain spells seq up to
     the branch and for the base seq has there. None when nothing was recorded. |memo|:
     the comparison's, where the index of the arm's refusals is kept (one omission after
-    another asks about the same ones). |cb| (stage L): each segment followed and each
+    another asks about the same ones). |cb| (local limits): each segment followed and each
     recorded refusal tested is charged before it is.
 
     The chains are not spelled: seq is followed down the tree of the refusals' chains
     (_refusal_index()), and a refusal at |at| is on seq's path when the chain matches seq
     up to |at| -- read at the segment that holds base at - 1 of the chain (its anchor), so
-    only the refusals anchored on the segments seq reaches are tested. Every refusal of the
-    arm was tested on every call before (L2: an arm of 32,001 segments was scanned per
-    omission, uncharged, 72x more work than charged); the first recorded one in the
-    arm's order (branch events, then segments' events) still wins."""
+    only the refusals anchored on the segments seq reaches are tested, not every refusal of
+    the arm on every call (an arm of 32,001 segments scanned per omission); the first
+    recorded one in the arm's order (branch events, then segments' events) wins."""
     ids = _label_index(g)[0].get(ref)
     if not ids:
         return None
@@ -4988,7 +4977,7 @@ def _refusal_index(arm, cb=None):
     segment for at_bp 0: an event before its own segment is filed under the ancestor that
     holds it) -- or False when one of those chains has a segment without bases. Priority:
     the arm's order, branch events first. A refusal past its segment's end is on no
-    chain and is left out. |cb| (stage L): the search for the ancestors of events before
+    chain and is left out. |cb| (local limits): the search for the ancestors of events before
     their segment (_chain_anchors()), where there are any; the rest is charged by the
     caller."""
     tree = _refusal_tree(arm)
@@ -5018,11 +5007,9 @@ def _refusal_index(arm, cb=None):
                 add(s.id, ev.at_bp, 'E', ev)
     if before:
         # An event whose at_bp lies before its own segment (the parser does not check it,
-        # the server never writes one) is filed under an ancestor. Each was found by a climb
-        # of its chain, one uncharged step per ancestor and per event: a deep comb with such
-        # events took O(events x depth), 10x its charge (the review of the L2 fix). One walk
-        # of the tree finds them all, charged, and the lists they join are put back in the
-        # arm's order
+        # the server never writes one) is filed under an ancestor. One walk of the tree finds
+        # them all, charged -- a climb of each event's chain would take O(events x depth) on a
+        # deep comb -- and the lists they join are put back in the arm's order
         got = _chain_anchors(kids, roots, offs, before, cb)
         joined = set()
         for (_, _, entry), a in zip(before, got):
@@ -5079,9 +5066,9 @@ def _chain_anchors(kids, roots, offs, asks, cb=None):
     tree (kids, offs, roots: _chain_tree()) that holds base |at| of that chain, or the
     chain's last segment that starts at it. One walk of the tree down from its roots, the
     chain to the current segment kept with its offsets, and one bisection per ask: O(tree +
-    asks x log depth), where a climb per ask was O(asks x depth). |cb| (stage L): a step per
-    segment of the tree and a bisection per ask, and the walk's stack, chain and answer,
-    charged before the walk (the stack and the chain are dropped after it)."""
+    asks x log depth), where a climb per ask would be O(asks x depth). |cb| (local limits):
+    a step per segment of the tree and a bisection per ask, and the walk's stack, chain and
+    answer, charged before the walk (the stack and the chain are dropped after it)."""
     n = len(offs)
     by_seg = {}
     for i, (seg, at) in enumerate((q[0], q[1]) for q in asks):
@@ -5119,7 +5106,7 @@ def _follow(segs, kids, roots, seq, lim, cb=None):
     """{segment: the length of seq's prefix its chain spells, its own bases included} for
     every segment of the tree (kids, roots) whose chain BEFORE it is seq's (bases [0,
     lim)): seq followed down the tree, a segment's bases compared only where its parent
-    matched in full. |cb| (stage L): each segment charged before it is compared -- its
+    matched in full. |cb| (local limits): each segment charged before it is compared -- its
     bases (two slices of them, dropped at once) and its entry in the answer, which the
     caller releases (_follow_bytes()) once it drops the answer."""
     out = {}
@@ -5158,8 +5145,9 @@ def _divergence(arm, seq, depth, memo=None):
     restricted walks (_restricted_tree()), a segment's bases compared where its chain so
     far matches, and the deepest match is the longest common prefix with some walk cut at
     the depth. Keeping every restricted walk's spelling for the comparison (one omission
-    after another asks again) held the whole arm's text spelled out -- on a comb as much
-    as to_fasta() writes -- and spelling them per omission was quadratic in time."""
+    after another asks again) would hold the whole arm's text spelled out -- on a comb as
+    much as to_fasta() writes -- and spelling them per omission would be quadratic in
+    time."""
     key = ('divergence_tree', id(arm), depth)
     tree = None if memo is None else memo.get(key)
     if tree is None:
@@ -5209,7 +5197,7 @@ def _claim_index(arm, rows, cb=None):
     a prefix of a walk exactly when the walk, followed down the tree (_follow()), matches
     that segment's chain at least to to_bp. A ValueError (derive.NO_BASES) where a chain
     lacks bases: every walk of |a| holds them here (the caller compares no side without).
-    |cb| (stage L): the search for the anchors of claims whose to_bp lies before their
+    |cb| (local limits): the search for the anchors of claims whose to_bp lies before their
     segment (_chain_anchors()), where there are any; the rest is charged by the caller."""
     segs = arm.segments
     tree = _chain_tree(segs, {c.segment for c in rows})
@@ -5226,7 +5214,7 @@ def _claim_index(arm, rows, cb=None):
         x = c.segment
         if offs[x] >= c.to_bp:
             # its last base before its own segment: an ancestor holds it, found below by
-            # one walk of the tree (a climb per claim was O(claims x depth), uncharged)
+            # one walk of the tree (a climb per claim would be O(claims x depth), uncharged)
             before.append((x, c.to_bp - 1, i))
             continue
         at, first = by_ref.setdefault(ref, {}).setdefault(x, ([], {}))
@@ -5301,8 +5289,8 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
         if cand is None:
             # the label's supported prefixes in order, once: the strings beginning with seq
             # are a run of that order starting where seq would be inserted, so one bisection
-            # and one startswith decide (every prefix was tested with startswith per walk
-            # before, L2 (1): 40M calls on a wide pair)
+            # and one startswith decide (testing every prefix with startswith per walk would
+            # make 40M calls on a wide pair)
             got = supported.get((side, ref), ())
             if cb is not None:
                 cb.charge(sort_work(len(got)) * (1 + (depth >> 9)), list_bytes(len(got)))
@@ -5359,8 +5347,8 @@ def _prefix_subset(a, b, sides, depth, sel, memo=None, inexact=None, cb=None, st
         ev_to = arm.evidence_complete_to_bp
         if best is None:
             if cb is not None:
-                # the refusal is looked up by the label's id: a's name/ref index (it was
-                # built uncharged, the level-5 batch's under-accounted cross pair)
+                # the refusal is looked up by the label's id: a's name/ref index, charged
+                # (the cross pair builds it)
                 _uses_g(cb, a, 'label_index')
                 # a's recorded refusals indexed once per comparison (their chains' tree and
                 # each refusal under its anchor), then per omission the segments seq
@@ -5541,8 +5529,8 @@ def memory_bytes(g):
     """The model's footprint in the heap: a deduplicating deep sizeof over the slotted
     model -- every record, label set, string, int and float it holds -- plus the caches
     the queries built (Graphlet.cache, Arm.cache), the envelope and the summary. What a
-    GraphletStore charges against max_ram_mb (the old shallow count saw 35-67 % of the
-    traced heap, B2)."""
+    GraphletStore charges against max_ram_mb (a shallow count would see 35-67 % of the
+    traced heap)."""
     return _deep_bytes([g])
 
 
@@ -5558,8 +5546,8 @@ def cache_signature(g):
     """A cheap fingerprint of the caches: each cache's keys and the number of entries of
     each value, which changes whenever a query adds to them. The keys too, not only their
     count: a step may swap one key for another of the same length -- runs_by_label (one
-    entry on a single-label arm) replacing label_runs()'s count left the lengths equal,
-    and the store never charged the index (review of the pass-5 fixes)."""
+    entry on a single-label arm) replacing label_runs()'s count leaves the lengths equal,
+    and the store would never charge the index."""
     sig = [tuple(g.cache)]
     for a in g.arms.values():
         sig.append(tuple(a.cache))
@@ -5620,7 +5608,7 @@ def arm_exact(g, side):
         return False
     stated = False
     for lim in g.limitations:
-        # a walked result's derivation (D3) overstates like trace_record_boundaries does
+        # a walked result's partial derivation overstates like trace_record_boundaries does
         if lim.kind in LOWER_BOUND_KINDS or derive.qualifies(g, lim):
             stated = True
             if lim.arm is None or lim.arm == side:
@@ -5661,8 +5649,8 @@ def evidence_block(g, side=None, view=None):
         'limitations': kinds,
     }
     if _C.requested(g):
-        # only when the request asked for coordinates (C1): every other evidence block is
-        # as it was. The block's kind and completeness (a cut list or a lower-bound run is
+        # only when the request asked for coordinates: no other evidence block carries the
+        # key. The block's kind and completeness (a cut list or a lower-bound run is
         # complete false), or the reason there is none
         raw = g.seed_summary['coordinates']
         out['coordinates'] = {'kind': raw.get('kind'), 'complete': raw.get('complete')} \
@@ -5678,10 +5666,10 @@ def summary(g, arm=None, max_bytes=2048, *, budget=None):
     top labels by direct_bp, the stated limitations (caveats: kind, knob, limit,
     observed, complete_to_bp and effect; informational ones flagged) and the resource
     stop with its suggested actions. A seed whose permitted set was derived from part of
-    it (D3) says so (seed.derivation: {partial, kmers_read, of}); a retrieval that asked
+    it says so (seed.derivation: {partial, kmers_read, of}); a retrieval that asked
     for record coordinates states their kind and completeness (coordinates), or the reason
     it has none. Under the cap the effect texts go first, then top
-    labels, then caveats (each step stated). budget= (stage L): a stop raises, with no
+    labels, then caveats (each step stated). budget= (local limits): a stop raises, with no
     partial."""
     b = _B.resolve(budget)
     if b is None:
@@ -5718,8 +5706,8 @@ def _summary(g, arm, max_bytes, b):
            'arms': {}, 'caveats': []}
     pd = derive.partial_derivation(g)
     if pd is not None:
-        # D3 named (R21 (3)): the permitted set was derived from part of the seed, a
-        # superset of its carriers, and the walk stopped at the seed
+        # the partial derivation named (SPEC §7.0): the permitted set was derived from part
+        # of the seed, a superset of its carriers, and the walk stopped at the seed
         out['seed']['derivation'] = {'partial': True, 'kmers_read': _kv(pd.observed),
                                      'of': g.seed.num_kmers}
     if _C.requested(g):

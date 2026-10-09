@@ -144,7 +144,7 @@ INDEXES = {
     # min_successor_labels 2 refuses B (x's minority), so the split keeps A and C. x's lineage
     # was on two successors before the quorum, z's on one: when x and z both end at the end of
     # A (y goes on along D), their two label_lost ends look alike in every other field but
-    # carry branches 1 and 0 -- the counterexample that made LabelRun::branches primary
+    # carry branches 1 and 0 -- the case that needs LabelRun::branches in the primary order
     'quorum': {
         'k': 15, 'seed': 808,
         'blocks': {'S': 30, 'P': 10, 'A': 30, 'B': 30, 'C': 30, 'D': 30},
@@ -174,11 +174,11 @@ INDEXES = {
         'files': {'comb.fa': [('backbone', ['B'])]
                   + [('tip%d' % i, [('B', i - 14, i), ('alt', 'B', i)]) for i in range(15, 245)]},
     },
-    # a row-diff annotation with coordinates (stage 3 of DESIGN-traverse-graphlet.md §14.1,
-    # the budget-aware reads): the path P (acc_path) and a record acc_rep that repeats the
-    # k-mer P[51, 66) 120,000 times between random spacers. The k-mer before it on P carries
-    # acc_path alone, but its row-diff successor carries 120,000 coordinates of acc_rep: a
-    # row whose dependencies are dense while its result is tiny (§14 freeze gate)
+    # a row-diff annotation with coordinates (the budget-aware reads of
+    # DESIGN-traverse-graphlet.md §14.1): the path P (acc_path) and a record acc_rep that
+    # repeats the k-mer P[51, 66) 120,000 times between random spacers. The k-mer before it on
+    # P carries acc_path alone, but its row-diff successor carries 120,000 coordinates of
+    # acc_rep: a row whose dependencies are dense while its result is tiny (§14 freeze gate)
     'dense': {
         'k': 15, 'seed': 1111, 'anno': 'row_diff_brwt_coord',
         'blocks': {'P': 120},
@@ -505,7 +505,7 @@ COMPARE_FIXTURES = {
 # hand-made: what the CLI cannot produce today
 HAND_MADE = ('clipped_merge', 'limits')
 
-# CLI fixtures of the request budgets (DESIGN-traverse-graphlet.md §14, stage 2), written to
+# CLI fixtures of the request budgets (DESIGN-traverse-graphlet.md §14), written to
 # documents/budgets/ (the top-level fixture list stays as it is). A work stop is the same
 # walk in every detail, so its full and graphlet responses are both written; a memory
 # stop is charged in the requested detail (the output is part of the budget), so the same
@@ -688,7 +688,7 @@ def features(body):
 def normalized_strategy(strategy, detail):
     """strategy_to_json() of src/cli/traverse.cpp over the request's strategy: every
     default filled in, the mode/preset dependent ones as parse_traverse_request() sets
-    them, plus output.detail/timing (v2 echo) and clamped."""
+    them, plus output.detail/timing and clamped."""
     st = copy.deepcopy(strategy or {})
     labels = st.get('labels', {})
     mode = labels.get('mode', 'constrain')

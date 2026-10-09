@@ -39,7 +39,7 @@ METHOD
   Fingerprints: every op's result is reduced to a stable digest (dataclasses by field, sets sorted, no
   object addresses) in another untimed pass; --compare flags (item, op) pairs whose digests differ.
   memory_bytes is informational (it changes whenever the model's layout does) and never flagged.
-  Work: with a library that has stage L budgets (f667d775 and later), one more untimed call per (item, op)
+  Work: with a library that has local budgets (metagraph.traverse.budget), one more untimed call per (item, op)
   under local_budget() without limits records its usage: lwu (local work units at the cold price,
   deterministic) and model_kb (the modelled memory account's peak). It is the call's consumed work in the
   library's own units, not CPU time.
@@ -49,7 +49,7 @@ METHOD
 
 INTERLEAVED A/B (--interleave LIB_A LIB_B)
   Two separate runs compare the machine's state as much as the code: on a loaded machine whole runs of one
-  library differed by +-25 % on every op alike (A1 -> A2 1.20, A2 -> A3 0.77, 2026-10-04). --interleave starts
+  library differed by +-25 % on every op alike (A1 -> A2 1.20, A2 -> A3 0.77). --interleave starts
   one worker process per library (the same inputs, items and ops) and times each (item, op) in --rounds rounds
   of A B B A, each request the cold repetitions above; per (item, op) the minimum of each side, B/A per op over
   the pairs with equal result fingerprints (others listed and left out; exit code 1 when any changed), and a
@@ -60,7 +60,7 @@ INTERLEAVED A/B (--interleave LIB_A LIB_B)
 OUTPUT (--out DIR, default bench_library_out/<label>_<timestamp>)
   library_results.json   meta (library path, module file, source digest, git head + dirty flag, python),
                          items, one row per (item, op): t_min_ms, t_med_ms, reps, peak_kb, held_kb, err, fp,
-                         usage {lwu, model_kb} (null without stage L); compare rows
+                         usage {lwu, model_kb} (null without local budgets); compare rows
   summary.md             per-op table (median / p90 / max over items), size bins, the slowest calls, compare,
                          errors
 
@@ -376,9 +376,9 @@ def peak_of(fn):
 
 
 def usage_of(fn):
-    """Stage L's account of one call of |fn| under a budget without limits: {lwu (local work units, cold price:
-    deterministic, the same in any process), model_kb (the modelled memory account's peak)}; None for a library
-    without stage L (before f667d775) or a call that raised. Never timed."""
+    """The local-budget account of one call of |fn| under a budget without limits: {lwu (local work units, cold
+    price: deterministic, the same in any process), model_kb (the modelled memory account's peak)}; None for a
+    library without local budgets or a call that raised. Never timed."""
     lb = getattr(T, 'local_budget', None)
     if lb is None:
         return None
@@ -554,7 +554,7 @@ def summary_md(res):
                       fmt(max([r['peak_kb'] for r in rs if r.get('peak_kb') is not None] or [0]), 0),
                       fmt(statistics.median(lwu)) if lwu else '-', errs])
     L.append('## per op (cold: fresh parse before every repetition; t_min over repetitions)\n')
-    L.append('median lwu = stage L local work units of one call (deterministic; "-" without stage L).\n')
+    L.append('median lwu = local work units of one call (deterministic; "-" without local budgets).\n')
     L.append(md_table(['op', 'items', 'median ms', 'p90 ms', 'max ms', 'slowest item', 'median peak KB',
                        'max peak KB', 'median lwu', 'errors'], trows))
     L.append('')
@@ -662,8 +662,8 @@ def compare_runs(pa, pb):
                      '%s -> %s' % (fmt(wa), fmt(wb)) if nw else '-'])
     L.append('B/A of t_min per (item, op), over the pairs that did the same completed work (equal result '
              'fingerprints); < 1 = B faster. "sum" = total over those items; "results changed" = pairs left out '
-             'because their results differ. lwu = stage L local work units of the call (cold price, deterministic; '
-             '"-" for a library without stage L), summed over the compared pairs.\n')
+             'because their results differ. lwu = local work units of the call (cold price, deterministic; '
+             '"-" for a library without local budgets), summed over the compared pairs.\n')
     L.append(md_table(['op', 'items', 'geomean B/A', 'median B/A', 'sum A ms', 'sum B ms', 'sum B/A',
                        'worst B/A (item)', 'median peak B/A', 'results changed', 'lwu A -> B'], rows))
     ca = {(c['a'], c['b'], c['mode']): c for c in A.get('compare') or []}

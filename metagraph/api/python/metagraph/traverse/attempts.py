@@ -9,13 +9,13 @@ A light module: the standard library and nothing else of this package. Importing
 metagraph.traverse.client (which re-exports every name here), or `from metagraph.traverse
 import release_verdict` (the package's names are loaded lazily), loads no parser, model or
 operation, so a process that only dispatches attempts and releases their capacity (the
-search service's API side) pays for none of them (LRG-G7).
+search service's API side) pays for none of them.
 
 The readers take the wire as the server writes it and are typed where a release depends on
 a value: an instant is an integer in [0, 2^53 - 1] -- never a bool or a float, which
 Python compares equal to integers (True == 1) --, an instance id a string, a flag a JSON
 bool, and a key whose value is null reads as absent (the duplicate 409 of a level-5 server
-writes `"tombstone": null`, C23). A value of another type reads as None, which no release
+writes `"tombstone": null`). A value of another type reads as None, which no release
 condition accepts.
 """
 
@@ -51,7 +51,7 @@ def _wire_bool(v):
 
 def _obj(body, key):
     """body[key] when |body| is an object and that value is one, else None: a non-object
-    `attempt` (or usage) is read as absent, never indexed (G1)."""
+    `attempt` (or usage) is read as absent, never indexed."""
     v = body.get(key) if isinstance(body, dict) else None
     return v if isinstance(v, dict) else None
 
@@ -69,7 +69,7 @@ class Suppression:
     that request can start on this server_instance -- True or False as stated, None when the
     answer does not state it as a JSON bool --, and when not, |covers_admission_reason|
     (`no_not_after_ms` | `beyond_tombstone_max`). An instant the answer leaves out or writes
-    as anything but an integer is None (G5)."""
+    as anything but an integer is None."""
     suppressed_until_ms: Optional[int]
     not_after_ms: Optional[int]
     covers_admission: Optional[bool]
@@ -110,10 +110,10 @@ class AttemptSent:
 
 
 class AttemptAnswer(dict):
-    """The JSON answer of POST /traverse/cancel or GET /traverse/attempt (a dict, as before),
+    """The JSON answer of POST /traverse/cancel or GET /traverse/attempt (a dict),
     with its HTTP |status|, the |route| (`cancel` | `attempt`) and, for a cancel, the body
     |sent| (whether not_after_ms went out with it). The typed reading: attempt_id, state
-    and server_instance at the top level, else in a cancel's `attempt` object (G6)."""
+    and server_instance at the top level, else in a cancel's `attempt` object."""
 
     def __init__(self, body, status, route, sent=None):
         super().__init__(body if isinstance(body, dict) else {})
@@ -266,7 +266,7 @@ class AttemptConflict(TraverseError):
     where the object lacks them (a null counts as absent). |usage|: the usage of the attempt
     the id names -- a finished one's, what it consumed; this refused copy consumed nothing.
 
-    For release_verdict() the object is the id's state: `finished` is a finished state (LRG-R1),
+    For release_verdict() the object is the id's state: `finished` is a finished state,
     `running` and `stopping` hold, a tombstone holds (a 409 frees nothing early)."""
 
     def __init__(self, status, message, body=None):
@@ -329,7 +329,7 @@ def classify_409(body, sent=None, message=None):
     status 409, never raised here. |sent|: the request as sent (its dict, or AttemptSent);
     |message|: the error text (default: the body's `error`).
 
-    In this order (LRG-G2; no server writes two of these, the order states which wins):
+    In this order (no server writes two of these, the order states which wins):
       1. an `attempt` object that states a `state`: AttemptConflict (the id's state);
       2. a top-level `state: "expired"`: AttemptExpired;
       3. a top-level `state: "instance_mismatch"`: InstanceMismatch only when |sent| carried
@@ -457,7 +457,7 @@ def _finished(why, sent, state, attempts, skew, instance=None):
     naf = _wire_int(st.get('not_after_ms'))
     if naf is None:
         naf = _wire_int((_obj(st, 'usage') or {}).get('not_after_ms'))
-    # O19: the finish is of this copy on the process it was pinned to -- else the pinned
+    # the finish must be of this copy on the process it was pinned to -- else the pinned
     # process holds nothing of it and admits a copy that reaches it, or the hold that
     # finish left is judged against another copy's not_after_ms
     if sent.expect_server_instance is not None:
@@ -482,7 +482,7 @@ def _finished(why, sent, state, attempts, skew, instance=None):
                      'no copy of the request arrives after the attempt left retention')
     retention = (attempts or {}).get('retention_s')
     if not attempts or isinstance(retention, bool) or not isinstance(retention, int):
-        # O16: without the capabilities' attempts block nothing says how long this server
+        # without the capabilities' attempts block nothing says how long this server
         # keeps the id (retention_s 0 keeps nothing): an empty list must mean "held"
         tokens.append('server_hold_unchecked')
         notes.append('the server\'s attempts block (retention_s, tombstone_max_s) was not '
@@ -493,7 +493,7 @@ def _finished(why, sent, state, attempts, skew, instance=None):
         notes.append('this server keeps no finished attempt (retention_s 0): no copy of '
                      'the request arrives later (one would run again)')
     elif attempts.get('tombstone_max_s') is None:
-        # O20: a server below feature level 5 holds a finished id while it is retained (by
+        # a server below feature level 5 holds a finished id while it is retained (by
         # age and by count, retention_count), never through not_after_ms
         tokens.append('no_finished_hold')
         notes.append('the attempts block states no tombstone_max_s (a server below feature '
@@ -547,9 +547,9 @@ def release_verdict(answer, sent, *, now_ms=None, clock_skew_allowance_ms=None,
 
       * on a finished state (code `finished`) -- GET /traverse/attempt's or a cancel's
         (`state: finished`, 200 or 404), the `attempt` object of a 409 that refused a copy
-        (AttemptConflict: the id's state, LRG-R1), the response (a TraverseResponse), or an
+        (AttemptConflict: the id's state), the response (a TraverseResponse), or an
         error that carries the attempt's usage (it ran);
-      * on an expired 409 (AttemptExpired, code `expired`, LRG-R2): the server checks the id
+      * on an expired 409 (AttemptExpired, code `expired`): the server checks the id
         against what it holds before not_after_ms, so no copy of the attempt was registered
         there when it was judged, and every later copy is refused there while its clock
         does not step back below not_after_ms (the server's own condition: its check is
@@ -565,7 +565,7 @@ def release_verdict(answer, sent, *, now_ms=None, clock_skew_allowance_ms=None,
         check or its handler's return -- the rest of the piece it was in and, when its walk
         had not stopped, the walk up to its next poll that reads the clock, the stopped
         seed's finalisation and the building of its result up to the first delivery check
-        --, a run of no stated length (X2): its release always states
+        --, a run of no stated length: its release always states
         `uninterruptible_overrun`. While the last answer says the attempt is running or
         stopping -- past its bound, so in that run -- the clock releases nothing
         (hold_clock_while_running, the default: read its state again and release on
@@ -620,7 +620,7 @@ def release_verdict(answer, sent, *, now_ms=None, clock_skew_allowance_ms=None,
         return verdict
     running = verdict.code in ('running', 'stopping')
     if running and hold_clock_while_running:
-        # LRG-R4 / X2: an answer saying running or stopping past the clock's limit is the
+        # an answer saying running or stopping past the clock's limit is the
         # attempt's run past its bound still going -- what the clock assumes has ended. The
         # search service's sweep holds here too
         return _hold(verdict.code,
@@ -663,7 +663,7 @@ def _answer_verdict(answer, sent, attempts=None, skew=None):
             return _other_attempt(answer.attempt_id, sent, 'the 409\'s attempt')
         state = answer.state
         if state == 'finished':
-            # LRG-R1: the object is the id's state as GET /traverse/attempt answers it
+            # the object is the id's state as GET /traverse/attempt answers it
             return _finished('a finished state (the attempt object of the 409 that refused '
                              'a copy)', sent, answer.attempt, attempts, skew,
                              answer.server_instance)
@@ -696,7 +696,7 @@ def _answer_verdict(answer, sent, attempts=None, skew=None):
         raise TypeError('release_verdict() reads an AttemptAnswer (cancel(), attempt()), a '
                         'TraverseResponse or a TraverseError, not %s' % type(answer).__name__)
     if answer.attempt_id != sent.attempt_id:
-        # O31: an answer that names no id is not known to be about this attempt
+        # an answer that names no id is not known to be about this attempt
         return _other_attempt(answer.attempt_id, sent, 'the answer')
     if answer.status == 429:
         return _hold('not_tombstoned',
@@ -740,7 +740,7 @@ def _answer_verdict(answer, sent, attempts=None, skew=None):
         return _hold('other_not_after_ms',
                      'the tombstone was judged against not_after_ms %r; the attempt was sent '
                      'with %r' % (sup.not_after_ms, sent.not_after_ms))
-    # LRG-R3: covers_admission restated with the ledger's allowance -- a server that states
+    # covers_admission restated with the ledger's allowance -- a server that states
     # it true with a hold short of not_after_ms + skew breaks SPEC §10.3, and a copy could
     # then be admitted once the hold is gone
     need = sent.not_after_ms + (skew or 0)
@@ -756,7 +756,7 @@ def _answer_verdict(answer, sent, attempts=None, skew=None):
 
 
 def _expired(answer, sent, skew=None):
-    """LRG-R2: an expired 409 to the attempt as sent. |skew|: clock_skew_allowance_ms (the
+    """An expired 409 to the attempt as sent. |skew|: clock_skew_allowance_ms (the
     call's, else the attempts block's), the step back of the server's clock every release
     assumes it survives."""
     if answer.attempt_id != sent.attempt_id:

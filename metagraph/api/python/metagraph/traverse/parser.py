@@ -7,7 +7,7 @@ set). It validates the A counts and the Z line count, so a truncated body raises
 GraphletFormatError instead of producing a shallower graphlet (§14: a cut-off parse is a
 local failure, never a result).
 
-dump(g) writes the canonical form (§2.3 v3): '*' wherever the field's rule reproduces
+dump(g) writes the canonical form (§2.3): '*' wherever the field's rule reproduces
 the value, every SETEXPR in its shortest form (tie explicit), RANGES collapsed, the
 B/T maps in canonical order. dump(parse(x)) == x for every canonical document;
 is_canonical(x) tests exactly that.
@@ -37,7 +37,7 @@ from .model import (
     Refusal, ResourceStop, Run, Segment, SeedInfo,
 )
 
-# stage L: the account of a parse, fitted to the traced peak of the corpus (CPython 3.11,
+# local limits: the account of a parse, fitted to the traced peak of the corpus (CPython 3.11,
 # 140 bodies; actual/fit at most 1.47, 1.25 on peaks of 100 KB or more) and charged at 1.5
 # times the fit: per body byte and per line (the line list, the tokens), per record of the
 # types that hold the most (a segment's raw tokens until its arm resolves, a leaf's
@@ -65,7 +65,7 @@ _SCOPE = {'p': 'per_path', 'u': 'united_history'}
 _KIND = {'c': 'column', 'h': 'header'}
 _O_WALKS = {'c': 'complete', 'p': 'partial', 'f': 'failed'}
 _O_BRANCH = {'c': 'complete', 'x': 'cut'}
-# (v5.2) label_evidence gained 'qualified'; the O grammar of §2.2 predates it: 'q'
+# label_evidence 'qualified' is 'q' (the O grammar of §2.2 does not list it)
 _O_LABEL = {'c': 'complete', 'l': 'lower_bound', 'q': 'qualified'}
 _O_DELIVERY = {'i': 'inline', 's': 'spooled', 'p': 'paged'}
 _REGIMES = ('basic', 'primary', 'canonical')
@@ -75,8 +75,8 @@ _NAME_RE = re.compile(r'[A-Za-z0-9_.\[\]-]+\Z')   # counter / extra names
 
 
 # which fields a record wrote as '*' (check_rules): one shared frozenset per combination
-# -- a new frozenset per run or segment cost 216 B each (frozenset() is no singleton),
-# 3.4 MB of a 13.9 MB model on 15,922 runs (B2)
+# -- a new frozenset per run or segment would cost 216 B each (frozenset() is no
+# singleton), 3.4 MB of a 13.9 MB model on 15,922 runs
 _NO_STARS = frozenset()
 _STRUCT_STAR = frozenset(['structural_successors'])
 _STAR_SETS = {}
@@ -142,7 +142,7 @@ class _Reader:
         self.lines = lines
         self.i = 0
         self.interner = LabelSetInterner()
-        # stage L: lines are paid for in blocks admitted before they are read
+        # local limits: lines are paid for in blocks admitted before they are read
         self.b = b
         self.paid = 0
         self.per_line_work = 0
@@ -809,8 +809,8 @@ def _attach_j(g, j):
     env = {k: v for k, v in j.items() if k not in ('results', 'view', 'derived_from')}
     # a body-only view or derived graphlet is saved with an empty envelope and summary:
     # read back as none. Any other J line keeps what it holds, an empty side included --
-    # read as none, it lost the other side and dump() dropped the J line (VPC-05: a
-    # round trip that was not stable)
+    # read as none, it would lose the other side and dump() would drop the J line: the
+    # round trip would not be stable
     body_only = not results[0] and not env and (j.get('view') is not None
                                                 or j.get('derived_from') is not None)
     g.seed_summary = None if body_only else results[0]
@@ -840,7 +840,7 @@ def parse(text, *, budget=None):
     counters or replay strategy; to_json(), next_request() and summary() raise
     MissingEnvelope then). Raises GraphletFormatError(line_no, msg).
 
-    budget= (stage L): a body whose line count alone exceeds the work budget, or whose
+    budget= (local limits): a body whose line count alone exceeds the work budget, or whose
     line list alone exceeds the memory budget, is refused before any record is read; a
     parse that stops raises LocalBudgetExceeded (not GraphletFormatError): no model, the
     text untouched -- a cut-off parse never makes a shallower graphlet (§14)."""
@@ -904,7 +904,7 @@ def _parse(text, b):
     g.body_digest = digest
     if g.has_j:
         # a saved file's coordinates (in its J line's summary) are checked against the
-        # body now that its R records are read (C9: eagerly, never at first use)
+        # body now that its R records are read (eagerly, never at first use)
         coords.attach(g, b)
     return g
 
@@ -914,7 +914,7 @@ _DIGEST_CHUNK = 1 << 20
 
 def body_digest(text):
     """The sha-256 (hex) of an MGT text's records without its J line and its Z record --
-    Graphlet.body_digest, what binds a resume token (stage L): the J line holds the
+    Graphlet.body_digest, what binds a resume token (local limits): the J line holds the
     envelope and a saved view, which no list reads, and the Z record counts the J line,
     so the server's body and the standalone file saved from it have one digest. Hashed a
     chunk at a time, so a large body is never copied whole."""
@@ -940,10 +940,10 @@ def _set(ids):
 
 
 def dump(g, envelope=None, *, budget=None):
-    """Canonical text (§2.3 v3). |envelope|: None -> a J line iff the graphlet was read
+    """Canonical text (§2.3). |envelope|: None -> a J line iff the graphlet was read
     with one; True -> whenever an envelope is attached; False -> body only. budget=
-    (stage L): every record is charged; a stop raises LocalBudgetExceeded and no text is
-    returned (done: the records written)."""
+    (local limits): every record is charged; a stop raises LocalBudgetExceeded and no text
+    is returned (done: the records written)."""
     b = _B.resolve(budget)
     if b is None:
         return _dump(g, envelope, None)
@@ -1221,8 +1221,8 @@ def is_canonical(text):
 
 def _transport_count(result, key):
     """result[key] (graphlet_bytes, graphlet_lines) as an int, None when absent. Anything
-    else is a GraphletFormatError: a str, None or list compared unequal and then failed
-    the '%d' of the message with a TypeError, and True passed as 1 (VPC-01)."""
+    else is a GraphletFormatError: a str, None or list would compare unequal and then fail
+    the '%d' of the message with a TypeError, and True would pass as 1."""
     if key not in result:
         return None
     v = result[key]
@@ -1233,8 +1233,8 @@ def _transport_count(result, key):
 
 def _check_transport(body, result):
     """The body against its summary's byte and line counts (a body cut in transport),
-    the cheap checks before any parse: the one copy of them (from_response() repeated
-    them inline, with the line count after the parse: VPC-02)."""
+    the cheap checks before any parse: the one copy of them (from_response(),
+    standalone_text() and the store's unparsed put call it)."""
     want = _transport_count(result, 'graphlet_bytes')
     if want is not None:
         # an ASCII body's bytes are its characters: no encoded copy to count them
@@ -1273,7 +1273,7 @@ def _from_response_checked(result, response, body, b):
     g = parse(body, budget=b)
     g.seed_summary = {k: v for k, v in result.items() if k != 'graphlet'}
     g.envelope = {k: v for k, v in response.items() if k != 'results'}
-    # the record coordinates of the summary against the body, eagerly (C9): an inconsistent
+    # the record coordinates of the summary against the body, eagerly: an inconsistent
     # block is a GraphletFormatError here, like a cut body
     coords.attach(g, b)
     return g
@@ -1308,7 +1308,7 @@ def standalone_text(body, result, response):
     except CodecError as e:
         raise GraphletFormatError(1, 'H seed_index: %s' % e) from None
     # tested in place: a slice of the rest of the body only to read its first two
-    # characters copied the whole body once more, held until the splice (VPC-03)
+    # characters would copy the whole body once more, held until the splice
     if body.startswith('J ', first + 1):
         raise ValueError('the body already carries a J line: a saved file, not a server body')
     last = body.rfind('\n', 0, len(body) - 1) + 1
@@ -1331,8 +1331,8 @@ def standalone_text(body, result, response):
 
 def save(g, path, *, budget=None):
     """Write the standalone .mgt file: H, J (envelope with this seed only), body.
-    Atomic: a reader never sees a partial file. budget= (stage L): the text is made in
-    full before the file is opened, so a stop writes no file (L4)."""
+    Atomic: a reader never sees a partial file. budget= (local limits): the text is made
+    in full before the file is opened, so a stop writes no file."""
     b = _B.resolve(budget)
     if b is not None:
         with b.scope('save', ('export_mgt',)):
@@ -1364,11 +1364,11 @@ def _write_text(text, path):
 def _write_all(fd, data, sync=False):
     """Write the bytes |data| in full to the file descriptor |fd| and close it -- without a
     buffer: they go out in one write, and a buffered file holds io.DEFAULT_BUFFER_SIZE (128
-    KiB from Python 3.14, more on a file system with larger blocks) that the stage-L account
-    of a save did not charge, which put it below the traced peak on bodies of 10-40 KB (the
-    review of pass 5's memory changes). |sync|: the data is flushed to the device (fsync)
-    before the file is closed -- what a write renamed into place needs so that a crash does
-    not leave the new name on an empty or partly written file (the store's spool, O17)."""
+    KiB from Python 3.14, more on a file system with larger blocks) that the local-limits
+    account of a save does not charge, which would put it below the traced peak on bodies of
+    10-40 KB. |sync|: the data is flushed to the device (fsync) before the file is closed --
+    what a write renamed into place needs so that a crash does not leave the new name on an
+    empty or partly written file (the store's spool)."""
     with os.fdopen(fd, 'wb', buffering=0) as f:
         view = memoryview(data)
         while view:
@@ -1382,8 +1382,8 @@ def _write_all(fd, data, sync=False):
 
 
 def load(path, *, budget=None):
-    """A saved .mgt file -> its Graphlet (or the GraphletView it saved). budget= (stage
-    L): the file's text, the parse and the view are charged; a stop raises
+    """A saved .mgt file -> its Graphlet (or the GraphletView it saved). budget=
+    (local limits): the file's text, the parse and the view are charged; a stop raises
     LocalBudgetExceeded and the file is left as it is."""
     b = _B.resolve(budget)
     if b is None:
