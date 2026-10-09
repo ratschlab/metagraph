@@ -630,6 +630,16 @@ def resolve(budget):
     return _AMBIENT.get()
 
 
+def run_scoped(budget, op, levers, fn):
+    """The prologue of a budgeted operation: fn(None) when there is no budget (|budget|
+    None and no ambient one, resolve()), else fn(b) inside b.scope(op, levers)."""
+    b = resolve(budget)
+    if b is None:
+        return fn(None)
+    with b.scope(op, levers):
+        return fn(b)
+
+
 @contextmanager
 def unbudgeted():
     """Run the enclosed code with no ambient budget: what a store's parse without parse

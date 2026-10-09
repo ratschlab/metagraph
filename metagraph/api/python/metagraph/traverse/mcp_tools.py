@@ -115,12 +115,12 @@ from .model import (
     ARM_SIDES, AmbiguousLabel, IncompleteRecording, MissingEnvelope, NextRequest,
     UnknownLabel, UnverifiableLabelName,
 )
-from .parser import _write_all, utf8_bytes
+from .parser import _replace_atomically, _write_all, utf8_bytes
 from .store import StoreLimitExceeded, UnknownHandle, unparsed_identity
 
 __all__ = ['GraphletTools', 'ToolError', 'ToolLimits', 'TOOL_CLASS', 'tool_names',
            'DEFAULT_MAX_BYTES', 'SEQUENCE_MAX_BYTES', 'CAPABILITIES_MAX_BYTES',
-           'MIN_MAX_BYTES', 'MAX_MAX_BYTES']
+           'MIN_MAX_BYTES', 'MAX_MAX_BYTES', 'too_large']
 
 DEFAULT_MAX_BYTES = 2048
 SEQUENCE_MAX_BYTES = 16 * 1024
@@ -437,9 +437,10 @@ def _selectors(v):
 
 # ------------------------------------------------------------------ the wrapper
 
-def _too_large(n, limit, takes_max):
-    """The result_too_large that replaces an answer over the ceiling, itself held to it:
-    the longest of three forms that fits. The hint names what THIS tool offers."""
+def too_large(n, limit, takes_max):
+    """The result_too_large error that replaces an answer of |n| bytes over the ceiling
+    |limit|, itself held to it: the longest of three forms that fits. The hint names what
+    the tool offers: raising max_bytes when |takes_max|, else only an export."""
     if takes_max:
         hint = 'raise max_bytes, or export the complete answer to a file'
     else:
@@ -453,6 +454,10 @@ def _too_large(n, limit, takes_max):
         if _size(out) <= limit:
             return out
     return out
+
+
+# the private name, kept for callers that import it
+_too_large = too_large
 
 
 def _fit_error(out, limit):
@@ -543,7 +548,7 @@ def _tool(fn):
             limit = supplied if takes_max and _valid_ceiling(supplied) else \
                 default_limit(self, kw.get('execute', True))
             out = {'error': 'bad_argument', 'message': str(e)}
-            return _fit_error(out, limit) or _too_large(_size(out), limit, takes_max)
+            return _fit_error(out, limit) or too_large(_size(out), limit, takes_max)
         limit = bound.arguments.get('max_bytes')
         if limit is not None and not _valid_ceiling(limit):
             # (the shortest form: this error must fit the smallest ceiling, 64 bytes)
@@ -628,7 +633,7 @@ def _tool(fn):
                 fitted = _fit_stop_error(out, limit)
             elif isinstance(out.get('error'), str) and out['error'] != 'result_too_large':
                 fitted = _fit_error(out, limit)
-            out = fitted or _too_large(n, limit, takes_max)
+            out = fitted or too_large(n, limit, takes_max)
         return out
     wrapped.__name__ = fn.__name__
     wrapped.__doc__ = fn.__doc__
@@ -1699,12 +1704,7 @@ class GraphletTools:
         args = dict(arm=a.side, walk=pid, cursor=cursor)
         start, resume, before = self._position('graphlet_walk', handle, args, cursor)
         k0 = resume[1] if resume else 0
-        base = {'handle': handle, 'arm': a.side, 'walk': pid, 'length_bp': p.length_bp,
-                'evidence': ops.evidence_block(g, a.side, view)}
-        if a.segments[p.leaf].leaf.continuation is not None:
-            c = ops.continuation(g, a, pid)
-            base['continuation'] = {'length_bp': len(c.sequence), 'loss_used': c.loss_used,
-                                    'labels': len(c.labels)}
+        base = _walk_base(g, a, view, handle, pid, p)
         rows = []
         partial = None
         call.budget.charge(_B.W_STEP * (a.segments[p.leaf].depth + 1))
@@ -1769,12 +1769,7 @@ class GraphletTools:
         if call is not None:
             return self._walk_budgeted(g, a, view, handle, pid, p, cursor, max_bytes, call)
         rows = self._walk_rows(g, a, p)
-        base = {'handle': handle, 'arm': a.side, 'walk': pid, 'length_bp': p.length_bp,
-                'evidence': ops.evidence_block(g, a.side, view)}
-        if a.segments[p.leaf].leaf.continuation is not None:
-            c = ops.continuation(g, a, pid)
-            base['continuation'] = {'length_bp': len(c.sequence), 'loss_used': c.loss_used,
-                                    'labels': len(c.labels)}
+        base = _walk_base(g, a, view, handle, pid, p)
         args = dict(arm=a.side, walk=pid, cursor=cursor)
         return self._page('graphlet_walk', handle, args, rows, base, max_bytes)
 
@@ -1864,13 +1859,7 @@ class GraphletTools:
                     route = routes[lw.arm][lw.run] if lw.run is not None else None
                 else:
                     route = next(routes[lw.arm])
-                row = {'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
-                       'evidence_from': lw.evidence_from, 'end': lw.end,
-                       'walks_below': len(lw.leaves_below),
-                       'merged_into': lw.merged_into, 'route': route}
-                if coordinates and lw.coordinates is not None:
-                    _coords_row(lw.coordinates, _coords_kind(g, lab.id), row)
-                rows.append(row)
+                rows.append(_label_walk_row(g, lab, lw, route, coordinates))
             base = dict(lab.as_dict(), handle=handle,
                         evidence=ops.evidence_block(g, arm, view))
             args = dict(arm=arm, name=lab.ref, cursor=cursor)
@@ -1939,15 +1928,7 @@ class GraphletTools:
             partial = e.partial.resume
         finally:
             b.row_extra = (0, 0)
-        rows = []
-        for lw, route in walks:
-            row = {'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
-                   'evidence_from': lw.evidence_from, 'end': lw.end,
-                   'walks_below': len(lw.leaves_below),
-                   'merged_into': lw.merged_into, 'route': route}
-            if coordinates and lw.coordinates is not None:
-                _coords_row(lw.coordinates, _coords_kind(g, lab.id), row)
-            rows.append(row)
+        rows = [_label_walk_row(g, lab, lw, route, coordinates) for lw, route in walks]
         base = dict(lab.as_dict(), handle=handle, evidence=ops.evidence_block(g, arm, view))
         return self._page('graphlet_labels', handle, args, rows, base, max_bytes, n,
                           resume=resume, before=before, partial=partial, start=start)
@@ -1970,11 +1951,7 @@ class GraphletTools:
                 continue
             if keep is not None and sp.segment not in keep:
                 continue
-            rows.append({'at_bp': sp.at_bp, 'segment': sp.segment,
-                         'kind': 'ambiguous' if sp.ambiguous else 'divergence',
-                         'labels_before': sp.labels_before,
-                         'branches': [{'char': b['char'], 'labels': b['labels_distinct']}
-                                      for b in derive.split_branches(a, sp, g.cap)]})
+            rows.append(_split_row(g, a, sp))
         args = dict(arm=a.side, min_labels_before=min_labels_before, cursor=cursor)
         base = {'handle': handle, 'arm': a.side,
                 'evidence': ops.evidence_block(g, a.side, view)}
@@ -2001,11 +1978,7 @@ class GraphletTools:
                     continue
                 b.charge(_B.W_ROW + _B.W_ELEM * len(sp.children),
                          _B.dict_bytes(6) + len(sp.children) * (_B.dict_bytes(2) + 100))
-                rows.append({'at_bp': sp.at_bp, 'segment': sp.segment,
-                             'kind': 'ambiguous' if sp.ambiguous else 'divergence',
-                             'labels_before': sp.labels_before,
-                             'branches': [{'char': x['char'], 'labels': x['labels_distinct']}
-                                          for x in derive.split_branches(a, sp, g.cap)]})
+                rows.append(_split_row(g, a, sp))
         except LocalBudgetExceeded as e:
             if not rows and k == k0:
                 raise
@@ -2470,6 +2443,39 @@ class GraphletTools:
         return _Receipt(out, ('summary', 'summary_stop'))
 
 
+def _walk_base(g, a, view, handle, pid, p):
+    """graphlet_walk's base: the walk, its length, the evidence and, when it has one, its
+    continuation's size."""
+    base = {'handle': handle, 'arm': a.side, 'walk': pid, 'length_bp': p.length_bp,
+            'evidence': ops.evidence_block(g, a.side, view)}
+    if a.segments[p.leaf].leaf.continuation is not None:
+        c = ops.continuation(g, a, pid)
+        base['continuation'] = {'length_bp': len(c.sequence), 'loss_used': c.loss_used,
+                                'labels': len(c.labels)}
+    return base
+
+
+def _label_walk_row(g, lab, lw, route, coordinates):
+    """graphlet_labels(name=)'s row of label walk |lw| of label |lab| with its |route|
+    (and, with |coordinates|, its run's occurrences)."""
+    row = {'arm': lw.arm, 'from_bp': lw.from_bp, 'to_bp': lw.to_bp,
+           'evidence_from': lw.evidence_from, 'end': lw.end,
+           'walks_below': len(lw.leaves_below),
+           'merged_into': lw.merged_into, 'route': route}
+    if coordinates and lw.coordinates is not None:
+        _coords_row(lw.coordinates, _coords_kind(g, lab.id), row)
+    return row
+
+
+def _split_row(g, a, sp):
+    """graphlet_splits' row of split |sp| of arm |a|."""
+    return {'at_bp': sp.at_bp, 'segment': sp.segment,
+            'kind': 'ambiguous' if sp.ambiguous else 'divergence',
+            'labels_before': sp.labels_before,
+            'branches': [{'char': x['char'], 'labels': x['labels_distinct']}
+                         for x in derive.split_branches(a, sp, g.cap)]}
+
+
 def _admit_paths(call, g, a):
     """Charge a budgeted call the arm's paths before a walk argument is resolved: a path
     id resolves through them, and a call refused afterwards would leave them built,
@@ -2640,7 +2646,8 @@ def _write_export(path, data):
             break
         except FileExistsError:
             continue
-    try:
+
+    def fill():
         if mode is not None:
             try:
                 os.fchmod(fd, mode)
@@ -2648,13 +2655,7 @@ def _write_export(path, data):
                 os.close(fd)              # _write_all() closes it otherwise
                 raise
         _write_all(fd, data)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _replace_atomically(tmp, path, fill)
     return len(data)
 
 
@@ -2665,15 +2666,7 @@ def _write_text_charged(path, text, b):
     b.charge(len(text) >> 8, 2 * (len(text) + 49))
     data = text.encode('utf-8')
     fd, tmp = tempfile.mkstemp(prefix='.export-', dir=os.path.dirname(path))
-    try:
-        _write_all(fd, data)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _replace_atomically(tmp, path, lambda: _write_all(fd, data))
     return len(data)
 
 
@@ -2700,18 +2693,13 @@ def _write_json_charged(path, obj, b):
     text), through a temporary file renamed on completion: a stop writes no file."""
     b.charge(0, _JSON_BUFFER + 512)            # the file's buffer and its objects
     f, tmp = _atomic_open(path)
-    try:
+
+    def fill():
         with f:
             w = _ChargedWriter(f, b)
             json.dump(obj, w, ensure_ascii=False)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-    return w.n
+        return w.n
+    return _replace_atomically(tmp, path, fill)
 
 
 def _alive_at(g, arm, at_bp):

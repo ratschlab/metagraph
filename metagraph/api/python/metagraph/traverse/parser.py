@@ -1349,8 +1349,17 @@ def _write_text(text, path):
     data = text.encode('utf-8')
     d = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(prefix='.mgt-', dir=d)
+    _replace_atomically(tmp, path, lambda: _write_all(fd, data))
+    return len(data)
+
+
+def _replace_atomically(tmp, path, fill):
+    """fill() -- which writes and closes the temporary file |tmp| beside |path| -- then
+    |tmp| renamed over |path| -> what fill() returned. On any failure (an interrupt
+    included) |tmp| is removed and the error raised: |path| is left as it was. The caller
+    creates |tmp|, so each writer keeps its own name prefix and file mode."""
     try:
-        _write_all(fd, data)
+        out = fill()
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -1358,7 +1367,7 @@ def _write_text(text, path):
         except OSError:
             pass
         raise
-    return len(data)
+    return out
 
 
 def _write_all(fd, data, sync=False):

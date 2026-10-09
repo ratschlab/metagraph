@@ -225,8 +225,8 @@ __all__ = [
     'splits', 'continuation', 'next_request', 'next_requests', 'resubmittable_names',
     'subgraph',
     'GraphletView', 'view_from_saved', 'view_from_spec',
-    'compare', 'compare_cost', 'index_identity', 'memory_bytes', 'cache_bytes',
-    'cache_signature',
+    'compare', 'compare_cost', 'comparability', 'index_identity', 'memory_bytes',
+    'cache_bytes', 'cache_signature', 'segment_support',
     'summary', 'evidence_block',
     'END_CLASS', 'alive_at', 'limitation_dict', 'resource_stop_dict', 'informational',
 ]
@@ -765,11 +765,24 @@ def _annotate_route_ends(arm):
     got = arm.cache.get('annotate_route_ends')
     if got is not None:
         return got
+    got = _route_ends_pass(arm, None)
+    arm.cache['annotate_route_ends'] = got
+    return got
+
+
+def _route_ends_pass(arm, depth):
+    """The pass of _annotate_route_ends() -> (alive_end, ends), over the whole DAG (|depth|
+    None: equal alive sets shared, a comb repeats a few) or over the DAG restricted to
+    [0, depth) (_annotate_route_ends_at(): the segments starting before the depth, P runs
+    and children cut there, ends at most at the depth)."""
+    lim = math.inf if depth is None else depth
     segs = arm.segments
     alive_end = [None] * len(segs)
     ends = {}
-    sets = {}                                # equal sets shared (a comb repeats a few)
+    sets = {} if depth is None else None
     for s in segs:
+        if s.from_bp >= lim:
+            continue
         if s.parents:
             alive = set()
             for p in s.parents:
@@ -777,7 +790,7 @@ def _annotate_route_ends(arm):
         else:
             alive = set(s.entry)
         for pr in s.presence:
-            if not alive:
+            if not alive or pr.from_bp >= lim:
                 break
             still = alive.intersection(pr.labels)
             if pr.from_bp > s.from_bp or not s.parents:
@@ -785,22 +798,22 @@ def _annotate_route_ends(arm):
                     ends.setdefault(l, []).append((s.id, pr.from_bp))
             alive = still
         fs = frozenset(alive)
-        alive_end[s.id] = sets.setdefault(fs, fs)
+        alive_end[s.id] = fs if sets is None else sets.setdefault(fs, fs)
     for s in segs:
         alive = alive_end[s.id]
         if not alive:
             continue
         carried = set()
         for c in s.children:
+            if segs[c].from_bp >= lim:
+                continue
             if not segs[c].presence:
                 carried = alive
                 break
             carried.update(alive.intersection(segs[c].presence[0].labels))
         for l in sorted(alive - carried):
-            ends.setdefault(l, []).append((s.id, s.end_bp))
-    got = (alive_end, ends)
-    arm.cache['annotate_route_ends'] = got
-    return got
+            ends.setdefault(l, []).append((s.id, min(s.end_bp, lim)))
+    return alive_end, ends
 
 
 def _annotate_routes(arm, l):
@@ -1506,11 +1519,8 @@ def routes(g, sel, arm, spell=False, *, budget=None, resume=None):
     default) no work or allocation budget applies; budget= (local limits): a stop raises
     LocalBudgetExceeded whose .partial holds the whole routes made so far, in this order,
     and a resume token (resume=)."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _routes(g, sel, arm, spell, None, resume)
-    with b.scope('routes', ('narrow_arm',)):
-        return _routes(g, sel, arm, spell, b, resume)
+    return _B.run_scoped(budget, 'routes', ('narrow_arm',),
+                         lambda b: _routes(g, sel, arm, spell, b, resume))
 
 
 def _route_depths(b, g, a):
@@ -1619,11 +1629,8 @@ def label_walks_routes(g, sel, arm=None, *, budget=None, resume=None):
     """label_walks() rows with each walk's own route (the segments routes() gives for
     it), made and charged together: [(LabelWalk, route)] (a stop's Partial holds such
     pairs). What graphlet_labels(name=) pages."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _label_walks(g, sel, arm, None, resume, True)
-    with b.scope('label_walks', ('narrow_arm',)):
-        return _label_walks(g, sel, arm, b, resume, True)
+    return _B.run_scoped(budget, 'label_walks', ('narrow_arm',),
+                         lambda b: _label_walks(g, sel, arm, b, resume, True))
 
 
 def label_walks(g, sel, arm=None, *, budget=None, resume=None):
@@ -1645,11 +1652,8 @@ def label_walks(g, sel, arm=None, *, budget=None, resume=None):
 
     budget= (local limits): a stop raises LocalBudgetExceeded whose .partial holds the whole
     label walks made so far, in this order, and a resume token (resume=)."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _label_walks(g, sel, arm, None, resume)
-    with b.scope('label_walks', ('narrow_arm',)):
-        return _label_walks(g, sel, arm, b, resume)
+    return _B.run_scoped(budget, 'label_walks', ('narrow_arm',),
+                         lambda b: _label_walks(g, sel, arm, b, resume))
 
 
 _LABEL_WALK_BYTES = record_bytes(LabelWalk) + 120
@@ -1760,11 +1764,8 @@ def support_profile(g, arm, leaf, kind='displayed', *, budget=None):
 
     budget= (local limits): a stop raises LocalBudgetExceeded with no partial -- the last
     maximal run of a cut profile might go on past the cut, so no prefix of runs is whole."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _support_profile(g, arm, leaf, kind, None)
-    with b.scope('support_profile', ('select_walks',)):
-        return _support_profile(g, arm, leaf, kind, b)
+    return _B.run_scoped(budget, 'support_profile', ('select_walks',),
+                         lambda b: _support_profile(g, arm, leaf, kind, b))
 
 
 _SUPPORT_RUN_BYTES = record_bytes(SupportRun) + LIST
@@ -1836,11 +1837,8 @@ def support_changes(g, arm, leaf, *, budget=None):
 
     budget= (local limits): a stop raises LocalBudgetExceeded with no partial (the changes are
     read off the whole profile)."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _support_changes(g, arm, leaf, None)
-    with b.scope('support_changes', ('select_walks',)):
-        return _support_changes(g, arm, leaf, b)
+    return _B.run_scoped(budget, 'support_changes', ('select_walks',),
+                         lambda b: _support_changes(g, arm, leaf, b))
 
 
 _CHANGE_BYTES = record_bytes(Change) + 2 * LIST + 200
@@ -1987,11 +1985,8 @@ def splits(g, arm, min_labels_before=0, *, budget=None, resume=None):
 
     budget= (local limits): a stop raises LocalBudgetExceeded whose .partial holds the whole
     split points made so far, in this order, and a resume token (resume=)."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _splits(g, arm, min_labels_before, None, resume)
-    with b.scope('splits', ('narrow_arm',)):
-        return _splits(g, arm, min_labels_before, b, resume)
+    return _B.run_scoped(budget, 'splits', ('narrow_arm',),
+                         lambda b: _splits(g, arm, min_labels_before, b, resume))
 
 
 _SPLIT_BYTES = record_bytes(SplitPoint) + LIST
@@ -2056,11 +2051,8 @@ def label_summary(g, *, budget=None):
     §5.1). direct_bp is label-consistent ROUTE support, not a contiguous occurrence.
     budget= (local limits): a stop raises, with no partial (a summary of some labels is not
     the table)."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _label_summary(g, None)
-    with b.scope('label_summary', ('narrow_labels',)):
-        return _label_summary(g, b)
+    return _B.run_scoped(budget, 'label_summary', ('narrow_labels',),
+                         lambda b: _label_summary(g, b))
 
 
 def _label_summary_prices(b, g):
@@ -2110,11 +2102,8 @@ def continuation(g, arm, leaf, *, budget=None):
     holds each label's own (T), and note says when one loss budget cannot serve them
     exactly (labels that ended the walk at different losses). budget= (local limits): charged
     as one step at its price; a stop raises."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _continuation(g, arm, leaf, None)
-    with b.scope('continuation', ('select_walks',)):
-        return _continuation(g, arm, leaf, b)
+    return _B.run_scoped(budget, 'continuation', ('select_walks',),
+                         lambda b: _continuation(g, arm, leaf, b))
 
 
 _CONT_BYTES = record_bytes(Continuation) + 2 * LIST + 200
@@ -3371,7 +3360,13 @@ def index_identity(g):
             'release': release}
 
 
-def _comparability(a, b):
+def comparability(a, b):
+    """Whether graphlets |a| and |b| can be compared at all -> (comparable, reason, notes):
+    False when they come from different indexes (index_meta_fp, index_fp, namespace or
+    release differ), have different oriented seed sequences, or name one label ref
+    differently; 'unverifiable' when either side has no index manifest digest (index_fp);
+    else True. |notes| is a new empty list for the caller's notes. compare() starts from
+    this verdict and only ever weakens it."""
     ia, ib = index_identity(a), index_identity(b)
     notes = []
     if ia['meta_fp'] and ib['meta_fp'] and ia['meta_fp'] != ib['meta_fp']:
@@ -3394,6 +3389,10 @@ def _comparability(a, b):
                                 'cannot be verified' % ('both' if not ia['fp'] and not ib['fp']
                                                         else 'one side')), notes
     return True, 'same index and seed', notes
+
+
+# the private name, kept for callers that import it
+_comparability = comparability
 
 
 # how weak a comparability verdict is: a comparison only ever moves to a weaker one (an
@@ -3632,7 +3631,7 @@ def _compare(a, b, arm, labels, mode, cb, state):
         cb.charge(W_ELEM * (2 * len(a.labels) + 2 * len(b.labels)),
                   dict_bytes(len(a.labels) + len(b.labels))
                   + (len(a.labels) + len(b.labels)) * (2 * STR + 24))
-    comparable, reason, notes = _comparability(a, b)
+    comparable, reason, notes = comparability(a, b)
     strategies = ((a.envelope or {}).get('strategy'), (b.envelope or {}).get('strategy'))
     if comparable is False:
         return Comparison(False, reason, None, None, [], [], notes, mode=mode,
@@ -3858,7 +3857,7 @@ def compare_cost(a, b, arm=None, mode='claims', *, labels=None):
                 'memory_bytes': {'at_least': t.peak, 'estimate': t.peak + extra_m},
                 'exact': exact, 'phases': dict(phases), 'unpriced': list(unpriced)}
 
-    comparable, _, _ = _comparability(a, b)
+    comparable, _, _ = comparability(a, b)
     if comparable is False:
         return result(True)
     sides, _ = _compare_sides(a, b, arm)
@@ -4145,12 +4144,17 @@ def _charge_chain_tree(cb, arm, segs):
               + len(segs) * LIST_ITEM)
 
 
-def _segment_support(g, arm, s):
-    """The displayed support inside one segment as (from, to, frozenset of ids), in order
-    and one at a time: the alive sets (constrain) or the recorded P sets (annotate)."""
+def segment_support(g, arm, s):
+    """The displayed support inside segment |s| of arm |arm| (an Arm and a Segment of
+    graphlet |g|) as (from, to, frozenset of label ids), in order and one at a time: the
+    alive sets (constrain) or the recorded P sets (annotate)."""
     if g.mode == 'constrain':
         return _iter_alive_pieces(arm, s)
     return ((p.from_bp, p.to_bp, frozenset(p.labels)) for p in s.presence)
+
+
+# the private name, kept for callers that import it
+_segment_support = segment_support
 
 
 def _cut_transient(cb, g, a):
@@ -4204,7 +4208,7 @@ def _cut_info(g, arm, anchor, m):
             parts = None
         elif parts is not None:
             parts.append(s.walk if s.end_bp <= m else s.walk[:m - s.from_bp])
-        for f, t, labs in _segment_support(g, arm, s):
+        for f, t, labs in segment_support(g, arm, s):
             if f >= m:
                 break
             inter = labs if inter is None else inter & labs
@@ -4422,7 +4426,7 @@ def _cut_pass(g, a, plan, cb, pr, held):
         else:
             pieces.append(s.walk if m is None or s.end_bp <= m else s.walk[:m - s.from_bp])
         inter = st['inter']
-        for f, t, labs in _segment_support(g, a, s):
+        for f, t, labs in segment_support(g, a, s):
             if m is not None and f >= m:
                 break
             if inter is None:
@@ -4616,41 +4620,7 @@ def _annotate_route_ends_at(arm, depth):
     # a merge AT the depth (zero length, ending there) is outside it
     if all(s.end_bp <= depth and (s.from_bp < depth or not s.parents) for s in segs):
         return _annotate_route_ends(arm)[1]
-    alive_end = [None] * len(segs)
-    ends = {}
-    for s in segs:
-        if s.from_bp >= depth:
-            continue
-        if s.parents:
-            alive = set()
-            for p in s.parents:
-                alive.update(alive_end[p])
-        else:
-            alive = set(s.entry)
-        for pr in s.presence:
-            if not alive or pr.from_bp >= depth:
-                break
-            still = alive.intersection(pr.labels)
-            if pr.from_bp > s.from_bp or not s.parents:
-                for l in alive - still:
-                    ends.setdefault(l, []).append((s.id, pr.from_bp))
-            alive = still
-        alive_end[s.id] = frozenset(alive)
-    for s in segs:
-        if s.from_bp >= depth or not alive_end[s.id]:
-            continue
-        alive = alive_end[s.id]
-        carried = set()
-        for c in s.children:
-            if segs[c].from_bp >= depth:
-                continue
-            if not segs[c].presence:
-                carried = alive
-                break
-            carried.update(alive.intersection(segs[c].presence[0].labels))
-        for l in sorted(alive - carried):
-            ends.setdefault(l, []).append((s.id, min(s.end_bp, depth)))
-    return ends
+    return _route_ends_pass(arm, depth)[1]
 
 
 def _restricted_claims(g, side, depth, inexact=None, cb=None):
@@ -5671,11 +5641,8 @@ def summary(g, arm=None, max_bytes=2048, *, budget=None):
     it has none. Under the cap the effect texts go first, then top
     labels, then caveats (each step stated). budget= (local limits): a stop raises, with no
     partial."""
-    b = _B.resolve(budget)
-    if b is None:
-        return _summary(g, arm, max_bytes, None)
-    with b.scope('summary', ('narrow_arm',)):
-        return _summary(g, arm, max_bytes, b)
+    return _B.run_scoped(budget, 'summary', ('narrow_arm',),
+                         lambda b: _summary(g, arm, max_bytes, b))
 
 
 def _summary(g, arm, max_bytes, b):

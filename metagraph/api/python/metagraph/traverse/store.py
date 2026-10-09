@@ -91,7 +91,7 @@ from . import budget as _B
 from . import coords
 from ._codec import CodecError, GraphletFormatError, parse_int
 from .budget import LocalBudget, LocalBudgetExceeded, LocalLimits
-from .parser import (_check_transport, _write_all, dump, from_response, j_object, parse,
+from .parser import (_check_transport, _replace_atomically, _write_all, dump, from_response, j_object, parse,
                      seed_envelope, utf8_bytes)
 
 __all__ = ['GraphletStore', 'Entry', 'UnknownHandle', 'StoreLimitExceeded']
@@ -283,19 +283,11 @@ _HASH_CHUNK = 1 << 20
 def _write_atomic(path, data):
     d = os.path.dirname(path)
     fd, tmp = tempfile.mkstemp(prefix='.tmp-', dir=d)
-    try:
-        # one write, without the 128 KiB buffer a buffered file holds (parser._write_all()),
-        # flushed before the rename: a rename to a new name is not ordered after the data on
-        # every file system (ext4's delayed allocation), and a crash left the new name on an
-        # empty file -- a body that every later put of the same body reused (O17)
-        _write_all(fd, data, sync=True)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    # one write, without the 128 KiB buffer a buffered file holds (parser._write_all()),
+    # flushed before the rename: a rename to a new name is not ordered after the data on
+    # every file system (ext4's delayed allocation), and a crash could leave the new name
+    # on an empty file -- a body that every later put of the same body would reuse
+    _replace_atomically(tmp, path, lambda: _write_all(fd, data, sync=True))
 
 
 def _file_sha256(path):
@@ -1191,11 +1183,8 @@ class GraphletStore:
         (Entry.parsed false) was checked for its frame only (transport, H, Z), never
         validated record by record: a parse of it may still refuse it. budget=: the copy
         is charged (a call of its own: with its base, CALL_BASE)."""
-        b = _B.resolve(budget)
-        if b is None:
-            return self._standalone_text(handle, None)
-        with b.scope('standalone_text'):
-            return self._standalone_text(handle, b)
+        return _B.run_scoped(budget, 'standalone_text', (),
+                             lambda b: self._standalone_text(handle, b))
 
     def _standalone_text(self, handle, b):
         e = self.get(handle)
