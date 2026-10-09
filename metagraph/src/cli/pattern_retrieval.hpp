@@ -45,7 +45,9 @@
  * raw contexts, select() (the pass: rows and reverse-complement lookups, one restricted read
  * per row under max_predicate_work, decisions in answer order, the relations of SPEC §19.7, the
  * selection admission) and the projection of the chosen contexts: none, predicate_only
- * (retrieve_given: the pass's rows instead of a discovery, placed) or all (retrieve()).
+ * (retrieve_given: the pass's rows instead of a discovery, placed) or all (retrieve()). On
+ * request the pass also answers the motif-level predicate of each pattern (MotifAnswer: the
+ * normal form on the union of its contexts' labels) from the same reads.
  */
 
 #include <algorithm>
@@ -354,7 +356,92 @@ struct SelectionRequest {
     // retrieve_given and builds their selection_labels; ALL their selection_labels (the
     // projection reads the rows again, retrieve())
     Projection projection = Projection::NONE;
+    // also ask the predicate once of the whole pattern (SelectionAnswer::motif): on the union
+    // of the predicate's labels over every tested context, from the pass's own reads. False:
+    // nothing of it is computed, held or charged
+    bool motif = false;
 };
+
+/**
+ * The motif-level predicate of one pattern of L <= k ("present in A, absent throughout C";
+ * DESIGN-pattern-search.md §5.6, §12): the request's normal form evaluated once on the union U
+ * of the predicate's labels over the pattern's graph contexts — per context the set the
+ * context-level selection evaluates (its k-mer's row and, with predicate_strands "either" on a
+ * BASIC graph, its reverse complement's), from the rows the selection pass read. A label is in
+ * U when some context of the pattern (in its scope and strands) carries it: the label's
+ * records hold the motif inside a k-mer of the index, on the strand selection_strands states.
+ *
+ * Exact only when every raw context was tested (the pass completed: tested exact and equal to
+ * the raw count). Otherwise the labels found on the tested contexts are present for sure and
+ * every other label of the normal form may or may not be: the value is Kleene's
+ * (Bound::eval3), definite only when no completion of the untested contexts can change it
+ * (any(A) with A found is true; none(C) with C found is false), else undecided.
+ */
+enum class MotifBasis {
+    // every raw context was tested: U is the motif's union, the value exact
+    EVERY_CONTEXT,
+    // not every context was tested, but the labels found decide the value whatever the
+    // untested contexts carry
+    TESTED_CONTEXTS,
+    // the normal form is a constant: decided without a context
+    CONSTANT,
+    // not known: the untested contexts may change it, or the evaluation did not run (stop)
+    UNDECIDED,
+};
+const char* to_string(MotifBasis basis);
+
+// Why not every raw context was tested, the first cause in the pipeline's order
+enum class MotifUntested {
+    // every context was tested (or none needed to be: a constant)
+    NONE,
+    // the raw count is not exact: discovery stopped (the engine's stop names it)
+    DISCOVERY,
+    // fewer raw contexts reached the pass than the raw count: partial's release cut at
+    // max_predicate_contexts, or the account could not hold their descriptors
+    RELEASE,
+    // the raw count is above max_predicate_contexts: nothing was read
+    NOT_ADMITTED,
+    // the pass did not start (the predicate not bound, the request's selection work spent,
+    // the engine's withheld release, a pattern longer than k)
+    NOT_STARTED,
+    // the pass stopped (its stop) or rows were refused (rows_refused)
+    SELECTION,
+};
+const char* to_string(MotifUntested untested);
+
+// A label of the normal form found on the union of a pattern's tested contexts
+struct MotifLabel {
+    // into Bound::labels()
+    graph::traversal::LabelId label = 0;
+    // the tested contexts whose evaluated set holds it (exact when every context was tested)
+    uint64_t contexts = 0;
+    // the first of them in answer order: an index into the pass's tested contexts
+    uint32_t first = 0;
+    // over those contexts, the rows it was found on (SelectionAnswer::kOnContext,
+    // kOnReverseComplement, both)
+    uint8_t on = 0;
+};
+
+struct MotifAnswer {
+    // true, false, or undecided (nullopt)
+    std::optional<bool> value;
+    MotifBasis basis = MotifBasis::UNDECIDED;
+    MotifUntested untested = MotifUntested::NONE;
+    // the labels of the normal form found, in label order (contexts desc, column asc): every
+    // label of U when the basis is EVERY_CONTEXT, a subset of it otherwise; nullopt when they
+    // were not listed (the predicate not bound, or a stop before the evaluation)
+    std::optional<std::vector<MotifLabel>> present;
+    // the labels of the normal form (Bound::labels().size(); 0 for a constant or unbound)
+    uint64_t labels = 0;
+    // the evaluation's own stop: "time" (the work time passed before it ran) or "max_memory"
+    // (the account could not hold its list of undecided labels); null when it ran
+    const char *stop = nullptr;
+    // the units of the final evaluation (also in SelectionAnswer::units)
+    uint64_t units = 0;
+};
+
+// The motif of a constant normal form: |value|, decided without a context
+MotifAnswer constant_motif(bool value);
 
 /**
  * What the selection pass made of one pattern (§19.6 steps 3 and 4, §19.7, §19.8). The
@@ -408,6 +495,8 @@ struct SelectionAnswer {
     uint64_t units = 0;
     uint64_t lookups = 0;
     double ms = 0;
+    // SelectionRequest::motif: the pattern's motif-level predicate, from the same reads
+    std::optional<MotifAnswer> motif;
 };
 
 // The selection of a pattern without a pass (§19.7): its normal form a constant (pass
@@ -570,6 +659,14 @@ class PatternRetrieval {
      *     selected or none; partial: the first max_contexts), the label order of the
      *     selection_labels; every row's hits freed but the chosen contexts' own rows
      *     (predicate_only, for retrieve_given).
+     * With |request|.motif, step 3 also gathers each decided context's labels into the
+     * pattern's union (an entry per distinct label, charged motif_label_bytes before it is
+     * made; the account refusing one stops the pass, {selection, max_memory}), and step 4
+     * evaluates the normal form on it once (MotifAnswer): Bound::eval when the pass completed,
+     * else Bound::eval3 with every label not found undecided (its list of ids charged before it
+     * is built, released after); the clock read before (a time stop is {output, time}, as the
+     * label order's), the units charged after (never refused, as a decision's), the labels
+     * found put in label order.
      * Throws std::logic_error before bind(), for a constant normal form (no pass: see
      * constant_selection), and std::runtime_error for a context without a row.
      */
@@ -585,6 +682,32 @@ class PatternRetrieval {
     // "either" on a BASIC graph), "both", or "either" on CANONICAL and PRIMARY graphs (one row
     // serves both orientations: no strand is known)
     Json::Value selection_strands_json(const SelectionAnswer &answer, size_t j) const;
+    /**
+     * The motif of a pattern whose pass did not run (|pass| NOT_ADMITTED or NOT_STARTED, e.g.
+     * a pattern longer than k), its raw count |raw|: undecided, nothing found; but a raw count
+     * exact 0 has no context to test, and the value is then the normal form's on the empty
+     * set (Bound::vacuous) when the predicate is bound. select() answers its own early
+     * returns alike.
+     */
+    MotifAnswer motif_without_pass(SelectionPass pass, const graph::pattern::Count &raw) const;
+    /**
+     * The answer's motif block of |motif|:
+     *   {"selected": true | false | null,
+     *    "decided_by": "every_context" | "tested_contexts" | "constant" | null,
+     *    "untested": null | "discovery" | "release" | "not_admitted" | "not_started"
+     *                | "selection",
+     *    "labels": <the normal form's labels>,
+     *    "labels_present": [{"column": <name>, "contexts": <count, graph_contexts>,
+     *                        "strands": "context" | "reverse_complement" | "both"
+     *                                   | "either"}, ...] | null,
+     *    "labels_absent": <labels - present> | null (every_context: an absence claim;
+     *                     constant: 0; null otherwise),
+     *    "stop": null | "time" | "max_memory"}
+     * A label's contexts are exact when every context was tested, at_least otherwise. The
+     * labels' bytes were charged by the pass; the text is the caller's to count
+     * (compact_json_bytes).
+     */
+    Json::Value motif_json(const MotifAnswer &motif) const;
     // frees what the last pattern's pass still holds: its descriptors (after the route built
     // the chosen contexts' results) and its kept rows (when retrieve_given did not take them)
     void end_selection();

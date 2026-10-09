@@ -23,8 +23,11 @@
  * §19.5-§19.9): which raw contexts of a pattern satisfy the request's bound predicate, read
  * from their annotation rows restricted to the predicate's labels, under max_predicate_work,
  * the request's memory account and its deadline; and the projection predicate_only's rows
- * (retrieve_given, pattern_retrieval.cpp). Every refusal, cut and stop is stated; a count is
- * exact only when every context behind it was decided.
+ * (retrieve_given, pattern_retrieval.cpp). On request (SelectionRequest::motif) the same reads
+ * answer the motif-level predicate: the normal form once per pattern on the union of the
+ * predicate's labels over its decided contexts (MotifAnswer), exact only when every context
+ * was decided, else three-valued. Every refusal, cut and stop is stated; a count is exact only
+ * when every context behind it was decided.
  */
 
 namespace mtg {
@@ -52,6 +55,36 @@ const char* to_string(SelectionPass pass) {
         case SelectionPass::CONSTANT: return "constant";
     }
     return "not_started";
+}
+
+const char* to_string(MotifBasis basis) {
+    switch (basis) {
+        case MotifBasis::EVERY_CONTEXT: return "every_context";
+        case MotifBasis::TESTED_CONTEXTS: return "tested_contexts";
+        case MotifBasis::CONSTANT: return "constant";
+        case MotifBasis::UNDECIDED: return "undecided";
+    }
+    return "undecided";
+}
+
+const char* to_string(MotifUntested untested) {
+    switch (untested) {
+        case MotifUntested::NONE: return "none";
+        case MotifUntested::DISCOVERY: return "discovery";
+        case MotifUntested::RELEASE: return "release";
+        case MotifUntested::NOT_ADMITTED: return "not_admitted";
+        case MotifUntested::NOT_STARTED: return "not_started";
+        case MotifUntested::SELECTION: return "selection";
+    }
+    return "none";
+}
+
+MotifAnswer constant_motif(bool value) {
+    MotifAnswer motif;
+    motif.value = value;
+    motif.basis = MotifBasis::CONSTANT;
+    motif.present.emplace();
+    return motif;
 }
 
 namespace {
@@ -97,6 +130,25 @@ struct PassRow {
     // what the account holds for the hits
     uint64_t bytes = 0;
 };
+
+// a label of the pattern's motif union, as the decisions gather it
+struct MotifEntry {
+    uint64_t contexts = 0;
+    uint32_t first = 0;
+    // the last context that counted it, plus one (a label on both of a context's rows counts
+    // the context once)
+    uint32_t stamp = 0;
+    uint8_t on = 0;
+};
+
+// the light-work units of sorting n items (n log n comparisons)
+uint64_t sort_units(uint64_t n) {
+    uint64_t u = n;
+    for (uint64_t h = n; h > 1; h >>= 1) {
+        u += n;
+    }
+    return u;
+}
 
 } // namespace
 
@@ -253,6 +305,70 @@ Json::Value PatternRetrieval::selection_strands_json(const SelectionAnswer &answ
     return v;
 }
 
+MotifAnswer PatternRetrieval::motif_without_pass(SelectionPass pass, const Count &raw) const {
+    if (pass != SelectionPass::NOT_ADMITTED && pass != SelectionPass::NOT_STARTED)
+        throw std::logic_error("pattern: a motif without a pass is not_admitted or not_started");
+    const Impl &m = *impl_;
+    const predicate::Bound *b = bound();
+    MotifAnswer motif;
+    motif.untested = pass == SelectionPass::NOT_ADMITTED ? MotifUntested::NOT_ADMITTED
+                                                         : MotifUntested::NOT_STARTED;
+    if (!b) {
+        // the binding stopped: no label is known, nothing can be evaluated
+        motif.stop = m.binding ? m.binding->stop : nullptr;
+        return motif;
+    }
+    if (b->constant())
+        return constant_motif(*b->constant());
+    motif.labels = b->labels().size();
+    motif.present.emplace();
+    if (raw.relation == Relation::EXACT && raw.value == 0) {
+        // no context to test: the union is empty, and the value the normal form's on it
+        motif.value = b->vacuous();
+        motif.basis = MotifBasis::EVERY_CONTEXT;
+        motif.untested = MotifUntested::NONE;
+    }
+    return motif;
+}
+
+Json::Value PatternRetrieval::motif_json(const MotifAnswer &motif) const {
+    const Impl &m = *impl_;
+    const predicate::Bound *b = bound();
+    const bool every = motif.basis == MotifBasis::EVERY_CONTEXT;
+    Json::Value v;
+    v["selected"] = motif.value ? Json::Value(*motif.value) : Json::Value();
+    v["decided_by"] = motif.basis == MotifBasis::UNDECIDED ? Json::Value()
+                                                           : Json::Value(to_string(motif.basis));
+    v["untested"] = motif.untested == MotifUntested::NONE ? Json::Value()
+                                                          : Json::Value(to_string(motif.untested));
+    v["labels"] = uint_json(motif.labels);
+    if (motif.present) {
+        if (!motif.present->empty() && !b)
+            throw std::logic_error("pattern: motif labels without a bound predicate");
+        Json::Value list(Json::arrayValue);
+        for (const MotifLabel &l : *motif.present) {
+            Json::Value e;
+            e["column"] = b->labels().at(l.label).name;
+            e["contexts"] = count_json(every ? Relation::EXACT : Relation::AT_LEAST, l.contexts,
+                                       Unit::GRAPH_CONTEXTS);
+            const uint8_t both = SelectionAnswer::kOnContext
+                                    | SelectionAnswer::kOnReverseComplement;
+            e["strands"] = m.mode != GraphMode::BASIC ? "either"
+                         : l.on == both ? "both"
+                         : l.on == SelectionAnswer::kOnReverseComplement ? "reverse_complement"
+                                                                         : "context";
+            list.append(std::move(e));
+        }
+        v["labels_present"] = std::move(list);
+    } else {
+        v["labels_present"] = Json::Value();
+    }
+    v["labels_absent"] = (every || motif.basis == MotifBasis::CONSTANT) && motif.present
+            ? Json::Value(uint_json(motif.labels - motif.present->size())) : Json::Value();
+    v["stop"] = motif.stop ? Json::Value(motif.stop) : Json::Value();
+    return v;
+}
+
 
 SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uint64_t released,
                                          const Count &raw, const Extraction &x,
@@ -301,10 +417,16 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         ended |= ends;
     };
 
+    // the motif of a pass that did not run (a.pass): nothing read
+    auto no_pass_motif = [&]() {
+        if (request.motif)
+            a.motif = motif_without_pass(a.pass, raw);
+    };
     if (x.withheld) {
         // nothing was released: nothing is read (§19.6 step 2)
         without_pass(&a, *x.withheld == Withheld::COUNT_ABOVE_THRESHOLD
                             ? SelectionPass::NOT_ADMITTED : SelectionPass::NOT_STARTED, raw);
+        no_pass_motif();
         return finish();
     }
     if (tested.empty() && released == 0 && x.complete) {
@@ -312,6 +434,11 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         a.pass = SelectionPass::COMPLETED;
         a.tested = Count::exact(Unit::GRAPH_CONTEXTS, 0);
         a.selected = Count::exact(Unit::GRAPH_CONTEXTS, 0);
+        if (request.motif) {
+            // the motif's union is empty and complete: the normal form's value on it
+            a.motif = motif_without_pass(SelectionPass::NOT_STARTED,
+                                         Count::exact(Unit::GRAPH_CONTEXTS, 0));
+        }
         return finish();
     }
     // a stop before the pass: the predicate not bound (its own stop), or the request's
@@ -327,6 +454,7 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         } else if (partial) {
             a.cut = before;
         }
+        no_pass_motif();
         return finish();
     }
     if (tested.empty() && released == 0 && !x.complete
@@ -336,6 +464,7 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         // stop: not_started in every mode (§19.7). A release cut by max_predicate_contexts
         // alone is the pass's (stopped, its bounds)
         without_pass(&a, SelectionPass::NOT_STARTED, raw);
+        no_pass_motif();
         return finish();
     }
 
@@ -516,6 +645,35 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
     std::unordered_set<LabelId> kept_names;
     bool listing = request.mode != Mode::COUNT;
     std::vector<LabelId> present;
+    // the motif's union (request.motif): an entry per distinct label found on a decided
+    // context, charged before it is made (held with the answer); |gathering| ends with the
+    // first entry the account refuses (the pass stops there)
+    std::unordered_map<LabelId, MotifEntry> motif_union;
+    uint64_t motif_bytes = 0;
+    bool gathering = request.motif;
+    // the labels of one row of decided context |i| into the union, found on |on|
+    auto gather = [&](size_t i, const LabelQuery::NodeHits &hits, uint8_t on) {
+        for (const LabelQuery::Hit &h : hits) {
+            auto it = motif_union.find(h.label);
+            if (it == motif_union.end()) {
+                const uint64_t bytes = motif_label_bytes(labels[h.label].name);
+                if (!m.account.charge(bytes)) {
+                    set_stop("selection", "max_memory");
+                    gathering = false;
+                    return;
+                }
+                motif_bytes += bytes;
+                it = motif_union.emplace(h.label, MotifEntry()).first;
+                it->second.first = static_cast<uint32_t>(i);
+            }
+            MotifEntry &e = it->second;
+            if (e.stamp != i + 1) {
+                e.stamp = static_cast<uint32_t>(i + 1);
+                ++e.contexts;
+            }
+            e.on |= on;
+        }
+    };
     auto decide = [&](size_t i) {
         // the clock every kReleaseClockStride lookups and decisions; not decided after it
         if (!heavy()) {
@@ -541,6 +699,17 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         ++decided;
         if (c.selected)
             ++selected;
+        if (gathering) {
+            // the set it was evaluated on joins the motif's union (no work beyond the
+            // decision's: one step per label it holds); a palindromic k-mer under "either" is
+            // its own reverse complement
+            gather(i, own.hits, either && rows[c.row].mirror == c.row
+                                    ? SelectionAnswer::kOnContext
+                                            | SelectionAnswer::kOnReverseComplement
+                                    : SelectionAnswer::kOnContext);
+            if (gathering && mr != kNoRow)
+                gather(i, rows[mr].hits, SelectionAnswer::kOnReverseComplement);
+        }
         if (c.selected && listing && selected <= request.max_contexts) {
             // listed: its selection_labels (the set it was evaluated on, ascending ids) with
             // the row each was found on (per label the orientation that supported it), its own
@@ -782,6 +951,89 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         a.list_cut = selected > request.max_contexts;
         keep_list = true;
     }
+
+    if (request.motif) {
+        // the motif-level predicate: the normal form once on the union of the decided
+        // contexts' labels, exact when every raw context was tested, else three-valued
+        // (every label not found undecided)
+        MotifAnswer &motif = a.motif.emplace();
+        motif.labels = labels.size();
+        if (!completed) {
+            // the first cause in the pipeline's order: discovery, the release, the pass
+            motif.untested
+                    = raw.relation != Relation::EXACT && raw.relation != Relation::BOUNDS
+                            ? MotifUntested::DISCOVERY
+                    : x.cut && *x.cut != StopReason::MAX_CONTEXTS ? MotifUntested::DISCOVERY
+                    : admission_cut || !x.complete || tested.size() < released
+                            || (raw.relation == Relation::EXACT && released < raw.value)
+                            ? MotifUntested::RELEASE
+                            : MotifUntested::SELECTION;
+        }
+        // the clock before the evaluation and the label order of the union (heavy work: up to
+        // every label of the normal form marked); a time stop leaves it undecided, unlisted
+        if (!m.budget.check_time()) {
+            set_stop("output", "time");
+            motif.stop = "time";
+            m.account.release(motif_bytes);
+            motif_bytes = 0;
+        } else {
+            std::vector<LabelId> sure;
+            sure.reserve(motif_union.size());
+            for (const auto &[id, e] : motif_union) {
+                sure.push_back(id);
+            }
+            uint64_t units = 0;
+            if (completed) {
+                motif.value = bound->eval(sure.data(), sure.size(), &units);
+                motif.basis = MotifBasis::EVERY_CONTEXT;
+            } else if (sure.empty()) {
+                // nothing found and every label undecided: every leaf of a normal form that is
+                // not a constant is undecided, and so is its root (no evaluation needed)
+            } else {
+                // the undecided labels: every label of the normal form not found, their ids
+                // charged before the list is built and released once evaluated
+                const uint64_t undecided = labels.size() - sure.size();
+                if (!m.account.charge(undecided * kMotifUndecidedBytes)) {
+                    // stated on the entry as the time stop above is (first stop wins)
+                    set_stop("output", "max_memory");
+                    motif.stop = "max_memory";
+                } else {
+                    std::vector<LabelId> maybe;
+                    maybe.reserve(undecided);
+                    for (LabelId id = 0; id < labels.size(); ++id) {
+                        if (!motif_union.count(id))
+                            maybe.push_back(id);
+                    }
+                    motif.value = bound->eval3(sure.data(), sure.size(), maybe.data(),
+                                               maybe.size(), &units);
+                    m.account.release(undecided * kMotifUndecidedBytes);
+                    if (motif.value)
+                        motif.basis = MotifBasis::TESTED_CONTEXTS;
+                }
+            }
+            // charged after, never refused (as a decision): bounded by the normal form's size
+            charge(units);
+            motif.units = units;
+            // the labels found in label order: contexts desc, column asc
+            std::vector<MotifLabel> found;
+            found.reserve(motif_union.size());
+            for (const auto &[id, e] : motif_union) {
+                found.push_back({ id, e.contexts, e.first, e.on });
+            }
+            std::sort(found.begin(), found.end(), [&](const MotifLabel &p, const MotifLabel &q) {
+                if (p.contexts != q.contexts)
+                    return p.contexts > q.contexts;
+                return labels[p.label].name < labels[q.label].name;
+            });
+            motif.present = std::move(found);
+            // the marks and the sort as the retrieval's light work: the next light work reads
+            // the clock once they pass its stride
+            m.unclocked = std::min<uint64_t>(units + labels.size()
+                                                     + sort_units(motif_union.size()),
+                                             Budget::kClockStride);
+        }
+    }
+
     if (keep_list && projection != Projection::NONE && !listed.empty()) {
         // the label order of §5.5 over the listed contexts' selection_labels: contexts desc,
         // column asc. The clock is read before it (§19.9), its sorts then counted as the
@@ -792,13 +1044,6 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         for (const auto &[id, count] : label_count) {
             order.push_back(id);
         }
-        auto sort_units = [](uint64_t n) {
-            uint64_t u = n;
-            for (uint64_t h = n; h > 1; h >>= 1) {
-                u += n;
-            }
-            return u;
-        };
         uint64_t sorting = sort_units(order.size());
         for (const auto &list : listed_labels) {
             sorting += sort_units(list.size());

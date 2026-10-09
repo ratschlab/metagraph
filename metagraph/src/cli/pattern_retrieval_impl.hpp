@@ -227,6 +227,13 @@ inline uint64_t selection_labels_bytes(uint64_t names_length) { return 32 + name
 // beside them its selection_strands (the list; per label the row it was found on, a byte kept,
 // and its string in the answer, at most 18 characters): 32 + 24 per label
 inline uint64_t selection_strands_bytes(uint64_t labels) { return 32 + 24 * labels; }
+// a label of a pattern's motif union (SelectionRequest::motif): its entry in the pass's index
+// of the union (label, contexts, first, the context that last counted it, rows), its
+// MotifLabel in the answer and its object in the motif block (column, contexts, strands) with
+// its copy of the label's name; charged before the entry is made, held with the answer
+inline uint64_t motif_label_bytes(std::string_view name) { return 64 + label_entry_bytes(name); }
+// an id of the motif's list of undecided labels (Bound::eval3's maybes), held while it runs
+constexpr uint64_t kMotifUndecidedBytes = sizeof(graph::traversal::LabelId);
 
 /**
  * A row of the selection pass held for the projection predicate_only (retrieve_given): the
