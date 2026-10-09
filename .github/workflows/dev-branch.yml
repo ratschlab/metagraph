@@ -1,0 +1,70 @@
+name: Development branch
+
+# The checks of the development branch gr/labeled-traversal (labeled traversal, graphlets,
+# pattern search) on one Linux configuration. A push runs them only when its head commit's
+# message contains "[ci]" (a plain push starts the workflow, and its jobs are skipped);
+# workflow_dispatch runs them on demand. master, tags and pull requests run main.yml.
+on:
+  push:
+    branches:
+      - gr/labeled-traversal
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  # linux.yml on the configuration its Python and mini-index jobs run on: the build, the
+  # branch's unit tests, its integration test modules, the Python library's tests and the
+  # tests on the mini index -- fetched, the copy the pattern fixtures were answered on, so
+  # that TestPatternFixtures compares every byte. No examples, no other integration modules.
+  Linux:
+    if: &requested "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[ci]')"
+    name: Linux (DNA, Release, g++-13)
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_type: Release
+      alphabet: DNA
+      compiler: g++-13
+      cc: gcc-13
+      cxx: g++-13
+      build_static: 'OFF'
+      with_avx: 'ON'
+      # the branch's suites (traversal, graphlets and their attempts, pattern search) and the
+      # annotation code they read through. The tests on the mini index skip here
+      # (unit_tests_parallel runs each shard in a directory of its own, without mini_refseq/)
+      # and run in mini-index-tests
+      unit_test_filter: '*Walker*:*LabelOracle*:*Resolve*:*Trie*:*SupportStep*:*Graphlet*:*Stage2Review*:*Attempt*:*ServerRequest*:*PathCache*:*Pattern*:*CoordToHeader*:*AlignmentFormatCoords*:*HeaderIndex*:*RowDiff*:*BRWT*:*Annotat*:*MultiGraph*:*MaskCheck*:*TraverseNotInGraph*'
+      # the branch's integration modules, whole; their classes on the mini index skip here and
+      # run in mini-index-tests
+      integration_test_filters: '*(test_traverse.* *(test_pattern.* *(test_multigraph.* *(test_transform_mask.*'
+      examples: false
+      mini_refseq: fetch
+
+  # The generated test data against their generators, without a build: the MGT v1 codec
+  # vectors and the hand-made graphlet documents. The CLI graphlet documents and the pattern
+  # bodies are checked against the build, in mini-index-tests; the pattern bodies against the
+  # SPEC in python-tests.
+  fixture-checks:
+    if: *requested
+    name: Fixture checks
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+
+      - name: The codec vectors are what make_codec_vectors.py writes
+        run: python metagraph/scripts/traversal/make_codec_vectors.py --check
+
+      - name: The hand-made graphlet documents are what graphlet_fixtures.py derives
+        run: python metagraph/scripts/traversal/graphlet_fixtures.py --check

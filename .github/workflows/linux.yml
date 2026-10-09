@@ -24,6 +24,31 @@ on:
       with_avx:
         required: true
         type: string
+      # What the jobs after the build run: main.yml's matrix leaves these at their defaults,
+      # dev-branch.yml narrows them to the development branch's checks
+      unit_test_filter:
+        description: gtest filter of the unit tests (empty runs every test)
+        required: false
+        type: string
+        default: ''
+      integration_test_filters:
+        description: main.py --test_filter patterns, separated by spaces, one run each ('*' runs every test)
+        required: false
+        type: string
+        default: '*'
+      examples:
+        description: build and run the examples
+        required: false
+        type: boolean
+        default: true
+      mini_refseq:
+        description: >-
+          how mini-index-tests gets the mini index: build (build_mini_refseq.sh, from NCBI's
+          records) or fetch (fetch_mini_refseq.sh, the published copy the fixtures were
+          answered on)
+        required: false
+        type: string
+        default: build
 
 jobs:
   build:
@@ -166,8 +191,15 @@ jobs:
 
       - &run-unit-tests
         name: run unit tests
+        env:
+          UNIT_TEST_FILTER: ${{ inputs.unit_test_filter }}
         run: |
-          cd metagraph/build && chmod +x unit_tests{,_parallel} && ./unit_tests_parallel
+          cd metagraph/build && chmod +x unit_tests{,_parallel}
+          if [ -n "$UNIT_TEST_FILTER" ]; then
+            ./unit_tests_parallel --gtest_filter="$UNIT_TEST_FILTER"
+          else
+            ./unit_tests_parallel
+          fi
 
 
   integration-tests:
@@ -209,13 +241,21 @@ jobs:
 
       - &run-integration-tests
         name: Run integration tests
+        env:
+          INTEGRATION_TEST_FILTERS: ${{ inputs.integration_test_filters }}
         run: |
           ./metagraph/integration_tests/install_test_environment.sh metagraph/api/python metagraph/build/test_venv
           cd metagraph/build
-          ./test_venv/bin/python ../integration_tests/main.py
+          # read -a: the patterns are split at spaces and never expanded as file names
+          read -r -a filters <<< "$INTEGRATION_TEST_FILTERS"
+          [ "${#filters[@]}" -gt 0 ] || { echo "no integration test filter" >&2; exit 1; }
+          for filter in "${filters[@]}"; do
+            ./test_venv/bin/python ../integration_tests/main.py --test_filter "$filter"
+          done
 
+      # with the whole integration suite only, not with a selection of it
       - name: check metagraph workflows
-        if: inputs.alphabet == 'DNA'
+        if: inputs.alphabet == 'DNA' && inputs.integration_test_filters == '*'
         run: |
           export PATH="$(pwd)/metagraph/build/:$PATH"
           metagraph --help
@@ -271,17 +311,21 @@ jobs:
   # records in the format of the public refseq33m index): the MiniRefSeq unit tests, the
   # contract of the stored fixtures (the pattern bodies against what this binary answers on
   # the mini, the graphlet documents against its CLI), and the integration classes that run on
-  # it. The index is built with this binary from the records; only the NCBI downloads are
-  # cached (keyed on the accession table), and the build still asks NCBI's esummary once to
-  # check the table. The build picks its row-diff anchors anew each time, so this index is not
-  # the one the pattern fixtures were answered on: TestPatternFixtures compares every body but
-  # the decode work those anchors make. The build needs NCBI's E-utilities to be reachable, so
-  # a failure of this job does not fail the workflow.
+  # it. The index comes one of two ways (input mini_refseq):
+  # - build: built with this binary from the records; only the NCBI downloads are cached
+  #   (keyed on the accession table), and the build still asks NCBI's esummary once to check
+  #   the table. The build picks its row-diff anchors anew each time, so this index is not the
+  #   one the pattern fixtures were answered on: TestPatternFixtures compares every body but
+  #   the decode work those anchors make. The build needs NCBI's E-utilities to be reachable,
+  #   so a failure of this job does not fail the workflow.
+  # - fetch: the published copy the fixtures were answered on (fetch_mini_refseq.sh, from a
+  #   pre-release of this repository; the archive cached under its name): TestPatternFixtures
+  #   compares every byte, and a failure fails the workflow.
   mini-index-tests:
     if: inputs.alphabet == 'DNA' && inputs.build_type == 'Release' && inputs.compiler == 'g++-13' && inputs.build_static == 'OFF'
     runs-on: *platform
     needs: [build]
-    continue-on-error: true
+    continue-on-error: ${{ inputs.mini_refseq == 'build' }}
 
     env: *linux-build-env
 
@@ -307,17 +351,49 @@ jobs:
       - *recreate-metagraph-symlink
 
       - name: Cache the mini index's downloads
+        if: inputs.mini_refseq == 'build'
         uses: actions/cache@v4
         with:
           path: metagraph/build/mini_refseq/raw
           key: mini-refseq-raw-${{ hashFiles('metagraph/scripts/traversal/mini_refseq_accessions.tsv') }}
 
       - name: Build the mini index
+        if: inputs.mini_refseq == 'build'
         run: |
           cd metagraph/build
           REUSE_RAW=1 THREADS="$(getconf _NPROCESSORS_ONLN)" \
             ../scripts/traversal/build_mini_refseq.sh ./mini_refseq ./metagraph \
             ../scripts/traversal/mini_refseq_accessions.tsv
+
+      # the archive's name is the cache key: a new published copy is a new name
+      - name: Name the published mini index
+        if: inputs.mini_refseq == 'fetch'
+        id: mini-asset
+        run: |
+          name="$(metagraph/scripts/traversal/fetch_mini_refseq.sh --asset)"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      # restored and saved in separate steps, so that a run whose tests fail keeps it too
+      - name: Restore the published mini index
+        if: inputs.mini_refseq == 'fetch'
+        id: mini-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/metagraph-test-data
+          key: test-data-${{ steps.mini-asset.outputs.name }}
+
+      - name: Fetch the published mini index
+        if: inputs.mini_refseq == 'fetch'
+        run: |
+          export METAGRAPH_TEST_DATA="$HOME/.cache/metagraph-test-data"
+          metagraph/scripts/traversal/fetch_mini_refseq.sh metagraph/build/mini_refseq
+
+      - name: Save the published mini index
+        if: inputs.mini_refseq == 'fetch' && steps.mini-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/metagraph-test-data
+          key: test-data-${{ steps.mini-asset.outputs.name }}
 
       - name: Unit tests on the mini index
         run: |
@@ -338,11 +414,13 @@ jobs:
           export METAGRAPH_REQUIRE_GUARDS=1
           ./test_venv/bin/python ../integration_tests/main.py --test_filter '*Mini*' < /dev/null
           # the pattern bodies are what this binary answers on the mini (pattern_fixtures.py;
-          # on this build of the index every byte but the decode work of its row-diff anchors)
+          # on the published copy every byte, on a build of its own every byte but the decode
+          # work of its row-diff anchors)
           ./test_venv/bin/python ../integration_tests/main.py --test_filter '*TestPatternFixtures*' < /dev/null
 
 
   examples:
+    if: inputs.examples
     runs-on: *platform
 
     env: *linux-build-env
