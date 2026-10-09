@@ -19,6 +19,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -897,6 +898,94 @@ TEST(PatternSegments, NoWindowAdmitted) {
     EXPECT_EQ(Extension::NOT_ADMITTED, run.result.segments->search);
     EXPECT_TRUE(run.segments.empty());
     EXPECT_EQ(0u, run.result.work.segment_anchors_extended);
+}
+
+TEST(PatternSegments, WindowWithoutAnchorsIsExtended) {
+    // a window with 0 anchors was searched completely: EXTENDED (EXACT 0, no root), never
+    // NOT_ADMITTED, so that such a window among windows not admitted makes the search
+    // COMPLETED, not "none_admitted". The graph holds the gene's forward strand only and
+    // max_anchors is 0: every forward window is not admitted, every reverse one has 0 anchors
+    std::mt19937 rng(14);
+    const Gene g = gene_case(rng, 60);
+    const Pattern pattern = Pattern::parse(PatternKind::DNA, g.gene);
+    const SegmentRunResult both = run_segments(*g.graph, pattern,
+                                               segment_request(plan_of(0, 15), Strands::BOTH, 0));
+    ASSERT_TRUE(both.result.segments);
+    EXPECT_FALSE(both.result.stop);
+    const SegmentCounts &c = *both.result.segments;
+    for (const WindowCount &w : c.windows.at(Orientation::FORWARD)) {
+        EXPECT_EQ(WindowState::NOT_ADMITTED, w.state) << w.offset;
+    }
+    for (const WindowCount &w : c.windows.at(Orientation::REVERSE)) {
+        EXPECT_EQ(WindowState::EXTENDED, w.state) << w.offset;
+        EXPECT_EQ(Relation::EXACT, w.anchors.relation) << w.offset;
+        EXPECT_EQ(0u, w.anchors.value) << w.offset;
+        EXPECT_EQ(0u, w.roots) << w.offset;
+    }
+    EXPECT_EQ(Extension::COMPLETED, c.search);
+    EXPECT_TRUE(both.segments.empty());
+    EXPECT_EQ(0u, both.result.work.segment_anchors_extended);
+    // the forward strand alone: none admitted
+    const SegmentRunResult forward_only = run_segments(
+            *g.graph, pattern, segment_request(plan_of(0, 15), Strands::FORWARD, 0));
+    ASSERT_TRUE(forward_only.result.segments);
+    EXPECT_EQ(Extension::NOT_ADMITTED, forward_only.result.segments->search);
+}
+
+TEST(PatternSegments, PeptideWithAStopItsTableCannotCode) {
+    // table 27 has no codon for '*' (its stop codons are sense codons there): a peptide holding
+    // one has no instance, yet it is searched as any other. The windows whose anchored bases
+    // hold a base of the '*' codon have EXACT 0 anchors (extended); the others are searched,
+    // and the parts before and after the '*' are segments; the note no_stop_codon
+    std::mt19937 rng(19);
+    const int table = 27;
+    std::string gene;
+    std::string peptide;
+    while (peptide.size() < 24) {
+        const std::string codon = random_dna(rng, 3);
+        const char residue = oracle_translate(table, codon);
+        if (residue == '*')
+            continue;
+        gene += codon;
+        peptide.push_back(residue);
+    }
+    const uint32_t star = 10;
+    peptide[star] = '*';
+    const uint32_t from = 3 * star;
+    const uint32_t to = from + 3;
+    const uint32_t L = 3 * static_cast<uint32_t>(peptide.size());
+    auto graph = build_graph<DBGSuccinct>(11, { random_dna(rng, 15) + gene
+                                                    + random_dna(rng, 15) },
+                                          DeBruijnGraph::BASIC);
+    const Pattern pattern = Pattern::parse(PatternKind::PROTEIN, peptide,
+                                           GeneticCode::get(table));
+    ASSERT_FALSE(pattern.has_instances());
+    const SegmentRunResult run = run_segments(*graph, pattern,
+                                              segment_request(plan_of(0, 1), Strands::FORWARD,
+                                                              1000));
+    ASSERT_FALSE(run.result.refusal);
+    ASSERT_TRUE(run.result.segments);
+    EXPECT_FALSE(run.result.stop);
+    EXPECT_EQ(Extension::COMPLETED, run.result.segments->search);
+    const auto &windows = run.result.segments->windows.at(Orientation::FORWARD);
+    EXPECT_EQ(L - 11 + 1, windows.size());
+    for (const WindowCount &w : windows) {
+        EXPECT_EQ(WindowState::EXTENDED, w.state) << w.offset;
+        EXPECT_EQ(Relation::EXACT, w.anchors.relation) << w.offset;
+        if (w.offset < to && w.offset + 11 > from) {
+            EXPECT_EQ(0u, w.anchors.value) << w.offset;
+        } else {
+            EXPECT_LE(1u, w.anchors.value) << w.offset;
+        }
+    }
+    EXPECT_EQ(1u, run.segments.count({ Orientation::FORWARD, 0, from }))
+        << describe_segments(run.segments);
+    EXPECT_EQ(1u, run.segments.count({ Orientation::FORWARD, to, L }))
+        << describe_segments(run.segments);
+    EXPECT_EQ(2u, run.segments.size()) << describe_segments(run.segments);
+    EXPECT_NE(run.result.notes.end(), std::find(run.result.notes.begin(),
+                                                run.result.notes.end(),
+                                                std::string(kNoteNoStopCodon)));
 }
 
 TEST(PatternSegments, WindowsBelowTheFloor) {
