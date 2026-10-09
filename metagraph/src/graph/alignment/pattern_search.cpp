@@ -139,6 +139,10 @@ Pattern Pattern::parse(PatternKind kind, std::string_view text, const GeneticCod
     upper.reserve(text.size());
     std::vector<CodonSet> codons;
     codons.reserve(text.size());
+    // the codons that substitute each residue (SPEC §21.3): the sense codons of the other
+    // residues; none for '*' (a stop is never substituted, a stop codon never substitutes)
+    std::vector<CodonSet> substitutes;
+    substitutes.reserve(text.size());
     std::vector<BaseSet> positions;
     positions.reserve(3 * text.size());
 
@@ -160,6 +164,7 @@ Pattern Pattern::parse(PatternKind kind, std::string_view text, const GeneticCod
         has_instances &= set != 0;
         upper.push_back(residue);
         codons.push_back(set);
+        substitutes.push_back(residue == '*' ? 0 : code.sense() & ~set);
         for (size_t j = 0; j < 3; ++j) {
             positions.push_back(codon_position_set(set, j));
         }
@@ -167,6 +172,7 @@ Pattern Pattern::parse(PatternKind kind, std::string_view text, const GeneticCod
 
     Pattern pattern(kind, std::move(upper), std::move(positions));
     pattern.codons_ = std::move(codons);
+    pattern.substitutes_ = std::move(substitutes);
     pattern.genetic_code_ = code.id();
     pattern.has_instances_ = has_instances;
     return pattern;
@@ -302,6 +308,10 @@ Pattern Pattern::reverse_complement() const {
         for (auto it = codons_.rbegin(); it != codons_.rend(); ++it) {
             rc.codons_.push_back(reverse_complement_codons(*it));
         }
+        rc.substitutes_.reserve(substitutes_.size());
+        for (auto it = substitutes_.rbegin(); it != substitutes_.rend(); ++it) {
+            rc.substitutes_.push_back(reverse_complement_codons(*it));
+        }
         rc.genetic_code_ = genetic_code_;
         rc.has_instances_ = has_instances_;
         return rc;
@@ -350,19 +360,13 @@ double Pattern::mismatch_information_bits(size_t begin, size_t end,
     assert(begin <= end && end <= positions_.size());
     if (!max_mismatches)
         return information_bits(begin, end);
-    if (kind_ == PatternKind::PROTEIN) {
-        throw std::invalid_argument("pattern: the substitution ball of a peptide is not "
-                                    "defined yet");
-    }
 
     // f[u] = log2 of the strings over the positions so far with exactly u substitutions
     constexpr double kEmpty = -std::numeric_limits<double>::infinity();
     std::vector<double> f(max_mismatches + 1, kEmpty);
     f[0] = 0;
-    for (size_t i = begin; i < end; ++i) {
-        const uint32_t s = set_size(positions_[i]);
-        const double same = std::log2(static_cast<double>(s));
-        const double other = s < 4 ? std::log2(static_cast<double>(4 - s)) : kEmpty;
+    // one step of the DP: |same| strings keep the level, |other| add a substitution
+    auto extend = [&](double same, double other) {
         for (size_t u = f.size(); u-- > 0; ) {
             const double kept = f[u] == kEmpty ? kEmpty : f[u] + same;
             const double added = !u || f[u - 1] == kEmpty || other == kEmpty
@@ -370,18 +374,44 @@ double Pattern::mismatch_information_bits(size_t begin, size_t end,
                 : f[u - 1] + other;
             f[u] = log2_add(kept, added);
         }
+    };
+    if (kind_ == PatternKind::PROTEIN) {
+        // per residue covered: the strings its codons spell over its positions in [begin, end)
+        // (one at least, as information_bits), and the strings its substitutes spell there
+        // that none of its codons spells (a cut codon agreeing with one of its own is not
+        // substituted)
+        for (size_t i = begin / 3; 3 * i < end; ++i) {
+            const size_t first = std::max(begin, 3 * i) - 3 * i;
+            const size_t last = std::min(end, 3 * i + 3) - 3 * i;
+            const uint32_t own = distinct_projections(codons_[i], first, last);
+            const uint32_t other = distinct_projections(codons_[i] | substitutes_[i], first, last)
+                                    - own;
+            extend(std::log2(static_cast<double>(std::max<uint32_t>(1, own))),
+                   other ? std::log2(static_cast<double>(other)) : kEmpty);
+        }
+    } else {
+        // per position of set size s: s matching bases, 4 - s substituting ones (none at N)
+        for (size_t i = begin; i < end; ++i) {
+            const uint32_t s = set_size(positions_[i]);
+            extend(std::log2(static_cast<double>(s)),
+                   s < 4 ? std::log2(static_cast<double>(4 - s)) : kEmpty);
+        }
     }
     double ball = kEmpty;
     for (double level : f) {
         ball = log2_add(ball, level);
     }
-    return 2.0 * static_cast<double>(end - begin) - ball;
+    // a ball holds at most every string over the positions (all of them: 0 bits), which the
+    // rounding of the log-space sums must not turn into a negative information
+    return std::max(0.0, 2.0 * static_cast<double>(end - begin) - ball);
 }
 
 std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orientation,
                                         std::string_view instance) {
-    if (pattern.kind() == PatternKind::PROTEIN)
-        throw std::invalid_argument("pattern: residue substitutions are not defined yet");
+    if (pattern.kind() == PatternKind::PROTEIN) {
+        throw std::invalid_argument("pattern: a peptide's substitutions are residues "
+                                    "(residue_substitutions)");
+    }
     const size_t L = pattern.length();
     if (instance.size() != L) {
         throw std::invalid_argument("pattern: an instance of " + std::to_string(instance.size())
@@ -402,6 +432,45 @@ std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orie
             result.push_back(Substitution { static_cast<uint32_t>(i), pattern.text()[i],
                                             iupac_letter(base) });
         }
+    }
+    return result;
+}
+
+std::vector<ResidueSubstitution> residue_substitutions(const Pattern &pattern,
+                                                       Orientation orientation,
+                                                       std::string_view instance) {
+    if (pattern.kind() != PatternKind::PROTEIN) {
+        throw std::invalid_argument("pattern: residue substitutions are a peptide's "
+                                    "(substitutions)");
+    }
+    const size_t L = pattern.length();
+    if (instance.size() != L) {
+        throw std::invalid_argument("pattern: an instance of " + std::to_string(instance.size())
+                                    + " bases for a peptide of " + std::to_string(L));
+    }
+    const GeneticCode &code = GeneticCode::get(pattern.genetic_code());
+    const bool reverse = orientation == Orientation::REVERSE;
+    std::vector<ResidueSubstitution> result;
+    for (size_t i = 0; 3 * i < L; ++i) {
+        // residue i's codon in P's reading direction
+        std::string codon(reverse ? instance.substr(L - 3 * i - 3, 3)
+                                  : instance.substr(3 * i, 3));
+        if (reverse)
+            ::reverse_complement(codon.begin(), codon.end());
+        const int c = codon_index(codon);
+        if (c < 0) {
+            throw std::invalid_argument("pattern: the instance holds the codon " + codon
+                                        + ", not three of A, C, G, T");
+        }
+        if (pattern.codon_sets()[i] >> c & 1)
+            continue;
+        if (!(pattern.substitute_sets()[i] >> c & 1)) {
+            throw std::invalid_argument("pattern: the codon " + codon + " at residue "
+                                        + std::to_string(i) + " is neither a codon of '"
+                                        + pattern.text()[i] + "' nor a substitute");
+        }
+        result.push_back(ResidueSubstitution { static_cast<uint32_t>(i), pattern.text()[i],
+                                               code.translate(c), std::move(codon) });
     }
     return result;
 }
@@ -764,9 +833,12 @@ Count to_count(const Estimate &e, Unit unit) {
 struct CodonWindow {
     std::vector<CodonSet> sets;
     size_t phase = 0;
+    // Request::max_mismatches > 0 only (empty otherwise): per residue of |sets|, its
+    // substitutes (Pattern::substitute_sets) cut to the window's positions as |sets| are
+    std::vector<CodonSet> substitutes;
 
     bool operator==(const CodonWindow &other) const {
-        return phase == other.phase && sets == other.sets;
+        return phase == other.phase && sets == other.sets && substitutes == other.substitutes;
     }
 
     // how many bases of window position j's codon before it lie inside the window: the ones
@@ -800,6 +872,56 @@ struct CodonWindow {
         }
         return w;
     }
+
+    // with the substitutes: per residue, codon position j and known bases b0, b1 (each -1 ..
+    // 3), own_and_other()'s two sets at index 25 j + 5 (b0 + 1) + b1 + 1
+    std::vector<std::array<std::pair<BaseSet, BaseSet>, 75>> steps_of;
+
+    // the substitutes of the window of(codons, reversed, begin, end), from |substitutes|
+    // (Pattern::substitute_sets of the same pattern), and the sets own_and_other() reads
+    void add_substitutes(const std::vector<CodonSet> &substitutes_of, bool reversed,
+                         size_t begin, size_t end) {
+        const CodonWindow w = of(substitutes_of, reversed, begin, end);
+        assert(w.phase == phase && w.sets.size() == sets.size());
+        substitutes = w.sets;
+        steps_of.resize(sets.size());
+        for (size_t r = 0; r < sets.size(); ++r) {
+            for (int j = 0; j < 3; ++j) {
+                for (int b0 = -1; b0 < 4; ++b0) {
+                    for (int b1 = -1; b1 < 4; ++b1) {
+                        steps_of[r][25 * j + 5 * (b0 + 1) + b1 + 1]
+                            = { next_bases(sets[r], j, b0, b1),
+                                next_bases(substitutes[r], j, b0, b1) };
+                    }
+                }
+            }
+        }
+    }
+
+    // the window position of the residue after the one holding window position |j| (of n)
+    size_t residue_end(size_t j, size_t n) const {
+        return std::min(n, j + 3 - (phase + j) % 3);
+    }
+
+    /**
+     * The bases a range of a level pass may append at window position |j| after the codon's
+     * bases b0 and b1 (as allowed()): |own| those continuing one of the residue's own codons,
+     * |other| those continuing one of its substitutes. While the bases spelled agree with an
+     * own codon (own != 0) a base of |own| keeps the level and a base only of |other| adds the
+     * residue's substitution; once they agree with none (own == 0: the residue was substituted
+     * at the base that left its codons) a base of |other| keeps the level. Over the window's
+     * positions only, so that a codon cut by its edge is substituted only when its bases inside
+     * agree with no codon of its own.
+     */
+    std::pair<BaseSet, BaseSet> own_and_other(size_t j, int b0, int b1) const {
+        const size_t at = phase + j;
+        return steps_of[at / 3][25 * (at % 3) + 5 * (b0 + 1) + b1 + 1];
+    }
+
+    // whether the residue of |sets| index |r| can hold a substitution within the window: some
+    // string its substitutes spell over the window's positions is spelled by none of its own
+    // codons (both are cylinders over those positions)
+    bool substitutable(size_t r) const { return substitutes[r] & ~sets[r]; }
 };
 
 /**
@@ -869,7 +991,10 @@ struct BaseSearch {
     // (offset, level) (slot()); the passes entered so far (the last one is the one a halt
     // interrupted); and per core position the BOSS codes of the bases that substitute it
     // (outside its set, in A, C, G, T order; none at N) and |left|, the core positions at or
-    // after it that can hold a substitution (left[core_length()] = 0)
+    // after it that can hold a substitution (left[core_length()] = 0). A peptide window has no
+    // per-position substitutes (its automaton has them per codon prefix), and its |left| counts
+    // residues: those that can hold a substitution within the window and have a position at
+    // or after it
     uint8_t levels = 1;
     uint8_t entered = 0;
     std::vector<std::vector<TAlphabet>> substitutes;
@@ -921,6 +1046,17 @@ struct BaseSearch {
         }
     }
 };
+
+/**
+ * may_be_palindromic() for the window of |search| with |level| substitutions. A peptide's
+ * substitution replaces a whole codon, up to three bases of mirrored pairs, so above level 0
+ * no pair rules a palindromic k-mer out: every offset is possible (even k).
+ */
+bool may_be_palindromic(const BaseSearch &search, size_t p, size_t k, uint32_t level) {
+    if (search.automaton && level)
+        return !(k % 2);
+    return may_be_palindromic(search.q, p, k, level);
+}
 
 // how an orientation's contexts are made of base searches (§4.1, "Three graph modes")
 struct OrientationPlan {
@@ -1139,7 +1275,7 @@ class PatternRun {
         if (o.palindromes) {
             uint32_t q = o.palindromes_mirrored ? mirror : p;
             const BaseSearch &source = searches_[*o.palindromes];
-            if (may_be_palindromic(source.q, q, k_, level))
+            if (may_be_palindromic(source, q, k_, level))
                 pal = source.palindromes[source.slot(q, level)];
         }
 
@@ -1350,6 +1486,9 @@ class PatternRun {
     uint64_t entries_tested_ = 0;
     // the flank's symbols: every symbol of the graph's alphabet but $ (NonSentinelSymbols)
     std::vector<TAlphabet> flank_symbols_;
+    // per BOSS code, the index of its base in A, C, G, T (-1 for $ and N): what a peptide
+    // window's level range records of the bases it spells
+    std::vector<int8_t> index_of_code_;
 
     std::vector<TAlphabet> codes_;
     // the BOSS codes of every BaseSet's bases, in A, C, G, T order (a peptide window's
@@ -1466,6 +1605,10 @@ class PatternRun {
             std::optional<CodonWindow> automaton;
             if (protein)
                 automaton = CodonWindow::of(pattern_.codon_sets(), reverse, 0, m);
+            // with mismatches the window carries its substitutes too (two windows are then one
+            // search only when their substitutions agree as well)
+            if (protein && request_.max_mismatches)
+                automaton->add_substitutes(pattern_.substitute_sets(), reverse, 0, m);
 
             OrientationPlan o { orientation, 0, std::nullopt, std::nullopt, false };
             if (!primary) {
@@ -1480,6 +1623,8 @@ class PatternRun {
             std::optional<CodonWindow> automaton_rc;
             if (protein)
                 automaton_rc = CodonWindow::of(pattern_.codon_sets(), !reverse, L - m, L);
+            if (protein && request_.max_mismatches)
+                automaton_rc->add_substitutes(pattern_.substitute_sets(), !reverse, L - m, L);
             // the palindromic k-mers at offset p of the window's search are those at the
             // mirrored offset of its reverse complement's: count them on one of the two
             bool mirrored = false;
@@ -1586,7 +1731,7 @@ class PatternRun {
     // cursor whose contexts start at its own first node (the direct read, or the palindromes
     // of a mapped one), rather than only shifted by the wrapper's offset
     bool read_at_own_node(const BaseSearch &search, uint32_t offset, uint32_t level = 0) const {
-        return search.read_directly || may_be_palindromic(search.q, offset, k_, level);
+        return search.read_directly || may_be_palindromic(search, offset, k_, level);
     }
 
     // PARTIAL: a range of |level| whose contexts start at node |lowest| lies beyond the
@@ -1757,7 +1902,7 @@ class PatternRun {
                 continue;
             const BaseSearch &mapped = searches_[*o.mapped];
             for (const Span &span : mapped.release) {
-                if (may_be_palindromic(mapped.q, span.offset, k_, span.level)) {
+                if (may_be_palindromic(mapped, span.offset, k_, span.level)) {
                     f(o, span, Use::MAPPED_SKIPPING);
                     f(o, span, Use::PALINDROMES);
                 } else {
@@ -1788,7 +1933,7 @@ class PatternRun {
         if (!item.candidates)
             return;
         if (search.count_palindromes
-                && may_be_palindromic(search.q, item.offset, k_, item.level)) {
+                && may_be_palindromic(search, item.offset, k_, item.level)) {
             item.scan = Item::Scan::CANDIDATES;
             item.count_palindromes = true;
         }
@@ -1814,7 +1959,7 @@ class PatternRun {
                 return;
             item.unchecked = depth < boss_.get_k();
             if (search.count_palindromes
-                    && may_be_palindromic(search.q, item.offset, k_, item.level)) {
+                    && may_be_palindromic(search, item.offset, k_, item.level)) {
                 item.scan = Item::Scan::CANDIDATES;
                 item.count_palindromes = true;
             }
@@ -1835,7 +1980,7 @@ class PatternRun {
         item.invalid_ns = edges.invalid_non_sentinel;
         item.invalid = edges.invalid;
         if (search.count_palindromes
-                && may_be_palindromic(search.q, item.offset, k_, item.level)) {
+                && may_be_palindromic(search, item.offset, k_, item.level)) {
             item.scan = Item::Scan::CANDIDATES;
             item.count_palindromes = true;
         } else if (item.invalid_ns) {
@@ -2022,13 +2167,17 @@ class PatternRun {
      * One range of a level pass: as Range (the nodes ending with a spelled prefix of the
      * window's core, and its length), with the substitutions that prefix holds. A stack of its
      * own, since suffix_to_prefix's ranges have no room for the level (the aligner's file is
-     * not edited, §11).
+     * not edited, §11). A peptide window's range also carries the last two bases it spelled
+     * (|spelled|: base indexes, the last in bits 0-1, the one before in bits 2-3), from which
+     * its codon's known bases are read (those the BOSS would give: the search without
+     * mismatches reads them back from the range's nodes)
      */
     struct LevelRange {
         edge_index first;
         edge_index last;
         uint32_t depth;
         uint8_t used;
+        uint8_t spelled = 0;
     };
 
     // the bases a range may append at one position: |same| keep its level, |next| add a
@@ -2039,21 +2188,37 @@ class PatternRun {
     };
 
     // the levels' state of every base search (BaseSearch::levels): counts per (offset, level),
-    // the substituting bases and the substitutable positions left per core position
+    // the substituting bases and the substitutable positions left per core position (a
+    // peptide window: the substitutable residues left)
     void prepare_levels() {
         assert(request_.max_mismatches <= kMaxMismatches);
-        assert(pattern_.kind() != PatternKind::PROTEIN && !long_);
+        assert(!extending_);
         levels_ = static_cast<uint8_t>(request_.max_mismatches + 1);
         align::NonSentinelSymbols()(boss_, Range(),
                                     [&](TAlphabet s) { flank_symbols_.push_back(s); });
+        index_of_code_.assign(boss_.alph_size, -1);
+        for (size_t b = 0; b < codes_.size(); ++b) {
+            index_of_code_[codes_[b]] = static_cast<int8_t>(b);
+        }
         for (BaseSearch &search : searches_) {
             search.levels = levels_;
             const size_t offsets = search.max_offset(k_) + 1;
             search.exact.assign(offsets * levels_, 0);
             search.unchecked.assign(offsets * levels_, 0);
             const size_t core = search.core_length();
-            search.substitutes.assign(core, {});
             search.left.assign(core + 1, 0);
+            if (search.automaton) {
+                // a residue counts from its first window position to its last
+                const CodonWindow &window = *search.automaton;
+                assert(!search.lead && window.substitutes.size() == window.sets.size());
+                for (size_t x = core; x-- > 0; ) {
+                    const size_t end = window.residue_end(x, core);
+                    search.left[x] = search.left[x + 1]
+                        + (x + 1 == end && window.substitutable((window.phase + x) / 3));
+                }
+                continue;
+            }
+            search.substitutes.assign(core, {});
             for (size_t x = core; x-- > 0; ) {
                 const BaseSet set = search.q[search.lead + x];
                 search.substitutes[x] = codes_of_set_[kAllBases & ~set];
@@ -2109,6 +2274,8 @@ class PatternRun {
      * searches of a pass (as estimated_cost, which it equals at t = 0).
      */
     double estimated_cost(const BaseSearch &search, uint8_t t) const {
+        if (search.automaton)
+            return estimated_peptide_cost(search, t);
         const double edges = static_cast<double>(boss_.num_edges());
         std::vector<double> f(t + 1, 0);
         f[0] = 1;
@@ -2130,6 +2297,43 @@ class PatternRun {
         return cost;
     }
 
+    /**
+     * estimated_cost(search, t) for a peptide window: per depth the prefixes of the window
+     * within t substitutions, counted per residue (its codons' strings over the positions the
+     * prefix covers, and its substitutes' strings that none of them spells), of which at most
+     * the graph's share (edges / 4^d) can be non-empty.
+     */
+    double estimated_peptide_cost(const BaseSearch &search, uint8_t t) const {
+        const CodonWindow &window = *search.automaton;
+        const double edges = static_cast<double>(boss_.num_edges());
+        const size_t n = search.core_length();
+        // the prefixes over the residues completed, per level
+        std::vector<double> f(t + 1, 0);
+        f[0] = 1;
+        double strings = 1;
+        double cost = 0;
+        for (size_t x = 0; x < n; ++x) {
+            const size_t at = window.phase + x;
+            const size_t r = at / 3;
+            // the codon positions of residue r covered so far: [first, at % 3]
+            const size_t first = x >= at % 3 ? 0 : at % 3 - x;
+            const double own = distinct_projections(window.sets[r], first, at % 3 + 1);
+            const double other = distinct_projections(window.sets[r] | window.substitutes[r],
+                                                      first, at % 3 + 1) - own;
+            std::vector<double> g(t + 1, 0);
+            double ball = 0;
+            for (size_t u = 0; u <= t; ++u) {
+                g[u] = f[u] * own + (u ? f[u - 1] * other : 0);
+                ball += g[u];
+            }
+            strings *= 4;
+            cost += ball * std::min(1.0, edges / strings);
+            if (x + 1 == window.residue_end(x, n))
+                f = std::move(g);
+        }
+        return cost;
+    }
+
     // pass |t| of |search|: every instance of its window with exactly t substitutions, counted
     // at level t. Nothing is tried when the core cannot hold t substitutions
     void discover_level(BaseSearch &search, uint8_t t) {
@@ -2147,7 +2351,9 @@ class PatternRun {
      * still be able to reach exactly t substitutions over the positions after x
      * (left[x + 1]). range.used <= t always, so neither difference wraps.
      */
-    static LevelSteps steps_at(const BaseSearch &search, const LevelRange &range, uint8_t t) {
+    LevelSteps steps_at(const BaseSearch &search, const LevelRange &range, uint8_t t) const {
+        if (search.automaton)
+            return peptide_steps_at(search, range, t);
         const size_t x = range.depth;
         const uint32_t after = search.left[x + 1];
         LevelSteps steps;
@@ -2155,6 +2361,42 @@ class PatternRun {
             steps.same = &search.codes[x];
         if (range.used < t && uint32_t(t - range.used - 1) <= after)
             steps.next = &search.substitutes[x];
+        return steps;
+    }
+
+    /**
+     * steps_at() for a peptide window: CodonWindow::own_and_other after the codon's bases the
+     * range spelled. While they agree with an own codon, the bases of |own| keep the level and
+     * can still reach t over the residues with positions left (the current one included while
+     * it has positions left: left[x + 1]); the bases only of |other| substitute the residue, the
+     * residues after it left to reach t (left at its end). Once the bases agree with no own
+     * codon, those of |other| keep the level over the residues after it. In pass 0 the bases
+     * tried are |own|, the symbols the search without mismatches tries.
+     */
+    LevelSteps peptide_steps_at(const BaseSearch &search, const LevelRange &range,
+                                uint8_t t) const {
+        const CodonWindow &window = *search.automaton;
+        const size_t x = range.depth;
+        const size_t j = (window.phase + x) % 3;
+        // the codon's bases inside the window before x, the last spelled at j - 1
+        int known[2] = { -1, -1 };
+        for (size_t i = 0; i < window.known(x); ++i) {
+            known[j - 1 - i] = (range.spelled >> (2 * i)) & 3;
+        }
+        const auto [own, other] = window.own_and_other(x, known[0], known[1]);
+        const uint32_t after_residue = search.left[window.residue_end(x, search.core_length())];
+        // range.used <= t always: no wrap
+        const uint32_t need = t - range.used;
+        LevelSteps steps;
+        if (own) {
+            if (need <= search.left[x + 1])
+                steps.same = &codes_of_set_[own];
+            const BaseSet substituting = other & ~own;
+            if (need && need - 1 <= after_residue && substituting)
+                steps.next = &codes_of_set_[substituting];
+        } else if (other && need <= after_residue) {
+            steps.same = &codes_of_set_[other];
+        }
         return steps;
     }
 
@@ -2238,7 +2480,10 @@ class PatternRun {
                     halt(search);
                     return;
                 }
-                LevelRange child { range.first, range.last, range.depth + 1, level };
+                // (the base spelled kept for a peptide window's codon; unread elsewhere)
+                LevelRange child { range.first, range.last, range.depth + 1, level,
+                                   static_cast<uint8_t>(((range.spelled << 2)
+                                                         | (index_of_code_[s] & 3)) & 0xF) };
                 if (boss_.tighten_range(&child.first, &child.last, s)) {
                     if (push) {
                         assert(stack);
@@ -3260,22 +3505,45 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         result.min_anchor_information_bits = floor_bits;
     }
 
-    // bounded mismatches (SPEC §21): served for DNA and IUPAC patterns of L <= k; the floor
-    // gates the bits left after max_mismatches substitutions, with no exemption
+    // bounded mismatches (SPEC §21): every kind, and for L > k the anchors (the extension is
+    // not served yet); the floor gates the bits left after max_mismatches substitutions, with
+    // no exemption
     const uint8_t max_mismatches = request.max_mismatches;
+    // the bits the floor gates within |m| substitutions and the window they are least in: the
+    // pattern's, or for L > k the least over the searched orientations' anchor windows (as
+    // floor_bits: FORWARD P[0, k), REVERSE P[L - k, L), FORWARD before REVERSE on a tie)
+    auto mismatch_floor_bits = [&](uint8_t m) {
+        if (!is_long)
+            return std::make_pair(pattern.mismatch_information_bits(m), Orientation::FORWARD);
+        std::pair<double, Orientation> least { std::numeric_limits<double>::infinity(),
+                                               Orientation::FORWARD };
+        for (Orientation o : searched_orientations(pattern, request.strands)) {
+            const double bits = o == Orientation::REVERSE
+                ? pattern.mismatch_information_bits(L - k, L, m)
+                : pattern.mismatch_information_bits(0, k, m);
+            if (bits < least.first)
+                least = { bits, o };
+        }
+        return least;
+    };
+    // (plain values rather than read back from the optionals, as floor_bits)
+    double mismatch_bits = 0;
+    Orientation mismatch_window = Orientation::FORWARD;
     if (max_mismatches) {
         if (max_mismatches > kMaxMismatches) {
             throw std::invalid_argument("pattern: max_mismatches "
                                         + std::to_string(max_mismatches) + " above "
                                         + std::to_string(kMaxMismatches));
         }
-        if (pattern.kind() == PatternKind::PROTEIN)
-            throw std::invalid_argument("pattern: mismatches in a peptide are not served yet");
-        if (is_long) {
-            throw std::invalid_argument("pattern: mismatches in a pattern longer than k are "
-                                        "not served yet");
+        if (is_long && request.extend_paths) {
+            throw std::invalid_argument("pattern: mismatches in the paths of a pattern longer "
+                                        "than k are not served yet (its anchors are, without "
+                                        "the extension)");
         }
         result.mismatch_information_bits = pattern.mismatch_information_bits(max_mismatches);
+        std::tie(mismatch_bits, mismatch_window) = mismatch_floor_bits(max_mismatches);
+        if (is_long)
+            result.min_anchor_mismatch_information_bits = mismatch_bits;
     }
 
     auto finish = [&]() {
@@ -3305,12 +3573,12 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     // with mismatches the floor gates the ball's bits: a ball is not one range, so no scope is
     // exempt (SPEC §21.5); a pattern refused states the largest smaller max_mismatches the
     // floor admits (0 under the rule below)
-    if (max_mismatches && *result.mismatch_information_bits < request.min_information_bits) {
+    if (max_mismatches && mismatch_bits < request.min_information_bits) {
         for (uint8_t m = max_mismatches; m-- > 0; ) {
             const bool admitted = m
-                ? pattern.mismatch_information_bits(m) >= request.min_information_bits
+                ? mismatch_floor_bits(m).first >= request.min_information_bits
                 : (result.scope == Scope::SUFFIX && pattern.is_exact())
-                        || result.information_bits >= request.min_information_bits;
+                        || floor_bits >= request.min_information_bits;
             if (admitted) {
                 result.max_mismatches_within_floor = m;
                 break;
@@ -3318,9 +3586,14 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         }
         result.refusal = Refusal {
             "information_below_floor",
-            "pattern: " + format_bits(*result.mismatch_information_bits)
+            "pattern: " + format_bits(mismatch_bits)
                 + " information bits within " + std::to_string(max_mismatches)
                 + (max_mismatches == 1 ? " substitution" : " substitutions")
+                + (!is_long ? ""
+                    : mismatch_window == Orientation::REVERSE
+                        ? " in the anchor window of the reverse orientation (the reverse "
+                          "complement of the pattern's last k positions)"
+                        : " in the anchor window")
                 + ", below the floor of " + format_bits(request.min_information_bits)
                 + " for scope " + to_string(result.scope)
         };
@@ -3753,6 +4026,13 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         // (the counts as the release left them: EXACT once it enumerated every candidate)
         anchors.total = *total;
         anchors.by_orientation = std::move(by_orientation);
+        if (max_mismatches) {
+            for (const auto &[level, count] : by_level) {
+                assert(level == anchors.by_mismatches.size());
+                anchors.by_mismatches.push_back(count);
+            }
+            assert(anchors.by_mismatches.size() == max_mismatches + 1u);
+        }
         result.anchors = std::move(anchors);
     } else {
         ContextCounts contexts;
@@ -3822,6 +4102,13 @@ void PatternSearch::answer_no_instance(const Pattern &pattern, const Request &re
     }
     for (Orientation o : result->searched) {
         contexts.by_orientation.emplace(o, Count::exact(Unit::GRAPH_CONTEXTS, 0));
+    }
+    // with mismatches every level too: a '*' is never substituted (SPEC §21.3), so there is no
+    // instance within any number of substitutions; no pass ran
+    if (request.max_mismatches) {
+        contexts.by_mismatches.assign(request.max_mismatches + 1u,
+                                      Count::exact(Unit::GRAPH_CONTEXTS, 0));
+        result->work.steps_by_mismatches.assign(request.max_mismatches + 1u, 0);
     }
     result->contexts = std::move(contexts);
     if (enumerating) {

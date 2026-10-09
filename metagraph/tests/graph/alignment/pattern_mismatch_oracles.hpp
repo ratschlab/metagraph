@@ -17,10 +17,17 @@
  *    string of the ball searched as an exact DNA pattern by the engine without mismatches, the
  *    contexts united, each at the level of the string that found it: the level DFS against a
  *    different algorithm.
+ *  - O4, the peptide residue oracle: the records translated in their six frames with this
+ *    file's own genetic codes and each window of residues compared letter by letter with the
+ *    peptide (a residue's codon of another residue's sense is one substitution; X and '*' are
+ *    never substituted, a stop never substitutes), and the same rule on the graph's k-mers
+ *    codon by codon (a codon cut by a window's edge: the least level over the codons agreeing
+ *    with its bases inside), with each context's level and substituted residues;
  *  - O5, the brute-force ball: every string over the pattern's positions enumerated and its
- *    substitutions counted: |ball| and the bits left, against the engine's log-space DP.
- * The IUPAC table, the reverse complement and palindromy are written out here; Pattern is read
- * only by O3, which hands the engine exact DNA strings.
+ *    substitutions counted: |ball| and the bits left, against the engine's log-space DP (a
+ *    peptide's by O4's rule, cut windows included).
+ * The IUPAC table, the genetic codes, the reverse complement and palindromy are written out
+ * here; Pattern is read only by O3, which hands the engine exact DNA strings.
  */
 
 #include <algorithm>
@@ -418,6 +425,405 @@ inline double exact_ball(size_t L, uint8_t m) {
         three *= 3;
     }
     return ball;
+}
+
+
+// ---------------------------------------------------------------- O4, the peptide residue oracle
+
+/**
+ * The standard code (NCBI table 1) by residue, '*' the stops, as textbooks list it: written
+ * apart from the engine's 64-letter strings.
+ */
+inline const std::map<char, std::vector<std::string>>& standard_code() {
+    static const std::map<char, std::vector<std::string>> code {
+        { 'A', { "GCT", "GCC", "GCA", "GCG" } },
+        { 'C', { "TGT", "TGC" } },
+        { 'D', { "GAT", "GAC" } },
+        { 'E', { "GAA", "GAG" } },
+        { 'F', { "TTT", "TTC" } },
+        { 'G', { "GGT", "GGC", "GGA", "GGG" } },
+        { 'H', { "CAT", "CAC" } },
+        { 'I', { "ATT", "ATC", "ATA" } },
+        { 'K', { "AAA", "AAG" } },
+        { 'L', { "TTA", "TTG", "CTT", "CTC", "CTA", "CTG" } },
+        { 'M', { "ATG" } },
+        { 'N', { "AAT", "AAC" } },
+        { 'P', { "CCT", "CCC", "CCA", "CCG" } },
+        { 'Q', { "CAA", "CAG" } },
+        { 'R', { "CGT", "CGC", "CGA", "CGG", "AGA", "AGG" } },
+        { 'S', { "TCT", "TCC", "TCA", "TCG", "AGT", "AGC" } },
+        { 'T', { "ACT", "ACC", "ACA", "ACG" } },
+        { 'V', { "GTT", "GTC", "GTA", "GTG" } },
+        { 'W', { "TGG" } },
+        { 'Y', { "TAT", "TAC" } },
+        { '*', { "TAA", "TAG", "TGA" } },
+    };
+    return code;
+}
+
+/**
+ * Every other NCBI table as the codons it codes differently from the standard code (the NCBI
+ * Taxonomy's "Differences from the Standard Code"; for 27, 28 and 31 the residue NCBI's ncbieaa
+ * gives a codon that can also end translation in context, which codes that residue).
+ */
+inline const std::map<int, std::vector<std::pair<std::string, char>>>& code_differences() {
+    static const std::map<int, std::vector<std::pair<std::string, char>>> diffs {
+        { 1, {} },
+        { 2, { { "AGA", '*' }, { "AGG", '*' }, { "ATA", 'M' }, { "TGA", 'W' } } },
+        { 3, { { "ATA", 'M' }, { "CTT", 'T' }, { "CTC", 'T' }, { "CTA", 'T' }, { "CTG", 'T' },
+               { "TGA", 'W' } } },
+        { 4, { { "TGA", 'W' } } },
+        { 5, { { "AGA", 'S' }, { "AGG", 'S' }, { "ATA", 'M' }, { "TGA", 'W' } } },
+        { 6, { { "TAA", 'Q' }, { "TAG", 'Q' } } },
+        { 9, { { "AAA", 'N' }, { "AGA", 'S' }, { "AGG", 'S' }, { "TGA", 'W' } } },
+        { 10, { { "TGA", 'C' } } },
+        { 11, {} },
+        { 12, { { "CTG", 'S' } } },
+        { 13, { { "AGA", 'G' }, { "AGG", 'G' }, { "ATA", 'M' }, { "TGA", 'W' } } },
+        { 14, { { "AAA", 'N' }, { "AGA", 'S' }, { "AGG", 'S' }, { "TAA", 'Y' },
+                { "TGA", 'W' } } },
+        { 15, { { "TAG", 'Q' } } },
+        { 16, { { "TAG", 'L' } } },
+        { 21, { { "TGA", 'W' }, { "ATA", 'M' }, { "AGA", 'S' }, { "AGG", 'S' },
+                { "AAA", 'N' } } },
+        { 22, { { "TCA", '*' }, { "TAG", 'L' } } },
+        { 23, { { "TTA", '*' } } },
+        { 24, { { "AGA", 'S' }, { "AGG", 'K' }, { "TGA", 'W' } } },
+        { 25, { { "TGA", 'G' } } },
+        { 26, { { "CTG", 'A' } } },
+        { 27, { { "TAG", 'Q' }, { "TAA", 'Q' }, { "TGA", 'W' } } },
+        { 28, { { "TAA", 'Q' }, { "TAG", 'Q' }, { "TGA", 'W' } } },
+        { 29, { { "TAA", 'Y' }, { "TAG", 'Y' } } },
+        { 30, { { "TAA", 'E' }, { "TAG", 'E' } } },
+        { 31, { { "TGA", 'W' }, { "TAG", 'E' }, { "TAA", 'E' } } },
+        { 32, { { "TAG", 'W' } } },
+        { 33, { { "TAA", 'Y' }, { "TGA", 'W' }, { "AGA", 'S' }, { "AGG", 'K' } } },
+    };
+    return diffs;
+}
+
+// one genetic code as the oracles read it: codon -> residue ('*' a stop)
+struct OracleCode {
+    int id;
+    std::map<std::string, char> residue;
+
+    // '?' for anything but a codon of A, C, G, T
+    char translate(std::string_view codon) const {
+        auto it = residue.find(std::string(codon));
+        return it == residue.end() ? '?' : it->second;
+    }
+};
+
+inline const OracleCode& oracle_code(int id) {
+    static std::map<int, OracleCode> cache;
+    auto it = cache.find(id);
+    if (it != cache.end())
+        return it->second;
+    OracleCode code { id, {} };
+    for (const auto &[residue, codons] : standard_code()) {
+        for (const std::string &codon : codons) {
+            code.residue[codon] = residue;
+        }
+    }
+    assert(code.residue.size() == 64);
+    for (const auto &[codon, residue] : code_differences().at(id)) {
+        code.residue[codon] = residue;
+    }
+    return cache.emplace(id, std::move(code)).first->second;
+}
+
+inline std::vector<int> oracle_code_ids() {
+    std::vector<int> ids;
+    for (const auto &[id, diffs] : code_differences()) {
+        ids.push_back(id);
+    }
+    return ids;
+}
+
+// every codon, in A C G T order
+inline const std::vector<std::string>& all_codons() {
+    static const std::vector<std::string> codons = []() {
+        std::vector<std::string> result;
+        for (char a : std::string("ACGT")) {
+            for (char b : std::string("ACGT")) {
+                for (char c : std::string("ACGT")) {
+                    result.push_back({ a, b, c });
+                }
+            }
+        }
+        return result;
+    }();
+    return codons;
+}
+
+// a peptide letter admits a coded residue without a substitution: X any residue, B D or N, Z E
+// or Q, J I or L, a residue itself, '*' a stop; no letter but '*' admits a stop
+inline bool letter_admits(char letter, char coded) {
+    if (letter == '*')
+        return coded == '*';
+    if (coded == '*' || coded == '?')
+        return false;
+    switch (letter) {
+        case 'X': return true;
+        case 'B': return coded == 'D' || coded == 'N';
+        case 'Z': return coded == 'E' || coded == 'Q';
+        case 'J': return coded == 'I' || coded == 'L';
+        default: return coded == letter;
+    }
+}
+
+/**
+ * The level of a codon coding |coded| at a residue |letter| (SPEC §21.3): 0 when the letter
+ * admits it, 1 when it is a sense codon of another residue and the letter can be substituted
+ * (every letter but X and '*'), nullopt otherwise (a stop where the letter is no '*', a sense
+ * codon at '*': no instance at any level).
+ */
+inline std::optional<uint8_t> codon_level(char letter, char coded) {
+    if (letter_admits(letter, coded))
+        return 0;
+    if (letter != 'X' && letter != '*' && coded != '*' && coded != '?')
+        return 1;
+    return std::nullopt;
+}
+
+/**
+ * The level of |piece|, the bases of a codon of residue |letter| at the codon positions
+ * [first, first + |piece|): a whole codon by codon_level, a cut one by the least level over
+ * the codons agreeing with it there (the least count any completion gives); nullopt when no
+ * codon of either kind agrees.
+ */
+inline std::optional<uint8_t> piece_level(char letter, const OracleCode &code, size_t first,
+                                          std::string_view piece) {
+    if (piece.size() == 3)
+        return codon_level(letter, code.translate(piece));
+    // (a cut piece's level is looked up again for every string of a brute-force ball)
+    static std::map<std::tuple<int, char, size_t, std::string>, std::optional<uint8_t>> cache;
+    const auto key = std::make_tuple(code.id, letter, first, std::string(piece));
+    if (auto it = cache.find(key); it != cache.end())
+        return it->second;
+    std::optional<uint8_t> least;
+    for (const std::string &codon : all_codons()) {
+        if (std::string_view(codon).substr(first, piece.size()) != piece)
+            continue;
+        const auto level = codon_level(letter, code.translate(codon));
+        if (level && (!least || *level < *least))
+            least = level;
+    }
+    cache.emplace(key, least);
+    return least;
+}
+
+// the substituted residues of an instance, in P's coordinates (ascending); its level is their
+// number
+typedef std::vector<uint32_t> Residues;
+
+/**
+ * |s| as the positions [begin, begin + |s|) of the instances of |peptide| (P's letters): the
+ * residues whose piece is substituted, nullopt when a piece is no instance at any level.
+ */
+inline std::optional<Residues> peptide_residues(const std::string &peptide,
+                                                const OracleCode &code, size_t begin,
+                                                std::string_view s) {
+    const size_t end = begin + s.size();
+    if (end > 3 * peptide.size())
+        return std::nullopt;
+    Residues residues;
+    for (size_t i = begin / 3; 3 * i < end; ++i) {
+        const size_t lo = std::max(begin, 3 * i);
+        const size_t hi = std::min(end, 3 * i + 3);
+        const auto level = piece_level(peptide[i], code, lo - 3 * i,
+                                       s.substr(lo - begin, hi - lo));
+        if (!level)
+            return std::nullopt;
+        if (*level)
+            residues.push_back(static_cast<uint32_t>(i));
+    }
+    return residues;
+}
+
+/**
+ * The same for the oriented peptide of |orientation|: REVERSE reads rc(P), whose positions
+ * [b, e) are the reverse complement of P's [L - e, L - b), so its residues are read on P.
+ */
+inline std::optional<Residues> oriented_residues(const std::string &peptide,
+                                                 const OracleCode &code,
+                                                 Orientation orientation, size_t begin,
+                                                 std::string_view s) {
+    if (orientation != Orientation::REVERSE)
+        return peptide_residues(peptide, code, begin, s);
+    const size_t L = 3 * peptide.size();
+    if (begin + s.size() > L)
+        return std::nullopt;
+    return peptide_residues(peptide, code, L - begin - s.size(), reverse_complement_string(s));
+}
+
+// the codons a letter admits without a substitution
+inline std::set<std::string> letter_codons(char letter, const OracleCode &code) {
+    std::set<std::string> codons;
+    for (const std::string &codon : all_codons()) {
+        if (letter_admits(letter, code.translate(codon)))
+            codons.insert(codon);
+    }
+    return codons;
+}
+
+// P's instances equal rc(P)'s: residue i's codons are the reverse complements of residue
+// m - 1 - i's, for every i (the instances are a product of codon sets)
+inline bool peptide_palindromic(const std::string &peptide, const OracleCode &code) {
+    for (size_t i = 0, j = peptide.size(); i < peptide.size(); ++i) {
+        std::set<std::string> mirrored;
+        for (const std::string &codon : letter_codons(peptide[--j], code)) {
+            mirrored.insert(reverse_complement_string(codon));
+        }
+        if (letter_codons(peptide[i], code) != mirrored)
+            return false;
+    }
+    return true;
+}
+
+inline std::vector<Orientation> peptide_orientations(const std::string &peptide,
+                                                     const OracleCode &code, Strands strands) {
+    if (peptide_palindromic(peptide, code))
+        return { Orientation::PALINDROMIC };
+    std::vector<Orientation> result;
+    if (strands != Strands::REVERSE)
+        result.push_back(Orientation::FORWARD);
+    if (strands != Strands::FORWARD)
+        result.push_back(Orientation::REVERSE);
+    return result;
+}
+
+/**
+ * O4 on the graph: every context of |peptide| (table |table|) within |m| substituted residues
+ * on |graph|, in answer order, its positions the substituted residues. L <= k: every k-mer,
+ * offset of the scope and orientation, the k-mer's bases at the offset read codon by codon; L >
+ * k: the anchors, every k-mer (offset 0) holding the anchor window of its orientation (FORWARD
+ * P[0, k), REVERSE rc(P)[0, k)) within |m|, a codon cut by the window's edge by its bases
+ * inside.
+ */
+inline std::vector<MCtx> peptide_walk(const DeBruijnGraph &graph, const std::string &peptide,
+                                      int table, Scope scope, Strands strands, uint8_t m) {
+    const OracleCode &code = oracle_code(table);
+    const size_t k = graph.get_k();
+    const size_t L = 3 * peptide.size();
+    const size_t window = std::min(L, k);
+    const std::vector<uint32_t> offsets = L > k ? std::vector<uint32_t> { 0 }
+                                                : scope_offsets(L, k, scope);
+    std::vector<MCtx> result;
+    for (const auto &[node, kmer] : graph_kmers(graph)) {
+        for (Orientation orientation : peptide_orientations(peptide, code, strands)) {
+            for (uint32_t p : offsets) {
+                const auto residues = oriented_residues(peptide, code, orientation, 0,
+                                                        std::string_view(kmer).substr(p, window));
+                if (residues && residues->size() <= m) {
+                    result.push_back(MCtx { node, p, orientation,
+                                            static_cast<uint8_t>(residues->size()), *residues });
+                }
+            }
+        }
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+// the translation of |s| from |frame|: one letter per whole codon ('?' if it holds a symbol
+// other than A, C, G, T)
+inline std::string translate_frame(std::string_view s, size_t frame, const OracleCode &code) {
+    std::string protein;
+    for (size_t i = frame; i + 3 <= s.size(); i += 3) {
+        protein.push_back(code.translate(s.substr(i, 3)));
+    }
+    return protein;
+}
+
+/**
+ * O4 on the records (L <= k): every strand sequence (the records, and on a CANONICAL or
+ * PRIMARY graph their reverse complements too) translated in its three frames, and those of
+ * its reverse complement for the reverse orientation; every window of r residues compared with
+ * the peptide letter by letter (codon_level on the translated residue); each instance within
+ * |m| at its start, and every indexed k-mer holding it at an offset of the scope, as (spelled
+ * k-mer, offset, orientation, level). Never reads the graph.
+ */
+inline SpelledMCtx peptide_records(const std::vector<std::string> &records, size_t k,
+                                   DeBruijnGraph::Mode mode, const std::string &peptide,
+                                   int table, Scope scope, Strands strands, uint8_t m) {
+    const OracleCode &code = oracle_code(table);
+    const size_t r = peptide.size();
+    const size_t L = 3 * r;
+    assert(L <= k);
+    std::vector<std::string> sequences = records;
+    if (mode != DeBruijnGraph::BASIC) {
+        for (const std::string &record : records) {
+            sequences.push_back(reverse_complement_string(record));
+        }
+    }
+    // the starts in |s| of the peptide's instances within m, with their levels
+    auto instances = [&](const std::string &s) {
+        std::vector<std::pair<size_t, uint8_t>> found;
+        for (size_t frame = 0; frame < 3; ++frame) {
+            const std::string protein = translate_frame(s, frame, code);
+            for (size_t start = 0; start + r <= protein.size(); ++start) {
+                uint32_t level = 0;
+                bool instance = true;
+                for (size_t i = 0; i < r && instance; ++i) {
+                    const auto l = codon_level(peptide[i], protein[start + i]);
+                    instance = l.has_value();
+                    level += l.value_or(0);
+                }
+                if (instance && level <= m)
+                    found.emplace_back(frame + 3 * start, static_cast<uint8_t>(level));
+            }
+        }
+        return found;
+    };
+    SpelledMCtx result;
+    for (const std::string &s : sequences) {
+        for (Orientation o : peptide_orientations(peptide, code, strands)) {
+            std::vector<std::pair<size_t, uint8_t>> at;
+            if (o != Orientation::REVERSE) {
+                at = instances(s);
+            } else {
+                // an instance of P in rc(s) at j is one of rc(P) in s at |s| - j - L
+                for (const auto &[j, level] : instances(reverse_complement_string(s))) {
+                    at.emplace_back(s.size() - j - L, level);
+                }
+            }
+            for (const auto &[i, level] : at) {
+                for (uint32_t p : scope_offsets(L, k, scope)) {
+                    if (i < p || i - p + k > s.size())
+                        continue;
+                    const std::string kmer = s.substr(i - p, k);
+                    if (kmer.find_first_not_of("ACGT") == std::string::npos)
+                        result.emplace(kmer, p, o, level);
+                }
+            }
+        }
+    }
+    return result;
+}
+
+/**
+ * O5 for a peptide: per number of substituted residues u, the strings over the positions
+ * [begin, end) of |peptide|'s instances (every string of A, C, G, T enumerated, 4^(end - begin)
+ * of them, end - begin <= 10) whose level by O4's rule is u; a string that is no instance is in
+ * no entry.
+ */
+inline std::vector<uint64_t> peptide_ball_histogram(const std::string &peptide, int table,
+                                                    size_t begin, size_t end) {
+    const OracleCode &code = oracle_code(table);
+    const size_t n = end - begin;
+    assert(n <= 10);
+    std::vector<uint64_t> histogram(peptide.size() + 1, 0);
+    std::string s(n, 'A');
+    for (uint64_t c = 0; c < (uint64_t(1) << (2 * n)); ++c) {
+        uint64_t x = c;
+        for (size_t i = 0; i < n; ++i, x >>= 2) {
+            s[i] = "ACGT"[x & 3];
+        }
+        if (const auto residues = peptide_residues(peptide, code, begin, s))
+            ++histogram[residues->size()];
+    }
+    return histogram;
 }
 
 } // namespace mismatch

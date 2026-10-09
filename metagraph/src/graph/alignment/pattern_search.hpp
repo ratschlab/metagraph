@@ -51,10 +51,13 @@
  *    stay exact. A pattern with few unchecked candidates is checked entry by entry and counted
  *    exactly (Request::max_checked_entries; the route passes --pattern-max-checked-entries).
  *  - bounded mismatches (not served yet: no route sets Request::max_mismatches; SPEC §21 is
- *    the contract to come): the engine answers DNA and IUPAC patterns of L <= k with
+ *    the contract to come): the engine answers DNA, IUPAC and peptide patterns of L <= k with
  *    ContextCounts::by_mismatches, Work::steps_by_mismatches, Stop::mismatch_level,
- *    Context::mismatches (substitutions() gives the positions), Result::
- *    mismatch_information_bits and, on a floor refusal, Result::max_mismatches_within_floor.
+ *    Context::mismatches (substitutions() gives the positions, residue_substitutions() a
+ *    peptide's residues and codons), Result::mismatch_information_bits and, on a floor
+ *    refusal, Result::max_mismatches_within_floor; patterns of L > k with their anchors per
+ *    level (AnchorCounts::by_mismatches, Result::min_anchor_mismatch_information_bits), the
+ *    extension not yet.
  *
  * For every type here nothing is weakened silently: every count carries its unit and its
  * relation, and a count is never promoted by assumption.
@@ -362,6 +365,15 @@ class Pattern final : public Model {
      * Empty for DNA and IUPAC.
      */
     const std::vector<CodonSet>& codon_sets() const { return codons_; }
+    /**
+     * PROTEIN: per residue, in the order of codon_sets(), the codons that substitute it under
+     * Request::max_mismatches (SPEC §21.3): the sense codons of the other residues
+     * (GeneticCode::sense() less the residue's own codons). None for X (every sense codon is
+     * its own) and for '*' (a stop is never substituted, and a stop codon never substitutes a
+     * residue). For the reverse complement, the original's in reverse order, each codon
+     * reverse-complemented. Empty for DNA and IUPAC.
+     */
+    const std::vector<CodonSet>& substitute_sets() const { return substitutes_; }
 
     /**
      * The engine's one primitive (§3): the bases allowed at |position| after the bases
@@ -417,9 +429,13 @@ class Pattern final : public Model {
      * matching and 4 - s substituting bases (an N none). |B| = sum over u <= max_mismatches of
      * f[u], f the product DP f'[u] = f[u] s + f[u - 1] (4 - s) over the positions, kept in log
      * space (the ball of a long pattern overflows every integer type): O((end - begin) m), no
-     * clock, as information_bits. With 0 it is information_bits(begin, end) itself. DNA and
-     * IUPAC only: a peptide's ball (residue substitutions) is not defined yet, and asking for
-     * it with max_mismatches > 0 throws std::invalid_argument.
+     * clock, as information_bits. With 0 it is information_bits(begin, end) itself.
+     * PROTEIN: the same DP over the residues the positions cover, a residue admitting the
+     * strings its codons spell over its positions in [begin, end) (at least one, as
+     * information_bits counts a residue without codons) and as substitutions the strings its
+     * substitutes (substitute_sets) spell there that none of its own codons spells: a codon cut
+     * by the window's edge counts as substituted only when its bases inside the window agree
+     * with no codon of its own (the least count any completion gives).
      */
     double mismatch_information_bits(size_t begin, size_t end, uint8_t max_mismatches) const;
     double mismatch_information_bits(uint8_t max_mismatches) const {
@@ -469,6 +485,8 @@ class Pattern final : public Model {
     std::vector<BaseSet> positions_;
     // PROTEIN only
     std::vector<CodonSet> codons_;
+    // PROTEIN only: per residue, substitute_sets()
+    std::vector<CodonSet> substitutes_;
     int genetic_code_ = 0;
     bool has_instances_ = true;
 };
@@ -663,14 +681,20 @@ struct Request {
      * default) is the search without substitutions: none of the code of the level passes
      * runs, and every answer is the one of a request without this field. A substitution is a
      * pattern position whose base in the instance lies outside the position's set (DNA,
-     * IUPAC; an N position never holds one). The search runs level by level: pass t finds
-     * the instances with exactly t substitutions (every base search, then that level's scans
-     * and check), so that a stop in pass t leaves every level below t complete
-     * (ContextCounts::by_mismatches, Stop::mismatch_level). The information floor gates
-     * Pattern::mismatch_information_bits, with no exemption (min_information_bits). Not a
-     * JSON field yet (the route does not set it). Served for DNA and IUPAC patterns of
-     * L <= k; above kMaxMismatches, for a peptide or for L > k count() and enumerate() throw
-     * std::invalid_argument.
+     * IUPAC; an N position never holds one) or, for a peptide, a residue whose codon is a
+     * sense codon of another residue (Pattern::substitute_sets: never at X or '*', never a
+     * stop codon), counted once whatever the number of its bases that differ. The search runs
+     * level by level: pass t finds the instances with exactly t substitutions (every base
+     * search, then that level's scans and check), so that a stop in pass t leaves every level
+     * below t complete (ContextCounts::by_mismatches, Stop::mismatch_level). The information
+     * floor gates Pattern::mismatch_information_bits (L > k: the least over the searched
+     * anchor windows), with no exemption (min_information_bits). Not a JSON field yet (the
+     * route does not set it). Served for every kind; for L > k the anchors are counted per
+     * level (AnchorCounts::by_mismatches; an anchor is the anchor window within the
+     * substitutions, a window that cuts a codon counting it as substituted only when its
+     * bases inside the window agree with none of its own codons) and released on
+     * release_anchors, while the extension is not served yet. Above kMaxMismatches, or for
+     * L > k with extend_paths, count() and enumerate() throw std::invalid_argument.
      */
     uint8_t max_mismatches = 0;
 };
@@ -1060,6 +1084,10 @@ struct AnchorCounts {
      */
     uint64_t candidates_examined = 0;
     Extension extension = Extension::NOT_REQUESTED;
+    // Request::max_mismatches m > 0: per level t = 0 .. m the anchors whose window holds exactly
+    // t substitutions, with ContextCounts::by_mismatches' relations; |total| is their sum.
+    // Empty without mismatches
+    std::vector<Count> by_mismatches;
 };
 
 // JSON work: what the search spent, charged against Budget
@@ -1197,7 +1225,8 @@ struct Context {
     std::string sequence = {};
     // Request::max_mismatches > 0: the substitutions its instance holds against the oriented
     // pattern of its orientation (its level); 0 without mismatches. The positions are
-    // substitutions(), computed from the instance
+    // substitutions() (a peptide's residues residue_substitutions()), computed from the
+    // instance
     uint8_t mismatches = 0;
 };
 
@@ -1222,12 +1251,44 @@ struct Substitution {
  * instantiates P, position i is instance[i]; REVERSE: it instantiates rc(P), position i of P is
  * the complement of instance[L - 1 - i]. A position holds a substitution when that base is
  * outside P's set there (an N position never does). Their number is the context's level
- * (Context::mismatches). O(L). Throws std::invalid_argument for a peptide, for an instance of
- * another length, and for a base other than A, C, G, T (no context spells one at a pattern
- * position).
+ * (Context::mismatches). O(L). Throws std::invalid_argument for a peptide
+ * (residue_substitutions), for an instance of another length, and for a base other than A, C,
+ * G, T (no context spells one at a pattern position).
  */
 std::vector<Substitution> substitutions(const Pattern &pattern, Orientation orientation,
                                         std::string_view instance);
+
+/**
+ * One substituted residue of a peptide's instance (SPEC §21.8, schema residue_substitution),
+ * in the coordinates of the submitted peptide P.
+ */
+struct ResidueSubstitution {
+    // 0-based residue of P
+    uint32_t residue;
+    // P's residue there (an amino acid, or B, Z, J; never X or '*', which are not substituted)
+    char expected;
+    // the residue the instance's codon codes in P's genetic code (never '*')
+    char found;
+    // that codon in P's reading direction: for a REVERSE context the reverse complement of the
+    // instance's three bases at [L - 3 residue - 3, L - 3 residue)
+    std::string codon;
+};
+
+/**
+ * The substituted residues of |instance|, the L = 3m bases a context of |orientation| spells
+ * at its offset (or a path's sequence), against the submitted peptide |pattern| (P as parsed,
+ * never its reverse complement), ascending by residue. FORWARD and PALINDROMIC: residue i is
+ * instance[3i, 3i + 3); REVERSE: the instance instantiates rc(P), and residue i of P is the
+ * reverse complement of instance[L - 3i - 3, L - 3i). A residue is substituted when that codon
+ * is one of its substitutes (Pattern::substitute_sets) rather than its own; their number is the
+ * context's level (Context::mismatches). O(L). Throws std::invalid_argument for a DNA or IUPAC
+ * pattern (substitutions), for an instance of another length, for a base other than A, C, G, T,
+ * and for a codon that is neither the residue's own nor a substitute (a stop where P has no
+ * '*', a sense codon at '*': no instance at any level).
+ */
+std::vector<ResidueSubstitution> residue_substitutions(const Pattern &pattern,
+                                                       Orientation orientation,
+                                                       std::string_view instance);
 
 
 // ---------------------------------------------------------------- the search state
@@ -1423,6 +1484,10 @@ struct Result {
     // m' < max_mismatches whose search the floor admits (m' = 0 under the rule without
     // mismatches, its exemption included), unset when none does (JSON null)
     std::optional<uint8_t> max_mismatches_within_floor;
+    // L > k with Request::max_mismatches > 0: the least over the searched orientations' anchor
+    // windows (as min_anchor_information_bits) of their mismatch_information_bits, the bits the
+    // information floor gated on
+    std::optional<double> min_anchor_mismatch_information_bits;
 
     // exactly one of the two is set on an answered pattern: contexts when L <= k, anchors
     // when L > k
@@ -1555,6 +1620,14 @@ struct Result {
  * (mismatches, node, offset, orientation): the closest instances first, so that PARTIAL keeps
  * and releases the first max_contexts of the closest levels (its retention bound a (level,
  * node) bound); ALL_OR_COUNT compares the total over the levels.
+ * A peptide's level is counted per residue on its codon automaton: a range carries the bases
+ * it spelled in the current codon, and at each position tries the bases that continue one of
+ * the residue's own codons (its level kept), then the bases that continue only a substitute
+ * (Pattern::substitute_sets: its level plus one, once for the codon), and once the codon has
+ * left its own codons the substitutes' bases (its level kept); the reachability counts the
+ * residues left that can hold a substitution, the current one while it is still its own. A
+ * substitution there changes up to three bases, so on an even-k wrapped PRIMARY graph a
+ * palindromic stored k-mer is taken as possible at every offset of a level above 0.
  *
  * Stateless between calls; one instance may serve concurrent requests, each with its own
  * Budget.
@@ -1601,8 +1674,8 @@ class PatternSearch {
      * pattern, except
      * std::logic_error on a broken internal invariant (never expected: an answer that
      * cannot be stated correctly is not stated at all), and std::invalid_argument for a
-     * Request::max_mismatches the engine does not serve (above kMaxMismatches, a peptide, a
-     * pattern longer than k), before anything is charged.
+     * Request::max_mismatches the engine does not serve (above kMaxMismatches, or a pattern
+     * longer than k with extend_paths), before anything is charged.
      * L > k with request.extend_paths: the anchors are retained (§5.2: kept through the
      * extension's admission, dropped once their count exceeds max_anchors) and, when
      * admitted, extended to count the paths (AnchorCounts::paths, Extension); no path is

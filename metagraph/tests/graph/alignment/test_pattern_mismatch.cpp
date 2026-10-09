@@ -1,17 +1,21 @@
 /**
- * Bounded mismatches in the pattern search (SPEC §21; the mismatch plan's increments 5m-0 and
- * 5m-1): DNA and IUPAC patterns of L <= k searched with Request::max_mismatches 1 to 3, checked
+ * Bounded mismatches in the pattern search (SPEC §21; the mismatch plan's increments 5m-0 to
+ * 5m-2): DNA, IUPAC and peptide patterns searched with Request::max_mismatches 1 to 3, checked
  * against the oracles of pattern_mismatch_oracles.hpp, which read the pattern through their own
- * IUPAC table and share only the graph with the engine:
+ * IUPAC table and genetic codes and share only the graph with the engine:
  *  - the Hamming graph-walk (O1) gives every context within m with its level and substituted
  *    positions, in answer order: every count per level, offset and orientation, every release
  *    and its order are checked against it;
  *  - the Hamming record-scan (O2) checks O1 against the records, without the graph's ids;
  *  - the candidate enumeration (O3) checks O1 by a different algorithm: every string of the
  *    ball searched exactly by the engine without mismatches;
+ *  - the peptide residue oracle (O4) does the same for peptides: residue substitutions read
+ *    codon by codon on the graph's k-mers (a long peptide's anchor windows with their cut
+ *    codons included), and checked against the records' six-frame translations;
  *  - the brute-force ball (O5) checks the information bits left after m substitutions.
  * Requests without mismatches are the other suites' (their answers must not change); here the
- * pass of level 0 is checked to be that search, step for step.
+ * pass of level 0 is checked to be that search, step for step. Patterns longer than k are
+ * checked through their anchors (the extension with mismatches is not served yet).
  *
  * Alphabet: DNA (DNA4) builds only; the engine's DNA5 path is not served (alphabet_untested).
  */
@@ -19,6 +23,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <functional>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -32,6 +38,7 @@
 #include "pattern_mismatch_oracles.hpp"
 #include "pattern_test_support.hpp"
 
+#include "graph/alignment/genetic_code.hpp"
 #include "graph/alignment/pattern_search.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
@@ -100,48 +107,91 @@ Pattern parse(const std::string &text) {
                           text);
 }
 
-Result count_of(const DeBruijnGraph &graph, const std::string &text, const Request &request,
+Result count_of(const DeBruijnGraph &graph, const Pattern &pattern, const Request &request,
                 uint64_t max_steps = kManySteps) {
     Budget budget = budget_of(max_steps);
-    return PatternSearch(graph).count(parse(text), request, budget);
+    return PatternSearch(graph).count(pattern, request, budget);
+}
+
+Result count_of(const DeBruijnGraph &graph, const std::string &text, const Request &request,
+                uint64_t max_steps = kManySteps) {
+    return count_of(graph, parse(text), request, max_steps);
 }
 
 /**
- * enumerate(): every released context as an MCtx, its level the engine's mismatches and its
- * positions those substitutions() reads off its instance, each substitution checked against
- * the oracles' table (expected is P's code, found the instance's base in P's orientation and
- * outside expected's bases).
+ * The substituted positions of a released context, read off its instance by substitutions()
+ * and checked against the oracles' table (expected is P's code, found the instance's base in
+ * P's orientation and outside expected's bases); for a peptide its substituted residues by
+ * residue_substitutions(), checked against the oracles' genetic code (expected is P's letter,
+ * the codon the instance's in P's reading direction, found its residue there, one
+ * substitution by O4's rule). |instance| is the context's L bases (a long pattern's anchor:
+ * its k-mer, not read here).
  */
-std::vector<MCtx> released_by(const DeBruijnGraph &graph, const std::string &text,
-                              const Request &request, Budget &budget, Result *result) {
-    const Pattern pattern = parse(text);
-    const size_t L = text.size();
-    std::vector<MCtx> released;
-    *result = PatternSearch(graph).enumerate(pattern, request, budget, [&](const Context &c) {
-        const std::string kmer = graph.get_node_sequence(c.node);
-        const std::string instance = kmer.substr(c.offset, L);
-        const std::vector<Substitution> subs = substitutions(pattern, c.orientation, instance);
-        EXPECT_EQ(c.mismatches, subs.size()) << text << " " << kmer;
-        MCtx m { c.node, c.offset, c.orientation, c.mismatches, {} };
-        for (const Substitution &s : subs) {
-            m.positions.push_back(s.position);
+std::vector<uint32_t> substituted_in(const Pattern &pattern, Orientation orientation,
+                                     const std::string &instance) {
+    const std::string &text = pattern.text();
+    const size_t L = pattern.length();
+    std::vector<uint32_t> positions;
+    if (pattern.kind() != PatternKind::PROTEIN) {
+        for (const Substitution &s : substitutions(pattern, orientation, instance)) {
+            positions.push_back(s.position);
             EXPECT_EQ(text[s.position], s.expected);
-            const char base = c.orientation == Orientation::REVERSE
+            const char base = orientation == Orientation::REVERSE
                 ? complement_base(instance[L - 1 - s.position])
                 : instance[s.position];
             EXPECT_EQ(base, s.found);
             EXPECT_EQ(std::string::npos, iupac_bases(s.expected).find(s.found));
+        }
+        return positions;
+    }
+    const OracleCode &code = oracle_code(pattern.genetic_code());
+    for (const ResidueSubstitution &s : residue_substitutions(pattern, orientation, instance)) {
+        positions.push_back(s.residue);
+        EXPECT_EQ(text[s.residue], s.expected);
+        const std::string codon = orientation == Orientation::REVERSE
+            ? reverse_complement_string(instance.substr(L - 3 * s.residue - 3, 3))
+            : instance.substr(3 * s.residue, 3);
+        EXPECT_EQ(codon, s.codon);
+        EXPECT_EQ(code.translate(codon), s.found) << codon;
+        EXPECT_EQ(1, codon_level(s.expected, s.found).value_or(9)) << s.expected << s.found;
+    }
+    return positions;
+}
+
+/**
+ * enumerate(): every released context as an MCtx, its level the engine's mismatches and its
+ * positions (a peptide's residues) those substituted_in() reads off its instance, as many as
+ * its level. A long pattern's anchors (release_anchors) have no whole instance: their
+ * positions are left empty.
+ */
+std::vector<MCtx> released_by(const DeBruijnGraph &graph, const Pattern &pattern,
+                              const Request &request, Budget &budget, Result *result) {
+    const size_t L = pattern.length();
+    const bool anchors = L > graph.get_k();
+    std::vector<MCtx> released;
+    *result = PatternSearch(graph).enumerate(pattern, request, budget, [&](const Context &c) {
+        const std::string kmer = graph.get_node_sequence(c.node);
+        MCtx m { c.node, c.offset, c.orientation, c.mismatches, {} };
+        if (!anchors) {
+            m.positions = substituted_in(pattern, c.orientation, kmer.substr(c.offset, L));
+            EXPECT_EQ(c.mismatches, m.positions.size()) << pattern.text() << " " << kmer;
         }
         released.push_back(m);
     });
     return released;
 }
 
-std::vector<MCtx> released_by(const DeBruijnGraph &graph, const std::string &text,
+std::vector<MCtx> released_by(const DeBruijnGraph &graph, const Pattern &pattern,
                               const Request &request, Result *result,
                               uint64_t max_steps = kManySteps) {
     Budget budget = budget_of(max_steps);
-    return released_by(graph, text, request, budget, result);
+    return released_by(graph, pattern, request, budget, result);
+}
+
+std::vector<MCtx> released_by(const DeBruijnGraph &graph, const std::string &text,
+                              const Request &request, Result *result,
+                              uint64_t max_steps = kManySteps) {
+    return released_by(graph, parse(text), request, result, max_steps);
 }
 
 // |count| states a true relation to |truth| (§3)
@@ -176,14 +226,15 @@ struct Truth {
     uint64_t total = 0;
 };
 
-Truth truth_of(const std::vector<MCtx> &expected, uint8_t m, size_t L, size_t k,
-               const Request &request, const std::string &text) {
+// the oracle's counts of |expected| over the offsets and orientations searched
+Truth truth_of(const std::vector<MCtx> &expected, uint8_t m,
+               const std::vector<uint32_t> &offsets, const std::vector<Orientation> &searched) {
     Truth truth;
     truth.by_level.assign(m + 1, 0);
-    for (uint32_t p : scope_offsets(L, k, request.scope)) {
+    for (uint32_t p : offsets) {
         truth.by_offset[p] = 0;
     }
-    for (const auto &[o, q] : orientations(text, request.strands)) {
+    for (Orientation o : searched) {
         truth.by_orientation[o] = 0;
     }
     for (const MCtx &c : expected) {
@@ -195,30 +246,36 @@ Truth truth_of(const std::vector<MCtx> &expected, uint8_t m, size_t L, size_t k,
     return truth;
 }
 
-/**
- * Every check of one completed (graph, pattern, request) against O1 (and O2 with |records|):
- * every count EXACT per level, offset and orientation; the steps per pass summing to the
- * steps; enumerate() releasing O1's list in (level, node, offset, orientation) order with each
- * context's level and positions; ALL_OR_COUNT's threshold on the total; PARTIAL's prefixes.
- * Returns the number of contexts.
- */
-size_t check_against_oracles(const DeBruijnGraph &graph, const std::string &text,
-                             const Request &request,
-                             const std::vector<std::string> *records = nullptr,
-                             DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC) {
-    const size_t k = graph.get_k();
-    const size_t L = text.size();
-    const uint8_t m = request.max_mismatches;
-    const std::vector<MCtx> expected = hamming_walk(graph, text, request.scope,
-                                                    request.strands, m);
-    if (records) {
-        // the graph holds exactly the records' k-mers (no cleaning in these builds)
-        EXPECT_EQ(hamming_records(*records, k, mode, text, request.scope, request.strands, m),
-                  spelled(graph, expected)) << text;
+std::vector<Orientation> searched_of(const std::string &text, Strands strands) {
+    std::vector<Orientation> searched;
+    for (const auto &[o, q] : orientations(text, strands)) {
+        searched.push_back(o);
     }
-    const Truth truth = truth_of(expected, m, L, k, request, text);
+    return searched;
+}
 
-    Result counted = count_of(graph, text, request);
+Truth truth_of(const std::vector<MCtx> &expected, uint8_t m, size_t L, size_t k,
+               const Request &request, const std::string &text) {
+    return truth_of(expected, m, scope_offsets(L, k, request.scope),
+                    searched_of(text, request.strands));
+}
+
+/**
+ * Every check of one completed (graph, pattern, request) of L <= k against the oracle's list
+ * |expected| (its orientations |searched|): every count EXACT per level, offset and
+ * orientation; the steps per pass summing to the steps; enumerate() releasing the list in
+ * (level, node, offset, orientation) order with each context's level and positions;
+ * ALL_OR_COUNT's threshold on the total; PARTIAL's prefixes. Returns the number of contexts.
+ */
+size_t check_against(const DeBruijnGraph &graph, const Pattern &pattern, const Request &request,
+                     const std::vector<MCtx> &expected, const std::vector<Orientation> &searched) {
+    const size_t k = graph.get_k();
+    const size_t L = pattern.length();
+    const uint8_t m = request.max_mismatches;
+    const std::string &text = pattern.text();
+    const Truth truth = truth_of(expected, m, scope_offsets(L, k, request.scope), searched);
+
+    Result counted = count_of(graph, pattern, request);
     EXPECT_FALSE(counted.refusal);
     if (counted.refusal)
         return 0;
@@ -247,9 +304,11 @@ size_t check_against_oracles(const DeBruijnGraph &graph, const std::string &text
                               counted.work.steps_by_mismatches.end(), uint64_t(0)));
     EXPECT_TRUE(counted.mismatch_information_bits);
 
-    // the release: O1's list, levels and positions included, in answer order
+    EXPECT_EQ(searched, counted.searched);
+
+    // the release: the oracle's list, levels and positions included, in answer order
     Result all;
-    const std::vector<MCtx> released = released_by(graph, text, request, &all);
+    const std::vector<MCtx> released = released_by(graph, pattern, request, &all);
     EXPECT_EQ(expected, released) << text << " m " << int(m);
     EXPECT_TRUE(all.extraction && all.extraction->complete);
     EXPECT_EQ(counted.work.steps, all.work.steps);
@@ -260,7 +319,7 @@ size_t check_against_oracles(const DeBruijnGraph &graph, const std::string &text
         Request tight = request;
         tight.max_contexts = expected.size() - 1;
         Result withheld;
-        EXPECT_TRUE(released_by(graph, text, tight, &withheld).empty());
+        EXPECT_TRUE(released_by(graph, pattern, tight, &withheld).empty());
         EXPECT_EQ(Withheld::COUNT_ABOVE_THRESHOLD, withheld.extraction->withheld);
     }
     // PARTIAL: the first max_contexts of the closest levels
@@ -270,13 +329,33 @@ size_t check_against_oracles(const DeBruijnGraph &graph, const std::string &text
                           uint64_t(expected.size()) }) {
         partial.max_contexts = cap;
         Result cut;
-        const std::vector<MCtx> prefix = released_by(graph, text, partial, &cut);
+        const std::vector<MCtx> prefix = released_by(graph, pattern, partial, &cut);
         const size_t n = std::min<size_t>(cap, expected.size());
         EXPECT_EQ(std::vector<MCtx>(expected.begin(), expected.begin() + n), prefix)
             << text << " cap " << cap;
         EXPECT_EQ(cap >= expected.size(), cut.extraction->complete);
     }
     return expected.size();
+}
+
+/**
+ * check_against() for a DNA or IUPAC pattern against O1, and O1 against O2 with |records|.
+ */
+size_t check_against_oracles(const DeBruijnGraph &graph, const std::string &text,
+                             const Request &request,
+                             const std::vector<std::string> *records = nullptr,
+                             DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC) {
+    const uint8_t m = request.max_mismatches;
+    const std::vector<MCtx> expected = hamming_walk(graph, text, request.scope,
+                                                    request.strands, m);
+    if (records) {
+        // the graph holds exactly the records' k-mers (no cleaning in these builds)
+        EXPECT_EQ(hamming_records(*records, graph.get_k(), mode, text, request.scope,
+                                  request.strands, m),
+                  spelled(graph, expected)) << text;
+    }
+    return check_against(graph, parse(text), request, expected,
+                         searched_of(text, request.strands));
 }
 
 // a random DNA or IUPAC pattern of |L| positions: IUPAC with every code, and N runs leading,
@@ -1347,20 +1426,31 @@ TEST(PatternMismatch, FloorOnTheBitsLeft) {
 // ---------------------------------------------------------------- the engine API
 
 TEST(PatternMismatch, RequestsNotServedYet) {
-    // above the contract's 3, a peptide, a pattern longer than k: refused as arguments (the
-    // route checks them before; 5m-2 and 5m-4 serve the latter two)
+    // above the contract's 3, and the paths of a pattern longer than k (its extension, 5m-4):
+    // refused as arguments before anything is charged (the route checks them before). A
+    // peptide, and a long pattern's anchors, are served
     auto graph = build(5, { "ACGTACGTAC" }, DeBruijnGraph::BASIC);
     const PatternSearch engine(*graph);
     Request request = make_request(Scope::ANY_OFFSET, Strands::BOTH, 4);
     Budget budget = budget_of();
     EXPECT_THROW(engine.count(parse("ACG"), request, budget), std::invalid_argument);
     request.max_mismatches = 1;
-    EXPECT_THROW(engine.count(Pattern::parse(PatternKind::PROTEIN, "MK"), request, budget),
-                 std::invalid_argument);
+    request.extend_paths = true;
     EXPECT_THROW(engine.count(parse("ACGTAC"), request, budget), std::invalid_argument);
     EXPECT_THROW(engine.enumerate(parse("ACGTAC"), request, budget, [](const Context&) {}),
                  std::invalid_argument);
+    EXPECT_THROW(engine.count(Pattern::parse(PatternKind::PROTEIN, "MK"), request, budget),
+                 std::invalid_argument);
     EXPECT_EQ(0u, budget.steps_used());
+    request.extend_paths = false;
+    const Result anchors = engine.count(parse("ACGTAC"), request, budget);
+    ASSERT_TRUE(anchors.anchors);
+    EXPECT_EQ(2u, anchors.anchors->by_mismatches.size());
+    EXPECT_EQ(Relation::UNKNOWN, anchors.anchors->paths.relation);
+    const Result peptide = engine.count(Pattern::parse(PatternKind::PROTEIN, "T"), request,
+                                        budget);
+    ASSERT_TRUE(peptide.contexts);
+    EXPECT_EQ(2u, peptide.contexts->by_mismatches.size());
     // without mismatches nothing of the new answer is set
     request.max_mismatches = 0;
     const Result r = engine.count(parse("ACG"), request, budget);
@@ -1399,6 +1489,857 @@ TEST(PatternMismatch, SubstitutionsInTheSubmittedPatternsCoordinates) {
     EXPECT_THROW(substitutions(Pattern::parse(PatternKind::PROTEIN, "M"), Orientation::FORWARD,
                                "ATG"),
                  std::invalid_argument);
+}
+
+
+// ---------------------------------------------------------------- 5m-2: peptides
+
+Pattern peptide_of(const std::string &peptide, int table) {
+    return Pattern::parse(PatternKind::PROTEIN, peptide, GeneticCode::get(table));
+}
+
+/**
+ * check_against() for a peptide against O4's graph walk, and the walk against O4's six-frame
+ * record scan with |records|. Returns the number of contexts.
+ */
+size_t check_peptide(const DeBruijnGraph &graph, const std::string &peptide, int table,
+                     const Request &request, const std::vector<std::string> *records = nullptr,
+                     DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC) {
+    const uint8_t m = request.max_mismatches;
+    const std::vector<MCtx> expected = peptide_walk(graph, peptide, table, request.scope,
+                                                    request.strands, m);
+    if (records) {
+        EXPECT_EQ(peptide_records(*records, graph.get_k(), mode, peptide, table, request.scope,
+                                  request.strands, m),
+                  spelled(graph, expected)) << peptide << " table " << table;
+    }
+    return check_against(graph, peptide_of(peptide, table), request, expected,
+                         peptide_orientations(peptide, oracle_code(table), request.strands));
+}
+
+// a residue letter of a random peptide: the 20 residues, and X, B, Z, J and '*' less often
+char random_letter(std::mt19937 &rng) {
+    static const std::string kResidues = "ACDEFGHIKLMNPQRSTVWY";
+    static const std::string kOthers = "XBZJ*";
+    return rng() % 6 ? kResidues[rng() % kResidues.size()] : kOthers[rng() % kOthers.size()];
+}
+
+// a codon of |code| whose residue |accept| admits, drawn at random; "" when none does
+std::string random_codon(std::mt19937 &rng, const OracleCode &code,
+                         const std::function<bool(char)> &accept) {
+    std::vector<std::string> codons;
+    for (const std::string &codon : all_codons()) {
+        if (accept(code.translate(codon)))
+            codons.push_back(codon);
+    }
+    return codons.empty() ? "" : codons[rng() % codons.size()];
+}
+
+/**
+ * Records around a peptide's neighbourhood: |copies| back-translations whose residues are each,
+ * at random, one of its own codons, a sense codon of another residue (a substitution), a stop
+ * codon or any codon, between random flanks, a third of them reverse-complemented, and a
+ * random record.
+ */
+std::vector<std::string> neighbourhood_records(std::mt19937 &rng, const std::string &peptide,
+                                               int table, size_t copies) {
+    const OracleCode &code = oracle_code(table);
+    std::vector<std::string> records;
+    for (size_t c = 0; c < copies; ++c) {
+        std::string record = random_records(rng, 1, 0, 6)[0];
+        for (char letter : peptide) {
+            const uint32_t roll = rng() % 10;
+            std::string codon;
+            if (roll < 6) {
+                codon = random_codon(rng, code, [&](char r) { return letter_admits(letter, r); });
+            } else if (roll < 8) {
+                codon = random_codon(rng, code, [&](char r) {
+                    return r != '*' && !letter_admits(letter, r);
+                });
+            } else if (roll < 9) {
+                codon = random_codon(rng, code, [](char r) { return r == '*'; });
+            }
+            record += codon.empty() ? all_codons()[rng() % 64] : codon;
+        }
+        record += random_records(rng, 1, 0, 6)[0];
+        records.push_back(rng() % 3 ? record : reverse_complement_string(record));
+    }
+    records.push_back(random_records(rng, 1, 20, 60)[0]);
+    return records;
+}
+
+// one random peptide case: a table, k, a graph mode, a peptide of L = 3r <= k, records around
+// its neighbourhood, m in {1, 2} (3 for k <= 9), a scope (any_offset only on PRIMARY), strands
+struct PeptideCase {
+    size_t k;
+    DeBruijnGraph::Mode mode;
+    int table;
+    std::string peptide;
+    std::vector<std::string> records;
+    std::shared_ptr<DeBruijnGraph> graph;
+    Request request;
+};
+
+PeptideCase random_peptide_case(uint32_t seed,
+                                const std::vector<size_t> &ks = { 6, 9, 10, 12 }) {
+    std::mt19937 rng(seed);
+    PeptideCase c;
+    c.k = ks[rng() % ks.size()];
+    c.mode = std::vector<DeBruijnGraph::Mode> {
+        DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }[rng() % 3];
+    const std::vector<int> ids = oracle_code_ids();
+    c.table = ids[rng() % ids.size()];
+    const size_t r = 1 + rng() % (c.k / 3);
+    for (size_t i = 0; i < r; ++i) {
+        c.peptide.push_back(random_letter(rng));
+    }
+    c.records = neighbourhood_records(rng, c.peptide, c.table, 3 + rng() % 5);
+    c.graph = build(c.k, c.records, c.mode);
+    const Scope scope = c.mode != DeBruijnGraph::PRIMARY && rng() % 3 == 0 ? Scope::SUFFIX
+                                                                           : Scope::ANY_OFFSET;
+    const Strands strands = std::vector<Strands> {
+        Strands::BOTH, Strands::BOTH, Strands::FORWARD, Strands::REVERSE }[rng() % 4];
+    c.request = make_request(scope, strands, 1 + rng() % (c.k <= 9 ? 3 : 2));
+    return c;
+}
+
+std::string describe(const PeptideCase &c) {
+    return c.peptide + " table " + std::to_string(c.table) + " k " + std::to_string(c.k) + " "
+         + mode_name(c.mode) + " m " + std::to_string(c.request.max_mismatches) + " "
+         + to_string(c.request.scope) + " " + to_string(c.request.strands);
+}
+
+TEST(PatternMismatchPeptide, OraclesAgree) {
+    // O4 on the graph (codon by codon) = O4 on the records (six frames translated); its level 0
+    // = the search without mismatches
+    size_t substituted = 0;
+    size_t contexts = 0;
+    for (uint32_t seed = 100; seed < 250; ++seed) {
+        const PeptideCase c = random_peptide_case(seed);
+        SCOPED_TRACE(describe(c));
+        const uint8_t m = c.request.max_mismatches;
+        const std::vector<MCtx> walk = peptide_walk(*c.graph, c.peptide, c.table,
+                                                    c.request.scope, c.request.strands, m);
+        EXPECT_EQ(peptide_records(c.records, c.k, c.mode, c.peptide, c.table, c.request.scope,
+                                  c.request.strands, m),
+                  spelled(*c.graph, walk));
+        Request exact = c.request;
+        exact.max_mismatches = 0;
+        Result r;
+        const std::vector<MCtx> v1 = released_by(*c.graph, peptide_of(c.peptide, c.table),
+                                                 exact, &r);
+        std::vector<MCtx> level0;
+        for (const MCtx &x : walk) {
+            if (!x.level)
+                level0.push_back(x);
+            substituted += x.level > 0;
+        }
+        EXPECT_EQ(level0, v1);
+        contexts += walk.size();
+    }
+    EXPECT_LT(300u, substituted);
+    EXPECT_LT(500u, contexts);
+}
+
+TEST(PatternMismatchPeptide, RandomPeptidesAgainstOracles) {
+    // 300 random cases over every genetic code: every count per level, offset and orientation,
+    // the release with each context's level, substituted residues and their codons, the
+    // thresholds, against O4 (graph and records)
+    std::vector<size_t> at_level(kMaxMismatches + 1, 0);
+    std::set<int> tables;
+    for (uint32_t seed = 300; seed < 600; ++seed) {
+        const PeptideCase c = random_peptide_case(seed);
+        SCOPED_TRACE(describe(c));
+        check_peptide(*c.graph, c.peptide, c.table, c.request, &c.records, c.mode);
+        for (const MCtx &x : peptide_walk(*c.graph, c.peptide, c.table, c.request.scope,
+                                          c.request.strands, c.request.max_mismatches)) {
+            ++at_level[x.level];
+            tables.insert(c.table);
+        }
+    }
+    EXPECT_EQ(oracle_code_ids().size(), tables.size());
+    EXPECT_LT(500u, at_level[0]);
+    EXPECT_LT(500u, at_level[1]);
+    EXPECT_LT(200u, at_level[2]);
+    EXPECT_LT(20u, at_level[3]);
+}
+
+TEST(PatternMismatchPeptide, RandomPeptidesAtK31) {
+    // the served k: peptides of 4 to 10 residues in records of a few hundred bases holding
+    // their neighbourhood, m 1 or 2, every mode
+    size_t substituted = 0;
+    for (uint32_t seed = 700; seed < 720; ++seed) {
+        std::mt19937 rng(seed);
+        const auto mode = std::vector<DeBruijnGraph::Mode> {
+            DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }[seed % 3];
+        const int table = oracle_code_ids()[rng() % oracle_code_ids().size()];
+        std::string peptide;
+        for (size_t i = 0, r = 4 + rng() % 7; i < r; ++i) {
+            peptide.push_back(random_letter(rng));
+        }
+        std::vector<std::string> records = neighbourhood_records(rng, peptide, table, 8);
+        for (const std::string &extra : random_records(rng, 2, 150, 300)) {
+            records.push_back(extra);
+        }
+        auto graph = build(31, records, mode);
+        const Request request = make_request(
+                mode != DeBruijnGraph::PRIMARY && rng() % 3 == 0 ? Scope::SUFFIX
+                                                                 : Scope::ANY_OFFSET,
+                Strands::BOTH, 1 + rng() % 2);
+        SCOPED_TRACE(peptide + " table " + std::to_string(table) + " " + mode_name(mode)
+                     + " m " + std::to_string(request.max_mismatches));
+        check_peptide(*graph, peptide, table, request, &records, mode);
+        for (const MCtx &x : peptide_walk(*graph, peptide, table, request.scope,
+                                          request.strands, request.max_mismatches)) {
+            substituted += x.level > 0;
+        }
+    }
+    EXPECT_LT(20u, substituted);
+}
+
+TEST(PatternMismatchPeptide, PassZeroIsTheSearchWithoutMismatches) {
+    // as for DNA: pass 0 charges the steps of the peptide search without mismatches in the same
+    // order, under every max_steps that stops it, with and without the mask
+    size_t stops = 0;
+    for (uint32_t seed = 800; seed < 840; ++seed) {
+        const PeptideCase c = random_peptide_case(seed);
+        const bool unmasked = seed % 3 == 0;
+        auto graph = c.graph;
+        if (unmasked) {
+            graph = build(c.k, c.records, c.mode);
+            const_cast<DBGSuccinct&>(stored_graph(*graph)).reset_mask();
+        }
+        SCOPED_TRACE(describe(c) + (unmasked ? " unmasked" : ""));
+        const Pattern pattern = peptide_of(c.peptide, c.table);
+        Request with = c.request;
+        with.max_checked_entries = unmasked ? 3 : 0;
+        Request without = with;
+        without.max_mismatches = 0;
+        const Result v1 = count_of(*graph, pattern, without);
+        const Result full = count_of(*graph, pattern, with);
+        ASSERT_FALSE(v1.stop);
+        ASSERT_FALSE(full.stop);
+        const uint64_t steps = v1.work.steps;
+        EXPECT_EQ(steps, full.work.steps_by_mismatches.at(0));
+        EXPECT_EQ(v1.contexts->total.value, full.contexts->by_mismatches.at(0).value);
+        EXPECT_EQ(v1.contexts->total.relation, full.contexts->by_mismatches.at(0).relation);
+        for (uint64_t s = 0; s < steps; ++s) {
+            const Result a = count_of(*graph, pattern, without, s);
+            const Result b = count_of(*graph, pattern, with, s);
+            ASSERT_TRUE(a.stop && b.stop) << s;
+            ++stops;
+            EXPECT_EQ(0, b.stop->mismatch_level.value_or(9)) << s;
+            EXPECT_EQ(a.stop->phase, b.stop->phase) << s;
+            EXPECT_EQ(a.work.ranges_visited, b.work.ranges_visited) << s;
+            EXPECT_EQ(a.work.steps, b.work.steps) << s;
+            EXPECT_EQ(a.contexts->total.relation, b.contexts->by_mismatches.at(0).relation);
+            EXPECT_EQ(a.contexts->total.value, b.contexts->by_mismatches.at(0).value) << s;
+            Request partial_a = without;
+            Request partial_b = with;
+            partial_a.mode = partial_b.mode = Mode::PARTIAL;
+            Result ra;
+            Result rb;
+            EXPECT_EQ(released_by(*graph, pattern, partial_a, &ra, s),
+                      released_by(*graph, pattern, partial_b, &rb, s)) << s;
+        }
+    }
+    EXPECT_LT(1000u, stops);
+}
+
+TEST(PatternMismatchPeptide, StoppedAtEveryStep) {
+    // every max_steps below a peptide case's total: the levels below the stop's complete, its
+    // own AT_LEAST or BOUNDS, the ones above UNKNOWN; PARTIAL a prefix of the closest levels
+    std::set<uint8_t> levels;
+    size_t cases = 0;
+    for (uint32_t seed = 900; cases < 16 && seed < 2000; ++seed) {
+        const PeptideCase c = random_peptide_case(seed, { 9, 12 });
+        const Pattern pattern = peptide_of(c.peptide, c.table);
+        const Result full = count_of(*c.graph, pattern, c.request);
+        if (full.work.steps < 50 || full.work.steps > 20'000
+                || !full.contexts->by_mismatches.back().value)
+            continue;
+        ++cases;
+        SCOPED_TRACE(describe(c));
+        const std::vector<MCtx> expected = peptide_walk(*c.graph, c.peptide, c.table,
+                                                        c.request.scope, c.request.strands,
+                                                        c.request.max_mismatches);
+        const Truth truth = truth_of(expected, c.request.max_mismatches,
+                                     scope_offsets(pattern.length(), c.k, c.request.scope),
+                                     full.searched);
+        const uint64_t stride = std::max<uint64_t>(1, full.work.steps / 300);
+        for (uint64_t s = 0; s < full.work.steps; s += (s < 200 ? 1 : stride)) {
+            const Result r = count_of(*c.graph, pattern, c.request, s);
+            ASSERT_TRUE(r.stop) << s;
+            const uint8_t t = check_stopped(r, truth);
+            EXPECT_EQ(pass_of_step(full.work.steps_by_mismatches, s), t) << s;
+            levels.insert(t);
+            Request partial = c.request;
+            partial.mode = Mode::PARTIAL;
+            Result p;
+            check_partial_after_stop(released_by(*c.graph, pattern, partial, &p, s), expected,
+                                     t);
+        }
+    }
+    EXPECT_EQ(16u, cases);
+    EXPECT_LE(3u, levels.size());
+}
+
+TEST(PatternMismatchPeptide, CheaperOrientationFirstInEveryPass) {
+    // the leucines that start LLLLMW branch widely where its reverse complement, which starts
+    // with rc(W) and rc(M), is narrow: in pass 1 the reverse orientation runs first (the
+    // residue-level estimate), so that a step stop there never leaves the forward one complete
+    // before it
+    std::mt19937 rng(73);
+    auto graph = build(19, random_records(rng, 6, 800, 800), DeBruijnGraph::BASIC);
+    const Pattern pattern = peptide_of("LLLLMW", 1);
+    const Request request = make_request(Scope::ANY_OFFSET, Strands::BOTH, 1, Mode::COUNT);
+    const Result full = count_of(*graph, pattern, request);
+    ASSERT_FALSE(full.stop);
+    const uint64_t pass0 = full.work.steps_by_mismatches.at(0);
+    const uint64_t stride = std::max<uint64_t>(1, (full.work.steps - pass0) / 2000);
+    size_t reverse_only = 0;
+    for (uint64_t s = pass0; s < full.work.steps; s += stride) {
+        const Result r = count_of(*graph, pattern, request, s);
+        ASSERT_TRUE(r.stop);
+        ASSERT_EQ(1, *r.stop->mismatch_level);
+        const bool forward = r.contexts->by_orientation.at(Orientation::FORWARD).relation
+                                == Relation::EXACT;
+        const bool reverse = r.contexts->by_orientation.at(Orientation::REVERSE).relation
+                                == Relation::EXACT;
+        EXPECT_FALSE(forward && !reverse) << s;
+        reverse_only += reverse && !forward;
+    }
+    EXPECT_LT(0u, reverse_only);
+}
+
+// the level of the context at |kmer| (offset 0, FORWARD) of |peptide| within 1 substitution,
+// -1 when it is none
+int level_at(const DeBruijnGraph &graph, const std::string &peptide, int table,
+             const std::string &kmer, uint8_t m = 1) {
+    Result r;
+    for (const MCtx &c : released_by(graph, peptide_of(peptide, table),
+                                     make_request(Scope::ANY_OFFSET, Strands::FORWARD, m), &r)) {
+        if (!c.offset && graph.get_node_sequence(c.node) == kmer)
+            return c.level;
+    }
+    return -1;
+}
+
+TEST(PatternMismatchPeptide, SynonymousAndSubstitutedCodons) {
+    // a synonymous codon keeps the level, a codon of another residue adds one: Leu TTA -> CTA
+    // 0, -> TTT (Phe) 1; Ser TCA -> AGT 0; Met ATG -> ATA (Ile) 1 in table 1, 0 in table 2
+    // (where ATA is Met); one substitution per residue however many bases differ
+    const std::vector<std::string> records { "TTA", "CTA", "TTT", "TCA", "AGT", "ATG", "ATA",
+                                             "GGG" };
+    auto graph = build(3, records, DeBruijnGraph::BASIC);
+    EXPECT_EQ(0, level_at(*graph, "L", 1, "TTA"));
+    EXPECT_EQ(0, level_at(*graph, "L", 1, "CTA"));
+    EXPECT_EQ(1, level_at(*graph, "L", 1, "TTT"));
+    EXPECT_EQ(0, level_at(*graph, "S", 1, "TCA"));
+    EXPECT_EQ(0, level_at(*graph, "S", 1, "AGT"));
+    EXPECT_EQ(1, level_at(*graph, "S", 1, "GGG"));
+    EXPECT_EQ(0, level_at(*graph, "M", 1, "ATG"));
+    EXPECT_EQ(1, level_at(*graph, "M", 1, "ATA"));
+    EXPECT_EQ(0, level_at(*graph, "M", 2, "ATA"));
+    EXPECT_EQ(-1, level_at(*graph, "M", 1, "ATA", 0));
+    // three bases differ, one substitution
+    EXPECT_EQ(1, level_at(*graph, "M", 1, "GGG"));
+    const auto subs = residue_substitutions(peptide_of("LM", 1), Orientation::FORWARD, "TTTATA");
+    ASSERT_EQ(2u, subs.size());
+    EXPECT_EQ(0u, subs[0].residue);
+    EXPECT_EQ('L', subs[0].expected);
+    EXPECT_EQ('F', subs[0].found);
+    EXPECT_EQ("TTT", subs[0].codon);
+    EXPECT_EQ(1u, subs[1].residue);
+    EXPECT_EQ('I', subs[1].found);
+    EXPECT_EQ("ATA", subs[1].codon);
+    for (const std::string peptide : { "L", "S", "M", "J", "X", "*" }) {
+        for (int table : { 1, 2 }) {
+            for (uint8_t m = 1; m <= 3; ++m) {
+                SCOPED_TRACE(peptide + " " + std::to_string(table) + " " + std::to_string(m));
+                check_peptide(*graph, peptide, table,
+                              make_request(Scope::ANY_OFFSET, Strands::BOTH, m), &records);
+            }
+        }
+    }
+}
+
+TEST(PatternMismatchPeptide, StopsAndXAreNeverSubstituted) {
+    // '*' is never substituted (a sense codon there is no instance) and a stop codon never
+    // substitutes a residue; X has no substitute; in tables 27, 28 and 31 the codons that end
+    // translation only in context are sense codons and substitute other residues
+    const std::vector<std::string> records { "AAATAA", "AAATGG", "AAGTGA", "CCCTAG", "AAATGT",
+                                             "TGGAAA", "TAAAAA", "CCCGGG", "AAATAG" };
+    auto graph = build(6, records, DeBruijnGraph::BASIC);
+    // K*: AAATAA and AAGTGA are level 0, CCCTAG level 1 (K -> P), AAATGG none ('*' -> W)
+    EXPECT_EQ(0, level_at(*graph, "K*", 1, "AAATAA"));
+    EXPECT_EQ(0, level_at(*graph, "K*", 1, "AAGTGA"));
+    EXPECT_EQ(1, level_at(*graph, "K*", 1, "CCCTAG"));
+    EXPECT_EQ(-1, level_at(*graph, "K*", 1, "AAATGG", 3));
+    // KW: TGA is a stop in table 1 (no instance at any level), W in table 4; TGT is C
+    EXPECT_EQ(0, level_at(*graph, "KW", 1, "AAATGG"));
+    EXPECT_EQ(-1, level_at(*graph, "KW", 1, "AAGTGA", 3));
+    EXPECT_EQ(0, level_at(*graph, "KW", 4, "AAGTGA"));
+    EXPECT_EQ(1, level_at(*graph, "KW", 1, "AAATGT"));
+    // XK: X admits every sense codon and nothing else
+    EXPECT_EQ(0, level_at(*graph, "XK", 1, "TGGAAA"));
+    EXPECT_EQ(-1, level_at(*graph, "XK", 1, "TAAAAA", 3));
+    EXPECT_EQ(1, level_at(*graph, "XK", 1, "CCCGGG"));
+    // context stops: KC in table 27 (TGA = W) one substitution at AAGTGA, none in table 1;
+    // KE in table 28 (TAA = Q) and KQ in table 31 (TAA = E) one at AAATAA
+    EXPECT_EQ(1, level_at(*graph, "KC", 27, "AAGTGA"));
+    EXPECT_EQ(-1, level_at(*graph, "KC", 1, "AAGTGA", 3));
+    EXPECT_EQ(1, level_at(*graph, "KE", 28, "AAATAA"));
+    EXPECT_EQ(1, level_at(*graph, "KQ", 31, "AAATAA"));
+    EXPECT_EQ(0, level_at(*graph, "KQ", 28, "AAATAA"));
+    for (const std::string peptide : { "K*", "KW", "XK", "KC", "KE", "KQ", "*X", "BZ" }) {
+        for (int table : { 1, 4, 27, 28, 31 }) {
+            for (uint8_t m = 1; m <= 2; ++m) {
+                SCOPED_TRACE(peptide + " " + std::to_string(table) + " " + std::to_string(m));
+                check_peptide(*graph, peptide, table,
+                              make_request(Scope::ANY_OFFSET, Strands::BOTH, m), &records);
+            }
+        }
+    }
+    // '*' read in a table without an unconditional stop has no codon: no instance within any
+    // number of substitutions, every level EXACT 0 with nothing searched
+    for (int table : { 27, 28, 31 }) {
+        for (uint8_t m = 1; m <= 3; ++m) {
+            const Pattern stop = peptide_of("K*", table);
+            ASSERT_FALSE(stop.has_instances());
+            const Result r = count_of(*graph, stop, make_request(Scope::ANY_OFFSET,
+                                                                 Strands::BOTH, m));
+            ASSERT_TRUE(r.contexts);
+            ASSERT_EQ(m + 1u, r.contexts->by_mismatches.size());
+            for (const Count &level : r.contexts->by_mismatches) {
+                EXPECT_EQ(Relation::EXACT, level.relation);
+                EXPECT_EQ(0u, level.value);
+            }
+            EXPECT_EQ(std::vector<uint64_t>(m + 1, 0), r.work.steps_by_mismatches);
+            EXPECT_EQ(0u, r.work.steps);
+            EXPECT_TRUE(std::count(r.notes.begin(), r.notes.end(), kNoteNoStopCodon));
+            ASSERT_TRUE(r.mismatch_information_bits);
+            Result e;
+            EXPECT_TRUE(released_by(*graph, stop, make_request(Scope::ANY_OFFSET, Strands::BOTH,
+                                                               m), &e).empty());
+            EXPECT_TRUE(e.extraction->complete);
+        }
+    }
+}
+
+TEST(PatternMismatchPeptide, ReverseComplementAndBothStrands) {
+    // the substitutes of rc(P) are P's reverse-complemented, residues in reverse order; a
+    // record holding the reverse complement of a variant is a REVERSE context whose substituted
+    // residue and codon read in P's coordinates and reading direction
+    std::mt19937 rng(61);
+    for (int table : oracle_code_ids()) {
+        const OracleCode &code = oracle_code(table);
+        std::string peptide;
+        for (int i = 0; i < 6; ++i) {
+            peptide.push_back(random_letter(rng));
+        }
+        const Pattern p = peptide_of(peptide, table);
+        const Pattern rc = p.reverse_complement();
+        ASSERT_EQ(peptide.size(), rc.substitute_sets().size());
+        for (size_t i = 0; i < peptide.size(); ++i) {
+            // the oracle's substitutes of residue m - 1 - i, reverse-complemented
+            std::set<std::string> expected;
+            const char letter = peptide[peptide.size() - 1 - i];
+            for (const std::string &codon : all_codons()) {
+                if (codon_level(letter, code.translate(codon)).value_or(0) == 1)
+                    expected.insert(reverse_complement_string(codon));
+            }
+            std::set<std::string> got;
+            for (int c = 0; c < 64; ++c) {
+                if (rc.substitute_sets()[i] >> c & 1)
+                    got.insert(mtg::test::codon_string(c));
+            }
+            EXPECT_EQ(expected, got) << peptide << " " << table << " " << i;
+        }
+    }
+    // KDVK (table 1) with D -> E (GAA) on the reverse strand only
+    const std::string variant = "AAAGAAGTTAAG";
+    const std::vector<std::string> records { "CC" + reverse_complement_string(variant) + "G" };
+    for (auto mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto graph = build(13, records, mode);
+        Result r;
+        const std::vector<MCtx> contexts = released_by(
+                *graph, peptide_of("KDVK", 1), make_request(Scope::ANY_OFFSET, Strands::BOTH, 1),
+                &r);
+        size_t reverse = 0;
+        for (const MCtx &c : contexts) {
+            EXPECT_EQ(1, c.level);
+            EXPECT_EQ(std::vector<uint32_t> { 1 }, c.positions);
+            reverse += c.orientation == Orientation::REVERSE;
+        }
+        EXPECT_LT(0u, reverse) << mode_name(mode);
+        if (mode == DeBruijnGraph::BASIC) {
+            EXPECT_EQ(contexts.size(), reverse);
+        }
+        check_peptide(*graph, "KDVK", 1, make_request(Scope::ANY_OFFSET, Strands::BOTH, 1),
+                      &records, mode);
+        const std::string instance = reverse_complement_string(variant);
+        const auto subs = residue_substitutions(peptide_of("KDVK", 1), Orientation::REVERSE,
+                                                instance);
+        ASSERT_EQ(1u, subs.size());
+        EXPECT_EQ("GAA", subs[0].codon);
+        EXPECT_EQ('E', subs[0].found);
+        EXPECT_EQ('D', subs[0].expected);
+    }
+}
+
+// the bits left within |m| by a peptide's brute-force ball over |n| positions
+double peptide_ball_bits(const std::vector<uint64_t> &histogram, size_t n, uint8_t m) {
+    uint64_t ball = 0;
+    for (size_t u = 0; u <= m && u < histogram.size(); ++u) {
+        ball += histogram[u];
+    }
+    return 2.0 * static_cast<double>(n) - std::log2(static_cast<double>(ball));
+}
+
+TEST(PatternMismatchPeptide, BallBitsAgainstTheBruteForceBall) {
+    // mismatch_information_bits of a peptide against every string enumerated (O5 by O4's
+    // rule), for every table and every letter, on whole codons and on windows that cut them
+    std::mt19937 rng(67);
+    const std::string kLetters = "ACDEFGHIKLMNPQRSTVWYXBZJ*";
+    size_t compared = 0;
+    for (int table : oracle_code_ids()) {
+        auto compare = [&](const std::string &peptide, size_t begin, size_t end) {
+            const Pattern pattern = peptide_of(peptide, table);
+            const std::vector<uint64_t> histogram = peptide_ball_histogram(peptide, table,
+                                                                          begin, end);
+            if (!std::accumulate(histogram.begin(), histogram.end(), uint64_t(0))) {
+                // a window without any instance ('*' without a stop codon): the engine's
+                // convention, one exact codon with no substitute, keeps it finite (no ball to
+                // compare with; alone, the '*' has the bits of every string being exact)
+                if (peptide == "*") {
+                    EXPECT_DOUBLE_EQ(2.0 * (end - begin),
+                                     pattern.mismatch_information_bits(begin, end, 2));
+                }
+                return;
+            }
+            for (uint8_t m = 0; m <= kMaxMismatches; ++m) {
+                const double expected = peptide_ball_bits(histogram, end - begin, m);
+                EXPECT_NEAR(expected, pattern.mismatch_information_bits(begin, end, m), 1e-9)
+                    << peptide << " table " << table << " [" << begin << ", " << end
+                    << ") m " << int(m);
+            }
+            ++compared;
+        };
+        for (char letter : kLetters) {
+            for (size_t begin = 0; begin < 3; ++begin) {
+                for (size_t end = begin + 1; end <= 3; ++end) {
+                    compare(std::string(1, letter), begin, end);
+                }
+            }
+        }
+        for (int i = 0; i < 3; ++i) {
+            std::string peptide;
+            for (int j = 0; j < 3; ++j) {
+                peptide.push_back(kLetters[rng() % kLetters.size()]);
+            }
+            // windows cutting the first and the last codon, and two whole codons
+            compare(peptide, 1, 8);
+            compare(peptide, 2, 7);
+            compare(peptide, 0, 6);
+        }
+    }
+    EXPECT_LT(4000u, compared);
+    // the decapeptide of GroEL in table 1 loses 7.8, 14.5 and 20.4 bits (SPEC §21.5); a Leu,
+    // Ser, Arg-rich one 6.5, 11.9 and 16.6
+    const Pattern groel = peptide_of("KDVKFGNDAR", 1);
+    EXPECT_NEAR(45.415, groel.mismatch_information_bits(0), 0.001);
+    EXPECT_NEAR(37.570, groel.mismatch_information_bits(1), 0.001);
+    EXPECT_NEAR(30.896, groel.mismatch_information_bits(2), 0.001);
+    EXPECT_NEAR(24.998, groel.mismatch_information_bits(3), 0.001);
+    const Pattern lsr = peptide_of("LSRLSRLSRL", 1);
+    EXPECT_NEAR(27.616, lsr.mismatch_information_bits(1), 0.001);
+    EXPECT_NEAR(22.231, lsr.mismatch_information_bits(2), 0.001);
+    EXPECT_NEAR(17.595, lsr.mismatch_information_bits(3), 0.001);
+    // the reverse complement has the same ball, window by mirrored window
+    const Pattern rc = groel.reverse_complement();
+    for (uint8_t m = 0; m <= 3; ++m) {
+        EXPECT_NEAR(groel.mismatch_information_bits(4, 25, m),
+                    rc.mismatch_information_bits(5, 26, m), 1e-9);
+    }
+}
+
+TEST(PatternMismatchPeptide, FloorOnTheResidueBall) {
+    // the floor (24 bits) gates the residue-level ball's bits, the refusal naming the largest
+    // m' the floor admits; the ball counted here from the oracle's code (per residue: its
+    // codons and the sense codons of other residues)
+    std::mt19937 rng(71);
+    auto graph = build(31, random_records(rng, 3, 200, 200), DeBruijnGraph::BASIC);
+    auto bits = [](const std::string &peptide, uint8_t m) {
+        const OracleCode &code = oracle_code(1);
+        std::vector<double> f(m + 1, 0);
+        f[0] = 1;
+        for (char letter : peptide) {
+            double own = 0;
+            double other = 0;
+            for (const std::string &codon : all_codons()) {
+                const auto level = codon_level(letter, code.translate(codon));
+                own += level == std::optional<uint8_t>(0);
+                other += level == std::optional<uint8_t>(1);
+            }
+            for (size_t u = f.size(); u-- > 0; ) {
+                f[u] = f[u] * own + (u ? f[u - 1] * other : 0);
+            }
+        }
+        return 6.0 * peptide.size() - std::log2(std::accumulate(f.begin(), f.end(), 0.0));
+    };
+    for (const std::string peptide : { "KDVKFGNDAR", "LSRLSRLSRL", "MWMWMWMW", "XXXXXMK" }) {
+        for (uint8_t m = 1; m <= 3; ++m) {
+            Request request = make_request(Scope::ANY_OFFSET, Strands::BOTH, m);
+            request.min_information_bits = 24;
+            const Result r = count_of(*graph, peptide_of(peptide, 1), request);
+            ASSERT_TRUE(r.mismatch_information_bits);
+            EXPECT_NEAR(bits(peptide, m), *r.mismatch_information_bits, 1e-9) << peptide;
+            const bool served = bits(peptide, m) >= 24;
+            EXPECT_EQ(served, !r.refusal) << peptide << " m " << int(m);
+            if (served)
+                continue;
+            EXPECT_EQ(0u, r.work.steps);
+            std::optional<uint8_t> within;
+            for (uint8_t w = m; w-- > 0; ) {
+                if (bits(peptide, w) >= 24) {
+                    within = w;
+                    break;
+                }
+            }
+            EXPECT_EQ(within, r.max_mismatches_within_floor) << peptide << " m " << int(m);
+        }
+    }
+    // a peptide longer than k: the floor reads the least anchor window (reverse: P's last k
+    // positions), each window's bits within m
+    auto small = build(10, random_records(rng, 3, 100, 100), DeBruijnGraph::BASIC);
+    const Pattern longer = peptide_of("WWWWLSRLSR", 1);
+    for (uint8_t m = 1; m <= 3; ++m) {
+        Request request = make_request(Scope::ANY_OFFSET, Strands::BOTH, m);
+        request.min_information_bits = 10;
+        const Result r = count_of(*small, longer, request);
+        const double least = std::min(longer.mismatch_information_bits(0, 10, m),
+                                      longer.mismatch_information_bits(20, 30, m));
+        ASSERT_TRUE(r.min_anchor_mismatch_information_bits);
+        EXPECT_DOUBLE_EQ(least, *r.min_anchor_mismatch_information_bits);
+        EXPECT_DOUBLE_EQ(longer.mismatch_information_bits(m), *r.mismatch_information_bits);
+        EXPECT_EQ(least < 10, bool(r.refusal)) << int(m);
+        if (r.refusal) {
+            EXPECT_NE(std::string::npos, r.refusal->message.find("reverse orientation"))
+                << r.refusal->message;
+        }
+    }
+}
+
+TEST(PatternMismatchPeptide, CutCodonsInAnchorWindows) {
+    // a peptide longer than k: its anchors per level, the anchor window cutting its last codon
+    // (k not a multiple of 3) and, on a wrapped PRIMARY graph, the reverse complement's window
+    // starting inside one; a cut codon counts as substituted only when its bases inside the
+    // window agree with no codon of its own (O4's least level over the agreeing codons)
+    std::set<uint8_t> levels;
+    size_t anchors = 0;
+    for (uint32_t seed = 1100; seed < 1220; ++seed) {
+        std::mt19937 rng(seed);
+        const size_t k = std::vector<size_t> { 5, 7, 8, 10, 11 }[rng() % 5];
+        const auto mode = std::vector<DeBruijnGraph::Mode> {
+            DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }[rng() % 3];
+        const int table = oracle_code_ids()[rng() % oracle_code_ids().size()];
+        std::string peptide;
+        for (size_t i = 0, r = k / 3 + 1 + rng() % 2; i < r; ++i) {
+            peptide.push_back(random_letter(rng));
+        }
+        const std::vector<std::string> records = neighbourhood_records(rng, peptide, table, 6);
+        auto graph = build(k, records, mode);
+        const uint8_t m = 1 + rng() % 2;
+        const Strands strands = std::vector<Strands> {
+            Strands::BOTH, Strands::FORWARD, Strands::REVERSE }[rng() % 3];
+        const Pattern pattern = peptide_of(peptide, table);
+        Request request = make_request(Scope::ANY_OFFSET, strands, m);
+        SCOPED_TRACE(peptide + " table " + std::to_string(table) + " k " + std::to_string(k)
+                     + " " + mode_name(mode) + " m " + std::to_string(m));
+        std::vector<MCtx> expected = peptide_walk(*graph, peptide, table, request.scope,
+                                                  strands, m);
+        const Result counted = count_of(*graph, pattern, request);
+        ASSERT_TRUE(counted.anchors);
+        EXPECT_FALSE(counted.stop);
+        EXPECT_EQ(Extension::NOT_REQUESTED, counted.anchors->extension);
+        EXPECT_EQ(expected.empty() ? Relation::EXACT : Relation::UNKNOWN,
+                  counted.anchors->paths.relation);
+        EXPECT_TRUE(std::count(counted.notes.begin(), counted.notes.end(), kNotePathsLater));
+        const Truth truth = truth_of(expected, m, { 0 }, counted.searched);
+        EXPECT_EQ(Relation::EXACT, counted.anchors->total.relation);
+        EXPECT_EQ(truth.total, counted.anchors->total.value);
+        ASSERT_EQ(m + 1u, counted.anchors->by_mismatches.size());
+        for (uint8_t t = 0; t <= m; ++t) {
+            EXPECT_EQ(Relation::EXACT, counted.anchors->by_mismatches[t].relation);
+            EXPECT_EQ(truth.by_level[t], counted.anchors->by_mismatches[t].value) << int(t);
+        }
+        for (const auto &[o, n] : truth.by_orientation) {
+            EXPECT_EQ(n, counted.anchors->by_orientation.at(o).value) << orientation_key(o);
+        }
+        // the anchors released on request: the oracle's list with its levels
+        request.release_anchors = true;
+        Result released;
+        std::vector<MCtx> got = released_by(*graph, pattern, request, &released);
+        for (MCtx &c : expected) {
+            levels.insert(c.level);
+            c.positions.clear();
+        }
+        EXPECT_EQ(expected, got);
+        EXPECT_TRUE(released.extraction->complete);
+        anchors += expected.size();
+    }
+    EXPECT_EQ((std::set<uint8_t> { 0, 1, 2 }), levels);
+    EXPECT_LT(300u, anchors);
+}
+
+TEST(PatternMismatchPeptide, PalindromicKmerAtALevel) {
+    // on an even-k wrapped PRIMARY graph AAATTT is its own reverse complement and holds KK with
+    // the second K substituted by F: a substituted residue changes the bases of three mirrored
+    // pairs, so the palindrome must be found at level 1 and counted once
+    const std::vector<std::string> records { "AAATTT", "CCAAATTTGG", "AAGAAA" };
+    for (size_t k : { 6, 8 }) {
+        auto graph = build(k, records, DeBruijnGraph::PRIMARY);
+        for (const std::string peptide : { "KK", "KF", "FK", "NF" }) {
+            for (uint8_t m = 1; m <= 2; ++m) {
+                SCOPED_TRACE(peptide + " k " + std::to_string(k) + " m " + std::to_string(m));
+                check_peptide(*graph, peptide, 1,
+                              make_request(Scope::ANY_OFFSET, Strands::BOTH, m), &records,
+                              DeBruijnGraph::PRIMARY);
+            }
+        }
+        if (k == 6) {
+            const std::vector<MCtx> kk = peptide_walk(*graph, "KK", 1, Scope::ANY_OFFSET,
+                                                      Strands::BOTH, 1);
+            EXPECT_TRUE(std::any_of(kk.begin(), kk.end(), [&](const MCtx &c) {
+                return graph->get_node_sequence(c.node) == "AAATTT" && c.level == 1;
+            }));
+        }
+    }
+}
+
+TEST(PatternMismatchPeptide, UnmaskedTwins) {
+    // without the mask every level is a true relation of the masked count, and the release
+    // enumerates every candidate, the source dummies dropped: the oracle's list, every level
+    // EXACT
+    size_t bounded = 0;
+    for (uint32_t seed = 1300; seed < 1360; ++seed) {
+        const PeptideCase c = random_peptide_case(seed);
+        auto unmasked = build(c.k, c.records, c.mode);
+        const_cast<DBGSuccinct&>(stored_graph(*unmasked)).reset_mask();
+        SCOPED_TRACE(describe(c));
+        const Pattern pattern = peptide_of(c.peptide, c.table);
+        const std::vector<MCtx> expected = peptide_walk(*c.graph, c.peptide, c.table,
+                                                        c.request.scope, c.request.strands,
+                                                        c.request.max_mismatches);
+        const Truth truth = truth_of(expected, c.request.max_mismatches,
+                                     scope_offsets(pattern.length(), c.k, c.request.scope),
+                                     peptide_orientations(c.peptide, oracle_code(c.table),
+                                                          c.request.strands));
+        const Result counted = count_of(*unmasked, pattern, c.request);
+        ASSERT_FALSE(counted.stop);
+        for (uint8_t t = 0; t <= c.request.max_mismatches; ++t) {
+            const Count &level = counted.contexts->by_mismatches.at(t);
+            EXPECT_TRUE(true_relation(level, truth.by_level[t])) << int(t);
+            bounded += level.relation == Relation::BOUNDS;
+        }
+        Result all;
+        EXPECT_EQ(expected, released_by(*unmasked, pattern, c.request, &all));
+        for (uint8_t t = 0; t <= c.request.max_mismatches; ++t) {
+            EXPECT_EQ(Relation::EXACT, all.contexts->by_mismatches.at(t).relation);
+            EXPECT_EQ(truth.by_level[t], all.contexts->by_mismatches.at(t).value);
+        }
+    }
+    EXPECT_LT(20u, bounded);
+}
+
+TEST(PatternMismatchPeptide, ResidueSubstitutionsInTheSubmittedPeptidesCoordinates) {
+    const Pattern p = peptide_of("MKB", 1);
+    EXPECT_TRUE(residue_substitutions(p, Orientation::FORWARD, "ATGAAAGAT").empty());
+    auto subs = residue_substitutions(p, Orientation::FORWARD, "ATAAAAGAA");
+    ASSERT_EQ(2u, subs.size());
+    EXPECT_EQ(0u, subs[0].residue);
+    EXPECT_EQ('M', subs[0].expected);
+    EXPECT_EQ('I', subs[0].found);
+    EXPECT_EQ("ATA", subs[0].codon);
+    EXPECT_EQ(2u, subs[1].residue);
+    EXPECT_EQ('B', subs[1].expected);
+    EXPECT_EQ('E', subs[1].found);
+    EXPECT_EQ("GAA", subs[1].codon);
+    // reverse: the instance instantiates rc(P); residue 1 read as the reverse complement of the
+    // instance's middle codon
+    subs = residue_substitutions(p, Orientation::REVERSE,
+                                 reverse_complement_string("ATGCGTAAT"));
+    ASSERT_EQ(1u, subs.size());
+    EXPECT_EQ(1u, subs[0].residue);
+    EXPECT_EQ('R', subs[0].found);
+    EXPECT_EQ("CGT", subs[0].codon);
+    // ATA is Met in table 2
+    EXPECT_TRUE(residue_substitutions(peptide_of("MKB", 2), Orientation::FORWARD,
+                                      "ATAAAAGAT").empty());
+    // no instance at any level: a stop at K, a sense codon at '*'; and the arguments
+    EXPECT_THROW(residue_substitutions(p, Orientation::FORWARD, "ATGTAAGAT"),
+                 std::invalid_argument);
+    EXPECT_THROW(residue_substitutions(peptide_of("M*", 1), Orientation::FORWARD, "ATGTGG"),
+                 std::invalid_argument);
+    EXPECT_THROW(residue_substitutions(p, Orientation::FORWARD, "ATGAAAGA"),
+                 std::invalid_argument);
+    EXPECT_THROW(residue_substitutions(p, Orientation::FORWARD, "ATGAANGAT"),
+                 std::invalid_argument);
+    EXPECT_THROW(residue_substitutions(parse("ACG"), Orientation::FORWARD, "ACG"),
+                 std::invalid_argument);
+}
+
+TEST(PatternMismatch, LongPatternAnchorsPerLevel) {
+    // a DNA or IUPAC pattern longer than k: its anchors per level, each the anchor window of its
+    // orientation (FORWARD P[0, k), REVERSE rc(P)[0, k)) within m, against O1 on the windows;
+    // the paths UNKNOWN (not extended)
+    size_t anchors = 0;
+    for (uint32_t seed = 1400; seed < 1480; ++seed) {
+        std::mt19937 rng(seed);
+        const size_t k = std::vector<size_t> { 5, 6, 7, 9 }[rng() % 4];
+        const auto mode = std::vector<DeBruijnGraph::Mode> {
+            DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }[rng() % 3];
+        const std::vector<std::string> records = random_records(rng, 4, 20, 60);
+        auto graph = build(k, records, mode);
+        const std::string text = random_pattern(rng, k + 1 + rng() % k, rng() % 2);
+        if (palindromic(read_pattern(text)))
+            continue;
+        const uint8_t m = 1 + rng() % 3;
+        const Strands strands = std::vector<Strands> {
+            Strands::BOTH, Strands::FORWARD, Strands::REVERSE }[rng() % 3];
+        SCOPED_TRACE(text + " k " + std::to_string(k) + " " + mode_name(mode) + " m "
+                     + std::to_string(m));
+        const size_t L = text.size();
+        std::vector<MCtx> expected;
+        // (a window equal to its reverse complement is O1's PALINDROMIC: relabelled |as|)
+        auto add = [&](const std::string &window, Strands window_strands, Orientation as) {
+            for (MCtx c : hamming_walk(*graph, window, Scope::ANY_OFFSET, window_strands, m)) {
+                c.orientation = as;
+                c.positions.clear();
+                expected.push_back(c);
+            }
+        };
+        if (strands != Strands::REVERSE)
+            add(text.substr(0, k), Strands::FORWARD, Orientation::FORWARD);
+        if (strands != Strands::FORWARD)
+            add(text.substr(L - k), Strands::REVERSE, Orientation::REVERSE);
+        std::sort(expected.begin(), expected.end());
+        Request request = make_request(Scope::ANY_OFFSET, strands, m);
+        const Result counted = count_of(*graph, text, request);
+        ASSERT_TRUE(counted.anchors);
+        ASSERT_FALSE(counted.stop);
+        const Truth truth = truth_of(expected, m, { 0 }, counted.searched);
+        EXPECT_EQ(truth.total, counted.anchors->total.value);
+        for (uint8_t t = 0; t <= m; ++t) {
+            EXPECT_EQ(truth.by_level[t], counted.anchors->by_mismatches.at(t).value) << int(t);
+        }
+        request.release_anchors = true;
+        Result released;
+        EXPECT_EQ(expected, released_by(*graph, text, request, &released));
+        anchors += expected.size();
+    }
+    EXPECT_LT(200u, anchors);
 }
 
 #endif // _DNA_GRAPH
