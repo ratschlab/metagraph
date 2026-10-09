@@ -226,6 +226,122 @@ jobs:
           pytest
 
 
+  # The Python library's tests (metagraph/api/python/tests: metagraph.traverse and the pattern
+  # fixtures' validator), on one configuration of the matrix: they test Python code and read
+  # committed fixtures, and the binary only where a test runs the CLI ($METAGRAPH_CLI).
+  python-tests:
+    if: inputs.alphabet == 'DNA' && inputs.build_type == 'Release' && inputs.compiler == 'g++-13' && inputs.build_static == 'OFF'
+    runs-on: *platform
+    needs: [build]
+
+    env: *linux-build-env
+
+    name: Python Tests
+
+    defaults: *linux-shell-defaults
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+          cache: pip
+          cache-dependency-path: metagraph/api/python/requirements.txt
+
+      - *install-linux-deps
+
+      - *download-build-artifacts
+
+      - *recreate-metagraph-symlink
+
+      - name: Install the Python API
+        run: pip install -e metagraph/api/python
+
+      - name: Run the Python tests
+        run: |
+          export METAGRAPH_CLI="$GITHUB_WORKSPACE/metagraph/build/metagraph"
+          cd metagraph/api/python
+          python -m unittest discover -s tests -t . -p 'test_traverse_*.py'
+          python -m unittest tests.test_pattern_fixtures
+
+
+  # The tests that need the mini index (scripts/traversal/build_mini_refseq.sh: 42 RefSeq
+  # records in the format of the public refseq33m index): the MiniRefSeq unit tests, the
+  # contract of the stored fixtures (the pattern bodies against what this binary answers on
+  # the mini, the graphlet documents against its CLI), and the integration classes that run on
+  # it. The index is built with this binary from the records; only the NCBI downloads are
+  # cached (keyed on the accession table), and the build still asks NCBI's esummary once to
+  # check the table. The build picks its row-diff anchors anew each time, so this index is not
+  # the one the pattern fixtures were answered on: TestPatternFixtures compares every body but
+  # the decode work those anchors make. The build needs NCBI's E-utilities to be reachable, so
+  # a failure of this job does not fail the workflow.
+  mini-index-tests:
+    if: inputs.alphabet == 'DNA' && inputs.build_type == 'Release' && inputs.compiler == 'g++-13' && inputs.build_static == 'OFF'
+    runs-on: *platform
+    needs: [build]
+    continue-on-error: true
+
+    env: *linux-build-env
+
+    name: Mini-index Tests
+
+    defaults: *linux-shell-defaults
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.13
+
+      - *install-linux-deps
+
+      - name: Install Python packages for tests
+        run: sudo apt-get install -y python3-venv
+
+      - *download-build-artifacts
+
+      - *recreate-metagraph-symlink
+
+      - name: Cache the mini index's downloads
+        uses: actions/cache@v4
+        with:
+          path: metagraph/build/mini_refseq/raw
+          key: mini-refseq-raw-${{ hashFiles('metagraph/scripts/traversal/mini_refseq_accessions.tsv') }}
+
+      - name: Build the mini index
+        run: |
+          cd metagraph/build
+          REUSE_RAW=1 THREADS="$(getconf _NPROCESSORS_ONLN)" \
+            ../scripts/traversal/build_mini_refseq.sh ./mini_refseq ./metagraph \
+            ../scripts/traversal/mini_refseq_accessions.tsv
+
+      - name: Unit tests on the mini index
+        run: |
+          cd metagraph/build
+          chmod +x unit_tests
+          ./unit_tests --gtest_filter='*MiniRefSeq*'
+
+      - name: The graphlet documents are what this CLI writes
+        run: |
+          cd metagraph
+          python scripts/traversal/graphlet_fixtures.py --from-cli build/metagraph --check
+
+      - name: Integration tests on the mini index
+        run: |
+          ./metagraph/integration_tests/install_test_environment.sh metagraph/api/python metagraph/build/test_venv
+          cd metagraph/build
+          # a missing input fails the guarded classes instead of skipping them
+          export METAGRAPH_REQUIRE_GUARDS=1
+          ./test_venv/bin/python ../integration_tests/main.py --test_filter '*Mini*' < /dev/null
+          # the pattern bodies are what this binary answers on the mini (pattern_fixtures.py;
+          # on this build of the index every byte but the decode work of its row-diff anchors)
+          ./test_venv/bin/python ../integration_tests/main.py --test_filter '*TestPatternFixtures*' < /dev/null
+
+
   examples:
     runs-on: *platform
 
