@@ -729,9 +729,9 @@ struct Stop {
  * object), and every kReleaseClockStride contexts an ALL_OR_COUNT delivery passes to the
  * caller; in the extension also every kReleaseClockStride anchors it lists, before every anchor
  * it extends (spelled first, k - 1 BOSS steps no step charges) and before every
- * kReleaseClockStride-th node its DFS expands; after a search that completed, before every
- * piece but the first of the low-complexity diagnostic (kNoteLowComplexity). Work therefore
- * ends within one such stride after the work time passes.
+ * kReleaseClockStride-th node its DFS expands; after a search that completed or stopped at a
+ * threshold, before every piece but the first of the low-complexity diagnostic
+ * (kNoteLowComplexity). Work therefore ends within one such stride after the work time passes.
  */
 class Budget {
   public:
@@ -1202,7 +1202,12 @@ struct PathView {
  * graph/traversal/support_step; not built yet); the engine only asks it and counts its
  * verdicts. With Request::support null the extension asks nothing.
  *
- * The protocol, per anchor of an admitted extension, in answer order:
+ * The protocol of an admitted extension:
+ *  - prepare(anchors): once, before the first anchor is opened, with every anchor the extension
+ *    will open (both orientations', in answer order), so that a tracker can read what it needs
+ *    of all of them first (the labels any of their walks can be supported by); false stops the
+ *    extension before its first anchor, as a STOPPED verdict;
+ * then per anchor, in answer order:
  *  - open(anchor): frame 0 from the anchor (depth 0, position k), before its first expansion;
  *  - push(child): frame d + 1 from frame d and the child entered (depth d + 1), right after
  *    the DFS chose it (its edge already examined and charged as a step) and before it is
@@ -1229,6 +1234,11 @@ class SupportTracker {
 
     virtual ~SupportTracker() = default;
 
+    // the default reads nothing
+    virtual bool prepare(const std::vector<Context> &anchors) {
+        (void)anchors;
+        return true;
+    }
     virtual Verdict open(const SearchState &anchor) = 0;
     virtual Verdict push(const SearchState &child) = 0;
     virtual void pop() = 0;
@@ -1263,18 +1273,26 @@ class PathSink {
     virtual bool accept(const PathView &path, const SupportTracker *support) = 0;
     // after a false accept(): the reason the route writes; nullptr before
     virtual const char* stop_reason() const = 0;
+    // after a false accept(): whether that stop is a threshold of the request's
+    // (stop_at_threshold, which a selecting sink owns: the selected paths above max_paths),
+    // not a budget; the engine treats it as its own threshold stops (kNoteLowComplexity)
+    virtual bool stopped_at_threshold() const { return false; }
 };
 
 // JSON notes of a pattern (§7.2), the ones the engine states:
 //  low_complexity_pattern    an exact pattern that sdust flags with the seeder's parameters
 //                            (T = 20, W = 64, is_low_complexity): why its counts are large. An
-//                            optional diagnostic: never stated on an answer with a stop (any
-//                            phase and reason, the request-wide stop of an earlier pattern
-//                            included), nor when the work time passed before sdust had read the
-//                            pattern (read in pieces of 128 bases, the clock before each but
-//                            the first, so only a pattern longer than 191 bases can lose it so;
-//                            Result::time_limited is then set, the counts complete and the stop
-//                            none). Otherwise stated iff sdust flags the whole pattern
+//                            optional diagnostic: never stated beside a budget stop (max_steps,
+//                            time, or a support tracker's or path sink's own: any phase, the
+//                            request-wide stop of an earlier pattern included), which leaves no
+//                            room for optional work; beside a threshold stop (max_contexts,
+//                            max_anchors, max_paths, or a path sink's threshold:
+//                            PathSink::stopped_at_threshold) it is diagnosed, those being the
+//                            answers whose counts are large. Not stated either when the work time passed
+//                            before sdust had read the pattern (read in pieces of 128 bases, the
+//                            clock before each but the first, so only a pattern longer than 191
+//                            bases can lose it so; Result::time_limited is then set, the counts
+//                            as they were). Otherwise stated iff sdust flags the whole pattern
 //  strand_unknown_canonical  graph mode CANONICAL or PRIMARY: orientations, not strands
 //  paths_later_increment     L > k without Request::extend_paths: anchors counted, paths
 //                            neither extended nor extracted (never set with extend_paths)
@@ -1334,10 +1352,10 @@ struct Result {
     // (phase DISCOVERY) with UNKNOWN counts
     std::optional<Stop> stop;
     // a TIME stop touched it, in any phase: the answer depends on the machine (JSON
-    // determinism "time_limited", else "full"; §5.5). Also set without a stop when the work
-    // time passed during the low-complexity diagnostic of a completed search of more than
-    // 191 bases, which then leaves its note out (kNoteLowComplexity): only that note depends
-    // on the machine there
+    // determinism "time_limited", else "full"; §5.5). Also set when the work time passed
+    // during the low-complexity diagnostic of a pattern of more than 191 bases (its search
+    // completed or stopped at a threshold), which then leaves its note out
+    // (kNoteLowComplexity): only that note depends on the machine there
     bool time_limited = false;
     // set by enumerate() on an answered pattern; never by count()
     std::optional<Extraction> extraction;

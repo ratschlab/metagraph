@@ -412,18 +412,18 @@ constexpr size_t kSdustPiece = 128;
 
 /**
  * Whether sdust flags |s| anywhere with the seeder's parameters: the seeder's filter, repeated
- * here because that function is file-local to the aligner, which the pattern search does not
- * edit (§11). An optional diagnostic of a completed search (kNoteLowComplexity), run under the
- * deadline (one sdust over a 30,000-base repeat takes 0.7 s). sdust decides at each base from
- * the window of W bases ending there (its triplet counts, and the longest suffix whose counts
- * stay within T / 5), and it flags |s| iff some window holds a perfect interval. So |s| is read
- * in pieces of kSdustPiece + W - 1 bases overlapping by W - 1, which hold every window of |s|;
- * a window cut at a piece's start is a suffix of the window of |s| at that base and holds a
- * perfect interval only if that one does: some piece is flagged iff |s| is. Stops at the first
- * piece flagged, so a repeat costs one piece (its perfect intervals are what makes sdust slow:
- * about 6 ms for 191 bases of ATG), and reads the clock before every piece but the first:
- * nullopt when the work time passed first. The first piece is read whatever the clock says, so
- * that a pattern of at most kSdustPiece + W - 1 bases is always diagnosed (its answer never
+ * here because that function is file-local to the aligner, which the pattern search does not edit
+ * (§11). An optional diagnostic of a search that completed or stopped at a threshold
+ * (kNoteLowComplexity), run under the deadline (one sdust over a 30,000-base repeat takes 0.7 s).
+ * sdust decides at each base from the window of W bases ending there (its triplet counts, and the
+ * longest suffix whose counts stay within T / 5), and it flags |s| iff some window holds a perfect
+ * interval. So |s| is read in pieces of kSdustPiece + W - 1 bases overlapping by W - 1, which hold
+ * every window of |s|; a window cut at a piece's start is a suffix of the window of |s| at that
+ * base and holds a perfect interval only if that one does: some piece is flagged iff |s| is. Stops
+ * at the first piece flagged, so a repeat costs one piece (its perfect intervals are what makes
+ * sdust slow: about 6 ms for 191 bases of ATG), and reads the clock before every piece but the
+ * first: nullopt when the work time passed first. The first piece is read whatever the clock says,
+ * so that a pattern of at most kSdustPiece + W - 1 bases is always diagnosed (its answer never
  * depends on the machine for it), at the cost of one piece past the work time.
  */
 std::optional<bool> is_low_complexity(std::string_view s, Budget &budget) {
@@ -2446,6 +2446,13 @@ bool PatternRun::extend_listed(bool keep, const std::vector<Context> &anchors) {
     for (const Context &anchor : anchors) {
         ++anchors_left_[anchor.orientation];
     }
+    // the support tracker sees every anchor before it opens the first (what it reads for all
+    // of them comes before any walk's rows)
+    if (request_.support && anchors.size() && !request_.support->prepare(anchors)) {
+        external_stop();
+        work_.steps = budget_.steps_used() - steps_before_;
+        return false;
+    }
     const Pattern rc = pattern_.reverse_complement();
     for (const Context &anchor : anchors) {
         // the clock before every anchor: its spelling (k - 1 BOSS steps) is work no step
@@ -3243,11 +3250,21 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     result.time_limited = engine.time_limited();
 
     // the bases of an exact pattern: its text, or for a peptide (every residue one codon) the
-    // codons it spells. An optional diagnostic: not run after any stop, and left out when the
-    // work time passes before sdust has its answer, a time stop the answer states as
-    // time_limited only (its counts complete, its stop none)
+    // codons it spells. An optional diagnostic: not run after a budget stop (max_steps, time,
+    // a support tracker's or path sink's own), which leaves no room for optional work, but
+    // after a threshold stop (stop_at_threshold, the engine's or a path sink's), whose counts
+    // are the large ones the note is about; left out when the work time passes before sdust
+    // has its answer, a time stop the answer states as time_limited only (its counts as they
+    // were, its stop unchanged)
+    const bool threshold_stop = result.stop
+        && (result.stop->reason == StopReason::MAX_CONTEXTS
+            || result.stop->reason == StopReason::MAX_ANCHORS
+            || result.stop->reason == StopReason::MAX_PATHS
+            || (result.stop->reason == StopReason::EXTERNAL && request.sink
+                    && request.sink->stopped_at_threshold()));
+    const bool budget_stop = result.stop && !threshold_stop;
     bool low_complexity = false;
-    if (pattern.is_exact() && !result.stop) {
+    if (pattern.is_exact() && !budget_stop) {
         const std::optional<bool> flagged = is_low_complexity(
                 pattern.kind() == PatternKind::PROTEIN ? exact_bases(pattern) : pattern.text(),
                 budget);
