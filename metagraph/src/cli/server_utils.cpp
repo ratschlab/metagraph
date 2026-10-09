@@ -52,9 +52,9 @@ std::string compress_string(const std::string &str, int compressionlevel, bool g
 
     // zlib counts its input in 32 bits (uInt avail_in): the text is handed over in pieces of
     // at most that many bytes, the last one with Z_FINISH. Assigned whole, a text of 4 GiB or
-    // more was cut to its size modulo 2^32, and the server answered 200 with a well-formed
-    // stream of that prefix (review of 2026-10-06, U13-04). A text of one piece — every text
-    // below 4 GiB — is compressed by the same calls as before, so its bytes are unchanged
+    // more would be cut to its size modulo 2^32, and the server would answer 200 with a
+    // well-formed stream of that prefix. A text of one piece — every text below 4 GiB — is
+    // compressed exactly as by a single call
     const size_t piece_limit = std::numeric_limits<uInt>::max();
     const size_t piece_max = max_piece ? std::min(max_piece, piece_limit) : piece_limit;
     const char *next = str.data();
@@ -159,8 +159,8 @@ class DeliveryChecks {
 // A streambuf appending to a string under DeliveryChecks: the JSON text of a large response is
 // written under the caller's check, byte for byte what an std::ostringstream receives (the same
 // writer writes into either). A piece the writer hands over is copied in pieces up to the next
-// check, so that a check comes every |interval| bytes however large the piece (review of pass
-// 5, finding 6: one 16 MiB string value was appended whole, one check after it)
+// check, so that a check comes every |interval| bytes however large the piece (otherwise one
+// 16 MiB string value would be appended whole, with one check after it)
 class CheckedStringBuf : public std::streambuf {
   public:
     CheckedStringBuf(std::string *out, DeliveryChecks *checks) : out_(out), checks_(checks) {}
@@ -228,13 +228,13 @@ using TransportBuffer = boost::asio::streambuf;
 
 // Sizes the transport's buffer of |response| for |bytes| at once. Response::write copies the
 // response into the Response's asio::streambuf, which grows 128 bytes at a time through
-// std::vector::resize, that is by doubling: its last step held an old and a new buffer of up
-// to the body's size beside the body (review of 2026-10-06, U13-03: a 68 MB body cost 129 MB
-// in that copy). The pinned Simple-Web-Server has no call to size it; its Response is the
-// std::ostream over that streambuf, so it is reached through rdbuf(). Called after the
-// response's last check, so nothing reaches the transport before every check passed (a 503 at
-// the bound or a client gone still writes nothing). A streambuf of another type (a submodule
-// bump) grows as before
+// std::vector::resize, that is by doubling: its last step holds an old and a new buffer of up
+// to the body's size beside the body (a 68 MB body costs 129 MB in that copy). The pinned
+// Simple-Web-Server has no call to size it; its Response is the std::ostream over that
+// streambuf, so it is reached through rdbuf(). Called after the response's last check, so
+// nothing reaches the transport before every check passed (a 503 at the bound or a client
+// gone still writes nothing). A streambuf of another type (a submodule bump) is left to grow
+// by itself
 void reserve_transport(std::ostream &response, size_t bytes) {
     if (auto *buffer = dynamic_cast<TransportBuffer *>(response.rdbuf()))
         buffer->prepare(bytes);
@@ -260,8 +260,8 @@ size_t response_head_bytes(const SimpleWeb::CaseInsensitiveMultimap &header) {
 // gzip wins over deflate at equal weight, the higher weight otherwise; the response is
 // uncompressed when neither is acceptable or the client weights identity above both
 // (uncompressed is also the fallback after "identity;q=0": refusing to answer is not what
-// such a client asked for). A substring test sent gzip for "gzip;q=0, deflate;q=1" and
-// for "identity, gzip;q=0" (review round 4, finding 4).
+// such a client asked for). A substring test would send gzip for "gzip;q=0, deflate;q=1"
+// and for "identity, gzip;q=0".
 std::string requested_encoding(const std::shared_ptr<HttpServer::Request> &request) {
     const auto [from, to] = request->header.equal_range("Accept-Encoding");
     if (from == to)
@@ -322,13 +322,13 @@ bool client_gone(const HttpServer::Request &request) {
 // state says it. A handler's connection leaves ESTABLISHED only by a FIN or a reset of the
 // peer (CLOSE_WAIT, CLOSED) or by the server's own shutdown — the HTTP server's content
 // timeout shuts the connection (FIN_WAIT1/2, CLOSING, TIME_WAIT, LAST_ACK) — and in every one
-// of these no response can be delivered. Only the peer's states were read before: on Linux,
-// whose shutdown keeps the waiting bytes (macOS discards them, so the peek already read the
-// end), a walk that outlived the content timeout with bytes waiting computed on to its end,
-// against the SPEC's "stopped by this too" (review of 2026-10-06, U13-02). SYN_RECV stays
-// connected: an accepted connection is there only under TCP Fast Open, which this server's
-// listener does not enable, and a live client must never read as gone. Not a TCP socket, or a
-// platform without the query: false (connected, as before)
+// of these no response can be delivered. Reading only the peer's states is not enough: on
+// Linux, whose shutdown keeps the waiting bytes (macOS discards them, so the peek reads the
+// end), a walk that outlived the content timeout with bytes waiting would compute on to its
+// end, against the SPEC's "stopped by this too". SYN_RECV stays connected: an accepted
+// connection is there only under TCP Fast Open, which this server's listener does not enable,
+// and a live client must never read as gone. Not a TCP socket, or a platform without the
+// query: false (connected)
 static bool tcp_peer_finished(int fd) {
 #if defined(__linux__)
     struct tcp_info info;
@@ -361,14 +361,13 @@ bool peer_closed(int fd) {
     if (n > 0) {
         // Data waiting — a pipelined request, or bytes past the request such as a trailing
         // CRLF (RFC 9112 §2.2) — hides a close behind it from the peek: the connection's
-        // state tells (review of the stage-4 backend, F3: a client that closed after a
-        // trailing CRLF was walked to the end and answered with 68 MB into a dead socket)
+        // state tells (otherwise a client that closed after a trailing CRLF would be
+        // walked to the end and answered into a dead socket)
         return tcp_peer_finished(fd);
     }
     // EBADF and ENOTSOCK: the descriptor holds no connection (closed, or not a socket), so no
-    // client can be answered through it. They read "connected" before, against this
-    // function's contract (review of 2026-10-06, U13-02); the server's descriptor is always
-    // its connection's socket while the handler holds the request, so this changes no request
+    // client can be answered through it. The server's descriptor is always its connection's
+    // socket while the handler holds the request, so a request never meets these
     return errno == ECONNRESET || errno == ENOTCONN || errno == EPIPE || errno == ETIMEDOUT
         || errno == EBADF || errno == ENOTSOCK;
 }
@@ -428,9 +427,8 @@ std::string assemble_traverse_response(const Json::Value &envelope,
         out += ',';
     out += kResults;
     // each text is freed once copied: what was copied and what is left to copy are the
-    // response once, where the texts stayed alive beside it until the handler returned —
-    // through the compression and the transport's copy (review of 2026-10-06, C9: the server
-    // held 2.5x the text with gzip, 3.5x without; X-EFFICIENCY-02, U12-02, U13-03)
+    // response once; texts kept alive beside it until the handler returns would stay through
+    // the compression and the transport's copy (2.5x the text held with gzip, 3.5x without)
     if (!check) {
         for (size_t i = 0; i < results.size(); ++i) {
             if (i)
@@ -439,7 +437,7 @@ std::string assemble_traverse_response(const Json::Value &envelope,
             std::string().swap(results[i]);
         }
     } else {
-        // each text copied in pieces up to the next check (finding 6)
+        // each text copied in pieces up to the next check
         DeliveryChecks checks(out, check, kDeliveryCheckBytes, max_gap_ms);
         for (size_t i = 0; i < results.size(); ++i) {
             if (i)
@@ -543,8 +541,8 @@ graph_list_identities(const std::vector<GraphListEntry> &entries,
     // them; the graph's derived data, its mask and Bloom filter, is not part of an identity),
     // so that two spellings of one index agree, and two pairs whose main files are symlinks to
     // the same files but whose sidecars differ are two indexes, each validated against its
-    // manifest (review of pass 5, finding 2: grouped by the main files' real paths, the second
-    // pair's own .seqs was never checked and both stated one index_fp)
+    // manifest (grouped by the main files' real paths, the second pair's own .seqs would never
+    // be checked and both would state one index_fp)
     auto real = [](const std::string &path) {
         std::error_code ec;
         const std::filesystem::path p = std::filesystem::weakly_canonical(path, ec);
@@ -582,7 +580,7 @@ graph_list_identities(const std::vector<GraphListEntry> &entries,
     // Two different indexes never state one fingerprint: the server checks sizes, not
     // contents, so one manifest whose files have the base names and sizes of another pair's
     // (two annotations of one graph with swapped memberships, written by one tool run) would
-    // let a client take one index for the other (review of pass 5). Copies of one index under
+    // let a client take one index for the other. Copies of one index under
     // two paths are refused too (telling them apart would need hashing): list one path
     std::map<std::string, std::pair<Pair, size_t>> by_fp;
     for (const auto &[pair, s] : stated) {

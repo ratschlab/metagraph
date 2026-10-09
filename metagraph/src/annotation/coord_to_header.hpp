@@ -108,11 +108,9 @@ class CoordToHeader {
      * index is built on the first call and is owned by this object, so it lives and dies
      * with the headers it indexes: a server builds it once for its loaded index, and an
      * object constructed later at a freed address can never be answered from another
-     * object's index. That is what a process-wide cache keyed by the object's address
-     * did, and a fingerprint of a few headers could not tell two such objects apart (GPT
-     * review of stage 2, finding 7: [A,X,Y,Z] cached, [A,Y,X,Z] rebuilt at the same
-     * address, and X resolved to the sequence now named Y). load() drops the index.
-     * Thread-safe.
+     * object's index. A process-wide cache keyed by the object's address could do that,
+     * and a fingerprint of a few headers cannot tell two such objects apart. load()
+     * drops the index. Thread-safe.
      */
     std::optional<std::pair<Column, size_t>> find_header(std::string_view header) const;
     // Builds the reverse index now, if not built yet, and returns its number of distinct

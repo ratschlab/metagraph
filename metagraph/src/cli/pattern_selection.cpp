@@ -19,13 +19,12 @@
 #include "pattern_predicate.hpp"
 
 /**
- * The selection pass of a predicate for patterns of L <= k (increment 5b-3; SPEC-pattern-search.md
- * §19.5-§19.9 as drafted, DECISIONS P4, P11, P13, P14, P17, P22): which raw contexts of a
- * pattern satisfy the request's bound predicate, read from their annotation rows restricted to
- * the predicate's labels, under max_predicate_work, the request's memory account and its
- * deadline; and the projection predicate_only's rows (retrieve_given, pattern_retrieval.cpp).
- * Every refusal, cut and stop is stated (the owner's guarantee rule); a count is exact only
- * when every context behind it was decided.
+ * The selection pass of a predicate for patterns of L <= k (SPEC-pattern-search.md
+ * §19.5-§19.9): which raw contexts of a pattern satisfy the request's bound predicate, read
+ * from their annotation rows restricted to the predicate's labels, under max_predicate_work,
+ * the request's memory account and its deadline; and the projection predicate_only's rows
+ * (retrieve_given, pattern_retrieval.cpp). Every refusal, cut and stop is stated; a count is
+ * exact only when every context behind it was decided.
  */
 
 namespace mtg {
@@ -332,9 +331,9 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
     if (tested.empty() && released == 0 && !x.complete
             && (!x.cut || *x.cut != StopReason::MAX_CONTEXTS)) {
         // partial: the engine stopped (max_steps, time) before it released a context. Nothing
-        // reached the pass, as when all_or_count's and count's release is withheld for the
-        // same stop: not_started in every mode (§19.7; the review of 5b, L1). A release cut
-        // by max_predicate_contexts alone is the pass's (stopped, its bounds)
+        // reached the pass, as when all_or_count's and count's release is withheld for the same
+        // stop: not_started in every mode (§19.7). A release cut by max_predicate_contexts
+        // alone is the pass's (stopped, its bounds)
         without_pass(&a, SelectionPass::NOT_STARTED, raw);
         return finish();
     }
@@ -542,10 +541,9 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
         if (c.selected)
             ++selected;
         if (c.selected && listing && selected <= request.max_contexts) {
-            // listed: its selection_labels (the set it was evaluated on, ascending ids) with the
-            // row each was found on (the owner's answer to P11: per label the orientation that
-            // supported it), its own row kept for predicate_only with the names of its labels,
-            // charged before
+            // listed: its selection_labels (the set it was evaluated on, ascending ids) with
+            // the row each was found on (per label the orientation that supported it), its own
+            // row kept for predicate_only with the names of its labels, charged before
             std::vector<Tagged> ids;
             uint64_t bytes = 0;
             if (projection != Projection::NONE) {
@@ -702,7 +700,7 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
                 (void)held;
                 row.bytes = decode.held();
                 row.hits = std::move(out[0]);
-                // the decoded row's whole size (P17): every entry, not only the predicate's
+                // the decoded row's whole size: every entry, not only the predicate's
                 charge(8 + static_cast<uint64_t>(costs[0].entries) + costs[0].dependency_units);
             } else {
                 std::vector<LabelQuery::NodeHits> out = query.fetch({ row.key }, &pace);
@@ -753,7 +751,7 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
     if (completed) {
         a.selected = Count::exact(Unit::GRAPH_CONTEXTS, selected);
     } else if (raw.relation == Relation::EXACT || raw.relation == Relation::BOUNDS) {
-        // the untested contexts may all pass (P13): S <= true <= S + R_upper - T
+        // the untested contexts may all pass: S <= true <= S + R_upper - T
         const uint64_t upper = raw.relation == Relation::BOUNDS ? raw.upper : raw.value;
         a.selected = Count::bounds(Unit::GRAPH_CONTEXTS, selected,
                                    selected + (upper > decided ? upper - decided : 0));
@@ -784,9 +782,9 @@ SelectionAnswer PatternRetrieval::select(std::vector<TestedContext> &tested, uin
     }
     if (keep_list && projection != Projection::NONE && !listed.empty()) {
         // the label order of §5.5 over the listed contexts' selection_labels: contexts desc,
-        // column asc. The clock is read before it (§19.9; the review of 5b, L3), its sorts
-        // then counted as the retrieval's light work (n log n comparisons each, Impl::
-        // may_work: the next light work reads the clock once they pass its stride)
+        // column asc. The clock is read before it (§19.9), its sorts then counted as the
+        // retrieval's light work (n log n comparisons each, Impl::may_work: the next light work
+        // reads the clock once they pass its stride)
         std::vector<LabelId> order;
         order.reserve(label_count.size());
         for (const auto &[id, count] : label_count) {

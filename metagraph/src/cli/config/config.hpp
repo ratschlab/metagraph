@@ -17,8 +17,7 @@ namespace cli {
 // The HTTP server's content timeout (s): the body, the handler and the response of every
 // request must fit in it (Simple-Web-Server's timeout_content, server.cpp), and the second a
 // route's own deadline leaves under it for the transport (/traverse's attempts' hard cap; the
-// cap of /pattern's time_budget_ms and of /resolve's opt-in deadline, review of 2026-10-07,
-// R1-05)
+// cap of /pattern's time_budget_ms and of /resolve's opt-in deadline)
 constexpr uint64_t kServerContentTimeoutS = 900;
 constexpr uint64_t kServerTransportMarginMs = 1000;
 // the longest route deadline the transport can honour (ms)
@@ -133,10 +132,10 @@ class Config {
     size_t traverse_max_seed_labels = 10'000;
     uint64_t resolve_max_query_bp = 0;
     // The server's maxima of a request's budgets (bounds.max_memory_mb, bounds.max_work_units;
-    // owner decision R16): 0 = off (a request's budgets as given, an omitted one none). Set,
-    // a larger budget is lowered to it and an omitted one set to it, echoed as clamped like
-    // the time cap. Off by default: a budget changes how a walk stops, so a deployment that
-    // did not choose one keeps the results it always gave
+    // SPEC-labeled-traversal-core.md §10.3): 0 = off (a request's budgets as given, an omitted
+    // one none). Set, a larger budget is lowered to it and an omitted one set to it, echoed as
+    // clamped like the time cap. Off by default: a budget changes how a walk stops, so a
+    // deployment that did not choose one keeps the results it always gave
     uint64_t traverse_max_memory_mb = 0;
     uint64_t traverse_max_work_units = 0;
     // Ledger-managed /traverse attempts (requests with attempt_id, traverse_attempts.hpp):
@@ -147,8 +146,7 @@ class Config {
     size_t traverse_attempt_retention = 10'000;
     // The longest a tombstone is held to cover the not_after_ms a cancel (or a refused copy of
     // the request) names, plus the clock skew allowance (s; never less than retention_s, which
-    // every tombstone is held at least): what bounds how long one cancel can keep an id
-    // refused (review of pass 5, finding 1)
+    // every tombstone is held at least): what bounds how long one cancel can keep an id refused
     uint64_t traverse_attempt_tombstone_max_s = 86'400;
     // the accepted ranges of the retention settings (refused at start-up beyond them): a year,
     // ten million attempts
@@ -160,7 +158,7 @@ class Config {
     uint64_t traverse_clock_skew_ms = 2000;
     // the expected duration of one uninterruptible piece of a /traverse annotation read under
     // a deadline (the reads are decoded in chunks sized from the observed per-row time, the
-    // deadline checked between them); 0: one piece per read, as before (ms)
+    // deadline checked between them); 0: one piece per read, not chunked (ms)
     uint64_t traverse_chunk_target_ms = 50;
     // the bound of a /traverse request's row-diff path cache (MiB; the rows its reads
     // reconstruct, kept so that a later read's row-diff path stops at a cached row): within
@@ -181,60 +179,59 @@ class Config {
     // and, but for the time budget, its default; the CLI applies the same ones, so that both
     // answer alike
     double pattern_min_information_bits = 24;
-    // owner decision #24 of 2026-10-08: on a graph without its dummy-edge mask, a pattern whose
-    // unchecked candidates number at most this has each of them tested at query time (k - 1
-    // steps each, charged to max_steps), its counts then exact; 0 tests none. Capped low (the
-    // owner: per-query checking of large blocks is too expensive): at most
-    // kMaxPatternCheckedEntries. Not a request field (stated in the capabilities' caps)
+    // on a graph without its dummy-edge mask, a pattern whose unchecked candidates number at
+    // most this has each of them tested at query time (k - 1 steps each, charged to max_steps),
+    // its counts then exact; 0 tests none. Capped low (per-query checking of large blocks is
+    // too expensive): at most kMaxPatternCheckedEntries. Not a request field (stated in the
+    // capabilities' caps)
     uint64_t pattern_max_checked_entries = 50;
     static constexpr uint64_t kMaxPatternCheckedEntries = 1'000;
     uint64_t pattern_max_contexts = 10'000;
     uint64_t pattern_max_anchors = 1'000;
-    // increment 4 (long_search "paths", §4.2): the default and maximum of max_paths, the
-    // retrieval threshold on the completed paths of a pattern longer than k (all_or_count
-    // releases them only when their exact count is at most this; partial's cap)
+    // long_search "paths" (§4.2): the default and maximum of max_paths, the retrieval threshold
+    // on the completed paths of a pattern longer than k (all_or_count releases them only when
+    // their exact count is at most this; partial's cap)
     uint64_t pattern_max_paths = 1'000;
     // the step cap of a request (§5.3). Not calibrated against the time budget on a deployed
-    // index (review of 2026-10-07, X-EFFICIENCY-05): measured in RAM at 0.2-0.7 us a step
-    // (the mini index, random graphs of 0.5 and 2 billion edges; M5 Max, shared), so 1e8 steps
-    // take 20-75 s, about the default 60 s budget: which of the two stops a heavy request
-    // first depends on the machine and its load (a time stop is time_limited). The rate on
-    // a large mmapped index is unmeasured (the milestone-6 benchmark, DESIGN §13); a request
-    // cannot raise this cap, only the operator can
+    // index: measured in RAM at 0.2-0.7 us a step (the mini index, random graphs of 0.5 and 2
+    // billion edges; M5 Max, shared), so 1e8 steps take 20-75 s, about the default 60 s budget:
+    // which of the two stops a heavy request first depends on the machine and its load (a time
+    // stop is time_limited). The rate on a large mmapped index is unmeasured; a request cannot
+    // raise this cap, only the operator can
     uint64_t pattern_max_steps = 100'000'000;
-    // the time budget of a request that names none, and the most one may name (the owner,
-    // 2026-10-07: 60 s by default, capped under the 900 s content timeout with room for the
-    // answer's serialisation and compression)
+    // the time budget of a request that names none, and the most one may name (60 s by default,
+    // capped under the 900 s content timeout with room for the answer's serialisation and
+    // compression)
     uint64_t pattern_default_time_ms = 60'000;
     uint64_t pattern_max_time_ms = 600'000;
-    // the finalisation reserve inside the time budget: work stops at least this long before
-    // the deadline so that the answer can still be written by it (ms); longer by the
-    // estimated time to write what the answer buffers (review of 2026-10-07,
-    // X-EFFICIENCY-04): at the rates below (MB/s), building and writing its JSON text and
-    // compressing it, with a margin of 1.25 (pattern_retrieval.hpp, AnswerVolume). Starting
-    // estimates as /traverse's delivery rates: conservative (16 x 10,000 results, 18.4 MB of
-    // text, were written and gzipped in 0.3-0.45 s on an M-series Mac; the model gives 2.8 s)
+    // the finalisation reserve inside the time budget: work stops at least this long before the
+    // deadline so that the answer can still be written by it (ms); longer by the estimated time
+    // to write what the answer buffers: at the rates below (MB/s), building and writing its
+    // JSON text and compressing it, with a margin of 1.25 (pattern_retrieval.hpp,
+    // AnswerVolume). Starting estimates as /traverse's delivery rates: conservative
+    // (16 x 10,000 results, 18.4 MB of text, were written and gzipped in 0.3-0.45 s on an
+    // M-series Mac; the model gives 2.8 s)
     uint64_t pattern_finalize_ms = 250;
     double pattern_delivery_build_mbps = 10;
     double pattern_delivery_compress_mbps = 50;
     // patterns per request (a longer list is refused, not cut)
     uint64_t pattern_max_patterns = 16;
-    // output.labels "all" (increment 3, §5.3): the labels kept per row (more are stated as a
-    // truncated anchor), the annotation work per request (the oracle's units: 8 per row, 1
-    // per entry and coordinate, and the rows' row-diff dependencies), the request's memory
-    // account (MiB), and partial's lists: labels per pattern, occurrences per label
+    // output.labels "all" (§5.3): the labels kept per row (more are stated as a truncated
+    // anchor), the annotation work per request (the oracle's units: 8 per row, 1 per entry and
+    // coordinate, and the rows' row-diff dependencies), the request's memory account (MiB), and
+    // partial's lists: labels per pattern, occurrences per label
     uint64_t pattern_max_labels_per_anchor = 64;
     uint64_t pattern_max_annotation_work = 100'000'000;
     uint64_t pattern_max_memory_mb = 256;
     uint64_t pattern_max_labels = 1'000;
     uint64_t pattern_max_occurrences = 16;
-    // increment 5b, a predicate's selection (SPEC-pattern-search.md §19.2, §19.3; owner
-    // decision P3 of 2026-10-08): the default and maximum of max_predicate_contexts (the raw
-    // contexts a pattern's selection may test) and of max_predicate_work (the selection's work
-    // per request, the oracle's units, a budget of its own beside max_annotation_work), and the
-    // names a predicate may list (not a request field: a larger predicate is refused,
-    // predicate_too_large). The last is at most kMaxPatternPredicateLabels (refused at
-    // start-up above): the bound predicate and its echo are linear in it
+    // a predicate's selection (SPEC-pattern-search.md §19.2, §19.3): the default and maximum of
+    // max_predicate_contexts (the raw contexts a pattern's selection may test) and of
+    // max_predicate_work (the selection's work per request, the oracle's units, a budget of its
+    // own beside max_annotation_work), and the names a predicate may list (not a request field:
+    // a larger predicate is refused, predicate_too_large). The last is at most
+    // kMaxPatternPredicateLabels (refused at start-up above): the bound predicate and its echo
+    // are linear in it
     uint64_t pattern_max_predicate_contexts = 100'000;
     uint64_t pattern_max_predicate_work = 100'000'000;
     uint64_t pattern_max_predicate_labels = 10'000;

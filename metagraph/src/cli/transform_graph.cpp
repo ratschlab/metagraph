@@ -27,9 +27,9 @@ namespace {
  * DBGSuccinct::load reads beside it. Only that file is written: the mask prunes nothing, so
  * node ids and the annotation stay valid, and a graph of hundreds of GB is not rewritten for a
  * file a small fraction of its size. Without a mask the pattern search cannot tell a source
- * dummy from a k-mer: it counts upper bounds with an estimate (counting upper_bound, owner
- * decision #16 of 2026-10-08); with it, exact counts. The mask is derived data of the graph,
- * not part of the index identity index_fp (owner decision #17).
+ * dummy from a k-mer: it counts upper bounds with an estimate (counting upper_bound,
+ * DESIGN-pattern-search.md §4.4); with it, exact counts. The mask is derived data of the
+ * graph, not part of the index identity index_fp.
  */
 int write_dummy_mask(const std::string &graph_path, const Config &config) {
     using graph::DBGSuccinct;

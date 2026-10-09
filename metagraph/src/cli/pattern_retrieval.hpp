@@ -3,11 +3,11 @@
 
 /**
  * The labelled retrieval of POST /pattern (docs/DESIGN-pattern-search.md §4.3, §5.2-§5.5,
- * §7.2; increment 3): output.labels "all" for patterns of L <= k, and (increment 4,
- * long_search "paths") for the paths of patterns longer than k (retrieve_paths: the labels on
- * every k-mer of a path, each with its support). The engine
- * (graph::pattern::PatternSearch::enumerate) releases the graph contexts; this module reads
- * their labels and places them, in two steps on the traversal's budget-aware, paced classes:
+ * §7.2): output.labels "all" for patterns of L <= k, and (long_search "paths") for the paths of
+ * patterns longer than k (retrieve_paths: the labels on every k-mer of a path, each with its
+ * support). The engine (graph::pattern::PatternSearch::enumerate) releases the graph contexts;
+ * this module reads their labels and places them, in two steps on the traversal's budget-aware,
+ * paced classes:
  *
  *  1. discovery: a LabelRecorder (column labels, at most max_labels_per_anchor per row, the
  *     row's true total beside the list) over the contexts' annotation keys;
@@ -18,30 +18,28 @@
  *     nowhere.
  *
  * Both steps read through LabelOracle::decode_charged() annotations with a DecodeBudget (the
- * account's remainder) and ReadPacing (the request's deadline); an unbudgeted backend is
- * read only when the request allows it (allow_unbudgeted_annotation), and the answer says so.
- * They read one row at a time, the time and the work checked before each row, every row whose
- * read began charged its units (refused and interrupted reads too), so that the reads pass the
- * work budget by one row at most (review GPT-2, findings 1 and 2).
- * One memory account per request, over all its patterns, holds what the reads return, the
- * label dictionary, the contexts' descriptors (charged as the engine releases them, before
- * their result objects are built), the statements of refused and truncated rows (reserved
- * before the read that can produce them), the deduplication state, the runs of occurrences a
- * path's verification keeps for its output and the labels built for the answer (a
- * deterministic model, as the walker's, never a measurement; an unbudgeted read may take it
- * past its maximum by the label names it returned, after which nothing more fits and the
- * reads stop, stated); the work
+ * account's remainder) and ReadPacing (the request's deadline); an unbudgeted backend is read
+ * only when the request allows it (allow_unbudgeted_annotation), and the answer says so. They
+ * read one row at a time, the time and the work checked before each row, every row whose read
+ * began charged its units (refused and interrupted reads too), so that the reads pass the work
+ * budget by one row at most.
+ * One memory account per request, over all its patterns, holds what the reads return, the label
+ * dictionary, the contexts' descriptors (charged as the engine releases them, before their
+ * result objects are built), the statements of refused and truncated rows (reserved before the
+ * read that can produce them), the deduplication state, the runs of occurrences a path's
+ * verification keeps for its output and the labels built for the answer (a deterministic model,
+ * as the walker's, never a measurement; an unbudgeted read may take it past its maximum by the
+ * label names it returned, after which nothing more fits and the reads stop, stated); the work
  * account counts the oracle's units (8 per row, 1 per entry and coordinate, and the rows'
- * row-diff dependencies; a refused row what its read decoded, at least 8). The work between
- * the reads (the occurrences, the paths' label lists and their verification) reads the clock
- * at least every Budget::kClockStride units, before the work (review GPT-3). Each placed
- * occurrence is counted in its label's union, but a label's list holds, and the answer's volume
- * and account are charged for, only what it can list (partial: max_occurrences_per_label of
- * the context's or path's first), cut to the union's first once it is complete. Every refusal,
- * truncation, cut and stop is stated (the owner's
- * guarantee rule); a count is exact only when everything behind it was read.
+ * row-diff dependencies; a refused row what its read decoded, at least 8). The work between the
+ * reads (the occurrences, the paths' label lists and their verification) reads the clock at
+ * least every Budget::kClockStride units, before the work. Each placed occurrence is counted in
+ * its label's union, but a label's list holds, and the answer's volume and account are charged
+ * for, only what it can list (partial: max_occurrences_per_label of the context's or path's
+ * first), cut to the union's first once it is complete. Every refusal, truncation, cut and stop
+ * is stated; a count is exact only when everything behind it was read.
  *
- * Increment 5b (pattern_selection.cpp; the internals shared through pattern_retrieval_impl.hpp):
+ * Predicates (pattern_selection.cpp; the internals shared through pattern_retrieval_impl.hpp):
  * the selection of a request's predicate for patterns of L <= k — bind() once per request, then
  * per pattern begin_selection(), admit_tested() and tested_context() as the engine releases the
  * raw contexts, select() (the pass: rows and reverse-complement lookups, one restricted read
@@ -86,13 +84,12 @@ struct Binding;
 }
 
 /**
- * What the answer of one /pattern request has built so far, and the time writing it is
- * expected to take (review of 2026-10-07, X-EFFICIENCY-04). The finalisation reserve
- * (--pattern-finalize-ms) is the floor of the time kept back from the work; the work stops
- * earlier by this estimate, so that a request whose patterns buffered many results is still
- * answered within its budget (a time stop, its counts kept) rather than 503 "deadline" with
- * all of its work lost. As /traverse's delivery reserve (traverse_attempts.hpp,
- * Attempt::reserve_ms), but from configured rates only:
+ * What the answer of one /pattern request has built so far, and the time writing it is expected
+ * to take. The finalisation reserve (--pattern-finalize-ms) is the floor of the time kept back
+ * from the work; the work stops earlier by this estimate, so that a request whose patterns
+ * buffered many results is still answered within its budget (a time stop, its counts kept)
+ * rather than 503 "deadline" with all of its work lost. As /traverse's delivery reserve
+ * (traverse_attempts.hpp, Attempt::reserve_ms), but from configured rates only:
  *
  *   finalize_ms = margin x scale x ((T + P) / (build x 1000) + (T + P) / (compress x 1000)
  *                                   + P / (build x 1000))
@@ -122,8 +119,8 @@ class AnswerVolume {
 
     uint64_t text_bytes() const { return text_; }
     uint64_t pending_bytes() const { return pending_; }
-    // the estimated time to write (and build the pending part of) what is buffered (ms); 0
-    // for a rate of 0 or infinity (no model: the reserve alone, as before the review)
+    // the estimated time to write (and build the pending part of) what is buffered (ms); 0 for
+    // a rate of 0 or infinity (no model: the reserve alone)
     double finalize_ms() const;
 
   private:
@@ -197,10 +194,10 @@ struct RetrievalContext {
 };
 
 /**
- * One released path of a pattern longer than k (long_search "paths", increment 4; §4.2), as
- * the route collected it from the engine (in answer order): its orientation, the L bases it
- * spells, and the annotation key of each of its n = L - k + 1 k-mers in reading order (row + 1,
- * as RetrievalContext::key; npos when one has no row).
+ * One released path of a pattern longer than k (long_search "paths"; §4.2), as the route
+ * collected it from the engine (in answer order): its orientation, the L bases it spells, and
+ * the annotation key of each of its n = L - k + 1 k-mers in reading order (row + 1, as
+ * RetrievalContext::key; npos when one has no row).
  */
 struct RetrievalPath {
     graph::pattern::Orientation orientation = graph::pattern::Orientation::FORWARD;
@@ -238,9 +235,9 @@ struct RetrievalHooks {
 };
 
 /**
- * Counters of the labelled retrieval (review GPT-3), additive: one pattern's in its
- * LabelsAnswer, the request's so far in PatternRetrieval::counters(). Not in the answer
- * unless the route states them.
+ * Counters of the labelled retrieval, additive: one pattern's in its LabelsAnswer, the
+ * request's so far in PatternRetrieval::counters(). Not in the answer unless the route states
+ * them.
  */
 struct RetrievalCounters {
     // the distinct annotation rows whose labels were read (LabelRecorder, complete or
@@ -301,9 +298,9 @@ struct LabelsAnswer {
 };
 
 /**
- * The selection of a predicate (increment 5b, SPEC-pattern-search.md §19): which contexts of a
- * pattern of L <= k satisfy the request's predicate, read from their annotation rows by the
- * selection pass (PatternRetrieval::select, pattern_selection.cpp).
+ * The selection of a predicate (SPEC-pattern-search.md §19): which contexts of a pattern of
+ * L <= k satisfy the request's predicate, read from their annotation rows by the selection pass
+ * (PatternRetrieval::select, pattern_selection.cpp).
  */
 
 // The request-wide options of the selection, effective (after the server's caps, §19.2)
@@ -383,10 +380,10 @@ struct SelectionAnswer {
     // reverse complement's), as ids into Bound::labels(), in label order (contexts desc over
     // the chosen, column asc); charged when the context was decided
     std::vector<std::vector<graph::traversal::LabelId>> selection_labels;
-    // beside each of them, which row it was found on (the owner's answer to P11: per selected
-    // result and label the orientation that supported it): kOnContext (the context's k-mer x
-    // as spelled), kOnReverseComplement (rc(x), "either" on a BASIC graph), or both (a
-    // palindromic x under "either": x is rc(x)). selection_strands_json names them
+    // beside each of them, which row it was found on (per selected result and label the
+    // orientation that supported it): kOnContext (the context's k-mer x as spelled),
+    // kOnReverseComplement (rc(x), "either" on a BASIC graph), or both (a palindromic x under
+    // "either": x is rc(x)). selection_strands_json names them
     static constexpr uint8_t kOnContext = 1;
     static constexpr uint8_t kOnReverseComplement = 2;
     std::vector<std::vector<uint8_t>> selection_label_rows;
@@ -473,9 +470,9 @@ class PatternRetrieval {
                           const Json::Value &graph_name);
 
     /**
-     * The labels of the admitted paths of one pattern longer than k (long_search "paths",
-     * increment 4; DESIGN §4.3 "Label consistency for long", owner decision #14), as
-     * retrieve() for contexts, with the same budgets, statements and modes:
+     * The labels of the admitted paths of one pattern longer than k (long_search "paths";
+     * DESIGN §4.3 "Label consistency for long"), as retrieve() for contexts, with the same
+     * budgets, statements and modes:
      *  1. discovery: the rows of every k-mer of every admitted path (each distinct row read
      *     once, one row per read, in answer order of first appearance); a path's labels are
      *     the labels present on EVERY one of its k-mers (support label_intersection);
@@ -490,7 +487,7 @@ class PatternRetrieval {
      *     unknown, nothing verified. Elsewhere label_intersection only. The chains are the
      *     intersection of the k-mers' coordinate lists shifted by -i (a leapfrog join from the
      *     smallest, consecutive chains kept as runs), made once per (path, label) and kept for
-     *     the output as runs of occurrences (review GPT-3, finding 1).
+     *     the output as runs of occurrences.
      * |require_verified| (require_support "record_verified"; placement record, checked by the
      * route): only the verified labels are listed, the others counted per path and per entry
      * (labels_excluded_unverified). Mode ALL_OR_COUNT or PARTIAL.
@@ -506,7 +503,7 @@ class PatternRetrieval {
     // the request's counters so far (the sum of its patterns')
     const RetrievalCounters& counters() const;
 
-    // ---- increment 5b: the selection of a predicate (pattern_selection.cpp; SPEC §19)
+    // ---- the selection of a predicate (pattern_selection.cpp; SPEC §19)
 
     /**
      * Binds the request's |predicate| to this index's columns (predicate::Bound::bind, the
@@ -546,12 +543,12 @@ class PatternRetrieval {
     TestedContext tested_context(const graph::pattern::Context &c) const;
 
     /**
-     * The selection pass of one pattern (§19.6 steps 3 and 4; PLAN 5b-3). |tested| are the
-     * admitted raw contexts in answer order (admit_tested), the first of |released| the engine
-     * released (more when the account could not hold their descriptors: the pass's set ended
-     * there, stop {selection, max_memory}); |raw| is the raw count (counts.contexts.total) and
-     * |x| the engine's extraction (withheld: no pass, not_admitted for
-     * count_above_threshold, else not_started). In order:
+     * The selection pass of one pattern (§19.6 steps 3 and 4). |tested| are the admitted raw
+     * contexts in answer order (admit_tested), the first of |released| the engine released
+     * (more when the account could not hold their descriptors: the pass's set ended there, stop
+     * {selection, max_memory}); |raw| is the raw count (counts.contexts.total) and |x| the
+     * engine's extraction (withheld: no pass, not_admitted for count_above_threshold, else
+     * not_started). In order:
      *  1. the rows: each context's row and, with "either" on a BASIC graph, its reverse
      *     complement's — the k-mer spelled, reverse-complemented and looked up
      *     (LabelOracle::keys_of_sequence), k units charged and the gate checked before each;
@@ -586,10 +583,10 @@ class PatternRetrieval {
     // the j-th chosen context's selection_labels (the names; their bytes were charged by the
     // pass)
     Json::Value selection_labels_json(const SelectionAnswer &answer, size_t j) const;
-    // beside them, per label the orientation whose row carries it (§19.10, the owner's answer
-    // to P11): "context" (the context's k-mer as spelled), "reverse_complement" (its reverse
-    // complement's row only, "either" on a BASIC graph), "both", or "either" on CANONICAL and
-    // PRIMARY graphs (one row serves both orientations: no strand is known)
+    // beside them, per label the orientation whose row carries it (§19.10): "context" (the
+    // context's k-mer as spelled), "reverse_complement" (its reverse complement's row only,
+    // "either" on a BASIC graph), "both", or "either" on CANONICAL and PRIMARY graphs (one row
+    // serves both orientations: no strand is known)
     Json::Value selection_strands_json(const SelectionAnswer &answer, size_t j) const;
     // frees what the last pattern's pass still holds: its descriptors (after the route built
     // the chosen contexts' results) and its kept rows (when retrieve_given did not take them)

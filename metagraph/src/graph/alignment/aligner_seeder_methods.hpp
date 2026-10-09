@@ -32,8 +32,7 @@ struct NonSentinelSymbols {
  * the stack, as symbols(boss, range, try_symbol), where |range| has its length already
  * incremented to the length of the ranges it is about to produce, and calls
  * try_symbol(s) for each symbol s to append, in the order the ranges are to be pushed.
- * The default (NonSentinelSymbols) is the loop over every non-sentinel symbol that this
- * function has always run, so its existing callers behave as before. The pattern search
+ * The default (NonSentinelSymbols) tries every non-sentinel symbol. The pattern search
  * (pattern_search.cpp) passes the symbols a pattern allows at each depth.
  */
 template <class BOSSEdgeRange, class SymbolSet = NonSentinelSymbols>

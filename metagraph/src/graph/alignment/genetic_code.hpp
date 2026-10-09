@@ -2,9 +2,9 @@
 #define __GENETIC_CODE_HPP__
 
 /**
- * The genetic codes of the pattern search's peptides (docs/DESIGN-pattern-search.md §6; owner
- * decision #15 of 2026-10-08): every NCBI translation table, and the codon sets the codon
- * automaton of a peptide pattern is built from.
+ * The genetic codes of the pattern search's peptides (docs/DESIGN-pattern-search.md §6): every
+ * NCBI translation table, and the codon sets the codon automaton of a peptide pattern is built
+ * from.
  *
  * A codon is indexed in reading order over the engine's base order (pattern_search.hpp's
  * BaseSet bits: A = 0, C = 1, G = 2, T = 3): index = 16 * b0 + 4 * b1 + b2. A set of codons is

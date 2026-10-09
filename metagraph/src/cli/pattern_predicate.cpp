@@ -42,9 +42,8 @@ PatternRefusal invalid(const std::string &message) {
 /**
  * Strict access to one JSON object of the request, as /traverse's: every field read is
  * remembered, and finish() refuses the first one nothing read ("unknown field"), after the
- * known ones were checked — the guarantee rule: a field this increment does not know is never
- * ignored. (A copy of the route's reader in pattern.cpp, kept here so that this increment does
- * not touch the route; the two can move into one header with the route's predicate fields.)
+ * known ones were checked — the guarantee rule: a field the server does not know is never
+ * ignored. (A copy of the route's reader in pattern.cpp.)
  */
 class Fields {
   public:
@@ -144,7 +143,7 @@ void Parser::names(const Json::Value &list, const std::string &path, Predicate::
     for (Json::ArrayIndex i = 0; i < list.size(); ++i) {
         const Json::Value &name = list[i];
         if (!name.isString()) {
-            // P7: names are strings, a taxid among them; the message names the fix
+            // names are strings, a taxid among them; the message names the fix
             if (name.isNumeric()) {
                 const std::string example = !name.isIntegral() ? std::string("562")
                         : name.isInt64() ? std::to_string(name.asInt64())

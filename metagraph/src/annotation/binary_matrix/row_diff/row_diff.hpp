@@ -90,8 +90,8 @@ class IRowDiff {
     const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
 
     /**
-     * The budget-aware decode path (decode_budget.hpp; DESIGN-traverse-graphlet.md §14,
-     * stage 3 of §14.1), opt-in: the default functions (get_rows, get_row_tuples,
+     * The budget-aware decode path (decode_budget.hpp; DESIGN-traverse-graphlet.md §14),
+     * opt-in: the default functions (get_rows, get_row_tuples,
      * get_rows_dict, ...) are untouched by it and keep their speed and threading.
      *
      * decode_rows() / decode_row_tuples() return the rows of |rows| like get_rows() /

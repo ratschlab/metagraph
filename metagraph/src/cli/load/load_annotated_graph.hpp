@@ -50,8 +50,8 @@ void build_mask_at_load(const std::shared_ptr<graph::DeBruijnGraph> &graph,
 bool mask_built_at_load(const graph::DeBruijnGraph &graph);
 
 /**
- * The check of a mask the pattern search is served on (review of 2026-10-07, I17; owner
- * decision #6): counts the edges with W = $ that |graph|'s mask marks valid
+ * The check of a mask the pattern search is served on (mask_invalid, SPEC-pattern-search.md
+ * §6): counts the edges with W = $ that |graph|'s mask marks valid
  * (DBGSuccinct::count_valid_sentinel_edges, O(number of W = $ edges)), and when there are any,
  * logs the remedy and records |graph| as one whose mask is invalid (mask_invalid_at_load): the
  * pattern search then refuses it (mask_invalid), since its counts would take those dummies

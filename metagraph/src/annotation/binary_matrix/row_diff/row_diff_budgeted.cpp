@@ -1,5 +1,5 @@
 // The budget-aware row-diff decode (DESIGN-traverse-graphlet.md §14, "row decoding is
-// budget-aware inside the decoder"; stage 3 of §14.1): IRowDiff::decode_budgeted, the body
+// budget-aware inside the decoder"): IRowDiff::decode_budgeted, the body
 // of decode_rows() / decode_row_tuples(). See decode_budget.hpp for the contract.
 #include "row_diff.hpp"
 
@@ -259,10 +259,10 @@ struct Visit {
         anchor_cached = (anchor_cached & kCached) | anchor;
     }
 };
-// 88 bytes before the efficiency pass, 96 now: the same bytes in the model at every capacity
-// a ChargedBuffer takes (16 * 2^k elements: 1,408 * 2^k and 1,536 * 2^k bytes share jemalloc's
-// size class, alloc_bytes()). A larger Visit would change every row's demand, and with it the
-// budgeted responses (review of the efficiency pass: 104 bytes moved a stated demand by 768)
+// At most 96 bytes: up to that size the model charges the same bytes at every capacity a
+// ChargedBuffer takes (16 * 2^k elements: 1,408 * 2^k and 1,536 * 2^k bytes share jemalloc's
+// size class, alloc_bytes()). A larger Visit changes every row's demand, and with it the
+// budgeted responses
 static_assert(sizeof(Visit) <= 96, "a larger Visit changes the demand of every row");
 
 // a visit's aggregates, as the path cache keeps them (and back)
@@ -525,7 +525,7 @@ DecodeStatus IRowDiff::decode_budgeted(const std::vector<Row> &rows, DecodeBudge
             // From the path, not from what this call built the row from: an empty diff keeps
             // the incoming row, whose bytes are its successor's aggregate when the row is
             // decoded alone but an exact-size copy when the path continued from a row shared
-            // earlier in the call — the demand must not depend on the batch (review F4)
+            // earlier in the call — the demand must not depend on the batch
             visit.full = changes ? result_bytes : next.full;
             visit.set_anchor(next.anchor());
             if (cache && cache->keeps(visit.length - 1, p - path, result)) {

@@ -37,44 +37,35 @@ using graph::DeBruijnGraph;
 namespace {
 
 /**
- * The projection of an omitted output.labels. The design's default is "all" (§7.1); the
- * owner's instruction for milestone 1 was that an omitted projection means "none", and
- * contract version 1 keeps it so now that "all" is served (increment 3): a request that named
- * no projection is answered byte for byte as before, without reading any annotation. It is
- * stated in every answer (`output`) and in the capabilities (`default_projection`), so a
- * client never has to assume it.
+ * The projection of an omitted output.labels: "none" (the design's default is "all", §7.1), so
+ * that a request that names no projection reads no annotation. It is stated in every answer
+ * (`output`) and in the capabilities (`default_projection`), so a client never has to assume
+ * it.
  */
 constexpr const char *kDefaultProjection = "none";
 
-// Request fields of later increments (§7.1): refused by name, any value (null included),
-// rather than reported as unknown, so that the answer says what to wait for. (long_search,
-// max_paths and require_support, reserved until increment 4, are served now: the paths of a
-// pattern longer than k, opt-in by long_search "paths", owner decisions #13 and #14;
-// genetic_code with the peptides of increment 5, owner decision #15; and predicate,
-// max_predicate_contexts and max_predicate_work with increment 5b, SPEC §19)
+// Request fields that are not served (§7.1): refused by name, any value (null included), rather
+// than reported as unknown, so that the answer says what to wait for
 const char *const kLaterIncrementFields[] = {
     "graphs", "budget_split",
 };
 
-// long_search (owner decision #13 of 2026-10-07): "anchors", the default, answers a pattern
-// longer than k by its anchors (the answer of increments 1-3, unchanged); "paths" extends them
-// into paths (increment 4). A pattern of at most k bases is answered alike under both
+// long_search: "anchors", the default, answers a pattern longer than k by its anchors; "paths"
+// extends them into paths. A pattern of at most k bases is answered alike under both
 constexpr const char kLongSearchAnchors[] = "anchors";
 constexpr const char kLongSearchPaths[] = "paths";
-// require_support (owner decision #14): every label carrying a path is returned with its
-// support ("label_intersection", the default), or only the record-verified ones
+// require_support: every label carrying a path is returned with its support
+// ("label_intersection", the default), or only the record-verified ones
 constexpr const char kSupportIntersection[] = "label_intersection";
 constexpr const char kSupportVerified[] = "record_verified";
 
-// The residues a protein pattern may hold (increment 5, owner decision #15; DESIGN §6): the 20
-// amino acids, the ambiguity codes X, B, Z, J and, since owner decision #19 of 2026-10-08, the
-// stop '*' (a stop codon of the request's genetic code), as the engine's Pattern::parse reads
-// them; listed in the capabilities
+// The residues a protein pattern may hold (DESIGN §6): the 20 amino acids, the ambiguity codes
+// X, B, Z, J and the stop '*' (a stop codon of the request's genetic code), as the engine's
+// Pattern::parse reads them; listed in the capabilities
 constexpr const char kProteinResidues[] = "ACDEFGHIKLMNPQRSTVWYXBZJ*";
 
-// The two prose fields of the capabilities, references to the SPEC since owner decision P9 of
-// 2026-10-08 (pattern_capabilities_json): every cap named in the first (the rule names each,
-// review of 2026-10-07, R2-04; increment 5b's three among them)
+// The two prose fields of the capabilities, references to the SPEC (pattern_capabilities_json);
+// the first names every cap
 constexpr const char kCapsRule[] = "max_contexts, max_anchors, max_paths, max_steps, "
     "time_budget_ms, max_labels_per_anchor, max_annotation_work, max_memory_mb, max_labels, "
     "max_occurrences_per_label, max_predicate_contexts, max_predicate_work: maxima of request "
@@ -83,15 +74,14 @@ constexpr const char kCapsRule[] = "max_contexts, max_anchors, max_paths, max_st
     "SPEC-pattern-search.md sections 4.5, 7.4, 7.6, 12.1, 19";
 constexpr const char kProteinRule[] = "SPEC-pattern-search.md sections 12.2, 18";
 
-// The note of an entry answered on a graph without its dummy-edge mask (counting
-// "upper_bound", owner decision #16) where a count carries an estimate: each such count is the
-// bounds [lower, upper], upper the BOSS entries of its ranges (source dummies included), and
-// its estimate is upper x the graph's sampled dummy fraction (index.dummy_fraction), not a
-// bound
+// The note of an entry answered on a graph without its dummy-edge mask (counting "upper_bound")
+// where a count carries an estimate: each such count is the bounds [lower, upper], upper the
+// BOSS entries of its ranges (source dummies included), and its estimate is upper x the graph's
+// sampled dummy fraction (index.dummy_fraction), not a bound
 constexpr const char kNoteEstimate[] = "estimate_sampled_dummy_fraction";
 
 // counting (capabilities and, on a graph without its mask, the answer's index): "exact" with
-// the dummy-edge mask, "upper_bound" without it (owner decision #16)
+// the dummy-edge mask, "upper_bound" without it
 constexpr const char kCountingExact[] = "exact";
 constexpr const char kCountingUpperBound[] = "upper_bound";
 
@@ -104,9 +94,9 @@ constexpr const char kNoteAnnotationNotRead[] = "annotation_not_read";
 // "serialisation every 4,096 objects")
 constexpr uint64_t kDeliveryStride = 4096;
 
-// Increment 5b (SPEC §19): output.labels of a predicate request that returns the predicate's
-// labels on each selected context; predicate_strands' values (P11: "either", the default,
-// reads a context's k-mer and its reverse complement on a BASIC graph, never mixing the two
+// Predicates (SPEC §19): output.labels of a predicate request that returns the predicate's
+// labels on each selected context; predicate_strands' values ("either", the default, reads a
+// context's k-mer and its reverse complement on a BASIC graph, never mixing the two
 // orientations: a label is present when it annotates the one k-mer or the other); the scope of
 // a predicate's claim (§19.5: per context, per index); and the notes of a predicate entry, in
 // this order after the others (§19.10)
@@ -126,7 +116,7 @@ const char *const kPredicateOperators[] = {
 constexpr int kMaxBodyNesting = 1000;
 
 // a number of milliseconds in a message: 250.5, not std::to_string's 250.500000 nor a cast's
-// 250 (review of 2026-10-07, T3-07; as /resolve's ms_text)
+// 250 (as /resolve's ms_text)
 std::string ms_text(double x) {
     std::ostringstream out;
     out << std::setprecision(15) << x;
@@ -162,7 +152,7 @@ Json::Value strings_json(std::initializer_list<const char*> values) {
 /**
  * Strict access to one JSON object of the request, as /traverse's: every field read is
  * remembered, and finish() refuses the first one nothing read ("unknown field"), after the
- * known ones were checked — the guarantee rule: a field this increment does not know is never
+ * known ones were checked — the guarantee rule: a field the server does not know is never
  * ignored.
  */
 class Fields {
@@ -199,7 +189,7 @@ class Fields {
 struct PatternSpec {
     Json::Value id;                      // the string given, or null
     PatternKind kind = PatternKind::DNA;
-    // a peptide's text (increment 5), parsed once the request's genetic code is known
+    // a peptide's text, parsed once the request's genetic code is known
     std::string protein;
     std::optional<Pattern> pattern;
     std::optional<std::pair<std::string, std::string>> error;  // code, message
@@ -212,22 +202,21 @@ struct ParsedRequest {
     double time_budget_ms = 0;
     // {field, requested, effective} per request value lowered to its cap
     Json::Value clamped = Json::Value(Json::arrayValue);
-    // output.labels "all" (increment 3)
+    // output.labels "all"
     bool labels_all = false;
     // the request named the labels: output.labels "all" or an annotation field
     bool annotation_named = false;
     // the effective annotation limits (used with labels_all in a retrieval mode)
     RetrievalLimits retrieval;
-    // long_search "paths" (increment 4): patterns longer than k are extended into paths
+    // long_search "paths": patterns longer than k are extended into paths
     // (Request::extend_paths); false for "anchors" or when omitted
     bool long_paths = false;
-    // require_support "record_verified" (increment 4): the labels of paths that one record
-    // verifies only
+    // require_support "record_verified": the labels of paths that one record verifies only
     bool require_verified = false;
-    // the genetic code of the request's peptides (increment 5): genetic_code, default 1
+    // the genetic code of the request's peptides: genetic_code, default 1
     const GeneticCode *genetic_code = &GeneticCode::standard();
-    // increment 5b (SPEC §19): the request's predicate as parsed (bound to the index once,
-    // before the first pattern); none without one
+    // the request's predicate as parsed (SPEC §19; bound to the index once, before the first
+    // pattern); none without one
     std::optional<predicate::Predicate> predicate;
     // output.labels "predicate_only": the predicate's labels on each selected context
     bool labels_predicate_only = false;
@@ -281,15 +270,14 @@ std::string string_field(Fields &f, const char *key, const std::string &def) {
 }
 
 /**
- * The request as this increment serves it (§7.1; SPEC §5): the first error wins, in
- * this order — a later-increment or resident-only field (named, whatever its value), the
- * patterns, mode, output, scope, strands, stop_at_threshold, the caps, the time budget, the
- * annotation caps, increment 4's long_search, max_paths, require_support, increment 5's
- * genetic_code (then the peptides are read in it: a slot error, never a refusal), increment
- * 5b's predicate (its form, then predicate_too_large), max_predicate_contexts,
- * max_predicate_work, predicate_strands, then "predicate_only" without a predicate and a
- * predicate with long_search "paths" — and a field nothing read is refused last, as
- * /traverse's Strict refuses it.
+ * The request as the route serves it (§7.1; SPEC §5): the first error wins, in this order — a
+ * field that is not served or resident-only (named, whatever its value), the patterns, mode,
+ * output, scope, strands, stop_at_threshold, the caps, the time budget, the annotation caps,
+ * long_search, max_paths, require_support, genetic_code (then the peptides are read in it: a
+ * slot error, never a refusal), the predicate (its form, then predicate_too_large),
+ * max_predicate_contexts, max_predicate_work, predicate_strands, then "predicate_only" without
+ * a predicate and a predicate with long_search "paths" — and a field nothing read is refused
+ * last, as /traverse's Strict refuses it.
  */
 ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits) {
     if (!json.isObject())
@@ -332,13 +320,12 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                 throw invalid(p.path("id") + ": expected a string");
             spec.id = p.raw("id").asString();
         }
-        // the kinds (§4.2): dna, iupac and, since increment 5, protein (a peptide)
+        // the kinds (§4.2): dna, iupac and protein (a peptide)
         const bool dna = p.has("dna");
         const bool iupac = p.has("iupac");
         const bool protein = p.has("protein");
         if (dna + iupac + protein != 1) {
-            // (without a peptide named, the message of increments 1-4: a request without the
-            // new kind is answered as before, byte for byte)
+            // (a request that names no peptide is not told about 'protein')
             throw invalid(path + (protein ? ": expected exactly one of 'dna', 'iupac', 'protein'"
                                           : ": expected exactly one of 'dna', 'iupac'"));
         }
@@ -378,8 +365,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             if (labels != "none" && labels != "all" && labels != kLabelsPredicateOnly)
                 throw invalid(o.path("labels") + ": expected one of none|all|predicate_only");
             req.labels_all = labels == "all";
-            // increment 5b: the predicate's labels on each selected context (§19.10); a
-            // request without a predicate is refused below, once the predicate is read
+            // the predicate's labels on each selected context (§19.10); a request without a
+            // predicate is refused below, once the predicate is read
             req.labels_predicate_only = labels == kLabelsPredicateOnly;
             req.annotation_named |= req.labels_all || req.labels_predicate_only;
             req.projection_named |= req.labels_all || req.labels_predicate_only;
@@ -398,8 +385,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
             req.retrieval.occurrences = o.raw("occurrences").asBool();
         }
         if (o.has("paths")) {
-            // increment 4: accepted with either value and changes nothing, since a path
-            // result always carries its node path (nodes, rows), as a context its node and row
+            // accepted with either value and changes nothing, since a path result always
+            // carries its node path (nodes, rows), as a context its node and row
             if (!o.raw("paths").isBool())
                 throw invalid(o.path("paths") + ": expected a boolean");
         }
@@ -431,7 +418,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                                              &req.clamped);
     req.max_steps = capped_integer(f, "max_steps", limits.max_steps, 1, &req.clamped);
     req.request.min_information_bits = limits.min_information_bits;
-    // owner decision #24: the server's policy, read on a graph without its mask only
+    // the server's policy, read on a graph without its mask only
     req.request.max_checked_entries = limits.max_checked_entries;
 
     req.time_budget_ms = limits.default_time_ms;
@@ -454,8 +441,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         }
     }
 
-    // the annotation caps (increment 3, §5.3): accepted with any projection and mode, used
-    // by output.labels "all" in a retrieval mode (elsewhere stated: annotation_not_read)
+    // the annotation caps (§5.3): accepted with any projection and mode, used by output.labels
+    // "all" in a retrieval mode (elsewhere stated: annotation_not_read)
     for (const char *key : { "max_labels_per_anchor", "max_annotation_work", "max_memory_mb",
                              "max_labels", "max_occurrences_per_label",
                              "allow_unbudgeted_annotation" }) {
@@ -485,7 +472,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
     }
     r.chunk_target_ms = limits.chunk_target_ms;
 
-    // increment 4: the paths of a pattern longer than k, opt-in (owner decision #13)
+    // the paths of a pattern longer than k, opt-in
     const std::string long_search = string_field(f, "long_search", kLongSearchAnchors);
     if (long_search != kLongSearchAnchors && long_search != kLongSearchPaths)
         throw invalid(f.path("long_search") + ": expected one of anchors|paths");
@@ -510,8 +497,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
                       "coordinates, which output.occurrences false does not read");
     }
 
-    // increment 5 (owner decision #15): the genetic code of the request's peptides, an NCBI
-    // translation table id; accepted with any request, it acts on protein patterns only
+    // the genetic code of the request's peptides, an NCBI translation table id; accepted with
+    // any request, it acts on protein patterns only
     if (f.has("genetic_code")) {
         const Json::Value &v = f.raw("genetic_code");
         if (!v.isIntegral()) {
@@ -536,16 +523,15 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         try {
             spec.pattern = Pattern::parse(PatternKind::PROTEIN, spec.protein, *req.genetic_code);
         } catch (const PatternError &e) {
-            // bad_alphabet: the slot's error (§8.9); the stop '*' is a residue since owner
-            // decision #19
+            // bad_alphabet: the slot's error (§8.9); the stop '*' is a residue
             spec.error = std::make_pair(e.code(), std::string(e.what()));
         }
     }
 
-    // increment 5b (SPEC §19.2, §19.3): the predicate (its form, then its size: 400
-    // predicate_too_large above the server's max_predicate_labels), then the selection's two
-    // caps, accepted with any request and acting only with a predicate (lowered and listed
-    // after max_paths), then predicate_strands
+    // the predicate (SPEC §19.2, §19.3; its form, then its size: 400 predicate_too_large above
+    // the server's max_predicate_labels), then the selection's two caps, accepted with any
+    // request and acting only with a predicate (lowered and listed after max_paths), then
+    // predicate_strands
     if (f.has("predicate")) {
         req.predicate = predicate::Predicate::parse(f.raw("predicate"),
                                                     limits.max_predicate_labels,
@@ -563,9 +549,8 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
         throw invalid(f.path("predicate_strands") + ": expected one of either|context");
     }
     req.selection.either = predicate_strands == kPredicateStrandsEither;
-    // the combinations: the predicate's labels need a predicate (was later_increment, any
-    // request); a predicate selects among supported paths for L > k (owner decision P24), which
-    // long_search "paths" (every graph walk) does not search
+    // the combinations: the predicate's labels need a predicate; a predicate selects among
+    // supported paths for L > k, which long_search "paths" (every graph walk) does not search
     if (req.labels_predicate_only && !req.predicate) {
         throw invalid("request.output.labels: \"predicate_only\" returns the labels a "
                       "predicate names: it needs a predicate (request.predicate)");
@@ -583,8 +568,7 @@ ParsedRequest parse_request(const Json::Value &json, const PatternLimits &limits
 }
 
 std::string support_message(const GraphSupport &support) {
-    // (mask_required, the refusal of a graph without its mask, is retired: such a graph is
-    // served with upper bounds since owner decision #16 of 2026-10-08)
+    // (no reason is mask_required: a graph without its mask is served, with upper bounds)
     if (support.reason == "representation_unsupported") {
         return "pattern: the graph is not a succinct graph (a DBGSuccinct, or a PRIMARY one "
                "wrapped in CanonicalDBG): the pattern lookup narrows BOSS ranges";
@@ -613,10 +597,10 @@ std::string support_message(const GraphSupport &support) {
 }
 
 /**
- * The estimate of a count of a graph served without its dummy-edge mask (owner decision #16):
- * its upper bound times the graph's dummy fraction, rounded, and kept inside the bounds
- * (lower, a true lower bound, can exceed the product). Not a bound: what the count would be if
- * the source dummies among the upper bound's entries were as frequent as among the graph's.
+ * The estimate of a count of a graph served without its dummy-edge mask: its upper bound times
+ * the graph's dummy fraction, rounded, and kept inside the bounds (lower, a true lower bound,
+ * can exceed the product). Not a bound: what the count would be if the source dummies among the
+ * upper bound's entries were as frequent as among the graph's.
  */
 uint64_t estimate(const Count &c, const DummyFraction &fraction) {
     assert(c.relation == Relation::BOUNDS);
@@ -629,8 +613,8 @@ uint64_t estimate(const Count &c, const DummyFraction &fraction) {
 /**
  * The JSON of one count (§7.4). |fraction|: the graph's dummy fraction when it is served
  * without its dummy-edge mask (counting "upper_bound"), null with the mask: a count with
- * relation bounds then also carries `estimate` (owner decision #16), and |estimated| is set.
- * With the mask nothing is added: every count is written as before.
+ * relation bounds then also carries `estimate`, and |estimated| is set. With the mask nothing
+ * is added.
  */
 Json::Value count_json(const Count &c, const DummyFraction *fraction = nullptr,
                        bool *estimated = nullptr) {
@@ -708,15 +692,15 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     // L, in bases, whatever the kind (a peptide's 3m)
     e["length"] = uint_json(spec.pattern->length());
     if (spec.kind == PatternKind::PROTEIN) {
-        // increment 5: the peptide's residues (m) and the genetic code it was read in
+        // a peptide's residues (m) and the genetic code it was read in
         e["residues"] = uint_json(spec.pattern->text().size());
         e["genetic_code"] = spec.pattern->genetic_code();
     }
     e["information_bits"] = result->information_bits;
     e["anchor_information_bits"] = result->anchor_information_bits
             ? Json::Value(*result->anchor_information_bits) : Json::Value();
-    // the least informative searched anchor window, the floor's operand for L > k (an
-    // addition to contract version 1; review of 2026-10-07, X-GUARANTEES-01)
+    // the least informative searched anchor window, the floor's operand for L > k (an addition
+    // under contract version 1)
     e["min_anchor_information_bits"] = result->min_anchor_information_bits
             ? Json::Value(*result->min_anchor_information_bits) : Json::Value();
     if (result->refusal) {
@@ -733,8 +717,8 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     e["strands"] = std::move(searched);
     e["palindromic"] = result->palindromic;
 
-    // a graph without its mask (owner decision #16): every count with relation bounds carries
-    // its estimate, and the entry then says what the estimate rests on (kNoteEstimate)
+    // a graph without its mask: every count with relation bounds carries its estimate, and the
+    // entry then says what the estimate rests on (kNoteEstimate)
     bool estimated = false;
     Json::Value counts;
     if (result->contexts) {
@@ -755,10 +739,9 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
         counts["anchors"] = std::move(a);
         Json::Value paths = count_json(result->anchors->paths, fraction, &estimated);
         if (long_paths) {
-            // increment 4 (long_search "paths", §4.2): the paths counted by the extension,
-            // per orientation, beside the branches it entered (work, not a count of the
-            // pattern) and what it did (no_anchors, not_started, not_admitted, stopped,
-            // completed)
+            // long_search "paths" (§4.2): the paths counted by the extension, per orientation,
+            // beside the branches it entered (work, not a count of the pattern) and what it did
+            // (no_anchors, not_started, not_admitted, stopped, completed)
             put_orientations(&paths, result->anchors->paths_by_orientation, strand_stated,
                              fraction, &estimated);
             paths["candidates_examined"] = uint_json(result->anchors->candidates_examined);
@@ -768,7 +751,7 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     } else {
         throw std::logic_error("pattern: the engine answered a pattern without counts");
     }
-    // nothing of the annotation is read in this increment (§7.2): stated, never omitted
+    // the engine reads no annotation (§7.2): the label counts are stated unknown, never omitted
     counts["labels"] = count_json(Count::unknown(Unit::LABELS));
     counts["occurrences"] = count_json(Count::unknown(Unit::PLACED_OCCURRENCES));
     e["counts"] = std::move(counts);
@@ -780,9 +763,9 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     if (long_paths && result->anchors) {
         // the outgoing edges the extension examined, one step each (part of steps)
         work["extension_edges"] = uint_json(result->work.extension_edges);
-        // (review GPT-3, round fix3; not steps) the anchors whose extension began, each spelled
-        // once (k - 1 BOSS steps no step charges), and the nodes the extension expanded with
-        // two or more k-mers allowed at the next position
+        // (not steps) the anchors whose extension began, each spelled once (k - 1 BOSS steps no
+        // step charges), and the nodes the extension expanded with two or more k-mers allowed
+        // at the next position
         work["extension_anchors"] = uint_json(result->work.extension_anchors);
         work["extension_branches"] = uint_json(result->work.extension_branches);
     }
@@ -820,8 +803,8 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
     for (const std::string &note : result->notes) {
         notes.append(note);
     }
-    // (the engine's notes first, no_stop_codon among them, owner decision #19; then the
-    // route's note of the estimates, decision #16)
+    // (the engine's notes first, no_stop_codon among them; then the route's note of the
+    // estimates)
     if (estimated)
         notes.append(kNoteEstimate);
     e["notes"] = std::move(notes);
@@ -834,12 +817,11 @@ Json::Value entry_json(const PatternSpec &spec, const Result *result, Mode mode,
 }
 
 /**
- * The labelled retrieval's counters of one entry (review GPT-3, round fix3), which apply_labels
- * does not merge: in every entry with labels (0 where none were read, e.g. a withheld count),
- * the distinct rows read beside the reads (work.annotation_rows counts both steps' reads); for
- * the paths of a long pattern also the verification's units of work and the time of the paths'
- * label lists and of their verification. Additive fields of work and timing; nothing for a
- * refused slot.
+ * The labelled retrieval's counters of one entry, which apply_labels does not merge: in every
+ * entry with labels (0 where none were read, e.g. a withheld count), the distinct rows read
+ * beside the reads (work.annotation_rows counts both steps' reads); for the paths of a long
+ * pattern also the verification's units of work and the time of the paths' label lists and of
+ * their verification. Additive fields of work and timing; nothing for a refused slot.
  */
 void put_retrieval_counters(Json::Value *entry, const RetrievalCounters &c, bool paths) {
     Json::Value &e = *entry;
@@ -854,8 +836,8 @@ void put_retrieval_counters(Json::Value *entry, const RetrievalCounters &c, bool
 }
 
 /**
- * What the route made of one pattern's selection (increment 5b, SPEC §19.6-§19.10), beside
- * the SelectionAnswer of PatternRetrieval::select (or of constant_selection,
+ * What the route made of one pattern's selection (SPEC §19.6-§19.10), beside the
+ * SelectionAnswer of PatternRetrieval::select (or of constant_selection,
  * selection_without_pass): how the entry is composed from the engine's answer and the pass's.
  */
 struct SelectionEntry {
@@ -885,10 +867,10 @@ struct SelectionEntry {
  * Merges one pattern's selection into its |entry| (entry_json's, of the engine's answer; the
  * results the route built for the selected contexts in it, for a pass): counts.tested and
  * counts.selected, selection, absence_filter, work.predicate_*, timing.selection_ms, the stop
- * (the engine's first, then the pass's, then the results' output), determinism, and on the
- * pass path in a retrieval mode withheld (the engine's, then the pass's, then the output's),
- * cut (partial, §19.8: the engine's stop, the pass's stop, the raw release's cut, the selected
- * list's cut; a cut of the output replaces them, as the memory cut of increment 3 does) and
+ * (the engine's first, then the pass's, then the results' output), determinism, and on the pass
+ * path in a retrieval mode withheld (the engine's, then the pass's, then the output's), cut
+ * (partial, §19.8: the engine's stop, the pass's stop, the raw release's cut, the selected
+ * list's cut; a cut of the output replaces them, as it does without a predicate) and
  * retrieval_complete (every selected context returned). The projection's labels are merged
  * after it (apply_labels); the notes after those.
  */
@@ -986,8 +968,8 @@ void put_selection(Json::Value *entry, const SelectionEntry &s, Mode mode) {
 std::string alphabet_refusal(const std::string &alphabet) {
     if (alphabet == "$ACGT")
         return "";
-    // owner decision #4 of 2026-10-07 (review I26): the engine counts on $ACGTN, but no DNA5
-    // build has run its tests; the route serves it once one passes
+    // the engine counts on $ACGTN, but no DNA5 build has run its tests; the route serves it
+    // once one passes
     if (alphabet == "$ACGTN")
         return "alphabet_untested";
     return "alphabet_unsupported";
@@ -995,7 +977,7 @@ std::string alphabet_refusal(const std::string &alphabet) {
 
 GraphSupport route_support(const DeBruijnGraph &graph) {
     GraphSupport support = PatternSearch::support(graph);
-    // (a graph without its mask is served, counting upper bounds: owner decision #16)
+    // (a graph without its mask is served, counting upper bounds)
     if (support.supported) {
         const std::string refusal = alphabet_refusal(support.alphabet);
         if (!refusal.empty()) {
@@ -1004,9 +986,9 @@ GraphSupport route_support(const DeBruijnGraph &graph) {
             return support;
         }
     }
-    // a mask that marks a W = $ edge valid (review of 2026-10-07, I17; owner decision #6),
-    // found once at load (check_mask_at_load): a loaded mask is trusted only once checked; a
-    // graph without a mask counts upper bounds and needs no such check
+    // a mask that marks a W = $ edge valid, found once at load (check_mask_at_load): a loaded
+    // mask is trusted only once checked; a graph without a mask counts upper bounds and needs
+    // no such check
     if (support.supported && support.mask_present && mask_invalid_at_load(graph)) {
         support.supported = false;
         support.reason = "mask_invalid";
@@ -1142,12 +1124,12 @@ PatternLimits pattern_limits(const Config &config) {
 }
 
 Json::Value parse_pattern_body(const std::string &content) {
-    // one RFC 8259 JSON text, its members' names unique (review of 2026-10-07, R1-02): no
-    // comments, no trailing comma, nothing after the value, and no duplicated member name,
-    // whose earlier value jsoncpp would drop without a word (a budget given twice would be
-    // replaced silently). Not CharReaderBuilder::strictMode(): its strictRoot would refuse a
-    // root that is not an object here, before the graph check (§5 step 4), where step 5 does.
-    // The route's own reader: /search, /align and /traverse keep theirs
+    // one RFC 8259 JSON text, its members' names unique: no comments, no trailing comma,
+    // nothing after the value, and no duplicated member name, whose earlier value jsoncpp would
+    // drop without a word (a budget given twice would be replaced silently). Not
+    // CharReaderBuilder::strictMode(): its strictRoot would refuse a root that is not an object
+    // here, before the graph check (§5 step 4), where step 5 does. The route's own reader:
+    // /search, /align and /traverse keep theirs
     // jsoncpp skips a comment before an object's member name whatever allowComments says: a
     // '/' outside a string is no JSON at all, so the text is refused before it is parsed
     bool in_string = false;
@@ -1177,8 +1159,8 @@ Json::Value parse_pattern_body(const std::string &content) {
         if (!reader->parse(content.data(), content.data() + content.size(), &json, &errors))
             throw invalid("request: not JSON: " + errors);
     } catch (const Json::Exception &e) {
-        // jsoncpp throws rather than returns past its nesting limit (review of 2026-10-07,
-        // R1-03, R2-01): the client's to fix, not a server bug (a 400 without a code)
+        // jsoncpp throws rather than returns past its nesting limit: the client's to fix, not a
+        // server bug (a 400 without a code)
         throw invalid("request: not JSON: " + std::string(e.what()) + " (more than "
                       + std::to_string(kMaxBodyNesting) + " nested arrays and objects)");
     }
@@ -1222,14 +1204,14 @@ Json::Value process_pattern_request(
     if (delivery)
         delivery->set_deadline(deadline);
     /**
-     * The work's deadline (review of 2026-10-07, X-EFFICIENCY-04): the request's, but read
-     * through a clock that runs ahead of |now| by the estimated time to write what the answer
-     * holds so far (AnswerVolume), so that the work stops finalize_ms plus that estimate before
-     * the deadline, and a request that buffered many results still answers within its budget
-     * (stopped by time, its counts kept) rather than 503 with all of its work lost. Every
-     * reading of the work time — the engine's (discovery, the release), the annotation reads'
-     * and the output of their labels — reads it; the answer's own deadline (|deadline|: the
-     * delivery check, timing.elapsed_ms) reads |now|.
+     * The work's deadline: the request's, but read through a clock that runs ahead of |now| by
+     * the estimated time to write what the answer holds so far (AnswerVolume), so that the work
+     * stops finalize_ms plus that estimate before the deadline, and a request that buffered
+     * many results still answers within its budget (stopped by time, its counts kept) rather
+     * than 503 with all of its work lost. Every reading of the work time — the engine's
+     * (discovery, the release), the annotation reads' and the output of their labels — reads
+     * it; the answer's own deadline (|deadline|: the delivery check, timing.elapsed_ms) reads
+     * |now|.
      */
     AnswerVolume volume(limits.delivery_build_mbps, limits.delivery_compress_mbps,
                         limits.delivery_text_scale);
@@ -1249,19 +1231,19 @@ Json::Value process_pattern_request(
     const size_t k = graph.get_k();
     const bool strand_stated = support.strand_stated;
     const uint64_t num_rows = anno_graph.get_annotator().num_objects();
-    // without the dummy-edge mask (owner decision #16): the counts are upper bounds, each
-    // with its estimate from the graph's dummy fraction (sampled once per graph)
+    // without the dummy-edge mask: the counts are upper bounds, each with its estimate from the
+    // graph's dummy fraction (sampled once per graph)
     const std::optional<DummyFraction> fraction = support.mask_present
             ? std::nullopt : dummy_fraction(anno_graph);
     if (!support.mask_present && !fraction)
         throw std::logic_error("pattern: no dummy fraction for a graph without its mask");
 
-    // output.labels "all" in a retrieval mode reads the annotation (increment 3, §4.3): on
-    // the budget-aware path, or unbudgeted by the request's explicit opt-in
+    // output.labels "all" in a retrieval mode reads the annotation (§4.3): on the budget-aware
+    // path, or unbudgeted by the request's explicit opt-in
     const bool read_labels = req.labels_all && mode != Mode::COUNT;
-    // increment 5b (SPEC §19): a predicate's selection reads the annotation in every mode, and
-    // its projection is the selected contexts' labels: none, the predicate's ("predicate_only")
-    // or all of them, in a retrieval mode
+    // a predicate's selection (SPEC §19) reads the annotation in every mode, and its projection
+    // is the selected contexts' labels: none, the predicate's ("predicate_only") or all of
+    // them, in a retrieval mode
     const bool has_predicate = req.predicate.has_value();
     const Projection projection = mode == Mode::COUNT ? Projection::NONE
                                 : req.labels_all ? Projection::ALL
@@ -1290,10 +1272,9 @@ Json::Value process_pattern_request(
                                  "it anyway (the answer then says annotation: unbudgeted), or "
                                  "ask for output.labels \"none\" or mode count");
         }
-        // increment 4 (DESIGN §4.3, owner decision #14): require_support "record_verified"
-        // keeps the labels one record verifies, which needs a BASIC index with coordinates
-        // and its record mapping; an index that cannot verify refuses it rather than answer
-        // in the weaker mode
+        // require_support "record_verified" (DESIGN §4.3) keeps the labels one record verifies,
+        // which needs a BASIC index with coordinates and its record mapping; an index that
+        // cannot verify refuses it rather than answer in the weaker mode
         if (read_labels && req.long_paths && req.require_verified
                 && std::string(retrieval->description().support) != kSupportVerified) {
             throw PatternRefusal(400, "support_unavailable",
@@ -1314,13 +1295,13 @@ Json::Value process_pattern_request(
 
     /**
      * One released context as its JSON result (§7.2, output.labels none), built in the engine's
-     * callback: spelling the k-mer is graph work, done while the engine still reads the
-     * clock (every 64 contexts handed over, in partial's release and in all_or_count's
-     * delivery of its buffered release; review of 2026-10-07, R1-01, E4-03), so that the
-     * finalisation reserve is left to assembling and writing the answer. The row is the annotation row the context's k-mer is annotated in,
-     * named without reading it: the stored k-mer's (base_node) on BASIC and wrapped PRIMARY
-     * graphs; on a native CANONICAL graph the canonical k-mer's (the annotation key of every
-     * route, LabelOracle::key_of), since the other orientation's row carries no labels.
+     * callback: spelling the k-mer is graph work, done while the engine still reads the clock
+     * (every 64 contexts handed over, in partial's release and in all_or_count's delivery of
+     * its buffered release), so that the finalisation reserve is left to assembling and writing
+     * the answer. The row is the annotation row the context's k-mer is annotated in, named
+     * without reading it: the stored k-mer's (base_node) on BASIC and wrapped PRIMARY graphs;
+     * on a native CANONICAL graph the canonical k-mer's (the annotation key of every route,
+     * LabelOracle::key_of), since the other orientation's row carries no labels.
      */
     auto context_json = [&](const Context &c, size_t length,
                             RetrievalContext *collected = nullptr) {
@@ -1365,12 +1346,12 @@ Json::Value process_pattern_request(
     };
 
     /**
-     * One released path of a pattern longer than k as its JSON result (long_search "paths",
-     * increment 4; owner decision #13): the new fields sequence (the L bases it spells),
-     * anchor_kmer (its anchor's k bases, as the graph spells them) and the node path with the
-     * row of each k-mer (nodes, rows), never kmer, which keeps its meaning (a context's
-     * k-mer); instance is the sequence, offset 0, the strand or orientation as for contexts.
-     * The rows are named without reading them, as a context's row (§7.10).
+     * One released path of a pattern longer than k as its JSON result (long_search "paths"):
+     * the fields sequence (the L bases it spells), anchor_kmer (its anchor's k bases, as the
+     * graph spells them) and the node path with the row of each k-mer (nodes, rows), never
+     * kmer, which keeps its meaning (a context's k-mer); instance is the sequence, offset 0,
+     * the strand or orientation as for contexts. The rows are named without reading them, as a
+     * context's row (§7.10).
      */
     auto path_json = [&](const Context &c, size_t length, RetrievalPath *collected = nullptr) {
         const size_t n = length - k + 1;
@@ -1446,7 +1427,7 @@ Json::Value process_pattern_request(
         std::optional<LabelsAnswer> labels;
         // the labels are a long pattern's paths' (retrieve_paths)
         bool label_paths = false;
-        // increment 5b: the pattern's selection (a request with a predicate)
+        // the pattern's selection (a request with a predicate)
         std::optional<SelectionEntry> selection;
         // its normal form is a constant (no pass, no read: note predicate_constant)
         bool constant = false;
@@ -1510,11 +1491,11 @@ Json::Value process_pattern_request(
         }
     };
 
-    // increment 5b: the request's predicate bound to the index's columns, once, before the
-    // first pattern (its bytes in the memory account; the work time read every 4,096 names); its
-    // echo (the normal form, the unknown names) is text the answer will hold. A binding the
-    // time or the account stopped leaves no bound predicate: every pattern's selection is then
-    // not_started, stopped as the binding was (stop {selection, time | max_memory})
+    // the request's predicate bound to the index's columns, once, before the first pattern (its
+    // bytes in the memory account; the work time read every 4,096 names); its echo (the normal
+    // form, the unknown names) is text the answer will hold. A binding the time or the account
+    // stopped leaves no bound predicate: every pattern's selection is then not_started, stopped
+    // as the binding was (stop {selection, time | max_memory})
     const predicate::Bound *bound = nullptr;
     if (has_predicate) {
         retrieval->bind(*req.predicate, req.selection);
@@ -1536,15 +1517,15 @@ Json::Value process_pattern_request(
     pass_request.projection = projection;
 
     /**
-     * One pattern of L <= k with a predicate (PLAN §2.1, SPEC §19.6): a constant normal form
-     * without a pass (false: discovery as mode count, nothing selected; true: the unfiltered
-     * request), else the engine's release into the pass (each raw context's 64-byte descriptor
-     * admitted before it is kept), the pass (PatternRetrieval::select), the results of the
-     * chosen contexts (their objects admitted, 512 + 2k, before each is built; the clock every
-     * 64), then the projection: none, the predicate's labels on the chosen rows
-     * (retrieve_given) or every label of them (retrieve). A pass that cannot start (the
-     * predicate not bound, or the request's selection work spent by an earlier pattern:
-     * sticky) leaves the raw search as mode count does it, nothing retained.
+     * One pattern of L <= k with a predicate (SPEC §19.6): a constant normal form without a
+     * pass (false: discovery as mode count, nothing selected; true: the unfiltered request),
+     * else the engine's release into the pass (each raw context's 64-byte descriptor admitted
+     * before it is kept), the pass (PatternRetrieval::select), the results of the chosen
+     * contexts (their objects admitted, 512 + 2k, before each is built; the clock every 64),
+     * then the projection: none, the predicate's labels on the chosen rows (retrieve_given) or
+     * every label of them (retrieve). A pass that cannot start (the predicate not bound, or the
+     * request's selection work spent by an earlier pattern: sticky) leaves the raw search as
+     * mode count does it, nothing retained.
      */
     auto answer_selection = [&](const Pattern &pattern, Answered &a) {
         const size_t length = pattern.length();
@@ -1567,7 +1548,7 @@ Json::Value process_pattern_request(
         if (bound && bound->constant()) {
             a.constant = true;
             if (!*bound->constant()) {
-                // false (P18): discovery as mode count does it, nothing retained, no read;
+                // constant false: discovery as mode count does it, nothing retained, no read;
                 // nothing can pass, also after a discovery stop
                 a.result = search.count(pattern, req.request, budget);
                 if (a.result->refusal)
@@ -1692,9 +1673,9 @@ Json::Value process_pattern_request(
                 collected.emplace_back();
                 Json::Value r = context_json(c, length, &collected.back());
                 if (projection != Projection::NONE) {
-                    // why it was selected (P22): the predicate's labels in the set it was
-                    // evaluated on, and per label the orientation whose row carries it (the
-                    // owner's answer to P11), their bytes charged by the pass
+                    // why it was selected: the predicate's labels in the set it was evaluated
+                    // on, and per label the orientation whose row carries it, their bytes
+                    // charged by the pass
                     r["selection_labels"] = retrieval->selection_labels_json(sel, j);
                     r["selection_strands"] = retrieval->selection_strands_json(sel, j);
                     volume.add(compact_json_bytes(r["selection_labels"])
@@ -1791,8 +1772,8 @@ Json::Value process_pattern_request(
         Json::Value entry = entry_json(req.patterns[i], a.result ? &*a.result : nullptr, mode,
                                        strand_stated, std::move(a.results), a.released,
                                        req.long_paths, fraction ? &*fraction : nullptr);
-        // increment 5b: the selection (before the projection's labels, whose withheld, cut and
-        // stop come after the pass's)
+        // the selection (before the projection's labels, whose withheld, cut and stop come
+        // after the pass's)
         if (a.selection)
             put_selection(&entry, *a.selection, mode);
         const bool projected = a.labels.has_value();
@@ -1853,11 +1834,11 @@ Json::Value process_pattern_request(
         out["output"]["occurrences"] = req.retrieval.occurrences;
     }
     if (has_predicate) {
-        // increment 5b (§19.10): the request's predicate as bound to this index: its normal
-        // form, the names of its lists and of them the index's columns, the others (a typo
-        // shows here, never as an absence), whether it holds on a context carrying none of its
-        // labels; null where the binding stopped (every entry says how: stop {selection,
-        // time | max_memory}). Written under the answer's delivery check
+        // the request's predicate as bound to this index (§19.10): its normal form, the names
+        // of its lists and of them the index's columns, the others (a typo shows here, never as
+        // an absence), whether it holds on a context carrying none of its labels; null where
+        // the binding stopped (every entry says how: stop {selection, time | max_memory}).
+        // Written under the answer's delivery check
         auto check = [delivery]() {
             if (delivery)
                 delivery->check();
@@ -1893,9 +1874,9 @@ Json::Value process_pattern_request(
     index["alphabet"] = support.alphabet;
     index["strand_stated"] = support.strand_stated;
     if (fraction) {
-        // owner decision #16, in the answers on a graph without its mask only (an answer on a
-        // masked graph is written as before: its counting is exact): what the counts are and
-        // the dummy fraction the estimates rest on
+        // in the answers on a graph without its mask only (an answer on a masked graph does not
+        // state it: its counting is exact): what the counts are and the dummy fraction the
+        // estimates rest on
         index["counting"] = kCountingUpperBound;
         index["dummy_fraction"] = dummy_fraction_json(*fraction);
     }
@@ -1911,9 +1892,8 @@ Json::Value process_pattern_request(
     l["max_patterns"] = uint_json(limits.max_patterns);
     l["stop_at_threshold"] = req.request.stop_at_threshold;
     if (read_labels || has_predicate) {
-        // the annotation limits, in the answers that read annotation only (the others answer
-        // as before increment 3); with a predicate in every mode (its selection reads rows
-        // under the account)
+        // the annotation limits, in the answers that read annotation only; with a predicate in
+        // every mode (its selection reads rows under the account)
         const RetrievalLimits &r = req.retrieval;
         l["max_labels_per_anchor"] = uint_json(r.max_labels_per_anchor);
         l["max_annotation_work"] = uint_json(r.max_annotation_work);
@@ -1923,15 +1903,15 @@ Json::Value process_pattern_request(
         l["allow_unbudgeted_annotation"] = r.allow_unbudgeted;
     }
     if (req.long_paths) {
-        // increment 4, in the answers that ask for paths only (the others answer as before)
+        // in the answers that ask for paths only
         l["long_search"] = kLongSearchPaths;
         l["max_paths"] = uint_json(req.request.max_paths);
         if (read_labels)
             l["require_support"] = req.require_verified ? kSupportVerified : kSupportIntersection;
     }
     if (has_predicate) {
-        // increment 5b (§19.10), in the answers with a predicate only: the selection's caps
-        // (effective), the server's cap on the names, and predicate_strands as requested
+        // in the answers with a predicate only (§19.10): the selection's caps (effective), the
+        // server's cap on the names, and predicate_strands as requested
         l["max_predicate_contexts"] = uint_json(req.max_predicate_contexts);
         l["max_predicate_work"] = uint_json(req.selection.max_predicate_work);
         l["max_predicate_labels"] = uint_json(limits.max_predicate_labels);
@@ -1956,7 +1936,7 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     Json::Value p;
     p["pattern_contract_version"] = kPatternContractVersion;
     if (multi_graph) {
-        // the fan-out over shards with its barriers is a later increment (§8)
+        // the fan-out over shards with its barriers is not served (§8)
         p["available"] = false;
         p["unavailable_reason"] = "multi_graph_later_increment";
         return p;
@@ -1964,8 +1944,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
 
     p["modes"] = strings_json({ "count", "all_or_count", "partial" });
     p["default_mode"] = to_string(Mode::ALL_OR_COUNT);
-    // increment 5b: the predicate's labels ("predicate_only", with a predicate) served; the
-    // default stays "none" (owner decision P2: a client sends "predicate_only" explicitly)
+    // the predicate's labels ("predicate_only", with a predicate) are served; the default is
+    // "none" (a client sends "predicate_only" explicitly)
     p["projections"] = strings_json({ "none", "all", kLabelsPredicateOnly });
     p["default_projection"] = kDefaultProjection;
     p["projections_later_increment"] = Json::Value(Json::arrayValue);
@@ -1973,8 +1953,8 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["default_occurrences"] = true;
     p["kinds"] = strings_json({ "dna", "iupac", "protein" });
     p["kinds_later_increment"] = Json::Value(Json::arrayValue);
-    // increment 5 (owner decision #15): the residues a protein pattern may hold, the genetic
-    // codes (NCBI translation table ids) and the default
+    // the residues a protein pattern may hold, the genetic codes (NCBI translation table ids)
+    // and the default
     Json::Value residues(Json::arrayValue);
     for (char c : std::string(kProteinResidues)) {
         residues.append(std::string(1, c));
@@ -1986,11 +1966,11 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     }
     p["genetic_codes"] = std::move(codes);
     p["default_genetic_code"] = GeneticCode::kStandard;
-    // a reference, not the rule (owner decision P9 of 2026-10-08): the capabilities document a
-    // service's MCP tool returns in one piece has a ceiling of 32 KiB
-    // (api/python/metagraph/traverse/mcp_tools.py CAPABILITIES_MAX_BYTES), which the
-    // document of the mini index nearly filled; the rule is the SPEC's, and the machine-readable
-    // part is in the fields above. ASCII only: the writers escape any other byte as \uXXXX
+    // a reference, not the rule: the capabilities document a service's MCP tool returns in one
+    // piece has a ceiling of 32 KiB (api/python/metagraph/traverse/mcp_tools.py
+    // CAPABILITIES_MAX_BYTES), which the document of the mini index nearly filled; the rule is
+    // the SPEC's, and the machine-readable part is in the fields above. ASCII only: the writers
+    // escape any other byte as \uXXXX
     p["protein_rule"] = kProteinRule;
     p["default_scope"] = to_string(Scope::ANY_OFFSET);
     Json::Value by_mode;
@@ -2001,7 +1981,7 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["scopes_by_graph_mode"] = std::move(by_mode);
     // what a pattern longer than k gets without the option (paths are opt-in: SPEC §12)
     p["long_patterns"] = "anchors_counted";
-    // increment 4 (owner decision #13): the long_search values served, and the default
+    // the long_search values served, and the default
     p["long_search"] = strings_json({ kLongSearchAnchors, kLongSearchPaths });
     p["default_long_search"] = kLongSearchAnchors;
     p["strands"] = strings_json({ "both", "forward", "reverse" });
@@ -2012,31 +1992,31 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     Json::Value caps;
     caps["max_contexts"] = uint_json(limits.max_contexts);
     caps["max_anchors"] = uint_json(limits.max_anchors);
-    // increment 4: long_search "paths"
+    // long_search "paths"
     caps["max_paths"] = uint_json(limits.max_paths);
-    // owner decision #24: not a request field (caps_rule)
+    // not a request field (caps_rule)
     caps["max_checked_entries"] = uint_json(limits.max_checked_entries);
     caps["max_steps"] = uint_json(limits.max_steps);
     caps["time_budget_ms"] = number_json(limits.max_time_ms);
     caps["min_information_bits"] = number_json(limits.min_information_bits);
     caps["max_patterns"] = uint_json(limits.max_patterns);
-    // the labelled retrieval's (output.labels "all", increment 3)
+    // the labelled retrieval's (output.labels "all")
     caps["max_labels_per_anchor"] = uint_json(limits.max_labels_per_anchor);
     caps["max_annotation_work"] = uint_json(limits.max_annotation_work);
     caps["max_memory_mb"] = uint_json(limits.max_memory_mb);
     caps["max_labels"] = uint_json(limits.max_labels);
     caps["max_occurrences_per_label"] = uint_json(limits.max_occurrences_per_label);
-    // increment 5b's (SPEC §19.2, §19.3): a predicate's selection; max_predicate_labels is not
-    // a request field (caps_rule)
+    // a predicate's selection (SPEC §19.2, §19.3); max_predicate_labels is not a request field
+    // (caps_rule)
     caps["max_predicate_contexts"] = uint_json(limits.max_predicate_contexts);
     caps["max_predicate_work"] = uint_json(limits.max_predicate_work);
     caps["max_predicate_labels"] = uint_json(limits.max_predicate_labels);
     p["caps"] = std::move(caps);
-    // increment 5b (SPEC §19.12): the operators served, the predicate_strands values (on
-    // CANONICAL and PRIMARY graphs both answer "either": one row serves a k-mer and its
-    // reverse complement) and the access the index gives a selection: "rows" (budget-aware, or
-    // an unbudgeted annotation without direct access) or "columns" (an unbudgeted annotation
-    // with direct access: single cells for at most 16 labels); null while it is not known
+    // the predicate (SPEC §19.12): the operators served, the predicate_strands values (on
+    // CANONICAL and PRIMARY graphs both answer "either": one row serves a k-mer and its reverse
+    // complement) and the access the index gives a selection: "rows" (budget-aware, or an
+    // unbudgeted annotation without direct access) or "columns" (an unbudgeted annotation with
+    // direct access: single cells for at most 16 labels); null while it is not known
     Json::Value predicate;
     Json::Value operators(Json::arrayValue);
     for (const char *op : kPredicateOperators) {
@@ -2049,17 +2029,14 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     // the budget of a request that names none: unlike the other caps, below the maximum
     p["default_time_budget_ms"] = number_json(limits.default_time_ms);
     p["finalize_reserve_ms"] = number_json(limits.finalize_ms);
-    // the rates of the time kept back for the answer (review of 2026-10-07, X-EFFICIENCY-04;
-    // SPEC §7.6), MB/s: stated as numbers since owner decision P9, where caps_rule's prose
-    // stated them before
+    // the rates of the time kept back for the answer (SPEC §7.6), MB/s, stated as numbers
     Json::Value delivery;
     delivery["build"] = number_json(limits.delivery_build_mbps);
     delivery["compress"] = number_json(limits.delivery_compress_mbps);
     p["delivery_mbps"] = std::move(delivery);
-    // which caps are request fields' maxima (review of 2026-10-07, R2-04) and which are the
-    // server's policy (max_patterns, min_information_bits; owner decision #24's
-    // max_checked_entries), every cap named; the rules themselves are the SPEC's (owner
-    // decision P9, as protein_rule)
+    // which caps are request fields' maxima and which are the server's policy (max_patterns,
+    // min_information_bits, max_checked_entries), every cap named; the rules themselves are the
+    // SPEC's (as protein_rule)
     p["caps_rule"] = kCapsRule;
 
     const char *graph_fields[] = { "graph_mode", "k", "alphabet", "strand_stated", "mask",
@@ -2095,9 +2072,9 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["mask"] = !support.mask_present ? "absent"
               : mask_built_at_load(graph) ? "built_at_load" : "file";
     if (support.supported) {
-        // owner decision #16: exact with the mask, upper bounds and estimates without it (the
-        // rule is SPEC's; no prose here: see protein_rule's note on the document's ceiling);
-        // the dummy fraction the estimates rest on, null with the mask
+        // exact with the mask, upper bounds and estimates without it (the rule is SPEC's; no
+        // prose here: see protein_rule's note on the document's ceiling); the dummy fraction
+        // the estimates rest on, null with the mask
         p["counting"] = support.mask_present ? kCountingExact : kCountingUpperBound;
         if (!support.mask_present) {
             if (auto fraction = dummy_fraction(*anno_graph))
@@ -2111,9 +2088,9 @@ Json::Value pattern_capabilities_json(const AnnotatedDBG *anno_graph,
     p["scopes"] = std::move(scopes);
 
     // what the annotation gives the labelled retrieval (output.labels "all"): placement and
-    // support need BASIC coordinates (and the .seqs mapping for records), the budgeted reads
-    // a row-diff annotation (§4.3); support is the best per-label support of a later
-    // increment's paths
+    // support need BASIC coordinates (and the .seqs mapping for records), the budgeted reads a
+    // row-diff annotation (§4.3); support is the best per-label support a path's labels can
+    // have on this index
     try {
         const graph::traversal::LabelOracle oracle(*anno_graph);
         const AnnotationDescription d = describe_annotation(oracle, support.mode);
@@ -2154,8 +2131,8 @@ bool write_pattern_answer(const std::string &content,
         out << Json::writeString(builder, e.body()) << std::endl;
     } catch (const std::exception &e) {
         // what the server answers 400 {"error"} without a code (an unexpected failure): the
-        // same body, and the next request file is still answered (review of 2026-10-07,
-        // R1-03, R2-01: an exception escaped and aborted the run, the later files unanswered)
+        // same body, and the next request file is still answered (an exception that escaped
+        // would abort the run with the later files unanswered)
         logger->error("Request in {} failed: {}", name, e.what());
         Json::Value body;
         body["error"] = e.what();

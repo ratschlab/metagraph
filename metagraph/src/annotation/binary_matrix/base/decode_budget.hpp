@@ -17,7 +17,7 @@ namespace matrix {
 
 /**
  * The budget-aware decode path of the annotation library (DESIGN-traverse-graphlet.md
- * §14, "row decoding is budget-aware inside the decoder"; stage 3 of §14.1).
+ * §14, "row decoding is budget-aware inside the decoder").
  *
  * A caller that opts in passes a DecodeBudget to a decode call (IRowDiff::decode_rows,
  * IRowDiff::decode_row_tuples). The decoder charges every heap buffer it allocates to the

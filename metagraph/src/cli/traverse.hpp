@@ -71,21 +71,9 @@ constexpr int kGraphletFormatVersion = 1;
 // The traversal algorithm every /traverse response names (`algorithm_version`), also stated
 // by both capabilities routes, so that a client can tell before asking which walk it gets
 constexpr const char *kTraverseAlgorithmVersion = "traverse-0.2";
-// What the server offers beyond the base contract (capabilities.feature_level), monotonic:
-// each pass that adds capabilities fields or routes bumps it by one (SPEC §10.3 maps every
-// level). 2: attempts and the client-gone stop; 3: not_after_ms, per-graph identity and
-// GET /traverse/capabilities?graph=, GET /capabilities, algorithm_version in the
-// capabilities, attempts.hard_cap_ms (allowance_ms an integer), deadline_check and the
-// chunked deadlines, compression_level and the delivery reserve; 4 (the efficiency pass): the
-// server's maxima of the budgets (the probe's max_memory_mb / max_work_units, clamped like the
-// time cap), the row-diff path cache (the probe's decode_cache) and the delivery reserve's
-// calibrated starting estimates (delivery_reserve.calibration); 5 (the review of 5801aea1): a
-// cancel's not_after_ms with suppressed_until_ms / covers_admission on every tombstone answer,
-// expect_server_instance (409 instance_mismatch), validated retention settings, the loader
-// inventory behind per-graph identity, and the seed phase and deadline record in timing; 6
-// (record coordinates): strategy.output.coordinates and max_coordinate_occurrences with the
-// coordinates block or null form per seed, the coordinates limitation and drop_coordinates,
-// the probe's coordinates block and delivery_reserve.coordinate_account_per_text_byte
+// What the server offers beyond the base contract (capabilities.feature_level). Monotonic: a
+// change that adds capabilities fields or routes raises it by one; SPEC §10.3 states what each
+// level adds.
 constexpr int kTraverseFeatureLevel = 6;
 
 /**
@@ -111,8 +99,8 @@ bool valid_index_name(const std::string &name);
 // index_meta_fp of the index behind |oracle| (cost: one pass over the column names)
 std::string index_meta_fingerprint(const graph::traversal::LabelOracle &oracle);
 /**
- * The loader dependency inventory of an index listed as |graph| and |annotation| (review of
- * pass 5, findings 2 and 3): every file of the index's IDENTITY that the server's loaders open
+ * The loader dependency inventory of an index listed as |graph| and |annotation|: every file
+ * of the index's IDENTITY that the server's loaders open
  * for the pair, its path derived from the LISTED spelling exactly as the loaders derive it (a
  * sidecar next to a symlink, not next to its target), in loading order —
  *   graph               the graph file (required)
@@ -124,7 +112,7 @@ std::string index_meta_fingerprint(const graph::traversal::LabelOracle &oracle);
  * A required file is listed whether it exists or not (the loader fails without it), an
  * optional one only when the loader would read it. Deliberately not listed: the graph's
  * DERIVED data, which the loader reads too (index_derived_files: the dummy-edge mask and the
- * Bloom filter; the owner's decision #17 of 2026-10-08), what the server does not open — a
+ * Bloom filter), what the server does not open — a
  * column annotation's .coords (merge_load reads the columns only), the graph's .weights, any
  * leftover <graph>.anchors beside another annotation type (theirs are inside the annotation
  * file) — and the header index of the coordinate mapping, which is built in memory from the
@@ -140,7 +128,7 @@ std::vector<IndexFile> index_load_inventory(const std::string &graph,
                                             const std::string &annotation,
                                             bool coord_mapping = true);
 /**
- * The derived data of the graph listed as |graph| (the owner's decision #17 of 2026-10-08):
+ * The derived data of the graph listed as |graph|:
  * files computed from the graph alone that DBGSuccinct::load reads beside it, and that are
  * NOT part of the index identity (index_fp) — an exact answer is the same with and without
  * them, and a manifest must not list them (index_manifest_fingerprint refuses one that does),
@@ -286,8 +274,8 @@ enum class CoordinatesOutput { NONE, REASON, BLOCK };
 // What one object of a result costs to deliver in |detail| (per object, bytes; upper
 // bounds): the output part of the memory budget's model (DESIGN-traverse-graphlet.md §14),
 // which process_traverse_request sets as Strategy::delivery, with every MGT float priced at
-// |float_width| characters (mgt_float_width); |coordinates|: the coordinates' share, nothing
-// (and every other price as before) without them
+// |float_width| characters (mgt_float_width); |coordinates|: the coordinates' share (nothing
+// without them; the other prices do not depend on it)
 graph::traversal::DeliveryCosts delivery_costs(const std::string &detail, bool sequences,
                                                uint64_t float_width = kMgtFloatWidth,
                                                CoordinatesOutput coordinates
@@ -307,7 +295,7 @@ uint64_t compact_json_size(const Json::Value &value);
 // graphlet_lines and graphlet_bytes. Counted exactly (compact_json_size), so that the text of
 // the same result without them — the opt-out request's, when the walk is the same — is the
 // result's text less this: what the server's delivery reserve leaves out of its ratio
-// samples beside the account's coordinate share (plan revision 3). 0 without them. |check|:
+// samples beside the account's coordinate share. 0 without them. |check|:
 // the attempt's delivery check, called every 4096 values counted (a large block is counted
 // under the attempt's bound, as it is written)
 uint64_t coordinates_text_bytes(const Json::Value &result,
@@ -393,7 +381,7 @@ KValue decode_kvalue(std::string_view token);
 } // namespace mgt
 
 // Server-side caps on POST /traverse, 0 = unlimited. A request that names no labels
-// makes the SERVER choose the permitted set, so the request's own bounds no longer
+// makes the SERVER choose the permitted set, so the request's own bounds do not
 // describe the work it asks for; these do. |max_time_ms| also bounds the derivation
 // itself, and a request asking for less is left alone (a clamp only ever lowers a
 // budget, never raises one) — see Config::traverse_max_*.
@@ -402,13 +390,13 @@ struct TraverseLimits {
     size_t max_seeds = 0;          // cap on |request.seeds|
     uint64_t max_seed_bp = 0;      // cap on the length of one seed
     size_t max_seed_labels = 0;    // cap on strategy.labels.max_seed_labels
-    // the maxima of the request's budgets (R16; 0 = off): a larger budget is lowered to it,
-    // an omitted one set to it, both echoed in strategy.clamped
+    // the maxima of the request's budgets (SPEC §10.3; 0 = off): a larger budget is lowered
+    // to it, an omitted one set to it, both echoed in strategy.clamped
     uint64_t max_memory_mb = 0;    // of strategy.bounds.max_memory_mb
     uint64_t max_work_units = 0;   // of strategy.bounds.max_work_units
     // Not a cap: the chunked deadlines (spec §6.8, Config::traverse_chunk_target_ms) — an
     // annotation read a deadline may fall into is decoded in chunks of about this many ms, the
-    // deadline checked between them; 0: one piece per read, as before
+    // deadline checked between them; 0: one piece per read
     double chunk_target_ms = 0;
     // Not a cap: the bound of the request's row-diff path cache (LabelOracle::path_cache,
     // Config::traverse_path_cache_mb); 0: off, every read decodes its rows' whole paths
@@ -455,7 +443,7 @@ constexpr double kResolveFinalizeMs = 250;
 // The time limits of a /resolve: the cap of bounds.time_budget_ms (the server's
 // --traverse-max-time-ms, as /traverse's; 0: none — the CLI, which an operator runs) and the
 // finalisation reserve inside every budget. A request without the field has no deadline,
-// whatever the cap: it is answered exactly as before the field was accepted
+// whatever the cap: it is answered without a time limit
 struct ResolveTimeLimits {
     double max_time_ms = 0;
     double finalize_ms = kResolveFinalizeMs;

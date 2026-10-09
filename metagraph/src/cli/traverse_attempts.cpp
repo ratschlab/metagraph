@@ -304,7 +304,7 @@ double Attempt::own_stop_ms() const {
 
 void Attempt::update_walk_until_locked() {
     // the reserve keeps time back for a delivery the server bounds: an attempt whose bound is
-    // not enforced (the CLI) states the floor, as before pass 5
+    // not enforced (the CLI) states the floor
     walk_until_ms_ = std::max(0.0, bound_ms_ - std::max(settings_.allowance_ms / 2,
                                                         enforced() ? reserve_ms() : 0.0));
 }
@@ -339,10 +339,10 @@ void Attempt::note_delivered(uint64_t text_bytes, double build_seconds, uint64_t
                                                         : mbps;
     }
     // The ratio of the rest of the output: the coordinate share's account and its exact text
-    // both left out, so that the sample is the one the same walk without coordinates gives
-    // (plan revision 3), and measured only on a rest of at least kMeasuredTextBytes (a seed
-    // whose text is mostly coordinates measures no ratio, like a small seed). Without
-    // coordinates both are 0: the sample is the one before the split
+    // both left out, so that the sample is the one the same walk without coordinates gives,
+    // and measured only on a rest of at least kMeasuredTextBytes (a seed whose text is
+    // mostly coordinates measures no ratio, like a small seed). Without coordinates both are
+    // 0 and the sample is the whole output's
     if (account > coordinate_account && text_bytes > coordinate_text
             && text_bytes - coordinate_text >= kMeasuredTextBytes) {
         const double ratio = static_cast<double>(account - coordinate_account)
@@ -458,8 +458,7 @@ void Attempt::check_delivery() {
             if (!stopped_at_)
                 stopped_at_ = now();
         }
-        // the bound as enforced: capped at the content timeout less one second (the review of
-        // 2026-10-06, C16: the message named only the uncapped sum)
+        // the bound as enforced: capped at the content timeout less one second
         throw AttemptAtBound(fmt::format(
                 "the attempt reached the duration bound the server enforces for it ({} ms: the "
                 "seeds' time budgets plus the server's allowance, at most hard_cap_ms, the "
@@ -503,7 +502,7 @@ void Attempt::seed_walked(size_t index, const SeedUsage &usage) {
     seeds_requested_ = std::max(seeds_requested_, seeds_.size());
     // once per seed: a seed abandoned while its result was built, or refused after its walk,
     // was already counted. A walk the client's departure cut did not finish: it is counted as
-    // abandoned, not as finished (review of the stage-4 backend, F5)
+    // abandoned, not as finished
     const bool first = !seeds_[index].walked;
     if (first) {
         if (usage.outcome == "abandoned") {
@@ -519,11 +518,11 @@ void Attempt::seed_walked(size_t index, const SeedUsage &usage) {
     // of them) measures what the reserve must keep beyond building and compressing — at the
     // walk's end only, the first call for the seed. A second call comes after the walk, while
     // its result was built (the client left: abandoned; a writer or the seed's refusal: failed),
-    // and the time since the walk-until then includes building, which the reserve prices on
-    // its own: measured as stop latency it became the server's measured_stop_ms (the longest
-    // of its last rate_window attempts), and every later attempt whose bound was no longer than
-    // that build time walked nothing (review of 2026-10-06, U11-01: 10.5 s of building recorded
-    // after a 400 ms stop)
+    // and the time since the walk-until then includes building, which the reserve prices on its
+    // own: measured as stop latency it would become the server's measured_stop_ms (the longest
+    // of its last rate_window attempts), and every later attempt whose bound is no longer than
+    // that build time would walk nothing (10.5 s of building recorded after a 400 ms stop, for
+    // example)
     if (first && enforced() && bound_set_) {
         const double late = elapsed_ms() - tripped_walk_until_ms_.value_or(walk_until_ms_);
         if (late > 0)
@@ -559,10 +558,9 @@ Json::Value Attempt::bound_json() const {
     // stopped being walked (the walk stopped at its first poll that read the clock after it,
     // usage.stopped_at). Otherwise the lowest walk-until the walk's clock-reading polls checked
     // (one in poll_stride, every forced one): the floor (bound - allowance /
-    // 2) unless the delivery reserve moved it before a check. A value no poll read bounded no
-    // walk: the lowest computed read 14905 ms for walks stopped near 16000, and 20174 ms (from
-    // the last seed's text, written after its walk) for a walk its own 30 s budget ended
-    // (review of pass 5, F4)
+    // 2) unless the delivery reserve moved it before a check. A value no poll read bounds no
+    // walk: the lowest computed would read 14905 ms for walks stopped near 16000, and 20174 ms
+    // (from the last seed's text, written after its walk) for a walk its own 30 s budget ended
     const double checked = checked_walk_until_ms_.load(std::memory_order_relaxed);
     b["walk_until_ms"] = ms_json(tripped_walk_until_ms_ ? *tripped_walk_until_ms_
                                : std::isfinite(checked) ? checked : walk_until_ms_);
@@ -604,9 +602,9 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
     // The request: work adds up; memory is held at once by the seed being walked and the
     // results of the seeds before it, which stay until the response is written — a walked
     // result its account at the end, a failed or never started one its priced echo
-    // (final_bytes; review of the stage-4 backend, F1: they were counted as 0). Under a memory
-    // budget a seed's walk holds at most the budget and its soft excess (as observed): what
-    // the request held at once is bounded by that, the results before it included
+    // (final_bytes). Under a memory budget a seed's walk holds at most the budget and its soft
+    // excess (as observed): what the request held at once is bounded by that, the results
+    // before it included
     uint64_t work = 0, held = 0, peak = 0, soft = 0, bound = 0;
     Json::Value list(Json::arrayValue);
     for (size_t i = 0; i < seeds_.size(); ++i) {
@@ -648,9 +646,8 @@ Json::Value Attempt::usage_json(const std::string &reason, bool per_seed) const 
     // over its own budget): the request states the largest
     memory["soft_excess_bytes"] = memory_budget_ ? uint_value(soft) : Json::Value();
     // Without a memory budget the account leaves out the label caches, the lookahead and a
-    // level's decoded rows, so nothing bounds what was held (review of the stage-4 backend,
-    // F2: 0.79 MB stated for a walk that raised the RSS by 111 MB): null, never a number that
-    // reads as a bound
+    // level's decoded rows, so nothing bounds what was held (a walk whose account states
+    // 0.79 MB can raise the RSS by 111 MB): null, never a number that reads as a bound
     memory["held_bound_bytes"] = memory_budget_ ? uint_value(bound) : Json::Value();
     u["memory"] = std::move(memory);
     if (per_seed)
@@ -910,10 +907,10 @@ void AttemptRegistry::expire_locked() {
             continue;
         if (hold_live_locked(*old, t, wall_now())) {
             // Its retention ended, by age or by count, while a copy of the request could still
-            // be admitted: the id stays refused, among the tombstones, until its hold ends
-            // (review of the pass-5 fixes, finding 1: a ledger released on the finished state,
-            // and a replay after retention_s, or after retention_count later finishes, ran
-            // again). Never dropped early: it ran, so it cannot be refused like a cancel
+            // be admitted: the id stays refused, among the tombstones, until its hold ends (a
+            // ledger releases on the finished state, and a replay after retention_s, or after
+            // retention_count later finishes, would run again). Never dropped early: it ran,
+            // so it cannot be refused like a cancel
             old->held_ = true;
             tomb_expiry_.emplace(old->tomb_steady_until_, old->ids().attempt_id);
             continue;
@@ -1025,13 +1022,11 @@ AttemptRegistry::start(const std::shared_ptr<Attempt> &attempt) {
             // A copy of a cancelled request arrived (a proxy's replay carries the same
             // not_after_ms): the tombstone is extended to cover its admission, so that every
             // later copy is refused too while it could still be admitted, and the refusal
-            // states the suppression judged against this request's not_after_ms (review of
-            // pass 5, finding 1: it was neither refreshed nor reported)
+            // states the suppression judged against this request's not_after_ms
             hold_locked(*it->second, attempt->ids().not_after_ms);
-            // its own not_after_ms alone, no fallback to a cancel's: whether a copy of THIS
-            // request is covered (review of the pass-5 fixes, finding 3: a copy without one
-            // was told covers_admission by a cancel's not_after_ms, and ran once re-sent after
-            // the tombstone expired)
+            // only this request's own not_after_ms decides whether a copy of THIS request is
+            // covered, never a cancel's: a copy without one would otherwise be told
+            // covers_admission and run once re-sent after the tombstone expired
             add_suppression_locked(&body, *it->second, attempt->ids().not_after_ms, false);
         } else if (settings_.retention_s && attempt->ids().not_after_ms) {
             // a copy of a running or finished request (a replay, or another request with its
@@ -1077,14 +1072,13 @@ Json::Value AttemptRegistry::capabilities_json() const {
     att["content_timeout_s"] = uint_value(settings_.content_timeout_s);
     att["client_check_ms"] = uint_value(settings_.client_check_ms);
     att["clock_skew_allowance_ms"] = uint_value(settings_.clock_skew_ms);
-    // What the bound is and how it is enforced (the review of 2026-10-06: C16, the cap; C20, the
-    // walk-until stated; X2, what runs past it, which every release text names). The bound is
-    // compared only in check_delivery: the walk's polls compare the walk-until, and only those
-    // that read the clock (one in poll_stride, every forced one). So past the bound the attempt
-    // runs on until its next delivery check — not one step, as these texts said before the
-    // review of the P2 fixes: the rest of the piece the bound fell into, the walk up to its next
-    // clock-reading poll, the stopped seed's finalisation and its result's building up to the
-    // first check (the reviewer's 6.94 Mbp seed: GET answered running 2,720 ms past the instant)
+    // What the bound is and how it is enforced: the cap, the walk-until stated, and what runs
+    // past it, which every release text names. The bound is compared only in check_delivery: the
+    // walk's polls compare the walk-until, and only those that read the clock (one in
+    // poll_stride, every forced one). So past the bound the attempt runs on until its next
+    // delivery check, not one step: the rest of the piece the bound fell into, the walk up to
+    // its next clock-reading poll, the stopped seed's finalisation and its result's building up
+    // to the first check (a 6.94 Mbp seed: GET answered running 2,720 ms past the instant)
     att["bound"] = fmt::format(
         "min(seeds x the effective bounds.time_budget_ms + allowance_ms, hard_cap_ms) ms on the "
         "attempt's clock, which starts when the server read the request's header (time queued "
@@ -1134,7 +1128,7 @@ Json::Value AttemptRegistry::capabilities_json() const {
     reserve["rate_window"] = uint_value(kRateWindow);
     reserve["margin"] = kReserveMargin;
     reserve["stop_ms"] = ms_json(settings_.delivery_stop_ms);
-    // where the configured starting estimates come from (feature level 4, the efficiency pass)
+    // where the configured starting estimates come from (feature level 4)
     reserve["calibration"] = "starting estimates, replaced by this server's measurements: "
         "account_per_text_byte just below the smallest ratios measured on real responses (JSON "
         "details 33.5 to 1,344, graphlet 58.4 and more; 20 and 40 before feature level 4). They "
@@ -1176,7 +1170,7 @@ Json::Value AttemptRegistry::capabilities_json() const {
         "compressed more slowly than the rates used allow for with the margin, a seed writes "
         "more text than its estimate, or the walk ends later after its walk-until than stop";
     att["delivery_reserve"] = std::move(reserve);
-    // The refusal order is part of the contract (the review of 2026-10-06, C24): an expired 409
+    // The refusal order is part of the contract: an expired 409
     // is a release ground (release_rule) only because the id's registration is checked first
     att["not_after"] = "not_after_ms (Unix epoch ms, an integer in [0, 2^53 - 1], with or "
         "without attempt_id): a request whose not_after_ms is earlier than this server's clock "
@@ -1196,7 +1190,7 @@ Json::Value AttemptRegistry::capabilities_json() const {
         "delivery), and as past its bound once its clock passes that + bound_ms — apart from "
         "what it runs past its bound, up to its next delivery check, a run of no stated length "
         "(bound, release_rule)";
-    // the field's format and its 400s (the review of 2026-10-06, X4: C17, D10): the value is
+    // the field's format and its 400s: the value is
     // checked as an id is, so that "" can never un-pin a request
     att["instance"] = "expect_server_instance (with attempt_id; a string matching id_pattern, "
         "as every server_instance does): a request naming another server_instance than this "
@@ -1248,14 +1242,13 @@ Json::Value AttemptRegistry::capabilities_json() const {
             "id no attempt of this process holds is refused (429, tombstone: false, reason: "
             "no_suppression) and promises nothing; a request with the id arriving later runs";
     }
-    // What a finished state promises against a replay of the request (review of the pass-5
-    // fixes, finding 1): the id's hold beyond retention, or, with nothing kept, nothing. The
-    // hold is this process's, in memory, so a restart ends it: only an attempt pinned to the
-    // instance (expect_server_instance) is refused by the restarted process, and the finished
-    // state is replay-safe only for such an attempt — required as for a tombstone, and what an
-    // unpinned one assumes stated (review of levels 4-5, finding 6: an unpinned request finished
-    // with not_after_ms 60 s ahead, replayed after a restart of the same endpoint, ran again, 170
-    // work units, while the text said a finished request within its hold was never run again)
+    // What a finished state promises against a replay of the request: the id's hold beyond
+    // retention, or, with nothing kept, nothing. The hold is this process's, in memory, so a
+    // restart ends it: only an attempt pinned to the instance (expect_server_instance) is refused
+    // by the restarted process, and the finished state is replay-safe only for such an attempt —
+    // required as for a tombstone, and what an unpinned one assumes stated (an unpinned request
+    // replayed after a restart of the same endpoint runs again, however far ahead its
+    // not_after_ms)
     const std::string finished_hold = settings_.retention_s
         ? "A finished attempt's id stays refused (409) while it is retained (retention_s, "
           "retention_count) and, for an attempt sent with not_after_ms, until this server's "
@@ -1281,14 +1274,13 @@ Json::Value AttemptRegistry::capabilities_json() const {
         : "retention_s is 0: finished attempts are not kept, so a finished state assumes that "
           "no copy of the request arrives after it (a copy sent with expect_server_instance is "
           "still refused by a restarted process). ";
-    // The grounds a ledger may release on, and what each assumes (the review of 2026-10-06:
-    // X2, the clock release takes the attempt as stopped at its bound, which it is apart from
-    // its run up to its next delivery check, of no stated length (bound), and an answer of
-    // running or stopping past that instant shows that run; the search service's release
-    // parity, LRG-R1 and LRG-R2:
-    // the 409 refusing a copy carries the id's state as GET answers it, so its finished state
-    // is a finished state, and an expired 409 is a ground because the id's registration is
-    // checked before the expiry). Text only: what the server does is unchanged
+    // The grounds a ledger may release on, and what each assumes: the clock release takes the
+    // attempt as stopped at its bound, which it is apart from its run up to its next delivery
+    // check, of no stated length (bound), and an answer of running or stopping past that
+    // instant shows that run; for the search service's release parity, the 409 refusing a
+    // copy carries the id's state as GET answers it, so its finished state is a finished
+    // state, and an expired 409 is a ground because the id's registration is checked before
+    // the expiry. Texts only: they state what the server does
     const std::string expired_ground = "An expired 409 (state: expired) for an attempt sent "
         "with exactly that not_after_ms — from the server_instance it named in "
         "expect_server_instance, when it named one — releases it: this server checks the id's "
@@ -1344,9 +1336,8 @@ std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint6
         auto it = attempts_.find(id);
         if (it == attempts_.end()) {
             if (!settings_.retention_s) {
-                // Retention 0: this server suppresses nothing (review of pass 5, finding 4: a
-                // tombstone held 0 s was promised and expired at once), said so; a retry gives
-                // the same answer
+                // Retention 0: this server suppresses nothing, and says so (a tombstone held
+                // 0 s would expire at once); a retry gives the same answer
                 Json::Value j = unknown_json(id);
                 j["error"] = "unknown attempt_id '" + id + "', and it was NOT tombstoned: this "
                              "server keeps no tombstones (--traverse-attempt-retention-s 0), so a "
@@ -1375,9 +1366,8 @@ std::pair<int, Json::Value> AttemptRegistry::cancel(const std::string &id, uint6
             // (409) and never runs here — for retention_s, and until the not_after_ms the
             // cancel names + the clock skew allowance, after which the request's own
             // not_after check refuses it. Only then (covers_admission) does a 404 from this
-            // server_instance mean that the attempt will not run on it at all (review of pass
-            // 5, finding 1: with retention 1 s a half-uploaded request completed at 1.18 s and
-            // ran)
+            // server_instance mean that the attempt will not run on it at all (with retention
+            // 1 s alone, a half-uploaded request completing at 1.18 s would run)
             auto tomb = Attempt::make_tombstone(id, settings_, instance_);
             attempts_.emplace(id, tomb);
             hold_locked(*tomb, not_after_ms);

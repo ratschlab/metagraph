@@ -45,7 +45,7 @@ class CurrentlyInitializingError : public std::runtime_error {
         : std::runtime_error("Server is currently initializing") {}
 };
 
-// What process_request does besides writing the result (null: nothing, as before)
+// What process_request does besides writing the result (null: nothing)
 struct ResponseControl {
     // called while the body is written (every 64 KiB of JSON text) and compressed (every
     // block): throws to stop — ClientGone (nothing is written) or HttpError (that answer)
@@ -70,8 +70,7 @@ struct ResponseControl {
     // before a byte of it is written; true: nothing is written and the connection is closed,
     // as for ClientGone. Not the deadline, which |check| reads: a 503 at the deadline is
     // still written to a client that is there. Unset (every other route): every error is
-    // written, as before — a check reaches only the success path (review GPT-2 of
-    // 2026-10-08, finding 4: a half-closed client was sent its 400 by /pattern)
+    // written; a check reaches only the success path
     std::function<bool()> gone;
 };
 
@@ -118,7 +117,7 @@ bool peer_closed(int fd);
 // |value| as the server writes it: compact (no indentation) or the default writer's
 // indentation, byte for byte what Json::writeString writes; with |check|, called every 64 KiB
 // of text (however large the pieces the writer hands over: they are copied in pieces up to the
-// next check, review of pass 5, finding 6), whose exception stops the writing and reaches the
+// next check), whose exception stops the writing and reaches the
 // caller. What stays uninterruptible is what the writer does between two pieces — preparing
 // one token, e.g. escaping one string value of 16 MiB, before it is copied — and |max_gap_ms|,
 // when given, receives the longest time between two checks (and from the start to the first,
@@ -132,11 +131,10 @@ std::string json_text(const Json::Value &value, bool compact,
 // object's members in byte order of their names), with "results":[t0,t1,...] between them —
 // byte for byte json_text(envelope with results, true); |check| and |max_gap_ms| as
 // json_text's, the results' texts copied in pieces of at most 64 KiB with a check between
-// them (finding 6: a seed's text of 16 MiB was appended whole, one check after it).
-// |results| is taken by value (the server moves its texts in): the response's exact size is
-// reserved before anything is copied, and each text is freed once copied, so that assembling
-// holds about the response once, not the texts beside a copy that grew by doubling (review
-// of 2026-10-06, C9: up to 3x the text before compression or the transport's copy began)
+// them. |results| is taken by value (the server moves its texts in): the response's exact
+// size is reserved before anything is copied, and each text is freed once copied, so that
+// assembling holds about the response once, not the texts beside a copy that grows by
+// doubling (up to 3x the text before compression or the transport's copy begins)
 std::string assemble_traverse_response(const Json::Value &envelope,
                                        std::vector<std::string> results,
                                        const std::function<void()> &check = nullptr,
@@ -146,7 +144,7 @@ std::string assemble_traverse_response(const Json::Value &envelope,
 // stream; |check| called before each 32 KiB block of output, its exception (after the stream
 // is released) reaching the caller. zlib counts its input in 32 bits: the text is handed over
 // in pieces of at most |max_piece| bytes (0: the most zlib takes, 2^32 - 1), so a text of any
-// size is compressed whole; a text of one piece is compressed exactly as before (|max_piece|
+// size is compressed whole; a text of one piece is compressed in one call (|max_piece|
 // below that is for tests)
 std::string compress_string(const std::string &text, int level, bool gzip,
                             const std::function<void()> &check = nullptr,
@@ -158,8 +156,8 @@ constexpr size_t kDeliveryCheckBytes = size_t(1) << 16;
 /**
  * One line of a multi-graph list (`server_query GRAPHS.csv`):
  *     name,graph_path,annotation_path[,manifest_path[,index_ns]]
- * split on every comma, the three first columns as before (a line of three columns is read as
- * it always was), the two last optional — the per-graph identity of
+ * split on every comma; the first three columns are required, the last two optional — the
+ * per-graph identity of
  * DESIGN-traverse-graphlet.md §21: the manifest of the pair's bundle, checked at start-up as
  * --index-manifest is, and the name the pair's responses state. An empty optional column means
  * none (index_fp, index_ns null). Paths are as the server opens them (relative to its working
@@ -174,8 +172,8 @@ struct GraphListEntry {
     std::string index_ns;           // "" none
 };
 // Throws std::invalid_argument naming the line's problem: fewer than three columns, more than
-// five (a fourth column used to be dropped silently; it now names a manifest, so a column
-// nothing reads is refused rather than ignored), or an index_ns that is not [A-Za-z0-9._-]+
+// five (a column nothing reads is refused rather than ignored), or an index_ns that is not
+// [A-Za-z0-9._-]+
 GraphListEntry parse_graph_list_line(const std::string &text, size_t line);
 
 /**

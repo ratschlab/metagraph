@@ -2,19 +2,18 @@
 #define __METAGRAPH_CLI_PATTERN_PREDICATE_HPP__
 
 /**
- * The predicate language of POST /pattern (increment 5b, SPEC-pattern-search.md §19.3,
- * §19.4, §19.9; the owner's decisions P1, P3, P5, P7, P18-P20 of 2026-10-08): a logical
- * condition on the annotation columns of a graph context or of a supported path,
+ * The predicate language of POST /pattern (SPEC-pattern-search.md §19.3, §19.4, §19.9): a
+ * logical condition on the annotation columns of a graph context or of a supported path,
  *
  *   {"any": [n1, ...]}  {"all": [...]}  {"none": [...]}
  *   {"at_least": {"n": m, "labels": [...]}}  {"and": [p, ...]}  {"or": [p, ...]}  {"not": p}
  *
- * parsed from the request (Predicate::parse), bound to one index's columns (bind: unknown
- * names folded away into the normal form) and evaluated on the labels a context carries
- * (Bound::eval) or may carry (Bound::eval3, three-valued, for the supported-path search's
- * pruning). Labels are column names and nothing more (P6: no taxonomy; a cohort is a list).
- * Nothing here reads annotation: the selection pass and the supported-path search read the
- * rows and hand the labels they found to the evaluator.
+ * parsed from the request (Predicate::parse), bound to one index's columns (bind: unknown names
+ * folded away into the normal form) and evaluated on the labels a context carries (Bound::eval)
+ * or may carry (Bound::eval3, three-valued, for the supported-path search's pruning). Labels
+ * are column names and nothing more (no taxonomy: a cohort is a list). Nothing here reads
+ * annotation: the selection pass and the supported-path search read the rows and hand the
+ * labels they found to the evaluator.
  */
 
 #include <cstdint>
@@ -101,12 +100,11 @@ using ColumnLookup = std::function<std::optional<Column>(const std::string &name
 struct Binding;
 
 /**
- * A predicate bound to one index (§19.4): the names that are not columns of its annotation
- * are unknown, absent from every context, and folded away (any of unknowns false, none true,
- * all with an unknown false, at_least with fewer than n known false, constants through and,
- * or and not); what is left is the normal form, the predicate the answer echoes and the
- * selection evaluates. A normal form that is a constant is evaluated without reading any
- * annotation (P18).
+ * A predicate bound to one index (§19.4): the names that are not columns of its annotation are
+ * unknown, absent from every context, and folded away (any of unknowns false, none true, all
+ * with an unknown false, at_least with fewer than n known false, constants through and, or and
+ * not); what is left is the normal form, the predicate the answer echoes and the selection
+ * evaluates. A normal form that is a constant is evaluated without reading any annotation.
  *
  * labels() is the permitted set of the selection's reads: the columns the normal form lists,
  * in the order of their first appearance in the request; a LabelId is an index into it (as a
@@ -137,8 +135,8 @@ class Bound {
                         graph::pattern::Budget &budget,
                         const std::function<bool(uint64_t)> &admit = nullptr);
 
-    // The same with |oracle|'s columns (LabelOracle::find_column; record headers are not
-    // looked up: a header that is no column is unknown, P20)
+    // The same with |oracle|'s columns (LabelOracle::find_column; record headers are not looked
+    // up: a header that is no column is unknown)
     static Binding bind(const Predicate &predicate,
                         const graph::traversal::LabelOracle &oracle,
                         graph::pattern::Budget &budget,
@@ -148,17 +146,17 @@ class Bound {
     // the folding dropped): the answer's predicate.names and predicate.known
     uint64_t num_names() const { return num_names_; }
     uint64_t num_known() const { return num_known_; }
-    // the names that are not columns of the index (record headers among them, P20), in the
-    // order of their first appearance in the request: predicate.unknown_labels
+    // the names that are not columns of the index (record headers among them), in the order of
+    // their first appearance in the request: predicate.unknown_labels
     const std::vector<std::string>& unknown_labels() const { return unknown_; }
 
     // the normal form is the constant false or true (no node, no label)
     std::optional<bool> constant() const { return constant_; }
-    // the normal form holds on a context carrying none of its labels (§19.4, P5): none(A),
+    // the normal form holds on a context carrying none of its labels (§19.4): none(A),
     // not(any(A)), or(none(A), any(B)), the constant true
     bool vacuous() const { return vacuous_; }
     // the normal form has neither none nor not: it cannot turn true when a label is taken
-    // away (the supported-path search may prune a branch on which it is already false, §20.9)
+    // away (the supported-path search may prune a branch on which it is already false)
     bool monotone() const { return monotone_; }
 
     // the permitted set: the columns of the normal form (LabelId = index). Empty for a

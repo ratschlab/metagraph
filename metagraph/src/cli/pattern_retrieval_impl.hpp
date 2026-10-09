@@ -3,11 +3,10 @@
 
 /**
  * The labelled retrieval's internals (pattern_retrieval.hpp), shared by the files that make up
- * PatternRetrieval: pattern_retrieval.cpp (the labels of contexts and paths, increments 3 and
- * 4), pattern_selection.cpp (the selection pass of a predicate, increment 5b) and, later, the
- * supported-path search's trackers (5s). Not an interface of the route: nothing outside those
- * files includes it. Moved here from pattern_retrieval.cpp unchanged (increment 5b-3): the
- * memory and text models, the request's account, the rows' states and PatternRetrieval::Impl.
+ * PatternRetrieval: pattern_retrieval.cpp (the labels of contexts and paths) and
+ * pattern_selection.cpp (the selection pass of a predicate). Not an interface of the route:
+ * nothing outside those files includes it. It holds the memory and text models, the request's
+ * account, the rows' states and PatternRetrieval::Impl.
  */
 
 #include <algorithm>
@@ -44,12 +43,11 @@ namespace retrieval {
 // a released context: its result object (k-mer, instance, offset, strand, node, row) and its
 // descriptor, beside its k-mer twice (the result's strings); charged before the object is built
 inline uint64_t context_bytes(size_t k) { return 512 + 2 * k; }
-// Every copy of a label's name the request holds is priced where it is made, at its length
-// (review GPT-2, finding 3: a result's label was priced 256 whatever its name, and one label
-// of 512 KiB in 64 contexts built a 34 MB answer under max_memory_mb 2):
-// a dictionary label: its LabelRef and name in the recorder, its counters here, and the copy
-// of its name in each pattern's placement (the LabelQuery of step 2 copies the dictionary;
-// one at a time); charged inside the read that names it
+// Every copy of a label's name the request holds is priced where it is made, at its length (a
+// flat price would let one long name in many contexts build an answer far past max_memory_mb):
+// a dictionary label: its LabelRef and name in the recorder, its counters here, and the copy of
+// its name in each pattern's placement (the LabelQuery of step 2 copies the dictionary; one at
+// a time); charged inside the read that names it
 inline uint64_t label_name_bytes(std::string_view name) { return 192 + 2 * name.size(); }
 // a label object of a result (column, support, the occurrences count, the list) and its copy
 // of the label's name
@@ -72,10 +70,9 @@ inline uint64_t statement_bytes(size_t k) { return 384 + k; }
 constexpr uint64_t kPathKmerBytes = 192;
 
 /**
- * The compact JSON text of the labels built for the answer, from above (AnswerVolume, review
- * of 2026-10-07, X-EFFICIENCY-04): estimated before the objects are built, so that the work
- * time is read with them counted. Integers at their widest (20 digits), strings as
- * string_text_bytes.
+ * The compact JSON text of the labels built for the answer, from above (AnswerVolume):
+ * estimated before the objects are built, so that the work time is read with them counted.
+ * Integers at their widest (20 digits), strings as string_text_bytes.
  */
 // a count {"relation":"at_least","unit":"placed_occurrences","value":<20 digits>}: 79
 constexpr uint64_t kCountText = 96;
@@ -233,7 +230,7 @@ struct RowState {
 };
 
 /**
- * The memory model of the selection pass (increment 5b, SPEC §19.9), beside the items above.
+ * The memory model of the selection pass (SPEC §19.9), beside the items above.
  */
 // a raw context kept for the pass (TestedContext: orientation, offset, node, row key, the
 // reverse complement's key, row indices, its decision); charged as the engine releases it
@@ -365,12 +362,11 @@ struct PatternRetrieval::Impl {
     }
 
     /**
-     * The clock of the retrieval's own work between the reads (review GPT-3, findings 1 and
-     * 4): the occurrences made for the counts and the output, the paths' label lists and their
-     * verification. Asked before |u| more units are done: the clock is read when they would
-     * take the units since its last reading past Budget::kClockStride, as the engine's steps
-     * read it; false when the work time passed (the caller states the stop and does not do the
-     * work).
+     * The clock of the retrieval's own work between the reads: the occurrences made for the
+     * counts and the output, the paths' label lists and their verification. Asked before |u|
+     * more units are done: the clock is read when they would take the units since its last
+     * reading past Budget::kClockStride, as the engine's steps read it; false when the work
+     * time passed (the caller states the stop and does not do the work).
      */
     uint64_t unclocked = 0;
     bool may_work(uint64_t u) {
@@ -383,10 +379,10 @@ struct PatternRetrieval::Impl {
         return true;
     }
 
-    // What a refused read is charged (review GPT-2, finding 1): the units of what it decoded
-    // (FetchRefusal::units: the row was read, and refused for its demand or its names), or 8
-    // when its read itself did not fit (its units are not known): a refused row is work like
-    // a row read, so that refusals cannot go on past the work budget
+    // What a refused read is charged: the units of what it decoded (FetchRefusal::units: the
+    // row was read, and refused for its demand or its names), or 8 when its read itself did not
+    // fit (its units are not known): a refused row is work like a row read, so that refusals
+    // cannot go on past the work budget
     static uint64_t refused_units(const graph::traversal::FetchRefusal &r) {
         return r.units ? r.units : 8;
     }
@@ -434,7 +430,7 @@ struct PatternRetrieval::Impl {
                     const std::vector<bool> *needed = nullptr,
                     const std::vector<graph::traversal::LabelRef> *dict = nullptr);
 
-    // ---- the selection of a predicate (increment 5b, pattern_selection.cpp)
+    // ---- the selection of a predicate (pattern_selection.cpp)
 
     graph::pattern::GraphMode mode = graph::pattern::GraphMode::BASIC;
     // bind(): the request's predicate bound to the index (its bytes held for the request), and

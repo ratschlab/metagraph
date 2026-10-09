@@ -40,17 +40,17 @@ class NodeFirstCache;
 namespace traversal {
 
 /**
- * Paces the annotation reads of one request under a deadline (pass 5, the chunked deadlines
- * of spec §6.8). A read the deadline cannot fall into is decoded in one piece, as before pass
- * 5: splitting a read costs what its rows share — on a row-diff annotation the rows of one
- * call share the decoding of their row-diff paths, which every chunk decodes again (review of
- * pass 5: one-row chunks made a 1.8 s row_diff walk take 30 s and hit its budget, so its bytes
- * changed) — and buys nothing when the deadline is far. A read that might reach the deadline
- * is split: a first chunk of at most |first_rows| measures this read's own rows (another
- * read's rows, another level's, may be far cheaper: a first chunk sized from them took 650 ms
- * of a 50 ms target), each next chunk at most 4 times the previous one and sized at the rate
- * the previous one measured to take min(|target_ms|, the time left), with the deadline checked
- * before each; once the rest is predicted to end well before the deadline it is one piece.
+ * Paces the annotation reads of one request under a deadline (the chunked deadlines of spec
+ * §6.8). A read the deadline cannot fall into is decoded in one piece: splitting a read costs
+ * what its rows share — on a row-diff annotation the rows of one call share the decoding of
+ * their row-diff paths, which every chunk decodes again (one-row chunks make a 1.8 s row_diff
+ * walk take 30 s) — and buys nothing when the deadline is far. A read that might reach the
+ * deadline is split: a first chunk of at most |first_rows| measures this read's own rows
+ * (another read's rows, another level's, may be far cheaper: a first chunk sized from them can
+ * take 650 ms of a 50 ms target), each next chunk at most 4 times the previous one and sized
+ * at the rate the previous one measured to take min(|target_ms|, the time left), with the
+ * deadline checked before each; once the rest is predicted to end well before the deadline it
+ * is one piece.
  * One chunk, at least one row, stays uninterruptible. It also measures every read, paced or
  * not: |max_read_ms| is the longest single piece of decoding (and of building what it returns)
  * the request made — what stating an uninterruptible step needs. Chunking never changes what a
@@ -58,18 +58,18 @@ namespace traversal {
  * its decoding.
  */
 /**
- * One uninterruptible piece of a seed's work, as its deadline record states it (R8; timing
- * only): what ran between two readings of the deadline — |kind| one of "read" (an annotation
- * read in one piece), "chunk" (a chunk of a split read), "rest" (the piece that ended a split
- * read), "kmer_mapping" (the seed's k-mers mapped to nodes and keys), "coord_mapping" (a derived
- * seed's k-mer whose coordinates were mapped to headers), "derivation_step" (a derived seed's
- * k-mer otherwise), "head" (the walk between two readings of the clock, reads excluded; the
- * last one ends at the walk's stop or end), "setup" (the seed phase's own processing between
+ * One uninterruptible piece of a seed's work, as its deadline record states it (SPEC §6.8;
+ * timing only): what ran between two readings of the deadline — |kind| one of "read" (an
+ * annotation read in one piece), "chunk" (a chunk of a split read), "rest" (the piece that ended
+ * a split read), "kmer_mapping" (the seed's k-mers mapped to nodes and keys), "coord_mapping" (a
+ * derived seed's k-mer whose coordinates were mapped to headers), "derivation_step" (a derived
+ * seed's k-mer otherwise), "head" (the walk between two readings of the clock, reads excluded;
+ * the last one ends at the walk's stop or end), "setup" (the seed phase's own processing between
  * its other pieces: validation, resolving label names and their duplicate check, the extra
  * labels, the depth-0 state — everything up to the walk's first checkpoint that no other piece
- * covers) and "finalisation" (from the walk's end or stop to its result) — with its rows and
- * the coordinates mapped to headers in it. The pieces cover the seed's time from its start to
- * its result (a read inside a head is a piece of its own, which the head excludes).
+ * covers) and "finalisation" (from the walk's end or stop to its result) — with its rows and the
+ * coordinates mapped to headers in it. The pieces cover the seed's time from its start to its
+ * result (a read inside a head is a piece of its own, which the head excludes).
  */
 struct UninterruptiblePiece {
     double ms = 0;
@@ -79,7 +79,7 @@ struct UninterruptiblePiece {
 };
 
 struct DecodePacer {
-    double target_ms = 0;          // 0: pacing off, one piece per read (as before)
+    double target_ms = 0;          // 0: pacing off, one piece per read
     size_t first_rows = 8;         // the most rows of a split read's first chunk
     double ms_per_row = 0;         // the slowest per-row time of any piece of the request
     double max_read_ms = 0;        // the longest single piece seen (ms)
@@ -112,9 +112,9 @@ struct DecodePacer {
     // excluded), noted as note_piece does and kept apart as the longest of the request, as
     // |max_read_ms| keeps the reads': the attempt states the larger of the two as
     // observed_max_uninterruptible_ms. A head is as uninterruptible as a read — a cancel or a
-    // walk-until that falls inside it is seen only at its end — and before the review of
-    // 2026-10-06 (W3) only reads were counted: a lookahead's 60,000-node chains ran 2 s to
-    // 11 s unpolled while the observation said 1 ms
+    // walk-until that falls inside it is seen only at its end — and counting only the
+    // reads would let a lookahead's 60,000-node chains run 2 s to 11 s unpolled while the
+    // observation says 1 ms
     double max_head_ms = 0;
     void note_head(double ms) {
         note_piece("head", ms);
@@ -123,13 +123,13 @@ struct DecodePacer {
     // the longest read or head piece of the request (ms): what an attempt observes as its
     // longest uninterruptible piece of walking (the delivery's gaps are the server's)
     double max_uninterruptible_ms() const { return std::max(max_read_ms, max_head_ms); }
-    // The seed phase's own processing (review of levels 4-5, finding 3). While a setup is open
-    // (the walker opens it at a seed's start and closes it at the walk's first checkpoint, or at
-    // its stop or end, or on its way out), every piece noted first notes the time between the end
-    // of the previous piece (|setup_since_ms|, on now_ms()'s clock) and its own start as a "setup"
-    // piece: before, only the seed phase's reads and k-mer mappings were pieces, and a request
-    // naming 2,500 headers with a shared 1,024-character prefix stated a longest piece of 0.297 ms
-    // for a seed phase of 126 ms, almost all of it a duplicate check between two pieces
+    // The seed phase's own processing. While a setup is open (the walker opens it at a seed's
+    // start and closes it at the walk's first checkpoint, or at its stop or end, or on its way
+    // out), every piece noted first notes the time between the end of the previous piece
+    // (|setup_since_ms|, on now_ms()'s clock) and its own start as a "setup" piece: with only the
+    // seed phase's reads and k-mer mappings as pieces, a request naming 2,500 headers with a
+    // shared 1,024-character prefix would state a longest piece of 0.297 ms for a seed phase of
+    // 126 ms, almost all of it a duplicate check between two pieces
     bool setup_open = false;
     double setup_since_ms = 0;
     void open_setup(double since_ms) {
@@ -277,7 +277,7 @@ class LabelOracle {
     SeqRange sequence_coords(Column column, uint64_t seq_id) const;
     /**
      * map_coord of the coordinates of one column, one after another, by the runs they form
-     * (the efficiency pass; the same (seq_id, local) as map_coord). The coordinates of one
+     * (the same (seq_id, local) as map_coord). The coordinates of one
      * sequence occupy a contiguous range, so in a tuple row's sorted coordinates a sequence
      * that holds several (rRNA operons: 7 copies in a genome) costs one rank and two selects
      * instead of a rank and a select each, and a coordinate in the sequence after the
@@ -287,13 +287,13 @@ class LabelOracle {
      * are mapped as map_coord maps them, at its cost (LabelOracleCoordRuns.DISABLED_Benchmark,
      * 2,000 sequences: runs of 7 at 22 ns a coordinate against 42-46 for map_coord, single
      * copies in consecutive sequences at 32-35 ns against 48, scattered ones at 40-42 against
-     * 39-42; ranges used unconditionally were 1.3-1.5 times slower than map_coord there).
+     * 39-42; ranges used unconditionally are 1.3-1.5 times slower than map_coord there).
      */
     class CoordRuns {
       public:
         // |count|: how many coordinates will be mapped (a list of fewer than 8 is mapped as
         // map_coord maps it: it does not repay finding its runs — the mini refseq rows' 2-6
-        // a column were 10-25% slower by the runs)
+        // a column are 10-25% slower by the runs)
         CoordRuns(const annot::CoordToHeader &cth, Column column, size_t count);
         std::pair<uint64_t, Coord> map(Coord coord);
       private:
@@ -310,7 +310,7 @@ class LabelOracle {
         Coord last_ = 0;
     };
     // map_coord of every coordinate in coords[0, n) of |column|, in order, passed to
-    // f(coord, seq_id, local), by CoordRuns (counted as n mappings, as before)
+    // f(coord, seq_id, local), by CoordRuns (counted as n mappings)
     // (no buffer: the budget-aware reads charge every buffer they hold)
     template <class F>
     void map_coords(Column column, const Coord *coords, size_t n, const F &f) const {
@@ -336,7 +336,7 @@ class LabelOracle {
     get_row_tuples(const std::vector<Row> &rows) const;
     bool get(Row row, Column column) const;
 
-    // The budget-aware reads (DESIGN-traverse-graphlet.md §14, stage 3 of §14.1): whether
+    // The budget-aware reads (DESIGN-traverse-graphlet.md §14): whether
     // this index has them — a row-diff annotation over BRWT or ColumnMajor, with or
     // without coordinates — and the reads themselves (IRowDiff::decode_rows /
     // decode_row_tuples: every buffer charged to |budget| before it is allocated, a read
@@ -363,7 +363,7 @@ class LabelOracle {
     DecodePacer& pacer() const { return pacer_; }
 
     /**
-     * The row-diff path cache (row_diff_cache.hpp; the efficiency pass): on a row-diff
+     * The row-diff path cache (row_diff_cache.hpp): on a row-diff
      * annotation every read above — the default and the budget-aware ones — keeps rows it
      * reconstructs (the requested rows, the rows just after them on their row-diff paths,
      * every checkpoint row and every narrow row: RowDiffCache::keeps), so that a later read's
@@ -394,7 +394,7 @@ class LabelOracle {
     // and the budget-aware ones), before the read — to make the reads of a small index slow
     std::function<void(size_t rows)> test_read_hook;
     // Tests: called with the name at every resolve_label — to make resolving a seed's labels
-    // slow on a virtual clock (the seed phase's setup pieces, review of levels 4-5, finding 3)
+    // slow on a virtual clock (the seed phase's setup pieces)
     std::function<void(const std::string &name)> test_resolve_hook;
 
   private:
@@ -420,7 +420,7 @@ class LabelOracle {
 };
 
 /**
- * What a key read by the budget-aware path costs (DESIGN-traverse-graphlet.md §14, stage 3),
+ * What a key read by the budget-aware path costs (DESIGN-traverse-graphlet.md §14),
  * kept with it in the caches: properties of the key, the same whether a fetch, the
  * lookahead or an earlier level decoded it, so that work and memory stops do not depend on
  * annotation.batch_kmers. |dependency_units|: the work of its row-diff dependency rows (8 per
@@ -459,7 +459,7 @@ constexpr size_t kMaxDecodeRun = 512;
 /**
  * Why the last budget-aware fetch of a LabelQuery or LabelRecorder was refused, so that the
  * caller can state the cause truthfully (a row that does not fit is not a dictionary that
- * does not fit; review of stage 3, F2): the refused key, what was left at its position and
+ * does not fit): the refused key, what was left at its position and
  * what admitting it needed.
  */
 struct FetchRefusal {
@@ -489,8 +489,8 @@ struct FetchRefusal {
     // as a returned key's) of the keys the refused call decoded and built — those before the
     // refused key, the refused key itself when it was built (DEMAND, NAMES), and the keys of
     // its run built after it — but not of the keys the cache held: decoding done though
-    // nothing was returned, which a caller with a work budget still charges (review GPT-2,
-    // finding 1). A key whose own read or build did not fit (DECODE) adds nothing: its units
+    // nothing was returned, which a caller with a work budget still charges. A key whose own
+    // read or build did not fit (DECODE) adds nothing: its units
     // are not known. INTERRUPTED: ReadPacing::units.
     uint64_t units = 0;
 };
@@ -498,7 +498,7 @@ struct FetchRefusal {
 /**
  * The (column, seq_id) keys of header labels, hashed for one flat table: a map per column
  * holds a whole bucket array (~1.5 KB with tsl's neighbourhood) even for a single label,
- * which a per-label charge cannot cover (review of stage 3, F1). Column and sequence ids are
+ * which a per-label charge cannot cover. Column and sequence ids are
  * small consecutive integers: mixed, so that a power-of-two table does not see them raw.
  */
 struct LabelKeyHash {
@@ -527,10 +527,11 @@ class LabelQuery {
     // hits sorted by label id
     using NodeHits = std::vector<Hit>;
 
-    // Throws std::invalid_argument if the requested access path is not available
-    // for this annotation (no silent fallback). AUTO picks DIRECT for at most 16 columns
-    // when the annotation has direct access, which the budget-aware fetch and warm do not
-    // read (they decode whole rows): their callers ask for ROWS explicitly.
+    // Throws std::invalid_argument if the requested access path is not available for this
+    // annotation (no silent fallback). AUTO picks DIRECT for at most 16 columns when the
+    // annotation has direct access, which the budget-aware fetch and warm do not read
+    // (they decode whole rows); no annotation they serve has direct access, so AUTO is
+    // ROWS there.
     LabelQuery(const LabelOracle &oracle,
                std::vector<LabelRef> labels,
                bool with_coords,
@@ -592,9 +593,9 @@ class LabelQuery {
     // ends the warming silently (nothing a later fetch returns depends on it); |pacing|:
     // each run decoded in paced pieces, its stop checked before each (interrupted: the run
     // is dropped and the warming ends silently). The warming also ends at the first run the
-    // cache cannot keep beside the runs this warm cached (it never evicts its own runs:
-    // review of 2026-10-06, U05-01) or cannot keep at all: what was cached before the warm
-    // may be evicted for its first run only
+    // cache cannot keep beside the runs this warm cached (it never evicts its own runs) or
+    // cannot keep at all: what was cached before the warm may be evicted for its first run
+    // only
     void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
               ReadPacing *pacing = nullptr);
     // what a copy of |hits| holds (the model of decode_budget.hpp)
@@ -603,8 +604,9 @@ class LabelQuery {
     const FetchRefusal& refusal() const { return refusal_; }
     uint64_t refused_held() const { return refusal_.held; }
     // Under a byte bound (set_max_cache_bytes), what the last unbudgeted call's raw rows held
-    // while their hits were built (an estimate, as the cache's): what a stage-2 read holds
-    // beyond the account, observed by the walker (memory_bound_soft). 0 without a bound.
+    // while their hits were built (an estimate, as the cache's): what such an unbudgeted
+    // read holds beyond the account, observed by the walker (memory_bound_soft). 0 without
+    // a bound.
     uint64_t last_call_bytes() const { return last_call_bytes_; }
 
     void clear_cache() { cache_.clear(); costs_.clear(); cache_bytes_ = 0; }
@@ -633,11 +635,11 @@ class LabelQuery {
     // table each, see LabelKeyHash)
     tsl::hopscotch_map<std::pair<Column, uint64_t>, LabelId, LabelKeyHash> header_labels_;
     tsl::hopscotch_set<Column> header_columns_;
-    // R6 (permitted-range filtering): per header column, the coordinate ranges of the requested
+    // Permitted-range filtering: per header column, the coordinate ranges of the requested
     // sequences, ascending, with their labels — a coordinate is looked up among them (a binary
     // search over the query's own sequences of that column) instead of being mapped to its
-    // sequence by a rank and a select, which every coordinate of the column cost before,
-    // those of the sequences no label names included
+    // sequence by a rank and a select, which every coordinate of the column would cost, those
+    // of the sequences no label names included
     struct HeaderRange {
         Coord first;
         Coord last;
@@ -768,7 +770,7 @@ class LabelRecorder {
                const std::function<uint64_t(std::string_view name)> &name_bytes,
                ReadPacing *pacing = nullptr);
     // as LabelQuery's, the warming ending at the first run the cache cannot keep beside this
-    // warm's runs or at all (U05-01)
+    // warm's runs or at all
     void warm(const std::vector<node_index> &keys, annot::matrix::DecodeBudget &budget,
               ReadPacing *pacing = nullptr);
     static uint64_t held_bytes(const NodeLabels &labels);
@@ -793,9 +795,9 @@ class LabelRecorder {
     uint64_t cache_bytes() const { return cache_bytes_; }
     // Every eviction, by either path, drops the rows and their costs together, so that every
     // key with a cost is a cached key: the budget-aware path's size check (equal sizes, equal
-    // keys) relies on it. Clearing the rows alone let an ordinary fetch leave a stale cost
-    // behind, and a budgeted fetch of an equal-sized cache then found a row without its cost
-    // (review of stage 3, F2: std::out_of_range for a valid key)
+    // keys) relies on it. Clearing the rows alone would let an ordinary fetch leave a stale
+    // cost behind, and a budgeted fetch of an equal-sized cache would then find a row
+    // without its cost (std::out_of_range for a valid key)
     void clear_cache() {
         cache_.clear();
         costs_.clear();

@@ -55,8 +55,8 @@ inline uint64_t row_copy_bytes(const MultiIntMatrix::RowTuples &row) {
  * three buffers — its columns, the end of each column's coordinates, and the coordinates —
  * rather than as a RowTuples copy, which allocates one buffer per column with more than two
  * coordinates and frees them one by one when the row is evicted: on a wide row of a coordinate
- * annotation (refseq33m 23S: ~11k columns, ~28k coordinates) those allocations were most of
- * what keeping a row cost (R10). load() rebuilds the row exactly; copy_bytes is what a
+ * annotation (refseq33m 23S: ~11k columns, ~28k coordinates) those allocations are most of
+ * what keeping a row costs. load() rebuilds the row exactly; copy_bytes is what a
  * RowTuples copy of it holds (row_copy_bytes), which the budget-aware decode charges for a hit.
  */
 template <class RowT>
@@ -128,24 +128,24 @@ struct StoredRow<MultiIntMatrix::RowTuples> {
 };
 
 /**
- * The row-diff path cache (the efficiency pass): reconstructed rows of a row-diff
- * annotation — the rows a decode call returned and the rows of their paths its retention
- * rule selects (keeps()) — kept across the decode calls of one request, so that a later
- * call's path that meets a cached row stops there instead of decoding to its anchor again. On refseq33m a
- * fetch of one warm 23S k-mer cost one whole path decode (66-86 ms) and each further row on
- * the same path 2.1 ms; a walk fetching a few keys per level paid 27-41 ms a row against 4.6
- * ms read in one call. A row's content does not depend on how it was reached, so what a
- * read returns never depends on the cache; only the decoding work does.
+ * The row-diff path cache: reconstructed rows of a row-diff annotation — the rows a decode
+ * call returned and the rows of their paths its retention rule selects (keeps()) — kept
+ * across the decode calls of one request, so that a later call's path that meets a cached
+ * row stops there instead of decoding to its anchor again. Without it, on refseq33m a fetch
+ * of one warm 23S k-mer costs one whole path decode (66-86 ms) and each further row on the
+ * same path 2.1 ms; a walk fetching a few keys per level pays 27-41 ms a row against 4.6 ms
+ * read in one call. A row's content does not depend on how it was reached, so what a read
+ * returns never depends on the cache; only the decoding work does.
  *
  * Bounded in bytes (StoredRow::bytes plus kEntryBytes per entry, an estimate of the table's
  * share), in two generations: inserts go to the current one, which becomes the older one
  * when it reaches half the bound (the older one is dropped then); a hit in the older one
- * moves the row to the current one. A walk moves forward, so the rows of the last few
- * levels are the ones its next paths meet. A generation dropped releases its table: a
- * cleared hopscotch map keeps its bucket array, sized for the most entries it ever held, so
- * after many narrow rows a few wide ones held that array beside their bound (74.7 MiB of heap
- * for 63.9 MiB accounted at a 64 MiB bound; review of the efficiency pass). Single-threaded,
- * as the request that owns it.
+ * moves the row to the current one. A walk moves forward, so the rows of the last few levels
+ * are the ones its next paths meet. A generation dropped releases its table: a cleared
+ * hopscotch map keeps its bucket array, sized for the most entries it ever held, so after
+ * many narrow rows a few wide ones would hold that array beside their bound (74.7 MiB of
+ * heap for 63.9 MiB accounted at a 64 MiB bound). Single-threaded, as the request that owns
+ * it.
  */
 template <class RowT>
 class RowDiffCache {
@@ -203,14 +203,13 @@ class RowDiffCache {
         return &gen_[0].emplace(row, std::move(entry)).first->second;
     }
     /**
-     * Which of the rows a decode call reconstructs are kept (R10, the review of feature level
-     * 4). Keeping every row of every path copied each row of a long path into the cache: on
-     * a coordinate annotation with wide rows (refseq33m 23S: ~28k coordinates in ~11k
-     * columns) a first read, whose paths no later read meets, was several times slower than
-     * without the cache, and a walk reading one row per call (batch_kmers 1) churned the
-     * cache's generations so that every call decoded its whole path again — 21.7 s against
-     * 2.9 s without the cache on a synthetic index of 8,000 labels with paths of up to 1,000
-     * rows. A call keeps
+     * Which of the rows a decode call reconstructs are kept. Keeping every row of every path
+     * would copy each row of a long path into the cache: on a coordinate annotation with wide
+     * rows (refseq33m 23S: ~28k coordinates in ~11k columns) a first read, whose paths no
+     * later read meets, is then several times slower than without the cache, and a walk
+     * reading one row per call (batch_kmers 1) churns the cache's generations so that every
+     * call decodes its whole path again — 21.7 s against 2.9 s without the cache on a
+     * synthetic index of 8,000 labels with paths of up to 1,000 rows. A call keeps
      *   - every row it was asked for (later paths meet them: a predecessor's path runs
      *     through its successor, and a repeated read is a hit),
      *   - the first |successors| rows after each of them on its path (a forward walk reads
@@ -225,13 +224,13 @@ class RowDiffCache {
      *     all rows is what made branched walks about twice as fast, and the rule keeps them
      *     all there (the same stored rows read and hits as keeping every row).
      * So a call of n rows whose paths read s stored rows keeps at most n x (successors + 3) +
-     * s / checkpoint rows that are not narrow, where keeping every row kept s of them
+     * s / checkpoint rows that are not narrow, where keeping every row would keep s of them
      * (rows_inserted and bytes_inserted count what it copies). Measured on the synthetic
-     * index (wide rows; paths of up to 100 and of up to 1,000 rows), against the cache off
-     * and the pass-5 binary: no request slower beyond noise, isolated first reads 1.3-2.2x
-     * faster than the cache off (a cut at a checkpoint replaces up to a whole path), walks
-     * with batch_kmers 1 14-15x; the defaults were chosen from 16/8, 32/16, 64/32 (also 4/8
-     * and 8/32 on UHGG), 16/8 being never slower than the cache off on either index.
+     * index (wide rows; paths of up to 100 and of up to 1,000 rows), against the cache off:
+     * no request slower beyond noise, isolated first reads 1.3-2.2x faster than the cache off
+     * (a cut at a checkpoint replaces up to a whole path), walks with batch_kmers 1 14-15x;
+     * the defaults were chosen from 16/8, 32/16, 64/32 (also 4/8 and 8/32 on UHGG), 16/8
+     * being never slower than the cache off on either index.
      */
     static constexpr uint32_t kCheckpoint = 16;
     static constexpr uint32_t kSuccessors = 8;
@@ -255,12 +254,12 @@ class RowDiffCache {
 
     // Cache the reconstructed row |full| of |row| at |depth| (with its path aggregates, if
     // known), within the bound; a row that does not fit even into an empty cache is not kept.
-    // Admitted before it is copied (review of levels 4-5, finding 1): its stored size is
-    // computed from |full|, the shared bound read, and the older entries evicted, and only
-    // then is the row copied — so a row the cache refuses is never copied, and the copy of
-    // one it keeps is made within the bound, never beside a cache that is full. Copying first
-    // made a cache bounded at 1 KiB allocate 4.2 MB for a row of 1,048,576 columns and then
-    // refuse it, its bytes, peak and inserted rows all stating 0.
+    // Admitted before it is copied: its stored size is computed from |full|, the shared bound
+    // read, and the older entries evicted, and only then is the row copied — so a row the
+    // cache refuses is never copied, and the copy of one it keeps is made within the bound,
+    // never beside a cache that is full. Copying first would allocate a refused row whole
+    // beside the bound (4.2 MB for a row of 1,048,576 columns in a cache bounded at 1 KiB)
+    // with no count stating it.
     void insert(Row row, const RowT &full, uint32_t depth = 0,
                 const PathAggregates *path = nullptr) {
         if (!enabled())
@@ -349,9 +348,9 @@ class RowDiffCache {
     // cached rows — so a read refused without the cache may fit with it. That makes no
     // difference to where a walk stops (a row is admitted by its whole path's demand, which a
     // read alone never exceeds), but the lookahead under a memory budget reads ahead until a
-    // run does not fit, and with the cache it read rows no level asked for (UHGG 16S, annotate
-    // mode, 8 MiB: 75k rows warmed against 52-55k without the cache, 13-27% more instructions;
-    // review of the efficiency pass). Set (the walker's, for the lookahead under a memory
+    // run does not fit, and with the cache it would read rows no level asked for (UHGG 16S,
+    // annotate mode, 8 MiB: 75k rows warmed against 52-55k without the cache, 13-27% more
+    // instructions). Set (the walker's, for the lookahead under a memory
     // budget), a read also charges, until its stored rows are read, what the decode to the
     // anchors would have held for the rows the cache spared it (IRowDiff::decode_budgeted)
     bool admit_as_uncached = false;

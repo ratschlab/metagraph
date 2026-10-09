@@ -7,59 +7,52 @@
  * graph, and for a pattern longer than k every graph path spelling it (phase 2, the
  * extension).
  *
- * The design is docs/DESIGN-pattern-search.md (v6 + §22); section numbers below refer to it.
+ * The design is docs/DESIGN-pattern-search.md; section numbers below refer to it.
  * This header is the contract between the engine (pattern_search.cpp) and the route
- * (src/cli/pattern.cpp) for increments 0-2 and the engine half of increment 4: modes count,
- * all_or_count and partial, the last two only with output.labels "none" (the label-free path,
- * §4.3); no annotation read, no placement, no predicate, single graph. The JSON the route
- * writes from these types is the contract of §7 (src/cli/pattern.cpp writes it); every JSON
- * name comes from the to_string() family at the end of this file.
+ * (src/cli/pattern.cpp): modes count, all_or_count and partial, whose release is label-free
+ * (§4.3: the engine reads no annotation, places nothing and evaluates no predicate), single
+ * graph. The JSON the route writes from these types is the contract of §7 (src/cli/pattern.cpp
+ * writes it); every JSON name comes from the to_string() family at the end of this file.
  *
- * The extension beyond k (§4.2, increment 4) is opt-in: Request::extend_paths. Without it
- * (the default) a pattern longer than k is answered exactly as in increments 1-2 (anchors
- * counted, paths UNKNOWN, nothing released, note paths_later_increment), so the route's
- * answers do not change until it opts in.
+ * The extension beyond k (§4.2) is opt-in: Request::extend_paths. Without it (the default) a
+ * pattern longer than k is answered by its anchors only (anchors counted, paths UNKNOWN,
+ * nothing released, note paths_later_increment).
  *
- * How the route serves them (src/cli/pattern.cpp; SPEC §12, §17):
- *  - `long` (increment 4): OPT-IN per request (owner decision #13 of 2026-10-07), an addition
- *    under contract version 1: the request field long_search "paths" sets
- *    Request::extend_paths and admits max_paths (--pattern-max-paths); a request without it
- *    keeps the anchor-only answer (counts.paths unknown, note and withheld reason
- *    paths_later_increment). With it, counts.paths states the extension's count, its
+ * How the route serves them (src/cli/pattern.cpp; SPEC-pattern-search.md §12):
+ *  - `long`: OPT-IN per request, an addition under contract version 1: the request field
+ *    long_search "paths" sets Request::extend_paths and admits max_paths (--pattern-max-paths);
+ *    a request without it keeps the anchor-only answer (counts.paths unknown, note and withheld
+ *    reason paths_later_increment). With it, counts.paths states the extension's count, its
  *    per-orientation split, candidates_examined and the Extension; a released path is written
  *    with the fields sequence (the L bases), anchor_kmer, nodes and rows, never `kmer`, which
  *    keeps its meaning (a context's k-mer); the withheld reason anchors_above_threshold, stop
  *    phase "extension" and reason "max_paths" can appear. Labels of paths are read by
- *    PatternRetrieval::retrieve_paths (support label_intersection or record_verified, owner
- *    decision #14).
- *  - `protein` (increment 5, §6; owner decision #15 of 2026-10-08): patterns[i].protein is the
- *    third kind; the request field genetic_code (an integer, default GeneticCode::kStandard)
- *    is looked up with GeneticCode::find (an unknown id: 400 genetic_code_unknown), and
- *    Pattern::parse(PatternKind::PROTEIN, text, code)'s PatternError (bad_alphabet; the
- *    stop_unsupported of 4596bb3b is retired, decision #19) is the slot's error as for dna and
- *    iupac. A peptide is a Pattern like
- *    any other: counts, contexts, anchors, the extension and its paths need no route code of
- *    their own; its entry states kind "protein", pattern = text() (the residues), length =
- *    length() (3m bases: every offset, scope decision, information bit and instance is in
- *    bases), residues (m) and genetic_code. The capabilities list the kind, the residues, the
- *    genetic codes (GeneticCode::ids()) and the default 1. The stop '*' is a residue since
- *    owner decision #19 of 2026-10-08 (a stop codon of the table; see Pattern::parse): a
- *    peptide holding it in a table without an unconditional stop codon has no instance and is
- *    answered with the note kNoteNoStopCodon (EXACT 0 contexts without a search for L <= k).
- *  - `supported_paths` (increment 5s, DECISIONS P23-P29; not wired yet, 5s-4): the extension is
- *    a DFS over search states (SearchState) with Pattern as its Model; the route passes a
- *    SupportTracker (5s-3, src/cli/pattern_support) and a PathSink through Request::support and
- *    Request::sink, and reads AnchorCounts::walks, supported, branches_pruned and
- *    pruned_before_completion. A request without them is answered exactly as in increment 4.
- *  - graphs without the dummy-edge mask (owner decision #16 of 2026-10-08): served, see
- *    "Graphs without the dummy-edge mask" at PatternSearch. Their counts that the engine could
- *    not resolve are BOUNDS [lower, U] (Count), the route adding the estimate U x f with f
- *    from sample_real_fraction(); the lists stay exact. A pattern with few unchecked
- *    candidates is checked entry by entry and counted exactly (owner decision #24,
- *    Request::max_checked_entries; the route passes --pattern-max-checked-entries).
+ *    PatternRetrieval::retrieve_paths (support label_intersection or record_verified).
+ *  - `protein` (§6): patterns[i].protein is the third kind; the request field genetic_code (an
+ *    integer, default GeneticCode::kStandard) is looked up with GeneticCode::find (an unknown
+ *    id: 400 genetic_code_unknown), and Pattern::parse(PatternKind::PROTEIN, text, code)'s
+ *    PatternError (bad_alphabet) is the slot's error as for dna and iupac. A peptide is a
+ *    Pattern like any other: counts, contexts, anchors, the extension and its paths need no
+ *    route code of their own; its entry states kind "protein", pattern = text() (the residues),
+ *    length = length() (3m bases: every offset, scope decision, information bit and instance is
+ *    in bases), residues (m) and genetic_code. The capabilities list the kind, the residues,
+ *    the genetic codes (GeneticCode::ids()) and the default 1. The stop '*' is a residue (a
+ *    stop codon of the table; see Pattern::parse): a peptide holding it in a table without an
+ *    unconditional stop codon has no instance and is answered with the note kNoteNoStopCodon
+ *    (EXACT 0 contexts without a search for L <= k).
+ *  - `supported_paths` (not served yet: no route sets a tracker or a sink): the extension is a
+ *    DFS over search states (SearchState) with Pattern as its Model; the route is to pass a
+ *    SupportTracker and a PathSink through Request::support and Request::sink, and to read
+ *    AnchorCounts::walks, supported, branches_pruned and pruned_before_completion. Without them
+ *    the extension is the plain one of long_search "paths".
+ *  - graphs without the dummy-edge mask: served, see "Graphs without the dummy-edge mask" at
+ *    PatternSearch. Their counts that the engine could not resolve are BOUNDS [lower, U]
+ *    (Count), the route adding the estimate U x f with f from sample_real_fraction(); the lists
+ *    stay exact. A pattern with few unchecked candidates is checked entry by entry and counted
+ *    exactly (Request::max_checked_entries; the route passes --pattern-max-checked-entries).
  *
- * The owner's guarantee rule holds for every type here: nothing is weakened silently, every
- * count carries its unit and its relation, and a count is never promoted by assumption.
+ * For every type here nothing is weakened silently: every count carries its unit and its
+ * relation, and a count is never promoted by assumption.
  */
 
 #include <cassert>
@@ -86,18 +79,18 @@ class DBGSuccinct;
 namespace pattern {
 
 // The version of the /pattern request and answer JSON (capabilities:
-// pattern.pattern_contract_version). Raised when a field changes meaning; a field or value
-// that only becomes accepted (a later increment's) does not raise it.
+// pattern.pattern_contract_version). Raised when a field changes meaning; a field or value that
+// is only added does not raise it.
 constexpr int kPatternContractVersion = 1;
 
 
 // ---------------------------------------------------------------- counts
 
 /**
- * What a count counts (§3). Units are never summed into each other: a graph-context count
- * says nothing about placed occurrences, an anchor count nothing about completed paths.
- * PLACED_OCCURRENCES and LABELS need annotation (a later increment): this increment states
- * them UNKNOWN.
+ * What a count counts (§3). Units are never summed into each other: a graph-context count says
+ * nothing about placed occurrences, an anchor count nothing about completed paths.
+ * PLACED_OCCURRENCES and LABELS need annotation, which the engine never reads: it states them
+ * UNKNOWN.
  */
 enum class Unit { GRAPH_CONTEXTS, ANCHORS, PATHS, PLACED_OCCURRENCES, LABELS };
 
@@ -113,7 +106,8 @@ enum class Unit { GRAPH_CONTEXTS, ANCHORS, PATHS, PLACED_OCCURRENCES, LABELS };
  *            all checked for source dummies (more of them than Request::max_checked_entries):
  *            upper = U, the candidate entries (source dummies included), lower = the part
  *            known exactly (PatternSearch, "Graphs without the dummy-edge mask").
- *  UNKNOWN   the phase never ran: a stop came before it started, or not in this increment.
+ *  UNKNOWN   the phase never ran: a stop came before it started, or the request does not run
+ *            it.
  * A search whose discovery was entered is AT_LEAST even when the stop refused its very first
  * step (AT_LEAST 0): it was interrupted, not skipped (SPEC §7.4). After any discovery stop
  * every per-offset count of the interrupted search is AT_LEAST too: v1 does not track which
@@ -186,8 +180,8 @@ struct Count {
 
 /**
  * The pattern kinds (§3): DNA over A, C, G, T; IUPAC over the 15 codes; PROTEIN a peptide,
- * searched as its codon automaton (§6, increment 5): 3 positions per residue, the bases
- * allowed at a position depending on the bases already spelled in its codon.
+ * searched as its codon automaton (§6): 3 positions per residue, the bases allowed at a
+ * position depending on the bases already spelled in its codon.
  */
 enum class PatternKind { DNA, IUPAC, PROTEIN };
 
@@ -207,11 +201,11 @@ constexpr BaseSet kBaseT = 8;
 constexpr BaseSet kAllBases = kBaseA | kBaseC | kBaseG | kBaseT;
 
 /**
- * What may come next along an instance (increment 5s, DECISIONS P29 of 2026-10-08): the
- * automaton the extension (§4.2) asks at every position beyond the anchor window. Pattern is the
- * one Model of this increment (DNA and IUPAC: a set per position; a peptide: its codon automaton,
- * §6). A Model is deterministic and of fixed length: from a state, a base leads to at most one
- * state, and an instance is a walk of exactly length() bases.
+ * What may come next along an instance: the automaton the extension (§4.2) asks at every
+ * position beyond the anchor window. Pattern is the only Model (DNA and IUPAC: a set per
+ * position; a peptide: its codon automaton, §6). A Model is deterministic and of fixed length:
+ * from a state, a base leads to at most one state, and an instance is a walk of exactly
+ * length() bases.
  *
  * The extension's search state (SearchState) is the oriented node, the position (the bases
  * spelled), the model's state and the support tracker's frame: the DFS of PatternSearch asks
@@ -219,7 +213,7 @@ constexpr BaseSet kAllBases = kBaseA | kBaseC | kBaseG | kBaseT;
  * enters, so that no model reads the spelled bases again (Pattern::allowed, which does, stays
  * the primitive of the range DFS of phase 1).
  *
- * Open, not designed (the coordinator's point 2 of 2026-10-08; nothing below is built):
+ * Open, not designed (nothing below is built):
  *  - bounded mismatches (docs/NOTE-mismatch-search.md): a Model whose State packs (the pattern's
  *    own state, the mismatches used) and whose bases() admits every base while mismatches are
  *    left (next() adds one where the pattern does not admit the base). Deterministic, fixed
@@ -236,17 +230,17 @@ constexpr BaseSet kAllBases = kBaseA | kBaseC | kBaseG | kBaseT;
  *    going on), and a bound on the score a branch can still reach (a bound(state) the DFS
  *    prunes on). The DFS would then key its work by (node, state); the trackers and sinks keep
  *    their interfaces (a walk is still a walk).
- *  - the selective anchor (5t, DECISIONS P30): a Model that also steps left (prev(), the codon
- *    automaton read backwards), with SearchState::side LEFT along incoming edges. It also needs
- *    start(window, offset) for a window at offset w (Pattern::start derives a peptide's codon
- *    phase from the window's length alone), and a left arm's SearchState: spelled growing at
- *    the left, position = w - depth, base the node's first base (support_step's Arm::LEFT).
- *  - the entry point (the review of 5s-2): today only extend_anchor<Pattern> is instantiated,
- *    from PatternRun::extend_listed with the oriented Pattern, and the anchor phase does not
- *    ask the Model. Another Model needs a per-orientation `const Model*` (a Request field or a
- *    PatternRun argument) with extend_anchor<Model> instantiated through the virtual calls,
- *    and the range DFS of phase 1 taking Model::bases() per range (from Model::start of the
- *    window) in place of CodonWindow::allowed.
+ *  - a selective anchor: a Model that also steps left (prev(), the codon automaton read
+ *    backwards), with SearchState::side LEFT along incoming edges. It also needs start(window,
+ *    offset) for a window at offset w (Pattern::start derives a peptide's codon phase from the
+ *    window's length alone), and a left arm's SearchState: spelled growing at the left,
+ *    position = w - depth, base the node's first base (support_step's Arm::LEFT).
+ *  - the entry point: only extend_anchor<Pattern> is instantiated, from
+ *    PatternRun::extend_listed with the oriented Pattern, and the anchor phase does not ask the
+ *    Model. Another Model needs a per-orientation `const Model*` (a Request field or a
+ *    PatternRun argument) with extend_anchor<Model> instantiated through the virtual calls, and
+ *    the range DFS of phase 1 taking Model::bases() per range (from Model::start of the window)
+ *    in place of CodonWindow::allowed.
  */
 class Model {
   public:
@@ -316,20 +310,19 @@ class Pattern final : public Model {
     static Pattern parse(PatternKind kind, std::string_view text);
 
     /**
-     * As above; for PROTEIN (§6, owner decision #15 of 2026-10-08) |code| is the genetic
-     * code (the route passes GeneticCode::get(request genetic_code), 1 by default), for DNA
-     * and IUPAC it is not read. A peptide is a string over the 20 residues A C D E F G H I
-     * K L M N P Q R S T V W Y, the ambiguity codes X (any residue: every codon of |code|
-     * that is not a stop), B (D or N), Z (E or Q) and J (I or L), and the stop '*' (owner
-     * decision #19 of 2026-10-08: a stop codon of |code| at that position, the codons whose
-     * residue in NCBI's ncbieaa is '*', GeneticCode::stops()), case-insensitive; it is the
-     * pattern of L = 3m positions whose instances are exactly the codon strings c_1 .. c_m
-     * with c_i a codon of residue i in |code| (§6: no superset; a stop codon only where the
-     * peptide has '*', X never matching one). The codons tables 27, 28 and 31 list as a
+     * As above; for PROTEIN (§6) |code| is the genetic code (the route passes
+     * GeneticCode::get(request genetic_code), 1 by default), for DNA and IUPAC it is not read.
+     * A peptide is a string over the 20 residues A C D E F G H I K L M N P Q R S T V W Y, the
+     * ambiguity codes X (any residue: every codon of |code| that is not a stop), B (D or N), Z
+     * (E or Q) and J (I or L), and the stop '*' (a stop codon of |code| at that position, the
+     * codons whose residue in NCBI's ncbieaa is '*', GeneticCode::stops()), case-insensitive;
+     * it is the pattern of L = 3m positions whose instances are exactly the codon strings c_1
+     * .. c_m with c_i a codon of residue i in |code| (§6: no superset; a stop codon only where
+     * the peptide has '*', X never matching one). The codons tables 27, 28 and 31 list as a
      * residue that ends translation only in context (GeneticCode::context_stops()) are that
-     * residue's (decision #21) and never a '*': those tables have no unconditional stop, so
-     * there '*' admits no codon and the peptide has no instance (has_instances() false; the
-     * engine answers it with the note kNoteNoStopCodon, see PatternSearch::count).
+     * residue's and never a '*': those tables have no unconditional stop, so there '*' admits
+     * no codon and the peptide has no instance (has_instances() false; the engine answers it
+     * with the note kNoteNoStopCodon, see PatternSearch::count).
      * Refused with "bad_alphabet": U (selenocysteine), O (pyrrolysine), '-', digits,
      * whitespace and every other character outside these 24 letters and '*', naming the
      * first such 0-based residue position, and an empty text.
@@ -384,9 +377,9 @@ class Pattern final : public Model {
     BaseSet allowed(size_t position, std::string_view spelled) const;
 
     /**
-     * The Model (increment 5s): allowed() with its state carried instead of read back. start()
-     * reads the anchor's last (k mod 3) bases for a peptide (its codon prefix at position k; a
-     * base other than A, C, G, T there admits nothing after it, as allowed() answers 0), nothing
+     * The Model: allowed() with its state carried instead of read back. start() reads the
+     * anchor's last (k mod 3) bases for a peptide (its codon prefix at position k; a base other
+     * than A, C, G, T there admits nothing after it, as allowed() answers 0), nothing
      * otherwise; next() appends a base to the codon prefix, emptied at a codon's end. O(1) but
      * bases(), which is allowed()'s codon test for a peptide.
      */
@@ -414,8 +407,8 @@ class Pattern final : public Model {
 
     /**
      * False iff the pattern has no instance at all: a peptide holding a '*' read in a genetic
-     * code without an unconditional stop codon (tables 27, 28, 31; owner decision #19). Every
-     * DNA and IUPAC pattern has instances.
+     * code without an unconditional stop codon (tables 27, 28, 31). Every DNA and IUPAC pattern
+     * has instances.
      */
     bool has_instances() const { return has_instances_; }
 
@@ -463,9 +456,9 @@ class Pattern final : public Model {
 // ---------------------------------------------------------------- request and budget
 
 /**
- * What a request answers (§5.2). In this increment the two retrieval modes exist only with
- * output.labels "none" (the route refuses every other projection): their retrieval is the
- * label-free extraction of enumerate(), and no annotation row is ever read.
+ * What a request answers (§5.2). The engine's retrieval in the two retrieval modes is the
+ * label-free extraction of enumerate(): it reads no annotation row (the route's
+ * PatternRetrieval reads the labels).
  *  COUNT         discover and count; nothing retained beyond the DFS frontier; no results.
  *  ALL_OR_COUNT  (the JSON default) the count, then every context — released only when
  *                discovery completed with an EXACT total <= max_contexts — or none, withheld
@@ -491,7 +484,7 @@ enum class Mode { COUNT, ALL_OR_COUNT, PARTIAL };
  *              Request::extend_paths every admitted anchor is extended along the pattern to
  *              position L (§4.2): the complete paths are the pattern's contexts (offset 0,
  *              n = L - k + 1 k-mers, every one of them retained: §3 "Covered sequence").
- *              Without extend_paths nothing is extended or extracted (increments 1-2).
+ *              Without extend_paths nothing is extended or extracted.
  */
 enum class Scope { SUFFIX, ANY_OFFSET, LONG };
 
@@ -502,7 +495,7 @@ enum class Scope { SUFFIX, ANY_OFFSET, LONG };
  */
 enum class Strands { BOTH, FORWARD, REVERSE };
 
-// the extension's support tracker and path sink (increment 5s), declared with the results below
+// the extension's support tracker and path sink, declared with the results below
 class SupportTracker;
 class PathSink;
 
@@ -532,16 +525,15 @@ struct Request {
     // the candidates of the ranges where a palindrome is possible): there the stop can fire
     // late or not at all, and the answer is then the EXACT count with no stop.
     // On a graph without the dummy-edge mask the running count compared is the running UPPER
-    // bound U (owner decision #16: conservative, the stop can fire while the true count is
-    // within the threshold; the note kNoteThresholdUpperBound says when the lower bound did
-    // not cross it), and so are ALL_OR_COUNT's retention and the extension's admission. On an
-    // even-k wrapped PRIMARY graph the running U leaves out the ranges whose palindrome scan
-    // is pending (the scan can only lower their share), so that it never exceeds the final U:
-    // there the stop can fire late or not at all, the admission after discovery then
-    // comparing the final U. (While the pattern's unchecked candidates are at most
-    // max_checked_entries, the retention compares the running lower bound instead, since the
-    // check after discovery may make the count EXACT and within the threshold; this stop
-    // still compares U.)
+    // bound U (conservative: the stop can fire while the true count is within the threshold;
+    // the note kNoteThresholdUpperBound says when the lower bound did not cross it), and so are
+    // ALL_OR_COUNT's retention and the extension's admission. On an even-k wrapped PRIMARY
+    // graph the running U leaves out the ranges whose palindrome scan is pending (the scan can
+    // only lower their share), so that it never exceeds the final U: there the stop can fire
+    // late or not at all, the admission after discovery then comparing the final U. (While the
+    // pattern's unchecked candidates are at most max_checked_entries, the retention compares
+    // the running lower bound instead, since the check after discovery may make the count EXACT
+    // and within the threshold; this stop still compares U.)
     bool stop_at_threshold = false;
     /**
      * Per pattern, all offsets and orientations (§5.3): the stop_at_threshold threshold for
@@ -562,11 +554,11 @@ struct Request {
      * complete paths are then the pattern's contexts: AnchorCounts::paths is counted (EXACT
      * when every anchor was extended), enumerate() releases paths (Context::path and
      * Context::sequence) instead of withholding PATHS_LATER_INCREMENT, and the note
-     * paths_later_increment is not set. False (the default): increments 1-2, unchanged —
-     * anchors counted, paths UNKNOWN (EXACT 0 without anchors), nothing extended or
-     * released for L > k, no extension step charged. Not a JSON field: the route sets it for
-     * a request with long_search "paths" (opt-in, owner decision #13; see "How the route
-     * serves them" at the top of this file); every other request keeps it false.
+     * paths_later_increment is not set. False (the default): anchors counted, paths UNKNOWN
+     * (EXACT 0 without anchors), nothing extended or released for L > k, no extension step
+     * charged. Not a JSON field: the route sets it for a request with long_search "paths"
+     * (opt-in; see "How the route serves them" at the top of this file); every other request
+     * keeps it false.
      */
     bool extend_paths = false;
     /**
@@ -605,34 +597,33 @@ struct Request {
      */
     double min_information_bits = 24;
     /**
-     * A graph without the dummy-edge mask only (owner decision #24 of 2026-10-08; never read
-     * with the mask): when discovery and its deferred scans completed with no stop and the
-     * pattern's unchecked candidates (the entries counted into U and not into the lower
-     * bound, summed over its base searches: U - lower of the total on a BASIC or CANONICAL
-     * graph; on a wrapped PRIMARY graph each entry enters both orientations' counts) number
-     * at most this, each is tested with BOSS::node_has_sentinel and only the real k-mers are
-     * counted: every count of the pattern (total, suffix, by_offset, by_orientation; the
-     * anchors of a long one) is then EXACT, 0 when all of them were source dummies. Each
-     * entry tested is charged k - 1 steps (the most symbols the test reads), so the check
-     * costs at most max_checked_entries x (k - 1) steps; a stop during it (phase MASK_SCAN)
-     * leaves the counts BOUNDS. With more unchecked candidates nothing is tested (BOUNDS, as
-     * before). 0 tests nothing (the default here; the route passes the server's
-     * --pattern-max-checked-entries, kDefaultMaxCheckedEntries unless set). Server policy,
-     * not a request field.
+     * A graph without the dummy-edge mask only (never read with the mask): when discovery and
+     * its deferred scans completed with no stop and the pattern's unchecked candidates (the
+     * entries counted into U and not into the lower bound, summed over its base searches:
+     * U - lower of the total on a BASIC or CANONICAL graph; on a wrapped PRIMARY graph each
+     * entry enters both orientations' counts) number at most this, each is tested with
+     * BOSS::node_has_sentinel and only the real k-mers are counted: every count of the pattern
+     * (total, suffix, by_offset, by_orientation; the anchors of a long one) is then EXACT, 0
+     * when all of them were source dummies. Each entry tested is charged k - 1 steps (the most
+     * symbols the test reads), so the check costs at most max_checked_entries x (k - 1) steps;
+     * a stop during it (phase MASK_SCAN) leaves the counts BOUNDS. With more unchecked
+     * candidates nothing is tested (the counts stay BOUNDS). 0 tests nothing (the default here;
+     * the route passes the server's --pattern-max-checked-entries, kDefaultMaxCheckedEntries
+     * unless set). Server policy, not a request field.
      */
     uint64_t max_checked_entries = 0;
     /**
-     * L > k with extend_paths: the supported-path search (increment 5s; SPEC-DRAFT §20, DECISIONS
-     * P29), read by the extension only. Not JSON fields: the route sets them per pattern for a
-     * request with long_search "supported_paths" (5s-4). Both null (the default): the extension
-     * runs exactly as in increment 4 — the same steps, clock readings, counts and paths.
+     * L > k with extend_paths: the supported-path search, read by the extension only (not
+     * served yet: no route sets them). Not JSON fields: the route is to set them per pattern
+     * for a request with long_search "supported_paths". Both null (the default): the plain
+     * extension — the same steps, clock readings, counts and paths as without these fields.
      *  support  carries each branch's support beside the DFS (SupportTracker: a frame per level,
-     *           pushed when a child is entered and popped with its level) and prunes a branch it
-     *           declares DEAD; the paths are then the SUPPORTED complete walks (AnchorCounts::
-     *           supported), every rule of max_paths (retention, ALL_OR_COUNT's threshold,
-     *           PARTIAL's cap, stop_at_threshold) applies to them, and AnchorCounts::paths becomes
-     *           a plain count of the complete walks (P25: AT_LEAST once a branch was pruned before
-     *           reaching L). Must outlive the call.
+     *           pushed when a child is entered and popped with its level) and prunes a branch
+     *           it declares DEAD; the paths are then the SUPPORTED complete walks
+     *           (AnchorCounts::supported), every rule of max_paths (retention, ALL_OR_COUNT's
+     *           threshold, PARTIAL's cap, stop_at_threshold) applies to them, and
+     *           AnchorCounts::paths becomes a plain count of the complete walks (AT_LEAST once
+     *           a branch was pruned before reaching L). Must outlive the call.
      *  sink     receives every path as it completes (with a tracker the supported ones), in
      *           answer order, instead of the engine's own list: the sink is the release, so
      *           count() serves it and enumerate() refuses an extending pattern with a sink
@@ -642,8 +633,8 @@ struct Request {
     PathSink *sink = nullptr;
 };
 
-// the server's default of Request::max_checked_entries (--pattern-max-checked-entries; owner
-// decision #24: a block of at most ~50 entries, about 1,500 backward steps at k = 31)
+// the server's default of Request::max_checked_entries (--pattern-max-checked-entries: a block
+// of at most ~50 entries, about 1,500 backward steps at k = 31)
 constexpr uint64_t kDefaultMaxCheckedEntries = 50;
 
 /**
@@ -689,10 +680,10 @@ class Deadline {
 };
 
 // Why a pattern's work stopped, or why PARTIAL's list was cut (JSON stop.reason, cut.reason):
-// the knob an agent can turn. MAX_PATHS: the stop_at_threshold threshold of the extension,
-// and PARTIAL's cap on the paths returned. EXTERNAL (increment 5s, internal): the extension's
-// support tracker or path sink (Request::support, Request::sink) answered STOPPED; the route,
-// which owns them, writes their own reason (SupportTracker::stop_reason, PathSink::stop_reason:
+// the knob an agent can turn. MAX_PATHS: the stop_at_threshold threshold of the extension, and
+// PARTIAL's cap on the paths returned. EXTERNAL (internal): the extension's support tracker or
+// path sink (Request::support, Request::sink) answered STOPPED; the route, which owns them,
+// writes their own reason (SupportTracker::stop_reason, PathSink::stop_reason:
 // max_annotation_work, max_memory), never "external". Never set without a tracker or a sink
 enum class StopReason { MAX_STEPS, TIME, MAX_CONTEXTS, MAX_ANCHORS, MAX_PATHS, EXTERNAL };
 
@@ -722,29 +713,29 @@ struct Stop {
 };
 
 /**
- * The request's work budget: max_steps and the deadline, shared by all patterns of the
- * request in request order (§5.3: one share per shard; this increment has one shard), so
- * that the same request on the same index stops at the same step (§5.5). A step is one
- * range evaluation (a tighten_range, successful or not, or a W-rule rank set), one edge
- * examined by a scan, or one outgoing edge examined by the extension (§4.2: every edge
- * DeBruijnGraph::call_outgoing_kmers reports for a node the DFS expands, allowed or not);
- * extraction charges no steps (its work is linear in the contexts it releases, which
- * max_contexts caps, plus the invalid candidates it skips) but reads the clock.
+ * The request's work budget: max_steps and the deadline, shared by all patterns of the request
+ * in request order (§5.3: one share per shard; a request runs on one shard), so that the same
+ * request on the same index stops at the same step (§5.5). A step is one range evaluation (a
+ * tighten_range, successful or not, or a W-rule rank set), one edge examined by a scan, or one
+ * outgoing edge examined by the extension (§4.2: every edge DeBruijnGraph::call_outgoing_kmers
+ * reports for a node the DFS expands, allowed or not); extraction charges no steps (its work is
+ * linear in the contexts it releases, which max_contexts caps, plus the invalid candidates it
+ * skips) but reads the clock.
  * Stops are sticky: once a charge is refused, every later charge is refused with the same
  * reason, and the patterns after it answer UNKNOWN counts with that stop.
  *
- * Where the engine reads the clock: at the start of every pattern, at every charge that
- * crosses a multiple of kClockStride steps (discovery, the deferred scans and the extension
- * share one step counter, so the boundary from discovery to the scans has no reading of its
- * own: at most kClockStride - 1 steps pass unread there, as anywhere), before every release,
- * every kClockStride edges the release examines and every kReleaseClockStride contexts it
- * passes on (a released context costs the caller a k-mer spelling, k - 1 BOSS steps, and its
- * result object), and every kReleaseClockStride contexts an ALL_OR_COUNT delivery passes to
- * the caller; in the extension also every kReleaseClockStride anchors it lists, before every
- * anchor it extends (spelled first, k - 1 BOSS steps no step charges) and before every
- * kReleaseClockStride-th node its DFS expands (GPT review 3, item 5); after a search that
- * completed, before every piece but the first of the low-complexity diagnostic
- * (kNoteLowComplexity). Work therefore ends within one such stride after the work time passes.
+ * Where the engine reads the clock: at the start of every pattern, at every charge that crosses
+ * a multiple of kClockStride steps (discovery, the deferred scans and the extension share one
+ * step counter, so the boundary from discovery to the scans has no reading of its own: at most
+ * kClockStride - 1 steps pass unread there, as anywhere), before every release, every
+ * kClockStride edges the release examines and every kReleaseClockStride contexts it passes on
+ * (a released context costs the caller a k-mer spelling, k - 1 BOSS steps, and its result
+ * object), and every kReleaseClockStride contexts an ALL_OR_COUNT delivery passes to the
+ * caller; in the extension also every kReleaseClockStride anchors it lists, before every anchor
+ * it extends (spelled first, k - 1 BOSS steps no step charges) and before every
+ * kReleaseClockStride-th node its DFS expands; after a search that completed, before every
+ * piece but the first of the low-complexity diagnostic (kNoteLowComplexity). Work therefore
+ * ends within one such stride after the work time passes.
  */
 class Budget {
   public:
@@ -833,17 +824,17 @@ struct GraphSupport {
     // DBGSuccinct, nor a CanonicalDBG over a PRIMARY one), "primary_unwrapped" (a PRIMARY
     // DBGSuccinct not wrapped in CanonicalDBG), "alphabet_unsupported" (the BOSS alphabet is
     // not "$ACGT" or "$ACGTN"). The route narrows it further (cli::route_support):
-    // "alphabet_untested" ($ACGTN, not served until a DNA5 build passes the pattern tests)
-    // and "mask_invalid" (a mask marking a W = $ edge valid). "mask_required", the refusal of
-    // a graph without its mask, is retired (owner decision #16 of 2026-10-08)
+    // "alphabet_untested" ($ACGTN, not served until a DNA5 build passes the pattern tests) and
+    // "mask_invalid" (a mask marking a W = $ edge valid). A graph without its mask is served:
+    // no reason is "mask_required"
     std::string reason;
     GraphMode mode = GraphMode::BASIC;
     /**
-     * The graph has its dummy-edge (valid-edge) mask: every count of a completed discovery
-     * is EXACT. Without it (owner decision #16) the graph is served all the same, its
-     * unresolved counts BOUNDS [lower, U] (PatternSearch, "Graphs without the dummy-edge
-     * mask"); the mask is derived data of the graph, never a different number for the same
-     * count (decision #17): it only changes which counts are exact.
+     * The graph has its dummy-edge (valid-edge) mask: every count of a completed discovery is
+     * EXACT. Without it the graph is served all the same, its unresolved counts BOUNDS [lower,
+     * U] (PatternSearch, "Graphs without the dummy-edge mask"); the mask is derived data of the
+     * graph, never a different number for the same count: it only changes which counts are
+     * exact.
      */
     bool mask_present = false;
     size_t k = 0;
@@ -857,12 +848,11 @@ struct GraphSupport {
 
 /**
  * f, the fraction of real k-mers among the entries of a succinct graph that a pattern can
- * count (owner decision #16 of 2026-10-08): the BOSS edges whose W is not $ (a sink dummy,
- * W = $, never carries a pattern base), each a k-mer or a source dummy (a k-mer starting
- * with '$', BOSS::node_has_sentinel). On a graph without its dummy-edge mask a count is the
- * bounds [lower, U] and the route states the additive estimate U x f beside it: what the count
- * would be if the source dummies among its U entries were as frequent as in the whole graph
- * (not a bound, never EXACT).
+ * count: the BOSS edges whose W is not $ (a sink dummy, W = $, never carries a pattern base),
+ * each a k-mer or a source dummy (a k-mer starting with '$', BOSS::node_has_sentinel). On a
+ * graph without its dummy-edge mask a count is the bounds [lower, U] and the route states the
+ * additive estimate U x f beside it: what the count would be if the source dummies among its U
+ * entries were as frequent as in the whole graph (not a bound, never EXACT).
  * Over the whole graph f = real edges / (edges with W != $), where `stats --count-dummy`'s
  * real edges = edges - source dummies - sink dummies (its source dummies include the main
  * dummy edge 1, whose W is $, its sinks do not) and the edges with W != $ number edges - sink
@@ -891,7 +881,7 @@ struct RealFraction {
     bool exact = false;
 };
 
-// the entries drawn for f (owner decision #16): 10,000
+// the entries drawn for f: 10,000
 constexpr uint64_t kRealFractionSamples = 10'000;
 
 /**
@@ -946,7 +936,7 @@ struct ContextCounts {
 
 /**
  * What phase 2 (§4.2) did for a pattern with L > k (JSON, once wired: counts.paths.extension).
- *  NOT_REQUESTED  Request::extend_paths is false: increments 1-2, nothing extended; paths
+ *  NOT_REQUESTED  Request::extend_paths is false: nothing extended; paths
  *                 UNKNOWN, EXACT 0 when the anchors are EXACT 0.
  *  NO_ANCHORS     the anchors are EXACT 0: nothing to extend; paths EXACT 0 (no path starts
  *                 without an anchor: a derivation, not a promotion).
@@ -955,9 +945,9 @@ struct ContextCounts {
  *                 completely is never extended; paths UNKNOWN (§3: every phase after a stop).
  *  NOT_ADMITTED   the anchors are EXACT and above max_anchors: the extension's admission
  *                 failed (§4.2); paths UNKNOWN; enumerate() withholds ANCHORS_ABOVE_THRESHOLD.
- *                 On a graph without the dummy-edge mask also: the anchors are BOUNDS (no
- *                 stop) and their upper bound U is above max_anchors (owner decision #16: the
- *                 admission compares U; kNoteThresholdUpperBound when the lower bound is not).
+ *                 On a graph without the dummy-edge mask also: the anchors are BOUNDS (no stop)
+ *                 and their upper bound U is above max_anchors (the admission compares U;
+ *                 kNoteThresholdUpperBound when the lower bound is not).
  *                 With U <= max_anchors the anchors are listed first, which drops the source
  *                 dummies and makes their count EXACT (NO_ANCHORS when none is left), and then
  *                 extended.
@@ -987,10 +977,10 @@ struct AnchorCounts {
      * NO_ANCHORS, or without extend_paths when the anchors are EXACT 0), AT_LEAST when
      * STOPPED, UNKNOWN otherwise. Never derived from the anchors (an anchor may have no
      * path: AAAC with AAA present).
-     * With a support tracker (Request::support, increment 5s) a plain count of the complete
-     * walks, supported or not (DECISIONS P25): EXACT only when COMPLETED and no branch was
-     * pruned before it reached L (pruned_before_completion false), AT_LEAST (the walks
-     * completed) otherwise; a branch pruned at its last k-mer is a complete walk and counted.
+     * With a support tracker (Request::support) a plain count of the complete walks, supported
+     * or not: EXACT only when COMPLETED and no branch was pruned before it reached L
+     * (pruned_before_completion false), AT_LEAST (the walks completed) otherwise; a branch
+     * pruned at its last k-mer is a complete walk and counted.
      */
     Count paths = Count::unknown(Unit::PATHS);
     /**
@@ -1003,17 +993,17 @@ struct AnchorCounts {
      */
     std::map<Orientation, Count> paths_by_orientation;
     /**
-     * Increment 5s (Request::support). |walks|: the complete walks the extension counted, a
-     * plain number (paths.value once the extension ran, with or without a tracker; 0 when it
-     * did not). |supported|: the complete walks the tracker supported (unit PATHS), with
-     * |paths|'s relation rule for the extension but without the pruning (a pruned branch holds
-     * no supported path): EXACT when COMPLETED, AT_LEAST when STOPPED, EXACT 0 without
+     * The supported-path search (Request::support). |walks|: the complete walks the extension
+     * counted, a plain number (paths.value once the extension ran, with or without a tracker; 0
+     * when it did not). |supported|: the complete walks the tracker supported (unit PATHS),
+     * with |paths|'s relation rule for the extension but without the pruning (a pruned branch
+     * holds no supported path): EXACT when COMPLETED, AT_LEAST when STOPPED, EXACT 0 without
      * anchors, UNKNOWN when the extension did not run and always without a tracker; per
      * orientation in |supported_by_orientation| (empty without a tracker), summed as |paths|.
      * |branches_pruned|: the tracker's DEAD verdicts — anchors and branches whose support ran
-     * out before L, and complete walks without support (work, exact as such). |pruned_before_
-     * completion|: some anchor or branch was pruned before L, so that the walks below it were not
-     * counted (|paths| AT_LEAST).
+     * out before L, and complete walks without support (work, exact as such).
+     * |pruned_before_completion|: some anchor or branch was pruned before L, so that the walks
+     * below it were not counted (|paths| AT_LEAST).
      */
     uint64_t walks = 0;
     Count supported = Count::unknown(Unit::PATHS);
@@ -1047,11 +1037,11 @@ struct Work {
     // L > k with extend_paths: the outgoing edges the extension examined, one step each
     // (allowed or not); 0 otherwise
     uint64_t extension_edges = 0;
-    // L > k with extend_paths, counters of the extension's work beside its steps (GPT review
-    // 3; not steps, never charged): the anchors whose extension began, each spelled once
-    // (k - 1 BOSS steps no step charges) before its DFS, at most the anchors listed; and the
-    // DFS's branchings, the nodes it expanded (anchors included) with two or more outgoing
-    // k-mers allowed at the next position. 0 when the extension did not run
+    // L > k with extend_paths, counters of the extension's work beside its steps (not steps,
+    // never charged): the anchors whose extension began, each spelled once (k - 1 BOSS steps no
+    // step charges) before its DFS, at most the anchors listed; and the DFS's branchings, the
+    // nodes it expanded (anchors included) with two or more outgoing k-mers allowed at the next
+    // position. 0 when the extension did not run
     uint64_t extension_anchors = 0;
     uint64_t extension_branches = 0;
     // every step this pattern charged: ranges_visited, plus the edges its scans examined,
@@ -1072,10 +1062,10 @@ struct Refusal {
 
 // Why enumerate() publishes nothing (JSON withheld.reason, §5.2)
 enum class Withheld {
-    // ALL_OR_COUNT: discovery (and for L > k the extension) completed, EXACT total >
-    // max_contexts (L <= k), or EXACT paths > max_paths (L > k with extend_paths). On a
+    // ALL_OR_COUNT: discovery (and for L > k the extension) completed, EXACT
+    // total > max_contexts (L <= k), or EXACT paths > max_paths (L > k with extend_paths). On a
     // graph without the dummy-edge mask also a BOUNDS total whose upper bound U is above
-    // max_contexts (owner decision #16: the admission compares U, conservative;
+    // max_contexts (the admission compares U, conservative;
     // kNoteThresholdUpperBound when the lower bound is not above it)
     COUNT_ABOVE_THRESHOLD,
     // ALL_OR_COUNT: stop_at_threshold stopped discovery or the extension (stop reason
@@ -1085,16 +1075,16 @@ enum class Withheld {
     DISCOVERY_BUDGET,
     // ALL_OR_COUNT: discovery, the extension or extraction stopped by the deadline (§5.3)
     DEADLINE,
-    // either mode, L > k without extend_paths, anchors not EXACT 0: results of a long
-    // pattern are its completed paths (§4.2), not extended in increments 1-2; anchors are
-    // never released as results
+    // either mode, L > k without extend_paths, anchors not EXACT 0: results of a long pattern
+    // are its completed paths (§4.2), which only extend_paths extends; anchors are never
+    // released as results
     PATHS_LATER_INCREMENT,
     // either mode, L > k with extend_paths: the anchors are EXACT and above max_anchors, so
     // the extension was not admitted (§4.2); counts.anchors is exact, the paths UNKNOWN
     ANCHORS_ABOVE_THRESHOLD,
-    // ALL_OR_COUNT, L > k with a support tracker (increment 5s): the tracker stopped the
-    // extension (StopReason::EXTERNAL); the route writes the tracker's reason (SPEC-DRAFT §20.5,
-    // annotation_budget), never "external"
+    // ALL_OR_COUNT, L > k with a support tracker: the tracker stopped the extension
+    // (StopReason::EXTERNAL); the route writes the tracker's reason (annotation_budget), never
+    // "external"
     EXTERNAL,
 };
 
@@ -1108,9 +1098,9 @@ struct Extraction {
     /**
      * Every context of the pattern in its scope and strands was released: discovery completed
      * with an EXACT count and returned equals it (an EXACT 0 included, and for L > k anchors
-     * EXACT 0, hence paths EXACT 0; with extend_paths, paths EXACT and all of them
-     * returned). JSON retrieval_complete: the one flag that licenses an absence claim over
-     * graph contexts (§5.1); it claims nothing about labels, which this increment never reads.
+     * EXACT 0, hence paths EXACT 0; with extend_paths, paths EXACT and all of them returned).
+     * JSON retrieval_complete: the one flag that licenses an absence claim over graph contexts
+     * (§5.1); it claims nothing about labels, which the engine never reads.
      */
     bool complete = false;
     // set: nothing is published ("results": [], returned 0). The callback received nothing,
@@ -1136,11 +1126,11 @@ struct Extraction {
  * both match TA), giving two contexts at one (node, offset) that differ in orientation; an
  * exact DNA pattern cannot. |path| and |sequence| are empty.
  *
- * L > k with Request::extend_paths: one path (§4.2), (orientation, path) its identity:
- * offset 0, |node| and |base_node| its anchor (the first k-mer), |path| its n = L - k + 1
- * nodes and |sequence| its L spelled bases, which instantiate P for FORWARD and PALINDROMIC
- * and rc(P) for REVERSE (§7.2, owner decision #13: the result's new field sequence is
- * |sequence|, its new field anchor_kmer the anchor's k-mer; kmer is not used for a path).
+ * L > k with Request::extend_paths: one path (§4.2), (orientation, path) its identity: offset
+ * 0, |node| and |base_node| its anchor (the first k-mer), |path| its n = L - k + 1 nodes and
+ * |sequence| its L spelled bases, which instantiate P for FORWARD and PALINDROMIC and rc(P) for
+ * REVERSE (§7.2: the result's field sequence is |sequence|, its field anchor_kmer the anchor's
+ * k-mer; kmer is not used for a path).
  * The anchors of Request::release_anchors are released like L <= k contexts (offset 0,
  * |path| and |sequence| empty).
  */
@@ -1164,17 +1154,17 @@ struct Context {
 };
 
 
-// ---------------------------------------------------------------- the search state (5s)
+// ---------------------------------------------------------------- the search state
 
 /**
- * The arm a step of the extension takes: RIGHT along outgoing edges (every extension of this
- * increment: each oriented pattern is read from its first k-window on), LEFT along incoming
- * edges (the selective anchor of 5t, DECISIONS P30: not built).
+ * The arm a step of the extension takes: RIGHT along outgoing edges (every extension: each
+ * oriented pattern is read from its first k-window on), LEFT along incoming edges (a selective
+ * anchor: not built).
  */
 enum class Side : uint8_t { RIGHT, LEFT };
 
 /**
- * One state of the extension's DFS (increment 5s, DECISIONS P29), as a SupportTracker sees it:
+ * One state of the extension's DFS, as a SupportTracker sees it:
  * the oriented node entered, the position in the oriented pattern, the Model's state and the
  * tracker's frame. Built only when a tracker is given (Request::support).
  */
@@ -1183,11 +1173,11 @@ struct SearchState {
     DeBruijnGraph::node_index node;
     // the stored k-mer that carries its annotation row (PatternSearch::base_node)
     DeBruijnGraph::node_index base_node;
-    // the stored k-mer is the reverse complement of the node's k-mer (review of 5s-2, for 5s-3:
-    // a tracker passes support_step the row's k-mer as rc of the k-mer spelled, without the
-    // wrapper's id arithmetic): true on the wrapper of a PRIMARY graph for a node that is not
-    // stored as spelled (base_node != node), false on BASIC and CANONICAL graphs. A palindromic
-    // k-mer is its own reverse complement: either value names the same row
+    // the stored k-mer is the reverse complement of the node's k-mer (so that a tracker passes
+    // support_step the row's k-mer as rc of the k-mer spelled, without the wrapper's id
+    // arithmetic): true on the wrapper of a PRIMARY graph for a node that is not stored as
+    // spelled (base_node != node), false on BASIC and CANONICAL graphs. A palindromic k-mer is
+    // its own reverse complement: either value names the same row
     bool stored_reverse_complement;
     // the oriented pattern extended: FORWARD and PALINDROMIC read P, REVERSE rc(P)
     Orientation orientation;
@@ -1207,8 +1197,7 @@ struct SearchState {
 
 /**
  * A complete walk as the extension hands it to a tracker and a sink (valid during the call
- * only): nothing is copied before a sink admits it (SPEC-DRAFT §20.7; GPT review 3, the
- * efficiency note on the copies of increment 4). copy() is the Context enumerate() releases.
+ * only): nothing is copied before a sink admits it. copy() is the Context enumerate() releases.
  */
 struct PathView {
     // the walk's anchor (offset 0, node == path.front())
@@ -1225,11 +1214,10 @@ struct PathView {
 };
 
 /**
- * The support of each branch of the extension (increment 5s; SPEC-DRAFT §20.3; DECISIONS P28,
- * P29): one frame per level of the DFS. Implemented outside the engine (src/cli/pattern_support,
- * 5s-3: the label and trace trackers over the annotation, on graph/traversal/support_step); the
- * engine only asks it and counts its verdicts. With Request::support null the extension asks
- * nothing and runs as in increment 4.
+ * The support of each branch of the extension: one frame per level of the DFS. Implemented
+ * outside the engine (the label and trace trackers over the annotation, on
+ * graph/traversal/support_step; not built yet); the engine only asks it and counts its
+ * verdicts. With Request::support null the extension asks nothing.
  *
  * The protocol, per anchor of an admitted extension, in answer order:
  *  - open(anchor): frame 0 from the anchor (depth 0, position k), before its first expansion;
@@ -1268,21 +1256,19 @@ class SupportTracker {
 };
 
 /**
- * What a complete walk becomes (increment 5s; DECISIONS P27, P29): the route's list of
- * supported paths (5s-4), later the alignment projection (5s-A) or a ranked list. Given
- * (Request::sink), it receives every path the extension completes — with a tracker the
- * supported ones, the tracker's frames still open so that it can read their support — in
- * answer order, through count(): the engine then keeps no path of its own, and enumerate()
- * refuses an extending pattern with a sink. Null: the engine's own list (enumerate() only),
- * with the retention rule of Request::max_paths. The engine applies stop_at_threshold
- * (more than max_paths paths complete: stop {EXTENSION, MAX_PATHS}) after the sink's call
- * either way; the retention of a given sink is its own (it admits a path's memory before it
- * copies it: PathView::copy).
+ * What a complete walk becomes: the route's list of supported paths, an alignment projection or
+ * a ranked list (none built yet). Given (Request::sink), it receives every path the extension
+ * completes — with a tracker the supported ones, the tracker's frames still open so that it can
+ * read their support — in answer order, through count(): the engine then keeps no path of its
+ * own, and enumerate() refuses an extending pattern with a sink. Null: the engine's own list
+ * (enumerate() only), with the retention rule of Request::max_paths. The engine applies
+ * stop_at_threshold (more than max_paths paths complete: stop {EXTENSION, MAX_PATHS}) after the
+ * sink's call either way; the retention of a given sink is its own (it admits a path's memory
+ * before it copies it: PathView::copy).
  * The engine's threshold counts the paths it handed over (with a tracker the supported ones),
- * not what the sink kept. A sink that selects among them (a predicate over supported paths,
- * 5b-5; PLAN §6: the threshold is on the selected paths) owns max_paths itself (the review of
- * 5s-2, decided by the integrator of round 5b-A): the route then leaves Request::
- * stop_at_threshold off, and the sink answers false once more than max_paths paths are
+ * not what the sink kept. A sink that selects among them (a predicate over supported paths: the
+ * threshold is on the selected paths) owns max_paths itself: the route then leaves
+ * Request::stop_at_threshold off, and the sink answers false once more than max_paths paths are
  * selected, with stop_reason() "max_paths" (the route writes stop {extension, max_paths}).
  */
 class PathSink {
@@ -1296,28 +1282,27 @@ class PathSink {
     virtual const char* stop_reason() const = 0;
 };
 
-// JSON notes of a pattern (§7.2), the ones this increment can state:
+// JSON notes of a pattern (§7.2), the ones the engine states:
 //  low_complexity_pattern    an exact pattern that sdust flags with the seeder's parameters
-//                            (T = 20, W = 64, is_low_complexity): why its counts are large.
-//                            An optional diagnostic (GPT review 3, item 2): never stated on
-//                            an answer with a stop (any phase and reason, the request-wide
-//                            stop of an earlier pattern included), nor when the work time
-//                            passed before sdust had read the pattern (read in pieces of 128
-//                            bases, the clock before each but the first, so only a pattern
-//                            longer than 191 bases can lose it so; Result::time_limited is
-//                            then set, the counts complete and the stop none). Otherwise
-//                            stated iff sdust flags the whole pattern, as before
+//                            (T = 20, W = 64, is_low_complexity): why its counts are large. An
+//                            optional diagnostic: never stated on an answer with a stop (any
+//                            phase and reason, the request-wide stop of an earlier pattern
+//                            included), nor when the work time passed before sdust had read the
+//                            pattern (read in pieces of 128 bases, the clock before each but
+//                            the first, so only a pattern longer than 191 bases can lose it so;
+//                            Result::time_limited is then set, the counts complete and the stop
+//                            none). Otherwise stated iff sdust flags the whole pattern
 //  strand_unknown_canonical  graph mode CANONICAL or PRIMARY: orientations, not strands
 //  paths_later_increment     L > k without Request::extend_paths: anchors counted, paths
 //                            neither extended nor extracted (never set with extend_paths)
-//  threshold_upper_bound     a graph without the dummy-edge mask (owner decision #16): a
+//  threshold_upper_bound     a graph without the dummy-edge mask: a
 //                            threshold decision went against the request on the count's
 //                            upper bound U while its lower bound did not cross the threshold
 //                            (ALL_OR_COUNT withheld COUNT_ABOVE_THRESHOLD, stop_at_threshold
 //                            stopped, the extension NOT_ADMITTED): the true count may be
 //                            within the threshold (PARTIAL lists the contexts regardless)
 //  no_stop_codon             a peptide holding '*' read in a genetic code without an
-//                            unconditional stop codon (tables 27, 28, 31; owner decision #19):
+//                            unconditional stop codon (tables 27, 28, 31):
 //                            '*' matches nothing there, so the pattern has no instance: its
 //                            contexts (L <= k) and paths (L > k) are 0 for that reason (never a
 //                            silent 0); a long one's anchors are the anchor window's, which may
@@ -1348,10 +1333,9 @@ struct Result {
     // L > k: the bits of the anchor window P[0, k), stated separately (§3; its meaning in
     // contract version 1, whatever the strands searched)
     std::optional<double> anchor_information_bits;
-    // L > k: the least over the searched orientations' anchor windows (FORWARD and
-    // PALINDROMIC: P[0, k); REVERSE: rc(P)[0, k), whose bits are those of P[L - k, L)), the
-    // bits the information floor gated on (X-GUARANTEES-01; an addition to the JSON of
-    // contract version 1, the owner's decision of 2026-10-07)
+    // L > k: the least over the searched orientations' anchor windows (FORWARD and PALINDROMIC:
+    // P[0, k); REVERSE: rc(P)[0, k), whose bits are those of P[L - k, L)), the bits the
+    // information floor gated on (an addition to the JSON of contract version 1)
     std::optional<double> min_anchor_information_bits;
     // L > k: the bits of each searched orientation's anchor window (an addition to the JSON
     // of contract version 1 when the route publishes it)
@@ -1434,9 +1418,9 @@ struct Result {
  * window, rc(Q[0, k)) = rc(Q)[L - k, L), may start inside a codon: its first codon is matched
  * on the bases inside the window only (the codon's earlier bases are free).
  *
- * Graphs without the dummy-edge mask (owner decisions #16 and #17 of 2026-10-08). The mask
- * only says which BOSS edges are dummies; without it the same ranges are discovered with the
- * same steps, and every place that read the mask counts the candidates instead:
+ * Graphs without the dummy-edge mask (§4.4). The mask only says which BOSS edges are dummies;
+ * without it the same ranges are discovered with the same steps, and every place that read the
+ * mask counts the candidates instead:
  *  - a flank range counts its non-sink edges (W != $, DBGSuccinct::count_non_sink_edges_in_
  *    range) instead of its valid ones, a W-rule leaf its candidates (W in {c, c + alph_size})
  *    instead of the valid ones among them: no INVALID scan exists, a sink never counts;
@@ -1447,11 +1431,11 @@ struct Result {
  *  - the palindrome scans of an even-k wrapped PRIMARY graph spell every candidate anyway,
  *    which checks it too (a k-mer holding '$' is a dummy, and never a palindrome).
  *  - a pattern whose discovery and scans completed with at most Request::max_checked_entries
- *    unchecked candidates in all (owner decision #24) has each of them tested after the scans
+ *    unchecked candidates in all has each of them tested after the scans
  *    (BOSS::node_has_sentinel, k - 1 steps each, phase MASK_SCAN): the real ones are counted
- *    exactly and the rest dropped, so every count of the pattern is EXACT. Its unchecked
- *    ranges are kept for that while their candidates number at most the limit (at most that
- *    many ranges), and freed once there are more.
+ *    exactly and the rest dropped, so every count of the pattern is EXACT. Its unchecked ranges
+ *    are kept for that while their candidates number at most the limit (at most that many
+ *    ranges), and freed once there are more.
  * A count is then EXACT when nothing of it is unchecked (an empty block, U = 0, included:
  * absence holds), else BOUNDS {lower, U}; stops as on a masked graph (AT_LEAST, UNKNOWN). The
  * admission decisions compare U (Request::stop_at_threshold, ALL_OR_COUNT's threshold, the
@@ -1523,9 +1507,9 @@ class PatternSearch {
      * admitted, extended to count the paths (AnchorCounts::paths, Extension); no path is
      * retained. The extension's memory is the anchor list (<= max_anchors) and the DFS
      * stack, O(n * alphabet) for n = L - k + 1.
-     * With Request::support and Request::sink (increment 5s) the extension asks the tracker
-     * per level and hands every (supported) complete walk to the sink as it completes; the
-     * counts are those of AnchorCounts (walks, supported, branches_pruned).
+     * With Request::support and Request::sink the extension asks the tracker per level and
+     * hands every (supported) complete walk to the sink as it completes; the counts are those
+     * of AnchorCounts (walks, supported, branches_pruned).
      */
     Result count(const Pattern &pattern, const Request &request, Budget &budget) const;
 
@@ -1572,11 +1556,11 @@ class PatternSearch {
      *                extension was not admitted (withheld ANCHORS_ABOVE_THRESHOLD).
      *                The release reads the clock once before the first callback.
      *  An EXACT 0 of anchors or of paths is a complete, empty release.
-     *  With a support tracker (Request::support, increment 5s) the paths are the supported
-     *  ones and every rule above reads their count (AnchorCounts::supported, EXACT when the
-     *  extension COMPLETED whatever it pruned); a tracker's stop is withheld EXTERNAL
-     *  (ALL_OR_COUNT) or cut EXTERNAL after the prefix completed before it (PARTIAL). With a
-     *  path sink (Request::sink) the sink is the release: an extending pattern is refused
+     *  With a support tracker (Request::support) the paths are the supported ones and every
+     *  rule above reads their count (AnchorCounts::supported, EXACT when the extension
+     *  COMPLETED whatever it pruned); a tracker's stop is withheld EXTERNAL (ALL_OR_COUNT) or
+     *  cut EXTERNAL after the prefix completed before it (PARTIAL). With a path sink
+     *  (Request::sink) the sink is the release: an extending pattern is refused
      *  (std::invalid_argument; count() serves it).
      * On a graph without the dummy-edge mask (see the class): ALL_OR_COUNT releases iff
      * discovery completed and the count is EXACT, or BOUNDS with U <= the threshold; the
@@ -1629,7 +1613,7 @@ class PatternSearch {
     Result run(const Pattern &pattern, const Request &request, Budget &budget,
                const std::function<void(const Context&)> *callback) const;
 
-    // a pattern with no instance (Pattern::has_instances, owner decision #19) and L <= k:
+    // a pattern with no instance (Pattern::has_instances) and L <= k:
     // every count EXACT 0, nothing charged
     void answer_no_instance(const Pattern &pattern, const Request &request, bool enumerating,
                             Result *result) const;
@@ -1799,9 +1783,8 @@ inline const char* to_string(Extension extension) {
     return "unknown";
 }
 
-// the request's `mode`, `scope` (LONG is not requestable) and `strands`; nullopt: not a
-// valid value. A valid mode is still refused by the route when its projection is a later
-// increment's (§7.1).
+// the request's `mode`, `scope` (LONG is not requestable) and `strands`; nullopt: not a valid
+// value. A valid mode is still refused by the route when its projection is not served (§7.1).
 inline std::optional<Mode> parse_mode(std::string_view s) {
     if (s == "count") return Mode::COUNT;
     if (s == "all_or_count") return Mode::ALL_OR_COUNT;

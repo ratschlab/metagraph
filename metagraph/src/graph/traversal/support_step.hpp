@@ -17,10 +17,10 @@ namespace traversal {
 
 /**
  * The support step: how the support a label gives a walk narrows when the walk takes one step
- * (DECISIONS P28 of increments 5b/5s: the walker's step rule, factored out as pure linear
- * merges so that the pattern's supported-path search and, later, the walker share it). Nothing
- * here reads the annotation, the graph or a clock of its own: the caller reads the rows, says
- * which k-mer each row belongs to, charges the units a call returns and owns the deadline.
+ * (the walker's step rule, factored out as pure linear merges so that the pattern's
+ * supported-path search and the walker can share it). Nothing here reads the annotation, the
+ * graph or a clock of its own: the caller reads the rows, says which k-mer each row belongs
+ * to, charges the units a call returns and owns the deadline.
  *
  * The two support levels are the walker's (traversal_types.hpp):
  *  - Support::KMER (`label_intersection`): a label supports a walk when it annotates every
@@ -33,15 +33,15 @@ namespace traversal {
  *    live coordinates are runs of consecutive coordinates (ChainRun), shifted by one and
  *    intersected with the row's coordinates turned into runs once per row (CoordRun): linear
  *    in runs, so a homopolymer's thousands of coordinates are one run and one comparison per
- *    step (GPT-3 finding 1: a 30,000-base homopolymer). Each run also carries the end of its
+ *    step. Each run also carries the end of its
  *    record in the direction it moves, and a chain is not continued past it: consecutive column
  *    coordinates in two records of one column are no occurrence (the walker's column-label
  *    trace does not see this, `trace_record_boundaries`). At this level a frame also keeps the
  *    KMER membership beside the chains, so that a label carried on every k-mer but held whole
- *    by no record can still be listed with `label_intersection` support (SPEC-DRAFT §20.6).
+ *    by no record can still be listed with `label_intersection` support (DESIGN-pattern-search.md §4.3).
  *
- * Strands (the owner's rule, DECISIONS P11: "the strand needs to be consistent for one search
- * direction, not flip half-way"): a label supports a walk in ONE orientation as a whole —
+ * Strands (one orientation per walk: the strand is consistent for one search direction and
+ * never flips half-way): a label supports a walk in ONE orientation as a whole —
  * every k-mer of the walk as spelled, or every k-mer of its reverse-complement walk, never
  * some on one strand and the rest on the other. A Frame therefore has one Orientation, fixed
  * when it is opened, and every row it is given must be the row of the k-mer that orientation
@@ -63,7 +63,7 @@ namespace traversal {
  * CANONICAL and PRIMARY graphs a k-mer and its reverse complement share one row and the
  * coordinates carry no strand: only SPELLED frames at the KMER level are meaningful there.
  *
- * Units, charged by the caller (SPEC-DRAFT §20.7): 1 per label of either list a label merge
+ * Units, charged by the caller: 1 per label of either list a label merge
  * compares, 1 per chain run and per coordinate run of a label a chain merge compares, 1 per
  * coordinate turned into runs (a row's, once), 1 per label, per run and per record lookup when
  * a frame is opened. Every call returns its units; Frame::price() gives, before a step, an upper bound of
@@ -78,7 +78,7 @@ namespace traversal {
  */
 namespace support_step {
 
-// The walk whose rows a frame reads (the owner's strand rule, above)
+// The walk whose rows a frame reads (the strand rule, above)
 enum class Orientation : uint8_t {
     SPELLED = 0,             // the rows of the walk's k-mers as it spells them
     REVERSE_COMPLEMENT = 1,  // the rows of their reverse complements: the reverse-complement walk

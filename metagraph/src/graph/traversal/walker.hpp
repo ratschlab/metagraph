@@ -47,8 +47,8 @@ class SeedDerivationError : public std::invalid_argument {
         TOO_WIDE,
         // bounds.time_budget_ms ran out before the first seed k-mer was consumed: |limit| the
         // budget, |observed| the elapsed ms. Once one was, the seed is delivered with the set
-        // derived from the k-mers read instead (SeedResult::derivation_partial, decision D3) —
-        // unless that set would then fail the seed, which then fails with this, as before D3
+        // derived from the k-mers read instead (SeedResult::derivation_partial, SPEC §7.0) —
+        // unless that set would then fail the seed, which then fails with this
         // (derivation_out_of_time)
         TIME_BUDGET,
         // a derived header name is not resubmittable as an explicit label: |subject|
@@ -81,7 +81,7 @@ class SeedDerivationError : public std::invalid_argument {
     // Under a memory budget, the soft excess the seed phase was seen to hold before it
     // failed (ResourceAccount::soft_overshoot, bytes): the derivation decodes whole rows
     // that no admission charges, so a failed seed states memory_bound_soft like every
-    // other result under a budget (GPT review of stage 2, finding 8). Set by the walker.
+    // other result under a budget. Set by the walker.
     uint64_t soft_overshoot() const { return soft_overshoot_; }
     void set_soft_overshoot(uint64_t bytes) { soft_overshoot_ = bytes; }
 
@@ -95,13 +95,13 @@ class SeedDerivationError : public std::invalid_argument {
 };
 const char* to_string(SeedDerivationError::Cause cause);
 
-// The failure of a derived seed whose time budget (|budget_ms|) ran out after |kmers_read| of
-// its |num_kmers| k-mers, |elapsed_ms| into the seed: every such seed's before decision D3,
-// and still the one of a seed that read none, or whose partial set cannot be delivered — a
-// check written for the whole seed's carriers refuses their superset (`exhaustive` over
-// max_seed_labels, an ambiguous derived header, an extra label it duplicates, a label name no
-// output carries), or a budget does not hold its depth-0 state. Their statements would be false
-// or overstated about a set the whole seed may narrow; this one is true (review of W1, finding 1)
+// The failure of a derived seed whose time budget (|budget_ms|) ran out after |kmers_read| of its
+// |num_kmers| k-mers, |elapsed_ms| into the seed, when it read none of them or its partial set
+// cannot be delivered (SPEC §7.0, derivation) — a check written for the whole seed's carriers
+// refuses their superset (`exhaustive` over max_seed_labels, an ambiguous derived header, an
+// extra label it duplicates, a label name no output carries), or a budget does not hold its
+// depth-0 state. Their statements would be false or overstated about a set the whole seed may
+// narrow; this one is true
 SeedDerivationError derivation_out_of_time(uint64_t kmers_read, uint64_t num_kmers,
                                            double budget_ms, double elapsed_ms);
 
@@ -217,9 +217,9 @@ struct DeliveryCosts {
     uint64_t occurrence = 0;
     // The part of |fixed| that is the coordinate output's (the block's skeleton with a cut
     // list's limitation and K record, or the null form with its reason; 0 without coordinates):
-    // charged with |fixed| as before, and counted again only in the account's coordinate share
+    // charged as part of |fixed|, and counted again only in the account's coordinate share
     // (ResourceAccount::coordinates), so that the server's delivery reserve can price the whole
-    // coordinate output at its own ratio and leave it out of the measured one (plan revision 3)
+    // coordinate output at its own ratio and leave it out of the measured one
     uint64_t coordinate_fixed = 0;
     // A seed-level limitation beyond the ones |fixed| holds, charged where a result states one
     // (the derivation limitation of a permitted set derived from part of the seed: Walker,
@@ -231,8 +231,8 @@ struct DeliveryCosts {
      * delivered size is no fixed multiple of its length — JSON writes a control character
      * as six bytes, MGT a '%' as three, and a graphlet's MGT text is escaped once more
      * inside its JSON string — so the layer that does the escaping prices each one
-     * exactly (GPT review of stage 2, finding 1: a fixed four bytes per name byte let a
-     * name of control characters deliver more than the whole budget). Empty: nothing.
+     * exactly (a fixed four bytes per name byte would let a name of control characters
+     * deliver more than the whole budget). Empty: nothing.
      */
     enum class Name { SEED_LABEL, LABEL, DROPPED_LABEL, SEED_ID };
     std::function<uint64_t(std::string_view name, Name use)> name;
@@ -249,7 +249,7 @@ constexpr uint64_t kWorkCheckInterval = 65536;
 // The graph steps of the structural lookahead (§8.3) after which it reads the seed's deadline
 // and the attempt's stop again: its chains run between two checkpoints, up to
 // min(batch_kmers, the radius left) steps per head of a level, and charge no units while they
-// are enumerated, so the work interval never polls them (the review of 2026-10-06, W3).
+// are enumerated, so the work interval never polls them.
 // Stated by the server's deadline_check rule
 constexpr size_t kLookaheadPollSteps = 16;
 
@@ -326,8 +326,8 @@ struct Strategy {
     // design's locus scope): each seed of a request is walked under budgets of its own, so
     // that its result does not depend on the other seeds of the request (§6.8). A request
     // of n seeds can therefore hold up to n times the memory budget — each seed's output is
-    // kept until the response is written — and the server bounds n (review of stage 2,
-    // finding 7: a request-level ledger would make a seed's stop depend on its position).
+    // kept until the response is written — and the server bounds n (a request-level
+    // ledger would make a seed's stop depend on its position).
     // Memory: the modelled bytes one seed's walk and output retain at once — the walker's
     // state, the label caches (a fixed allotment under a budget) and the output in the
     // requested detail (|delivery|) — charged per head at admission, the depth-0 state
@@ -340,10 +340,9 @@ struct Strategy {
     // after every charge of the walk (the seed phase: once every kWorkCheckInterval units),
     // so a stop exceeds it by what was charged since the previous comparison — one fetch
     // call's rows, a node's label-state scan, the seed phase with the roots' rows — and the
-    // largest such charge is stated (ResourceAccount::largest_charge). Work
-    // is the walk's alone, the same in every output detail (finding 5: charging delivery as
-    // work would make a work stop depend on the detail). Either budget stops the whole
-    // seed, with resource_limit.
+    // largest such charge is stated (ResourceAccount::largest_charge). Work is the walk's
+    // alone, the same in every output detail (charging delivery as work would make a work
+    // stop depend on the detail). Either budget stops the whole seed, with resource_limit.
     uint64_t max_memory_bytes = 0;
     uint64_t max_work_units = 0;
     DeliveryCosts delivery;
@@ -362,7 +361,7 @@ struct Strategy {
     // at least k, or the continuation would be shorter than a k-mer and not valid
     // traverse input (traverse_seed() refuses 1 .. k - 1)
     uint64_t continuation_bp = 1000;
-    // Record coordinates (DESIGN-traverse-graphlet.md §18, owner decisions C1-C12; opt-in, C1):
+    // Record coordinates (DESIGN-traverse-graphlet.md §18; opt-in):
     // where each run's sequence and each seed label's seed lies in its label's record (header
     // labels) or column (column labels), recorded only under support trace on an index with
     // k-mer coordinates — everywhere else coordinates_reason says why none are (§18.1). Off (the
@@ -398,7 +397,7 @@ struct Seed {
      *
      * Deriving replaces the given list everywhere: `label_dict`, the label ids of all
      * outputs and the request indices of a LabelChangeCost TABLE are "seed labels in
-     * order, then Strategy::extra" as before, with the derived labels in the place of
+     * order, then Strategy::extra", with the derived labels in the place of
      * the given ones (a table authored by name therefore needs an explicit list).
      * An `extra` label that the derivation also produced is rejected as a duplicate.
      *
@@ -421,8 +420,8 @@ struct Seed {
  * result that states labels_from_seed without a finished walk to read it from — a seed failed
  * by a budget (SeedBudgetError) or by its derivation, and a seed an attempt never started —
  * so that the results of one request agree with the walked ones, which state what the walk
- * set (review of 2026-10-06, X-DUP-01: the not-started writer used seed.labels.empty() and
- * stated true for every annotate seed, where a walked or budget-failed one states false)
+ * set (a writer testing seed.labels.empty() would state true for every annotate seed,
+ * where a walked or budget-failed one states false)
  */
 inline bool labels_derived_from_seed(const Seed &seed, LabelMode mode) {
     return mode != LabelMode::ANNOTATE && seed.labels.empty();
@@ -560,16 +559,15 @@ struct RunCoordinates {
     // the chains live at the last node: the run's true occurrence count (> |ends| when cut)
     uint64_t total = 0;
     // Chains that were live on the run's lineage and continued on no followed path of it
-    // before its last node (C5, decision C-N1): a record end, a successor not followed
+    // before its last node: a record end, a successor not followed
     // (blocked, a quorum, the branch limit), or a continuation taken over by a switch. Chains
     // partitioned among the children of a split are not ended (each follows one child); a
     // clone made at a split inherits the count of the prefix it shares.
     uint64_t chains_ended = 0;
     // The run was entered by a switch into a label whose own lineage was still live at the
-    // switch (revision 1 of the coordinates plan, decision C-N2 option a): its entry kept only
-    // the label's chains that continue from before the switch, so chains of the label that
-    // start at the switch node are missing — |total| is a lower bound. Stated per run and by
-    // the block (complete: false); the walk itself is unchanged.
+    // switch: its entry kept only the label's chains that continue from before the switch, so
+    // chains of the label that start at the switch node are missing — |total| is a lower
+    // bound. Stated per run and by the block (complete: false); the walk itself is unchanged.
     bool lower_bound = false;
 };
 
@@ -604,14 +602,14 @@ struct Continuation {
 /**
  * One leaf of the segment DAG. The path is its leaf's first-parent chain, which is NOT
  * stored: on a comb-shaped trie (one terminating branch per split) the chains sum to
- * Θ(segments²), so materialising one per leaf made finalisation quadratic in the result
- * (DESIGN-traverse-graphlet.md §14, "delivery is accounted per expansion"). The chain is
- * derived on demand from parent pointers — by the serialisers while they write it, and
- * by path_segments() for C++ callers.
+ * Θ(segments²), so materialising one per leaf would make finalisation quadratic in the
+ * result (DESIGN-traverse-graphlet.md §14, "delivery is accounted per expansion"). The chain
+ * is derived on demand from parent pointers (walk_path_leaf_first) — by the serialisers
+ * while they write it.
  */
 struct PathResult {
     size_t id = 0;
-    size_t leaf = 0;                 // the leaf segment (root -> leaf: path_segments())
+    size_t leaf = 0;                 // the leaf segment
     uint64_t length_bp = 0;
     std::array<uint32_t, kNumEndReasons> end_reasons {};
     std::optional<EndReason> path_reason;   // MAX_EXTENSION / resource / beam
@@ -677,7 +675,7 @@ struct BranchEvent {
     // cause is a decision of one strategy knob, and a checker verifies it against that
     // knob. This is the walker's explicit per-successor refusal evidence: |dropped|
     // and |ambiguous| alone cannot tell a successor that was refused from one that was
-    // followed and then deleted from the output (review round 3, finding 1), and a
+    // followed and then deleted from the output, and a
     // missing child says nothing about why it is missing.
     struct Refusal {
         char ch;
@@ -732,7 +730,7 @@ struct ArmResult {
     // under merge, where a merge unites the edge histories of the routes it joins and
     // the set of walks present is the smaller one admissible under that union. Stated
     // as a field, not only in walk_rule's prose, so that a checker can pick the
-    // termination scope it verifies against (review round 3).
+    // termination scope it verifies against.
     const char *completeness_scope = "per_path";
     // Per-node label lists cut by Strategy::max_labels_per_node: how many recorded
     // positions (annotate mode: the root's boundary node, every node entered and every
@@ -785,8 +783,8 @@ struct ArmResult {
     size_t max_reminimisation_rounds = 0;
     // The work of recording refusals (BranchEvent::refused): per round that excludes
     // sources, the successor state entries scanned once for those sources (scanning
-    // every successor once per excluded source was Θ(|σ|²) at a node where every
-    // source is ambiguous: review round 4), plus the loss-budget tests of a finite
+    // every successor once per excluded source would be Θ(|σ|²) at a node where every
+    // source is ambiguous), plus the loss-budget tests of a finite
     // change cost — one per (source, successor) under a constant cost, one per target
     // under a table. Linear in |σ| + Σ|σ_v| per round under forbid and constant costs.
     uint64_t refusal_scans = 0;
@@ -834,16 +832,16 @@ struct DroppedLabel {
 struct ResourceStop {
     // CANCELLED, ATTEMPT_DEADLINE: no budget of the request ran out — the walk was stopped from
     // outside (AttemptControl): the attempt was cancelled, or it reached the duration bound the
-    // server enforces for it (DESIGN-traverse-graphlet.md §14 v5.1). Their amounts are the
+    // server enforces for it (DESIGN-traverse-graphlet.md §14). Their amounts are the
     // attempt's: |limit| its bound and |used| its elapsed time (whole milliseconds)
     enum Resource { MEMORY, WORK, TIME, CANCELLED, ATTEMPT_DEADLINE };
     Resource resource = MEMORY;
     // traversal | finalisation | serialisation | annotation_decode. Finalisation and
     // serialisation are reserved at admission, so they never stop; annotation_decode: a
     // budget-aware annotation read (LabelOracle::decode_charged()) did not fit the memory
-    // the request had left (stage 3 of DESIGN-traverse-graphlet.md §14.1) — a level's read
-    // (the level is censored from its first head) or, failing the seed, the seed phase's
-    // or an annotate root's
+    // the request had left (the budget-aware decode, DESIGN-traverse-graphlet.md §14.1) —
+    // a level's read (the level is censored from its first head) or, failing the seed, the
+    // seed phase's or an annotate root's
     const char *phase = "traversal";
     Arm arm = Arm::RIGHT;            // the arm whose head was not admitted
     uint64_t at_bp = 0;              // that head's depth
@@ -858,7 +856,7 @@ struct ResourceStop {
     // ---- what did not fit, for the statements of a memory stop (the message, the actions
     // and the walk_domain they shape; nothing of it is a field of its own on the wire). A stop
     // must name its true cause: a row that does not fit is not a dictionary or a level's lists
-    // that do not (review of stage 3, F2, F6, F7)
+    // that do not
     enum Cause {
         HEAD,           // a head's admission (traversal), or the seed's depth-0 state
         READ_ROW,       // annotation_decode: an annotation row with its row-diff dependency rows
@@ -888,8 +886,7 @@ struct ResourceStop {
     // LABEL_NAMES on a format whose reads are not budget-aware: the level's rows were read
     // whole and the labels they named charged after the read, which put the account over the
     // budget — no row was refused, so |row_demand| and |left| say nothing (0), and |demand|
-    // is the account with those labels, a lower bound (review of 2026-10-06, U03-03: stated as
-    // a refused head with an exact need, without the levers that name fewer labels)
+    // is the account with those labels, a lower bound
     bool names_after_read = false;
     // MEMORY: the caches' allotments of the budget that |used| and |demand| include (bytes;
     // 0 in the seed phase, which runs before they are charged). They are fractions of the
@@ -907,10 +904,10 @@ uint64_t memory_allotments(uint64_t budget);
  * The smallest bounds.max_memory_mb, in bytes (a whole number of MiB), whose admitted account
  * holds |need| bytes measured at a budget whose caches' allotments were |allotted| bytes: the
  * allotments grow with the budget (memory_allotments), so a budget of |need| holds less than
- * |need| beside them and the same state fails again (review of the stage-3 fixes, P2: a depth-0
- * failure stated "need 7 MiB" at 1 MiB, then "need 9 MiB" at 7 and "need 10 MiB" at 8 and 9;
- * 10 held it). With |allotted| 0 (nothing allotted in the account yet: the seed phase) it is
- * |need| rounded up to whole MiB, as before.
+ * |need| beside them and the same state fails again (stating |need| alone, a depth-0 failure
+ * would state "need 7 MiB" at 1 MiB, then "need 9 MiB" at 7 and "need 10 MiB" at 8 and 9). With
+ * |allotted| 0 (nothing allotted in the account yet: the seed phase) it is |need| rounded up to
+ * whole MiB.
  */
 uint64_t memory_budget_holding(uint64_t need, uint64_t allotted);
 
@@ -919,11 +916,11 @@ struct ResourceAccount {
     uint64_t memory_limit = 0;
     uint64_t memory_peak = 0;        // the largest accounted total
     uint64_t memory_final = 0;       // accounted when the walk ended (live reservations 0)
-    // The excess over the budget (0 without one) of what was held but could not be
-    // charged before it was allocated — a level's decoded annotation rows (stage 3 charges
-    // them inside the decoder), a cache beyond its allotment and an annotate dictionary's
-    // growth — on top of the admitted account, which never exceeds the budget itself: the
-    // memory_bound_soft limitation's observed
+    // The excess over the budget (0 without one) of what was held but could not be charged
+    // before it was allocated — a level's decoded annotation rows (the budget-aware decode
+    // charges them inside the decoder), a cache beyond its allotment and an annotate
+    // dictionary's growth — on top of the admitted account, which never exceeds the budget
+    // itself: the memory_bound_soft limitation's observed
     uint64_t soft_overshoot = 0;
     uint64_t work_limit = 0;
     // the seed phase (its validation, or the derivation of its permitted set: 8 per seed
@@ -934,12 +931,12 @@ struct ResourceAccount {
     // The most work charged between two comparisons with the work budget (units; 0: no
     // comparison was made, i.e. no work budget). Every comparison follows one that passed,
     // so a work stop exceeds the budget by at most its last such stretch, and so by at most
-    // this: the bound a stop states with its number (review of the stage-2 fixes, F7), whatever
+    // this: the bound a stop states with its number, whatever
     // the charge was — a fetch call's annotation rows decoded whole with their coordinates,
     // a node's label-state scan, or the seed phase with the roots' rows, which are charged
     // before the first comparison so that the result complete to 0 bp can be delivered
     uint64_t largest_charge = 0;
-    // How the annotation was read under the request's budgets (stage 3 of
+    // How the annotation was read under the request's budgets (the budget-aware decode of
     // DESIGN-traverse-graphlet.md §14.1): |decode_charged| — by the budget-aware decode path
     // (every dependency row and coordinate tuple charged before it is held, a read that does
     // not fit refused whole, each row's dependency rows charged as work); |row_diff_uncounted|
@@ -954,9 +951,10 @@ struct ResourceAccount {
     uint64_t coordinates = 0;
 };
 
-// A seed's deadline record (R8; timing only): its longest uninterruptible piece, and, when a
-// stop ended its walk, what stopped it (time_budget, attempt, cancelled, memory, work) and how
-// long after its deadline (the seed's time budget, or the attempt's walk-until) it stopped
+// A seed's deadline record (SPEC §6.8; timing only): its longest uninterruptible piece, and,
+// when a stop ended its walk, what stopped it (time_budget, attempt, cancelled, memory, work)
+// and how long after its deadline (the seed's time budget, or the attempt's walk-until) it
+// stopped
 struct DeadlineRecord {
     UninterruptiblePiece longest;
     std::string stopped_by;
@@ -1008,15 +1006,15 @@ struct SeedResult {
     size_t k = 0;
 
     // The permitted set was derived from the first |kmers_read| of the seed's num_kmers k-mers
-    // only: the seed's time budget ran out during the derivation (the owner's decision D3,
-    // 2026-10-04). Such a set is the intersection over fewer rows, a superset of the labels
-    // carrying the whole seed, so it may hold labels the whole seed would exclude: the result
-    // states a `derivation` limitation and its label evidence is qualified (overstated). The
-    // walk is the seed itself — stopped by the time budget at depth 0 (complete_to_bp 0) —
-    // since the budget is spent. A derivation stopped before its first k-mer still fails the
-    // seed (SeedDerivationError::TIME_BUDGET), as before, and so does one whose partial set
-    // would fail the seed in any other way (derivation_out_of_time): a result carrying this is
-    // always a walked one.
+    // only: the seed's time budget ran out during the derivation (SPEC §7.0, derivation). Such
+    // a set is the intersection over fewer rows, a superset of the labels carrying the whole
+    // seed, so it may hold labels the whole seed would exclude: the result states a
+    // `derivation` limitation and its label evidence is qualified (overstated). The walk is
+    // the seed itself — stopped by the time budget at depth 0 (complete_to_bp 0) — since the
+    // budget is spent. A derivation stopped before its first k-mer still fails the seed
+    // (SeedDerivationError::TIME_BUDGET), and so does one whose partial set would fail the
+    // seed in any other way (derivation_out_of_time): a result carrying this is always a
+    // walked one.
     struct PartialDerivation {
         uint64_t kmers_read = 0;
         double elapsed_ms = 0;
@@ -1029,7 +1027,7 @@ struct SeedResult {
 // presence (also in annotate mode, which refuses trace), where a stretch can be stitched from
 // several occurrences; the seed was not traversed (failed, refused, not started); or its
 // permitted set was derived from part of the seed, so no label's occurrences of the whole seed
-// are known (D3, under support trace)
+// are known (a partial derivation, under support trace)
 constexpr const char *kCoordinatesNoIndex = "index has no coordinates";
 constexpr const char *kCoordinatesSupportKmer = "support kmer";
 constexpr const char *kCoordinatesNoTraversal = "no traversal";
@@ -1045,8 +1043,8 @@ const char* coordinates_reason(const Strategy &strategy, bool index_has_coordina
  * budget ran out while the seed was validated or its permitted set derived, or the memory
  * budget does not hold the depth-0 state — the label dictionary and both arms' roots, each
  * root reserved with what ending and delivering its labels costs in the requested detail
- * (an unadmitted depth-0 state was delivered whole, ~4 KB per label and arm in detail full:
- * review of stage 2, finding 3). No valid traversal exists within the budget, not even one
+ * (an unadmitted depth-0 state would be delivered whole, ~4 KB per label and arm in detail
+ * full). No valid traversal exists within the budget, not even one
  * complete to 0 bp, so unlike a stop between two heads there is no partial result: the
  * caller reports the seed as failed (outcome.walks: failed) with its resource stop and
  * traverses the other seeds. Raised before anything per label is delivered.
@@ -1131,7 +1129,7 @@ struct Admission {
  * leave runs, events, splits and paths consistent).
  */
 /**
- * One charge of a budget-aware annotation read (stage 3 of DESIGN-traverse-graphlet.md §14.1;
+ * One charge of a budget-aware annotation read (DESIGN-traverse-graphlet.md §14.1;
  * annot::matrix::DecodeBudget): where the read is — the seed phase (SEED: the derivation's
  * rows or the validation's), an annotate root (ROOT), a level's fetch (LEVEL) or the
  * lookahead (WARM) — the arm and depth, and |ordinal|, which counts the decode charges of the
@@ -1146,7 +1144,7 @@ struct DecodeCharge {
 };
 
 /**
- * A stop requested from outside the walk (DESIGN-traverse-graphlet.md §14 v5.1: a lease is a
+ * A stop requested from outside the walk (DESIGN-traverse-graphlet.md §14: a lease is a
  * valid release point only because the backend stops the attempt itself): the attempt was
  * cancelled, it reached the duration bound the server enforces for it, or its client closed
  * the connection. The core library knows no HTTP (spec §10.1): the caller decides, the walker
@@ -1190,7 +1188,7 @@ struct AttemptControl {
     std::function<double()> elapsed_ms;
     double bound_ms = 0;
     AttemptMeter *meter = nullptr;
-    // The chunked deadlines (pass 5, spec §6.8): |ms_left| the time left before the walk must
+    // The chunked deadlines (spec §6.8): |ms_left| the time left before the walk must
     // stop (the attempt's walk-until; infinity: none), which sizes the chunks of an annotation
     // read, and |poll_now| the poll asked before each chunk — a poll that also reads the clock
     // and the client (not only the stop flag), so that a stop that fell inside a long read is
@@ -1216,8 +1214,8 @@ struct WalkerHooks {
     std::function<void(Arm, uint64_t, uint64_t)> level;
     // a derived seed's state is recounted in full at every observation and compared with the
     // running total the derivation keeps (std::logic_error on a difference): what a debug
-    // build asserts, so that a Release build's tests check that the total is the sum it
-    // replaced (the review of 2026-10-06, W2)
+    // build asserts, so that a Release build's tests check that the running total is the
+    // recounted sum
     bool recount_derivation_state = false;
 };
 
@@ -1234,7 +1232,7 @@ struct WalkerHooks {
  * labels in the given order, then strategy.extra.
  * An empty |seed.labels| derives the permitted set from the seed (see Seed::labels);
  * the derived labels then take the place of the given ones in both orders.
- * |control|: a stop from outside the walk (AttemptControl); null: none, as before.
+ * |control|: a stop from outside the walk (AttemptControl); null: none.
  */
 SeedResult traverse_seed(LabelOracle &oracle,
                          const Seed &seed,
@@ -1251,8 +1249,8 @@ SeedResult traverse_seed(LabelOracle &oracle,
  * the walk sums a lineage's loss (left to right along the chain, so a label the walk can
  * enter within the budget is found within it). An extra label is a switch target; the walk
  * enforces cumulative losses switch by switch, so it is accepted when SOME chain reaches it
- * within the budget, not only one switch from a seed label (the stage-2 recheck's design
- * answer: A -> B = 1, B -> C = 1 under a budget of 2 rejected C, which the walk enters).
+ * within the budget, not only one switch from a seed label (A -> B = 1, B -> C = 1 under a
+ * budget of 2 reaches C, which the walk enters).
  *
  * A constant cost reaches every label in one switch (a chain costs more), so only
  * cost <= budget matters. A table is relaxed by Dijkstra: a popped label relaxes its
@@ -1270,7 +1268,7 @@ std::vector<double> switch_reach(const LabelChangeCost &cost, size_t n, size_t s
 std::string spell_path(const ArmResult &arm, const PathResult &path);
 
 // The segments of |path|, root -> leaf, through first parents at joins: the chain that
-// PathResult no longer stores. O(path depth in segments) per call.
+// PathResult does not store. O(path depth in segments) per call.
 std::vector<size_t> path_segments(const ArmResult &arm, const PathResult &path);
 
 // Visit the segments of |path| leaf -> root (first parents) without allocating; |f|

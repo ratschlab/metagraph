@@ -66,13 +66,13 @@ struct ContextLabel {
     bool verified = false;
 };
 
-// What the verification of a path keeps for its output (review GPT-3, finding 1: the chains
-// of every (path, label) were made again for the output): its occurrences as runs, |count|
-// consecutive starts in one record from |first| on (global placement: consecutive chains, the
-// coordinate |first|.a on) — a homopolymer's are one run. Charged before they are held: the
-// entry of a label with occurrences (PathRuns) and each run, both below the deduplication
-// state the output then charges for the occurrences (kDedupBytes each, a run holding one at
-// least), so that keeping them does not raise the peak of the account
+// What the verification of a path keeps for its output, so that the chains of every (path,
+// label) are not made again for it: its occurrences as runs, |count| consecutive starts in one
+// record from |first| on (global placement: consecutive chains, the coordinate |first|.a on) —
+// a homopolymer's are one run. Charged before they are held: the entry of a label with
+// occurrences (PathRuns) and each run, both below the deduplication state the output then
+// charges for the occurrences (kDedupBytes each, a run holding one at least), so that keeping
+// them does not raise the peak of the account
 struct OccurrenceRun {
     Occurrence first;
     uint64_t count = 0;
@@ -148,18 +148,16 @@ uint64_t consecutive(const ShiftedList &l, uint64_t limit) {
 }
 
 /**
- * The chains of a path in one label (§4.3; review GPT-3, finding 1): the column coordinates c
- * with c + j a coordinate of the j-th k-mer of the path for every j, the intersection of
- * |lists| shifted. Each coordinate of the first list was binary-searched in every other one
- * before, and again for the output (a 30,000-base homopolymer and a 1,500-base path: 44
- * million searches, twice, without a clock reading). A leapfrog join instead, driven by the
- * smallest list: its next coordinate is the candidate, the other lists (smallest first) seek
- * it from where they stood (galloping), the first holding a larger coordinate moves the
- * candidate there, and a candidate every list holds is extended into the run of consecutive
- * chains as far as every list is consecutive from it (a homopolymer's chains: one run, one
- * check per list). emit(first, last) takes the runs in order and may end the join (false).
- * |work|(units) is asked before every seek and every extension, and false ends the join
- * (returned: false).
+ * The chains of a path in one label (§4.3): the column coordinates c with c + j a coordinate of
+ * the j-th k-mer of the path for every j, the intersection of |lists| shifted. A leapfrog join,
+ * driven by the smallest list (binary-searching each coordinate of the first list in every
+ * other one would take 44 million searches for a 30,000-base homopolymer and a 1,500-base
+ * path): its next coordinate is the candidate, the other lists (smallest first) seek it from
+ * where they stood (galloping), the first holding a larger coordinate moves the candidate
+ * there, and a candidate every list holds is extended into the run of consecutive chains as far
+ * as every list is consecutive from it (a homopolymer's chains: one run, one check per list).
+ * emit(first, last) takes the runs in order and may end the join (false). |work|(units) is
+ * asked before every seek and every extension, and false ends the join (returned: false).
  */
 template <class Emit, class Work>
 bool join_chains(std::vector<ShiftedList> &lists, const Emit &emit, const Work &work) {
@@ -362,12 +360,11 @@ AnnotationDescription describe_annotation(const LabelOracle &oracle, GraphMode m
 }
 
 
-// Both steps read one row at a time (review GPT-2, finding 2): the time and the work are
-// checked before every row, and every row whose read began is charged its units (also when it
-// is refused or interrupted), so that a read passes the work budget by its one row at most —
-// a batch sized by the rows read before it overshot by every wider row in it (7 rows of one
-// label, then 8 of 100: 927 units under a budget of 150). The units of a row do not depend on
-// how the rows are cut into reads (KeyCost: its whole row-diff path), so where the reads stop
+// Both steps read one row at a time: the time and the work are checked before every row, and
+// every row whose read began is charged its units (also when it is refused or interrupted), so
+// that a read passes the work budget by its one row at most — a batch sized by the rows read
+// before it would overshoot by every wider row in it. The units of a row do not depend on how
+// the rows are cut into reads (KeyCost: its whole row-diff path), so where the reads stop
 // depends only on the index and the request.
 void PatternRetrieval::Impl::discover(std::vector<RowState> &rows,
                                       const std::vector<RetrievalContext> &contexts,
@@ -821,10 +818,10 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
         rank[order[r]] = r;
     }
 
-    // the text the labels built for the answer will write (AnswerVolume, review of
-    // 2026-10-07, X-EFFICIENCY-04), from above and before they are built: every result's label
-    // fields and by_label first, then each context's labels as the loop below takes them; the
-    // work time is read with them counted before each context's labels are built
+    // the text the labels built for the answer will write (AnswerVolume), from above and before
+    // they are built: every result's label fields and by_label first, then each context's
+    // labels as the loop below takes them; the work time is read with them counted before each
+    // context's labels are built
     uint64_t pending = 0;
     auto pend = [&](uint64_t bytes) {
         pending += bytes;
@@ -864,14 +861,14 @@ LabelsAnswer PatternRetrieval::retrieve_rows(const std::vector<RetrievalContext>
     if (!summary_held)
         unpend(summary_text);
 
-    // the contexts' label lists with their occurrences; each label's deduplicated union
-    // (§5.4: (column, seq_id, start, strand); the label is the column). Every occurrence is
-    // counted in its label's union, but a listed label's list holds only the first
-    // max_occurrences_per_label of its context's occurrences in partial (review GPT-3, finding
-    // 4: every one was built, charged and estimated in the answer's volume, the cap applied
-    // after): the label lists the first that many of its union, and those of one context are a
-    // prefix of its sorted occurrences. Once the unions are complete, the lists are cut to
-    // them, and what they no longer hold refunded to the account and the volume
+    // the contexts' label lists with their occurrences; each label's deduplicated union (§5.4:
+    // (column, seq_id, start, strand); the label is the column). Every occurrence is counted in
+    // its label's union, but a listed label's list holds only the first
+    // max_occurrences_per_label of its context's occurrences in partial, so that the ones past
+    // the cap are never built, charged or estimated in the answer's volume: the label lists the
+    // first that many of its union, and those of one context are a prefix of its sorted
+    // occurrences. Once the unions are complete, the lists are cut to them, and what they no
+    // longer hold refunded to the account and the volume
     std::vector<std::vector<ContextLabel>> lists(keep);
     std::vector<std::set<Occurrence>> unions(dict.size());
     std::vector<bool> output_cut(keep, !summary_held);
@@ -1479,21 +1476,20 @@ LabelsAnswer PatternRetrieval::retrieve_paths(const std::vector<RetrievalPath> &
 
     const std::vector<LabelRef> &dict = m.recorder->labels();
 
-    // ---- step 3, the verification of every label carrying a path, once per (path, label)
-    // (review GPT-3, finding 1: the chains were made again for the output, and nothing read
-    // the clock in either). The chains of a path in a label: join_chains over the coordinates
-    // of its k-mers (NOT_PLACED when a row of the path was not placed or holds no coordinates
-    // of the label). Their occurrences, as runs (OccurrenceRun): with record placement the
-    // chains whose whole path lies in one record, (seq_id, local + 1), the record mapping
-    // first (§4.3; a chain whose first k-mer is in one record and whose last is past that
-    // record's k-mers crosses into the next record of the column: not an occurrence), and the
-    // label is verified when there is one; global, every chain (kmer_coord, offset 0), nothing
-    // verified. The runs are kept for the output (PathRuns, charged before they are held):
-    // when the account cannot hold a path's, its labels and the later paths' are verified all
-    // the same (a label's first occurrence is enough), and their labels are not output (stop
-    // {output, max_memory}: holding no more than the runs, the account could not hold their
-    // occurrences' deduplication). The work is clocked inside (stop {placement, time}: the
-    // path and the later ones not verified)
+    // ---- step 3, the verification of every label carrying a path, once per (path, label), its
+    // chains kept for the output and its work clocked. The chains of a path in a label:
+    // join_chains over the coordinates of its k-mers (NOT_PLACED when a row of the path was not
+    // placed or holds no coordinates of the label). Their occurrences, as runs (OccurrenceRun):
+    // with record placement the chains whose whole path lies in one record, (seq_id, local +
+    // 1), the record mapping first (§4.3; a chain whose first k-mer is in one record and whose
+    // last is past that record's k-mers crosses into the next record of the column: not an
+    // occurrence), and the label is verified when there is one; global, every chain
+    // (kmer_coord, offset 0), nothing verified. The runs are kept for the output (PathRuns,
+    // charged before they are held): when the account cannot hold a path's, its labels and the
+    // later paths' are verified all the same (a label's first occurrence is enough), and their
+    // labels are not output (stop {output, max_memory}: holding no more than the runs, the
+    // account could not hold their occurrences' deduplication). The work is clocked inside
+    // (stop {placement, time}: the path and the later ones not verified)
     const uint64_t cap = partial ? m.limits.max_occurrences_per_label
                                  : std::numeric_limits<uint64_t>::max();
     bool late = false;

@@ -60,8 +60,8 @@ const char* to_string(SeedDerivationError::Cause cause) {
 
 SeedDerivationError derivation_out_of_time(uint64_t kmers_read, uint64_t num_kmers,
                                            double budget_ms, double elapsed_ms) {
-    // the text every such failure had before D3, so that a seed whose partial set is not
-    // delivered fails exactly as it did
+    // the text of the time budget's derivation failure, also for a seed whose partial set is
+    // not delivered (SPEC §7.0, derivation)
     return SeedDerivationError(SeedDerivationError::TIME_BUDGET,
             "The time budget (bounds.time_budget_ms) ran out while deriving the permitted set "
             "from the seed, after " + std::to_string(kmers_read) + " of "
@@ -73,7 +73,7 @@ SeedDerivationError derivation_out_of_time(uint64_t kmers_read, uint64_t num_kme
 namespace {
 
 /*
- * Implementation notes (spec §6, increment I3):
+ * Implementation notes (spec §6):
  *
  * - Exploration is level-synchronous: all live path heads of an arm at extension
  *   depth d take one step in one level, the two arms alternate by depth (§6.8).
@@ -85,7 +85,7 @@ namespace {
  *   independent of batch_kmers; rows_fetched / cache_hits are not).
  * - Tip windows and bubble windows (Strategy::tip_window_bp / bubble_window_bp, the
  *   TIP / BUBBLE events and the GrowthBin::tips / bubbles counters) are NOT
- *   implemented in this increment; the fields are kept and stay zero (spec §12), and
+ *   implemented; the fields are kept and stay zero (spec §12), and
  *   validate_strategy() refuses a non-zero window instead of ignoring it.
  * - EndReason has no values for `switched`, `superseded`, `minority`,
  *   `below_min_labels`, `split_limit`, `switch_sources` and `hairpin`: a source
@@ -102,7 +102,7 @@ namespace {
  *   structural block it can verify itself, as evidence for an omission — a missing
  *   child says nothing about why it is missing. Recording them is linear per
  *   re-minimisation round (ArmResult::refusal_scans), and a loss-budget refusal does
- *   not depend on whether the source goes on elsewhere (review round 4).
+ *   not depend on whether the source goes on elsewhere.
  * - Hairpins (§6.5): with skip_hairpins the self-RC step is inadmissible and gets a
  *   HAIRPIN event; without it the step is followed, flagged with a HAIRPIN event
  *   (text "followed") on the parent segment and never counts toward ambiguity
@@ -134,16 +134,16 @@ namespace {
 constexpr char kSentinel = boss::BOSS::kSentinel;
 // the structural lookahead cache is cleared when it grows beyond this many nodes
 constexpr size_t kMaxLookahead = 1'000'000;
-// Under a §14 budget the level's annotation keys are fetched in calls of at most this
-// many (fewer when rows are wide or the work budget is near, fetch_chunk()): a fetch call is
-// the unit of charging, so its rows are charged as work when it returns them and what it
-// holds is observed before the comparison after it. Without a budget the level is one
-// LOGICAL call, as it always was (the cache, and with it the direct_reads counter, depends on
-// the batching). A call the deadline may fall into is also decoded in time-sized chunks with
-// the deadline checked between them (pass 5, LabelOracle::pacer; a call far from it is one
-// piece, as splitting costs what its rows share): a call's counting and cache decisions stay
-// whole, so chunking changes nothing it returns, and the uninterruptible unit is one chunk
-// (at least one row), not the call.
+// Under a §14 budget the level's annotation keys are fetched in calls of at most this many
+// (fewer when rows are wide or the work budget is near, fetch_chunk()): a fetch call is the
+// unit of charging, so its rows are charged as work when it returns them and what it holds is
+// observed before the comparison after it. Without a budget the level is one LOGICAL call
+// (the cache, and with it the direct_reads counter, depends on the batching). A call the
+// deadline may fall into is also decoded in time-sized chunks with the deadline checked
+// between them (LabelOracle::pacer; a call far from it is one piece, as splitting costs what
+// its rows share): a call's counting and cache decisions stay whole, so chunking changes
+// nothing it returns, and the uninterruptible unit is one chunk (at least one row), not the
+// call.
 constexpr size_t kFetchChunk = 8192;
 
 // A budget or the deadline ran out while a head was being PLANNED or a level fetched
@@ -153,7 +153,7 @@ constexpr size_t kFetchChunk = 8192;
 struct BudgetTrip {
     ResourceStop::Resource resource;
     double demand;                  // work units, elapsed ms, or bytes
-    // annotation_decode: a budget-aware annotation read did not fit (stage 3), with what the
+    // annotation_decode: a budget-aware annotation read did not fit, with what the
     // walk held then (bytes; -1: the account, as for a refused head) and whether a test hook
     // (WalkerHooks::deny_decode) refused it rather than the budget
     const char *phase = "traversal";
@@ -429,9 +429,9 @@ struct HeadPlan {
     std::vector<BranchEvent::Refusal> refused;
     std::vector<SourcePlan> sources;     // parallel to the head's state
     // The re-minimisation rounds the step needed (the rounds after the first). Kept here
-    // and counted when the step is committed (or a cap stops it, as before stage 2), not
-    // while planning: max_reminimisation_rounds > 0 is what states greedy_losses, and a
-    // head that is not admitted decided nothing greedily (review of stage 2, finding 1).
+    // and counted when the step is committed (or a cap stops it), not while planning:
+    // max_reminimisation_rounds > 0 is what states greedy_losses, and a head that is not
+    // admitted decided nothing greedily.
     size_t reminimisations = 0;
     // what committing the plan costs (§14, modelled bytes): the objects it adds for good,
     // and per followed successor the new head's reservations
@@ -699,10 +699,10 @@ class Walker {
              + std::min<uint64_t>(chains, coord_cap_) * m_.occurrence;
     }
     // The runs continued by the children of one split so far, as stamps indexed by run id:
-    // O(1) per entry. A scan of the runs taken so far made a split O(|σ|²), once in its
-    // plan and once in its commit — on a 2,876-label locus most of the walk's time, with
-    // no budget set (review of stage 2, finding 4). begin_split() starts a split;
-    // taken_run() marks |run| and tells whether an earlier child of the split took it.
+    // O(1) per entry. A scan of the runs taken so far would make a split O(|σ|²), once
+    // in its plan and once in its commit — on a 2,876-label locus most of the walk's
+    // time, with no budget set. begin_split() starts a split; taken_run() marks |run|
+    // and tells whether an earlier child of the split took it.
     void begin_split(const ArmState &arm) {
         if (run_stamp_.size() < arm.result.runs.size())
             run_stamp_.resize(arm.result.runs.size(), 0);
@@ -788,8 +788,8 @@ class Walker {
     uint64_t work_used() const { return seed_work_ + work_of(arms_[0]) + work_of(arms_[1]); }
     // The seed phase's work (§14, "rows decoded" count for the locus): the rows read to
     // validate the seed or derive its permitted set, charged as the walk charges its
-    // reads, so that a work budget bounds the seed phase too (review of stage 2, finding
-    // 6). Over the budget it fails the seed: nothing has been walked yet.
+    // reads, so that a work budget bounds the seed phase too. Over the budget it fails the
+    // seed: nothing has been walked yet.
     void charge_seed(uint64_t units);
     std::vector<LabelQuery::NodeHits> fetch_seed_hits(LabelQuery &query,
                                                       const std::vector<node_index> &keys);
@@ -798,8 +798,8 @@ class Walker {
     // Throws what fails the seed (run() turns it into the time budget's failure after a
     // partial derivation)
     void seed_phase();
-    // the failure of a seed whose partial set (D3) is not delivered: the time budget's, as
-    // before D3, with what the seed phase was seen to hold beyond a memory budget
+    // the failure of a seed whose partial set (SPEC §7.0, derivation) is not delivered: the
+    // time budget's, with what the seed phase was seen to hold beyond a memory budget
     SeedDerivationError partial_derivation_failure() const;
     // a budget does not hold the seed itself: throws SeedBudgetError
     [[noreturn]] void fail_seed(ResourceStop::Resource resource, double used, double demand,
@@ -817,7 +817,7 @@ class Walker {
     // otherwise once the interval has passed, §14), and with the deadline a stop from outside
     // the walk (external_stop). Throws BudgetTrip.
     void checkpoint(bool force);
-    // The seed phase as timing states it (review of levels 4-5, finding 3): from the walker's
+    // The seed phase as timing states it: from the walker's
     // start to the walk's first checkpoint — validation or derivation, resolving the label
     // names and their duplicate check, the extra labels, the depth-0 state, everything before
     // the first head — or, without one, to the walk's stop or end (|until_ms|, on the seed's
@@ -826,7 +826,7 @@ class Walker {
     // walk's head pieces there; once only, and on every way out of run() (failures too)
     void begin_setup();
     void end_setup(double until_ms = -1);
-    // A head piece ends where the walk reads its clock for a stop (R8): the walk since the
+    // A head piece ends where the walk reads its clock for a stop (SPEC §6.8): the walk since the
     // previous such reading, |now_ms| on the seed's clock, its reads excluded (they are pieces
     // of their own), noted (DecodePacer::note_head) and the next one started; nothing while the
     // seed phase is open (its pieces are setup pieces). Called by checkpoint() and by the
@@ -847,13 +847,13 @@ class Walker {
     EndReason note_stop(const ArmState &arm, const Item *head, ResourceStop::Resource resource,
                         double demand, bool injected = false, const char *phase = "traversal",
                         double used = -1, const ResourceStop *detail = nullptr);
-    // the trip of a level's budget-aware read that |refusal| refused (stage 3), with its
+    // the trip of a level's budget-aware read that |refusal| refused, with its
     // cause: the row with its dependency rows, or (annotate) the labels it would name first;
     // what the level held then is observed first (memory_bound_soft)
     BudgetTrip read_trip(const FetchRefusal &refusal);
     // Throws the trip of a level whose own lists (keys, successors, its fetch's vectors), held
     // beside the account, already leave none of the budget for its budget-aware read: their
-    // cause, not a row's (review of stage 3, F6)
+    // cause, not a row's
     void level_lists_trip();
     // what a recorded (annotate) dictionary label named |name| costs the account: label_bytes()'s
     // model, read from the name in place
@@ -870,13 +870,13 @@ class Walker {
     // the keys of the next fetch call; |grown| is the call's growth from one key per level
     // under a work budget
     size_t fetch_chunk(size_t grown) const;
-    // ---- the chunked deadlines (pass 5, spec §6.8): which deadline a read is paced against —
+    // ---- the chunked deadlines (spec §6.8): which deadline a read is paced against —
     // the seed's time budget as the walk reads it (WALK: depth > 0, time_exceeded), as the
     // derivation reads it (DERIVATION: a positive budget only), or none (NONE: depth 0, a
     // validation) — always with the attempt's walk-until when there is one
     enum class Deadline { NONE, WALK, DERIVATION };
     // what a read checks between its chunks; null when reads are not paced (target 0), so that
-    // such a read is one piece, as before
+    // such a read is one piece
     ReadPacing *pacing(Deadline deadline);
     // the stop a paced read saw before a chunk, as a level's trip: the time budget, a cancel,
     // the attempt's walk-until (BudgetTrip), or a gone client (AttemptAborted)
@@ -887,17 +887,17 @@ class Walker {
     // the memory bound's soft part (memory_bound_soft, ResourceAccount::soft_overshoot):
     // what is held beyond the admitted account — decoded rows (|scratch|), a cache beyond its
     // allotment, dictionary labels named but not charged yet — observed wherever it is held
-    // and before any check after it can throw (GPT review of stage 2, finding 3)
+    // and before any check after it can throw
     void observe_soft(uint64_t scratch, uint64_t dictionary = 0);
     // the same for the seed phase, which runs before the account exists
     void observe_seed_scratch(uint64_t scratch);
-    // ---- the budget-aware annotation reads (stage 3 of DESIGN-traverse-graphlet.md §14.1;
+    // ---- the budget-aware annotation reads (DESIGN-traverse-graphlet.md §14.1;
     // LabelOracle::decode_charged()): what a read may hold — the budget minus the admitted
     // account and what the level's fetch holds beyond it (|level_soft_|); a DecodeBudget of
     // |max| bytes whose charges the test hook can refuse (WalkerHooks::deny_decode)
     uint64_t allowance() const;
     annot::matrix::DecodeBudget decode_budget(DecodeCharge::Where where, Arm arm, uint64_t max);
-    // The derivation's window read budget-aware (stage 3): its distinct |rows| in runs within
+    // The derivation's window read budget-aware: its distinct |rows| in runs within
     // |budget| (a run that does not fit retried in halves), every row admitted against its
     // standalone demand beside the rows read before it, so that where the read stops depends
     // on the rows alone. Every row read: returns rows.size(), |*out| and |*costs| filled and
@@ -927,15 +927,14 @@ class Walker {
     uint64_t dictionary_held() const;
 
     /**
-     * The row-diff path cache (LabelOracle::path_cache, the efficiency pass) during this
-     * seed. Without a memory budget it is the request's, within the request's bound, kept
-     * from seed to seed (only physical work depends on it). Under a memory budget it is the
-     * seed's: empty and off until the depth-0 state is admitted (the seed phase and the
-     * annotate roots decode as before the efficiency pass, so that what their refusals state
-     * is as before too), then within what the label cache leaves of its allotment
-     * (enable_path_cache: the allotment is in the account, and the label cache stays as it
-     * was), emptied when the seed ends. The scope restores the request's bound when the seed
-     * ends.
+     * The row-diff path cache (LabelOracle::path_cache) during this seed. Without a memory
+     * budget it is the request's, within the request's bound, kept from seed to seed (only
+     * physical work depends on it). Under a memory budget it is the seed's: empty and off until
+     * the depth-0 state is admitted (the seed phase and the annotate roots decode without it, so
+     * that what their refusals state does not depend on the cache), then within what the label
+     * cache leaves of its allotment (enable_path_cache: the allotment is in the account, and the
+     * label cache is not reduced for it), emptied when the seed ends. The scope restores the
+     * request's bound when the seed ends.
      */
     struct PathCacheScope {
         PathCacheScope(LabelOracle &oracle, bool memory_budget)
@@ -990,9 +989,9 @@ class Walker {
     // (trace support on an index with coordinates, and a permitted set read from the whole
     // seed), the cap on a list, and the part of the account they are (the output's fixed part
     // for them, their entries and occurrences as charged when created;
-    // ResourceAccount::coordinates). No work is charged
-    // for them: every coordinate was charged one unit with the row that carried it, and work
-    // must not depend on what the output asks for (stage 2, finding 5)
+    // ResourceAccount::coordinates). No work is charged for them: every coordinate was
+    // charged one unit with the row that carried it, and work must not depend on what the
+    // output asks for
     bool record_coords_ = false;
     size_t coord_cap_ = 16;
     uint64_t coord_account_ = 0;
@@ -1033,9 +1032,9 @@ class Walker {
     // two comparisons (ResourceAccount::largest_charge)
     uint64_t compared_at_ = 0;
     uint64_t largest_charge_ = 0;
-    // the deadline record (R8, timing): the clock and the reads' total time when checkpoint()
-    // last read the clock or the seed phase ended (end_setup; -1: not yet), and the walk's first
-    // stop — when (on the seed's clock), by what, and how long after its deadline
+    // the deadline record (SPEC §6.8, timing): the clock and the reads' total time when
+    // checkpoint() last read the clock or the seed phase ended (end_setup; -1: not yet), and the
+    // walk's first stop — when (on the seed's clock), by what, and how long after its deadline
     double head_clock_ms_ = -1;
     double head_reads_ms_ = 0;
     double stop_ms_ = -1;
@@ -1046,13 +1045,14 @@ class Walker {
     uint64_t depth_ = 0;             // the level being processed
     size_t events_written_ = 0;      // events pushed, for the plan's debug check
     // the annotation is read by the budget-aware decode path: a request budget is set and
-    // the index has the path (stage 3)
+    // the index has the path
     bool decode_charged_ = false;
     // What the level holds until its heads are processed, beyond the admitted account
     // (bytes): its key and successor lists and what its fetch returned — with the
     // budget-aware reads the held bytes they were charged at (the level's vectors, the rows'
-    // hits or label lists), otherwise the estimate stage 2 observed. Subtracted from what a
-    // read may hold, and observed at every admission (memory_bound_soft); 0 between levels.
+    // hits or label lists), otherwise the estimate an unbudgeted read observes. Subtracted
+    // from what a read may hold, and observed at every admission (memory_bound_soft); 0
+    // between levels.
     uint64_t level_soft_ = 0;
     uint64_t decode_charges_ = 0;    // DecodeCharge::ordinal
     // the test hook (WalkerHooks::deny_decode) refused the last charge of a budget-aware read:
@@ -1191,19 +1191,18 @@ void Walker::validate_seed() {
     if (seed_.labels.empty()) {
         all_supported = derive_seed_labels(keys, &seed_refs, &hits);
         if (result_.derivation_partial && record_coords_) {
-            // a set derived from part of the seed (D3) was not followed over the whole seed:
-            // no label's occurrences of the seed are known (under trace its continuity was not
-            // checked either), and the walk stops at depth 0
+            // a set derived from part of the seed (a partial derivation) was not followed over
+            // the whole seed: no label's occurrences of the seed are known (under trace its
+            // continuity was not checked either), and the walk stops at depth 0
             record_coords_ = false;
             result_.coordinates_reason = kCoordinatesPartialDerivation;
         }
     } else {
         // Each name once, a duplicate refused before it is resolved and the first one in the
-        // request's order, as before — found in a hash set of the names seen, where every name
-        // was compared with every earlier one: 2,500 headers sharing a 1,024-character prefix
-        // took about 120 ms of a seed phase of 126 ms (review of levels 4-5, finding 3). A
-        // resolved label carries the name it was given (LabelOracle::resolve_label), so this
-        // is the check on the resolved names it replaces
+        // request's order — found in a hash set of the names seen (comparing every name with
+        // every earlier one took about 120 ms of a seed phase of 126 ms for 2,500 headers
+        // sharing a 1,024-character prefix). A resolved label carries the name it was given
+        // (LabelOracle::resolve_label), so this is also the check on the resolved names
         tsl::hopscotch_set<std::string_view> named;
         named.reserve(seed_.labels.size());
         for (const auto &name : seed_.labels) {
@@ -1297,8 +1296,8 @@ void Walker::validate_seed() {
         // The validation's peak under trace support: the hits with their coordinates, every
         // label's live coordinate set and both arms' boundary coordinates, all held at once
         // here and none of them charged (the account does not exist yet). Observed before
-        // anything can fail the seed, so that a failure and a walk both state them (review
-        // of the stage-2 recheck, P2: copies of 9.6 MB under 1 MiB were reported as 3 MiB)
+        // anything can fail the seed, so that a failure and a walk both state them (copies
+        // of 9.6 MB under 1 MiB would otherwise be reported as 3 MiB)
         auto coords_bytes = [](const auto &sets) {
             uint64_t bytes = 0;
             for (const auto &set : sets) {
@@ -1346,9 +1345,8 @@ void Walker::validate_seed() {
 
     // ---- extra labels (switch targets). One naming a target of the dictionary — a kept seed
     // label or an earlier extra label (LabelRef::same_target: the column, and for a header its
-    // sequence) — is refused, the first in the request's order, as before; the targets are
-    // looked up in a hash set rather than scanned per extra label, which was quadratic too
-    // (the review of levels 4-5, finding 3)
+    // sequence) — is refused, the first in the request's order; the targets are looked up in a
+    // hash set rather than scanned per extra label, which would be quadratic
     if (!strategy_.extra.empty()) {
         // (column, 1 + seq_id) for a header, (column, 0) for a column: equal iff same_target
         auto target_of = [](const LabelRef &ref) {
@@ -1396,7 +1394,7 @@ void Walker::validate_seed() {
     // every extra label must be reachable: entered by some chain of switches from a seed
     // label whose summed cost stays within the loss budget (switch_reach); the walk enforces
     // the cumulative loss switch by switch. One that no chain reaches is refused, all of them
-    // named (the first eight, and how many more), as before for one
+    // named (the first eight, and how many more)
     const std::vector<double> reach = switch_reach(cost_, result_.label_dict.size(),
                                                    result_.num_seed_labels,
                                                    strategy_.loss_budget);
@@ -1425,9 +1423,9 @@ std::string Walker::echoed(const std::string &name, const std::string &where) co
     // Under a memory budget a name the INDEX supplies (a header, a column name) is echoed
     // by a failure as a bounded prefix with its length and where it is: a failed seed's
     // result is not admitted, and nothing in the request bounds such a name, so echoing it
-    // whole let one failed result exceed the budget (review of the stage-2 fixes, F1: a header
-    // of 180,000 control characters, written twice, was 2.16 MB under 1 MiB). Without a
-    // budget, or when short, it is echoed whole, as before.
+    // whole would let one failed result exceed the budget (a header of 180,000 control
+    // characters, written twice, is 2.16 MB under 1 MiB). Without a budget, or when short, it
+    // is echoed whole.
     constexpr size_t kEchoBytes = 256;
     if (!strategy_.max_memory_bytes || name.size() <= kEchoBytes)
         return name;
@@ -1584,18 +1582,18 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     auto out_of_time = [&]() {
         return budget_ms > 0 && elapsed_ms() >= budget_ms;
     };
-    // The budget ran out after j >= 1 of the seed's k-mers were consumed (the owner's decision
-    // D3, 2026-10-04): the derivation ends with the set derived from those j k-mers — the
-    // intersection over fewer rows, a superset of the whole seed's carriers — and the seed is
-    // delivered with it, stated (SeedResult::derivation_partial), instead of failing: the
+    // The budget ran out after j >= 1 of the seed's k-mers were consumed (a partial
+    // derivation, SPEC §7.0): the derivation ends with the set derived from those j k-mers —
+    // the intersection over fewer rows, a superset of the whole seed's carriers — and the seed
+    // is delivered with it, stated (SeedResult::derivation_partial), instead of failing: the
     // labels carrying the part read are what a caller can name next. Set by the seed's own
     // time budget only, and it ends the window loop below (a stop of the attempt still fails
-    // the seed, and work and memory stops are where they were); before the first k-mer
-    // nothing is derived and the seed fails as before. The checks after the loop were written
-    // for the whole seed's carriers and see the superset: one that refuses it ("N labels carry
-    // the seed" under `exhaustive`, an ambiguous header) would state something false about the
-    // whole seed, so run() turns every failure after a partial derivation back into the time
-    // budget's, as before D3 (derivation_out_of_time)
+    // the seed, and work and memory stops are unaffected); before the first k-mer nothing is
+    // derived and the seed fails. The checks after the loop were written for the whole seed's
+    // carriers and see the superset: one that refuses it ("N labels carry the seed" under
+    // `exhaustive`, an ambiguous header) would state something false about the whole seed, so
+    // run() turns every failure after a partial derivation into the time budget's
+    // (derivation_out_of_time)
     bool partial = false;
     // The candidate set of the FIRST k-mer consumed is a whole annotation row: no
     // intersection has narrowed it yet. A seed of exactly k bases never gets an
@@ -1635,15 +1633,13 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     // candidate guard below is applied, and whether a seed is accepted must not depend on a
     // fetch-size knob. Every window is charged as one charge before its k-mers are consumed,
     // so its width also places the work comparisons, `largest_charge` and, after an early
-    // no_carrier, `work_seed`: those must not depend on the knob either. Before the review of
-    // 2026-10-06 (W1) the later windows of a read that is not budget-aware were
-    // clamp(batch_kmers, 1, 64) wide, and a work-budgeted derived seed walked partial at
-    // batch_kmers 1 and 7 and failed at 64; the cost of the fixed width is at most 63 rows
-    // read past an early no_carrier. A window's rows are held at once, and the soft observation
-    // under a memory budget counts them (observe() below), so at batch_kmers below 64 that
-    // observation changed with W1 too — usage.memory.soft_excess_bytes and held_bound_bytes,
-    // the per-seed soft excess, memory_bound_soft's observed where it crosses a MiB — to the
-    // count of the 64 rows the derivation now holds (stated with level 6, SPEC §10.3)
+    // no_carrier, `work_seed`: those must not depend on the knob either (later windows as wide
+    // as batch_kmers would let a work-budgeted derived seed walk partial at batch_kmers 1 and 7
+    // and fail at 64). The cost of the fixed width is at most 63 rows read past an early
+    // no_carrier. A window's rows are held at once, and the soft observation under a memory
+    // budget counts them (observe() below): usage.memory.soft_excess_bytes and
+    // held_bound_bytes, the per-seed soft excess and memory_bound_soft's observed count the 64
+    // rows the derivation holds
     constexpr size_t kMaxChunk = 64;
     // The derivation's state is recounted in full at every observation in a debug build (an
     // assert), and in a Release build when a test hook asks for it
@@ -1654,10 +1650,10 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
 #endif
     // The bytes of |coords_at| as the soft observation counts them — every k-mer's vector
     // (consumed or not), its entries and their coordinates — kept as a running total, updated
-    // where an entry is added or dropped. Summing |coords_at| at every observation walked all
-    // M k-mers' vectors and every kept entry, at every window and twice per observation:
+    // where an entry is added or dropped. Summing |coords_at| at every observation would walk
+    // all M k-mers' vectors and every kept entry, at every window and twice per observation:
     // O(M / 64 x M x (1 + L)) for L carriers, 51 s for a 100 kbp trace seed under a memory
-    // budget that never bound (the review of 2026-10-06, W2). The total must equal that sum
+    // budget that never bound. The total must equal that sum
     // EXACTLY: it decides what a budget-aware window may read (`beside`, a stop) and what
     // memory_bound_soft states, so every update below mirrors one term of the sum
     using CoordsAt = std::vector<std::pair<Key, SmallVector<Coord>>>;
@@ -1703,14 +1699,14 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         std::vector<annot::matrix::MultiIntMatrix::RowTuples> tuples;
         // the work of each distinct row's row-diff dependency rows (budget-aware reads only)
         std::vector<uint64_t> dependency;
-        // The window's read is paced under a deadline (pass 5): the seed's time budget as the
+        // The window's read is paced under a deadline: the seed's time budget as the
         // derivation reads it after every k-mer, and the attempt's walk-until. A stop between
         // its chunks charges what they decoded (work done, stated without a comparison, as a
         // window found too_wide) and ends the derivation as the next k-mer's check would have:
         // time_budget after the k-mers consumed so far, or the attempt's stop failing the seed
         ReadPacing *pace = pacing(Deadline::DERIVATION);
-        // Returns true when the set of the k-mers consumed before the window is delivered (D3:
-        // the window's rows were read in part and not consumed)
+        // Returns true when the set of the k-mers consumed before the window is delivered (a
+        // partial derivation: the window's rows were read in part and not consumed)
         auto interrupted = [&](uint64_t units) {
             seed_work_ += units;
             if (paced_by_time_) {
@@ -1727,7 +1723,7 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             // derivation's state, every dependency row and tuple charged before it is held,
             // and row by row admitted beside the rows before it: a row that does not fit
             // fails the seed (no result exists yet), and the statement says what it needed
-            // and what the window's earlier rows held (review of stage 3, F3)
+            // and what the window's earlier rows held
             const uint64_t beside = seed_bytes() + state_bytes();
             const uint64_t max = !mem_limit_ ? std::numeric_limits<uint64_t>::max()
                                : beside < mem_limit_ ? mem_limit_ - beside : 0;
@@ -1831,12 +1827,13 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                 at += piece;
             }
         }
-        // a paced read stopped by the time budget after k-mers were consumed: their set (D3)
+        // a paced read stopped by the time budget after k-mers were consumed: their set is
+        // delivered
         if (partial)
             break;
         // The sub-batch's decoded rows and the running intersection are held before any
         // account exists, the largest scratch of a derived seed: observed as the soft excess,
-        // which a seed failed here states too (finding 8) — after the read, and again once
+        // which a seed failed here states too — after the read, and again once
         // the sub-batch is consumed (the intersection grows while the rows are still held)
         auto observe = [&]() {
             if (!strategy_.max_memory_bytes)
@@ -1886,13 +1883,12 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         for (size_t i = begin; i < end; ++i) {
             order.push_back(i);
         }
-        // The window's rows, charged as ONE charge as soon as they are read, before a
-        // comparison can fail the seed: the window was decoded whole, and charging each k-mer's
-        // row when it was consumed let the first row's comparison fail the seed with the
-        // window's later rows decoded and never charged (review of the stage-2 recheck, P2: two
-        // rows of 400,019 units reported as 200,009). Each k-mer's row is charged as the walk
-        // charges a fetched row (8 per key, 1 per entry, and its row-diff dependency rows with
-        // the budget-aware reads), a row two k-mers share once per k-mer, as before.
+        // The window's rows are charged as ONE charge as soon as they are read, before a
+        // comparison can fail the seed: the window is decoded whole, and charging each k-mer's
+        // row only when it is consumed would let the first comparison fail the seed with the
+        // later rows decoded but never charged. Each k-mer's row is charged as the walk charges
+        // a fetched row (8 per key, 1 per entry, and its row-diff dependency rows with the
+        // budget-aware reads); a row two k-mers share, once per k-mer.
         uint64_t window_units = 0;
         for (size_t i = begin; i < end; ++i) {
             window_units += 8 + cost_of(i) + (dependency.empty() ? 0 : dependency[row_of(i)]);
@@ -1908,8 +1904,8 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
             if (cost[best] > max_candidates) {
                 // the window was read whole before it was found too wide: its rows are the
                 // seed's work (the usage a ledger reconciles), added without a comparison, so
-                // that too_wide stays the cause stated (review of the stage-3 fixes, P3: a
-                // window of 400,019 units reported 0)
+                // that too_wide stays the cause stated (a window of 400,019 units would otherwise
+                // state 0)
                 seed_work_ += window_units;
                 throw SeedDerivationError(SeedDerivationError::TOO_WIDE,
                         "The permitted set cannot be derived from this seed: the narrowest of "
@@ -1926,7 +1922,7 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         for (size_t i : order) {
             const bool first = done.empty();
             // the k-mer's step is one uninterruptible piece (its coordinates mapped to headers
-            // in it): the deadline is read after it (R8)
+            // in it): the deadline is read after it (SPEC §6.8)
             const uint64_t step_coords = oracle_.pacer().coords_now();
             const PacerTimer step(oracle_.pacer());
             // counted when the row is CONSUMED, not when the sub-batch is fetched, so
@@ -2067,8 +2063,9 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
                                            step.elapsed_ms(), 1, mapped);
             }
             // per k-mer, like the deadline: the window was charged when it was read. At least
-            // this k-mer was consumed, so the set derived so far is delivered (D3); after the
-            // last one the derivation is complete and the walk's own deadline takes over
+            // this k-mer was consumed, so the set derived so far is delivered (a partial
+            // derivation); after the last one the derivation is complete and the walk's own
+            // deadline takes over
             seed_external_stop();
             if (out_of_time() && done.size() < keys.size()) {
                 partial = true;
@@ -2127,8 +2124,8 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
         // ... and a header that an explicit list would resolve to something else is just
         // as unusable. Every derived name must round-trip through the resolver the
         // explicit path uses, resolve_label(): it tries column names FIRST, so a header
-        // spelled like a column resolves to that column (whatever find_header() would say:
-        // review round 3, finding 3), and a header held by several columns resolves to
+        // spelled like a column resolves to that column (whatever find_header() would
+        // say), and a header held by several columns resolves to
         // the first of them, which need not be the derived one.
         for (const Key &key : live) {
             const std::string &name = name_of(key);
@@ -2184,12 +2181,13 @@ bool Walker::derive_seed_labels(const std::vector<node_index> &keys,
     hits->clear();
     if (!trace_ || result_.derivation_partial) {
         // Every derived label supports every k-mer by construction and there are no
-        // coordinates to carry over, so the per-label validation needs no hit matrix at
-        // all: materialising one would be |live| x |keys| Hit objects (32 B each) saying
-        // nothing but that. The caller is told so instead. A set derived from part of the
-        // seed (D3) is taken as derived: under trace its coordinate continuity over the seed
-        // cannot be checked without the rows not read, the walk stops at depth 0 with no step
-        // taken, and the result states that the set is overstated (label evidence qualified)
+        // coordinates to carry over, so the per-label validation needs no hit matrix at all:
+        // materialising one would be |live| x |keys| Hit objects (32 B each) saying nothing
+        // but that. The caller is told so instead. A set derived from part of the seed (a
+        // partial derivation) is taken as derived: under trace its coordinate continuity over
+        // the seed cannot be checked without the rows not read, the walk stops at depth 0
+        // with no step taken, and the result states that the set is overstated (label
+        // evidence qualified)
         return true;
     }
     // the hits of this pass in the shape the per-label validation expects: only the
@@ -2219,8 +2217,8 @@ void Walker::charge_seed(uint64_t units) {
     // budget by less than W at a comparison is let go on, so that, once it ends, the first
     // head's check stops the walk with a valid result complete to 0 bp (the result is
     // returned and the overrun stated); one that has run past it by W or more fails the seed,
-    // where no result exists yet. Comparing only against the budget failed seeds whose overrun
-    // was far below W, which the spec lets finish (review of stage 3, F9). A comparison that
+    // where no result exists yet. Comparing only against the budget would fail seeds whose
+    // overrun is far below W, which the spec lets finish. A comparison that
     // lets an overrun go on is not one that passed: what is charged after it stays in the
     // stretch since the last comparison that passed, so that a stop still exceeds the budget
     // by at most the stretch it states (largest_charge).
@@ -2260,15 +2258,13 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
         return units;
     };
     // Every row a call returned is charged as ONE charge, before the comparison that can fail
-    // the seed: the call decoded them all, and charging them row by row let the first row's
-    // comparison fail the seed with the call's later rows decoded and never charged (review of
-    // the stage-2 recheck, P2: two rows of 400,019 units reported as 200,010). A call is one
-    // indivisible charge, as a level's fetch call is (largest_charge states it).
+    // the seed: the call decoded them all, and charging them row by row would let the first
+    // row's comparison fail the seed with the call's later rows decoded and never charged. A
+    // call is one indivisible charge, as a level's fetch call is (largest_charge states it).
     auto charge = [&](size_t from) {
         // What the call holds is observed BEFORE the charge: a charge can fail the seed, and
-        // the failure must state what the fetched rows and the query's cache held (review of
-        // the stage-2 fixes, F2: observed 0 while the first row alone held 3.2 MB of
-        // coordinates under 1 MiB) — the rule of finding 3, observe then check
+        // the failure must state what the fetched rows and the query's cache held — observe,
+        // then check
         uint64_t units = 0;
         for (size_t i = from; i < hits.size(); ++i) {
             scratch += sizeof(hits[i]) + hits[i].size() * sizeof(LabelQuery::Hit);
@@ -2284,11 +2280,11 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
     // a work budget it is the work a failed seed phase can run past its last comparison by:
     // grown from one key, doubling, it holds about one check interval at the widest row read
     // so far (with its hits, coordinates and, budget-aware, dependency rows), so that a failed
-    // seed phase ran past the budget by less than two intervals plus one such call. Sized from
-    // the query's labels alone, a call of rows wider than that was one charge of 2.5 million
-    // units under a budget of 1 once its rows were charged together. Without a work budget the
-    // calls are as before.
-    // Under the attempt's walk-until the validation's reads are paced (pass 5): a stop between
+    // seed phase runs past the budget by less than two intervals plus one such call. Sized from
+    // the query's labels alone, a call of rows wider than that could be one charge of 2.5
+    // million units under a budget of 1. Without a work budget the calls are not sized by the
+    // budget.
+    // Under the attempt's walk-until the validation's reads are paced: a stop between
     // chunks charges the rows the chunks decoded and fails the seed (no result exists yet). The
     // seed's own time budget never stops it (§6.8: the deadline is not checked at depth 0, and
     // a seed validated past its budget still delivers its result complete to 0 bp)
@@ -2310,7 +2306,7 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_seed_hits(LabelQuery &query,
         return chunk;
     };
     if (decode_charged_) {
-        // The budget-aware reads (stage 3), in chunks under any budget: each within what the
+        // The budget-aware reads, in chunks under any budget: each within what the
         // memory budget leaves beside the seed and the hits read so far, every key admitted
         // against its demand; a chunk that does not fit fails the seed. The validation's
         // query caches nothing (the walk's own query is another), and each row's work includes
@@ -2445,8 +2441,8 @@ void Walker::fail_depth0(uint64_t need, const Arm *unread, uint64_t labels, uint
         + (unread ? "at least " : "")
         + std::to_string((need + (uint64_t(1) << 20) - 1) >> 20) + " MiB";
     // The need includes the caches' allotments of this budget, which grow with the budget: the
-    // knob value that holds the state is stated, not the need (raised to it, the seed failed
-    // again with a larger need; review of the stage-3 fixes, P2)
+    // knob value that holds the state is stated, not the need (raised to the need, the seed
+    // would fail again with a larger need)
     const uint64_t knob = memory_budget_holding(need, allotted_) >> 20;
     if (allotted_) {
         what += " with the caches' allotments of this budget (5/16 of it, at most 128 MiB), which "
@@ -2464,8 +2460,7 @@ void Walker::fail_depth0(uint64_t need, const Arm *unread, uint64_t labels, uint
               "before it already reached the budget";
         what += strategy_.direction == Strategy::BOTH && *unread == Arm::LEFT
             ? "; the RIGHT arm's root was not read)" : ")";
-        // a lower bound is no promise: what was not built may need more (review of stage 3,
-        // answer 2)
+        // a lower bound is no promise: what was not built may need more
         what += "; raising the budget to that may still fail: unread roots, labels or later "
                 "state may need more";
     }
@@ -2522,11 +2517,11 @@ void Walker::init_arm(ArmState &arm) {
         const node_index key = oracle_.key_of(root.node, root.kmer);
         std::vector<LabelRecorder::NodeLabels> nl;
         if (decode_charged_) {
-            // The budget-aware read (stage 3), within what the account leaves. The depth-0
-            // state built so far (the other arm's root, its labels and reservation) may already
-            // reach the budget: then the state does not fit whatever this row holds, and the
-            // seed fails as a depth-0 state, with its levers, without reading the row (review
-            // of stage 3, F7: it was reported as this row's decoding)
+            // The budget-aware read, within what the account leaves. The depth-0 state built so
+            // far (the other arm's root, its labels and reservation) may already reach the
+            // budget: then the state does not fit whatever this row holds, and the seed fails
+            // as a depth-0 state, with its levers, without reading the row (not as this row's
+            // decoding)
             if (mem_limit_ && accounted() >= mem_limit_)
                 fail_depth0(accounted() + 1, &arm.arm);
             std::vector<KeyCost> costs;
@@ -3212,7 +3207,7 @@ void Walker::commit_entries(ArmState &arm, const Item &item, size_t target_segme
                 // A switch into a label whose own lineage was live at the head carries only
                 // that lineage's continuing chains (process_item), so chains of the label that
                 // start here are missing whenever some were left out: the run's occurrences are
-                // a lower bound, stated (revision 1, decision C-N2 a). The walk is unchanged
+                // a lower bound, stated. The walk is unchanged
                 auto t = std::lower_bound(targets.begin(), targets.end(), e.label,
                                           [](const Target &x, LabelId l) { return x.label < l; });
                 assert(t != targets.end() && t->label == e.label);
@@ -3308,7 +3303,7 @@ void Walker::init_budgets() {
           + nodes_.size() * (sizeof(node_index) + 64);
     // what the output repeats from the request and the index besides the dictionary: the
     // seed_id and the dropped seed labels with their names and presence runs, each name
-    // priced as delivered (escaped) in the requested detail (finding 1)
+    // priced as delivered (escaped) in the requested detail
     base_ += seed_.seed_id.size() + (d.name ? d.name(seed_.seed_id, DeliveryCosts::Name::SEED_ID) : 0);
     for (const DroppedLabel &dl : result_.dropped_labels) {
         base_ += 2 * sizeof(DroppedLabel) + dl.name.size() + dl.reason.size()
@@ -3330,14 +3325,14 @@ void Walker::init_budgets() {
         if (recorder_)
             recorder_->set_max_cache_bytes(cache_allotment_);
     }
-    // the derivation limitation a permitted set derived from part of the seed states (D3):
-    // a record the fixed part does not hold
+    // the derivation limitation a permitted set derived from part of the seed states: a
+    // record the fixed part does not hold
     if (result_.derivation_partial)
         base_ += d.extra_limitation;
     fixed_base_ = base_;
     // The coordinate output's fixed part is in base_ already (d.fixed); counted here too, in
     // the coordinate share only, so that the share is all the account the coordinates add —
-    // what the delivery reserve prices at its own ratio and its ratio samples leave out (C3).
+    // what the delivery reserve prices at its own ratio and its ratio samples leave out.
     // Nothing is admitted or charged by this line
     coord_account_ = strategy_.coordinates ? d.coordinate_fixed : 0;
     // the seed labels' recorded occurrences of the seed belong to the depth-0 state, admitted
@@ -3357,15 +3352,14 @@ void Walker::enable_path_cache() {
     // The row-diff path cache shares the label cache's allotment: it holds what the label
     // cache leaves of it (re-read at every insert, and trimmed before the label cache grows:
     // LabelOracle::make_room), so that both stay within the allotment the account holds, the
-    // label cache evicts as it always did and nothing admitted or observed changes (the
-    // lookahead's reads, physical work, are admitted as without the cache: prefetch).
-    // Only from here, after both roots were read: a refused annotate root states whether its
-    // read alone was refused (a lower bound) or its standalone demand did not fit, and with
-    // the cache on, the left root's path could hold the right root's row, whose read then
+    // label cache evicts as it does without it and nothing admitted or observed changes (the
+    // lookahead's reads, physical work, are admitted as without the cache: prefetch). Only
+    // from here, after both roots were read: a refused annotate root states whether its read
+    // alone was refused (a lower bound) or its standalone demand did not fit, and with the
+    // cache on, the left root's path could hold the right root's row, whose read then
     // completes where it alone would have been refused — a DEMAND statement where the seed
-    // without the cache states a DECODE one (review of the efficiency pass). The levels
-    // state only what holds either way (read_trip), so from depth 1 on the cache changes
-    // nothing they state
+    // without the cache states a DECODE one. The levels state only what holds either way
+    // (read_trip), so from depth 1 on the cache changes nothing they state
     oracle_.path_cache().set_bound(std::min(oracle_.path_cache_max(), cache_allotment_),
                                    [this]() {
         const uint64_t label = query_ ? query_->cache_bytes()
@@ -3452,7 +3446,7 @@ void Walker::settle(ArmState &arm, uint64_t held) {
 // as far as no earlier head charged them: the first head of a level that creates a child
 // pays for them in its admission. Charged at the next level's start instead, they could
 // put the account over the budget without any admission refusing them, and the stop that
-// follows would deliver a result beyond the budget (review of stage 2, finding 3).
+// follows would deliver a result beyond the budget.
 void Walker::plan_bins(const ArmState &arm, uint64_t child_depth) {
     const size_t needed = bins_needed(child_depth);
     if (needed > arm.bins_charged) {
@@ -3536,12 +3530,11 @@ void Walker::checkpoint(bool force) {
     // The work budget is compared on every call, and every charge of the walk reaches a
     // checkpoint before the next one (a fetch call's rows, a derivation's scan, each target
     // it prices, each edge-reuse probe, each successor enumeration): a comparison costs
-    // nothing, and comparing only once every interval let a level of wide annotation rows
-    // run far past the budget (GPT review of stage 2, finding 2: 125,044 units used under a
-    // budget of 1). The previous comparison passed, so a stop overruns the budget by what
-    // was charged since, at most: the largest such stretch is recorded and stated with its
-    // number (review of the stage-2 fixes, F7), rather than a bound that one kind of
-    // charge could break.
+    // nothing, and comparing only once every interval would let a level of wide annotation
+    // rows run far past the budget (125,044 units used under a budget of 1). The previous
+    // comparison passed, so a stop overruns the budget by what was charged since, at most:
+    // the largest such stretch is recorded and stated with its number, rather than a bound
+    // that one kind of charge could break.
     if (strategy_.max_work_units) {
         largest_charge_ = std::max(largest_charge_, used - compared_at_);
         compared_at_ = used;
@@ -3552,7 +3545,7 @@ void Walker::checkpoint(bool force) {
         return;
     next_check_ = used + kWorkCheckInterval;
     // the walk since the clock was last read for a stop, its reads excluded: one head's
-    // processing, or a few (R8)
+    // processing, or a few (SPEC §6.8)
     note_head(elapsed_ms());
     // The deadline needs the clock, so it is read before every head and at least every
     // interval, so that one wide level cannot overrun it by more than that. Never at depth
@@ -3671,8 +3664,8 @@ void Walker::write_meter() const noexcept {
     m.work_seed = seed_work_;
     // What the budget admitted: an account past it was refused (the seed failed at depth 0, or
     // the walk stopped) or is held beyond it as the soft excess, so under a memory budget the
-    // admitted peak is at most the budget (review of the stage-4 backend, F1: a refused depth-0
-    // demand of 21.8 MB was reported as admitted under 1 MiB)
+    // admitted peak is at most the budget (a refused depth-0 demand is never reported as
+    // admitted)
     const uint64_t peak = std::max(peak_, accounted());
     m.memory_peak = mem_limit_ ? std::min(peak, mem_limit_) : peak;
     m.memory_final = accounted();
@@ -3685,7 +3678,7 @@ EndReason Walker::note_stop(const ArmState &arm, const Item *head,
                             ResourceStop::Resource resource, double demand, bool injected,
                             const char *phase, double used, const ResourceStop *detail) {
     if (!result_.resource_stop) {
-        // the deadline record (R8): what stopped the walk, and how long after its deadline
+        // the deadline record (SPEC §6.8): what stopped the walk, and how long after its deadline
         // (the seed's time budget on the seed's clock, the attempt's walk-until on its own)
         stop_ms_ = elapsed_ms();
         DeadlineRecord &d = result_.deadline;
@@ -3742,8 +3735,8 @@ EndReason Walker::note_stop(const ArmState &arm, const Item *head,
     }
     // the cap trigger's demand, in the unit of the knob a reader would raise
     // (bounds.max_memory_mb counts whole MiB): the budget that admits it, whose caches'
-    // allotments are larger than this budget's (memory_budget_holding; review of the
-    // stage-3 fixes, P2: the need at this budget, raised to, failed again)
+    // allotments are larger than this budget's (memory_budget_holding: the need at this budget,
+    // raised to, would fail again)
     switch (resource) {
         case ResourceStop::MEMORY:
             cap_demand_ = static_cast<double>(
@@ -3795,7 +3788,7 @@ void Walker::observe_soft(uint64_t scratch, uint64_t dictionary) {
     // beyond its allotment and the dictionary labels a fetch named that are not charged
     // yet. The admitted account itself never exceeds the budget (the depth-0 state and
     // every level's bins are admitted), so memory_bound_soft never reports the modelled
-    // state's own excess as the decoder's (review of stage 2, finding 3).
+    // state's own excess as the decoder's.
     uint64_t cache = 0;
     if (query_) {
         cache = query_->cache_bytes();
@@ -3926,7 +3919,7 @@ size_t Walker::fetch_chunk(size_t grown) const {
     // deadline is read between calls), and under a work budget no more than the budget has
     // left, so that near the budget a call reads one key; and there grown from one key per
     // level (|grown|), so that rows far wider than any fetched before are met by a small
-    // call rather than by a whole chunk of them (review of the stage-2 fixes, F3)
+    // call rather than by a whole chunk of them
     uint64_t chunk = std::clamp<uint64_t>(kWorkCheckInterval / (8 + widest_row_), 1, kFetchChunk);
     if (strategy_.max_work_units) {
         const uint64_t used = work_used();
@@ -3941,8 +3934,8 @@ size_t Walker::fetch_chunk(size_t grown) const {
 // "coordinates mapped"): 8 per key, 1 per entry and 1 per coordinate. A row is charged
 // when a fetch returns it — decoded then or by the lookahead ahead of it — whether or not a
 // head consumes it: a level cut mid-way decoded its later rows all the same, and charging
-// only consumed rows hid that decoding from the budget and from `used` (review of the
-// stage-2 fixes, F3: 880,000 of 900,000 decoded entries uncharged)
+// only consumed rows would hide that decoding from the budget and from `used` (e.g.
+// 880,000 of 900,000 decoded entries uncharged)
 static uint64_t row_units(node_index key, const LabelQuery::NodeHits &h) {
     uint64_t units = (key != npos ? 8 : 0) + h.size();
     for (const LabelQuery::Hit &hit : h) {
@@ -3954,7 +3947,7 @@ static uint64_t row_units(node_index key, const LabelQuery::NodeHits &h) {
 std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
                                                      const std::vector<node_index> &keys) {
     // A call the deadline may fall into is decoded in time-sized chunks with the deadline
-    // checked between them (pacing, pass 5): a call's counters, cache and result are those of the
+    // checked between them (pacing): a call's counters, cache and result are those of the
     // whole call, so a level that the deadline does not stop is unchanged; one it stops is
     // censored at its first head, where the whole call would have been (the rows its chunks
     // decoded are charged: decoded work, though no row was returned)
@@ -3973,7 +3966,7 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
         return hits;
     }
     if (decode_charged_) {
-        // The budget-aware reads (stage 3): each call admits every key it returns against
+        // The budget-aware reads: each call admits every key it returns against
         // the key's demand, within what the request has left — the budget minus the account
         // and what the level's fetch holds already, so that where a level stops does not
         // depend on how it is cut into calls nor on what the lookahead cached. The level's
@@ -3981,8 +3974,8 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
         // row-diff dependency rows (KeyCost), whichever read decoded them.
         // A level with no key to read (the radius, where heads only end, or dead ends) reads
         // nothing, so it is not admitted as a read: it finishes within the reservations its
-        // heads already hold. Admitting its empty lists stopped a completed radius-0 walk
-        // whose depth-0 state filled the budget exactly (review of stage 3, F3).
+        // heads already hold. Admitting its empty lists would stop a completed radius-0 walk
+        // whose depth-0 state filled the budget exactly.
         if (keys.empty())
             return {};
         std::vector<LabelQuery::NodeHits> hits;
@@ -4024,8 +4017,7 @@ std::vector<LabelQuery::NodeHits> Walker::fetch_hits(ArmState &arm,
     }
     // Under a §14 budget in calls (fetch_chunk()), each charged and compared when it
     // returns; the memory a call leaves held beyond the account is observed BEFORE the
-    // comparison after it can throw, or a stop inside the fetch would hide it (GPT review
-    // of stage 2, finding 3)
+    // comparison after it can throw, or a stop inside the fetch would hide it
     std::vector<LabelQuery::NodeHits> hits;
     hits.reserve(keys.size());
     // the level's key and successor lists, held beside its hits (run_level)
@@ -4212,33 +4204,32 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
         return;
     // Past the seed's deadline no later level runs (run() reads the same clock before the
     // next depth, a head's checkpoint before the other arm's next head), so nothing the
-    // lookahead would read can be consumed: its graph steps and reads are skipped. Before
-    // the efficiency pass the lookahead ran in full there (2.2 s on a 250 ms budget on
-    // refseq33m); only timing and the physical counters can tell the difference
+    // lookahead would read can be consumed: its graph steps and reads are skipped (a
+    // lookahead run in full there took 2.2 s on a 250 ms budget on refseq33m); only
+    // timing and the physical counters can tell the difference
     if (time_exceeded())
         return;
     // The chains' graph steps and key mappings run between two checkpoints, so they read the
-    // stops themselves (the review of 2026-10-06, W3): before, only the seed's own deadline
-    // ended a chain, and a level's chains — up to items x min(batch_kmers, the radius left)
-    // graph steps, then one keys_of_path per chain — ran unpolled: at batch_kmers 60,000 a
-    // cancel was seen 1.5 to 11.8 s late and a walk-until passed by 0.6 to 6 s (an HTTP 503 at
-    // the bound), while observed_max_uninterruptible_ms said 1 ms. Now the stops are read
-    // every kLookaheadPollSteps graph steps of the whole lookahead and before each chain's key
-    // mapping: the seed's deadline, and the attempt's (a cancel, its walk-until, a gone
-    // client) with the poll that also reads the clock (AttemptControl::poll_now), the same
-    // tests as a paced read's. A stop ends the lookahead at once: the chain being built is
-    // dropped (its keys are not mapped) and nothing is read, since past a stop no later level
-    // consumes the cache — the next head's checkpoint, or at depth 0 run() before depth 1,
-    // stops the walk on the same stop, which the poll here made sticky (a cancel or a
-    // walk-until is kept by the attempt; the seed's deadline is the clock's). The attempt's
-    // stops are read only through poll_now, paced or not: it is the poll that hands a passed
-    // walk-until to the attempt (request_stop, stopped_at). Before the review of the P2 fixes
-    // the unpaced lookahead stopped on ms_left() <= 0 without that poll, so nothing recorded
-    // the stop and the next checkpoint's poll, which reads the clock only every poll_stride-th
-    // time, let the walk run up to poll_stride - 1 more heads. Nothing depends on the cache, so
-    // only timing and the physical counters (direct_reads, the row reads' counters in `timing`)
-    // can differ, and only on a walk that a stop ends. Each poll ends a head piece (note_head),
-    // so the observation counts the stretches between them
+    // stops themselves: if only the seed's own deadline ended a chain, a level's chains — up to
+    // items x min(batch_kmers, the radius left) graph steps, then one keys_of_path per chain —
+    // would run unpolled (at batch_kmers 60,000 a cancel was seen 1.5 to 11.8 s late and a
+    // walk-until passed by 0.6 to 6 s, an HTTP 503 at the bound, while
+    // observed_max_uninterruptible_ms said 1 ms). The stops are read every kLookaheadPollSteps
+    // graph steps of the whole lookahead and before each chain's key mapping: the seed's
+    // deadline, and the attempt's (a cancel, its walk-until, a gone client) with the poll that
+    // also reads the clock (AttemptControl::poll_now), the same tests as a paced read's. A stop
+    // ends the lookahead at once: the chain being built is dropped (its keys are not mapped)
+    // and nothing is read, since past a stop no later level consumes the cache — the next
+    // head's checkpoint, or at depth 0 run() before depth 1, stops the walk on the same stop,
+    // which the poll here made sticky (a cancel or a walk-until is kept by the attempt; the
+    // seed's deadline is the clock's). The attempt's stops are read only through poll_now,
+    // paced or not: it is the poll that hands a passed walk-until to the attempt (request_stop,
+    // stopped_at); stopping on ms_left() <= 0 without that poll would record no stop, and the
+    // next checkpoint's poll, which reads the clock only every poll_stride-th time, would let
+    // the walk run up to poll_stride - 1 more heads. Nothing depends on the cache, so only
+    // timing and the physical counters (direct_reads, the row reads' counters in `timing`) can
+    // differ, and only on a walk that a stop ends. Each poll ends a head piece (note_head), so
+    // the observation counts the stretches between them
     ReadPacing *pace = pacing(Deadline::WALK);
     auto stopped = [&]() {
         note_head(elapsed_ms());
@@ -4266,12 +4257,11 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
         // The chain stops at the radius: its n-th node (n from 0, the item's successor at
         // ext_bp + 1 + n) is enumerated and its single successor's row warmed only when that
         // node is below the radius — a head at the radius is ended, not expanded, so its
-        // successors are never asked for. Before the efficiency pass the chain ran
-        // batch_kmers nodes whatever the radius left (1,047 rows read for 32 consumed on
-        // refseq33m); what changes is physical work (timing) and the counters of lookahead
-        // work: annotation.direct_reads (a direct-access annotation's lookahead reads single
-        // cells), and keys_mapped where the unbudgeted lookahead outgrew kMaxLookahead and
-        // its clearing counted the keys
+        // successors are never asked for (a chain of batch_kmers nodes whatever the radius
+        // left read 1,047 rows for 32 consumed on refseq33m); this changes physical work
+        // (timing) and the counters of lookahead work: annotation.direct_reads (a
+        // direct-access annotation's lookahead reads single cells), and keys_mapped where
+        // the unbudgeted lookahead outgrows kMaxLookahead and its clearing counts the keys
         const uint64_t radius = strategy_.max_extension_bp;
         const uint64_t room = items[i].ext_bp + 1 < radius ? radius - items[i].ext_bp - 1 : 0;
         const size_t chain_max = std::min<uint64_t>(strategy_.batch_kmers, room);
@@ -4287,7 +4277,7 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
                 break;
             // the graph steps of a chain are not free either (about 0.65 ms a first-touch node
             // on refseq33m, 1,000 per chain at batch_kmers 1000): a chain stops at the seed's
-            // deadline, as its read does — read at every step, as before — and at the polls
+            // deadline, as its read does — read at every step — and at the polls
             if (n > 0 && time_exceeded()) {
                 stop = true;
                 break;
@@ -4363,7 +4353,7 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
         // the warming silently, and the next head's checkpoint, which reads the same deadline,
         // stops the walk there, where the whole read would have: nothing depends on the cache.
         // Also at depth 0, where no head checks the deadline: run() reads it before depth 1,
-        // so the roots' lookahead read past it was never consumed (the efficiency pass). The
+        // so the roots' lookahead read past it would never be consumed. The
         // read's pacing is the one the chains polled with (pacing() returned it unused: a poll
         // that found no stop leaves it as new)
         if (decode_charged_) {
@@ -4374,7 +4364,7 @@ void Walker::prefetch(ArmState &arm, const std::vector<Item> &items,
             // Under a memory budget the lookahead reads until a run does not fit, and with the
             // path cache a run holds less: it reads as if the cache were not there (its rows
             // the cache spared charged; RowDiffCache::admit_as_uncached), so that the cache does
-            // not make it read rows no level asks for (review of the efficiency pass)
+            // not make it read rows no level asks for
             struct AdmitAsUncached {
                 AdmitAsUncached(LabelOracle &oracle, bool on) : oracle(oracle), on(on) {
                     if (on)
@@ -4500,28 +4490,27 @@ void Walker::merge_level(ArmState &arm, uint64_t depth) {
         // The displayed walk follows the first parent through a merge — the paths' segment
         // chains and spelled bases, their continuations, and route_bp, which states what of
         // that spelling a label does not carry —, so the first parent is the one carried by
-        // the most labels (the owner's decision R21 (4)): the labels whose lineages its head
-        // brings into the merge node (constrain), or the fewest labels present at a node of
-        // the parent's segment, true counts (annotate: every head at the node holds the
-        // node's own labels, so the parent's own bases tell the routes apart — as many labels
-        // as can carry it whole; only its own segment: a merged parent holds the union of its
-        // parents' labels, so after nested merges the walk displayed upstream of it can be
-        // carried by fewer — a known limit, pinned by MiniRefSeq.AnnotateMergeRanksParentsBy-
-        // TheirOwnSegment so that the library checks the same rule, DESIGN §26.6); ties in
-        // arrival order, as every parent was before. Which
-        // labels reach the merged head with which loss and branches does not depend on the
-        // order (each label's least (loss, branches) is kept); on a tie of both, the first
-        // parent's lineage continues, as before.
+        // the most labels (the majority-parent rule, SPEC §7.1): the labels whose lineages
+        // its head brings into the merge node (constrain), or the fewest labels present at a
+        // node of the parent's segment, true counts (annotate: every head at the node holds
+        // the node's own labels, so the parent's own bases tell the routes apart — as many
+        // labels as can carry it whole; only its own segment: a merged parent holds the union
+        // of its parents' labels, so after nested merges the walk displayed upstream of it
+        // can be carried by fewer — a known limit, pinned by
+        // MiniRefSeq.AnnotateMergeRanksParentsByTheirOwnSegment so that the library checks
+        // the same rule, DESIGN §26.6); ties in arrival order. Which labels reach the merged
+        // head with which loss and branches does not depend on the order (each label's least
+        // (loss, branches) is kept); on a tie of both, the first parent's lineage continues.
         // One exception keeps the arrival order: tree and full detail (the JSON spells every
         // path's segment chain, m_.chain_entry > 0) under a memory budget. The merged
         // segment's chain length follows the first parent (new_segment: chain_len), and every
         // later head reserves the delivery of its path's chain, exactly the output it writes;
-        // a majority parent with a longer chain would move the memory stop (review of W2:
-        // 1-4 levels on an arm, up to 30), and the owner's decision changes the display only,
-        // never the depth a budget certifies. Charging below the output would break the
-        // memory bound, charging the longest parent's chain at every merge would move more
-        // stops; so where the account depends on the displayed chain, the display stays as
-        // it was. Graphlet and summary detail charge no chain: the rule applies there always
+        // a majority parent with a longer chain would move the memory stop (1-4 levels on an
+        // arm, up to 30), and the rule changes the display only, never the depth a budget
+        // certifies. Charging below the output would break the memory bound, charging the
+        // longest parent's chain at every merge would move more stops; so where the account
+        // depends on the displayed chain, the display keeps the arrival order. Graphlet and
+        // summary detail charge no chain: the rule applies there always
         const bool majority_first = !(m_.chain_entry > 0 && mem_limit_ > 0);
         auto carried = [&](const Item &item) -> size_t {
             if (!annotate_)
@@ -4874,10 +4863,10 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
                 // dictionary labels after the read (a budget-aware read admits them inside it:
                 // read_trip). Stated as what it is — LABEL_NAMES, with the levers that name
                 // fewer labels — and as a lower bound: the level needs at least the account
-                // with them, its heads more. It was stated as a refused head (cause HEAD) with
-                // an exact need, the dictionary's: raised to it, the walk stopped at the same
-                // depth again, and lower_max_labels_per_node, which lets it finish at the
-                // budget it had, was not offered (review of 2026-10-06, U03-03)
+                // with them, its heads more. Stated as a refused head (cause HEAD) with an
+                // exact need, the dictionary's, it would be wrong: raised to it, the walk
+                // stops at the same depth again, and lower_max_labels_per_node, which lets it
+                // finish at the budget it had, would not be offered
                 BudgetTrip t { ResourceStop::MEMORY, static_cast<double>(accounted()) };
                 ResourceStop &d = t.detail;
                 d.cause = ResourceStop::LABEL_NAMES;
@@ -4901,7 +4890,7 @@ void Walker::run_level(ArmState &arm, uint64_t depth) {
     }
     prefetch(arm, items, succs);
     if (mem_limit_) {
-        // the lookahead warmed the caches, possibly beyond their allotments (the stage-2
+        // the lookahead warmed the caches, possibly beyond their allotments (the unbudgeted
         // reads), while the level's rows are still held: observed before a head's check can
         // throw, with the raw rows the lookahead's read held while it built them
         observe_soft(level_soft_ + (decode_charged_ ? 0
@@ -4997,10 +4986,10 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
             if (trace_) {
                 const Entry *e = find_entry(item.state, h.label);
                 if (e) {
-                    // the coordinates were charged with their row when the fetch returned
-                    // it (one indivisible charge with the row, compared after the fetch
-                    // call: review of the stage-2 fixes, F5 — charged here as one sum after the
-                    // whole row, they ran past the stated bound unchecked)
+                    // the coordinates were charged with their row when the fetch returned it
+                    // (one indivisible charge with the row, compared after the fetch call —
+                    // charged here as one sum after the whole row, they would run past the
+                    // stated bound unchecked)
                     for (Coord x : h.coords) {
                         bool ok = side == Arm::RIGHT
                             ? (x > 0 && std::binary_search(e->coords.begin(), e->coords.end(), x - 1))
@@ -5090,8 +5079,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
         // The next derivation removes the excluded sources' entries from every
         // successor: record which successors refused them while those entries are
         // still visible. Each successor's state is scanned once per round for all the
-        // sources this round excluded — a scan per excluded source was Θ(|σ|²) at a
-        // node where every source is ambiguous (review round 4, finding 2).
+        // sources this round excluded — a scan per excluded source would be Θ(|σ|²) at a
+        // node where every source is ambiguous.
         excluded_on.clear();
         for (size_t i = 0; i < cands_.size(); ++i) {
             Cand &c = cands_[i];
@@ -5170,8 +5159,8 @@ std::optional<EndReason> Walker::process_item(ArmState &arm, Item &item,
     const size_t nf = followed.size();
 
     // ---- caps, decided before anything is committed. A capped head still counts its
-    // re-minimisation rounds, as it always did: a result without a budget is unchanged
-    // by stage 2 (only a head the budget refuses leaves them uncounted)
+    // re-minimisation rounds, so that a result without a budget does not depend on the
+    // budget machinery (only a head the budget refuses leaves them uncounted)
     if (auto cap = cap_check(arm, nf, remaining_in_level)) {
         count_reminimisations(arm);
         return cap;
@@ -5297,7 +5286,7 @@ void Walker::plan_cost(const ArmState &arm, const Item &item) {
 // PLAN-B (§14): the per-source decisions of a step that passed the caps — which lineage
 // continues, which ends silently (it goes on only under other names) and which ends with
 // what reason, and every refusal of the step — in the order the commit replays them, so
-// that refusal groups, `dropped` and the label ends keep today's order. Mutates scratch
+// that refusal groups, `dropped` and the label ends keep their order. Mutates scratch
 // and the spent-work counter refusal_scans only.
 void Walker::plan_outcomes(ArmState &arm, const Item &item) {
     Scratch &sc = scratch_;
@@ -5462,10 +5451,10 @@ void Walker::plan_outcomes(ArmState &arm, const Item &item) {
     // ---- loss-budget refusals of the sources whose end was not decided by the budget
     // above: a successor on which a lineage could go on only by a switch above the
     // budget is refused to it by the budget whether the lineage continues on another
-    // successor or ends for another reason — only the label END depends on that
-    // (review round 4, finding 3). A source excluded by the branch limit is left out:
-    // the limit took it out of every successor's source set, so no switch of it was
-    // priced, and its refusals are the "branch" ones.
+    // successor or ends for another reason — only the label END depends on that. A
+    // source excluded by the branch limit is left out: the limit took it out of every
+    // successor's source set, so no switch of it was priced, and its refusals are the
+    // "branch" ones.
     if (cost_.finite()) {
         for (const Cand &c : cands_) {
             // every target entered: the budget refused nothing here
@@ -5490,7 +5479,7 @@ void Walker::plan_outcomes(ArmState &arm, const Item &item) {
 }
 
 // COMMIT (§14) of an admitted constrained step: writes the decisions of PLAN-A/B into the
-// result in the order the walker always wrote them (blocked / hairpin events, the label
+// result in a fixed order (blocked / hairpin events, the label
 // ends in state order, the branch event, then the step or the split). Cannot fail.
 void Walker::commit_item(ArmState &arm, Item &item, const std::vector<Succ> &succs) {
     const uint64_t at = item.ext_bp;
@@ -5586,7 +5575,7 @@ void Walker::commit_item(ArmState &arm, Item &item, const std::vector<Succ> &suc
     account_steps(arm, at, nf);
 
     if (record_coords_) {
-        // C5 (decision C-N1): a lineage that goes on under its own run keeps, of its chains,
+        // A lineage that goes on under its own run keeps, of its chains,
         // those continuing on a followed child as the same run; the others end here, before the
         // run's last node (a record end, a successor not followed, a switch taking the
         // continuation over). A chain continues on at most one child (a coordinate is one
@@ -6088,16 +6077,15 @@ void Walker::summarize() {
 // the level is admitted. A walk that a budget, a refused admission or the deadline stopped
 // after the fetch can then hold labels only the heads it never committed would have
 // recorded: in label_dict, its L records and label_summary, but in no segment, split or
-// event — a label "met" that appears nowhere in the result (review of stage 2, finding 2).
-// Such a result keeps only the labels it records, in their first-seen order, so that the
-// kept ids keep their relative order and every sorted list stays sorted. (The labels a
-// stop orphans are those first named at or after the first head it censored, i.e. the
-// last ids, so the kept ids do not change at all.) A walk that is not stopped records
-// every label it named — each fetched successor is followed or stated by an event — so
-// this is the identity there. Applied to stops by a request budget or a refused admission
-// only: a cap, and a time stop without a budget, keep their dictionary as it was before
-// stage 2 (they can hold such a label too; changing them would change results that set
-// no budget, which stage 2 leaves byte-identical).
+// event — a label "met" that appears nowhere in the result. Such a result keeps only the
+// labels it records, in their first-seen order, so that the kept ids keep their relative
+// order and every sorted list stays sorted. (The labels a stop orphans are those first
+// named at or after the first head it censored, i.e. the last ids, so the kept ids do not
+// change at all.) A walk that is not stopped records every label it named — each fetched
+// successor is followed or stated by an event — so this is the identity there. Applied to
+// stops by a request budget or a refused admission only: a cap, and a time stop without a
+// budget, keep their whole dictionary (they can hold such a label too; compacting them
+// would change results that set no budget).
 void Walker::compact_dictionary() {
     const size_t n = result_.label_dict.size();
     constexpr LabelId kUnused = std::numeric_limits<LabelId>::max();
@@ -6228,7 +6216,7 @@ void Walker::seed_phase() {
         validate_seed();
     } catch (SeedDerivationError &e) {
         // a seed failed in its derivation states memory_bound_soft like any other result
-        // under a memory budget, with what the derivation was seen to hold (finding 8)
+        // under a memory budget, with what the derivation was seen to hold
         e.set_soft_overshoot(overshoot_);
         throw;
     }
@@ -6263,24 +6251,24 @@ void Walker::seed_phase() {
     // What the depth-0 state holds whatever its admission decides — the dictionary's labels
     // with their names in every copy, the query's or recorder's cache — is observed before
     // the admission can fail the seed: a seed the budget does not hold still built it, and
-    // its failure states that excess (review of the stage-2 fixes, F6: twelve names of 1 MB
-    // under 1 MiB reported memory_bound_soft 0). Within the budget it is no excess.
+    // its failure states that excess (twelve names of 1 MB under 1 MiB would otherwise state
+    // memory_bound_soft 0). Within the budget it is no excess.
     observe_seed_scratch(dictionary_held());
     // ---- ADMIT the depth-0 state (§14) like any head: the dictionary and both roots,
     // each reserved with what ending and delivering it costs. A result complete to 0 bp
     // is the shallowest there is, so a budget that does not hold this holds no valid
     // result at all, and the seed fails before anything per label is delivered. Without
-    // this the depth-0 result was delivered whatever it cost — ~4 KB per label and arm in
-    // detail full, 44 MiB for 2,876 derived labels under a 1 MiB budget, reported as the
-    // soft overshoot (review of stage 2, finding 3).
+    // this the depth-0 result would be delivered whatever it cost — ~4 KB per label and
+    // arm in detail full, 44 MiB for 2,876 derived labels under a 1 MiB budget, stated
+    // only as the soft overshoot.
     if (mem_limit_ && accounted() > mem_limit_)
         fail_depth0(accounted());
 }
 
 SeedDerivationError Walker::partial_derivation_failure() const {
     assert(result_.derivation_partial);
-    // the k-mers read and the time when the budget stopped the derivation: what the failure
-    // stated before D3, at that same check
+    // the k-mers read and the time when the budget stopped the derivation: the time budget's
+    // failure at that same check
     SeedDerivationError e = derivation_out_of_time(result_.derivation_partial->kmers_read,
                                                    result_.num_kmers, strategy_.time_budget_ms,
                                                    result_.derivation_partial->elapsed_ms);
@@ -6306,12 +6294,11 @@ SeedResult Walker::run() {
     } metered { *this };
     // this seed's deadline record (the pacer is the request's)
     oracle_.pacer().longest = UninterruptiblePiece();
-    // The seed phase's time and its reads' (timing; R10: 9.3 s of a 1 s budget outside the
-    // walk's fetch time was visible only as elapsed time no counter explained), and its setup
+    // The seed phase's time and its reads' (timing: 9.3 s of a 1 s budget outside the walk's
+    // fetch time would otherwise show only as elapsed time no counter explains), and its setup
     // pieces, from the walker's start: closed at the walk's first checkpoint, or at its stop or
-    // end below, or here on the way out of a failed seed (review of levels 4-5, finding 3: the
-    // validation's time was stated, but neither what came after it before the first head nor,
-    // in the deadline record, any of it between the reads and k-mer mappings)
+    // end below, or here on the way out of a failed seed, so that the deadline record covers
+    // the time between the reads and k-mer mappings too
     begin_setup();
     struct SetupEnd {
         Walker &walker;
@@ -6321,7 +6308,7 @@ SeedResult Walker::run() {
     mem_limit_ = strategy_.max_memory_bytes;
     budgeted_ = strategy_.max_memory_bytes || strategy_.max_work_units;
     // under a request budget the annotation is read by the budget-aware decode path when the
-    // index has it (stage 3 of DESIGN-traverse-graphlet.md §14.1), from the seed phase on
+    // index has it (DESIGN-traverse-graphlet.md §14.1), from the seed phase on
     decode_charged_ = budgeted_ && oracle_.decode_charged();
     // record coordinates (§18.1): only under support trace on an index with coordinates —
     // validate_seed refuses trace without them, and drops the recording for a set derived from
@@ -6330,14 +6317,14 @@ SeedResult Walker::run() {
     result_.coordinates_reason = coordinates_reason(strategy_, oracle_.has_coordinates());
     record_coords_ = strategy_.coordinates && !result_.coordinates_reason;
     coord_cap_ = strategy_.max_coordinate_occurrences;
-    // D3's partial set is delivered as a walked result or not at all: whatever fails the seed
-    // after it — a check written for the whole seed's carriers refusing their superset
-    // (`exhaustive` over max_seed_labels: "N labels carry the seed"; an ambiguous or
+    // A partial derivation's set is delivered as a walked result or not at all: whatever fails
+    // the seed after it — a check written for the whole seed's carriers refusing their
+    // superset (`exhaustive` over max_seed_labels: "N labels carry the seed"; an ambiguous or
     // non-resubmittable header; an extra label it duplicates), or a budget its depth-0 state
-    // does not fit — fails it as before D3, with the time budget that cut the derivation. That
-    // statement is true and names the first lever; the others would be false or overstated
-    // about a set the whole seed may narrow (review of W1, finding 1). SeedDerivationError is
-    // an invalid_argument, and so is a refused request, which the time budget preempted too
+    // does not fit — fails it with the time budget that cut the derivation. That statement is
+    // true and names the first lever; the others would be false or overstated about a set the
+    // whole seed may narrow. SeedDerivationError is an invalid_argument, and so is a refused
+    // request, which the time budget preempted too
     try {
         seed_phase();
     } catch (const std::invalid_argument &) {
@@ -6352,10 +6339,11 @@ SeedResult Walker::run() {
     enable_path_cache();
 
     if (result_.derivation_partial) {
-        // The permitted set was derived from part of the seed (D3): the seed's time budget is
-        // spent, so the walk is the seed itself — every root censored by the time budget at
-        // depth 0, as the deadline censors a level (complete_to_bp 0) — with no step taken,
-        // which under trace could not be taken anyway (no coordinates were carried)
+        // The permitted set was derived from part of the seed (a partial derivation): the
+        // seed's time budget is spent, so the walk is the seed itself — every root censored
+        // by the time budget at depth 0, as the deadline censors a level (complete_to_bp 0) —
+        // with no step taken, which under trace could not be taken anyway (no coordinates
+        // were carried)
         depth_ = 0;
         for (const ArmState &arm : arms_) {
             if (!arm.frontier.empty()) {
@@ -6383,8 +6371,7 @@ SeedResult Walker::run() {
             // Only a head below the radius is censored by the deadline: stop_frontier ends
             // the others as max_extension_bp, so when every remaining head has reached the
             // radius the walk is complete and nothing was stopped. Stating a time stop then
-            // (resource_stop, Q) told the reader to raise a budget that cut nothing (GPT
-            // review of stage 2, N1).
+            // (resource_stop, Q) would tell the reader to raise a budget that cut nothing.
             for (const ArmState &arm : arms_) {
                 auto head = std::find_if(arm.frontier.begin(), arm.frontier.end(), [&](const Item &item) {
                     return item.ext_bp < strategy_.max_extension_bp;
@@ -6413,7 +6400,7 @@ SeedResult Walker::run() {
     const double walk_end_ms = stop_ms_ >= 0 ? stop_ms_ : elapsed_ms();
     if (setup_open_) {
         // no checkpoint was reached (a radius of 0, a seed whose derivation the time budget cut
-        // (D3), no arm to walk): the seed phase ran to the walk's stop or end
+        // (a partial derivation), no arm to walk): the seed phase ran to the walk's stop or end
         end_setup(walk_end_ms);
     } else if (walk_end_ms > head_clock_ms_) {
         // the walk after the last reading of the clock, to its stop or end, its reads excluded:
@@ -6430,11 +6417,11 @@ SeedResult Walker::run() {
         arm.result.work_units = work_of(arm);
     }
     // a stop by a request budget or a refused admission; a time stop without a budget (and
-    // a cap) keeps its dictionary as before stage 2, so that such a result is unchanged
+    // a cap) keeps its whole dictionary, so that a result that sets no budget is not compacted
     if (annotate_ && result_.resource_stop
             && (budgeted_ || result_.resource_stop->resource != ResourceStop::TIME))
         compact_dictionary();
-    // every head ended within what it held: nothing is reserved any more
+    // every head ended within what it held: nothing is reserved
     assert(reserved_ == 0);
     ResourceAccount &account = result_.account;
     account.memory_limit = mem_limit_;

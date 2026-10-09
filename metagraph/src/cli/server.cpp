@@ -432,7 +432,7 @@ const GraphPair& select_traverse_pair(const std::string &name, const std::string
         return *pairs[0];
 
     // a name whose pairs share one graph has several annotations, which graph_path cannot
-    // choose between (review of pass 5: it was told to pass graph_path, then refused for it)
+    // choose between
     auto several_annotations = [&](const std::string &graph) {
         std::string annotations;
         for (const GraphPair *pair : pairs) {
@@ -540,8 +540,8 @@ std::vector<std::string> filter_graphs_from_list(
 
 // The reverse index of the sequence headers (CoordToHeader::find_header), built while the
 // index loads rather than by the first request naming a header: on refseq33m (33M headers)
-// that request spent seconds in it, inside its time budget and outside every read timer (R10:
-// 9.3 s of a 1 s budget)
+// that request would spend seconds in it (9.3 s), inside its time budget and outside every
+// read timer
 static void build_header_index(const graph::AnnotatedDBG &index) {
     const auto *coord_to_header = index.get_coord_to_header();
     if (!coord_to_header)
@@ -579,11 +579,11 @@ int run_server(Config *config) {
     // loaded files before the index is served; the meta fingerprint once the index is
     // loaded. Multi-index mode: per (graph, annotation) pair, the name and the manifest of the
     // graph list's optional columns, checked before loading, and the meta fingerprint computed
-    // on first use (a pair without them states null, as before).
+    // on first use (a pair without them states null).
     IndexIdentity single_identity;
     // the graph's derived data the loader reads (index_derived_files: its mask and Bloom
     // filter), named beside a checked manifest so that an operator sees what is loaded
-    // although index_fp does not cover it (the owner's decision #17 of 2026-10-08)
+    // although index_fp does not cover it
     auto log_derived_data = [&](const std::string &graph) {
         std::vector<std::string> loaded;
         for (const IndexDerivedFile &f : index_derived_files(graph)) {
@@ -923,10 +923,10 @@ int run_server(Config *config) {
     };
 
     // Count, and extract without reading annotation, the graph contexts of short motifs and
-    // IUPAC patterns (DESIGN-pattern-search.md, increments 0-2; pattern.hpp). Single-graph
-    // servers only: the multi-graph fan-out with its barriers is a later increment (§8). Every
-    // refusal is {"error", "code"}; the answer is written under the request's own deadline
-    // (its finalisation reserve), past which it is 503 "deadline", never a partial answer.
+    // IUPAC patterns (DESIGN-pattern-search.md; pattern.hpp). Single-graph servers only: the
+    // multi-graph fan-out with its barriers is not served (§8). Every refusal is {"error",
+    // "code"}; the answer is written under the request's own deadline (its finalisation
+    // reserve), past which it is 503 "deadline", never a partial answer.
     server.resource["^/pattern$"]["POST"] = [&](shared_ptr<HttpServer::Response> response,
                                                 shared_ptr<HttpServer::Request> request) {
         auto as_http = [](const PatternRefusal &e) { return HttpError(e.status(), e.body()); };
@@ -934,8 +934,8 @@ int run_server(Config *config) {
         // compression of the answer are checked against it
         PatternDelivery delivery;
         // a client that is gone, or a shutdown, is not answered: the work ends at its next
-        // clock reading, the writing at its next check, and nothing is written (review of
-        // 2026-10-07, X-CONCURRENCY-01, R2-02; as /resolve's and /traverse's)
+        // clock reading, the writing at its next check, and nothing is written (as /resolve's and
+        // /traverse's)
         auto gone = [&request, &shutdown]() {
             return shutdown.stopping() || client_gone(*request);
         };
@@ -943,8 +943,7 @@ int run_server(Config *config) {
         ResponseControl control;
         // nor with an error: a refusal, a 400 of a malformed body, a 503 (the index loading,
         // the deadline) or an unexpected failure is not written to a client that left — a
-        // half-close counts — or during a shutdown (SPEC §3; review GPT-2 of 2026-10-08,
-        // finding 4: `{` and {"patterns":[]} from a half-closed client were answered 400).
+        // half-close counts — or during a shutdown (SPEC §3).
         // Asked apart from the deadline: a 503 at the deadline reaches a client still there
         control.gone = gone;
         control.check = [&]() {
@@ -979,7 +978,8 @@ int run_server(Config *config) {
     };
 
     // The ledger-managed /traverse attempts of this process (requests with attempt_id): the
-    // backend half of stage 4 of DESIGN-traverse-graphlet.md §14 (traverse_attempts.hpp)
+    // backend half of the attempt ledger of DESIGN-traverse-graphlet.md §14
+    // (traverse_attempts.hpp)
     AttemptSettings attempt_settings;
     attempt_settings.allowance_ms = config->traverse_attempt_allowance_ms;
     attempt_settings.hard_cap_ms = kContentTimeoutS * 1000.0 - 1000;
@@ -992,8 +992,7 @@ int run_server(Config *config) {
     attempt_settings.delivery_build_mbps = config->traverse_delivery_build_mbps;
     // until measured longer, the walk is taken to end at most a chunk of a read and 950 ms (the
     // heads between two readings of the clock, the stopped seed's finalisation) after its
-    // walk-until (calibrated in the efficiency pass: 352-1,001 ms measured on SRA, 1,699 once
-    // under load; 200 assumed before)
+    // walk-until (calibrated: 352-1,001 ms measured on SRA, 1,699 once under load)
     attempt_settings.delivery_stop_ms = static_cast<double>(config->traverse_chunk_target_ms) + 950;
     AttemptRegistry attempts(attempt_settings);
     logger->info("[Server] Traverse attempts: server_instance {}, allowance {} ms, {}",
@@ -1012,11 +1011,11 @@ int run_server(Config *config) {
     // optionally freeze seeds for /traverse. No graph traversal. A request with
     // bounds.time_budget_ms runs under that deadline (capped by --traverse-max-time-ms, as
     // /traverse's), its answer written under it: past it, 503 "deadline", never a partial
-    // answer; without the field no deadline is set or read and the answer is as it always was
+    // answer; without the field no deadline is set or read
     // the cap of the opt-in deadline: --traverse-max-time-ms, and never above what the
-    // transport can honour (review of 2026-10-07, R1-05: with the flag 0, uncapped, or above
-    // it, a budget past the content timeout was accepted and the connection closed before any
-    // answer or 503); lowered requests are stated in limits.clamped
+    // transport can honour (with the flag 0, uncapped, or above it, a budget past the content
+    // timeout would be accepted and the connection closed before any answer or 503); lowered
+    // requests are stated in limits.clamped
     const ResolveTimeLimits resolve_time {
         config->traverse_max_time_ms > 0
                 && config->traverse_max_time_ms < static_cast<double>(kServerMaxDeadlineMs)
@@ -1106,13 +1105,12 @@ int run_server(Config *config) {
         // each seed's result is written as text once built (its tree freed at once, its bytes
         // known to the attempt's delivery reserve); the response is assembled from them, byte
         // for byte the text of the whole tree. The texts are moved into the assembly, which
-        // frees each once copied: nothing reads them after it, and kept here they lived until
-        // the handler returned, through the compression and the transport's copy (review of
-        // 2026-10-06, C9)
+        // frees each once copied: nothing reads them after it, and kept here they would live
+        // until the handler returned, through the compression and the transport's copy
         ResultTexts texts;
         control.write = [&texts, attempt](const Json::Value &envelope,
                                           const std::function<void()> &check) {
-            // the longest stretch between two checks (deadline_check, finding 6)
+            // the longest stretch between two checks (deadline_check)
             double gap = 0;
             std::string text = texts.active
                 ? assemble_traverse_response(envelope, std::move(texts.texts), check, &gap)
@@ -1173,7 +1171,7 @@ int run_server(Config *config) {
                 // tombstoned id is refused, without usage (it would be reconciled against the
                 // other attempt); and one whose not_after_ms has passed is not started at all
                 // (its ledger may already have released it), also without usage. Once its
-                // retention and hold are over the id runs again (the review of 2026-10-06, D3)
+                // retention and hold are over the id runs again
                 if (auto refused = attempts.start(attempt)) {
                     if (refused->instance_mismatch) {
                         logger->info("[Server] Attempt {} (request {}): not started, {}",
@@ -1195,9 +1193,8 @@ int run_server(Config *config) {
                                         "cancelled before this request arrived (tombstoned: "
                                       + attempts.retention_text() + "): it is not run";
                     } else {
-                        // not "within the retention period: an attempt runs once" (before the
-                        // review of the P2 fixes): a finished id is also refused while held past
-                        // its retention, and runs again once neither keeps it (D3)
+                        // a finished id is also refused while held past its retention, and runs
+                        // again once neither keeps it
                         body["error"] = "attempt_id '" + attempt->ids().attempt_id + "' is "
                                         "running, or retained or held after it finished, on "
                                         "this server (" + attempts.retention_text()
@@ -1321,9 +1318,9 @@ int run_server(Config *config) {
     auto deadline_check_json = [&]() {
         Json::Value d;
         d["chunk_target_ms"] = static_cast<Json::UInt64>(config->traverse_chunk_target_ms);
-        // No time bound on one piece is stated, and none will be (decision 3c-N5): the later
-        // stages' checkpoints bound the index operations of a piece, not its wall time, which
-        // page faults and scheduling leave open
+        // No time bound on one piece is stated, and none will be: checkpoints bound the index
+        // operations of a piece, not its wall time, which page faults and scheduling leave
+        // open
         d["max_uninterruptible_ms"] = Json::Value();
         d["observed_max_uninterruptible_ms"]
             = static_cast<Json::UInt64>(attempts.observed_max_uninterruptible_ms());
@@ -1401,24 +1398,23 @@ int run_server(Config *config) {
         caps["max_query_bp"] = static_cast<Json::UInt64>(config->resolve_max_query_bp);
         // the request budgets of DESIGN-traverse-graphlet.md §14 (bounds.max_memory_mb,
         // bounds.max_work_units) and W, the interval in charged work units at which the
-        // walker reads the clock at the latest; stated here, not in every response, where
-        // the per-request capabilities stay as they were. How far a work stop can exceed
-        // its budget is stated with what bounds it, not as a fixed maximum: a fetch
-        // call's rows are decoded and charged whole (GPT review of stage 2, finding 2),
-        // and each stop states the most its seed charged between two comparisons (the
-        // review of the stage-2 fixes, F7: no fixed kind of charge bounds them all)
+        // walker reads the clock at the latest; stated here, not in the per-request
+        // capabilities of every response. How far a work stop can exceed its budget is
+        // stated with what bounds it, not as a fixed maximum: a fetch call's rows are
+        // decoded and charged whole, and each stop states the most its seed charged
+        // between two comparisons (no fixed kind of charge bounds them all)
         Json::Value budgets(Json::arrayValue);
         budgets.append("max_memory_mb");
         budgets.append("max_work_units");
         caps["budgets"] = budgets;
-        // the server's maxima of those budgets (feature level 4, R16; 0: off): a larger
+        // the server's maxima of those budgets (feature level 4; 0: off): a larger
         // budget is lowered to it and an omitted one set to it, echoed in strategy.clamped
         caps["max_memory_mb"] = static_cast<Json::UInt64>(config->traverse_max_memory_mb);
         caps["max_work_units"] = static_cast<Json::UInt64>(config->traverse_max_work_units);
         caps["work_check_interval"]
             = static_cast<Json::UInt64>(graph::traversal::kWorkCheckInterval);
-        // Work is deterministic LOGICAL work, not measured decode effort (review of stage 3,
-        // answer 1): the physical decode counters are in each response's timing
+        // Work is deterministic LOGICAL work, not measured decode effort: the physical
+        // decode counters are in each response's timing
         caps["work_bound"] = "bounds.max_work_units counts deterministic logical work, not "
             "measured decode effort: 4 per successor enumeration; per annotation row a fetch "
             "returns 8 per key and 1 per entry and coordinate, and on a budget-aware "
@@ -1434,7 +1430,7 @@ int run_server(Config *config) {
             "is read before every head and at least every work_check_interval units; the "
             "physical decode counters are in timing";
         caps["memory_bound"] = "soft";
-        // the row-diff path cache of the reads (feature level 4, the efficiency pass)
+        // the row-diff path cache of the reads (feature level 4)
         Json::Value decode_cache;
         decode_cache["path_cache_mb"] = static_cast<Json::UInt64>(config->traverse_path_cache_mb);
         decode_cache["rule"] = "on a row-diff annotation rows a /traverse request's reads "
@@ -1472,7 +1468,7 @@ int run_server(Config *config) {
         // /capabilities, here because this is the document a service's probe reads
         caps["pattern"] = pattern_capabilities_json(&index, pattern_limits(*config),
                                                     !config->fnames.empty());
-        // /resolve's deadline (bounds.time_budget_ms, milestone 1b): the same block as on
+        // /resolve's deadline (bounds.time_budget_ms): the same block as on
         // /capabilities. Not a feature_level bump, which every /resolve and /traverse response
         // states: a client gates on this block's presence
         caps["resolve"] = resolve_capabilities_json(resolve_time);
@@ -1527,7 +1523,7 @@ int run_server(Config *config) {
         }, /* compact */ true, &traversal_io);
     };
 
-    // The server-wide capabilities (DESIGN-traverse-graphlet.md §21, the owner's note): the
+    // The server-wide capabilities (DESIGN-traverse-graphlet.md §21): the
     // routes and features this server offers, its mode and graphs, the attempts and how
     // deadlines are checked — answered while the single index loads (ready: false), so that a
     // service can learn the server's instance and contract before it routes anything to it
@@ -1717,7 +1713,7 @@ int run_server(Config *config) {
     // through this function's destructors. They join what may still run: graph_loader an index
     // load in progress (single-index mode serves 503 while it loads, so a stop can come before
     // it ends — on a cold disk minutes later, the whole docker-stop timeout this shutdown is
-    // there to avoid; review of W2), graphs_pool its tasks. Nothing of the process's state
+    // there to avoid), graphs_pool its tasks. Nothing of the process's state
     // outlives it (an index is only read), so nothing is lost by not unwinding
     logger->info("[Server] Stopped");
     shutdown.finished();

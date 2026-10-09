@@ -48,7 +48,7 @@ namespace {
 // The check of the server's attempt while the results are built (traverse_attempts.hpp): its
 // client (gone: AttemptAborted) and its bound (reached: AttemptAtBound), every 4096 objects of
 // the JSON tree and of the MGT text, so that an attempt stops at its bound wherever it is
-// rather than outliving the lease that bound is (DESIGN-traverse-graphlet.md §14 v5.1). Set by
+// rather than outliving the lease that bound is (DESIGN-traverse-graphlet.md §14). Set by
 // process_traverse_request for its own thread (the builders take no attempt); null otherwise,
 // where a tick is one test of a thread-local pointer.
 thread_local Attempt *t_delivery = nullptr;
@@ -164,8 +164,8 @@ Json::Value labels_json(const std::vector<LabelId> &labels) {
 // and a number is then rejected rather than accepted and ignored.
 // |min| > 0: a knob 0 means nothing for. Every number out of [min, max] is then refused with
 // that whole range, "unlimited" included, so that a client following the refusal is not
-// refused again: [0, max] misstated it, and 0 had a refusal of its own (review of W1,
-// finding 4). With |min| 0 the knob's refusals are the ones it always had.
+// refused again (a refusal naming [0, max] would misstate it, and 0 would need a refusal of
+// its own). With |min| 0, every number out of [0, max] is refused.
 size_t limit_or_unlimited(Strict &s, const std::string &k, size_t def, size_t max,
                           const char *only_unlimited, size_t min = 0) {
     if (!s.has(k))
@@ -451,11 +451,11 @@ TraverseRequest parse_traverse_request(const Json::Value &json) {
             // shorter than k could not be resubmitted as a seed
             st.continuation_bp = o.uint("continuation_bp", 1000, 0);
             req.timing = o.boolean("timing", true);
-            // Record coordinates (DESIGN-traverse-graphlet.md §18; opt-in, decision C1). The cap
-            // is refused without coordinates: true, where it would change nothing (§7.0's rule
-            // for knobs, decision C-N6), and accepted with it whatever the support — under
-            // support kmer it is inert, and the result says why no coordinates are reported
-            // (C-N7), so that a request switching its support stays valid
+            // Record coordinates (DESIGN-traverse-graphlet.md §18; opt-in). The cap is refused
+            // without coordinates: true, where it would change nothing (§7.0's rule for knobs),
+            // and accepted with it whatever the support — under support kmer it is inert, and
+            // the result says why no coordinates are reported, so that a request switching its
+            // support stays valid
             st.coordinates = o.boolean("coordinates", false);
             if (o.has("max_coordinate_occurrences")) {
                 if (!st.coordinates) {
@@ -548,10 +548,10 @@ ResolveRequest parse_resolve_request(const Json::Value &json) {
     if (s.has("bounds")) {
         Strict b(s.raw("bounds"), "request.bounds");
         req.max_query_bp = b.uint("max_query_bp", 1'000'000, 1);
-        // The deadline (milestone 1b of DESIGN-pattern-search.md: the search service runs
-        // /resolve as a job): opt-in, so that a request without it is answered exactly as
-        // before. Any finite non-negative number here; the route refuses a budget not above
-        // its finalisation reserve and lowers one above the server's cap, which it knows
+        // The deadline (the search service runs /resolve as a job): opt-in, so that a
+        // request without it is answered without a time limit. Any finite non-negative
+        // number here; the route refuses a budget not above its finalisation reserve and
+        // lowers one above the server's cap, which it knows
         if (b.has("time_budget_ms")) {
             req.time_budget_ms = b.number("time_budget_ms", 0, 0,
                                           std::numeric_limits<double>::max());
@@ -680,8 +680,8 @@ Json::Value strategy_to_json(const Strategy &st, const CostSpec &cost, const std
     o["profile_bin_bp"] = uint_json(st.profile_bin_bp);
     o["max_branch_events"] = limit_json(st.max_branch_events);
     o["continuation_bp"] = uint_json(st.continuation_bp);
-    // echoed only when asked for (decision C1), with the cap, default included, so that the
-    // echo is the whole request; the echo of a request without them stays what it was
+    // echoed only when asked for, with the cap, default included, so that the echo is the
+    // whole request; a request without them echoes neither
     if (st.coordinates) {
         o["coordinates"] = true;
         o["max_coordinate_occurrences"] = limit_json(st.max_coordinate_occurrences);
@@ -757,8 +757,8 @@ static Json::Value limitation(const char *kind, const std::string &knob, Json::V
     return j;
 }
 
-// What a walk_domain of a budget at the server's maximum (R16; state_budget_clamp) says in
-// place of "raise the knob"
+// What a walk_domain of a budget at the server's maximum (SPEC §10.3; state_budget_clamp)
+// says in place of "raise the knob"
 static const char *const kAtServerMaximum
     = "; the knob is at the server's maximum (server_limit), which a request cannot raise";
 
@@ -774,9 +774,8 @@ static const char* external_cause(const ResourceStop &q) {
     return q.resource == ResourceStop::CANCELLED
         ? "the attempt was cancelled (POST /traverse/cancel)"
         // the bound as enforced: capped at attempts.hard_cap_ms, the content timeout less one
-        // second (the review of 2026-10-06, C16: a request of 30 or more default seeds was told
-        // the uncapped sum). An effect is priced at 640 bytes (DeliveryCosts), so the cap is
-        // named by its capabilities field rather than spelled out
+        // second. An effect is priced at 640 bytes (DeliveryCosts), so the cap is named by its
+        // capabilities field rather than spelled out
         : "the attempt reached the time at which the server stops walking it (the duration "
           "bound it enforces, the seeds' time budgets plus its allowance (at most hard_cap_ms), "
           "less the larger of half the allowance and the delivery reserve, kept for the "
@@ -816,8 +815,8 @@ static bool ended_by(const ArmResult &arm, EndReason reason) {
                        [&](const PathResult &p) { return p.path_reason == reason; });
 }
 
-// A stop by a budget-aware annotation read that did not fit (stage 3 of
-// DESIGN-traverse-graphlet.md §14.1): its statements name the decoding, its levers the seed
+// A stop by a budget-aware annotation read that did not fit
+// (DESIGN-traverse-graphlet.md §14.1): its statements name the decoding, its levers the seed
 static bool is_decode_stop(const ResourceStop &q) {
     return std::string(q.phase) == "annotation_decode";
 }
@@ -825,7 +824,7 @@ static bool is_decode_stop(const ResourceStop &q) {
 // A seed-level memory stop's walk_domain observed, in the knob's unit: the smallest budget
 // (whole MiB) that holds its demand beside the caches' allotments of THAT budget — the demand
 // includes this budget's allotments, which grow with the knob, so the demand itself, raised
-// to, failed again (review of the stage-3 fixes, P2)
+// to, would fail again
 static uint64_t knob_mib(const ResourceStop &q) {
     return memory_budget_holding(static_cast<uint64_t>(std::ceil(q.demand)), q.allotted) >> 20;
 }
@@ -901,7 +900,7 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
             // A refused level read and a level whose lists left no room state the least the
             // stop needed (the exact demand would depend on annotation.batch_kmers, §6.8), so
             // the value is a lower bound, said as such, and raising the knob to it is no
-            // promise (review of stage 3, answer 2)
+            // promise
             if (trigger && r == EndReason::RESOURCE_LIMIT && stop && !stop->injected
                     && stop->lower_bound) {
                 effect += " (observed: at least what admitting it needed, MiB rounded up to the "
@@ -911,8 +910,8 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
             } else if (trigger && r == EndReason::RESOURCE_LIMIT && stop && !stop->injected
                     && stop->resource == ResourceStop::MEMORY && stop->allotted) {
                 // the need at this budget includes the caches' allotments of this budget, which
-                // grow with it: the budget that admits the head is stated (memory_budget_holding;
-                // review of the stage-3 fixes, P2)
+                // grow with it: the budget that admits the head is stated
+                // (memory_budget_holding)
                 effect += " (observed: what admitting it needed, MiB rounded up to the smallest "
                           "budget that admits it with the caches' allotments, which grow with the "
                           "budget)";
@@ -1014,7 +1013,7 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
 
 // The per-seed outcome (spec §7.0), one axis per guarantee, read off the stated limitations
 // of the result itself (seed level and every arm): conservative by construction
-// (DESIGN-traverse-graphlet.md §14, v5.2) — an axis is complete only when no limitation of
+// (DESIGN-traverse-graphlet.md §14) — an axis is complete only when no limitation of
 // its class applies, so a reader never finds a limitation whose axis still reads complete.
 //   walks               partial: walk_domain (an arm stopped at a cap), seed_labels (a carrier
 //                       of the seed was not taken, so the walks only it carries are missing),
@@ -1027,9 +1026,9 @@ static Json::Value arm_limitations(const ArmResult &arm, const Strategy &st,
 //                       inexact_counts, seed_labels, switch_sources, greedy_losses;
 //                       qualified: something reported may be overstated —
 //                       trace_record_boundaries, and a walked result's derivation (its
-//                       permitted set derived from part of the seed, D3); qualified wins when
+//                       permitted set derived from part of the seed); qualified wins when
 //                       both apply. The coordinates limitation (a cut occurrence list) is in
-//                       no class (decision C2, provisional): its block states complete: false
+//                       no class: its block states complete: false
 //   delivery            inline (the whole result is in this response); spooled / paged
 //                       are reserved for the graphlet delivery path
 static Json::Value outcome_of(const Json::Value &result, bool failed) {
@@ -1043,8 +1042,8 @@ static Json::Value outcome_of(const Json::Value &result, bool failed) {
             lower |= kind == "label_lists" || kind == "inexact_counts" || kind == "seed_labels"
                   || kind == "switch_sources" || kind == "greedy_losses";
             // a walked result's derivation limitation: its permitted set was derived from part
-            // of the seed (D3), a superset of the whole seed's carriers. A failed seed's states
-            // why there is no result at all and qualifies nothing (as before)
+            // of the seed, a superset of the whole seed's carriers. A failed seed's states
+            // why there is no result at all and qualifies nothing
             qualified |= kind == "trace_record_boundaries" || (kind == "derivation" && !failed);
         }
     };
@@ -1429,8 +1428,8 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
             // A seed-phase read (the derivation's window, the validation) holds annotation
             // rows, not output: the detail does not change what it needs. An annotate root's
             // read competes with the account, which holds the other arm's root and its labels
-            // once that was read: the detail and the label cap shrink those (review of stage 3,
-            // F7: they were not offered, and they turn such a failure into a walk)
+            // once that was read: the detail and the label cap shrink those (they turn such a
+            // failure into a walk)
             const bool seed_read = failed && q.cause == ResourceStop::READ_ROW
                 && q.where != ResourceStop::ROOT;
             const bool root_read = failed && q.cause == ResourceStop::READ_ROW
@@ -1449,8 +1448,8 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                     // account: the recorded block (a run's coordinates can cost 4-20 times the
                     // run itself) or the null form with its reason, which no request can avoid
                     // but by dropping them (an index without coordinates, support kmer: about
-                    // 1.6 KB a seed, enough to move a stop). The action of decision C12, offered
-                    // for both (review of W1, finding 2)
+                    // 1.6 KB a seed, enough to move a stop). drop_coordinates is offered
+                    // for both
                     if (st.coordinates)
                         actions.append("drop_coordinates");
                 }
@@ -1458,7 +1457,7 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
             if (q.injected) {
                 // no lever helps against a test hook
             } else if (q.cause == ResourceStop::READ_ROW) {
-                // A refused annotation read (stage 3): on a row-diff annotation every read
+                // A refused annotation read: on a row-diff annotation every read
                 // decodes a whole row with its dependency rows, so what reads fewer rows is
                 // the lever — a more selective seed, or in annotate mode (which reads every
                 // node's row) a label-constrained query; naming fewer labels or a smaller
@@ -1533,8 +1532,7 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                               "traversal exists within the budget, not even one complete to 0 bp)";
         if (q.resource == ResourceStop::WORK) {
             // how far the failed seed phase ran past the budget, with the number that bounds
-            // it, as a walk's work stop states it (review of the stage-2 recheck, P2: a failed
-            // seed's message returned before the statement)
+            // it, as a walk's work stop states it
             message += "; the seed phase is compared with the budget once every "
                      + std::to_string(kWorkCheckInterval) + " units and fails at a comparison "
                        "finding it at least " + std::to_string(kWorkCheckInterval)
@@ -1547,10 +1545,9 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
         return j;
     }
     if (q.resource == ResourceStop::MEMORY && q.cause != ResourceStop::HEAD) {
-        // A level's budget-aware annotation read did not fit (stage 3): the level is censored
-        // from its first head, as at a refused head. The message names what did not fit — the
-        // row, the labels it would name first, or the level's own lists — with its bytes
-        // (review of stage 3, F2, F6)
+        // A level's budget-aware annotation read did not fit: the level is censored from its
+        // first head, as at a refused head. The message names what did not fit — the row, the
+        // labels it would name first, or the level's own lists — with its bytes
         const std::string where = std::to_string(q.at_bp) + " bp on the " + to_string(q.arm)
                                 + " arm";
         const std::string present = "every walk up to each arm's complete_to_bp is present and "
@@ -1570,8 +1567,7 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                       "output's detail";
         } else if (q.cause == ResourceStop::LABEL_NAMES && q.names_after_read) {
             // a format whose reads are not budget-aware: no row was refused, so there is no
-            // row demand or bytes left to state, and the need is a lower bound (review of
-            // 2026-10-06, U03-03)
+            // row demand or bytes left to state, and the need is a lower bound
             message = "the memory budget (" + knob + ") stopped the walk at " + where
                     + " after reading the next level's annotation: its rows named "
                     + std::to_string(q.labels) + " new dictionary label(s), whose entries and "
@@ -1616,7 +1612,7 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
     }
     if (is_external_stop(q)) {
         // when the walk stopped, on the attempt's clock: what a ledger needs to release the
-        // attempt's capacity (DESIGN §14 v5.1: a cancellation must be acknowledged)
+        // attempt's capacity (DESIGN §14: a cancellation must be acknowledged)
         j["message"] = std::string(external_cause(q)) + " and the walk stopped at the next "
             "checkpoint, " + std::to_string(static_cast<uint64_t>(q.used)) + " ms after the "
             "request was received (the bound: " + std::to_string(static_cast<uint64_t>(q.limit))
@@ -1648,22 +1644,21 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
                    "annotation decoding is not charged yet (memory_bound_soft)";
     } else if (q.resource == ResourceStop::WORK) {
         // How far used can exceed the budget, stated with the number that bounds it rather
-        // than as a fixed maximum (GPT review of stage 2, finding 2) or a kind of charge
-        // that another kind could break (the review of the stage-2 fixes, F4, F5, F7: two
-        // roots' rows, a row's coordinates and a label-state scan each exceeded "the
+        // than as a fixed maximum or a kind of charge that another kind could break (two
+        // roots' rows, a row's coordinates and a label-state scan can each exceed "the
         // widest row"): every comparison follows one that passed, so the overrun is at
         // most what was charged since, and the walker records the most it charged between
-        // two comparisons. Work is the walk's, the same in every detail (finding 5 of the
-        // first stage-2 review: charging delivery would make the stop depend on the
-        // detail), so it also says what bounds the output.
+        // two comparisons. Work is the walk's, the same in every detail (charging delivery
+        // would make the stop depend on the detail), so it also says what bounds the
+        // output.
         message += "; work is compared with the budget after every charge, so used exceeds it "
                    "by at most what was charged since the previous comparison";
         if (account && account->largest_charge) {
             message += " (the most this seed charged between two comparisons: "
                      + std::to_string(account->largest_charge) + " units)";
         }
-        // with the budget-aware reads a row is charged with its row-diff dependency rows
-        // (stage 3); a row-diff annotation without them says that they are not counted
+        // with the budget-aware reads a row is charged with its row-diff dependency rows; a
+        // row-diff annotation without them says that they are not counted
         const char *weights = account && account->decode_charged
             ? "(8 per key and per dependency row, 1 per entry and coordinate; near the budget a "
               "call reads one key)"
@@ -1672,8 +1667,7 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
               "call reads one key)"
             : "(8 per key, 1 per entry and coordinate; near the budget a call reads one key)";
         // W is the threshold at which a seed phase is failed, not a ceiling on how far it ran
-        // past the budget (review of stage 3, answer 3: "cut W units past the budget" read as
-        // an exact overshoot)
+        // past the budget
         message += std::string(", one indivisible charge: a fetch call's rows, decoded whole with "
                    "their coordinates ") + weights + ", a label-state scan, or the roots' rows "
                    "with the end of the seed phase (one charge, so that the result complete to 0 "
@@ -1687,12 +1681,12 @@ static Json::Value resource_stop_json(const ResourceStop &q, const Strategy &st,
     return j;
 }
 
-// memory_bound_soft (§7.0): stated by every response under a memory budget — a failed
-// seed's too — because something is always held beyond the admitted account. With the
-// budget-aware reads (stage 3, account.decode_charged) the annotation reads are charged
-// before they are held, and the statement names only what is still uncharged; otherwise
-// stage 2's statement. Both name a failed result's echo of the request's seed_id, which only
-// the request bounds (failed_soft prices it; review of the stage-2 recheck, design answer 5).
+// memory_bound_soft (§7.0): stated by every response under a memory budget — a failed seed's
+// too — because something is always held beyond the admitted account. With the budget-aware
+// reads (account.decode_charged) the annotation reads are charged before they are held, and
+// the statement names only what is still uncharged; otherwise the decoded rows are uncharged
+// too, and the statement says so. Both name a failed result's echo of the request's seed_id,
+// which only the request bounds (failed_soft prices it).
 static Json::Value memory_bound_soft(const Strategy &st, const ResourceAccount &account) {
     return limitation("memory_bound_soft", "bounds.max_memory_mb",
                       uint_json(st.max_memory_bytes >> 20),
@@ -1727,22 +1721,21 @@ static Json::Value occurrence_json(uint64_t start, uint64_t end) {
 
 /**
  * The `coordinates` block of a seed whose coordinates were recorded (DESIGN-traverse-graphlet.md
- * §18.2, owner decisions C1-C12, revision 1 of the coordinates plan), the same in every detail:
- * the kind (record: every label a header, positions within its record; column: every label a
- * column, positions global in its column; mixed: each label's kind says which, C3), k, the cap,
- * whether every list is whole; per seed label its occurrences of the seed; per requested arm one
- * entry per run, in R order, with the occurrences of the run's own bases [from_bp, to_bp) — from
- * a chain's k-mer coordinate c at the run's last node and the run's length L: [c + k - L, c + k)
- * on the right arm, [c, c + L) on the left — the true count where the list was cut, the chains
- * that ended before the last node (C5), and lower_bound where the run's chains are a lower bound
- * (a switch into a label whose own lineage was live). A cut list is stated by the `coordinates`
- * limitation appended to |lims| (no outcome class, C2); lower-bound runs by the block alone.
- * A column's coordinates number its k-mers (record i's k-mer j is offset_i + j), so a column
- * interval numbers base p of record i as offset_i + p: record i's last k - 1 bases share their
- * numbers with record i + 1's first k - 1, and an interval touching them is attributed to one
- * record only with the record lengths (deferred, C10). The contract and the docs state it
- * (review of W1, finding 6), beside trace_record_boundaries (a column's trace can run across
- * two records whose coordinates are adjacent).
+ * §18.2), the same in every detail: the kind (record: every label a header, positions within its
+ * record; column: every label a column, positions global in its column; mixed: each label's kind
+ * says which), k, the cap, whether every list is whole; per seed label its occurrences of the
+ * seed; per requested arm one entry per run, in R order, with the occurrences of the run's own
+ * bases [from_bp, to_bp) — from a chain's k-mer coordinate c at the run's last node and the
+ * run's length L: [c + k - L, c + k) on the right arm, [c, c + L) on the left — the true count
+ * where the list was cut, the chains that ended before the last node, and lower_bound where the
+ * run's chains are a lower bound (a switch into a label whose own lineage was live). A cut list
+ * is stated by the `coordinates` limitation appended to |lims| (no outcome class); lower-bound
+ * runs by the block alone. A column's coordinates number its k-mers (record i's k-mer j is
+ * offset_i + j), so a column interval numbers base p of record i as offset_i + p: record i's
+ * last k - 1 bases share their numbers with record i + 1's first k - 1, and an interval touching
+ * them is attributed to one record only with the record lengths, which this block does not use.
+ * The contract and the docs state it, beside trace_record_boundaries (a column's trace can run
+ * across two records whose coordinates are adjacent).
  * delivery_tick() per entry and occurrence: a large block is built under the attempt's check.
  */
 static Json::Value coordinates_json(const SeedResult &r, const Strategy &st, Json::Value *lims) {
@@ -2024,14 +2017,14 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
     // server clamps this seed ran into
     Json::Value lims(Json::arrayValue);
     if (r.derivation_partial) {
-        // The time budget ran out while the permitted set was derived, after part of the seed
-        // (decision D3): the set of the k-mers read is a superset of the whole seed's carriers,
-        // so a label here may not carry the whole seed — label evidence qualified (outcome_of) —
-        // and the walk stopped at the seed. Observed: j, the k-mers read (an integer), of
-        // num_kmers — NOT the elapsed ms that the same (kind, cause, knob) observes on a seed
-        // whose derivation failed (derivation_out_of_time; a number). One triple, two units:
-        // the owner's decision of 2026-10-06 (X1) keeps the wire as level 6 has it and states
-        // both units, told apart by the result's shape (walked: arms, no `error`); SPEC §7.0
+        // The time budget ran out while the permitted set was derived, after part of the seed (a
+        // partial derivation, SPEC §7.0): the set of the k-mers read is a superset of the whole
+        // seed's carriers, so a label here may not carry the whole seed — label evidence
+        // qualified (outcome_of) — and the walk stopped at the seed. Observed: j, the k-mers
+        // read (an integer), of num_kmers — NOT the elapsed ms that the same (kind, cause, knob)
+        // observes on a seed whose derivation failed (derivation_out_of_time; a number). One
+        // triple, two units, told apart by the result's shape (walked: arms, no `error`);
+        // SPEC §7.0
         const uint64_t read = r.derivation_partial->kmers_read;
         Json::Value d = limitation(
                 "derivation", "bounds.time_budget_ms", Json::Value(st.time_budget_ms),
@@ -2051,11 +2044,11 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
         lims.append(std::move(d));
     }
     if (r.labels_dropped) {
-        // A set derived from part of the seed (D3) is a superset of the whole seed's carriers:
-        // the cap cut it in index order, so what it dropped need not carry the whole seed and
-        // what it kept may not either — the true carriers may be among either. No walk is
-        // missing for them (the walk stopped at the seed); the levers are the cap, the time
-        // budget and an explicit list (review of W1, finding 1)
+        // A set derived from part of the seed is a superset of the whole seed's carriers: the
+        // cap cut it in index order, so what it dropped need not carry the whole seed and what
+        // it kept may not either — the true carriers may be among either. No walk is missing
+        // for them (the walk stopped at the seed); the levers are the cap, the time budget and
+        // an explicit list
         lims.append(limitation("seed_labels", "labels.max_seed_labels", uint_json(st.max_seed_labels),
                                uint_json(r.labels_supporting_total),
                                r.derivation_partial
@@ -2087,14 +2080,14 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
         }
     }
     if (st.max_memory_bytes) {
-        // stage 2 of §14.1 enforces the budget on the modelled state and output; the
-        // decode of a level's annotation rows happens before it can be charged (stage 3),
-        // so the bound is soft until then, and every response under it says so
+        // the budget is enforced on the modelled state and output (§14.1); a read that is
+        // not budget-aware decodes a level's annotation rows before they can be charged,
+        // so the bound is soft, and every response under it says so
         lims.append(memory_bound_soft(st, r.account));
     }
     if (st.coordinates) {
-        // asked for (decision C1): the block where they were recorded, otherwise null with the
-        // reason (§18.1); without the request nothing, so that every output is as before
+        // asked for: the block where they were recorded, otherwise null with the reason
+        // (§18.1); without the request nothing
         if (r.coordinates_recorded) {
             j["coordinates"] = coordinates_json(r, st, &lims);
         } else {
@@ -2182,8 +2175,8 @@ Json::Value seed_result_to_json(const SeedResult &r, const Strategy &st, const s
         t["seed_phase_ms"] = c.seed_phase_seconds * 1000;
         t["seed_fetch_ms"] = c.seed_fetch_seconds * 1000;
         t["label_resolve_ms"] = c.label_resolve_seconds * 1000;
-        // the deadline record (R8): the seed's longest uninterruptible piece, and what stopped
-        // its walk how long after its deadline — which piece made a stop late
+        // the deadline record (SPEC §6.8): the seed's longest uninterruptible piece, and what
+        // stopped its walk how long after its deadline — which piece made a stop late
         Json::Value dl;
         const DeadlineRecord &d = r.deadline;
         Json::Value piece;
@@ -2358,7 +2351,7 @@ Json::Value coordinates_capabilities_json(const LabelOracle &oracle) {
     c["kinds"] = std::move(kinds);
     c["limitation"] = "coordinates";
     c["action"] = "drop_coordinates";
-    // The true bound of the block (plan revision 7): --traverse-max-memory-mb is 0 by default,
+    // The true bound of the block: --traverse-max-memory-mb is 0 by default,
     // so neither it nor the cap bounds the block's size on its own. The text names the probe's
     // own max_memory_mb / max_work_units rather than a value: this function sees no server
     // configuration, and a server maximum, when set, is the budget of every request without one
@@ -2403,11 +2396,9 @@ Json::Value capabilities_to_json(const LabelOracle &oracle, const std::string &r
     // the REQUEST schema this server accepts (strategy.schema_version): not a feature level
     c["schema_version"] = 1;
     // What the server offers beyond the base contract, monotonic: a client states a feature as
-    // "feature_level >= n" (fields are only ever added; SPEC §10.3 lists each level). 2: attempts
-    // (attempt_id/budget_id/locus_id, usage, POST /traverse/cancel, GET /traverse/attempt/{id},
-    // the enforced attempt bound) and the stop when the client is gone; 3: pass 5; 4: the
-    // efficiency pass; 5: the review of pass 5; 6: record coordinates (kTraverseFeatureLevel).
-    // In the probe and in every response, so that a client reading only responses states it too.
+    // "feature_level >= n" (fields are only ever added; SPEC §10.3 states what each level adds;
+    // kTraverseFeatureLevel). In the probe and in every response, so that a client reading only
+    // responses states it too.
     c["feature_level"] = kTraverseFeatureLevel;
     c["k"] = uint_json(oracle.get_k());
     c["regime"] = to_string(oracle.regime());
@@ -2961,12 +2952,11 @@ std::vector<IndexFile> index_load_inventory(const std::string &graph,
                                             bool coord_mapping) {
     std::vector<IndexFile> files;
     // The paths are derived from the LISTED spelling, as the loaders derive them: a sidecar is
-    // looked up next to a symlinked main file, not next to its target (review of pass 5,
-    // finding 2: two symlinks to one graph and annotation hid different .seqs files)
+    // looked up next to a symlinked main file, not next to its target (otherwise two symlinks
+    // to one graph and annotation could hide different .seqs files)
     files.push_back({ graph, "graph", true });
     // the dummy-edge mask and the Bloom filter DBGSuccinct::load reads beside the graph are
-    // its derived data, not part of the identity (the owner's decision #17 of 2026-10-08;
-    // until then they were listed here, review of pass 5, finding 3): index_derived_files
+    // its derived data, not part of the identity: index_derived_files
     files.push_back({ annotation, "annotation", true });
     for (const IndexAnnotationKind &kind : index_annotation_kinds()) {
         if (!utils::ends_with(annotation, kind.extension))
@@ -3131,8 +3121,8 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
         if (!files.emplace(path, std::make_pair(f["size"].asUInt64(), digest)).second)
             throw bad("the file " + path + " is listed twice");
     }
-    // The graph's derived data is not part of the identity (the owner's decision #17 of
-    // 2026-10-08): a manifest that lists a mask or a Bloom filter — any entry named *.edgemask
+    // The graph's derived data is not part of the identity: a manifest that lists a mask or a
+    // Bloom filter — any entry named *.edgemask
     // or *.bloom, whichever graph it belongs to — is refused rather than its entry skipped,
     // since skipping it would change the index_fp the manifest states without a word
     for (const auto &[p, entry] : files) {
@@ -3153,9 +3143,9 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
     };
     // Base names unique: loaded files are matched to entries by base name, so a manifest of a
     // directory listing several bundles that share names (A/graph.dbg, B/graph.dbg,
-    // A/annotation.seqs, B/annotation.seqs) passed for every one of them, which then stated
-    // one index_fp for different indexes (review of the pass-5 fixes; index_manifest.py writes
-    // bare base names, and --verify refuses such a manifest too)
+    // A/annotation.seqs, B/annotation.seqs) would pass for every one of them, which would then
+    // state one index_fp for different indexes (index_manifest.py writes bare base names, and
+    // --verify refuses such a manifest too)
     std::map<std::string, std::string> by_name;
     for (const auto &[p, entry] : files) {
         auto [it, inserted] = by_name.emplace(base_name(p), p);
@@ -3169,7 +3159,7 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
     // The optional files of this pair's inventory that it does not load (missing beside the
     // listed spelling, --no-coord-mapping) must not be listed either: index_fp would describe
     // a file set that is not the loaded one, while an index that does load the file states the
-    // same index_fp (review of the pass-5 fixes). Files outside the inventory (--extra: a
+    // same index_fp. Files outside the inventory (--extra: a
     // column annotation's .coords, the .weights, anchors beside another annotation type) stay
     // allowed
     for (const std::string &path : not_loaded) {
@@ -3195,7 +3185,6 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
         if (!named) {
             // an identity sidecar the loader reads (a .seqs, the row-diff anchors) that the
             // manifest does not cover could change answers under an unchanged fingerprint
-            // (review of pass 5, finding 3)
             throw bad("it does not cover the file " + path + " (" + std::to_string(size)
                       + " bytes), which the server loads for this index: the manifest must "
                         "list every file of the loader inventory (traverse --index-inventory; "
@@ -3208,9 +3197,9 @@ std::string index_manifest_fingerprint(const std::string &manifest_path,
     }
     // One graph with one annotation: a manifest that also lists another graph or annotation
     // (one written for a directory, or with --extra) would lend one fingerprint to every index
-    // of the directory, two annotations of one graph included (review of pass 5: two
-    // annotations with swapped memberships stated one index_fp and one index_meta_fp, and
-    // compared as the same index)
+    // of the directory, two annotations of one graph included (two annotations with
+    // swapped memberships would state one index_fp and one index_meta_fp, and compare as
+    // the same index)
     std::set<std::string> loaded_names;
     for (const std::string &path : loaded) {
         loaded_names.insert(base_name(path));
@@ -3281,7 +3270,7 @@ static_assert(sizeof(kReasonCodes) == kNumEndReasons + 1, "one MGT code per EndR
 
 char reason_code(EndReason reason) { return kReasonCodes[static_cast<size_t>(reason)]; }
 
-// The walker's text qualifier of a label end, kept as the code's second letter (today's
+// The walker's text qualifier of a label end, kept as the code's second letter (the
 // JSON replaces the enum by the text; the graphlet keeps both). Each text belongs to one
 // reason, which is checked rather than trusted: a new text must get a letter here.
 char qualifier_code(const std::string &text, EndReason reason) {
@@ -3551,7 +3540,7 @@ class GraphletWriter {
         end();
     }
 
-    // a JSON limitation value as a typed K value (§2.2 v5.1): the knob's own type
+    // a JSON limitation value as a typed K value (§2.2): the knob's own type
     mgt::KValue kvalue(const Json::Value &v, const std::string &what) {
         mgt::KValue k;
         if (v.isString()) {
@@ -4350,8 +4339,8 @@ uint64_t mgt_float_width(const Strategy &st, const LabelChangeCost &cost,
     // cost) and at most the loss budget; a needed budget is a loss plus one cost: so every
     // such value is 0, +inf, or in [smallest positive cost, loss budget + largest cost], and
     // the sums are rounded monotonically. Canonical MGT writes them positionally: 1e-300 is
-    // 302 characters (review of the stage-2 recheck, P1: switches of 1e-300 delivered 22 MB
-    // within an account of 16 MiB, priced at 24 characters a float).
+    // 302 characters (switches of 1e-300 priced at 24 characters a float would deliver
+    // 22 MB within an account of 16 MiB).
     std::vector<double> costs;
     switch (cost.model()) {
         case LabelChangeCost::FORBID:
@@ -4391,8 +4380,8 @@ uint64_t mgt_float_width(const Strategy &st, const LabelChangeCost &cost,
  * What one object costs this response to deliver in |detail| (bytes, upper bounds checked
  * against the serialisers by Graphlet.DeliveryCostsBoundTheOutput, adversarial names
  * included), for the memory budget (DESIGN-traverse-graphlet.md §14: "delivery is accounted
- * per expansion"). Every bound is a worst case, not an average (the owner's answer to the
- * stage-2 review: delivery margins come from demonstrated upper bounds, escaping included).
+ * per expansion"). Every bound is a worst case, not an average (delivery margins come from
+ * demonstrated upper bounds, escaping included).
  *
  * JSON (summary / tree / full, and the summary of a graphlet). jsoncpp's tree costs per
  * value at most: an object member a std::map node (rb-tree links and colour, the CZString key,
@@ -4474,7 +4463,7 @@ DeliveryCosts delivery_costs(const std::string &detail, bool sequences, uint64_t
     // list's). A run's entry: an element, its object, 8 members and its occurrence list; a seed
     // label's: an element, its object, 3 members and its list; an occurrence: an element, its
     // pair's array and two elements (numbers of at most 20 digits, the 48 B an element's text
-    // takes). A seed-level limitation beyond the fixed part's (D3's derivation): one more
+    // takes). A seed-level limitation beyond the fixed part's (a partial derivation's): one more
     if (coordinates != CoordinatesOutput::NONE) {
         d.coordinate_run = kElement + kMap + 8 * kMember + kMap;
         d.coordinate_seed = kElement + kMap + 3 * kMember + kMap;
@@ -4622,9 +4611,9 @@ static LabelChangeCost make_cost(const CostSpec &spec, const std::vector<std::st
     return LabelChangeCost::forbid();
 }
 
-// The strategy.clamped entry of the server's maximum (R16) of the budget a stop ran into —
-// bounds.max_memory_mb for a memory stop, bounds.max_work_units for a work stop — or null: the
-// budget was the request's own (a smaller one is kept), or the stop is no budget's
+// The strategy.clamped entry of the server's maximum (SPEC §10.3) of the budget a stop ran
+// into — bounds.max_memory_mb for a memory stop, bounds.max_work_units for a work stop — or
+// null: the budget was the request's own (a smaller one is kept), or the stop is no budget's
 static const Json::Value* budget_clamp(const Json::Value &clamped, ResourceStop::Resource resource) {
     const char *field = resource == ResourceStop::MEMORY ? "bounds.max_memory_mb"
                       : resource == ResourceStop::WORK ? "bounds.max_work_units" : nullptr;
@@ -4637,9 +4626,8 @@ static const Json::Value* budget_clamp(const Json::Value &clamped, ResourceStop:
     return nullptr;
 }
 
-// What a seed stopped by a budget at the server's maximum (R16) states, walked or failed in its
-// seed phase alike (review of the efficiency pass: a failed seed stated none of it and told the
-// agent to raise the knob): the server_clamp limitation; the stop's `requested`, what the request
+// What a seed stopped by a budget at the server's maximum (SPEC §10.3) states, walked or failed
+// in its seed phase alike: the server_clamp limitation; the stop's `requested`, what the request
 // asked for ("unlimited": it gave no budget); no action raising the budget, and the knob's
 // walk_domain entries carry server_limit (as a derivation's and seed_labels' do) and say that a
 // request cannot raise it — an arm's "; raise the knob" is replaced by that statement, a failed
@@ -4717,7 +4705,7 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
             for (const ArmResult &a : r.arms) {
                 affected |= a.requested && ended_by(a, EndReason::TIME_BUDGET);
             }
-            // a set derived from part of the seed (D3) names the clamped knob too, with the
+            // a set derived from part of the seed names the clamped knob too, with the
             // server's value, as a failed derivation's entry does (failed_seed_to_json)
             for (Json::Value &l : lims) {
                 if (l["kind"].asString() == "derivation" && l["knob"].asString() == field)
@@ -4728,7 +4716,7 @@ static void state_server_clamps(Json::Value *rj, const SeedResult &r, const Json
                     && (*rj)["resource_stop"]["resource"].asString() == "time")
                 (*rj)["resource_stop"]["requested"] = c["requested"];
         } else if (field == "bounds.max_memory_mb" || field == "bounds.max_work_units") {
-            // the server's maximum of a budget (R16) bound this seed when the budget stopped
+            // the server's maximum of a budget bound this seed when the budget stopped
             // its walk (state_budget_clamp)
             const ResourceStop::Resource resource = field == "bounds.max_memory_mb"
                 ? ResourceStop::MEMORY : ResourceStop::WORK;
@@ -4763,8 +4751,8 @@ static uint64_t failed_result_bytes(const Strategy &st, const Seed &seed) {
 // memory_bound_soft's observed excess (bytes) for a seed failed or refused without an
 // admitted result. Such a result is not admitted, and it echoes the request's seed_id,
 // which only the request's size bounds: a seed_id that the depth-0 admission refused still
-// came back whole (review of the stage-2 fixes, F1: 100,000 emoji, a 1.2 MB result under 1 MiB
-// with soft excess 0). It is priced as a delivered result prices it — the fixed part, an
+// comes back whole (100,000 emoji: a 1.2 MB result under 1 MiB). It is priced as a delivered
+// result prices it — the fixed part, an
 // upper bound of this shorter result, and the seed_id in every copy the serialisers hold —
 // and what exceeds the budget is stated with what the walk observed. Index-supplied names
 // in its messages are cut under a budget (Walker::echoed), so they add no more than a
@@ -4776,10 +4764,10 @@ static uint64_t failed_soft(const Strategy &st, const Seed &seed, uint64_t obser
     return std::max(observed, held > st.max_memory_bytes ? held - st.max_memory_bytes : 0);
 }
 
-// A failed, refused or never started seed of a request that asked for coordinates (decision C1)
-// states that it has none, and why: |reason| is computed once per request — the index's or the
-// support's when either rules them out whatever the seed, otherwise "no traversal" (§18.1).
-// Null: not asked for, nothing is added, so that such a result is as before
+// A failed, refused or never started seed of a request that asked for coordinates states that
+// it has none, and why: |reason| is computed once per request — the index's or the support's
+// when either rules them out whatever the seed, otherwise "no traversal" (§18.1). Null: not
+// asked for, nothing is added
 static void state_no_coordinates(Json::Value *rj, const char *reason) {
     if (!reason)
         return;
@@ -4890,7 +4878,7 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
     if (st.max_memory_bytes) {
         // every response under a memory budget states it (§7.0), a failed derivation's
         // too: it decoded whole annotation rows that no admission charged, and observed is
-        // what it was seen to hold beyond the budget (GPT review of stage 2, finding 8)
+        // what it was seen to hold beyond the budget
         ResourceAccount account;
         account.memory_limit = st.max_memory_bytes;
         account.soft_overshoot = failed_soft(st, seed, e.soft_overshoot());
@@ -4910,9 +4898,9 @@ static Json::Value failed_seed_to_json(const Seed &seed, const SeedDerivationErr
 // failed derivation -- no arms, `outcome.walks: failed`, an `error`, and a `derivation`
 // limitation with cause `unrepresentable_label_name`. Names come from FASTA headers and
 // file names, which need not be UTF-8; no output (JSON, MGT) carries such a name verbatim,
-// and a REPLACED name (U+FFFD, as earlier servers wrote it) can be another label's name
-// anywhere in the index: a continuation that resubmitted it went on under that other
-// label (GPT review, finding 1). So nothing of the seed is delivered, and neither the
+// and a REPLACED name (U+FFFD) can be another label's name anywhere in the index: a
+// continuation that resubmitted it would go on under that other label. So nothing of
+// the seed is delivered, and neither the
 // error nor the effect echoes the name's bytes: they name the label by its column (and
 // sequence id). The knob is the one that avoids recording the label where one exists.
 // Returns a null value when every name is valid.
@@ -5010,7 +4998,7 @@ static Json::Value unrepresentable_seed_to_json(const Seed &seed, const SeedResu
 // resource_stop (DESIGN §14: "failed: no valid traversal exists (structured reason in
 // limitations / resource_stop)"): a seed-level walk_domain naming the budget's knob, and
 // the resource_stop with what the budget held and needed and the levers on the seed.
-// DECISION (the conservative rule of DESIGN §14 v5.2: a stated limitation is never
+// DECISION (the conservative rule of DESIGN §14: a stated limitation is never
 // omitted, and no axis is non-complete without the limitation that explains it): the
 // walk_domain is stated although it is otherwise an arm's — the walk domain was cut to
 // nothing by a cap, which is exactly what a walk_domain states, and a reader that only
@@ -5022,7 +5010,7 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
                                               const Strategy &st, const Json::Value &clamped,
                                               const char *coordinates_reason) {
     const ResourceStop &q = e.stop();
-    // the budget at the server's maximum (R16), which a request cannot raise: its lever is
+    // the budget at the server's maximum, which a request cannot raise: its lever is
     // not offered (state_budget_clamp states the rest)
     const Json::Value *clamp = q.injected ? nullptr : budget_clamp(clamped, q.resource);
     const bool at_max = clamp != nullptr;
@@ -5035,10 +5023,10 @@ static Json::Value budget_failed_seed_to_json(const Seed &seed, const SeedBudget
     rj["error"] = e.what();
     Json::Value lims(Json::arrayValue);
     if (q.resource == ResourceStop::MEMORY && is_decode_stop(q)) {
-        // A seed-phase or root read did not fit (stage 3). Observed: what admitting the refused
-        // row needed — its standalone demand beside what was held — or, where its read alone was
-        // refused, the least it was seen to need (review of stage 3, F7: the budget's MiB plus
-        // one told an agent to raise the budget to a value that failed again)
+        // A seed-phase or root read did not fit. Observed: what admitting the refused row needed
+        // — its standalone demand beside what was held — or, where its read alone was refused,
+        // the least it was seen to need (the budget's MiB plus one would tell an agent to raise
+        // the budget to a value that fails again)
         const bool root = q.where == ResourceStop::ROOT;
         lims.append(limitation("walk_domain", "bounds.max_memory_mb",
                                st.max_memory_bytes ? uint_json(st.max_memory_bytes >> 20)
@@ -5141,7 +5129,7 @@ static const char* resource_name(ResourceStop::Resource resource) {
     return "";
 }
 
-// A seed the attempt never started (DESIGN-traverse-graphlet.md §14 v5.1): the attempt was
+// A seed the attempt never started (DESIGN-traverse-graphlet.md §14): the attempt was
 // cancelled, or reached the duration bound the server enforces for it, before this seed's walk
 // began. Failed per seed in the shape of a failed derivation (no arms, an error,
 // outcome.walks: failed) with a seed-level walk_domain naming the attempt and the
@@ -5164,7 +5152,7 @@ static Json::Value not_started_seed_to_json(const Seed &seed, ExternalStop stop,
     sj["seed_id"] = seed.seed_id;
     sj["length_bp"] = uint_json(seed.sequence.size());
     // as a walked or budget-failed seed of the same request states it: false in annotate mode
-    // (review of 2026-10-06, X-DUP-01: seed.labels.empty() said true for every annotate seed)
+    // (seed.labels.empty() would say true for every annotate seed)
     sj["labels_from_seed"] = labels_derived_from_seed(seed, st.label_mode);
     rj["seed"] = std::move(sj);
     rj["error"] = std::string("not started: ") + external_cause(q) + " before this seed began, "
@@ -5282,10 +5270,11 @@ Json::Value process_traverse_request(const Json::Value &json,
               uint_json(limits.max_seed_labels));
         req.strategy.max_seed_labels = limits.max_seed_labels;
     }
-    // The server's maxima of the budgets (R16): a larger budget is lowered to the maximum and
-    // an omitted one (none: unbounded) set to it, echoed with `requested` "unlimited" (how a
-    // knob spells no limit, which the graphlet's K and Q records can hold, unlike null), so
-    // that no request on such a server runs without the bound the operator chose
+    // The server's maxima of the budgets (SPEC §10.3): a larger budget is lowered to the
+    // maximum and an omitted one (none: unbounded) set to it, echoed with `requested`
+    // "unlimited" (how a knob spells no limit, which the graphlet's K and Q records can hold,
+    // unlike null), so that no request on such a server runs without the bound the operator
+    // chose
     if (limits.max_memory_mb) {
         const uint64_t requested_mb = req.strategy.max_memory_bytes >> 20;
         if (!req.strategy.max_memory_bytes || requested_mb > limits.max_memory_mb) {
@@ -5432,7 +5421,7 @@ Json::Value process_traverse_request(const Json::Value &json,
     // |account|: the walk's final modelled account (0: no walk), whose ratio to the text the
     // server measures for its next attempts' estimates; |coordinates|: its record coordinates'
     // share, which the ratio leaves out with the exact text it wrote (coordinates_text_bytes,
-    // counted before the tree is freed; plan revision 3)
+    // counted before the tree is freed)
     auto append = [&](Json::Value &&rj, double built_seconds, uint64_t account = 0,
                       uint64_t coordinates = 0) {
         if (!texts) {
@@ -5471,8 +5460,7 @@ Json::Value process_traverse_request(const Json::Value &json,
                     append(not_started_seed_to_json(req.seeds[j], stop, attempt->bound_ms(),
                                                     attempt->elapsed_ms(), req.strategy,
                                                     decode_charged, no_coordinates), 0);
-                    // its usage is what its result states and holds (review of the stage-4
-                    // backend, F1: a never started seed stated a soft excess its usage did not)
+                    // its usage is what its result states and holds
                     SeedUsage usage;
                     usage.meter.memory_final = failed_result_bytes(req.strategy, req.seeds[j]);
                     usage.meter.soft_excess = failed_soft(req.strategy, req.seeds[j], 0);
@@ -5488,9 +5476,8 @@ Json::Value process_traverse_request(const Json::Value &json,
         // What the seed's walk consumed and what stopped it, recorded when its walk is over
         // (before its result is built, which the attempt's bound can still interrupt). A
         // failed or refused seed's result is not the walk's: its usage states what that result
-        // holds and what its memory_bound_soft states, the echo of seed_id included (review of
-        // the stage-4 backend, F1: 52 bytes of soft excess beside a stated 20 MiB). |refused|:
-        // the demand a memory budget refused, when one stopped or failed the seed
+        // holds and what its memory_bound_soft states, the echo of seed_id included.
+        // |refused|: the demand a memory budget refused, when one stopped or failed the seed
         auto walked = [&](const std::string &outcome, const std::string &stopped_by,
                           bool failed_result = false,
                           std::optional<uint64_t> refused = std::nullopt) {
@@ -5524,7 +5511,7 @@ Json::Value process_traverse_request(const Json::Value &json,
         dict.insert(dict.end(), req.strategy.extra.begin(), req.strategy.extra.end());
         LabelChangeCost cost = make_cost(req.cost, dict);
         // the output's floats are priced at the widest the seed's costs and the time budgets
-        // can be written (24 characters for every usual request, as before)
+        // can be written (24 characters for every usual request)
         const uint64_t float_width = mgt_float_width(req.strategy, cost, requested_time_ms,
                                                      limits.max_time_ms);
         if (float_width != priced_width) {
@@ -5555,9 +5542,9 @@ Json::Value process_traverse_request(const Json::Value &json,
             Json::Value refused = unrepresentable_seed_to_json(seed, r, req.strategy,
                                                                no_coordinates);
             if (!refused.isNull() && r.derivation_partial) {
-                // A partial set (D3) is delivered as a walk or not at all (Walker::run): such a
-                // name among labels the whole seed may exclude fails the seed as before D3, with
-                // the time budget that cut its derivation (the handler below states it)
+                // A partial derivation's set is delivered as a walk or not at all (Walker::run):
+                // such a name among labels the whole seed may exclude fails the seed with the
+                // time budget that cut its derivation (the handler below states it)
                 SeedDerivationError e = derivation_out_of_time(
                         r.derivation_partial->kmers_read, r.num_kmers, req.strategy.time_budget_ms,
                         r.derivation_partial->elapsed_ms);
@@ -5686,7 +5673,7 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
     Json::Value t;
     t["accepted"] = true;
     t["knob"] = "bounds.time_budget_ms";
-    // no deadline without the field, whatever the cap: such a request is answered as before
+    // no deadline without the field, whatever the cap: such a request has no time limit
     t["default"] = Json::Value();
     // the cap (--traverse-max-time-ms, as /traverse's); 0: none
     t["max_time_ms"] = ms_json(limits.max_time_ms);
@@ -5742,7 +5729,7 @@ Json::Value resolve_capabilities_json(const ResolveTimeLimits &limits) {
 // the prefix did not discover — whether either holds on the whole query is unknown, so the
 // selection is not made rather than refused (a 400 would blame the request for the deadline).
 // What is known whatever the stop is refused as without one, every seed checked first, in
-// select_seeds' order (review of 2026-10-07, V1-02): an interval empty or out of range, an
+// select_seeds' order: an interval empty or out of range, an
 // interval not fully in the graph (the whole query's k-mers are mapped before the deadline is
 // read), and, with explicit labels (every one of them profiled whatever the stop), a seed
 // label that is not one of them
@@ -5825,8 +5812,7 @@ Json::Value process_resolve_request(
     using graph::pattern::Deadline;
     // the deadline of a request with bounds.time_budget_ms starts here, its body parsed (as
     // /pattern's, DESIGN-pattern-search.md §5.3), before its fields are read; a request without
-    // the field reads no clock for it (review of 2026-10-07, T3-05, V1-03: the start was read
-    // for every request)
+    // the field reads no clock for it
     const std::function<Deadline::Clock::time_point()> now
             = clock ? clock : std::function<Deadline::Clock::time_point()>(&Deadline::Clock::now);
     std::optional<Deadline::Clock::time_point> start;
@@ -5905,7 +5891,7 @@ Json::Value process_resolve_request(
             abandon();
         if (req.select) {
             req.policy.release_id = release;
-            // under a stop the selection is the prefix's (decision B7), made from it unless an
+            // under a stop the selection is the prefix's, made from it unless an
             // explicit seed reaches beyond what the prefix can tell
             if (profile.stop && req.policy.policy == SelectionPolicy::EXPLICIT)
                 not_made = explicit_selection_blocked(profile, req.policy,
@@ -6001,7 +5987,7 @@ int traverse_graph(Config *config) {
             return 1;
         }
         // A request with attempt_id states its usage on an error after it was read too, as the
-        // server's 400 does (review of the stage-4 backend, F8); a malformed id is refused
+        // server's 400 does; a malformed id is refused
         // without (nothing to reconcile)
         std::unique_ptr<Attempt> attempt;
         try {

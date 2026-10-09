@@ -26,14 +26,14 @@ namespace mtg {
 namespace cli {
 
 /**
- * The backend half of stage 4 of DESIGN-traverse-graphlet.md §14 (the ledger itself lives in
- * the search service): a /traverse request that carries an `attempt_id` is an ATTEMPT the
- * service's ledger reserved an allowance for. The server registers it while it runs, lets it
- * be cancelled by id (POST /traverse/cancel), reports its state (GET /traverse/attempt/{id})
- * for a retention period after it finished, states its usage in every response to it, and
- * enforces a duration bound on it itself — §14 v5.1: a lease is a valid release point only
- * because the backend enforces the same deadline, so an attempt cannot outlive its lease, and
- * a cancellation the backend has not acknowledged releases nothing.
+ * The backend half of the attempt ledger of DESIGN-traverse-graphlet.md §14 (the ledger
+ * itself lives in the search service): a /traverse request that carries an `attempt_id` is an
+ * ATTEMPT the service's ledger reserved an allowance for. The server registers it while it
+ * runs, lets it be cancelled by id (POST /traverse/cancel), reports its state (GET
+ * /traverse/attempt/{id}) for a retention period after it finished, states its usage in every
+ * response to it, and enforces a duration bound on it itself — §14: a lease is a valid
+ * release point only because the backend enforces the same deadline, so an attempt cannot
+ * outlive its lease, and a cancellation the backend has not acknowledged releases nothing.
  *
  * Every /traverse (with or without attempt_id) is also stopped when its client is gone (the
  * connection closed): the walk is abandoned and nothing is written.
@@ -57,7 +57,7 @@ struct AttemptIds {
     // The server_instance the request is meant for (with attempt_id only): a process with
     // another one refuses it before anything runs (409, state instance_mismatch). Tombstones
     // live in memory, so after a restart a delayed copy of a cancelled request would find
-    // none and run: with this field it is refused instead (review of pass 5, finding 1)
+    // none and run: with this field it is refused instead
     std::string expect_server_instance;
 };
 
@@ -129,17 +129,17 @@ struct AttemptSettings {
     uint64_t clock_skew_ms = 2000;
     // the HTTP server's content timeout (s), from which hard_cap_ms is derived: stated
     uint64_t content_timeout_s = 900;
-    // The delivery reserve (pass 5): the rates (MB/s) at which the response is assumed to be
-    // compressed and its results' text built — the latter replaced by the slowest rate measured
-    // on the attempt's own seeds of at least kMeasuredTextBytes — and how many bytes of the
-    // walker's modelled account one byte of a seed's text is at most taken for (the model
-    // prices every delivered byte several times over). The ratios are starting estimates just
-    // below the smallest measured on real responses — 33.5 (UHGG full) to 1,344 (SRA summary)
-    // for the JSON details, 58.4 and more for a graphlet (pass 5) —, which a server replaces
-    // by its own measurements. Conservative: a server's first large attempt of a detail can
-    // still be cut early until it measured that detail (a warm SRA server cut the first tree
-    // and full attempts of a 16S beam at 3-5 s of 40 s with 20/40 and with 30/50 alike, the
-    // tree measuring 115-129; review of the efficiency pass)
+    // The delivery reserve: the rates (MB/s) at which the response is assumed to be compressed
+    // and its results' text built — the latter replaced by the slowest rate measured on the
+    // attempt's own seeds of at least kMeasuredTextBytes — and how many bytes of the walker's
+    // modelled account one byte of a seed's text is at most taken for (the model prices every
+    // delivered byte several times over). The ratios are starting estimates just below the
+    // smallest measured on real responses — 33.5 (UHGG full) to 1,344 (SRA summary) for the
+    // JSON details, 58.4 and more for a graphlet —, which a server replaces by its own
+    // measurements. Conservative: a server's first large attempt of a detail can still be cut
+    // early until it measured that detail (a warm SRA server cut the first tree and full
+    // attempts of a 16S beam at 3-5 s of 40 s with 20/40 and with 30/50 alike, the tree
+    // measuring 115-129)
     double delivery_compress_mbps = 50;
     double delivery_build_mbps = 10;
     double account_per_text_byte_json = 30;
@@ -148,20 +148,20 @@ struct AttemptSettings {
     // it — after a chunk of an annotation read, a lookahead's poll, the heads between two
     // readings of the clock (one poll in poll_stride reads it) — and its stopped
     // seed is finalised before its text is built: the time from the walk-until to the walk's
-    // end assumed until the server measured a longer one (ms; the server sets chunk_target_ms
-    // + 950; review of pass 5, F3: a walk stopped 124 ms after its walk-until left its delivery
-    // that much short of the reserve, 503). Calibrated in the efficiency pass: SRA attempts
-    // stopped 352 ms after their walk-until on a quiet fresh server, 1,001 ms on a loaded one
-    // (1,699 ms once in pass 5, under load, on a 400 MB result), against the 250 assumed
-    // before: the middle one is assumed, a longer one measured replaces it; a finalisation
-    // that grows with the result is covered by the reserve's margin as long as it runs faster
-    // than 4 x build_mbps (about 235 MB/s for that 400 MB result, against 40 MB/s needed)
+    // end assumed until the server measured a longer one (ms; the server sets chunk_target_ms +
+    // 950: a walk stopped 124 ms after its walk-until with none assumed would leave its
+    // delivery that much short of the reserve, 503). Calibrated: SRA attempts stopped 352 ms
+    // after their walk-until on a quiet fresh server, 1,001 ms on a loaded one (1,699 ms once
+    // under load, on a 400 MB result): the middle one is assumed, a longer one measured
+    // replaces it; a finalisation that grows with the result is covered by the reserve's margin
+    // as long as it runs faster than 4 x build_mbps (about 235 MB/s for that 400 MB result,
+    // against 40 MB/s needed)
     double delivery_stop_ms = 1000;
 };
 
 // The delivery model's rates and ratios vary between responses: the reserve keeps this much
-// more than the model's time (review of pass 5, F3: a reserve with no margin delivered a
-// response the model fitted exactly about half the time)
+// more than the model's time (a reserve with no margin would deliver a response the model
+// fits exactly only about half the time)
 constexpr double kReserveMargin = 1.25;
 
 // The most text one byte of the record coordinates' share of a seed's account (DeliveryCosts:
@@ -173,9 +173,8 @@ constexpr double kReserveMargin = 1.25;
 // graphlet) 15,151, the null form (106) 1,584: 14.9 at the least
 // (GraphletCoordinates.CoordinateAccountBoundsItsText). The
 // reserve estimates the coordinate share's text with it, not with the measured ratio of the
-// rest of the output (115-129 for a tree, against 20-73 for an occurrence: measured, it
-// understated a coordinate-heavy seed's text up to 4 times, DESIGN §26 M2; plan revision 3,
-// decision D5)
+// rest of the output (115-129 for a tree, against 20-73 for an occurrence: the measured
+// ratio would understate a coordinate-heavy seed's text up to 4 times, DESIGN §26 M2)
 constexpr uint64_t kCoordinateAccountPerTextByte = 12;
 
 // a seed's text (or a response) of at least this many bytes measures a delivery rate (smaller
@@ -186,7 +185,7 @@ constexpr uint64_t kMeasuredTextBytes = 1 << 20;
 // once, a temporarily slow response is remembered for a while)
 constexpr size_t kRateWindow = 16;
 
-// What a server measured of its own deliveries (pass 5; 0: not measured yet): the slowest
+// What a server measured of its own deliveries (0: not measured yet): the slowest
 // rates (MB/s) at which it built a seed's result text and compressed a response, and per
 // detail the smallest ratio of a seed's modelled account to its text — each over its last
 // kRateWindow measurements of at least kMeasuredTextBytes
@@ -210,8 +209,8 @@ struct SeedUsage {
     // The walker's meter, as the result states it: for a failed or never started seed, whose
     // result is not the walk's, |memory_final| is what that result holds until the response is
     // written (its fixed part and its echo of seed_id, as failed_soft prices it) and
-    // |soft_excess| what its memory_bound_soft states (the echo included; review of the stage-4
-    // backend, F1); |memory_peak| is at most the budget (what the budget admitted)
+    // |soft_excess| what its memory_bound_soft states (the echo included); |memory_peak| is at
+    // most the budget (what the budget admitted)
     graph::traversal::AttemptMeter meter;
     // the demand a memory budget refused when it stopped or failed the seed (bytes at that
     // budget: a head, a read, or the seed's depth-0 state); none when no memory budget did
@@ -271,7 +270,7 @@ class Attempt {
     // enforced): what sizes the chunks of the walk's annotation reads (the handler's thread)
     double ms_left() const;
 
-    // ---- the delivery reserve (pass 5): the seeds stop being walked at
+    // ---- the delivery reserve: the seeds stop being walked at
     // bound - max(allowance / 2, reserve), the reserve being kReserveMargin times the time to
     // build and compress what the response will hold — the text of the seeds finished so far
     // (exact, written as each was built) and of the seed being walked (its modelled account
@@ -292,8 +291,8 @@ class Attempt {
     // walk whose modelled account ended at |account| bytes (0: no walk, a failed seed), of
     // which |coordinate_account| is the coordinate share and |coordinate_text| the exact text
     // it wrote (coordinates_text_bytes): the ratio of the rest is measured without both, so
-    // that a request with coordinates measures what the same walk without them would (plan
-    // revision 3: their ratio would lower the estimate of every later attempt without them)
+    // that a request with coordinates measures what the same walk without them would (their
+    // ratio would lower the estimate of every later attempt without them)
     void note_delivered(uint64_t text_bytes, double build_seconds, uint64_t account = 0,
                         uint64_t coordinate_account = 0, uint64_t coordinate_text = 0);
     // what this server measured before the attempt started: it replaces the configured rates
@@ -343,7 +342,7 @@ class Attempt {
     void seed_delivered(size_t index, const std::string &outcome, double elapsed_ms);
     // The longest uninterruptible piece of the request's walks so far (ms; an annotation read
     // or chunk, or a head piece — the walk between two readings of the clock for a stop,
-    // DecodePacer::max_uninterruptible_ms; head pieces since the review of 2026-10-06, W3),
+    // DecodePacer::max_uninterruptible_ms),
     // stated in usage as observed_max_uninterruptible_ms
     void note_max_uninterruptible_ms(double ms);
     double max_uninterruptible_ms() const;
@@ -456,9 +455,8 @@ class Attempt {
     // the one ms the wall clock's inclusive expiry adds; a forward step of the wall clock does
     // not shorten it), and the wall clock while it reads at most |tomb_wall_until_ms_|
     // (inclusive: the strict not_after check still admits a copy at not_after_ms itself, so a
-    // hold to not_after_ms + skew must include that instant; review of the pass-5 fixes,
-    // finding 2) — so a covered not_after_ms has passed on that clock whenever the hold is
-    // gone. Never shortened
+    // hold to not_after_ms + skew must include that instant) — so a covered not_after_ms
+    // has passed on that clock whenever the hold is gone. Never shortened
     Clock::time_point tomb_steady_until_;
     uint64_t tomb_wall_until_ms_ = 0;
     // the largest not_after_ms a cancel or a refused copy named for the id (none: none did)
@@ -474,9 +472,9 @@ class Attempt {
  * it is running or retained: a second request with it is refused (409), never run twice. A
  * finished attempt sent with not_after_ms is retained at least until not_after_ms +
  * clock_skew_ms (within the cap from its finish), so that a replay of the request is refused
- * while it could still be admitted (review of the pass-5 fixes, finding 1: a ledger releases
- * on a finished state, and a replay arriving after retention_s, or after retention_count later
- * finishes, ran again).
+ * while it could still be admitted (a ledger releases on a finished state, and a replay
+ * arriving after retention_s, or after retention_count later finishes, would otherwise run
+ * again).
  */
 class AttemptRegistry {
   public:
@@ -580,9 +578,9 @@ class AttemptRegistry {
     std::deque<std::shared_ptr<Attempt>> retained_;
     // the tombstones, and the finished attempts held past their retention, by their
     // steady-clock expiry (and id), apart from the retained attempts: each is kept its whole
-    // hold, whatever finishes after it (review of the stage-4 backend, F6: sharing
-    // retention_count, later finishes evicted a tombstone early and the cancelled id ran); one
-    // whose steady expiry passed while its wall-clock one has not (the wall clock stepped back)
+    // hold, whatever finishes after it (sharing retention_count, later finishes would evict a
+    // tombstone early and the cancelled id would run); one whose steady expiry passed while its
+    // wall-clock one has not (the wall clock stepped back)
     // is re-keyed to the time its wall clock still needs. A held finished attempt is never
     // dropped early, so the table can exceed retention_count by them (a cancel of an unknown id
     // is refused, 429, while it holds that many): what it holds is bounded by the attempts

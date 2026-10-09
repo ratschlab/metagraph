@@ -124,8 +124,8 @@ Config::Config(int argc, char *argv[]) {
     bool xdrop_override = false;
     // An integer (ms) the traversal capabilities state: non-negative and exactly representable
     // as a double, so that a JSON client reads it as written and a ledger can add to it (atoll
-    // wrapped -1 to 2^64 - 1, stated as such; review of pass 5). The attempts' allowance too: a
-    // fraction would be stated rounded and enforced unrounded
+    // would wrap -1 to 2^64 - 1, stated as such). The attempts' allowance too: a fraction would
+    // be stated rounded and enforced unrounded
     // the value of |text| when it is an integer in [0, 2^53 - 1] (none otherwise)
     const auto exact_integer = [](const char *text) -> std::optional<uint64_t> {
         char *end = nullptr;
@@ -146,12 +146,12 @@ Config::Config(int argc, char *argv[]) {
         }
         *out = *v;
     };
-    // An integer in [0, |max|]: the attempts' retention settings (review of pass 5, finding 4:
-    // atoll read -1 as 2^64 - 1 seconds, which the capabilities stated while the conversion to
-    // a signed std::chrono::seconds expired every tombstone at once). |max| keeps every
-    // conversion the registry makes exact (seconds to steady-clock nanoseconds, to Unix-epoch
-    // milliseconds) far from overflowing, so a value is refused at start-up rather than wrapped.
-    // Every refusal names the option's own range (a negative or non-numeric value too)
+    // An integer in [0, |max|]: the attempts' retention settings (atoll would read -1 as
+    // 2^64 - 1 seconds, which the capabilities would state while the conversion to a signed
+    // std::chrono::seconds expired every tombstone at once). |max| keeps every conversion the
+    // registry makes exact (seconds to steady-clock nanoseconds, to Unix-epoch milliseconds)
+    // far from overflowing, so a value is refused at start-up rather than wrapped. Every
+    // refusal names the option's own range (a negative or non-numeric value too)
     const auto bounded = [&](const char *option, const char *text, uint64_t max, uint64_t *out) {
         const std::optional<uint64_t> v = exact_integer(text);
         if (!v || *v > max) {
@@ -639,7 +639,7 @@ Config::Config(int argc, char *argv[]) {
     }
     // the mask is built where the graph is loaded at start-up: one graph (-i / -a) of
     // server_query or pattern. A graph list's graphs are loaded by requests, and /pattern is
-    // not served on them yet (a later increment), so the flag would do nothing there
+    // not served on them, so the flag would do nothing there
     if (pattern_build_mask
             && !(identity == PATTERN || (identity == SERVER_QUERY && fnames.empty()))) {
         std::cerr << "Error: --pattern-build-mask applies to server_query with one graph "
@@ -835,16 +835,16 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
     // a /pattern deadline the transport cannot honour would be accepted and echoed, and the
-    // connection closed at the content timeout before any answer or 503 (review of
-    // 2026-10-07, R1-05): the cap stays under it (the CLI has no transport)
+    // connection closed at the content timeout before any answer or 503: the cap stays under it
+    // (the CLI has no transport)
     if (identity == SERVER_QUERY && pattern_max_time_ms > kServerMaxDeadlineMs) {
         std::cerr << "Error: --pattern-max-time-ms must be at most " << kServerMaxDeadlineMs
                   << " on server_query (the " << kServerContentTimeoutS << " s content timeout "
                   "less " << kServerTransportMarginMs << " ms for the transport)" << std::endl;
         print_usage_and_exit = true;
     }
-    // the rates the finalisation estimate of an answer assumes (review of 2026-10-07,
-    // X-EFFICIENCY-04): a rate that is not a positive number would make the estimate meaningless
+    // the rates the finalisation estimate of an answer assumes: a rate that is not a positive
+    // number would make the estimate meaningless
     if ((identity == PATTERN || identity == SERVER_QUERY)
             && (!(pattern_delivery_build_mbps > 0) || !std::isfinite(pattern_delivery_build_mbps)
                 || !(pattern_delivery_compress_mbps > 0)
@@ -853,8 +853,8 @@ Config::Config(int argc, char *argv[]) {
                      "must be positive numbers" << std::endl;
         print_usage_and_exit = true;
     }
-    // the labelled retrieval's caps (increment 3): a row keeps at least one label, a read
-    // needs work and memory; the memory account in bytes must fit 64 bits (2^40 MiB)
+    // the labelled retrieval's caps: a row keeps at least one label, a read needs work and
+    // memory; the memory account in bytes must fit 64 bits (2^40 MiB)
     if ((identity == PATTERN || identity == SERVER_QUERY)
             && (pattern_max_labels_per_anchor < 1 || pattern_max_annotation_work < 1
                 || pattern_max_memory_mb < 1 || pattern_max_memory_mb > (uint64_t(1) << 40))) {
@@ -863,9 +863,8 @@ Config::Config(int argc, char *argv[]) {
                      "at most 2^40" << std::endl;
         print_usage_and_exit = true;
     }
-    // a predicate's selection (increment 5b): its work budget is at least one unit, as
-    // max_predicate_work's request value must be (--pattern-max-predicate-labels is bounded
-    // where it is read)
+    // a predicate's selection: its work budget is at least one unit, as max_predicate_work's
+    // request value must be (--pattern-max-predicate-labels is bounded where it is read)
     if ((identity == PATTERN || identity == SERVER_QUERY) && pattern_max_predicate_work < 1) {
         std::cerr << "Error: --pattern-max-predicate-work must be at least 1" << std::endl;
         print_usage_and_exit = true;

@@ -74,7 +74,7 @@ void build_mask_at_load(const std::shared_ptr<DeBruijnGraph> &graph, bool stdout
         return;
     }
     // (the graph was loaded without one: none beside it, or one that could not be opened,
-    // which DBGSuccinct::load names in a warning; review of 2026-10-07, M1-03)
+    // which DBGSuccinct::load names in a warning)
     logger->log(progress, "--pattern-build-mask: building the dummy-edge mask in memory "
                           "(the graph was loaded without a .edgemask)...");
     try {
@@ -141,7 +141,7 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const
         // shared with anyone, so that nothing ever sees it without the mask
         if (serves_pattern) {
             // a mask read from its file is checked once, here, before the graph is shared
-            // (mask_invalid, review of 2026-10-07, I17); one built at load is not
+            // (mask_invalid); one built at load is not
             check_mask_at_load(graph, cli);
         }
         if (build_mask) {
@@ -152,7 +152,7 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const
                     + DBGSuccinct::kDummyMaskExtension;
             if (dbg_succ && !dbg_succ->get_mask() && std::filesystem::exists(mask_path)) {
                 // a mask that is there but could not be opened (permissions): not "no mask",
-                // whose remedy transform would refuse (review of 2026-10-07, M1-03)
+                // whose remedy transform would refuse
                 logger->log(cli ? spdlog::level::warn : spdlog::level::info,
                             "The dummy-edge mask {} exists but could not be opened "
                             "(permissions?): the graph was loaded without it, and the pattern "
@@ -174,8 +174,9 @@ std::shared_future<std::shared_ptr<DeBruijnGraph>> async_load_critical_dbg(const
             }
         }
         if (serves_pattern) {
-            // without a mask (none, or not built): the dummy fraction of the estimates (owner
-            // decision #16), sampled once here rather than in the first request
+            // without a mask (none, or not built): the dummy fraction of the estimates
+            // (counts are bounds, DESIGN-pattern-search.md §4.4), sampled once here rather
+            // than in the first request
             sample_dummy_fraction_at_load(graph, cli);
         }
         return graph;

@@ -26,16 +26,15 @@ struct KmerInterval {
     }
 };
 
-// A /resolve decodes the present k-mers' rows in batches and holds one batch at a time
-// (review of the pass-5 fixes, finding 7: the discovery kept a prefix of the rows for the
-// profile pass, which decoded every other row again in one call — a second decode, and no
-// bound). The first batch has kResolveFirstBatchRows rows; each next one is sized from the
-// widest row of the one before to about kResolveBatchBytes (row_copy_bytes), at most twice the
-// previous batch's rows and at most kResolveBatchRows rows — so a batch is larger than
-// kResolveBatchBytes only where the rows widen within the query. A row is decoded once per
-// batch; a discovery keeps the row of a k-mer that occurs again later in the query for that
-// occurrence, at most kResolveKeptBytes of such rows (beyond that a repeated row is decoded
-// again), and an explicit profile decodes each distinct row once (its hits are kept per key)
+// A /resolve decodes the present k-mers' rows in batches and holds one batch at a time, so
+// that the rows it holds stay bounded. The first batch has kResolveFirstBatchRows rows; each
+// next one is sized from the widest row of the one before to about kResolveBatchBytes
+// (row_copy_bytes), at most twice the previous batch's rows and at most kResolveBatchRows rows
+// — so a batch is larger than kResolveBatchBytes only where the rows widen within the query. A
+// row is decoded once per batch; a discovery keeps the row of a k-mer that occurs again later
+// in the query for that occurrence, at most kResolveKeptBytes of such rows (beyond that a
+// repeated row is decoded again), and an explicit profile decodes each distinct row once (its
+// hits are kept per key)
 constexpr size_t kResolveFirstBatchRows = 64;
 constexpr size_t kResolveBatchRows = 4096;
 constexpr uint64_t kResolveBatchBytes = uint64_t(64) << 20;
@@ -60,8 +59,8 @@ struct ResolveOptions {
     // request runs exactly as without one). Read where |stop| is polled during the work —
     // between two row batches, every kResolveCheckKmers k-mers of the explicit labels' support
     // pass —, after |stop|: true ends the work there, and the profile is then exactly the
-    // resolve of the query's first SupportProfile::stop->resolved_kmers k-mers (decision B7,
-    // DESIGN-traverse-graphlet.md §21): a prefix, never a sample of the whole query. Under it
+    // resolve of the query's first SupportProfile::stop->resolved_kmers k-mers
+    // (DESIGN-traverse-graphlet.md §21): a prefix, never a sample of the whole query. Under it
     // the explicit labels' hits are fetched kResolveCheckKmers k-mers at a time (one fetch of
     // the whole query, the unbudgeted path, is a piece no clock read can end). Not a request
     // field.
@@ -122,7 +121,7 @@ struct ResolveStop {
     // the runs of the WHOLE query's k-mers present in the graph (SupportProfile::graph_runs
     // holds the prefix's): the k-mers are mapped before the deadline is first read, so their
     // presence is known whatever the stop — an explicit seed not fully in the graph is a 400
-    // under a stop as without one (review of 2026-10-07, V1-02)
+    // under a stop as without one
     std::vector<KmerInterval> query_graph_runs;
 };
 
@@ -220,7 +219,7 @@ static constexpr uint64_t kFnvOffsetBasis = 0xcbf29ce484222325ULL;
 std::string hex64(uint64_t x);
 
 // Run-length encoding of a presence mask ("x<n>o<n>..."), compatible with the
-// query output of `with_signature` (moved here from cli/query.cpp).
+// query output of `with_signature`.
 std::string encode_runs(const std::vector<KmerInterval> &runs, uint64_t num_kmers);
 
 } // namespace traversal

@@ -357,9 +357,9 @@ SupportProfile resolve_support(LabelOracle &oracle,
         return options.time_up && options.time_up();
     };
     // Where the deadline ended the work: the k-mers before |resolved| are resolved, the profile
-    // being exactly the resolve of that prefix (decision B7). The prefix is what makes a stopped
-    // answer honest without a new statement per field: every run, count, truncation, candidate
-    // and seed is that of a real query, the first |resolved| k-mers, never a sample of the whole
+    // being exactly the resolve of that prefix. The prefix is what makes a stopped answer honest
+    // without a new statement per field: every run, count, truncation, candidate and seed is
+    // that of a real query, the first |resolved| k-mers, never a sample of the whole query
     bool stopped = false;
     uint64_t resolved = 0;
     ResolveStop::Phase stop_phase = ResolveStop::ROWS;
@@ -404,14 +404,12 @@ SupportProfile resolve_support(LabelOracle &oracle,
         profile.graph_runs.swap(cut);
     };
 
-    // ---- the rows: decoded in batches, each dropped once it is used (review of the pass-5
-    // fixes, finding 7: the discovery kept a prefix of the rows for the profile pass, which
-    // decoded all the others again in one call, so the request held about all of them and paid
-    // a second decode). |use(j, row)| gets the row of present_keys[j], j ascending: tuple rows
-    // with |tuple_rows|, else whole rows (for_each_row: a repeated key's row is kept for its
-    // later occurrences within kept_bytes). Returns how many present k-mers were used: all, or
-    // under a deadline those before the batch it ended at (none when it had passed before the
-    // first: |rows_expired|)
+    // ---- the rows: decoded in batches, each dropped once it is used (keeping them for a
+    // second pass would hold about all of them, or decode them twice). |use(j, row)| gets the
+    // row of present_keys[j], j ascending: tuple rows with |tuple_rows|, else whole rows
+    // (for_each_row: a repeated key's row is kept for its later occurrences within
+    // kept_bytes). Returns how many present k-mers were used: all, or under a deadline those
+    // before the batch it ended at (none when it had passed before the first: |rows_expired|)
     bool rows_expired = false;
     auto each_row = [&](bool tuple_rows, const auto &use_rows, const auto &use_tuples) -> size_t {
         if (rows_expired)
@@ -611,14 +609,14 @@ SupportProfile resolve_support(LabelOracle &oracle,
         // ---- support per k-mer of explicit labels
         LabelQuery query_labels(oracle, refs, with_coords);
         // Every label's support from one pass over the k-mers: each hit goes to its label's
-        // accumulator, k-mer by k-mer in ascending order, as a discovery accumulates them.
-        // Under trace the per-label scan this replaces (for each label, every k-mer's hit list
-        // searched for it) cost O(labels x k-mers x hits), an absent label reading every list
-        // whole: 2,000 explicit labels took 5.9 s where the discovery returning the same
-        // profiles took 0.2 s, and nothing polled the client meanwhile (review of 2026-10-06,
-        // X-EFFICIENCY-04). Each label receives the calls the scan made, in the same order, so
-        // the profiles are the same. Presence held a bitmap of labels x k-mers (125 MB for 1,000
-        // labels on 1 M k-mers); the accumulator's runs are runs_of's of that bitmap
+        // accumulator, k-mer by k-mer in ascending order, as a discovery accumulates them. Under
+        // trace a per-label scan (for each label, every k-mer's hit list searched for it) would
+        // cost O(labels x k-mers x hits), an absent label reading every list whole: 2,000
+        // explicit labels took 5.9 s that way where the discovery returning the same profiles
+        // takes 0.2 s, with nothing polling the client meanwhile. Each label receives the calls
+        // such a scan makes, in the same order, so the profiles are the same. A presence bitmap
+        // of labels x k-mers would take 125 MB for 1,000 labels on 1 M k-mers; the accumulator's
+        // runs are runs_of's of that bitmap
         std::vector<LabelSupport> support(refs.size());
         std::vector<Coord> scratch;
         auto scatter = [&](uint64_t i, const LabelQuery::NodeHits &node_hits) {
@@ -711,10 +709,9 @@ SupportProfile resolve_support(LabelOracle &oracle,
                 if (options.time_up) {
                     // every k-mer before distinct_at[next] has its key primed now (the whole
                     // query after the last batch): their hits are scattered here, so that a
-                    // stop between batches keeps every row it read (review of 2026-10-07,
-                    // T3-01/V1-01: a separate hits pass read again the deadline the priming
-                    // had seen pass, at its second piece, and cut the answer to about 4,096
-                    // k-mers however many rows were primed)
+                    // stop between batches keeps every row it read (a separate hits pass
+                    // would read the deadline again and cut the answer short of the rows
+                    // already primed)
                     scatter_primed(next < distinct.size() ? distinct_at[next] : resolved);
                 }
                 // after the last batch the rows are all read, whatever the deadline says
@@ -728,7 +725,7 @@ SupportProfile resolve_support(LabelOracle &oracle,
         }
 
         if (!options.time_up) {
-            // no deadline: one fetch of every k-mer's hits, as before
+            // no deadline: one fetch of every k-mer's hits
             auto hits = query_labels.fetch(keys);
             checkpoint();
             for (uint64_t i = 0; i < hits.size(); ++i) {

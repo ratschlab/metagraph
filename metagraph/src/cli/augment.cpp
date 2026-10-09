@@ -104,8 +104,8 @@ int augment_graph(Config *config) {
     // A masked graph: DBGSuccinct::add_sequence marks every edge it inserts valid, the new
     // dummy edges included, and leaves a sink dummy that a new k-mer took over invalid (its
     // TODO). Written as it is, that mask makes the pattern search take dummies for k-mers and
-    // claim a too-large count exact (review of 2026-10-07, I17). So the mask is rebuilt here,
-    // as `transform --mask-dummy` builds it (node ids, and the annotation rows, unchanged)
+    // claim a too-large count exact. So the mask is rebuilt here, as `transform --mask-dummy`
+    // builds it (node ids, and the annotation rows, unchanged)
     auto *masked_succinct = dynamic_cast<graph::DBGSuccinct*>(graph.get());
     if (masked_succinct && masked_succinct->get_mask()) {
         logger->trace("Rebuilding the dummy-edge mask of the extended graph...");

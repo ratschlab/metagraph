@@ -145,14 +145,13 @@ Pattern Pattern::parse(PatternKind kind, std::string_view text, const GeneticCod
     bool has_instances = true;
     for (size_t i = 0; i < text.size(); ++i) {
         const char residue = std::toupper(static_cast<unsigned char>(text[i]));
-        // the stop '*' (owner decision #19 of 2026-10-08): the table's stop codons, none in
-        // a table without an unconditional stop (27, 28, 31), whose context stops code their
-        // residue (decision #21): the peptide then has no instance
+        // the stop '*': the table's stop codons, none in a table without an unconditional stop
+        // (27, 28, 31), whose context stops code their residue: the peptide then has no
+        // instance
         const CodonSet set = residue == '*' ? code.stops() : residue_codons(residue, code);
         if (!set && residue != '*') {
             std::ostringstream msg;
-            // (the text of 4596bb3b, kept so that the answers of every request it served
-            // stay byte-identical; '*' is a residue now, and never named here)
+            // ('*', a residue too, is not listed: the message is part of the answers)
             msg << "pattern: character '" << text[i] << "' at position " << i
                 << " is not in the protein alphabet (A C D E F G H I K L M N P Q R S T V W Y, "
                    "and X B Z J)";
@@ -271,9 +270,9 @@ double Pattern::information_bits(size_t begin, size_t end) const {
         }
         return bits;
     }
-    // log2(4 / |set|) per set size, each computed once by the very expression the sum used
-    // per position before, so that the sums are the same doubles bit for bit (one table read
-    // per base instead of a log2: the O(L) pass of a long pattern, C1-01)
+    // log2(4 / |set|) per set size, each computed once by the expression a per-position sum
+    // would use, so that the sums are the same doubles bit for bit (one table read per base
+    // instead of a log2: the O(L) pass of a long pattern)
     static const std::array<double, 5> kBits {
         0, std::log2(4.0 / 1u), std::log2(4.0 / 2u), std::log2(4.0 / 3u), std::log2(4.0 / 4u)
     };
@@ -418,21 +417,20 @@ constexpr size_t kSdustWindow = 64;
 constexpr size_t kSdustPiece = 128;
 
 /**
- * Whether sdust flags |s| anywhere with the seeder's parameters: the seeder's filter,
- * repeated here because that function is file-local to the aligner, which this increment
- * does not edit (§11). An optional diagnostic of a completed search (kNoteLowComplexity),
- * run under the deadline (GPT review 3, item 2: one sdust over a 30,000-base repeat took
- * 0.7 s without a clock reading). sdust decides at each base from the window of W bases
- * ending there (its triplet counts, and the longest suffix whose counts stay within T / 5),
- * and it flags |s| iff some window holds a perfect interval. So |s| is read in pieces of
- * kSdustPiece + W - 1 bases overlapping by W - 1, which hold every window of |s|; a window
- * cut at a piece's start is a suffix of the window of |s| at that base and holds a perfect
- * interval only if that one does: some piece is flagged iff |s| is. Stops at the first piece
- * flagged, so a repeat costs one piece (its perfect intervals are what makes sdust slow:
+ * Whether sdust flags |s| anywhere with the seeder's parameters: the seeder's filter, repeated
+ * here because that function is file-local to the aligner, which the pattern search does not
+ * edit (§11). An optional diagnostic of a completed search (kNoteLowComplexity), run under the
+ * deadline (one sdust over a 30,000-base repeat takes 0.7 s). sdust decides at each base from
+ * the window of W bases ending there (its triplet counts, and the longest suffix whose counts
+ * stay within T / 5), and it flags |s| iff some window holds a perfect interval. So |s| is read
+ * in pieces of kSdustPiece + W - 1 bases overlapping by W - 1, which hold every window of |s|;
+ * a window cut at a piece's start is a suffix of the window of |s| at that base and holds a
+ * perfect interval only if that one does: some piece is flagged iff |s| is. Stops at the first
+ * piece flagged, so a repeat costs one piece (its perfect intervals are what makes sdust slow:
  * about 6 ms for 191 bases of ATG), and reads the clock before every piece but the first:
- * nullopt when the work time passed first. The first piece is read whatever the clock says,
- * so that a pattern of at most kSdustPiece + W - 1 bases is always diagnosed (its answer
- * never depends on the machine for it), at the cost of one piece past the work time.
+ * nullopt when the work time passed first. The first piece is read whatever the clock says, so
+ * that a pattern of at most kSdustPiece + W - 1 bases is always diagnosed (its answer never
+ * depends on the machine for it), at the cost of one piece past the work time.
  */
 std::optional<bool> is_low_complexity(std::string_view s, Budget &budget) {
     for (size_t begin = 0; begin < s.size(); begin += kSdustPiece) {
@@ -525,7 +523,7 @@ struct Item {
     bool scan_done = false;
     // a graph without the dummy-edge mask, a range whose nodes were not wholly spelled: its
     // candidates may include source dummies (k-mers starting with '$'), which nothing has
-    // checked (owner decision #16). Never set on a masked graph
+    // checked. Never set on a masked graph
     bool unchecked = false;
     uint64_t examined = 0;
     // INVALID: the examined invalid edges whose W is not the sentinel (s)
@@ -614,10 +612,10 @@ struct Span {
 static_assert(sizeof(Span) == 24, "a retained range stays 24 bytes");
 
 /**
- * A graph without the dummy-edge mask (owner decision #24): an unchecked range kept for the
- * check after discovery, while the pattern's unchecked candidates number at most
- * Request::max_checked_entries (so at most that many of these). Its candidates: a flank's
- * non-sink edges (c == 0), a W rule's edges with W in {c, c + alph_size}.
+ * A graph without the dummy-edge mask: an unchecked range kept for the check after discovery,
+ * while the pattern's unchecked candidates number at most Request::max_checked_entries (so at
+ * most that many of these). Its candidates: a flank's non-sink edges (c == 0), a W rule's edges
+ * with W in {c, c + alph_size}.
  */
 struct CheckRange {
     edge_index first;
@@ -710,11 +708,11 @@ struct CodonWindow {
  * (PatternRun::symbols_at): a range of depth d is the set of nodes ending with the window's
  * first d spelled bases, so the spelled prefix travels with the range itself.
  *
- * A leading run of pattern N on a $ACGT graph is not searched (|lead|): every base of a
- * valid k-mer there is one of A, C, G, T, so q at offset p is exactly its core q[lead, |q|)
- * at offset p + lead, and the DFS runs on the core with its flank stopped where the offset
- * of q reaches 0 (X-EFFICIENCY-01: the run would otherwise be branched four ways per position
- * on the widest ranges). Every offset stored here is q's.
+ * A leading run of pattern N on a $ACGT graph is not searched (|lead|): every base of a valid
+ * k-mer there is one of A, C, G, T, so q at offset p is exactly its core q[lead, |q|) at offset
+ * p + lead, and the DFS runs on the core with its flank stopped where the offset of q reaches 0
+ * (the run would otherwise be branched four ways per position on the widest ranges). Every
+ * offset stored here is q's.
  */
 struct BaseSearch {
     std::vector<BaseSet> q;
@@ -752,10 +750,10 @@ struct BaseSearch {
     // the lower bound of everything counted so far (stop_at_threshold, retention)
     uint64_t running_lower = 0;
     // the upper bound of everything counted so far: what the thresholds compare on a graph
-    // without the mask (owner decision #16)
+    // without the mask
     uint64_t running_upper = 0;
     // the candidates of the items whose palindromes are counted (count_palindromes): at least
-    // the palindromic contexts among them, which a wrapped PRIMARY union finds twice (E2-02)
+    // the palindromic contexts among them, which a wrapped PRIMARY union finds twice
     uint64_t running_palindrome_candidates = 0;
 
     // per offset, filled by tally() after the scans
@@ -882,11 +880,11 @@ class PatternRun {
             long_(pattern.length() > support.k),
             extending_(long_ && request.extend_paths),
             cap_(long_ ? request.max_anchors : request.max_contexts),
-            // PARTIAL releases at most cap_ contexts: keep only the ranges that can hold one
-            // of the first cap_ in answer order (E4-01)
+            // PARTIAL releases at most cap_ contexts: keep only the ranges that can hold one of
+            // the first cap_ in answer order
             prune_(retain && !extending_ && request.mode == Mode::PARTIAL),
             masked_(support.mask_present),
-            // the check of a few unchecked candidates (owner decision #24): never with the mask
+            // the check of a few unchecked candidates: never with the mask
             check_limit_(support.mask_present ? 0 : request.max_checked_entries),
             checkable_(check_limit_ > 0) {
         for (char base : { 'A', 'C', 'G', 'T' }) {
@@ -971,7 +969,7 @@ class PatternRun {
             if (!stop_)
                 scan_all(order);
             // a graph without the mask, every range discovered and scanned: a few unchecked
-            // candidates are tested one by one (owner decision #24)
+            // candidates are tested one by one
             if (!stop_)
                 check_unchecked(order);
         }
@@ -1075,11 +1073,11 @@ class PatternRun {
     bool extend(bool keep, uint64_t anchors);
 
     /**
-     * The two halves of extend(): the listing of the anchors in answer order (the anchor
-     * ranges then discarded; false when the deadline stopped it, {EXTENSION, TIME} recorded),
-     * and the extension of a listed set (false when a stop ended it). Without the mask (owner
-     * decision #16) the listing drops the source dummies, so that the caller learns the exact
-     * anchor count from it before extending.
+     * The two halves of extend(): the listing of the anchors in answer order (the anchor ranges
+     * then discarded; false when the deadline stopped it, {EXTENSION, TIME} recorded), and the
+     * extension of a listed set (false when a stop ended it). Without the mask the listing
+     * drops the source dummies, so that the caller learns the exact anchor count from it before
+     * extending.
      */
     bool list_anchors(std::vector<Context> *anchors);
     bool extend_listed(bool keep, const std::vector<Context> &anchors);
@@ -1170,14 +1168,14 @@ class PatternRun {
     const uint64_t cap_;
     // PARTIAL: the retained ranges are bounded by what the release can use
     const bool prune_;
-    // the graph has its dummy-edge mask; without it (owner decision #16) the candidates of a
-    // range not wholly spelled are unchecked, the thresholds compare upper bounds, and the
-    // release tests every unchecked candidate for a source dummy
+    // the graph has its dummy-edge mask; without it the candidates of a range not wholly
+    // spelled are unchecked, the thresholds compare upper bounds, and the release tests every
+    // unchecked candidate for a source dummy
     const bool masked_;
-    // a graph without the mask (owner decision #24): the most unchecked candidates the check
-    // after discovery tests (Request::max_checked_entries; 0 with the mask or when disabled),
-    // the unchecked candidates counted so far over every base search, and whether they are
-    // still within the limit (their ranges kept in BaseSearch::checks)
+    // a graph without the mask: the most unchecked candidates the check after discovery tests
+    // (Request::max_checked_entries; 0 with the mask or when disabled), the unchecked
+    // candidates counted so far over every base search, and whether they are still within the
+    // limit (their ranges kept in BaseSearch::checks)
     const uint64_t check_limit_;
     uint64_t unchecked_entries_ = 0;
     bool checkable_;
@@ -1222,8 +1220,8 @@ class PatternRun {
     uint64_t expanded_ = 0;
     bool keep_paths_ = false;
     std::vector<Context> paths_;
-    // with a support tracker (increment 5s): the supported paths per orientation and in all,
-    // the DEAD verdicts, and the orientations with one before L
+    // with a support tracker: the supported paths per orientation and in all, the DEAD
+    // verdicts, and the orientations with one before L
     std::map<Orientation, uint64_t> supported_;
     uint64_t supported_total_ = 0;
     uint64_t pruned_ = 0;
@@ -1346,11 +1344,11 @@ class PatternRun {
     // ---------------------------------------------------------------- discovery
 
     // the running lower bound of the whole pattern (§5.2 stop_at_threshold): the sum over
-    // orientations. A wrapped PRIMARY union of a + b discovered contexts counts both parts
-    // when k is odd (no k-mer of odd length over A, C, G, T is its own reverse complement);
-    // for even k it can count a palindromic stored k-mer twice, at most once per candidate
-    // of the ranges where the counting search may meet one (pc), so it holds at least
-    // a + b - min(pc, a, b) (E2-02: max(a, b) before, about half the count)
+    // orientations. A wrapped PRIMARY union of a + b discovered contexts counts both parts when
+    // k is odd (no k-mer of odd length over A, C, G, T is its own reverse complement); for even
+    // k it can count a palindromic stored k-mer twice, at most once per candidate of the ranges
+    // where the counting search may meet one (pc), so it holds at least a + b - min(pc, a, b)
+    // (max(a, b) would be about half the count)
     uint64_t running_lower() const {
         uint64_t total = 0;
         for (const OrientationPlan &o : plans_) {
@@ -1384,18 +1382,18 @@ class PatternRun {
         return total;
     }
 
-    // after every count: the release's retention (ALL_OR_COUNT releases nothing once the
-    // count exceeds max_contexts, §5.2) and the threshold stop of stop_at_threshold. The
-    // count compared is the running lower bound with the mask, and the running upper bound
-    // without it (owner decision #16: conservative, as the admissions after discovery)
+    // after every count: the release's retention (ALL_OR_COUNT releases nothing once the count
+    // exceeds max_contexts, §5.2) and the threshold stop of stop_at_threshold. The count
+    // compared is the running lower bound with the mask, and the running upper bound without it
+    // (conservative, as the admissions after discovery)
     bool threshold_crossed() {
         const uint64_t threshold = long_ ? request_.max_anchors : request_.max_contexts;
         const uint64_t compared = masked_ ? running_lower() : running_upper();
-        // ALL_OR_COUNT releases nothing above its threshold, and the extension is not
-        // admitted above max_anchors in any mode (§5.2: anchors kept through the admission).
-        // Without the mask, while the unchecked candidates are few enough for the check after
-        // discovery (owner decision #24), the count may still become EXACT and within the
-        // threshold: the ranges are dropped only once the lower bound is above it
+        // ALL_OR_COUNT releases nothing above its threshold, and the extension is not admitted
+        // above max_anchors in any mode (§5.2: anchors kept through the admission). Without the
+        // mask, while the unchecked candidates are few enough for the check after discovery,
+        // the count may still become EXACT and within the threshold: the ranges are dropped
+        // only once the lower bound is above it
         const uint64_t retained_on = !masked_ && checkable_ ? running_lower() : compared;
         if (retain_ && (request_.mode == Mode::ALL_OR_COUNT || extending_)
                 && retained_on > threshold) {
@@ -1473,9 +1471,9 @@ class PatternRun {
     }
 
     /**
-     * A graph without the mask (owner decision #24): an unchecked range no scan reads, kept
-     * for the check after discovery while the pattern's unchecked candidates number at most
-     * check_limit_; once they are more, nothing will be checked and every kept range is freed.
+     * A graph without the mask: an unchecked range no scan reads, kept for the check after
+     * discovery while the pattern's unchecked candidates number at most check_limit_; once they
+     * are more, nothing will be checked and every kept range is freed.
      */
     void keep_for_check(BaseSearch &search, const Item &item) {
         if (!checkable_)
@@ -1492,14 +1490,13 @@ class PatternRun {
     }
 
     /**
-     * PARTIAL's retention bound (E4-01): every cursor the release would build over the
-     * retained ranges, as (lowest node, highest node, contexts it is sure to emit), where
-     * distinct cursors never emit one context twice except a palindrome cursor, which is
-     * credited none. If the cursors that end at or before a node T are sure to emit cap_
-     * contexts, the first cap_ contexts in answer order (node first) lie at or below T, so a
-     * range none of whose cursors starts at or below T can be dropped. T found over the ranges
-     * retained so far can only fall as more arrive, so the bound holds for every later range
-     * too (add_item drops those at once).
+     * PARTIAL's retention bound: every cursor the release would build over the retained ranges,
+     * as (lowest node, highest node, contexts it is sure to emit), where distinct cursors never
+     * emit one context twice except a palindrome cursor, which is credited none. If the cursors
+     * that end at or before a node T are sure to emit cap_ contexts, the first cap_ contexts in
+     * answer order (node first) lie at or below T, so a range none of whose cursors starts at
+     * or below T can be dropped. T found over the ranges retained so far can only fall as more
+     * arrive, so the bound holds for every later range too (add_item drops those at once).
      */
     void compact_release() {
         struct Bound {
@@ -1550,7 +1547,7 @@ class PatternRun {
      *                   their own id);
      *  PALINDROMES      beside MAPPED_SKIPPING: only those palindromic k-mers, at their own id
      *                   and the mirrored offset, which the direct search may not have reached
-     *                   before a stop (E2-01); the merge drops the duplicate when it has.
+     *                   before a stop; the merge drops the duplicate when it has.
      */
     enum class Use : uint8_t { DIRECT, MAPPED, MAPPED_SKIPPING, PALINDROMES };
 
@@ -1605,8 +1602,8 @@ class PatternRun {
         if (masked_) {
             item.candidates = dbg_succ_.count_valid_edges_in_range(first, last);
         } else {
-            // no mask (owner decision #16): every edge that can carry a base, the source
-            // dummies among them unless the nodes are wholly spelled (depth k - 1)
+            // no mask: every edge that can carry a base, the source dummies among them unless
+            // the nodes are wholly spelled (depth k - 1)
             item.candidates = dbg_succ_.count_non_sink_edges_in_range(first, last);
             item.unchecked = depth < boss_.get_k();
         }
@@ -1624,8 +1621,8 @@ class PatternRun {
     void count_w_rule(BaseSearch &search, const Range &range, TAlphabet c) {
         const auto &[first, last, depth] = range;
         if (!masked_) {
-            // no mask (owner decision #16): the candidates, unchecked unless the nodes are
-            // wholly spelled (depth k - 1: no room for '$'); no INVALID scan exists
+            // no mask: the candidates, unchecked unless the nodes are wholly spelled (depth
+            // k - 1: no room for '$'); no INVALID scan exists
             Item item;
             item.first = first;
             item.last = last;
@@ -1809,9 +1806,9 @@ class PatternRun {
 
     /**
      * The ranges a base search's DFS can create over its core, level by level: the core's
-     * combinations so far, of which at most the graph's share (edges / 4^d) can be non-empty.
-     * A planning estimate (X-EFFICIENCY-01: an N run early in a window is wide, late in it
-     * narrow), used only to order the searches; the flank is the same for every search.
+     * combinations so far, of which at most the graph's share (edges / 4^d) can be non-empty. A
+     * planning estimate (an N run early in a window is wide, late in it narrow), used only to
+     * order the searches; the flank is the same for every search.
      */
     double estimated_cost(const BaseSearch &search) const {
         const double edges = static_cast<double>(boss_.num_edges());
@@ -1932,20 +1929,20 @@ class PatternRun {
 
     /**
      * The depth-first search of one anchor (§4.2) over search states (SearchState: the node,
-     * the position, the Model's state, the tracker's frame): from the anchor's k spelled
-     * bases, at every position the outgoing k-mers of the path's last node whose base the
-     * |model| allows in its state there (Model::bases; the state after each base entered,
-     * Model::next), in symbol order (A, C, G, T), to position L = model.length() of the
-     * oriented pattern. One step per outgoing edge examined, allowed or not; the clock before
-     * every kReleaseClockStride-th node expanded, counted over the whole extension. With a
-     * support tracker (Request::support) one frame per level: opened at the anchor, pushed
-     * when a child is entered (before it is expanded or completed), popped when the DFS leaves
-     * it; a DEAD verdict prunes the branch (not expanded), a STOPPED one ends the extension.
-     * Without one, exactly increment 4's DFS. False when a stop ended it.
+     * the position, the Model's state, the tracker's frame): from the anchor's k spelled bases,
+     * at every position the outgoing k-mers of the path's last node whose base the |model|
+     * allows in its state there (Model::bases; the state after each base entered, Model::next),
+     * in symbol order (A, C, G, T), to position L = model.length() of the oriented pattern. One
+     * step per outgoing edge examined, allowed or not; the clock before every
+     * kReleaseClockStride-th node expanded, counted over the whole extension. With a support
+     * tracker (Request::support) one frame per level: opened at the anchor, pushed when a child
+     * is entered (before it is expanded or completed), popped when the DFS leaves it; a DEAD
+     * verdict prunes the branch (not expanded), a STOPPED one ends the extension. Without one,
+     * the plain DFS of long_search "paths". False when a stop ended it.
      * A template on the Model's type: with a Pattern (final, its Model methods defined in this
-     * file) every call is resolved and inlined, so that the DFS of increment 4 costs what it
-     * cost (5s-2's timing: per extension edge within the noise of an A/A run); another Model
-     * instantiates it as itself, or as Model through the virtual calls.
+     * file) every call is resolved and inlined, so that the plain DFS costs no more than one
+     * written for Pattern alone (per extension edge, within the noise of an A/A timing);
+     * another Model instantiates it as itself, or as Model through the virtual calls.
      */
     template <class M>
     bool extend_anchor(const Context &anchor, const M &model) {
@@ -1999,7 +1996,7 @@ class PatternRun {
             // the clock before every kReleaseClockStride-th node expanded: a node's outgoing
             // k-mers cost a few BOSS steps each (more on the wrapper of a PRIMARY graph) and
             // one step is charged per edge, so that a stride of steps can take long on a cold
-            // index (GPT review 3, item 5)
+            // index
             if (!(++expanded_ % Budget::kReleaseClockStride) && !budget_.check_time()) {
                 record_stop(StopPhase::EXTENSION, StopReason::TIME);
                 return false;
@@ -2086,7 +2083,7 @@ class PatternRun {
                         ++frames.open;
                         break;
                     case SupportTracker::Verdict::DEAD:
-                        // pruned: not expanded; at L a complete walk all the same (P25)
+                        // pruned: not expanded; at L a complete walk all the same
                         if (at_end) {
                             ++found_[anchor.orientation];
                             ++found_total_;
@@ -2142,10 +2139,10 @@ class PatternRun {
     bool scan(Item &item) {
         ++work_.mask_scans;
         if (!masked_) {
-            // no mask (owner decision #16): only the palindrome scans of an even-k wrapped
-            // PRIMARY graph exist (CANDIDATES). Each candidate is spelled for its palindrome
-            // test, which shows a source dummy too (its k-mer starts with '$'; never a
-            // palindrome, its last base being one): |hits| counts the real ones
+            // no mask: only the palindrome scans of an even-k wrapped PRIMARY graph exist
+            // (CANDIDATES). Each candidate is spelled for its palindrome test, which shows a
+            // source dummy too (its k-mer starts with '$'; never a palindrome, its last base
+            // being one): |hits| counts the real ones
             assert(item.scan == Item::Scan::CANDIDATES && item.count_palindromes);
             // the candidates: a flank's non-sink edges, a W rule's edges with W in
             // {c, c + alph_size}
@@ -2217,8 +2214,8 @@ class PatternRun {
         }
     }
 
-    // one candidate tested by the check (owner decision #24): k - 1 steps, the most symbols
-    // BOSS::node_has_sentinel reads
+    // one candidate tested by the check: k - 1 steps, the most symbols BOSS::node_has_sentinel
+    // reads
     bool charge_check() {
         if (!budget_.charge(k_ - 1)) {
             record_stop(StopPhase::MASK_SCAN, *budget_.stopped());
@@ -2228,13 +2225,13 @@ class PatternRun {
     }
 
     /**
-     * A graph without the mask, discovery and the deferred scans complete (owner decision
-     * #24): when the pattern's unchecked candidates number at most check_limit_, each is
-     * tested with BOSS::node_has_sentinel, in the order of the base searches (as the scans)
-     * and of their ranges' discovery, edge by edge: the real k-mers become exact contexts and
-     * the source dummies drop out, so that every count of the pattern is EXACT. Nothing is
-     * applied before the last candidate is tested: a stop on the way (phase MASK_SCAN) leaves
-     * every count as discovery left it, BOUNDS.
+     * A graph without the mask, discovery and the deferred scans complete: when the pattern's
+     * unchecked candidates number at most check_limit_, each is tested with
+     * BOSS::node_has_sentinel, in the order of the base searches (as the scans) and of their
+     * ranges' discovery, edge by edge: the real k-mers become exact contexts and the source
+     * dummies drop out, so that every count of the pattern is EXACT. Nothing is applied before
+     * the last candidate is tested: a stop on the way (phase MASK_SCAN) leaves every count as
+     * discovery left it, BOUNDS.
      */
     void check_unchecked(const std::vector<size_t> &order) {
         if (!checkable_ || !unchecked_entries_)
@@ -2315,7 +2312,7 @@ class PatternRun {
             }
             if (!item.flank() && !dbg_succ_.in_graph(e))
                 continue;
-            // no mask (owner decision #16): a source dummy is never released
+            // no mask: a source dummy is never released
             if (item.unchecked && boss_.node_has_sentinel(e))
                 continue;
             switch (cursor.use) {
@@ -2436,10 +2433,10 @@ bool PatternRun::release(uint64_t limit, const std::function<void(const Context&
 
 bool PatternRun::list_anchors(std::vector<Context> *anchors) {
     assert(extending_);
-    // the anchors in answer order (§5.5); their ranges are discarded once they are listed:
-    // the anchors are kept through the extension, not beyond (§5.2). The clock every
-    // kReleaseClockStride anchors listed, as for a caller's emit: on a cold index each costs
-    // a few page reads that no step charges (GPT review 3, item 5)
+    // the anchors in answer order (§5.5); their ranges are discarded once they are listed: the
+    // anchors are kept through the extension, not beyond (§5.2). The clock every
+    // kReleaseClockStride anchors listed, as for a caller's emit: on a cold index each costs a
+    // few page reads that no step charges
     listed_ = release(kNoLimit, [&](const Context &c) { anchors->push_back(c); }, true,
                       StopPhase::EXTENSION);
     drop_anchors();
@@ -2458,8 +2455,8 @@ bool PatternRun::extend_listed(bool keep, const std::vector<Context> &anchors) {
     const Pattern rc = pattern_.reverse_complement();
     for (const Context &anchor : anchors) {
         // the clock before every anchor: its spelling (k - 1 BOSS steps) is work no step
-        // charges, and the anchors' DFS charges too few steps to cross a stride (GPT review 3,
-        // item 5: 674 anchors spelled on a cold index ran 3 s past the work time unread)
+        // charges, and the anchors' DFS charges too few steps to cross a stride (674 anchors
+        // spelled on a cold index would run 3 s past the work time unread)
         if (!budget_.check_time()) {
             record_stop(StopPhase::EXTENSION, StopReason::TIME);
             done = false;
@@ -2738,9 +2735,8 @@ GraphSupport PatternSearch::support(const DeBruijnGraph &graph) {
         result.reason = "representation_unsupported";
         return result;
     }
-    // without the mask the graph is served all the same (owner decision #16 of 2026-10-08):
-    // its unresolved counts are upper bounds (PatternSearch, "Graphs without the dummy-edge
-    // mask"); mask_required, which refused it before, is retired
+    // without the mask the graph is served all the same: its unresolved counts are upper bounds
+    // (PatternSearch, "Graphs without the dummy-edge mask"); no reason is mask_required
 
     result.supported = true;
     return result;
@@ -2799,12 +2795,11 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     result.palindromic = pattern.is_palindromic();
     result.information_bits = pattern.information_bits();
     // the bits the information floor reads: for a long pattern the least over the searched
-    // orientations' anchor windows (X-GUARANTEES-01: FORWARD P[0, k), REVERSE rc(P)[0, k),
-    // whose bits are P[L - k, L)'s), so that no searched window below the floor runs (kept in
-    // a plain double rather than read back from the optional, which GCC 13 -O3 flags as maybe
-    // uninitialized under -Werror). anchor_information_bits keeps its contract-version-1
-    // meaning, the bits of P[0, k) whatever the strands; the least is stated apart, in
-    // min_anchor_information_bits (the owner's decision of 2026-10-07)
+    // orientations' anchor windows (FORWARD P[0, k), REVERSE rc(P)[0, k), whose bits are
+    // P[L - k, L)'s), so that no searched window below the floor runs (kept in a plain double
+    // rather than read back from the optional, which GCC 13 -O3 flags as maybe uninitialized
+    // under -Werror). anchor_information_bits keeps its contract-version-1 meaning, the bits of
+    // P[0, k) whatever the strands; the least is stated apart, in min_anchor_information_bits
     double floor_bits = result.information_bits;
     // the orientation whose window is the least informative (FORWARD before REVERSE on a tie)
     Orientation floor_window = Orientation::FORWARD;
@@ -2840,12 +2835,11 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
         };
         return finish();
     }
-    // a pattern without instances (owner decision #19: '*' read in a table without an
-    // unconditional stop codon) and L <= k, where a context instantiates the whole pattern:
-    // answered EXACT 0 with nothing searched, so that there is nothing for the information
-    // floor to gate. A longer one is searched as any other: its anchors instantiate the
-    // anchor window only, which may not reach the '*', and its paths (none) are the
-    // extension's
+    // a pattern without instances ('*' read in a table without an unconditional stop codon) and
+    // L <= k, where a context instantiates the whole pattern: answered EXACT 0 with nothing
+    // searched, so that there is nothing for the information floor to gate. A longer one is
+    // searched as any other: its anchors instantiate the anchor window only, which may not
+    // reach the '*', and its paths (none) are the extension's
     if (!pattern.has_instances() && !is_long) {
         answer_no_instance(pattern, request, callback != nullptr, &result);
         return finish();
@@ -2934,12 +2928,11 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     aggregate();
 
     /**
-     * A graph without the dummy-edge mask (owner decision #16): the contexts (or anchors) a
-     * release enumerated, per orientation and offset. A release that enumerated every
-     * candidate of a completed discovery makes each count the number it released
-     * (exactify); one cut short raises each count's lower bound to it (raise_lower). Real
-     * contexts only (the release drops the source dummies), so a number outside a count's
-     * bounds is a broken invariant, never published.
+     * A graph without the dummy-edge mask: the contexts (or anchors) a release enumerated, per
+     * orientation and offset. A release that enumerated every candidate of a completed
+     * discovery makes each count the number it released (exactify); one cut short raises each
+     * count's lower bound to it (raise_lower). Real contexts only (the release drops the source
+     * dummies), so a number outside a count's bounds is a broken invariant, never published.
      */
     typedef std::map<std::pair<Orientation, uint32_t>, uint64_t> Released;
     auto released_at = [](const Released &released, const Cell &cell) -> uint64_t {
@@ -3014,7 +3007,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             if (no_anchor) {
                 anchors.extension = Extension::NO_ANCHORS;
             } else if (unresolved()) {
-                // no mask (owner decision #16): the admission compares the upper bound
+                // no mask: the admission compares the upper bound
                 if (total->upper > request.max_anchors) {
                     anchors.extension = Extension::NOT_ADMITTED;
                     engine.drop_anchors();
@@ -3072,10 +3065,10 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             }
 
             // per orientation: EXACT 0 without anchors; EXACT when every anchor of it was
-            // extended, AT_LEAST when the extension stopped before; UNKNOWN when it did not run.
-            // With a support tracker (increment 5s) the walks are a plain count, AT_LEAST also
-            // when a branch was pruned before L (P25), and the supported paths follow the rule
-            // of the extension alone
+            // extended, AT_LEAST when the extension stopped before; UNKNOWN when it did not
+            // run. With a support tracker the walks are a plain count, AT_LEAST also when a
+            // branch was pruned before L, and the supported paths follow the rule of the
+            // extension alone
             const bool tracked = request.support != nullptr;
             std::optional<Count> sum;
             std::optional<Count> supported_sum;
@@ -3158,8 +3151,8 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
             }
 
         } else if (request.mode == Mode::ALL_OR_COUNT) {
-            // without the mask the threshold is compared with the upper bound (owner
-            // decision #16: conservative), and the release resolves the count
+            // without the mask the threshold is compared with the upper bound (conservative),
+            // and the release resolves the count
             if (resolvable && total->upper <= max_released && !engine.retained_all()) {
                 // the running count the retention compares never exceeds the final U
                 throw std::logic_error("pattern: ranges dropped for an admitted release");
@@ -3173,7 +3166,7 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                 std::vector<Context> buffer;
                 if (engine.release(kNoLimit, [&](const Context &c) { buffer.push_back(c); },
                                    false)) {
-                    // the absence licence rests on this: checked in every build (T1-02)
+                    // the absence licence rests on this: checked in every build
                     if (exact && buffer.size() != total->value) {
                         throw std::logic_error("pattern: " + std::to_string(buffer.size())
                                                + " contexts released of "
@@ -3238,9 +3231,8 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
                 }
                 if (finished) {
                     // an exact count and a release run to its end must agree, as in
-                    // all_or_count (owner decision #9 of 2026-10-07, I09): min(count, cap)
-                    // contexts, else the list would be stated complete short of the count, or
-                    // cut by a cap it did not reach
+                    // all_or_count: min(count, cap) contexts, else the list would be stated
+                    // complete short of the count, or cut by a cap it did not reach
                     if (now_exact && (extraction.returned > total->value
                                         || (extraction.returned < total->value
                                                 && extraction.returned < max_released))) {
@@ -3285,10 +3277,10 @@ Result PatternSearch::run(const Pattern &pattern, const Request &request, Budget
     result.stop = engine.stop();
     result.time_limited = engine.time_limited();
 
-    // the bases of an exact pattern: its text, or for a peptide (every residue one codon)
-    // the codons it spells. An optional diagnostic: not run after any stop, and left out when
-    // the work time passes before sdust has its answer, a time stop the answer states as
-    // time_limited only (its counts complete, its stop none; GPT review 3, item 2)
+    // the bases of an exact pattern: its text, or for a peptide (every residue one codon) the
+    // codons it spells. An optional diagnostic: not run after any stop, and left out when the
+    // work time passes before sdust has its answer, a time stop the answer states as
+    // time_limited only (its counts complete, its stop none)
     bool low_complexity = false;
     if (pattern.is_exact() && !result.stop) {
         const std::optional<bool> flagged = is_low_complexity(
@@ -3317,7 +3309,7 @@ void PatternSearch::answer_no_instance(const Pattern &pattern, const Request &re
     const size_t L = pattern.length();
     assert(!pattern.has_instances() && L <= k);
     // the orientations a search would have had, each with every count EXACT 0: an absence
-    // derived from the pattern (owner decision #19), nothing searched or charged
+    // derived from the pattern, nothing searched or charged
     result->searched = searched_orientations(pattern, request.strands);
     ContextCounts contexts;
     contexts.total = Count::exact(Unit::GRAPH_CONTEXTS, 0);

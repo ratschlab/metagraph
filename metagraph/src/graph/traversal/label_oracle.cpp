@@ -305,9 +305,9 @@ size_t DecodePacer::next(size_t remaining, double ms_left, size_t previous,
     const bool known = previous > 0 || ms_per_row > 0;
     const double rate = previous ? previous_ms / static_cast<double>(previous) : ms_per_row;
     const double factor = previous ? rest_factor : far_factor;
-    // The deadline cannot fall into the rest of the read: one piece, as before pass 5 (the
-    // products are NaN for a rate of 0 with an infinite factor, which then splits). Nothing
-    // measured yet: one piece only without a deadline, else a first chunk measures the rows
+    // The deadline cannot fall into the rest of the read: one piece (the products are NaN
+    // for a rate of 0 with an infinite factor, which then splits). Nothing measured yet:
+    // one piece only without a deadline, else a first chunk measures the rows
     if (known ? static_cast<double>(remaining) * rate * factor < ms_left
               : std::isinf(ms_left) && !std::isinf(factor))
         return remaining;
@@ -363,9 +363,8 @@ void DecodePacer::record(size_t rows, double ms, const char *kind, uint64_t coor
     // one piece or starts with a small chunk, so a pessimistic value costs a first chunk at
     // most, while an optimistic one lets a whole read overrun the deadline. Row costs vary by
     // two orders of magnitude on a row-diff annotation (a row whose path is shared with the
-    // other rows of its call against one that decodes its own): a rate that decayed to the
-    // cheap rows let a call of 182 unshared rows run 287 ms past a 200 ms budget (review of
-    // pass 5, F2)
+    // other rows of its call against one that decodes its own): a rate that decays to the
+    // cheap rows would let a call of 182 unshared rows run 287 ms past a 200 ms budget
     ms_per_row = std::max(ms_per_row, ms / static_cast<double>(rows));
 }
 
@@ -524,7 +523,7 @@ LabelQuery::LabelQuery(const LabelOracle &oracle,
             // a few single-cell reads beat reconstructing the whole row. A trap for the
             // budget-aware fetch, which reads whole rows only (decode_run asserts the path is
             // not DIRECT): AUTO picks DIRECT for <= 16 columns wherever the annotation has
-            // direct access, so a budgeted caller asks for ROWS explicitly. Unreachable today:
+            // direct access, so a budgeted caller asks for ROWS explicitly. Unreachable:
             // no annotation the budget-aware reads serve (LabelOracle::decode_charged(), the
             // row-diff family) has direct access, so AUTO is ROWS there (the test
             // LabelOracleAccess.AutoPicksDirectForAtMost16Columns pins both)
@@ -710,14 +709,14 @@ static std::vector<node_index> in_first_order(const std::vector<node_index> &key
 
 // The pacing of the unbudgeted reads of LabelQuery and LabelRecorder: |keys| (sorted,
 // distinct) decoded by |decode| (their fetch_uncached, which caches what it decodes), every
-// piece measured. In one piece, as before pass 5, when the deadline cannot fall into the read
-// (DecodePacer::next). Split, its chunks are taken in the order of the keys' first appearance
-// in |order| — the caller's keys, in the walk's order, where the nodes of one path are adjacent
-// and their rows share the decoding of their row-diff paths, which one call does once — and
-// each is sorted as a whole read is: chunks of sorted keys held rows of as many paths as rows,
-// and a row_diff lookahead took 0.75 ms a row in chunks against 0.016 ms read whole (review of
-// pass 5, F1). Stopped before a chunk: false, ReadPacing::interrupted set and its units the
-// work of the keys decoded (|units| of each, read from the cache).
+// piece measured. In one piece when the deadline cannot fall into the read (DecodePacer::next).
+// Split, its chunks are taken in the order of the keys' first appearance in |order| — the
+// caller's keys, in the walk's order, where the nodes of one path are adjacent and their rows
+// share the decoding of their row-diff paths, which one call does once — and each is sorted as
+// a whole read is: chunks of sorted keys would hold rows of as many paths as rows (a row_diff
+// lookahead took 0.75 ms a row in such chunks against 0.016 ms read whole). Stopped before a
+// chunk: false, ReadPacing::interrupted set and its units the work of the keys decoded (|units|
+// of each, read from the cache).
 template <class Decode, class Units>
 static bool paced_fetch(DecodePacer &pacer, const std::vector<node_index> &keys,
                         const std::vector<node_index> &order, ReadPacing *pacing,
@@ -1112,13 +1111,13 @@ bool LabelQuery::cache_budgeted(const node_index *keys, size_t n, const NodeHits
     // kept (Eviction).
     // That first run still drops the rows earlier warms read ahead that the walk has not
     // reached, which the walk then decodes again: the excess over a work budget alone that
-    // SPEC §6.8 states (U05-01, measured with this fix: on mini_refseq up to +20% tuple rows
-    // at 16 MiB and +52% at 32 MiB, batch_kmers 2,048-8,192). Evicting the oldest entries
-    // first (a list in caching order, with a warm keeping a quarter of the cache) cut the
-    // tuple rows by 12% there, but it kept the label cache full, and the row-diff path cache,
-    // which holds only what the label cache leaves of their allotment (make_room), read 2.5
-    // times the stored rows; evicting the oldest half read 2-7% more rows at the default
-    // batch_kmers 64. So the eviction stays wholesale
+    // SPEC §6.8 states (on mini_refseq up to +20% tuple rows at 16 MiB and +52% at 32 MiB,
+    // batch_kmers 2,048-8,192). Evicting the oldest entries first (a list in caching order,
+    // with a warm keeping a quarter of the cache) cuts the tuple rows by 12% there, but it
+    // keeps the label cache full, and the row-diff path cache, which holds only what the
+    // label cache leaves of their allotment (make_room), then reads 2.5 times the stored
+    // rows; evicting the oldest half reads 2-7% more rows at the default batch_kmers 64. So
+    // the eviction is wholesale
     if (cache_bytes_ + fresh > max_cache_bytes_ || cache_.size() + fresh_count > max_cache_size_) {
         const bool kept_alone = all <= max_cache_bytes_ && all_count <= max_cache_size_;
         if (eviction == Eviction::KEEP || (eviction == Eviction::EVICT_IF_KEPT && !kept_alone))
@@ -1294,8 +1293,7 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
     if (costs_.size() != cache_.size())
         clear_cache();
     // A cache of capacity zero keeps nothing, so there is nothing to warm; the runs below
-    // are at most that capacity long and would never advance (review of stage 3, F1: a
-    // warm with max_cache_size 0 did not return)
+    // are at most that capacity long and would never advance
     if (!max_cache_size_)
         return;
     // the misses, charged like the rest of the lookahead's read
@@ -1310,13 +1308,13 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
     }
     std::sort(missing.begin(), missing.end());
     missing.erase(std::unique(missing.begin(), missing.end()), missing.end());
-    // The runs and their pieces are taken in the order of the keys' first appearance in
-    // |keys| — the walk's order, where the nodes of one path are adjacent and share the
-    // decoding of their row-diff paths — and each piece is decoded sorted, as paced_fetch
-    // takes the unbudgeted reads (review of pass 5, finding 5: runs cut from the globally
-    // sorted keys held rows of as many paths as rows; 32 paths, 2,048 rows, runs of 8: 161,679
-    // decoder charges against 28,736). Only what is cached depends on it: a key is admitted
-    // and charged by its own costs when the walk reads it (fetch)
+    // The runs and their pieces are taken in the order of the keys' first appearance in |keys|
+    // — the walk's order, where the nodes of one path are adjacent and share the decoding of
+    // their row-diff paths — and each piece is decoded sorted, as paced_fetch takes the
+    // unbudgeted reads (runs cut from the globally sorted keys would hold rows of as many
+    // paths as rows: 32 paths, 2,048 rows, runs of 8 make 161,679 decoder charges against
+    // 28,736). Only what is cached depends on it: a key is admitted and charged by its own
+    // costs when the walk reads it (fetch)
     missing = in_first_order(missing, keys);
     DecodePacer &pacer = oracle_.pacer();
     const bool paced = pacing && pacer.target_ms > 0;
@@ -1325,13 +1323,13 @@ void LabelQuery::warm(const std::vector<node_index> &keys, DecodeBudget &budget,
     const size_t run = std::min(kMaxDecodeRun, max_cache_size_);
     // The warming ends at the first run the cache cannot keep beside the runs this warm cached
     // (or cannot keep at all), before it is decoded where the count tells, after where only
-    // its bytes do: the runs are in the walk's order, so the runs kept are the nearest. Every
-    // run was decoded before, and one that did not fit evicted the cache wholesale, this
-    // warm's own earlier runs included, or was dropped when it alone exceeded the bound: a
-    // warm larger than the cache decoded every run and kept the last one or two, the farthest,
-    // and the level decoded the near rows again (review of 2026-10-06, U05-01: +31-39% tuple
-    // rows at batch_kmers 2048-8192 under 16 MiB, the same result). Nothing a fetch returns,
-    // admits or charges depends on the cache, so only physical work and time change
+    // its bytes do: the runs are in the walk's order, so the runs kept are the nearest.
+    // Decoding every run, one that did not fit evicting the cache wholesale (this warm's own
+    // earlier runs included) or dropped when it alone exceeded the bound, a warm larger than
+    // the cache would keep only the last one or two runs, the farthest, and the level would
+    // decode the near rows again (+31-39% tuple rows at batch_kmers 2048-8192 under 16 MiB,
+    // the same result). Nothing a fetch returns, admits or charges depends on the cache, so
+    // only physical work and time change
     size_t warmed = 0;          // runs this warm cached
     for (size_t begin = 0; begin < missing.size(); begin += run) {
         const size_t len = std::min(run, missing.size() - begin);
@@ -1615,8 +1613,8 @@ namespace {
 // open-addressing table at load at most 1/2 and a list, both grown by fixed policies (16
 // entries, then doubling) and nothing else, so that what m labels make them hold at once,
 // the transients of a rehash and of a copy included, is the function pending_bytes(m) of
-// LabelRecorder. (A map per column, as before, held a whole bucket array per new label,
-// uncharged: review of stage 3, F1.)
+// LabelRecorder. (A map per column would hold a whole bucket array per new label,
+// uncharged.)
 class PendingLabels {
   public:
     using Key = std::pair<Column, uint64_t>;
@@ -2166,7 +2164,7 @@ void LabelRecorder::warm(const std::vector<node_index> &keys, DecodeBudget &budg
     double previous_ms = 0;
     const size_t run = std::min(kMaxDecodeRun, max_cache_size_);
     // as LabelQuery::warm: the warming ends at the first run the cache cannot keep beside this
-    // warm's runs or at all, so that it never evicts its own runs (U05-01)
+    // warm's runs or at all, so that it never evicts its own runs
     size_t warmed = 0;          // runs this warm cached
     for (size_t begin = 0; begin < missing.size(); begin += run) {
         const size_t len = std::min(run, missing.size() - begin);

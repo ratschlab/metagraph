@@ -3,41 +3,41 @@
 
 /**
  * POST /pattern and `metagraph pattern`: count and extract the graph contexts of short motifs
- * and IUPAC patterns, and read their labels (docs/DESIGN-pattern-search.md, increments 0-3),
- * and the paths of patterns longer than k (increment 4, opt-in).
- * The engine is graph::pattern::PatternSearch (src/graph/alignment/pattern_search.hpp), the
- * labelled retrieval PatternRetrieval (pattern_retrieval.hpp); this file turns their results
- * into the JSON of the route's contract (pattern_contract_version 1):
+ * and IUPAC patterns, read their labels (docs/DESIGN-pattern-search.md), and find the paths of
+ * patterns longer than k (opt-in). The engine is graph::pattern::PatternSearch
+ * (src/graph/alignment/pattern_search.hpp), the labelled retrieval PatternRetrieval
+ * (pattern_retrieval.hpp); this file turns their results into the JSON of the route's contract
+ * (pattern_contract_version 1):
  *  - modes count, all_or_count and partial; the two retrieval modes with output.labels "none"
  *    (the label-free path, §4.3: contexts with k-mer, instance, offset, strand, node and row
- *    ids, no annotation row read) or "all" (increment 3: each context's labels, placed where
- *    the index can place them, under the annotation budgets);
- *  - a pattern longer than k: its anchors counted and nothing extracted (long_search
- *    "anchors", the default), or with long_search "paths" (increment 4, owner decisions #13
- *    and #14) the anchors extended into paths (§4.2): counts.paths, path results with the new
- *    fields sequence, anchor_kmer, nodes and rows (never kmer), and with output.labels "all"
- *    each path's labels, each with its support (label_intersection, record_verified) and
- *    require_support "record_verified" listing the verified ones only;
- *  - a predicate (increment 5b, SPEC §19; patterns of L <= k): the request's predicate bound
- *    once to the index's columns, each pattern's raw contexts (at most max_predicate_contexts)
- *    tested by the selection pass of PatternRetrieval (their rows, with predicate_strands
- *    "either" on a BASIC graph also their reverse complements', under max_predicate_work), the
- *    selected ones returned with output.labels "none", "predicate_only" or "all"; counts.tested
- *    and counts.selected, selection, absence_filter and the top-level predicate block. A
- *    pattern longer than k under long_search "anchors" keeps its anchors' answer, its selection
- *    not_started; with long_search "paths" a predicate is refused (it selects supported paths,
- *    a later increment);
+ *    ids, no annotation row read) or "all" (each context's labels, placed where the index can
+ *    place them, under the annotation budgets);
+ *  - a pattern longer than k: its anchors counted and nothing extracted (long_search "anchors",
+ *    the default), or with long_search "paths" the anchors extended into paths (§4.2):
+ *    counts.paths, path results with the fields sequence, anchor_kmer, nodes and rows (never
+ *    kmer), and with output.labels "all" each path's labels, each with its support
+ *    (label_intersection, record_verified) and require_support "record_verified" listing the
+ *    verified ones only;
+ *  - a predicate (SPEC §19; patterns of L <= k): the request's predicate bound once to the
+ *    index's columns, each pattern's raw contexts (at most max_predicate_contexts) tested by
+ *    the selection pass of PatternRetrieval (their rows, with predicate_strands "either" on a
+ *    BASIC graph also their reverse complements', under max_predicate_work), the selected ones
+ *    returned with output.labels "none", "predicate_only" or "all"; counts.tested and
+ *    counts.selected, selection, absence_filter and the top-level predicate block. A pattern
+ *    longer than k under long_search "anchors" keeps its anchors' answer, its selection
+ *    not_started; with long_search "paths" a predicate is refused (a predicate selects among
+ *    supported paths, which are not served);
  *  - single-graph servers only;
- *  - graphs with their dummy-edge mask (counting "exact") and, since owner decision #16 of
- *    2026-10-08, without it (counting "upper_bound"): a count is then the bounds [lower, U],
- *    U the BOSS entries of its ranges (source dummies among them), with the additive estimate
- *    U x f (f the graph's sampled dummy fraction, DummyFraction), while every list stays exact
- *    (the engine drops the dummies it releases); a pattern with at most max_checked_entries
- *    unchecked candidates has them tested and its counts exact (owner decision #24);
- *  - peptides with the stop '*' (owner decision #19): a stop codon of the request's genetic
- *    code; a table without an unconditional stop codon matches nothing there, stated in a note.
- * Everything a later increment adds is refused (400 "later_increment"), never ignored: the
- * owner's guarantee rule, nothing weakened silently.
+ *  - graphs with their dummy-edge mask (counting "exact") and without it (counting
+ *    "upper_bound"): a count is then the bounds [lower, U], U the BOSS entries of its ranges
+ *    (source dummies among them), with the additive estimate U x f (f the graph's sampled dummy
+ *    fraction, DummyFraction), while every list stays exact (the engine drops the dummies it
+ *    releases); a pattern with at most max_checked_entries unchecked candidates has them tested
+ *    and its counts exact;
+ *  - peptides with the stop '*': a stop codon of the request's genetic code; a table without an
+ *    unconditional stop codon matches nothing there, stated in a note.
+ * A request field that is not served is refused (400 "later_increment"), never ignored, so that
+ * nothing is weakened silently.
  */
 
 #include <cstdint>
@@ -90,14 +90,14 @@ class PatternRefusal : public std::runtime_error {
  * The server's caps of a /pattern request (the --pattern-* flags; the CLI applies the same
  * ones, so that both answer alike). Each is a request field's maximum: a larger request value
  * is lowered to it and listed in limits.clamped (the /traverse convention), never refused,
- * never silently kept; and each is the field's default, except the time budget, whose
- * default (60 s) lies under its maximum (600 s), the owner's decision of 2026-10-07 (§5.3).
+ * never silently kept; and each is the field's default, except the time budget, whose default
+ * (60 s) lies under its maximum (600 s) (§5.3).
  */
 struct PatternLimits {
     uint64_t max_contexts = 10'000;
     uint64_t max_anchors = 1'000;
-    // increment 4, long_search "paths": the retrieval threshold on the completed paths of a
-    // pattern longer than k (all_or_count) and partial's cap on them
+    // long_search "paths": the retrieval threshold on the completed paths of a pattern longer
+    // than k (all_or_count) and partial's cap on them
     uint64_t max_paths = 1'000;
     uint64_t max_steps = 100'000'000;
     double default_time_ms = 60'000;
@@ -107,37 +107,36 @@ struct PatternLimits {
     // the estimated finalisation of what the answer buffers: delivery_* below)
     double finalize_ms = 250;
     double min_information_bits = 24;
-    // owner decision #24, a graph without its dummy-edge mask only: a pattern whose unchecked
-    // candidates number at most this has each of them tested (k - 1 steps each), its counts
-    // then exact (graph::pattern::Request::max_checked_entries); 0 tests none. Not a request
-    // field: the server's policy (--pattern-max-checked-entries), stated in caps
+    // a graph without its dummy-edge mask only: a pattern whose unchecked candidates number at
+    // most this has each of them tested (k - 1 steps each), its counts then exact
+    // (graph::pattern::Request::max_checked_entries); 0 tests none. Not a request field: the
+    // server's policy (--pattern-max-checked-entries), stated in caps
     uint64_t max_checked_entries = graph::pattern::kDefaultMaxCheckedEntries;
     // patterns per request: above it the request is refused (a list is not cut)
     uint64_t max_patterns = 16;
-    // the labelled retrieval (output.labels "all", increment 3; §4.3, §5.3): the labels kept
-    // per row, the annotation work (the oracle's units), the request's memory account (MiB),
-    // and partial's lists of labels per pattern and of occurrences per label
+    // the labelled retrieval (output.labels "all"; §4.3, §5.3): the labels kept per row, the
+    // annotation work (the oracle's units), the request's memory account (MiB), and partial's
+    // lists of labels per pattern and of occurrences per label
     uint64_t max_labels_per_anchor = 64;
     uint64_t max_annotation_work = 100'000'000;
     uint64_t max_memory_mb = 256;
     uint64_t max_labels = 1'000;
     uint64_t max_occurrences_per_label = 16;
-    // increment 5b, a predicate's selection (SPEC §19.2): the raw contexts a pattern's selection
-    // may test (its compute admission) and the selection's work per request (the oracle's
-    // units), request fields' maxima like the others; and the names a predicate may list, the
-    // server's policy (a larger predicate is refused, predicate_too_large)
+    // a predicate's selection (SPEC §19.2): the raw contexts a pattern's selection may test
+    // (its compute admission) and the selection's work per request (the oracle's units),
+    // request fields' maxima like the others; and the names a predicate may list, the server's
+    // policy (a larger predicate is refused, predicate_too_large)
     uint64_t max_predicate_contexts = 100'000;
     uint64_t max_predicate_work = 100'000'000;
     uint64_t max_predicate_labels = 10'000;
     // not a cap: the annotation reads under the deadline are decoded in chunks of about this
     // many ms (the server's --traverse-chunk-target-ms, as /traverse's reads); 0: one piece
     double chunk_target_ms = 50;
-    // not caps: the finalisation of what the answer buffers (AnswerVolume; review of
-    // 2026-10-07, X-EFFICIENCY-04): the rates (MB/s) at which its JSON text is assumed to be
-    // built and written, and compressed (--pattern-delivery-build-mbps,
-    // --pattern-delivery-compress-mbps), and the text written per byte of compact JSON (1 on
-    // the server; the CLI's indented text 2). The work stops finalize_ms plus that estimate
-    // before the deadline. 0 or infinity: the reserve alone
+    // not caps: the finalisation of what the answer buffers (AnswerVolume): the rates (MB/s) at
+    // which its JSON text is assumed to be built and written, and compressed
+    // (--pattern-delivery-build-mbps, --pattern-delivery-compress-mbps), and the text written
+    // per byte of compact JSON (1 on the server; the CLI's indented text 2). The work stops
+    // finalize_ms plus that estimate before the deadline. 0 or infinity: the reserve alone
     double delivery_build_mbps = 10;
     double delivery_compress_mbps = 50;
     double delivery_text_scale = 1;
@@ -147,9 +146,9 @@ PatternLimits pattern_limits(const Config &config);
 
 /**
  * The alphabet half of the route's support decision, a pure function of the graph's BOSS
- * alphabet (owner decision #4 of 2026-10-07, review I26): "" for "$ACGT" (served),
- * "alphabet_untested" for "$ACGTN" (the engine supports it, but the route does not serve it
- * until a DNA5 build passes the pattern tests), "alphabet_unsupported" for any other.
+ * alphabet: "" for "$ACGT" (served), "alphabet_untested" for "$ACGTN" (the engine supports it,
+ * but the route does not serve it until a DNA5 build passes the pattern tests),
+ * "alphabet_unsupported" for any other.
  */
 std::string alphabet_refusal(const std::string &alphabet);
 
@@ -157,22 +156,19 @@ std::string alphabet_refusal(const std::string &alphabet);
  * Whether /pattern and `metagraph pattern` serve |graph|: the engine's PatternSearch::support,
  * narrowed by the route's own reasons, "alphabet_untested" (alphabet_refusal) and
  * "mask_invalid" (a loaded mask that marks an edge with W = $ valid, found once at load:
- * check_mask_at_load; review of 2026-10-07, I17, owner decision #6). Its reason is the 400
- * refusal's code and the
- * capabilities' unavailable_reason. The engine itself keeps serving $ACGTN (its tests). A graph
- * without a mask is served (owner decision #16 of 2026-10-08: counting "upper_bound"):
- * mask_required, which refused it before, is retired (no configuration answers it).
+ * check_mask_at_load). Its reason is the 400 refusal's code and the capabilities'
+ * unavailable_reason. The engine itself keeps serving $ACGTN (its tests). A graph without a
+ * mask is served with counting "upper_bound"; no configuration answers mask_required.
  */
 graph::pattern::GraphSupport route_support(const graph::DeBruijnGraph &graph);
 
 /**
  * f, the fraction of real k-mers among the entries of a succinct graph that a pattern can
- * count (owner decision #16 of 2026-10-08): on a graph served without its dummy-edge mask a
- * count is an upper bound U (the BOSS entries of its ranges, the source dummies among them),
- * stated with the additive estimate U x f. Sampled by the engine
- * (graph::pattern::sample_real_fraction: 10,000 entries with W != $ drawn with a seed fixed by
- * the graph's number of edges, the same value in every process; Wilson's 95% interval), once
- * per graph by the route (dummy_fraction).
+ * count: on a graph served without its dummy-edge mask a count is an upper bound U (the BOSS
+ * entries of its ranges, the source dummies among them), stated with the additive estimate U x
+ * f. Sampled by the engine (graph::pattern::sample_real_fraction: 10,000 entries with W != $
+ * drawn with a seed fixed by the graph's number of edges, the same value in every process;
+ * Wilson's 95% interval), once per graph by the route (dummy_fraction).
  */
 using DummyFraction = graph::pattern::RealFraction;
 
@@ -213,12 +209,12 @@ class PatternDelivery {
     void check() const;
 
     /**
-     * The server's "the client left, or the server stops" (review of 2026-10-07,
-     * X-CONCURRENCY-01, R2-02: /pattern ran to its deadline for a caller that was gone):
-     * process_pattern_request gives it to the request's Budget (Budget::set_abort, read at
-     * every clock reading of the work), and check() asks it while the answer is assembled,
-     * written and compressed. Its answer true throws graph::pattern::Aborted; the server
-     * then writes nothing. Unset (the CLI, tests): never asked.
+     * The server's "the client left, or the server stops", so that /pattern does not run to its
+     * deadline for a caller that is gone: process_pattern_request gives it to the request's
+     * Budget (Budget::set_abort, read at every clock reading of the work), and check() asks it
+     * while the answer is assembled, written and compressed. Its answer true throws
+     * graph::pattern::Aborted; the server then writes nothing. Unset (the CLI, tests): never
+     * asked.
      */
     void set_abort(std::function<bool()> aborted) { abort_ = std::move(aborted); }
     const std::function<bool()>& abort() const { return abort_; }
@@ -229,8 +225,8 @@ class PatternDelivery {
 };
 
 // The request body as JSON: one RFC 8259 JSON text with unique member names and nothing after
-// it, nested at most 1,000 deep; anything else is refused as invalid_request (the generic
-// parse error of the other routes carries no code; their parser stays as lenient as it was)
+// it, nested at most 1,000 deep; anything else is refused as invalid_request (the other routes'
+// generic parse error carries no code, and their parser is more lenient)
 Json::Value parse_pattern_body(const std::string &content);
 
 /**
@@ -269,13 +265,13 @@ Json::Value process_pattern_request(const Json::Value &json,
  * can answer /pattern (available: true | false | null while the single index loads, with the
  * reason when false), the modes, projections, kinds, scopes and strands, the caps and the
  * finalisation reserve with the delivery rates (delivery_mbps; caps_rule and protein_rule are
- * references to the SPEC, owner decision P9), and what the graph is (mode, k, alphabet, mask,
- * counting: exact with the mask, upper_bound without it, and then its dummy_fraction; owner
- * decision #16) and what its annotation gives the labelled retrieval (placement, support,
- * annotation: budgeted or unbudgeted) and a predicate's selection (increment 5b: projections
- * with "predicate_only", the caps max_predicate_contexts, max_predicate_work and
- * max_predicate_labels, and the predicate object: operators, strands, access). |anno_graph| is
- * null while the index loads; |multi_graph| servers answer only that they are not served yet.
+ * references to the SPEC), and what the graph is (mode, k, alphabet, mask, counting: exact with
+ * the mask, upper_bound without it, and then its dummy_fraction) and what its annotation gives
+ * the labelled retrieval (placement, support, annotation: budgeted or unbudgeted) and a
+ * predicate's selection (projections with "predicate_only", the caps max_predicate_contexts,
+ * max_predicate_work and max_predicate_labels, and the predicate object: operators, strands,
+ * access). |anno_graph| is null while the index loads; |multi_graph| servers answer only that
+ * they are not served yet.
  */
 Json::Value pattern_capabilities_json(const graph::AnnotatedDBG *anno_graph,
                                       const PatternLimits &limits, bool multi_graph);
